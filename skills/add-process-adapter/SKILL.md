@@ -8,7 +8,7 @@ description: Create, package, import, reload, test, or review a Partyline adapte
 Read `docs/adapters.md` before implementation. Use one package per process:
 
 ```
-partyline/adapters/<adapter-id>/
+partyline/adapters/bundled/<adapter-id>/
   adapter.toml
   adapter.py
 ```
@@ -27,14 +27,18 @@ version = "0.1.0"
 description = "Interactive adapter for Example Process."
 entrypoint = "adapter.py"
 command = ["example-process"]
-requires = []
-capabilities = []
+requires = ["example-process"]
 env_unset = []
+capabilities = { resume = false }
 ```
 
-Use an argv array for `command`, not a shell string. Keep secrets and machine-specific paths out
-of the manifest. Use `env_unset` only for inherited variables that would interfere with a child
-process.
+Use an argv array for `command`, not a shell string. `requires` lists executables that must be on
+`PATH`. `capabilities` is a table; set `resume = true` only if re-attaching genuinely reopens the
+process's previous session. `entrypoint` must name a file inside the package directory, and the
+class it exports defaults to `PartylineAdapter` — override with `class = "..."` if you need a
+different name. Keep secrets and machine-specific paths out of the manifest. Use `env_unset` only
+for inherited variables that would interfere with a child process; an entry ending in `*` clears
+every variable with that prefix.
 
 ## Implement lifecycle behavior
 
@@ -50,6 +54,14 @@ these invariants:
   into chat messages.
 - Start observing output after this attachment starts, and avoid replaying prior records after
   a resume.
+- **Locate the transcript unambiguously.** If the CLI accepts a session id or a session
+  directory, pass one you chose — then the path is exact and nothing else can occupy it. If you
+  must fall back to matching on working directory and start time, you also have to *claim* the
+  file you resolve and skip files another attachment already claimed, and serialize discovery so
+  two attachments cannot resolve at once. Two copies of the same CLI started in one directory
+  seconds apart are otherwise indistinguishable, and the second one will tail the first one's
+  transcript and repost its messages under the wrong handle. This is a real failure that has
+  happened; treat it as the default hazard of directory-based discovery, not an edge case.
 - Report meaningful lifecycle status and cleanly stop background tasks.
 
 Use the attachment working directory and inherited environment. Do not edit shell profiles or
