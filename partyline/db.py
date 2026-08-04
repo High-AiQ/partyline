@@ -94,6 +94,22 @@ class Db:
         self._exec("UPDATE conversations SET topic=? WHERE id=?", (topic, conv_id))
         return self.get_conversation(conv_id)
 
+    def rename_conversation(self, conv_id, name):
+        self._exec("UPDATE conversations SET name=? WHERE id=?", (name, conv_id))
+        return self.get_conversation(conv_id)
+
+    def delete_conversation(self, conv_id):
+        """Drop a line and everything hanging off it, in one transaction.
+
+        Callers must stop live adapters first: this only removes rows, and an
+        orphaned pty whose attachment row is gone can never be detached again.
+        """
+        with self.lock:
+            self.conn.execute("DELETE FROM messages WHERE conv_id=?", (conv_id,))
+            self.conn.execute("DELETE FROM attachments WHERE conv_id=?", (conv_id,))
+            self.conn.execute("DELETE FROM conversations WHERE id=?", (conv_id,))
+            self.conn.commit()
+
     # -- messages ----------------------------------------------------------
     def add_message(self, conv_id, sender, sender_type, body):
         ts = time.time()

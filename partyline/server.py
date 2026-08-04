@@ -139,6 +139,11 @@ class TopicIn(BaseModel):
     sender: str = ""      # who set it, for the system notice
 
 
+class RenameIn(BaseModel):
+    name: str
+    sender: str = ""      # who renamed it, for the system notice
+
+
 class PresetIn(BaseModel):
     title: str
     name: str
@@ -234,6 +239,51 @@ async def set_topic(conv_id: str, body: TopicIn):
     await post_message(conv_id, "system", "system", notice)
     await broadcast(conv_id, {"type": "conversation", "conversation": conv})
     return conv
+
+
+@app.put("/api/conversations/{conv_id}/name")
+async def rename_conversation(conv_id: str, body: RenameIn):
+    conv = db.get_conversation(conv_id)
+    if not conv:
+        raise HTTPException(404)
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "a line needs a name")
+    if len(name) > 120:
+        raise HTTPException(400, "name is capped at 120 characters")
+    if name == conv["name"]:
+        return conv
+    was = conv["name"]
+    conv = db.rename_conversation(conv_id, name)
+    who = f" by @{body.sender.strip()}" if body.sender.strip() else ""
+    # Like a topic change: never wakes anyone, but rides along in the next
+    # digest, so agents learn the line's new name without costing a turn.
+    await post_message(conv_id, "system", "system", f"☏ line renamed{who}: {was} → {name}")
+    await broadcast(conv_id, {"type": "conversation", "conversation": conv})
+    return conv
+
+
+@app.delete("/api/conversations/{conv_id}")
+async def delete_conversation(conv_id: str):
+    conv = db.get_conversation(conv_id)
+    if not conv:
+        raise HTTPException(404)
+    # Tell watchers before anything is torn down: once the rows are gone a tab
+    # sitting on this line can only discover it by a 404 on its next fetch.
+    await broadcast(conv_id, {"type": "conversation_deleted", "conversation_id": conv_id})
+    stopped: list[str] = []
+    for att in db.list_attachments(conv_id):
+        adapter = live.pop(att["id"], None)
+        if adapter is None:
+            continue
+        stopped.append(att["name"])
+        try:
+            await adapter.stop()
+        except Exception:
+            pass  # a pty that will not die must not strand the delete
+    db.delete_conversation(conv_id)
+    sockets.pop(conv_id, None)
+    return {"ok": True, "stopped": stopped}
 
 
 @app.post("/api/conversations/{conv_id}/attachments")
