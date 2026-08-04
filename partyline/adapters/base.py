@@ -56,7 +56,14 @@ class Adapter:
     def __init__(self, att: dict, post: Post, on_status: Status, on_cli_session=None):
         self.att = att
         self.resume = bool(att.get("resume"))
-        self.post = post
+        self._post_to_chat = post
+        # A process killed mid-turn comes back to a CLI that resumes the
+        # interrupted turn, so its first output is a fragment of work nobody
+        # asked for — it has had no new input since it died. Stay quiet until
+        # something is actually delivered. Wrapping the callback rather than
+        # asking each adapter to check means external adapters get this too.
+        self._silent_until_wake = self.resume
+        self._explained_silence = False
         self.on_status = on_status
         self.on_cli_session = on_cli_session
         self.proc: subprocess.Popen | None = None
@@ -66,6 +73,24 @@ class Adapter:
         self._stopping = False
         self._term = pyte.Screen(120, 40)
         self._term_stream = pyte.ByteStream(self._term)
+
+    async def post(self, sender: str, sender_type: str, body: str):
+        """Send something to the chat, unless the process is resuming mid-turn.
+
+        Only agent speech is held back. System notices — exits, failures — must
+        always get through, because they are how a person finds out something
+        went wrong.
+        """
+        if self._silent_until_wake and sender_type == "agent":
+            if not self._explained_silence:
+                self._explained_silence = True
+                await self._post_to_chat(
+                    "system", "system",
+                    f"@{self.att['name']} resumed mid-turn — leftover output from the "
+                    "interrupted turn was not posted; @mention it to pick up where it left off",
+                )
+            return
+        await self._post_to_chat(sender, sender_type, body)
 
     def build_command(self) -> list[str]:
         return list(self.att["command"])
@@ -165,6 +190,10 @@ class Adapter:
         """Receive bytes from the pty. Transcript adapters can ignore this."""
 
     async def deliver(self, messages: list[dict]):
+        # Being woken is the thing that ends post-resume silence: from here on
+        # the process is answering something real rather than finishing a turn
+        # that was cut off.
+        self._silent_until_wake = False
         text = self.format_digest(messages)
         if text.strip():
             await self.send_keys(text)

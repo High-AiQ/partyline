@@ -226,6 +226,60 @@ class DigestTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[greg]: hi", sent[0])
 
 
+class ResumeSilenceTest(unittest.IsolatedAsyncioTestCase):
+    """A process resumed after being killed mid-turn must not blurt out the
+    tail of the turn nobody is waiting for."""
+
+    async def test_a_fresh_process_posts_normally(self):
+        adapter = Recorder(["cat"])
+        await adapter.post("dummy", "agent", "hello everyone")
+        self.assertEqual(adapter.posts, [("dummy", "agent", "hello everyone")])
+
+    async def test_a_resumed_process_holds_back_its_interrupted_turn(self):
+        adapter = Recorder(["cat"], resume=True)
+        await adapter.post("dummy", "agent", "…as I was saying")
+
+        self.assertEqual(len(adapter.posts), 1)
+        sender, kind, body = adapter.posts[0]
+        self.assertEqual((sender, kind), ("system", "system"))
+        self.assertIn("resumed mid-turn", body)
+        self.assertNotIn("as I was saying", body)
+
+    async def test_the_explanation_is_posted_only_once(self):
+        adapter = Recorder(["cat"], resume=True)
+        for fragment in ("first", "second", "third"):
+            await adapter.post("dummy", "agent", fragment)
+        self.assertEqual(len(adapter.posts), 1)
+
+    async def test_system_notices_are_never_held_back(self):
+        """An exit or a failure is how a person learns something broke."""
+        adapter = Recorder(["cat"], resume=True)
+        await adapter.post("system", "system", "@dummy exited (code 1)")
+        self.assertEqual(adapter.posts, [("system", "system", "@dummy exited (code 1)")])
+
+    async def test_being_woken_ends_the_silence(self):
+        sent = []
+
+        class Silent(Recorder):
+            async def send_keys(self, text):
+                sent.append(text)
+
+        adapter = Silent(["cat"], resume=True)
+        await adapter.deliver([{"sender": "greg", "body": "you there?"}])
+        await adapter.post("dummy", "agent", "yes — picking this back up")
+
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(adapter.posts, [("dummy", "agent", "yes — picking this back up")])
+
+    async def test_an_exiting_resumed_process_still_reports_its_code(self):
+        """End to end through the real pty path, not just the wrapper."""
+        adapter = Recorder(["sh", "-c", "exit 4"], resume=True)
+        await adapter.start()
+        await until(lambda: adapter.posts, what="the exit notice")
+        self.assertIn("@dummy exited (code 4)", adapter.posts[0][2])
+        await adapter.stop()
+
+
 class BriefingTest(unittest.TestCase):
     def test_briefing_names_the_process_and_its_line(self):
         text = Recorder(["cat"]).briefing()
