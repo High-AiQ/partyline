@@ -70,6 +70,10 @@ def load_adapter(path: str | Path) -> str:
     cls = getattr(module, str(manifest["class"]), None)
     if not isinstance(cls, type) or not issubclass(cls, Adapter):
         raise ValueError("adapter manifest class must inherit Adapter")
+    # An imported package may share an id with a bundled one and take over. That
+    # is intentional — it's how you override a shipped adapter — but it has to be
+    # visible, so the listing always says where the loaded code came from.
+    manifest["source"] = "bundled" if directory.parent == BUNDLED_ROOT else str(directory)
     register_adapter(adapter_id, cls, manifest)
     _LOADED_PATHS[adapter_id] = directory
     return adapter_id

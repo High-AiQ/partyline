@@ -74,8 +74,15 @@ class Adapter:
         master, slave = os.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
         env = dict(os.environ, TERM="xterm-256color")
+        # Adapters declare what to strip so a spawned CLI doesn't mistake itself
+        # for a nested harness. A trailing "*" clears a whole prefix.
         for key in self.att.get("adapter_metadata", {}).get("env_unset", []):
-            env.pop(key, None)
+            if key.endswith("*"):
+                prefix = key[:-1]
+                for existing in [k for k in env if k.startswith(prefix)]:
+                    env.pop(existing, None)
+            else:
+                env.pop(key, None)
 
         def preexec():
             os.setsid()
