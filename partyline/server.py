@@ -69,7 +69,14 @@ async def post_message(conv_id: str, sender: str, sender_type: str, body: str):
 async def route_mentions(conv_id: str, msg: dict):
     if msg["sender_type"] == "system":
         return  # join/exit notices mention names but must never wake agents
-    names = {n.lower() for n in MENTION_RE.findall(msg["body"])}
+    # A handle may legitimately contain "." or "-", but a mention that ends a
+    # sentence picks up its punctuation: "thanks @opus." must still ring opus.
+    # Both readings are accepted rather than guessing which one was meant.
+    names = set()
+    for found in MENTION_RE.findall(msg["body"]):
+        names.add(found.lower())
+        names.add(found.rstrip(".-_").lower())
+    names.discard("")
     if not names:
         return
     ring_all = "all" in names  # reserved handle: rings every running agent

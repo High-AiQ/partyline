@@ -118,6 +118,28 @@ body::after{
   border-radius:4px;padding:10px 14px;margin:8px 0;overflow-x:auto;font-size:12.5px;
 }
 .msg .body pre code{background:none;border:0;padding:0}
+/* ── rich text, agent messages only ──
+   Headings stay close to body size: this is a chat line, not a document, and a
+   28px h1 in a message bubble reads as shouting. */
+.msg .body .md-h{font-family:var(--serif);font-style:italic;font-weight:400;color:var(--cream);margin:10px 0 2px;line-height:1.3}
+.msg .body .md-h1{font-size:19px}
+.msg .body .md-h2{font-size:17px}
+.msg .body .md-h3{font-size:15px;font-style:normal;font-family:var(--mono);font-weight:600;color:var(--cream-dim);letter-spacing:.02em}
+.msg .body .md-h:first-child{margin-top:0}
+.msg .body ul,.msg .body ol{margin:6px 0 6px 4px;padding-left:18px}
+.msg .body li{margin:1px 0}
+.msg .body ul li::marker{color:var(--copper)}
+.msg .body ol li::marker{color:var(--copper);font-size:11px}
+.msg .body blockquote{
+  margin:8px 0;padding:2px 0 2px 12px;border-left:2px solid var(--line);color:var(--cream-dim);font-style:italic;
+}
+.msg .body hr{border:0;border-top:1px dashed var(--line);margin:12px 0}
+.msg .body a{color:var(--copper-hot);text-decoration:none;border-bottom:1px solid rgba(217,142,74,.35)}
+.msg .body a:hover{border-bottom-color:var(--copper-hot)}
+.msg .body table{border-collapse:collapse;margin:8px 0;font-size:12.5px;display:block;overflow-x:auto;max-width:100%}
+.msg .body th,.msg .body td{border:1px solid var(--line);padding:4px 10px;text-align:left;vertical-align:top}
+.msg .body th{background:var(--ink-3);color:var(--cream-dim);font-weight:600}
+.msg .body s{color:var(--cream-faint)}
 .msg.system{max-width:none;text-align:center;margin:18px 0}
 .msg.system .body{
   display:inline-block;color:var(--cream-faint);font-size:11px;font-style:italic;
@@ -410,16 +432,110 @@ if(state.me){ $("gate").style.display="none"; $("app").hidden=false; $("meName")
 
 /* ── rendering helpers ── */
 const esc = s => s.replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-function render(body){
-  // escape, then fences -> inline code -> bold -> mentions
-  let out="", parts = body.split(/```(?:\w*\n)?/);
-  parts.forEach((part,i)=>{
-    if(i%2===1){ out += "<pre><code>"+esc(part.replace(/\n$/,""))+"</code></pre>"; return; }
-    let t = esc(part);
-    t = t.replace(/`([^`\n]+)`/g,"<code>$1</code>");
-    t = t.replace(/\*\*([^*\n]+)\*\*/g,"<b>$1</b>");
-    t = t.replace(/(^|\s)@([A-Za-z0-9][A-Za-z0-9_.-]*)/g,'$1<span class="mention">@$2</span>');
-    out += t;
+/* Inline spans. Always runs on ALREADY-ESCAPED text, so no markup can be
+   injected from a message body. Link hrefs are restricted to http(s) for the
+   same reason — a `javascript:` URL in a chat line would be an easy XSS. */
+function mdInline(t){
+  t = t.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+  t = t.replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+  t = t.replace(/~~([^~\n]+)~~/g, "<s>$1</s>");
+  t = t.replace(/(^|[^\w*_])[*_]([^*_\n]+)[*_](?![\w*_])/g, "$1<i>$2</i>");
+  t = t.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g,
+                '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  // Trailing punctuation is sentence punctuation, not part of the handle —
+  // "thanks @greg." mentions greg, and the highlight has to agree with routing.
+  t = t.replace(/(^|\s)@([A-Za-z0-9][A-Za-z0-9_.-]*)/g,
+                (all, lead, name)=>{
+                  const trimmed = name.replace(/[.\-_]+$/, "");
+                  return `${lead}<span class="mention">@${trimmed}</span>${name.slice(trimmed.length)}`;
+                });
+  return t;
+}
+
+const CELLS = row => row.replace(/^\s*\|/, "").replace(/\|\s*$/, "").split("|").map(c => c.trim());
+
+/* Block-level markdown for one non-code segment of already-escaped text. */
+function mdBlocks(src){
+  const lines = src.split("\n");
+  const out = [];
+  let para = [], list = null, quote = null, table = null;
+  const flushPara = ()=>{ if(para.length){ out.push(mdInline(para.join("\n"))); para = []; } };
+  const flushList = ()=>{
+    if(!list) return;
+    out.push(`<${list.tag}>` + list.items.map(i=>`<li>${mdInline(i)}</li>`).join("") + `</${list.tag}>`);
+    list = null;
+  };
+  const flushQuote = ()=>{
+    if(!quote) return;
+    out.push(`<blockquote>${mdInline(quote.join("\n"))}</blockquote>`); quote = null;
+  };
+  const flushTable = ()=>{
+    if(!table) return;
+    const head = `<tr>${table.head.map(c=>`<th>${mdInline(c)}</th>`).join("")}</tr>`;
+    const rows = table.rows.map(r=>`<tr>${r.map(c=>`<td>${mdInline(c)}</td>`).join("")}</tr>`).join("");
+    out.push(`<table>${head}${rows}</table>`); table = null;
+  };
+  const flush = ()=>{ flushPara(); flushList(); flushQuote(); flushTable(); };
+
+  for(let i=0; i<lines.length; i++){
+    const line = lines[i];
+
+    if(table){                                   // table rows run until a non-row
+      if(line.includes("|")){ table.rows.push(CELLS(line)); continue; }
+      flushTable();
+    }
+    // A header row followed by a |---|---| separator starts a table.
+    if(line.includes("|") && /^[\s|:-]*-[\s|:-]*$/.test(lines[i+1]||"") && (lines[i+1]||"").includes("|")){
+      flush(); table = { head: CELLS(line), rows: [] }; i++; continue;
+    }
+
+    let m;
+    if((m = line.match(/^(#{1,6})\s+(.*)$/))){   // heading
+      flush();
+      const level = Math.min(m[1].length, 3);
+      out.push(`<div class="md-h md-h${level}">${mdInline(m[2].trim())}</div>`);
+      continue;
+    }
+    if(/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)){ flush(); out.push("<hr>"); continue; }
+
+    // "&gt;" not ">": block parsing runs after escaping.
+    if((m = line.match(/^\s*&gt;\s?(.*)$/))){    // blockquote
+      flushPara(); flushList(); flushTable();
+      (quote ||= []).push(m[1]);
+      continue;
+    }
+    flushQuote();
+
+    if((m = line.match(/^\s*[-*+]\s+(.*)$/))){   // bullets
+      flushPara(); flushTable();
+      if(list && list.tag !== "ul") flushList();
+      (list ||= { tag:"ul", items:[] }).items.push(m[1]);
+      continue;
+    }
+    if((m = line.match(/^\s*\d+[.)]\s+(.*)$/))){ // numbers
+      flushPara(); flushTable();
+      if(list && list.tag !== "ol") flushList();
+      (list ||= { tag:"ol", items:[] }).items.push(m[1]);
+      continue;
+    }
+    flushList();
+
+    if(!line.trim() && !para.length) continue;   // swallow padding between blocks
+    para.push(line);
+  }
+  flush();
+  return out.join("");
+}
+
+/* rich = full markdown. Deliberately off for people: a human typing "#1 issue"
+   or "*sigh*" means it literally, and their text should look like they typed
+   it. Processes emit real markdown, so they get the full treatment. */
+function render(body, rich){
+  let out = "", parts = body.split(/```(?:\w*\n)?/);
+  parts.forEach((part, i)=>{
+    if(i % 2 === 1){ out += "<pre><code>" + esc(part.replace(/\n$/,"")) + "</code></pre>"; return; }
+    const t = esc(part);
+    out += rich ? mdBlocks(t) : mdInline(t);
   });
   return out;
 }
@@ -440,13 +556,13 @@ function addMsg(m, scroll=true){
   const el = document.createElement("div");
   if(m.sender_type==="system"){
     el.className="msg system";
-    el.innerHTML = `<div class="body">${render(m.body)}</div>`;
+    el.innerHTML = `<div class="body">${render(m.body, m.sender_type==="agent")}</div>`;
   } else {
     el.className="msg";
     const when = new Date(m.created_at*1000).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
     el.innerHTML =
       `<div class="head"><span class="who ${m.sender_type}" style="${whoStyle(m)}">${esc(m.sender)}</span>`+
-      `<span class="when">${when}</span></div><div class="body">${render(m.body)}</div>`;
+      `<span class="when">${when}</span></div><div class="body">${render(m.body, m.sender_type==="agent")}</div>`;
   }
   feed.appendChild(el);
   if(stick) feed.scrollTop = feed.scrollHeight;
