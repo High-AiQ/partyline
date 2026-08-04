@@ -542,8 +542,16 @@ async def ws_endpoint(ws: WebSocket, conv_id: str):
             data = await ws.receive_json()
             sender = str(data.get("sender", "")).strip()[:32] or "anon"
             body = str(data.get("body", "")).strip()
-            if body:
-                await post_message(conv_id, sender, "human", body)
+            if not body:
+                continue
+            # An archived line can still be reached by a deep link, and typing
+            # into one writes messages nobody will ever see. Refuse out loud.
+            conv = db.get_conversation(conv_id)
+            if conv is None or conv["archived_at"]:
+                await ws.send_json({"type": "error", "conversation_id": conv_id,
+                                    "message": "this line is archived — restore it to talk here"})
+                continue
+            await post_message(conv_id, sender, "human", body)
     except WebSocketDisconnect:
         pass
     finally:
