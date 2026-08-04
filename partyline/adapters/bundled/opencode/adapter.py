@@ -50,7 +50,7 @@ class PartylineAdapter(Adapter):
             return None
         cutoff = int((self.spawned_at - 2) * 1000)
         try:
-            with self._connect() as db:
+            with contextlib.closing(self._connect()) as db:
                 rows = db.execute(
                     "SELECT id FROM session WHERE directory = ? AND time_created >= ? "
                     "ORDER BY time_created DESC",
@@ -99,12 +99,13 @@ class PartylineAdapter(Adapter):
         seen: set[str] = set()
         while self.alive():
             try:
-                with self._connect() as db:
+                with contextlib.closing(self._connect()) as db:
                     rows = db.execute(
                         "SELECT part.id, part.data FROM part "
                         "JOIN message ON message.id = part.message_id "
                         "WHERE part.session_id = ? AND part.time_created >= ? "
                         "AND json_extract(message.data, '$.role') = 'assistant' "
+                        "AND json_extract(message.data, '$.time.completed') IS NOT NULL "
                         "AND json_extract(part.data, '$.type') = 'text' "
                         "ORDER BY part.time_created, part.id",
                         (session_id, started_ms),
