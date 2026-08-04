@@ -16,7 +16,7 @@ import struct
 import subprocess
 import termios
 import time
-from typing import Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
 import pyte
 
@@ -229,7 +229,7 @@ class Adapter:
 
     async def _tail_jsonl(self, path: str, handle_line):
         """Follow a JSONL transcript, ignoring incomplete or invalid records."""
-        with open(path, "r", encoding="utf-8", errors="replace") as file:
+        with open(path, encoding="utf-8", errors="replace") as file:
             while True:
                 position = file.tell()
                 line = file.readline()
@@ -239,6 +239,11 @@ class Adapter:
                     await asyncio.sleep(0.5)
                     continue
                 if not line.endswith("\n"):
+                    # A half-written record: wait for the writer to finish it.
+                    # If the writer is gone it never will be, and without this
+                    # check the tail spins on that fragment forever.
+                    if not self.alive():
+                        return
                     file.seek(position)
                     await asyncio.sleep(0.3)
                     continue

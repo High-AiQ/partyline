@@ -13,7 +13,7 @@ import tomllib
 from pathlib import Path
 
 from .base import Adapter
-from .registry import ADAPTER_METADATA, ADAPTERS, register_adapter, unregister_adapter
+from .registry import register_adapter, unregister_adapter
 
 PACKAGE_ROOT = Path(__file__).parent
 BUNDLED_ROOT = PACKAGE_ROOT / "bundled"
@@ -39,7 +39,8 @@ def _manifest(path: Path) -> dict:
     manifest.setdefault("requires", [])
     manifest.setdefault("capabilities", {})
     manifest.setdefault("env_unset", [])
-    if not isinstance(manifest["command"], list) or not all(isinstance(arg, str) for arg in manifest["command"]):
+    command = manifest["command"]
+    if not isinstance(command, list) or not all(isinstance(arg, str) for arg in command):
         raise ValueError("adapter command must be an argv array")
     if not isinstance(manifest["capabilities"], dict):
         raise ValueError("adapter capabilities must be a table, e.g. capabilities = { resume = true }")
@@ -60,7 +61,8 @@ def load_adapter(path: str | Path) -> str:
     # take effect without restarting the server.
     global _GENERATION
     _GENERATION += 1
-    module_name = f"partyline_adapter_{adapter_id}_{hashlib.sha256(str(directory).encode()).hexdigest()[:12]}_{_GENERATION}"
+    fingerprint = hashlib.sha256(str(directory).encode()).hexdigest()[:12]
+    module_name = f"partyline_adapter_{adapter_id}_{fingerprint}_{_GENERATION}"
     spec = importlib.util.spec_from_file_location(module_name, entrypoint)
     if spec is None or spec.loader is None:
         raise ValueError(f"cannot load adapter entrypoint: {entrypoint}")
@@ -124,6 +126,10 @@ def adapter_packages(root: Path):
         yield from sorted(path.parent for path in collection.glob("*/adapter.toml"))
 
 
+def _run_git(command: list[str]):
+    subprocess.run(command, check=True, capture_output=True, text=True)
+
+
 def import_repository(repository: str, ref: str | None = None) -> list[str]:
     """Clone or refresh a trusted repository and load all contained packages."""
     repository = repository.strip()
@@ -136,14 +142,15 @@ def import_repository(repository: str, ref: str | None = None) -> list[str]:
     destination = adapter_store() / slug
     destination.parent.mkdir(parents=True, exist_ok=True)
     if (destination / ".git").is_dir():
-        subprocess.run(["git", "-C", str(destination), "fetch", "--tags", "origin"], check=True, capture_output=True, text=True)
-        subprocess.run(["git", "-C", str(destination), "checkout", "--force", ref or "origin/HEAD"], check=True, capture_output=True, text=True)
+        git = ["git", "-C", str(destination)]
+        _run_git(git + ["fetch", "--tags", "origin"])
+        _run_git(git + ["checkout", "--force", ref or "origin/HEAD"])
     else:
         command = ["git", "clone", "--depth", "1"]
         if ref:
             command.extend(["--branch", ref])
         command.extend([repository, str(destination)])
-        subprocess.run(command, check=True, capture_output=True, text=True)
+        _run_git(command)
     loaded = [load_adapter(package) for package in adapter_packages(destination)]
     if not loaded:
         raise ValueError("repository contains no adapter.toml packages")

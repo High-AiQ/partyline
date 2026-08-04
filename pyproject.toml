@@ -17,7 +17,19 @@ dev = [
     "coverage>=7.4",
     "httpx>=0.27",          # fastapi TestClient
     "websockets>=12",       # websocket lifecycle tests
+    "ruff>=0.6",
 ]
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests must point PARTYLINE_DB at a temp file before importing the server, which
+# reads it at import time. That is a deliberate import-order exception.
+"tests/*" = ["E402"]
 
 [tool.coverage.run]
 source = ["partyline"]

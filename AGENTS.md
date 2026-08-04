@@ -63,6 +63,23 @@ participant in the room — including whoever is doing the work. The rules that 
 - Prefer changes that make a restart cheaper (resume support, adopting live attachments,
   liveness reporting) over changes that assume restarts are rare.
 
+## Code style
+
+- **Write functionally where it pays.** Prefer pure functions: same inputs, same outputs, no
+  hidden state read or written. Pass behavior as arguments — this codebase already does it with
+  the `post` and `on_status` callbacks an adapter is constructed with, and that is why an
+  adapter can be tested without a server.
+- **Push side effects to the edges.** Database writes, pty writes, subprocess spawns, and
+  broadcasts belong in a thin outer layer; the logic that decides *what* to do should be a
+  function you can call in a test with a dict and assert on the return value. When a function is
+  hard to test, that is the design telling you the effect is too deep inside it.
+- **Aim for under 300 lines per `.py` file** (tests excepted — they are allowed to be long and
+  boring). This is an encouragement, not a gate: a file crossing it is a prompt to look for the
+  seam, not a reason to split something coherent in half.
+- **Lint must pass**: `uv run ruff check .`, clean, before every commit. The autoformatter is
+  deliberately not enforced — this codebase hand-wraps for readability, and `ruff format` would
+  undo that. Match the surrounding style instead.
+
 ## Adapter rules
 
 - One bundled adapter package lives at `partyline/adapters/bundled/<id>/` and has a manifest

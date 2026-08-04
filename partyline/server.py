@@ -7,7 +7,6 @@ Routing model (MVP):
     excluding its own, formatted as `[sender]: text` lines.
 """
 
-import asyncio
 import os
 import re
 import shlex
@@ -358,7 +357,8 @@ async def attach(conv_id: str, body: AttachIn):
     # Fail here with something readable rather than as a spawn traceback later.
     for executable in metadata.get("requires") or []:
         if shutil.which(executable) is None:
-            raise HTTPException(400, f"{executable!r} is not on PATH — install it, or attach with a full path")
+            raise HTTPException(
+                400, f"{executable!r} is not on PATH — install it, or attach with a full path")
 
     cwd = os.path.abspath(os.path.expanduser(body.cwd.strip() or os.getcwd()))
     if not os.path.isdir(cwd):
@@ -376,7 +376,7 @@ async def attach(conv_id: str, body: AttachIn):
         await adapter.start()
     except Exception as exc:
         db.set_attachment_status(att_id, "exited")
-        raise HTTPException(500, f"failed to spawn: {exc}")
+        raise HTTPException(500, f"failed to spawn: {exc}") from exc
     live[att_id] = adapter
 
     await post_message(
@@ -395,7 +395,8 @@ async def resume_attachment(att_id: str):
         raise HTTPException(409, f"'{att['name']}' is already live")
     metadata = ADAPTER_METADATA.get(att["adapter"], {})
     capabilities = metadata.get("capabilities") or {}
-    can_resume = capabilities.get("resume", False) if isinstance(capabilities, dict) else "resume" in capabilities
+    can_resume = (capabilities.get("resume", False) if isinstance(capabilities, dict)
+                  else "resume" in capabilities)
     if not can_resume:
         raise HTTPException(400, f"the {att['adapter']} adapter has no session to resume")
     for other in db.list_attachments(att["conv_id"]):
@@ -416,7 +417,7 @@ async def resume_attachment(att_id: str):
         await adapter.start()
     except Exception as exc:
         db.set_attachment_status(att_id, "exited")
-        raise HTTPException(500, f"failed to resume: {exc}")
+        raise HTTPException(500, f"failed to resume: {exc}") from exc
     live[att_id] = adapter
 
     await post_message(
@@ -492,7 +493,7 @@ async def attachment_key(att_id: str, body: KeyIn):
     try:
         adapter.send_key(body.key)
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, str(exc)) from exc
     return {"ok": True}
 
 
