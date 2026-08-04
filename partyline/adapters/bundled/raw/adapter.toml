@@ -1,10 +1,14 @@
 [adapter]
-name = "Raw process"
+name = "raw"
 version = "1.0.0"
-description = "Generic adapter for an interactive process."
+description = "Any interactive process: a shell, a script, a CLI without a first-class adapter yet."
 entrypoint = "adapter.py"
+class = "PartylineAdapter"
 command = []
 requires = []
-capabilities = []
 env_unset = []
 output = "quiescent terminal output"
+
+[adapter.capabilities]
+# A bare process has no session of its own to reopen.
+resume = false

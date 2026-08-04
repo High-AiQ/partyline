@@ -37,10 +37,12 @@ def _manifest(path: Path) -> dict:
         raise ValueError(f"adapter manifest is missing: {', '.join(sorted(missing))}")
     manifest.setdefault("class", "PartylineAdapter")
     manifest.setdefault("requires", [])
-    manifest.setdefault("capabilities", [])
+    manifest.setdefault("capabilities", {})
     manifest.setdefault("env_unset", [])
     if not isinstance(manifest["command"], list) or not all(isinstance(arg, str) for arg in manifest["command"]):
         raise ValueError("adapter command must be an argv array")
+    if not isinstance(manifest["capabilities"], dict):
+        raise ValueError("adapter capabilities must be a table, e.g. capabilities = { resume = true }")
     return manifest
 
 
@@ -52,18 +54,19 @@ def load_adapter(path: str | Path) -> str:
     entrypoint = directory / str(manifest["entrypoint"])
     if not entrypoint.is_file() or entrypoint.parent != directory:
         raise ValueError("adapter entrypoint must be a file in its package directory")
-    if directory.parent == BUNDLED_ROOT:
-        module = importlib.import_module(f"partyline.adapters.bundled.{adapter_id}.adapter")
-    else:
-        global _GENERATION
-        _GENERATION += 1
-        module_name = f"partyline_adapter_{adapter_id}_{hashlib.sha256(str(directory).encode()).hexdigest()[:12]}_{_GENERATION}"
-        spec = importlib.util.spec_from_file_location(module_name, entrypoint)
-        if spec is None or spec.loader is None:
-            raise ValueError(f"cannot load adapter entrypoint: {entrypoint}")
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
-        spec.loader.exec_module(module)
+    # Every load gets a fresh module name rather than importlib.reload(), so a
+    # reload re-executes the file instead of handing back a cached module. That
+    # applies to bundled packages too: editing one and hitting reload should
+    # take effect without restarting the server.
+    global _GENERATION
+    _GENERATION += 1
+    module_name = f"partyline_adapter_{adapter_id}_{hashlib.sha256(str(directory).encode()).hexdigest()[:12]}_{_GENERATION}"
+    spec = importlib.util.spec_from_file_location(module_name, entrypoint)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"cannot load adapter entrypoint: {entrypoint}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
     cls = getattr(module, str(manifest["class"]), None)
     if not isinstance(cls, type) or not issubclass(cls, Adapter):
         raise ValueError("adapter manifest class must inherit Adapter")
