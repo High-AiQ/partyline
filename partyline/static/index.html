@@ -80,6 +80,21 @@ body::after{
 @media (hover:none){.conv-actions{opacity:1;pointer-events:auto}}
 #newconv{padding:14px 20px;border-top:1px dashed var(--line);display:flex;gap:8px}
 #newconv input{flex:1;min-width:0}
+#archiveSection{border-top:1px dashed var(--line);max-height:30%;overflow-y:auto;color:var(--cream-faint)}
+#archiveSection summary{list-style:none;cursor:pointer;padding:10px 20px;font-size:10.5px;letter-spacing:.05em}
+#archiveSection summary::-webkit-details-marker{display:none}
+#archiveSection summary::before{content:"▸";display:inline-block;width:14px;color:var(--cream-faint)}
+#archiveSection[open] summary::before{content:"▾"}
+#archiveSection summary:hover{color:var(--cream-dim);background:var(--ink-3)}
+#archiveCount{color:var(--cream-faint);font-size:10px}
+#archivedConvs{padding:0 12px 8px}
+.archive-note{padding:0 8px 6px;font-size:10px;font-style:italic;color:var(--cream-faint)}
+.archive-row{display:flex;align-items:center;gap:7px;padding:5px 8px;margin-bottom:3px;border:1px solid rgba(93,91,82,.45);border-radius:4px;color:var(--cream-faint)}
+.archive-row .name{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px}
+.archive-actions{display:flex;gap:4px;flex:none}
+.archive-actions button{padding:4px 6px;font-size:9.5px}
+.archive-actions .restore{color:var(--green);border-color:rgba(127,176,105,.35)}
+.archive-actions .purge{color:var(--red);border-color:rgba(201,111,90,.35)}
 #me{
   padding:12px 20px;border-top:1px solid var(--line);color:var(--cream-faint);
   font-size:11px;display:flex;justify-content:space-between;align-items:center;
@@ -289,6 +304,8 @@ body::after{
 .line-status{min-height:18px;color:var(--cream-faint);font-size:10.5px;font-style:italic}
 .line-status.error{color:var(--red);font-style:normal}
 .warn-sent{color:var(--green);font-style:normal}
+#wireNotice{position:fixed;left:50%;top:18px;z-index:70;transform:translateX(-50%);max-width:min(560px,90vw);padding:8px 14px;border:1px solid var(--line);border-radius:5px;background:var(--ink-2);color:var(--cream-dim);box-shadow:0 12px 30px rgba(0,0,0,.45);font-size:11px;animation:arrive .2s ease both}
+#wireNotice.error{color:var(--red);border-color:rgba(201,111,90,.55)}
 .modal.wide{width:min(980px,96vw)}
 .screen{
   background:#0a0c0b;border:1px solid var(--line);border-radius:5px;
@@ -359,6 +376,10 @@ button.primary:hover{color:var(--ink)}
       <input id="newconvName" placeholder="new line…" maxlength="60" autocomplete="off">
       <button type="submit">+</button>
     </form>
+    <details id="archiveSection">
+      <summary>archived lines <span id="archiveCount"></span></summary>
+      <nav id="archivedConvs" aria-label="archived lines"><div class="archive-note">open to load the archive</div></nav>
+    </details>
     <div id="me"><span>operator&nbsp;<b id="meName"></b></span><button id="meEdit" type="button">edit</button></div>
   </aside>
 
@@ -409,7 +430,7 @@ button.primary:hover{color:var(--ink)}
 "use strict";
 const $ = id => document.getElementById(id);
 const state = { me:null, convs:[], conv:null, atts:[], seen:new Set(), ws:null, wsGen:0,
-                humans:new Set(), attention:new Set(), adapters:[] };
+                humans:new Set(), attention:new Set(), adapters:[], archives:[] };
 
 /* ── adapters ──
    The list is whatever the server has registered, bundled or imported, so an
@@ -640,6 +661,73 @@ async function loadConvs(){
   const routed = routedId && state.convs.find(c=>c.id===routedId);
   if(routed && (!state.conv || state.conv.id!==routed.id)) openConv(routed, {fromRoute:true});
 }
+
+async function loadArchived(){
+  const box = $("archivedConvs");
+  box.innerHTML = `<div class="archive-note">loading…</div>`;
+  const res = await fetch("/api/conversations?archived=1");
+  if(!res.ok){ box.innerHTML = `<div class="archive-note">could not load the archive</div>`; return; }
+  state.archives = await res.json();
+  $("archiveCount").textContent = state.archives.length ? "("+state.archives.length+")" : "";
+  if(!state.archives.length){ box.innerHTML = `<div class="archive-note">no archived lines</div>`; return; }
+  box.innerHTML = "";
+  state.archives.forEach(c=>{
+    const row = document.createElement("div"); row.className = "archive-row";
+    const name = document.createElement("span"); name.className = "name"; name.textContent = c.name; name.title = c.name;
+    const actions = document.createElement("div"); actions.className = "archive-actions";
+    const restore = document.createElement("button"); restore.type="button"; restore.className="restore"; restore.textContent="restore";
+    const purge = document.createElement("button"); purge.type="button"; purge.className="purge"; purge.textContent="delete forever";
+    restore.title = "restore this line"; purge.title = "permanently delete this line";
+    restore.onclick = ()=>restoreConversation(c, restore);
+    purge.onclick = ()=>purgeConversation(c);
+    actions.append(restore, purge); row.append(name, actions); box.appendChild(row);
+  });
+}
+function refreshArchivesIfOpen(){ if($("archiveSection").open) loadArchived(); }
+$("archiveSection").addEventListener("toggle", ()=>{ if($("archiveSection").open) loadArchived(); });
+
+async function restoreConversation(c, button){
+  button.disabled = true; button.textContent = "restoring…";
+  const res = await fetch("/api/conversations/"+c.id+"/restore", {method:"POST"});
+  if(!res.ok){
+    let detail = "could not restore line";
+    try{ detail = (await res.json()).detail || detail; }catch(err){}
+    alert(detail); button.disabled=false; button.textContent="restore"; return;
+  }
+  const restored = await res.json();
+  await loadConvs(); loadArchived(); openConv(restored);
+}
+
+function purgeConversation(c){
+  modal("delete forever · " + c.name, (content, close)=>{
+    content.innerHTML =
+      `<p>This permanently deletes the line’s messages, attachments, and history. It cannot be undone.</p>`+
+      `<form class="line-form">`+
+      `<label for="purgeLine">type the line name to confirm</label>`+
+      `<input id="purgeLine" autocomplete="off" spellcheck="false">`+
+      `<div class="line-status" aria-live="polite"></div>`+
+      `<div class="line-actions"><button type="button">cancel</button><button class="danger" type="submit" disabled>delete forever</button></div>`+
+      `</form>`;
+    const form = content.querySelector("form");
+    const input = content.querySelector("#purgeLine");
+    const status = content.querySelector(".line-status");
+    const confirm = form.querySelector("button[type=submit]");
+    input.oninput = ()=>{ confirm.disabled = input.value !== c.name; };
+    form.querySelector("button[type=button]").onclick = close;
+    form.onsubmit = async e=>{
+      e.preventDefault(); confirm.disabled=true; confirm.textContent="deleting…";
+      const res = await fetch("/api/conversations/"+c.id+"/purge", {method:"DELETE"});
+      if(!res.ok){
+        let detail = "could not delete forever";
+        try{ detail = (await res.json()).detail || detail; }catch(err){}
+        status.textContent = detail; status.classList.add("error"); confirm.disabled=false; confirm.textContent="delete forever"; return;
+      }
+      close(); await loadArchived();
+    };
+    setTimeout(()=>input.focus(), 50);
+  });
+}
+
 $("newconv").onsubmit = async e=>{
   e.preventDefault();
   const name = $("newconvName").value.trim(); if(!name) return;
@@ -678,6 +766,18 @@ function clearCurrentConversation(removeRoute=true){
   $("composer").hidden = true;
   $("feed").innerHTML = `<div class="empty"><div class="art">no line selected</div>pick a conversation, or open a new one</div>`;
   if(removeRoute && routeConversationId()) clearConversationRoute();
+}
+
+let wireNoticeTimer = null;
+function showWireNotice(message, kind=""){
+  let notice = $("wireNotice");
+  if(!notice){
+    notice = document.createElement("div"); notice.id="wireNotice"; notice.setAttribute("role", "status"); notice.setAttribute("aria-live", "polite");
+    document.body.appendChild(notice);
+  }
+  notice.textContent = message; notice.className = kind;
+  clearTimeout(wireNoticeTimer);
+  wireNoticeTimer = setTimeout(()=>{ notice.remove(); }, 4200);
 }
 
 window.addEventListener("hashchange", ()=>{
@@ -808,7 +908,7 @@ async function deleteConversation(c){
         }
         close();
         if(state.conv && state.conv.id===c.id) clearCurrentConversation();
-        await loadConvs();
+        await loadConvs(); refreshArchivesIfOpen();
       };
     })().catch(()=>{ content.innerHTML = `<p class="line-status error">Could not load this line. Try again.</p>`; });
   });
@@ -857,6 +957,12 @@ function connectWs(convId){
   state.ws = ws;
   ws.onmessage = ev=>{
     const e = JSON.parse(ev.data);
+    if(e.type==="error" && e.conversation_id===convId){
+      showWireNotice(e.message || "this line is no longer available", "error");
+      if(state.conv && state.conv.id===convId) clearCurrentConversation();
+      loadConvs(); refreshArchivesIfOpen();
+      return;
+    }
     if(e.type==="message"){
       const empty = $("feed").querySelector(".empty"); if(empty) empty.remove();
       addMsg(e.message);
@@ -874,7 +980,7 @@ function connectWs(convId){
     }
     if(e.type==="conversation_archived" || e.type==="conversation_deleted"){
       if(state.conv && e.conversation_id===state.conv.id) clearCurrentConversation();
-      loadConvs();
+      loadConvs(); refreshArchivesIfOpen();
     }
   };
   ws.onclose = ()=>{ if(gen===state.wsGen) setTimeout(()=>{ if(gen===state.wsGen) connectWs(convId); }, 1500); };
