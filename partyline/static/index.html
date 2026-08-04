@@ -13,6 +13,8 @@
   --ink-2:#141715;
   --ink-3:#1b1f1c;
   --line:#2a2f2b;
+  --panel:#20251f;        /* lifted surface: menus must read above the rail */
+  --panel-line:#3a423b;
   --copper:#d98e4a;       /* patch-cable copper */
   --copper-hot:#f2b06b;
   --cream:#e9e2d4;        /* operator's ledger paper */
@@ -71,12 +73,38 @@ body::after{
 }
 .conv-actions{position:absolute;right:8px;top:50%;transform:translateY(-50%);display:flex;align-items:center;gap:4px;opacity:0;pointer-events:none;transition:opacity .15s}
 .conv-row:hover .conv-actions,.conv-row:focus-within .conv-actions{opacity:1;pointer-events:auto}
+/* While its menu is open the row keeps its actions lit, so the ⋯ does not
+   vanish out from under the pointer on the way down to the menu. */
+.conv-row.menu-open .conv-actions{opacity:1;pointer-events:auto}
+.conv-row.menu-open .conv{color:var(--cream);background:var(--ink-3)}
 .conv-more{width:44px;height:44px;padding:0;background:var(--ink-2);color:var(--cream-faint);font-size:16px;line-height:1}
 .conv-more:hover,.conv-more[aria-expanded="true"]{color:var(--ink);background:var(--copper)}
-.conv-menu{position:absolute;right:8px;top:38px;z-index:10;display:flex;flex-direction:column;min-width:108px;padding:4px;background:var(--ink-2);border:1px solid var(--line);border-radius:5px;box-shadow:0 12px 28px rgba(0,0,0,.45)}
-.conv-menu button{border:0;background:none;text-align:left;padding:7px 9px;font-size:10.5px;white-space:nowrap}
-.conv-menu button:hover{color:var(--ink);background:var(--copper)}
+/* The menu lives on <body>, not in the row: #convs scrolls, and an absolutely
+   positioned child would be clipped by it — the last line's menu worst of all.
+   Fixed positioning also decouples it from the row's hover fade, so travelling
+   from the ⋯ to the menu cannot dismiss it mid-move. */
+.conv-menu{
+  position:fixed;z-index:60;display:flex;flex-direction:column;min-width:132px;padding:5px;
+  background:var(--panel);border:1px solid var(--panel-line);border-radius:6px;
+  box-shadow:0 18px 42px rgba(0,0,0,.55), 0 2px 6px rgba(0,0,0,.4), inset 0 1px 0 rgba(233,226,212,.04);
+  animation:menuIn .12s ease-out;
+}
+@keyframes menuIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.conv-menu::before{  /* copper hairline, echoing the active-line marker */
+  content:"";position:absolute;left:9px;right:9px;top:-1px;height:1px;
+  background:linear-gradient(90deg,transparent,var(--copper),transparent);opacity:.55;
+}
+.conv-menu button{
+  border:0;background:none;text-align:left;padding:8px 10px;font-size:10.5px;white-space:nowrap;
+  color:var(--cream-dim);border-radius:3px;display:flex;align-items:center;gap:9px;
+  letter-spacing:.04em;transition:background .1s,color .1s;
+}
+.conv-menu button .g{width:12px;color:var(--cream-faint);font-size:11px;transition:color .1s}
+.conv-menu button:hover,.conv-menu button:focus-visible{color:var(--ink);background:var(--copper);outline:0}
+.conv-menu button:hover .g,.conv-menu button:focus-visible .g{color:var(--ink)}
 .conv-menu .delete{color:var(--red)}
+.conv-menu .delete:hover,.conv-menu .delete:focus-visible{color:var(--cream);background:var(--red)}
+.conv-menu .delete:hover .g,.conv-menu .delete:focus-visible .g{color:var(--cream)}
 @media (hover:none){.conv-actions{opacity:1;pointer-events:auto}}
 #newconv{padding:14px 20px;border-top:1px dashed var(--line);display:flex;gap:8px}
 #newconv input{flex:1;min-width:0}
@@ -613,6 +641,62 @@ function addMsg(m, scroll=true){
   if(stick) feed.scrollTop = feed.scrollHeight;
 }
 
+/* ── line actions menu ──
+   One element, reused by every row, parented to <body>. Rows are rebuilt on
+   every loadConvs(), so a per-row menu would leak listeners and lose its open
+   state on each refresh; a single detached menu survives both. */
+const lineMenu = Object.assign(document.createElement("div"), {className:"conv-menu", hidden:true});
+lineMenu.owner = null;
+document.body.appendChild(lineMenu);
+
+function closeLineMenu(){
+  if(!lineMenu.owner) return;
+  lineMenu.owner.setAttribute("aria-expanded", "false");
+  lineMenu.owner.closest(".conv-row")?.classList.remove("menu-open");
+  lineMenu.owner = null; lineMenu.hidden = true;
+}
+
+function openLineMenu(anchor, row, c){
+  closeLineMenu();
+  lineMenu.innerHTML = "";
+  const item = (label, glyph, className, run)=>{
+    const b = document.createElement("button");
+    b.type = "button"; if(className) b.className = className;
+    b.innerHTML = `<span class="g">${glyph}</span>${esc(label)}`;
+    b.onclick = e=>{ e.stopPropagation(); closeLineMenu(); run(c); };
+    return b;
+  };
+  lineMenu.append(item("rename", "✎", "", renameConversation),
+                  item("delete", "⌫", "delete", deleteConversation));
+
+  lineMenu.hidden = false;
+  lineMenu.owner = anchor;
+  anchor.setAttribute("aria-expanded", "true");
+  row.classList.add("menu-open");
+  placeLineMenu();
+  lineMenu.querySelector("button").focus();
+}
+
+function placeLineMenu(){
+  if(!lineMenu.owner) return;
+  const at = lineMenu.owner.getBoundingClientRect();
+  const box = lineMenu.getBoundingClientRect();
+  // Flip above the button rather than hang off the bottom of the window, and
+  // never let the panel run past either edge.
+  let top = at.bottom + 6;
+  if(top + box.height > innerHeight - 8) top = Math.max(8, at.top - box.height - 6);
+  const left = Math.min(Math.max(8, at.right - box.width), innerWidth - box.width - 8);
+  lineMenu.style.top = top + "px";
+  lineMenu.style.left = left + "px";
+}
+
+// A menu pinned to viewport coordinates has to close when those coordinates
+// stop meaning anything: a scrolled rail, a resized window, a click elsewhere.
+addEventListener("click", e=>{ if(!lineMenu.contains(e.target)) closeLineMenu(); });
+addEventListener("keydown", e=>{ if(e.key==="Escape") closeLineMenu(); });
+addEventListener("resize", closeLineMenu);
+addEventListener("scroll", closeLineMenu, true);
+
 /* ── conversations ── */
 function conversationRoute(id){ return "#/c/" + encodeURIComponent(id); }
 function routeConversationId(){
@@ -632,6 +716,9 @@ function clearConversationRoute(){
 
 async function loadConvs(){
   state.convs = await (await fetch("/api/conversations")).json();
+  // The rows are about to be replaced; an open menu would be left anchored to a
+  // detached button and could never be closed by clicking its ⋯ again.
+  closeLineMenu();
   const nav = $("convs"); nav.innerHTML="";
   state.convs.forEach(c=>{
     const row = document.createElement("div"); row.className = "conv-row";
@@ -645,17 +732,11 @@ async function loadConvs(){
     more.className = "conv-more"; more.type = "button"; more.textContent = "⋯";
     more.title = "line actions"; more.setAttribute("aria-label", "line actions for " + c.name);
     more.setAttribute("aria-expanded", "false");
-    const menu = document.createElement("div"); menu.className = "conv-menu"; menu.hidden = true;
-    const rename = document.createElement("button"); rename.type = "button"; rename.textContent = "rename";
-    const del = document.createElement("button"); del.type = "button"; del.className = "delete"; del.textContent = "delete";
-    menu.append(rename, del); actions.append(more, menu); row.append(b, actions); nav.appendChild(row);
+    actions.append(more); row.append(b, actions); nav.appendChild(row);
     more.onclick = e=>{
       e.stopPropagation();
-      nav.querySelectorAll(".conv-menu").forEach(m=>{ if(m!==menu) m.hidden=true; });
-      menu.hidden = !menu.hidden; more.setAttribute("aria-expanded", String(!menu.hidden));
+      if(lineMenu.owner === more) closeLineMenu(); else openLineMenu(more, row, c);
     };
-    rename.onclick = e=>{ e.stopPropagation(); menu.hidden=true; more.setAttribute("aria-expanded", "false"); renameConversation(c); };
-    del.onclick = e=>{ e.stopPropagation(); menu.hidden=true; more.setAttribute("aria-expanded", "false"); deleteConversation(c); };
   });
   const routedId = routeConversationId();
   const routed = routedId && state.convs.find(c=>c.id===routedId);
