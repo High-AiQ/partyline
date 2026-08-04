@@ -147,7 +147,7 @@ class ServerTest(unittest.TestCase):
 
     def test_websocket_claim_rejects_invalid_duplicate_and_process_handles(self):
         self.add_attachment("process", "opus")
-        server.human_handles["line"] = {object(): "terra"}
+        server.human_handles["line"] = {object(): ("terra", "other-browser")}
         for handle, expected in (("bad name", "alphanumeric"), ("all", "reserved"),
                                  ("TERRA", "another human"), ("opus", "running process")):
             socket = StreamWebSocket({"type": "hello", "handle": handle})
@@ -156,9 +156,21 @@ class ServerTest(unittest.TestCase):
             self.assertIn(expected, socket.sent[0]["message"])
 
     def test_attach_rejects_handle_claimed_by_a_human(self):
-        server.human_handles["line"] = {object(): "terra"}
+        server.human_handles["line"] = {object(): ("terra", "other-browser")}
         self.assert_http(409, server.attach("line", server.AttachIn(
             name="TERRA", adapter="fake", cwd=self.directory.name)))
+
+    def test_matching_client_id_reclaims_a_stale_handle(self):
+        stale_socket = object()
+        server.sockets["line"] = {stale_socket}
+        server.human_handles["line"] = {stale_socket: ("terra", "browser-id")}
+        socket = StreamWebSocket(
+            {"type": "hello", "handle": "terra", "client_id": "browser-id"},
+            {"sender": "terra", "body": "back online"},
+        )
+        self.arun(server.ws_endpoint(socket, "line"))
+        self.assertNotIn(stale_socket, server.sockets["line"])
+        self.assertEqual(server.db.list_messages("line")[-1]["body"], "back online")
 
     def test_topic_and_rename_validation_and_notices(self):
         self.assert_http(404, server.set_topic("missing", server.TopicIn(topic="x")))

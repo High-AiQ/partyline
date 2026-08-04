@@ -34,7 +34,7 @@ db = Db(os.environ.get("PARTYLINE_DB", os.path.expanduser("~/.partyline.db")))
 sockets: dict[str, set] = {}          # conv_id -> live websockets
 # Each socket claims one human handle before it may send.  This stays in memory:
 # presence is deliberately about a live connection, not a durable identity.
-human_handles: dict[str, dict[WebSocket, str]] = {}
+human_handles: dict[str, dict[WebSocket, tuple[str, str]]] = {}
 live: dict[str, Adapter] = {}         # attachment_id -> adapter
 
 
@@ -347,7 +347,7 @@ async def attach(conv_id: str, body: AttachIn):
         raise HTTPException(400, "name must be alphanumeric ([A-Za-z0-9_.-], max 32)")
     if body.name.lower() in RESERVED_NAMES:
         raise HTTPException(400, f"'{body.name}' is a reserved handle")
-    if body.name.lower() in {name.lower() for name in human_handles.get(conv_id, {}).values()}:
+    if body.name.lower() in {name.lower() for name, _ in human_handles.get(conv_id, {}).values()}:
         raise HTTPException(409, f"'{body.name}' is already in use by a human on this line")
     if body.adapter not in ADAPTERS:
         raise HTTPException(400, f"adapter must be one of {sorted(ADAPTERS)}")
@@ -564,11 +564,13 @@ async def ws_endpoint(ws: WebSocket, conv_id: str):
     await ws.accept()
     sockets.setdefault(conv_id, set()).add(ws)
     claimed_handle = None
+    claimed_client = None
     try:
         while True:
             data = await ws.receive_json()
             if data.get("type") == "hello":
                 handle = str(data.get("handle", "")).strip()
+                client_id = str(data.get("client_id", "")).strip()
                 conv = db.get_conversation(conv_id)
                 error = handle_error(handle)
                 if conv is None or conv["archived_at"]:
@@ -577,14 +579,28 @@ async def ws_endpoint(ws: WebSocket, conv_id: str):
                     error = "that handle is taken by a running process on this line"
                 elif not error and any(
                     other is not ws and name.lower() == handle.lower()
-                    for other, name in human_handles.get(conv_id, {}).items()
+                    and (not client_id or client != client_id)
+                    for other, (name, client) in human_handles.get(conv_id, {}).items()
                 ):
                     error = "that handle is taken by another human on this line"
                 if error:
                     await ws.send_json({"type": "error", "conversation_id": conv_id, "message": error})
                     continue
-                human_handles.setdefault(conv_id, {})[ws] = handle
-                claimed_handle = handle
+                # A reconnect can arrive before a half-open old socket times
+                # out. Its durable client id proves it is the same browser, so
+                # let the new socket take over and make the old one inert.
+                claims = human_handles.setdefault(conv_id, {})
+                if client_id:
+                    for other, (_, client) in list(claims.items()):
+                        if other is not ws and client == client_id:
+                            claims.pop(other)
+                            sockets.get(conv_id, set()).discard(other)
+                            try:
+                                await other.close(code=1000, reason="superseded by reconnect")
+                            except Exception:
+                                pass  # a half-open socket cannot be closed cleanly
+                claims[ws] = (handle, client_id)
+                claimed_handle, claimed_client = handle, client_id
                 await ws.send_json({"type": "hello", "conversation_id": conv_id, "handle": handle})
                 continue
 
@@ -598,6 +614,10 @@ async def ws_endpoint(ws: WebSocket, conv_id: str):
             if claimed_handle is None:
                 await ws.send_json({"type": "error", "conversation_id": conv_id,
                                     "message": "choose a handle before sending messages"})
+                continue
+            if human_handles.get(conv_id, {}).get(ws) != (claimed_handle, claimed_client):
+                await ws.send_json({"type": "error", "conversation_id": conv_id,
+                                    "message": "this connection was superseded; reconnect to continue"})
                 continue
             sender = str(data.get("sender", "")).strip()
             if sender != claimed_handle:
