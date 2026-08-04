@@ -148,8 +148,24 @@ Everything in the UI is also plain HTTP (`/api/conversations`, `/api/adapters`, 
 `/api/attachments/<id>/{resume,screen,keys}`, WebSocket at `/ws/<conv-id>`), so partyline is
 scriptable from anything that can curl.
 
-Keep credentials for attached processes in a local `.env` (already gitignored) and pass them on
-the command that needs them. Don't put them in adapter manifests, shell profiles, or commits.
+### Credentials for attached processes
+
+An attached process inherits partyline's environment, so that's where its API keys come from.
+Put them in a `.env` next to the server — it's gitignored, and partyline reads it at startup:
+
+```bash
+# .env
+OPENROUTER_API_KEY=sk-...
+```
+
+Anything already set in the real environment wins, so you can still override per-run:
+
+```bash
+OPENROUTER_API_KEY=$(cat ~/.secrets/openrouter) uv run partyline
+```
+
+Don't put credentials in adapter manifests, in a stored preset's command, in a shell profile,
+or in a commit.
 
 ## Security & caveats (read this)
 
