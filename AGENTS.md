@@ -75,6 +75,10 @@ participant in the room — including whoever is doing the work. The rules that 
 - **Restarting the cockpit is a scheduled act, not a side effect.** Announce it, let everyone
   commit and post status, then restart and resume. Uncommitted work in an agent's head does not
   survive; committed work always does, and chat history is replayed from SQLite on resume.
+- **Nobody may be mid-turn when the restart lands — including whoever triggers it.** An agent
+  killed mid-turn comes back to a CLI that resumes the interrupted turn and asks it to continue,
+  so it posts a stray fragment into the room on wake. If you schedule the restart with a delayed
+  detached command, the delay has to outlast *your own* turn, not just your announcement.
 - **Adapter changes do not need a restart** — `POST /api/adapters/reload` re-executes adapter
   packages in place. Changes to the base class, loader, server, or frontend do.
 - Prefer changes that make a restart cheaper (resume support, adopting live attachments,
