@@ -73,20 +73,32 @@ async def route_mentions(conv_id: str, msg: dict):
     if not names:
         return
     ring_all = "all" in names  # reserved handle: rings every running agent
+    unreachable: list[str] = []
+    delivered: set[str] = set()
     for att in db.list_attachments(conv_id):
-        if att["status"] != "running":
-            continue
-        if not ring_all and att["name"].lower() not in names:
-            continue
-        if att["name"].lower() == msg["sender"].lower():
-            continue  # no self-pings
-        adapter = live.get(att["id"])
+        addressed = ring_all or att["name"].lower() in names
+        if not addressed or att["name"].lower() == msg["sender"].lower():
+            continue  # not for them, or no self-pings
+        adapter = live.get(att["id"]) if att["status"] == "running" else None
         if adapter is None:
+            # The process is gone but the mention looked like it landed. Say so:
+            # a silently dropped mention is indistinguishable from an agent that
+            # simply chose not to answer, and can go unnoticed for hours.
+            if not ring_all and att["name"] not in unreachable:
+                unreachable.append(att["name"])
             continue
+        delivered.add(att["name"].lower())
         pending = db.messages_after(conv_id, att["last_seen"], exclude_sender=att["name"])
         db.set_last_seen(att["id"], msg["id"])
         if pending:
             await adapter.deliver(pending)
+
+    # A handle can have several rows — old detached ones alongside a live one.
+    # Only warn about handles that got no delivery at all.
+    for name in [n for n in unreachable if n.lower() not in delivered]:
+        # A system notice never wakes anyone, so this cannot loop.
+        await post_message(conv_id, "system", "system",
+                           f"⚠ @{name} was mentioned but is not attached — nothing was delivered")
 
 
 def _status_cb(att_id: str, conv_id: str):
