@@ -2,56 +2,86 @@
 
 *Several parties. One wire. Pick up.*
 
-partyline is a local chatroom where people and interactive processes work together. Attach a
-real terminal program to a conversation, give it an `@handle`, and route messages between
-participants:
+A chatroom where **humans and interactive terminal processes talk to each other**. Attach real
+executables — a coding-agent CLI, a REPL, a custom script — to a conversation, give each one an
+@handle, and route work between them:
 
-> **greg:** @reviewer I finished the migration; please review it.
+> **greg:** @reviewer I finished the migration, pls review
 > **reviewer:** On it. @tester can you run the test suite while I read the diff?
 
-Processes wake only when mentioned. They run in a real terminal, using the same interactive
-experience they have when launched by hand.
+Processes only wake when @mentioned. No polling loops, no cron jobs.
 
-## Why a terminal-backed process?
+## Why a real terminal?
 
-partyline starts the actual interactive executable in a pseudo-terminal (pty). Chat messages
-are delivered as bracketed-paste keystrokes followed by Enter. Replies come from the process's
-own transcript when an adapter supports one; partyline never turns a terminal screen into chat
-output. This preserves a clean conversation while still allowing a person to inspect and answer
-an interactive screen when needed.
+Because the interactive app is the real thing. Headless and one-shot modes are a different
+program with different behaviour, different context discovery, and different auth. partyline
+spawns the **actual interactive executable in a pty** — same startup, same project files, same
+login as typing in your terminal. The trick that keeps it clean: **the screen is never scraped.**
+
+| direction | mechanism |
+|---|---|
+| chat → process | keystrokes written to the pty (bracketed paste + Enter) — the app sees a typed/queued message |
+| process → chat | tail the app's own structured transcript; its replies become chat messages |
+
+For a process with no transcript of its own, the `raw` adapter falls back to the ANSI-stripped
+pty stream, flushed on quiescence. Every adapter prefers a transcript when one exists, because
+that is what keeps replies free of spinners, redraws and box-drawing characters.
 
 ## Getting started
 
-Requirements: Linux or macOS, Python 3.10+, [uv](https://docs.astral.sh/uv/), and any process
-you plan to attach installed and ready for interactive use.
+**Requirements:** Linux or macOS, Python 3.11+, [uv](https://docs.astral.sh/uv/), and whichever
+CLIs you want to attach, installed **and logged in**.
 
 ```bash
 git clone git@github.com:High-AiQ/partyline.git
 cd partyline
-uv run partyline
+uv run partyline          # serves http://127.0.0.1:8642
 ```
 
-Open <http://127.0.0.1:8642>, choose a handle, create a conversation, then attach a process.
-The first release includes adapters for **pi**, **opencode**, and **hermes**. Choose a handle,
-adapter, command, and working directory; then start talking.
+Then, in the browser:
 
-Before attaching a process in a working directory for the first time, start it there manually
-once to complete any initial setup it requires.
+1. **Pick a handle** — this is your name on the wire (stored locally).
+2. **Open a line** — type a conversation name in the left rail, hit `+`.
+3. **Patch in a process** — on the right, give it a handle (e.g. `reviewer`), pick an adapter,
+   optionally add a command, set the working directory you want it to work in (it picks up that
+   project's `AGENTS.md` and trust settings), and hit **attach**.
+4. **Talk.** Plain messages go to everyone; `@reviewer do X` wakes reviewer with every message
+   it hasn't seen yet. Processes are briefed on join, so they @mention you and each other back.
 
-## Conversation model
+> **Strongly recommended:** if the CLI you are attaching has a permission or approval mode, set
+> it in the command. A headless TUI cannot ask you questions — without it, processes pause on
+> approval dialogs until you answer via **peek** (below).
 
-- Every message is stored locally and broadcast to the people on the conversation.
-- A process receives accumulated unread messages only after an explicit `@handle` mention.
-- `@all` rings every running process. Use it sparingly: it starts a turn for each process.
-- System notices do not ring processes, but arrive with the next message digest.
-- The terminal screen can be viewed from the attachment controls, with a small keypad for
-  common interactive responses.
+Before first attaching a process in a new working directory, run its CLI there manually once to
+clear first-run trust/onboarding prompts.
 
 ## Adapters
 
-An adapter is a small Python package that tells partyline how to start and communicate with one
-interactive process. Built-in adapters live in `partyline/adapters/bundled/<id>/`. An external adapter
-repository has this layout:
+Out of the box:
+
+- **pi** — pins `--session-id`/`--session-dir` and tails the JSONL session transcript.
+- **opencode** — tails opencode's own session store.
+- **hermes** — tails hermes's own session store.
+- **raw** — any process: shells, custom scripts, CLIs without a first-class adapter yet.
+  Output is the ANSI-stripped pty stream, flushed after ~1.2s of quiet; input is the message
+  body verbatim. Also the starting point for writing a new adapter (~40 lines).
+
+An adapter is a small package that tells partyline how to start one process and how to turn its
+output into chat. Bundled ones live in `partyline/adapters/bundled/<id>/`; the layout is
+identical wherever they come from:
+
+```
+<id>/
+  adapter.toml   # identity, entrypoint, default command, requires, capabilities
+  adapter.py     # defines class PartylineAdapter(Adapter)
+```
+
+To write one, read [docs/adapters.md](docs/adapters.md) or hand your agent the
+[add-process-adapter skill](skills/add-process-adapter/SKILL.md).
+
+### Importing adapters from a git repo
+
+A repository is either a single adapter package (`adapter.toml` at its root) or a collection:
 
 ```
 adapters/
@@ -60,62 +90,86 @@ adapters/
     adapter.py
 ```
 
-The manifest supplies the adapter identity, display metadata, entrypoint, and default command.
-`adapter.py` exports a `PartylineAdapter` subclass. See [the adapter reference](docs/adapters.md)
-and [adapter-authoring skill](skills/add-process-adapter/SKILL.md) for the contract, lifecycle
-rules, and test checklist.
-
-### Import an adapter repository
-
-Import a public repository through the local API:
-
 ```bash
 curl -X POST http://127.0.0.1:8642/api/adapters/import \
   -H 'content-type: application/json' \
   -d '{"repository":"https://github.com/example/partyline-adapters.git","ref":"main"}'
+
+curl http://127.0.0.1:8642/api/adapters          # what's registered now
+curl -X POST http://127.0.0.1:8642/api/adapters/reload   # re-read after editing one
 ```
 
-The `ref` field is optional. partyline clones the repository into its local adapter store and
-discovers `adapters/*/adapter.toml`. Inspect the enabled adapters with:
+`ref` is optional. The checkout lands in the local adapter store, and every `adapter.toml` it
+contains is registered. Reload re-executes the adapter files without restarting the server:
+already-running attachments keep the code they started with, new attachments get the new code.
 
-```bash
-curl http://127.0.0.1:8642/api/adapters
-```
+> **Importing an adapter runs its code as you.** `adapter.py` is executed on import, not
+> sandboxed. Read the source of anything you import, and prefer repositories you control.
 
-After changing an installed adapter, reload its definitions without restarting the server:
+## Features
 
-```bash
-curl -X POST http://127.0.0.1:8642/api/adapters/reload
-```
+**Presets** — save a handle + adapter + command under a title and reuse it in any conversation.
+Working directory is deliberately per-attach. `save` / `manage` in the attach form.
 
-Only import code you trust. Imported adapters run as your user and can start local processes.
+**Line topics** — every line can carry a free-text topic (up to 3000 chars; any human can edit
+it from the top bar): the project, the culture, standing instructions — whatever gives the line
+its character. Processes get the topic in their join briefing, and topic changes are posted as
+system notices that ride along in the next @mention digest, so running processes pick them up
+without spending a turn.
+
+**Resume** — when an adapter can reopen its process's session, a dead jack shows **↻ resume**:
+it respawns with full context, no briefing turn is spent, history is not re-posted, and its
+unread-message cursor survives, so its next wake includes whatever it missed.
+
+**Peek & keys** — every running jack has **⌗ peek**: a live view of the process's actual
+terminal screen (rendered server-side, refreshes every 2s), plus a small keypad (enter / esc /
+arrows / y / n / 1-4) to answer whatever dialog is on screen.
+
+## Routing model
+
+- Every message is stored (SQLite) and broadcast to all humans on the line.
+- Processes wake **only on an explicit `@handle` mention**; a wake delivers all messages the
+  process hasn't seen yet as `[sender]: text` lines.
+- `@all` rings **every running process** on the line at once. It's a deliberate megaphone, not
+  the default: each ring spends one turn per process. `all` and `system` are reserved handles.
+- System notices (joins, exits, topic changes) never wake processes, but they ride along in the
+  next wake's digest.
 
 ## Configuration
 
-| Environment variable | Default | Purpose |
-| --- | --- | --- |
-| `PARTYLINE_PORT` | `8642` | HTTP port |
-| `PARTYLINE_HOST` | `127.0.0.1` | Bind address |
-| `PARTYLINE_DB` | `~/.partyline.db` | Local conversation data |
-| `PARTYLINE_ADAPTERS_DIR` | platform-local adapter store | Imported adapter location |
+| env var | default | |
+|---|---|---|
+| `PARTYLINE_PORT` | `8642` | |
+| `PARTYLINE_HOST` | `127.0.0.1` | see security note before changing |
+| `PARTYLINE_DB` | `~/.partyline.db` | conversations, messages, attachments, presets |
+| `PARTYLINE_ADAPTERS_DIR` | `~/.partyline/adapters` | where imported adapter repos are checked out |
 
-Keep credentials in a local `.env` file when needed by an attached process. `.env` is ignored
-by git. Do not add credentials to commands, shell profiles, commits, or adapter manifests.
+Everything in the UI is also plain HTTP (`/api/conversations`, `/api/adapters`, `/api/presets`,
+`/api/attachments/<id>/{resume,screen,keys}`, WebSocket at `/ws/<conv-id>`), so partyline is
+scriptable from anything that can curl.
 
-## Security
+Keep credentials for attached processes in a local `.env` (already gitignored) and pass them on
+the command that needs them. Don't put them in adapter manifests, shell profiles, or commits.
 
-partyline has no authentication and binds to localhost by default. Anyone who can reach its
-port can interact with processes running as you. Do not expose it directly to a network.
+## Security & caveats (read this)
 
-Processes inherit your user account and run in the working directory you select. Treat a shared
-conversation as shared terminal access. Review external adapter source before importing it.
+- **No auth. Binds localhost by default. Anyone who can reach the port can spawn processes as
+  you.** Do not expose it to a network as-is; if you must, tunnel (SSH/tailscale).
+- Processes run with your user, your CLI logins, and the cwd you chose. The chat is a shared
+  terminal, not a sandbox.
+- Imported adapters are executed code. Review before importing.
+- Clean server shutdown SIGTERMs attached processes (use resume to bring them back); a hard
+  crash orphans them until SIGHUP from the closing pty.
+- Adapters that locate a session by working directory can be confused by two attachments started
+  in the same directory at the same moment; bundled adapters claim their transcript to prevent
+  it, but it's the first thing to check when a new adapter posts someone else's replies.
 
 ## Development
 
-Read [AGENTS.md](AGENTS.md) before contributing. Run throwaway instances while testing:
+Read [AGENTS.md](AGENTS.md) first. Test against a throwaway DB and port, never a live one:
 
 ```bash
 PARTYLINE_DB=/tmp/partyline-test.db PARTYLINE_PORT=8643 uv run partyline
 ```
 
-The project is released under the [MIT License](LICENSE).
+Released under the [MIT License](LICENSE).

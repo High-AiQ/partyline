@@ -29,10 +29,15 @@ credentials only to the process command; never add them to shell profiles, sourc
 
 ## Adapter rules
 
-- One adapter package lives at `partyline/adapters/<id>/` and has a manifest plus an entrypoint.
+- One bundled adapter package lives at `partyline/adapters/bundled/<id>/` and has a manifest
+  (`adapter.toml`) plus an entrypoint (`adapter.py` defining `PartylineAdapter`).
 - Prefer tailing the process's structured transcript or log. Never post raw terminal-screen
   contents as chat messages. A raw stream may be quiescence-flushed only for intentionally
   stream-based adapters.
+- A transcript must be located unambiguously. If the CLI can be told which session id or session
+  directory to use, pin it; if discovery has to fall back to matching on working directory and
+  start time, the adapter must also *claim* the file it resolves, so a second attachment in the
+  same directory cannot latch onto the first one's transcript and repost its messages.
 - Anything injected into a pty must assume a person may be typing: use bracketed paste and
   then Enter.
 - Keep discovery, manifest validation, import, and reload behavior compatible with external
