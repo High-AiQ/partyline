@@ -1,0 +1,10 @@
+[adapter]
+name = "Raw process"
+version = "1.0.0"
+description = "Generic adapter for an interactive process."
+entrypoint = "adapter.py"
+command = []
+requires = []
+capabilities = []
+env_unset = []
+output = "quiescent terminal output"

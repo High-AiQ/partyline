@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>partyline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#0e100f;          /* deep exchange-room black-green */
+  --ink-2:#141715;
+  --ink-3:#1b1f1c;
+  --line:#2a2f2b;
+  --copper:#d98e4a;       /* patch-cable copper */
+  --copper-hot:#f2b06b;
+  --cream:#e9e2d4;        /* operator's ledger paper */
+  --cream-dim:#9a968a;
+  --cream-faint:#5d5b52;
+  --green:#7fb069;        /* live-line LED */
+  --red:#c96f5a;
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+  --serif:"Instrument Serif",Georgia,serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--ink);color:var(--cream);font-family:var(--mono);
+  font-size:13.5px;line-height:1.55;overflow:hidden;
+}
+/* film grain over everything */
+body::after{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:99;opacity:.05;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+}
+#app{
+  display:grid;grid-template-columns:250px 1fr 288px;
+  grid-template-rows:minmax(0,100%);height:100%;
+}
+#app>*{min-height:0}
+
+/* ── left rail ─────────────────────────────────────────── */
+#rail{
+  background:var(--ink-2);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;min-width:0;
+}
+#wordmark{padding:26px 20px 18px;border-bottom:1px dashed var(--line)}
+#wordmark h1{
+  font-family:var(--serif);font-weight:400;font-size:34px;letter-spacing:.5px;
+  color:var(--cream);
+}
+#wordmark h1 em{color:var(--copper);font-style:italic}
+#wordmark p{color:var(--cream-faint);font-size:10.5px;margin-top:4px;letter-spacing:.06em}
+#ver{
+  color:var(--copper);border:1px solid rgba(217,142,74,.3);border-radius:3px;
+  padding:0 5px;font-size:9px;letter-spacing:.08em;vertical-align:1px;
+}
+#convs{flex:1;min-height:0;overflow-y:auto;padding:10px 0}
+.conv{
+  display:block;width:100%;text-align:left;background:none;border:0;cursor:pointer;
+  font:inherit;color:var(--cream-dim);padding:9px 20px;position:relative;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.conv:hover{color:var(--cream);background:var(--ink-3)}
+.conv.active{color:var(--copper-hot);background:var(--ink-3)}
+.conv.active::before{
+  content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--copper);
+}
+#newconv{padding:14px 20px;border-top:1px dashed var(--line);display:flex;gap:8px}
+#newconv input{flex:1;min-width:0}
+#me{
+  padding:12px 20px;border-top:1px solid var(--line);color:var(--cream-faint);
+  font-size:11px;display:flex;justify-content:space-between;align-items:center;
+}
+#me b{color:var(--cream-dim);font-weight:500}
+#me button{font-size:10px;padding:2px 8px}
+
+/* ── center: the line ──────────────────────────────────── */
+#main{display:flex;flex-direction:column;min-width:0;overflow:hidden;background:
+  radial-gradient(1200px 500px at 50% -200px, #171b18 0%, var(--ink) 60%)}
+#topbar{
+  padding:16px 28px;border-bottom:1px solid var(--line);
+  display:flex;align-items:baseline;gap:14px;
+}
+#convname{font-family:var(--serif);font-size:24px;font-weight:400;font-style:italic;color:var(--cream);flex:none}
+#convmeta{
+  color:var(--cream-dim);font-size:11.5px;font-style:italic;min-width:0;flex:1;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;
+  border-bottom:1px dashed transparent;transition:color .15s;
+}
+#convmeta:hover{color:var(--copper-hot);border-bottom-color:rgba(217,142,74,.4)}
+#convmeta.unset{color:var(--cream-faint)}
+#convmeta[hidden]{display:none}
+.topicBox{
+  background:var(--ink);border:1px solid var(--line);border-radius:4px;color:var(--cream);
+  padding:9px 11px;font:inherit;font-size:12px;min-height:120px;resize:vertical;outline:0;
+}
+.topicBox:focus{border-color:var(--copper)}
+.topicRow{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.topicRow .count{color:var(--cream-faint);font-size:10px}
+#feed{flex:1;min-height:0;overflow-y:auto;padding:22px 28px 10px}
+#feed .empty{
+  color:var(--cream-faint);text-align:center;margin-top:12vh;font-size:12.5px;
+}
+#feed .empty .art{font-family:var(--serif);font-style:italic;font-size:26px;color:var(--cream-dim);margin-bottom:10px}
+.msg{margin:0 0 14px;max-width:860px;animation:arrive .28s ease both}
+@keyframes arrive{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.msg .head{display:flex;align-items:baseline;gap:10px;margin-bottom:2px}
+.msg .who{font-weight:600;font-size:12.5px}
+.msg .who.agent::before{content:"▸ ";color:var(--copper);font-weight:400}
+.msg .when{color:var(--cream-faint);font-size:10px}
+.msg .body{white-space:pre-wrap;word-wrap:break-word;color:var(--cream)}
+.msg .body .mention{color:var(--copper-hot);background:rgba(217,142,74,.09);border-radius:3px;padding:0 3px}
+.msg .body code{background:var(--ink-3);border:1px solid var(--line);border-radius:3px;padding:1px 5px;font-size:12.5px}
+.msg .body pre{
+  background:var(--ink-2);border:1px solid var(--line);border-left:2px solid var(--copper);
+  border-radius:4px;padding:10px 14px;margin:8px 0;overflow-x:auto;font-size:12.5px;
+}
+.msg .body pre code{background:none;border:0;padding:0}
+.msg.system{max-width:none;text-align:center;margin:18px 0}
+.msg.system .body{
+  display:inline-block;color:var(--cream-faint);font-size:11px;font-style:italic;
+  border-top:1px dashed var(--line);border-bottom:1px dashed var(--line);padding:3px 18px;
+  max-width:100%;overflow-wrap:anywhere;
+}
+/* composer */
+#composer{padding:14px 28px 20px;border-top:1px solid var(--line);position:relative}
+#mentionPop{
+  position:absolute;bottom:calc(100% + 6px);left:28px;z-index:20;
+  background:var(--ink-2);border:1px solid var(--line);border-radius:6px;
+  min-width:230px;max-height:240px;overflow-y:auto;padding:5px;
+  box-shadow:0 14px 40px rgba(0,0,0,.5);animation:arrive .14s ease both;
+}
+#mentionPop .opt{
+  display:flex;align-items:center;gap:9px;padding:6px 10px;border-radius:4px;
+  cursor:pointer;color:var(--cream-dim);
+}
+#mentionPop .opt .led{width:6px;height:6px}
+#mentionPop .opt .nm{font-weight:600;flex:1}
+#mentionPop .opt .kind{font-size:9.5px;color:var(--cream-faint);letter-spacing:.06em}
+#mentionPop .opt.sel{background:var(--ink-3);color:var(--cream)}
+#mentionPop .opt.sel .nm{color:var(--copper-hot)}
+#composer .box{
+  display:flex;align-items:flex-end;gap:12px;background:var(--ink-2);
+  border:1px solid var(--line);border-radius:6px;padding:10px 12px;
+  transition:border-color .15s;
+}
+#composer .box:focus-within{border-color:var(--copper)}
+#input{
+  flex:1;background:none;border:0;outline:0;resize:none;color:var(--cream);
+  font:inherit;max-height:180px;min-height:22px;
+}
+#composer .hint{color:var(--cream-faint);font-size:10px;margin-top:6px}
+#send{align-self:flex-end}
+
+/* ── right rail: on the line ───────────────────────────── */
+#board{
+  background:var(--ink-2);border-left:1px solid var(--line);
+  display:flex;flex-direction:column;overflow-y:auto;
+}
+#board h2, #board h3{
+  font-family:var(--serif);font-style:italic;font-weight:400;font-size:17px;
+  color:var(--cream-dim);padding:20px 18px 10px;
+}
+#jacks{padding:0 12px 8px}
+.jack{
+  border:1px solid var(--line);border-radius:5px;background:var(--ink-3);
+  padding:9px 11px;margin-bottom:8px;position:relative;
+}
+.jack .row{display:flex;align-items:center;gap:8px}
+.led{width:7px;height:7px;border-radius:50%;background:var(--cream-faint);flex:none}
+.led.running{background:var(--green);box-shadow:0 0 6px var(--green);animation:pulse 2.2s infinite}
+.led.exited{background:var(--red)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.jack .name{font-weight:600;cursor:pointer}
+.jack .name:hover{color:var(--copper-hot)}
+.jack .tag{
+  font-size:9.5px;color:var(--copper);border:1px solid rgba(217,142,74,.35);
+  border-radius:3px;padding:0 5px;letter-spacing:.05em;
+}
+.jack .cmd{color:var(--cream-faint);font-size:10.5px;margin-top:4px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.jack .x{
+  position:absolute;top:6px;right:8px;background:none;border:0;color:var(--cream-faint);
+  cursor:pointer;font:inherit;font-size:12px;padding:2px;
+}
+.jack .x:hover{color:var(--red)}
+.jack.dead{opacity:.75}
+.jack .resume{
+  margin-top:6px;font-size:10px;padding:2px 9px;
+  color:var(--green);border-color:rgba(127,176,105,.4);
+}
+.jack .resume:hover{background:var(--green);border-color:var(--green);color:var(--ink)}
+/* a process is stuck on a dialog: the whole jack rings until someone peeks */
+.jack.attention{border-color:rgba(242,176,107,.7);animation:ring-glow 1.1s ease-in-out infinite}
+@keyframes ring-glow{
+  0%,100%{box-shadow:0 0 0 rgba(242,176,107,0)}
+  50%{box-shadow:0 0 16px rgba(242,176,107,.4), inset 0 0 8px rgba(242,176,107,.08)}
+}
+.jack.attention .led{background:var(--copper-hot);box-shadow:0 0 8px var(--copper-hot);animation:pulse .55s infinite}
+.jack.attention .peek-btn{
+  color:var(--ink);background:var(--copper);border-color:var(--copper-hot);
+  animation:jiggle 1.6s ease-in-out infinite;transform-origin:50% 80%;
+}
+/* a burst of rattle, then a beat of rest — like a phone ringing */
+@keyframes jiggle{
+  0%,35%,100%{transform:rotate(0)}
+  7%{transform:rotate(-2.5deg) translateX(-1px)}
+  14%{transform:rotate(2deg) translateX(1px)}
+  21%{transform:rotate(-2deg) translateX(-1px)}
+  28%{transform:rotate(1.5deg) translateX(1px)}
+}
+#presetRow{display:flex;gap:6px;align-items:center}
+#presetRow select{flex:1;min-width:0}
+#presetRow button{padding:6px 8px;font-size:10.5px;flex:none}
+
+/* ── modal ─────────────────────────────────────────────── */
+.overlay{
+  position:fixed;inset:0;background:rgba(8,10,9,.75);backdrop-filter:blur(2px);
+  z-index:50;display:flex;align-items:center;justify-content:center;
+}
+.modal{
+  background:var(--ink-2);border:1px solid var(--line);border-radius:8px;
+  width:min(560px,92vw);max-height:82vh;display:flex;flex-direction:column;
+  box-shadow:0 24px 60px rgba(0,0,0,.55);animation:arrive .22s ease both;
+}
+.modal header{
+  display:flex;align-items:baseline;justify-content:space-between;
+  padding:16px 20px 10px;border-bottom:1px dashed var(--line);
+}
+.modal header h2{font-family:var(--serif);font-style:italic;font-weight:400;font-size:20px;color:var(--cream)}
+.modal header .close{background:none;border:0;color:var(--cream-faint);cursor:pointer;font-size:14px;padding:4px}
+.modal header .close:hover{color:var(--red);background:none}
+.modal .content{padding:14px 20px 20px;overflow-y:auto;display:flex;flex-direction:column;gap:10px}
+.preset-card{
+  border:1px solid var(--line);border-radius:6px;background:var(--ink-3);
+  padding:12px;display:flex;flex-direction:column;gap:7px;
+}
+.preset-card .grid{display:grid;grid-template-columns:78px 1fr;gap:6px 10px;align-items:center}
+.preset-card .grid label{color:var(--cream-faint);font-size:10px;letter-spacing:.05em;text-align:right}
+.preset-card .actions{display:flex;gap:8px;justify-content:flex-end}
+.preset-card .del{color:var(--red);border-color:rgba(201,111,90,.4)}
+.preset-card .del:hover{background:var(--red);border-color:var(--red);color:var(--ink)}
+.modal .content .note{color:var(--cream-faint);font-size:10.5px;font-style:italic}
+.modal.wide{width:min(980px,96vw)}
+.screen{
+  background:#0a0c0b;border:1px solid var(--line);border-radius:5px;
+  padding:12px 14px;font-size:11px;line-height:1.4;color:#c9c4b6;
+  overflow:auto;max-height:56vh;white-space:pre;
+}
+.keypad{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.keypad button{font-size:10.5px;padding:4px 10px}
+.keypad .lbl{color:var(--cream-faint);font-size:10px;margin-right:4px}
+#attach{padding:4px 12px 20px;display:flex;flex-direction:column;gap:7px}
+#attach label{color:var(--cream-faint);font-size:10px;letter-spacing:.05em;margin-bottom:-4px}
+#attach .note{color:var(--cream-faint);font-size:10px;font-style:italic}
+
+/* controls */
+input,select,textarea,button{font-family:var(--mono)}
+input,select{
+  background:var(--ink);border:1px solid var(--line);border-radius:4px;
+  color:var(--cream);padding:6px 9px;font-size:12px;outline:0;
+}
+input:focus,select:focus{border-color:var(--copper)}
+button{
+  background:var(--ink-3);border:1px solid var(--line);border-radius:4px;
+  color:var(--cream-dim);padding:6px 12px;font-size:11.5px;cursor:pointer;
+  letter-spacing:.04em;transition:all .15s;
+}
+button:hover{color:var(--ink);background:var(--copper);border-color:var(--copper)}
+button.primary{color:var(--copper-hot);border-color:rgba(217,142,74,.5)}
+button.primary:hover{color:var(--ink)}
+
+/* first-run overlay */
+#gate{
+  position:fixed;inset:0;background:var(--ink);z-index:100;
+  display:flex;align-items:center;justify-content:center;
+}
+#gate .card{text-align:center;animation:arrive .5s ease both}
+#gate h1{font-family:var(--serif);font-weight:400;font-size:64px;color:var(--cream)}
+#gate h1 em{color:var(--copper);font-style:italic}
+#gate p{color:var(--cream-dim);margin:6px 0 26px;font-size:12.5px;letter-spacing:.04em}
+#gate form{display:flex;gap:10px;justify-content:center}
+#gate input{font-size:14px;padding:9px 14px;width:220px;text-align:center}
+
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+::-webkit-scrollbar-track{background:transparent}
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div class="card">
+    <h1>party<em>line</em></h1>
+    <p>several parties. one wire. pick up.</p>
+    <form id="gateForm">
+      <input id="gateName" placeholder="your handle" maxlength="32" autocomplete="off" autofocus>
+      <button class="primary" type="submit">connect</button>
+    </form>
+  </div>
+</div>
+
+<div id="app" hidden>
+  <aside id="rail">
+    <div id="wordmark">
+      <h1>party<em>line</em></h1>
+      <p>humans &amp; processes, one wire <span id="ver" hidden></span></p>
+    </div>
+    <nav id="convs"></nav>
+    <form id="newconv">
+      <input id="newconvName" placeholder="new line…" maxlength="60" autocomplete="off">
+      <button type="submit">+</button>
+    </form>
+    <div id="me"><span>operator&nbsp;<b id="meName"></b></span><button id="meEdit" type="button">edit</button></div>
+  </aside>
+
+  <main id="main">
+    <div id="topbar">
+      <span id="convname">—</span>
+      <span id="convmeta" hidden></span>
+    </div>
+    <div id="feed"><div class="empty"><div class="art">no line selected</div>pick a conversation, or open a new one</div></div>
+    <div id="composer" hidden>
+      <div class="box">
+        <textarea id="input" rows="1" placeholder="say something… @name to ring an agent"></textarea>
+        <button id="send" class="primary" type="button">send</button>
+      </div>
+      <div class="hint">enter to send · shift+enter for a new line · agents only wake when @mentioned · @all rings every running agent</div>
+    </div>
+  </main>
+
+  <aside id="board">
+    <h2>on the line</h2>
+    <div id="jacks"><div class="note" style="padding:0 8px;color:var(--cream-faint);font-size:11px;font-style:italic">nobody attached yet</div></div>
+    <h3>patch in a process</h3>
+    <form id="attach">
+      <label>preset</label>
+      <div id="presetRow">
+        <select id="aPreset"><option value="">— none —</option></select>
+        <button type="button" id="presetSave" title="save current name/adapter/command as a preset">save</button>
+        <button type="button" id="presetManage" title="view / edit presets">manage</button>
+      </div>
+      <label>name (the @handle)</label>
+      <input id="aName" placeholder="reviewer" maxlength="32" autocomplete="off">
+      <label>adapter</label>
+      <select id="aAdapter">
+        <option value="opencode">opencode</option>
+        <option value="pi">pi</option>
+        <option value="hermes">hermes</option>
+        <option value="raw">raw — any process</option>
+      </select>
+      <label>command (blank = adapter default)</label>
+      <input id="aCmd" placeholder="blank = adapter default" autocomplete="off">
+      <label>working directory</label>
+      <input id="aCwd" placeholder="~/code/myproject" autocomplete="off">
+      <button class="primary" type="submit">attach</button>
+      <div class="note">the real interactive process is spawned in a pty</div>
+    </form>
+  </aside>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const state = { me:null, convs:[], conv:null, atts:[], seen:new Set(), ws:null, wsGen:0,
+                humans:new Set(), attention:new Set() };
+
+/* ── version badge ── */
+fetch("/api/version").then(r=>r.json()).then(d=>{
+  $("ver").textContent = "v"+d.version; $("ver").hidden = false;
+}).catch(()=>{});
+
+/* ── identity ── */
+state.me = localStorage.getItem("partyline_user");
+function showGate(){ $("gate").style.display="flex"; $("gateName").value = state.me||""; $("gateName").focus(); }
+$("gateForm").onsubmit = e => {
+  e.preventDefault();
+  const v = $("gateName").value.trim().replace(/\s+/g,"-").slice(0,32);
+  if(!v) return;
+  if(["all","system"].includes(v.toLowerCase())) return alert("that handle is reserved");
+  state.me = v; localStorage.setItem("partyline_user", v);
+  $("gate").style.display="none"; $("app").hidden=false; $("meName").textContent=v;
+  loadConvs();
+};
+$("meEdit").onclick = showGate;
+if(state.me){ $("gate").style.display="none"; $("app").hidden=false; $("meName").textContent=state.me; loadConvs(); }
+
+/* ── rendering helpers ── */
+const esc = s => s.replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function render(body){
+  // escape, then fences -> inline code -> bold -> mentions
+  let out="", parts = body.split(/```(?:\w*\n)?/);
+  parts.forEach((part,i)=>{
+    if(i%2===1){ out += "<pre><code>"+esc(part.replace(/\n$/,""))+"</code></pre>"; return; }
+    let t = esc(part);
+    t = t.replace(/`([^`\n]+)`/g,"<code>$1</code>");
+    t = t.replace(/\*\*([^*\n]+)\*\*/g,"<b>$1</b>");
+    t = t.replace(/(^|\s)@([A-Za-z0-9][A-Za-z0-9_.-]*)/g,'$1<span class="mention">@$2</span>');
+    out += t;
+  });
+  return out;
+}
+const hue = n => { let h=0; for(const c of n) h=(h*31+c.charCodeAt(0))%360; return h; };
+function whoStyle(m){
+  if(m.sender_type==="system") return "";
+  const h = hue(m.sender.toLowerCase());
+  return `color:hsl(${h} ${m.sender_type==="agent"?"55%":"40%"} ${m.sender_type==="agent"?"68%":"72%"})`;
+}
+function nearBottom(el){ return el.scrollHeight - el.scrollTop - el.clientHeight < 140; }
+function addMsg(m, scroll=true){
+  if(state.seen.has(m.id)) return;
+  state.seen.add(m.id);
+  if(m.sender_type==="human" && m.sender.toLowerCase()!==(state.me||"").toLowerCase())
+    state.humans.add(m.sender);
+  const feed = $("feed");
+  const stick = scroll && nearBottom(feed);
+  const el = document.createElement("div");
+  if(m.sender_type==="system"){
+    el.className="msg system";
+    el.innerHTML = `<div class="body">${render(m.body)}</div>`;
+  } else {
+    el.className="msg";
+    const when = new Date(m.created_at*1000).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
+    el.innerHTML =
+      `<div class="head"><span class="who ${m.sender_type}" style="${whoStyle(m)}">${esc(m.sender)}</span>`+
+      `<span class="when">${when}</span></div><div class="body">${render(m.body)}</div>`;
+  }
+  feed.appendChild(el);
+  if(stick) feed.scrollTop = feed.scrollHeight;
+}
+
+/* ── conversations ── */
+async function loadConvs(){
+  state.convs = await (await fetch("/api/conversations")).json();
+  const nav = $("convs"); nav.innerHTML="";
+  state.convs.forEach(c=>{
+    const b = document.createElement("button");
+    b.className = "conv"+(state.conv && c.id===state.conv.id ? " active":"");
+    b.textContent = c.name;
+    if(c.topic) b.title = c.topic;
+    b.onclick = ()=>openConv(c);
+    nav.appendChild(b);
+  });
+}
+$("newconv").onsubmit = async e=>{
+  e.preventDefault();
+  const name = $("newconvName").value.trim(); if(!name) return;
+  $("newconvName").value="";
+  const c = await (await fetch("/api/conversations",{method:"POST",
+    headers:{"Content-Type":"application/json"}, body:JSON.stringify({name})})).json();
+  await loadConvs(); openConv(c);
+};
+
+async function openConv(c){
+  state.conv = c; state.seen = new Set(); state.humans = new Set(); state.attention = new Set();
+  $("convname").textContent = c.name;
+  $("feed").innerHTML = ""; $("composer").hidden = false;
+  connectWs(c.id);
+  const d = await (await fetch("/api/conversations/"+c.id)).json();
+  state.conv = d.conversation; renderTopic();
+  d.messages.forEach(m=>addMsg(m,false));
+  $("feed").scrollTop = $("feed").scrollHeight;
+  state.atts = d.attachments; renderJacks();
+  loadConvs();
+  if(!d.messages.length)
+    $("feed").innerHTML = `<div class="empty"><div class="art">the line is open</div>patch in a process on the right, or just start talking</div>`;
+}
+
+/* ── line topic ── */
+function renderTopic(){
+  const el = $("convmeta");
+  if(!state.conv){ el.hidden = true; return; }
+  const t = (state.conv.topic || "").trim();
+  el.hidden = false;
+  el.textContent = t || "set a topic…";
+  el.classList.toggle("unset", !t);
+  el.title = t ? t + "\n\n(click to edit)" : "give this line a topic — agents get it in their briefing";
+}
+$("convmeta").onclick = ()=>{
+  if(!state.conv) return;
+  modal("line topic · "+state.conv.name, (content, close)=>{
+    const ta = document.createElement("textarea");
+    ta.className = "topicBox"; ta.maxLength = 3000;
+    ta.value = state.conv.topic || "";
+    ta.placeholder = "what is this line about? project, culture, standing instructions —\nagents receive it in their join briefing, and hear about changes at their next wake";
+    const row = document.createElement("div"); row.className = "topicRow";
+    row.innerHTML = `<span class="count"></span><button type="button" class="primary">save topic</button>`;
+    const count = row.querySelector(".count");
+    const tick = ()=>count.textContent = ta.value.length + " / 3000";
+    ta.oninput = tick; tick();
+    row.querySelector("button").onclick = async ()=>{
+      const res = await fetch("/api/conversations/"+state.conv.id+"/topic", {
+        method:"PUT", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({topic: ta.value, sender: state.me})});
+      if(!res.ok){ alert((await res.json()).detail || "could not save topic"); return; }
+      state.conv = await res.json();
+      renderTopic(); loadConvs(); close();
+    };
+    content.append(ta, row);
+    setTimeout(()=>ta.focus(), 50);
+  });
+};
+
+/* ── websocket ── */
+function connectWs(convId){
+  const gen = ++state.wsGen;
+  if(state.ws){ try{state.ws.close();}catch(e){} }
+  const ws = new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host+"/ws/"+convId);
+  state.ws = ws;
+  ws.onmessage = ev=>{
+    const e = JSON.parse(ev.data);
+    if(e.type==="message"){
+      const empty = $("feed").querySelector(".empty"); if(empty) empty.remove();
+      addMsg(e.message);
+    }
+    if(e.type==="attachment"){
+      const i = state.atts.findIndex(a=>a.id===e.attachment.id);
+      if(i>=0) state.atts[i]=e.attachment; else state.atts.push(e.attachment);
+      if(e.attachment.status!=="running" && e.attachment.status!=="starting")
+        state.attention.delete(e.attachment.id);
+      renderJacks();
+    }
+    if(e.type==="attention"){ state.attention.add(e.attachment_id); renderJacks(); }
+    if(e.type==="conversation" && state.conv && e.conversation.id===state.conv.id){
+      state.conv = e.conversation; renderTopic(); loadConvs();
+    }
+  };
+  ws.onclose = ()=>{ if(gen===state.wsGen) setTimeout(()=>{ if(gen===state.wsGen) connectWs(convId); }, 1500); };
+}
+
+/* ── composer ── */
+const input = $("input");
+function sendNow(){
+  const body = input.value.trim();
+  if(!body || !state.ws || state.ws.readyState!==1) return;
+  state.ws.send(JSON.stringify({sender:state.me, body}));
+  input.value=""; input.style.height="auto";
+}
+$("send").onclick = sendNow;
+input.addEventListener("keydown", e=>{
+  if(ac.open){
+    if(e.key==="ArrowDown"){ e.preventDefault(); acMove(1); return; }
+    if(e.key==="ArrowUp"){ e.preventDefault(); acMove(-1); return; }
+    if(e.key==="Enter"||e.key==="Tab"){ e.preventDefault(); acPick(); return; }
+    if(e.key==="Escape"){ e.preventDefault(); acClose(); return; }
+  }
+  if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); sendNow(); }
+});
+input.addEventListener("input", ()=>{
+  input.style.height="auto"; input.style.height=Math.min(input.scrollHeight,180)+"px";
+  acUpdate();
+});
+input.addEventListener("click", acUpdate);
+input.addEventListener("blur", ()=>setTimeout(acClose, 150)); // let option clicks land
+
+/* ── @ autocomplete: who's on the line ── */
+const ac = { open:false, items:[], sel:0, start:0 };
+const acPop = document.createElement("div");
+acPop.id = "mentionPop"; acPop.hidden = true;
+$("composer").appendChild(acPop);
+
+function acCandidates(prefix){
+  const agents = latestJacks().map(a=>({name:a.name, kind:a.adapter, status:a.status}));
+  const humans = [...state.humans].map(n=>({name:n, kind:"human", status:null}));
+  const p = prefix.toLowerCase();
+  const liveFirst = x=>(x.status==="running"||x.status==="starting") ? 0 : x.status ? 1 : 2;
+  const out = [...agents, ...humans]
+    .filter(x=>x.name.toLowerCase().startsWith(p))
+    .sort((a,b)=>liveFirst(a)-liveFirst(b) || a.name.localeCompare(b.name));
+  // the megaphone is deliberately last: it rings every attached process
+  if("all".startsWith(p) && agents.some(a=>a.status==="running"||a.status==="starting"))
+    out.push({name:"all", kind:"rings every agent", status:null, all:true});
+  return out;
+}
+function acUpdate(){
+  const upto = input.value.slice(0, input.selectionStart);
+  const m = /(^|\s)@([A-Za-z0-9_.-]*)$/.exec(upto);
+  if(!m || !state.conv) return acClose();
+  const items = acCandidates(m[2]);
+  if(!items.length) return acClose();
+  ac.open = true; ac.items = items; ac.start = upto.length - m[2].length - 1;
+  ac.sel = Math.min(ac.sel, items.length-1);
+  acRender();
+}
+function acRender(){
+  acPop.hidden = false;
+  acPop.innerHTML = ac.items.map((x,i)=>
+    `<div class="opt${i===ac.sel?" sel":""}" data-i="${i}">`+
+    (x.status ? `<span class="led ${x.status}"></span>` : `<span class="led" style="background:none"></span>`)+
+    `<span class="nm"${x.all?' style="color:var(--copper-hot)"':` style="color:hsl(${hue(x.name.toLowerCase())} 55% 68%)"`}>@${esc(x.name)}</span>`+
+    `<span class="kind"${x.all?' style="color:var(--copper)"':""}>${esc(x.kind)}</span></div>`).join("");
+  acPop.querySelectorAll(".opt").forEach(o=>{
+    o.onmousedown = e=>e.preventDefault(); // keep textarea focus
+    o.onclick = ()=>{ ac.sel = +o.dataset.i; acPick(); };
+  });
+  const sel = acPop.querySelector(".opt.sel");
+  if(sel) sel.scrollIntoView({block:"nearest"});
+}
+function acMove(d){ ac.sel = (ac.sel + d + ac.items.length) % ac.items.length; acRender(); }
+function acPick(){
+  const x = ac.items[ac.sel]; if(!x) return acClose();
+  const tail = input.value.slice(input.selectionStart);
+  input.value = input.value.slice(0, ac.start) + "@" + x.name + " " + tail;
+  const caret = ac.start + x.name.length + 2;
+  input.setSelectionRange(caret, caret); input.focus();
+  acClose();
+}
+function acClose(){ ac.open = false; ac.sel = 0; acPop.hidden = true; }
+
+/* ── attachments ── */
+function latestJacks(){
+  // latest attachment per handle, live ones win over dead ones
+  const byName = new Map();
+  [...state.atts].sort((a,b)=>a.created_at-b.created_at).forEach(a=>{
+    const prev = byName.get(a.name.toLowerCase());
+    const live = s=>s==="running"||s==="starting";
+    if(!prev || live(a.status) || !live(prev.status)) byName.set(a.name.toLowerCase(), a);
+  });
+  return [...byName.values()];
+}
+function renderJacks(){
+  const box = $("jacks"); box.innerHTML="";
+  const atts = latestJacks();
+  if(!atts.length){
+    box.innerHTML = `<div class="note" style="padding:0 8px;font-style:italic">nobody attached yet</div>`;
+    return;
+  }
+  atts.forEach(a=>{
+    const live = a.status==="running"||a.status==="starting";
+    const resumable = false;
+    const needsYou = live && state.attention.has(a.id);
+    const el = document.createElement("div");
+    el.className = "jack"+(live?"":" dead")+(needsYou?" attention":"");
+    el.innerHTML =
+      `<div class="row"><span class="led ${a.status}"></span>`+
+      `<span class="name" style="color:hsl(${hue(a.name.toLowerCase())} 55% 68%)" title="insert @${esc(a.name)}">${esc(a.name)}</span>`+
+      `<span class="tag">${a.adapter}</span>`+
+      (live?`<button class="x" title="detach">✕</button>`:"")+`</div>`+
+      `<div class="cmd" title="${esc(a.cwd)}">${esc(a.command.join(" "))} · ${a.status}</div>`+
+      (live?`<button class="resume peek-btn" title="live view of this agent's terminal">${needsYou?"⏸ answer":"⌗ peek"}</button>`:"")+
+      (resumable?`<button class="resume" title="respawn with full session context">↻ resume</button>`:"");
+    el.querySelector(".name").onclick = ()=>{ input.value = (input.value+" @"+a.name+" ").replace(/^ /,""); input.focus(); };
+    const x = el.querySelector(".x");
+    if(x) x.onclick = async ()=>{ await fetch("/api/attachments/"+a.id,{method:"DELETE"}); };
+    const pk = el.querySelector(".peek-btn");
+    if(pk) pk.onclick = ()=>{ state.attention.delete(a.id); renderJacks(); peek(a); };
+    const r = el.querySelector(".resume:not(.peek-btn)");
+    if(r) r.onclick = async ()=>{
+      r.disabled = true; r.textContent = "resuming…";
+      const res = await fetch("/api/attachments/"+a.id+"/resume",{method:"POST"});
+      if(!res.ok){ alert((await res.json()).detail||"resume failed"); r.disabled=false; r.textContent="↻ resume"; }
+    };
+    box.appendChild(el);
+  });
+}
+$("attach").onsubmit = async e=>{
+  e.preventDefault();
+  if(!state.conv) return alert("open a conversation first");
+  const payload = {
+    name: $("aName").value.trim(), adapter: $("aAdapter").value,
+    command: $("aCmd").value.trim(), cwd: $("aCwd").value.trim(),
+  };
+  if(!payload.name) return alert("give it a handle");
+  const res = await fetch("/api/conversations/"+state.conv.id+"/attachments",{
+    method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload)});
+  if(!res.ok){ alert((await res.json()).detail || "attach failed"); return; }
+  $("aName").value=""; $("aCmd").value="";
+  const att = await res.json();
+  const i = state.atts.findIndex(x=>x.id===att.id);
+  if(i>=0) state.atts[i]=att; else state.atts.push(att);
+  renderJacks();
+};
+
+/* ── presets ── */
+state.presets = [];
+async function loadPresets(keepId){
+  state.presets = await (await fetch("/api/presets")).json();
+  const sel = $("aPreset");
+  sel.innerHTML = `<option value="">— none —</option>` +
+    state.presets.map(p=>`<option value="${p.id}">${esc(p.title)}</option>`).join("");
+  if(keepId) sel.value = keepId;
+}
+$("aPreset").onchange = ()=>{
+  const p = state.presets.find(x=>x.id===$("aPreset").value);
+  if(!p) return;
+  $("aName").value = p.name; $("aAdapter").value = p.adapter; $("aCmd").value = p.command;
+};
+loadPresets();
+
+function modal(title, build, opts={}){
+  const ov = document.createElement("div"); ov.className="overlay";
+  ov.innerHTML = `<div class="modal${opts.wide?" wide":""}"><header><h2>${esc(title)}</h2>`+
+    `<button class="close" title="close">✕</button></header><div class="content"></div></div>`;
+  const close = ()=>{ if(opts.onClose) opts.onClose(); ov.remove(); };
+  ov.querySelector(".close").onclick = close;
+  ov.onclick = e=>{ if(e.target===ov) close(); };
+  build(ov.querySelector(".content"), close);
+  document.body.appendChild(ov);
+  return ov;
+}
+
+function peek(a){
+  let timer = null;
+  modal("peek · "+a.name, content=>{
+    const pre = document.createElement("pre"); pre.className="screen"; pre.textContent="…";
+    const pad = document.createElement("div"); pad.className="keypad";
+    pad.innerHTML = `<span class="lbl">send key:</span>`+
+      ["enter","esc","up","down","tab","y","n","1","2","3"]
+        .map(k=>`<button type="button" data-k="${k}">${k}</button>`).join("");
+    pad.querySelectorAll("button").forEach(b=>{
+      b.onclick = async ()=>{
+        await fetch("/api/attachments/"+a.id+"/keys",{method:"POST",
+          headers:{"Content-Type":"application/json"}, body:JSON.stringify({key:b.dataset.k})});
+        setTimeout(refresh, 350);
+      };
+    });
+    const note = document.createElement("div"); note.className="note";
+    note.textContent = "live view of the agent's terminal — refreshes every 2s; keys go straight to its pty";
+    content.append(pre, pad, note);
+    async function refresh(){
+      const res = await fetch("/api/attachments/"+a.id+"/screen");
+      if(res.ok){ const d = await res.json(); pre.textContent = d.screen || "(blank screen)"; }
+      else pre.textContent = "(attachment is not live)";
+    }
+    refresh(); timer = setInterval(refresh, 2000);
+  }, {wide:true, onClose:()=>clearInterval(timer)});
+}
+
+function presetCard(p, close){
+  const el = document.createElement("div"); el.className="preset-card";
+  el.innerHTML =
+    `<div class="grid">`+
+    `<label>title</label><input class="pTitle" maxlength="48">`+
+    `<label>@handle</label><input class="pName" maxlength="32">`+
+    `<label>adapter</label><select class="pAdapter">`+
+      `<option value="opencode">opencode</option><option value="pi">pi</option><option value="hermes">hermes</option><option value="raw">raw</option></select>`+
+    `<label>command</label><input class="pCmd" placeholder="blank = adapter default">`+
+    `</div><div class="actions">`+
+    (p.id?`<button type="button" class="del">delete</button>`:"")+
+    `<button type="button" class="primary save">${p.id?"save changes":"create preset"}</button></div>`;
+  el.querySelector(".pTitle").value = p.title||""; el.querySelector(".pName").value = p.name||"";
+  el.querySelector(".pAdapter").value = p.adapter||"opencode"; el.querySelector(".pCmd").value = p.command||"";
+  el.querySelector(".save").onclick = async ()=>{
+    const body = {
+      title: el.querySelector(".pTitle").value.trim(), name: el.querySelector(".pName").value.trim(),
+      adapter: el.querySelector(".pAdapter").value, command: el.querySelector(".pCmd").value.trim(),
+    };
+    const res = await fetch(p.id?"/api/presets/"+p.id:"/api/presets",
+      {method:p.id?"PUT":"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+    if(!res.ok){ alert((await res.json()).detail||"save failed"); return; }
+    const saved = await res.json();
+    await loadPresets(saved.id);
+    if(close) close();
+  };
+  const del = el.querySelector(".del");
+  if(del) del.onclick = async ()=>{
+    await fetch("/api/presets/"+p.id,{method:"DELETE"});
+    await loadPresets();
+    el.remove();
+  };
+  return el;
+}
+
+$("presetSave").onclick = ()=>{
+  const draft = {title:$("aName").value.trim(), name:$("aName").value.trim(),
+                 adapter:$("aAdapter").value, command:$("aCmd").value.trim()};
+  modal("save as preset", (content, close)=>content.appendChild(presetCard(draft, close)));
+};
+$("presetManage").onclick = ()=>{
+  modal("presets", content=>{
+    if(!state.presets.length)
+      content.innerHTML = `<div class="note">no presets yet — fill the attach form and hit save</div>`;
+    state.presets.forEach(p=>content.appendChild(presetCard({...p})));
+  });
+};
+</script>
+</body>
+</html>

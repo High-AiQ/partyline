@@ -1,0 +1,10 @@
+[adapter]
+name = "Pi"
+version = "1.0.0"
+description = "Adapter for the Pi interactive terminal application."
+entrypoint = "adapter.py"
+command = ["pi"]
+requires = []
+capabilities = []
+env_unset = []
+output = "quiescent terminal output"

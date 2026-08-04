@@ -1,0 +1,10 @@
+[adapter]
+name = "Hermes"
+version = "1.0.0"
+description = "Adapter for the Hermes interactive terminal application."
+entrypoint = "adapter.py"
+command = ["hermes"]
+requires = []
+capabilities = []
+env_unset = []
+output = "quiescent terminal output"

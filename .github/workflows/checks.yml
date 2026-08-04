@@ -1,0 +1,40 @@
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  conventional-commits:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: conventional one-liners
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "pull_request" ]; then
+            commits=$(git rev-list --no-merges "origin/$BASE..HEAD")
+          elif [ -z "$BEFORE" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+            commits=$(git rev-list -1 HEAD)   # forced push or new branch: check the tip only
+          else
+            commits=$(git rev-list --no-merges "$BEFORE..HEAD")
+          fi
+          fail=0
+          for c in $commits; do
+            subject=$(git log -1 --format=%s "$c")
+            if ! printf '%s' "$subject" | grep -Eq '^(feat|fix|docs|refactor|test|chore)(\([a-z0-9_.-]+\))?!?: .+'; then
+              echo "FAIL $c — subject is not conventional: $subject"; fail=1
+            fi
+            if [ "$(git log -1 --format=%B "$c" | grep -c .)" -gt 1 ]; then
+              echo "FAIL $c — has a body; one-liner commits only: $subject"; fail=1
+            fi
+          done
+          [ "$fail" = 0 ] && echo "all commits conventional one-liners"
+          exit "$fail"

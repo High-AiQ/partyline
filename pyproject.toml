@@ -1,0 +1,23 @@
+[project]
+name = "partyline"
+dynamic = ["version"]
+description = "A chatroom for humans and interactive processes, routed with @mentions."
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pyte>=0.8",
+]
+
+[project.scripts]
+partyline = "partyline.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "partyline/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["partyline"]

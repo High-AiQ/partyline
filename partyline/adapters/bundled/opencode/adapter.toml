@@ -1,0 +1,10 @@
+[adapter]
+name = "OpenCode"
+version = "1.0.0"
+description = "Adapter for the OpenCode interactive terminal application."
+entrypoint = "adapter.py"
+command = ["opencode"]
+requires = []
+capabilities = []
+env_unset = []
+output = "quiescent terminal output"

@@ -1,0 +1,130 @@
+"""Load adapter packages from the bundled directory or an imported checkout."""
+
+from __future__ import annotations
+
+import hashlib
+import importlib
+import importlib.util
+import os
+import re
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+from .base import Adapter
+from .registry import ADAPTER_METADATA, ADAPTERS, register_adapter, unregister_adapter
+
+PACKAGE_ROOT = Path(__file__).parent
+BUNDLED_ROOT = PACKAGE_ROOT / "bundled"
+_LOADED_PATHS: dict[str, Path] = {}
+_GENERATION = 0
+
+
+def adapter_store() -> Path:
+    """Directory holding repositories imported through the local API."""
+    return Path(os.environ.get("PARTYLINE_ADAPTERS_DIR", "~/.partyline/adapters")).expanduser()
+
+
+def _manifest(path: Path) -> dict:
+    try:
+        with (path / "adapter.toml").open("rb") as file:
+            manifest = tomllib.load(file)["adapter"]
+    except (FileNotFoundError, KeyError, tomllib.TOMLDecodeError) as exc:
+        raise ValueError(f"invalid adapter package: {path}") from exc
+    required = {"name", "version", "description", "entrypoint", "command"}
+    if missing := required - manifest.keys():
+        raise ValueError(f"adapter manifest is missing: {', '.join(sorted(missing))}")
+    manifest.setdefault("class", "PartylineAdapter")
+    manifest.setdefault("requires", [])
+    manifest.setdefault("capabilities", [])
+    manifest.setdefault("env_unset", [])
+    if not isinstance(manifest["command"], list) or not all(isinstance(arg, str) for arg in manifest["command"]):
+        raise ValueError("adapter command must be an argv array")
+    return manifest
+
+
+def load_adapter(path: str | Path) -> str:
+    """Load one adapter directory and return its registered ID."""
+    directory = Path(path).resolve()
+    manifest = _manifest(directory)
+    adapter_id = str(manifest.get("id") or directory.name).strip().lower()
+    entrypoint = directory / str(manifest["entrypoint"])
+    if not entrypoint.is_file() or entrypoint.parent != directory:
+        raise ValueError("adapter entrypoint must be a file in its package directory")
+    if directory.parent == BUNDLED_ROOT:
+        module = importlib.import_module(f"partyline.adapters.bundled.{adapter_id}.adapter")
+    else:
+        global _GENERATION
+        _GENERATION += 1
+        module_name = f"partyline_adapter_{adapter_id}_{hashlib.sha256(str(directory).encode()).hexdigest()[:12]}_{_GENERATION}"
+        spec = importlib.util.spec_from_file_location(module_name, entrypoint)
+        if spec is None or spec.loader is None:
+            raise ValueError(f"cannot load adapter entrypoint: {entrypoint}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+    cls = getattr(module, str(manifest["class"]), None)
+    if not isinstance(cls, type) or not issubclass(cls, Adapter):
+        raise ValueError("adapter manifest class must inherit Adapter")
+    register_adapter(adapter_id, cls, manifest)
+    _LOADED_PATHS[adapter_id] = directory
+    return adapter_id
+
+
+def reload_adapter(adapter_id: str) -> str:
+    """Replace a previously loaded adapter with the current package files."""
+    path = _LOADED_PATHS.get(adapter_id)
+    if path is None:
+        raise ValueError(f"adapter is not loaded: {adapter_id}")
+    unregister_adapter(adapter_id)
+    return load_adapter(path)
+
+
+def load_bundled_adapters():
+    for manifest in sorted(BUNDLED_ROOT.glob("*/adapter.toml")):
+        load_adapter(manifest.parent)
+
+
+def adapter_packages(root: Path):
+    """Yield package directories from a single package or a collection checkout."""
+    if (root / "adapter.toml").is_file():
+        yield root
+    collection = root / "adapters"
+    if collection.is_dir():
+        yield from sorted(path.parent for path in collection.glob("*/adapter.toml"))
+
+
+def import_repository(repository: str, ref: str | None = None) -> list[str]:
+    """Clone or refresh a trusted repository and load all contained packages."""
+    repository = repository.strip()
+    if not repository:
+        raise ValueError("repository is required")
+    slug = repository.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", slug).strip(".-")
+    if not slug:
+        raise ValueError("repository must have a usable name")
+    destination = adapter_store() / slug
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if (destination / ".git").is_dir():
+        subprocess.run(["git", "-C", str(destination), "fetch", "--tags", "origin"], check=True, capture_output=True, text=True)
+        subprocess.run(["git", "-C", str(destination), "checkout", "--force", ref or "origin/HEAD"], check=True, capture_output=True, text=True)
+    else:
+        command = ["git", "clone", "--depth", "1"]
+        if ref:
+            command.extend(["--branch", ref])
+        command.extend([repository, str(destination)])
+        subprocess.run(command, check=True, capture_output=True, text=True)
+    loaded = [load_adapter(package) for package in adapter_packages(destination)]
+    if not loaded:
+        raise ValueError("repository contains no adapter.toml packages")
+    return loaded
+
+
+def reload_adapters() -> list[str]:
+    """Reload known definitions; active attachments retain their loaded class."""
+    loaded = []
+    for adapter_id, path in list(_LOADED_PATHS.items()):
+        unregister_adapter(adapter_id)
+        loaded.append(load_adapter(path))
+    return loaded

@@ -1,0 +1,1 @@
+"""Generic interactive-process adapter."""
