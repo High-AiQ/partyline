@@ -1,12 +1,12 @@
 [adapter]
 name = "OpenCode"
 version = "1.0.0"
-description = "Adapter for the OpenCode interactive terminal application."
+description = "Tails completed assistant text from OpenCode's local session store."
 entrypoint = "adapter.py"
 command = ["opencode"]
-requires = []
+requires = ["opencode"]
 env_unset = []
-output = "quiescent terminal output"
+output = "local session transcript"
 
 [adapter.capabilities]
-resume = false
+resume = true
