@@ -61,7 +61,11 @@ class ServerTest(unittest.TestCase):
         server.ADAPTERS.clear()
         server.ADAPTERS["fake"] = FakeAdapter
         server.ADAPTER_METADATA.clear()
-        server.ADAPTER_METADATA["fake"] = {"command": ["fake"], "requires": [], "capabilities": {"resume": True}}
+        server.ADAPTER_METADATA["fake"] = {
+            "command": ["fake"],
+            "requires": [],
+            "capabilities": {"resume": True},
+        }
         server.make_adapter = lambda *args, **kwargs: FakeAdapter()
         self.conv = server.db.create_conversation("line", "Line")
 
@@ -117,7 +121,9 @@ class ServerTest(unittest.TestCase):
         self.assertIn("topic set by @greg", server.db.list_messages("line")[-1]["body"])
         self.assert_http(400, server.rename_conversation("line", server.RenameIn(name=" ")))
         self.assert_http(400, server.rename_conversation("line", server.RenameIn(name="x" * 121)))
-        renamed = self.arun(server.rename_conversation("line", server.RenameIn(name="Renamed", sender="greg")))
+        renamed = self.arun(
+            server.rename_conversation("line", server.RenameIn(name="Renamed", sender="greg"))
+        )
         self.assertEqual(renamed["name"], "Renamed")
         self.assertIn("Line → Renamed", server.db.list_messages("line")[-1]["body"])
 
@@ -144,11 +150,17 @@ class ServerTest(unittest.TestCase):
         server.ADAPTER_METADATA["fake"]["requires"] = ["definitely-not-a-command"]
         self.assert_http(400, server.attach("line", server.AttachIn(name="x", adapter="fake")))
         server.ADAPTER_METADATA["fake"]["requires"] = []
-        self.assert_http(400, server.attach("line", server.AttachIn(name="x", adapter="fake", cwd="/no/such/cwd")))
-        attached = self.arun(server.attach("line", server.AttachIn(name="terra", adapter="fake", cwd=self.directory.name)))
+        self.assert_http(
+            400, server.attach("line", server.AttachIn(name="x", adapter="fake", cwd="/no/such/cwd"))
+        )
+        attached = self.arun(
+            server.attach("line", server.AttachIn(name="terra", adapter="fake", cwd=self.directory.name))
+        )
         self.assertEqual(attached["name"], "terra")
         self.assertIn(attached["id"], server.live)
-        self.assert_http(409, server.attach("line", server.AttachIn(name="TERRA", adapter="fake", cwd=self.directory.name)))
+        self.assert_http(
+            409, server.attach("line", server.AttachIn(name="TERRA", adapter="fake", cwd=self.directory.name))
+        )
 
     def test_resume_screen_keys_and_detach(self):
         self.add_attachment("old", status="exited")
@@ -165,10 +177,18 @@ class ServerTest(unittest.TestCase):
 
     def test_presets_and_attention_hook(self):
         self.assert_http(400, server.create_preset(server.PresetIn(title="", name="x", adapter="fake")))
-        preset = self.arun(server.create_preset(server.PresetIn(title=" My preset ", name="x", adapter="fake", command=" run ")))
+        preset = self.arun(
+            server.create_preset(
+                server.PresetIn(title=" My preset ", name="x", adapter="fake", command=" run ")
+            )
+        )
         self.assertEqual(preset["title"], "My preset")
-        self.assert_http(404, server.update_preset("missing", server.PresetIn(title="x", name="x", adapter="fake")))
-        updated = self.arun(server.update_preset(preset["id"], server.PresetIn(title="New", name="x", adapter="fake")))
+        self.assert_http(
+            404, server.update_preset("missing", server.PresetIn(title="x", name="x", adapter="fake"))
+        )
+        updated = self.arun(
+            server.update_preset(preset["id"], server.PresetIn(title="New", name="x", adapter="fake"))
+        )
         self.assertEqual(updated["title"], "New")
         self.assertEqual(self.arun(server.delete_preset(preset["id"])), {"ok": True})
 

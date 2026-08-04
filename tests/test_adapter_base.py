@@ -17,6 +17,7 @@ from pathlib import Path
 os.environ.setdefault("PARTYLINE_DB", "/tmp/partyline-test-adapter-base.db")
 
 from partyline.adapters.base import Adapter
+from datetime import UTC
 
 
 async def until(predicate, timeout=10.0, what="condition"):
@@ -261,22 +262,22 @@ class FreshnessTest(unittest.TestCase):
     def test_a_resumed_process_rejects_records_from_before_it_started(self):
         adapter = Recorder(["cat"], resume=True)
         adapter.spawned_at = time.time()
-        from datetime import datetime, timezone
-        old = datetime.fromtimestamp(adapter.spawned_at - 3600, timezone.utc).isoformat()
+        from datetime import datetime
+        old = datetime.fromtimestamp(adapter.spawned_at - 3600, UTC).isoformat()
         self.assertFalse(adapter._fresh(old))
 
     def test_a_resumed_process_accepts_records_from_after_it_started(self):
         adapter = Recorder(["cat"], resume=True)
         adapter.spawned_at = time.time()
-        from datetime import datetime, timezone
-        now = datetime.fromtimestamp(adapter.spawned_at + 1, timezone.utc).isoformat()
+        from datetime import datetime
+        now = datetime.fromtimestamp(adapter.spawned_at + 1, UTC).isoformat()
         self.assertTrue(adapter._fresh(now))
 
     def test_a_trailing_z_is_understood_as_utc(self):
         adapter = Recorder(["cat"], resume=True)
         adapter.spawned_at = time.time()
-        from datetime import datetime, timezone
-        stamp = datetime.fromtimestamp(adapter.spawned_at + 1, timezone.utc)
+        from datetime import datetime
+        stamp = datetime.fromtimestamp(adapter.spawned_at + 1, UTC)
         self.assertTrue(adapter._fresh(stamp.isoformat().replace("+00:00", "Z")))
 
 

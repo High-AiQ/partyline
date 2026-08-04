@@ -8,7 +8,6 @@ canonical transcript content.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import sqlite3
@@ -133,7 +132,9 @@ class HermesAdapterTest(RecordingAdapterTest):
             resume=True,
             cli_session="new",
         )
-        self.assertEqual(existing_flags.build_command(), ["fake-cli", "--cli", "--pass-session-id", "-r", "old"])
+        self.assertEqual(
+            existing_flags.build_command(), ["fake-cli", "--cli", "--pass-session-id", "-r", "old"]
+        )
         HermesAdapter._release(None)
 
     async def test_discovery_matches_cwd_and_claims_each_session_once(self):
@@ -141,19 +142,27 @@ class HermesAdapterTest(RecordingAdapterTest):
         now = time.time()
         db.executemany(
             "INSERT INTO sessions VALUES(?,?,?)",
-            [("first", "/project", now - 1), ("other", "/elsewhere", now - .5),
-             ("second", "/project", now - .2)],
+            [
+                ("first", "/project", now - 1),
+                ("other", "/elsewhere", now - 0.5),
+                ("second", "/project", now - 0.2),
+            ],
         )
-        db.commit(); db.close()
-        one = self.make(HermesAdapter); one.spawned_at = now
-        two = self.make(HermesAdapter); two.spawned_at = now
-        one._db = one._open_db(); two._db = two._open_db()
+        db.commit()
+        db.close()
+        one = self.make(HermesAdapter)
+        one.spawned_at = now
+        two = self.make(HermesAdapter)
+        two.spawned_at = now
+        one._db = one._open_db()
+        two._db = two._open_db()
         self.assertEqual(one._discover(), "first")
         self.assertEqual(two._discover(), "second")
         self.assertIsNone(one._discover())
         HermesAdapter._release("first")
         self.assertEqual(one._discover(), "first")
-        one._db.close(); two._db.close()
+        one._db.close()
+        two._db.close()
 
         self.assertTrue(one._same_cwd("/project"))
         self.assertFalse(one._same_cwd("/elsewhere"))
@@ -171,13 +180,19 @@ class HermesAdapterTest(RecordingAdapterTest):
         db = self.make_store()
         db.executemany(
             "INSERT INTO messages(id,session_id,role,content,active) VALUES(?,?,?,?,?)",
-            [(1, "s", "user", "question", 1), (2, "s", "assistant", "answer", 1),
-             (3, "s", "assistant", json.dumps([{"text": "second"}]), 0),
-             (4, "other", "assistant", "wrong session", 1),
-             (5, "s", "assistant", "   ", 1)],
+            [
+                (1, "s", "user", "question", 1),
+                (2, "s", "assistant", "answer", 1),
+                (3, "s", "assistant", json.dumps([{"text": "second"}]), 0),
+                (4, "other", "assistant", "wrong session", 1),
+                (5, "s", "assistant", "   ", 1),
+            ],
         )
-        db.commit(); db.close()
-        adapter = self.make(HermesAdapter); adapter._db = adapter._open_db(); adapter.proc = Process()
+        db.commit()
+        db.close()
+        adapter = self.make(HermesAdapter)
+        adapter._db = adapter._open_db()
+        adapter.proc = Process()
 
         async def stop_after_post(*args):
             self.messages.append(args)
@@ -193,17 +208,22 @@ class HermesAdapterTest(RecordingAdapterTest):
         adapter.proc = Process()
         adapter.screen_text = lambda: "Welcome to Hermes Agent"
         await adapter._run()
-        self.assertEqual(self.messages, [("system", "system", "@agent could not open the Hermes session store read-only")])
+        self.assertEqual(
+            self.messages, [("system", "system", "@agent could not open the Hermes session store read-only")]
+        )
 
         exited = self.make(HermesAdapter)
-        exited.proc = Process(); exited.proc.stop()
+        exited.proc = Process()
+        exited.proc.stop()
         await exited._run()
         self.assertEqual(self.messages[-1][2], "@agent could not open the Hermes session store read-only")
 
     async def test_run_timeout_and_missing_resume_session(self):
-        db = self.make_store(); db.close()
+        db = self.make_store()
+        db.close()
         timeout_adapter = self.make(HermesAdapter)
-        timeout_adapter.proc = Process(); timeout_adapter.screen_text = lambda: "Welcome to Hermes Agent"
+        timeout_adapter.proc = Process()
+        timeout_adapter.screen_text = lambda: "Welcome to Hermes Agent"
         timeout_adapter.DISCOVERY_TIMEOUT = 999
         timeout_sleeps = 0
         timeout_adapter.send_keys = AsyncMock()
@@ -212,7 +232,8 @@ class HermesAdapterTest(RecordingAdapterTest):
         async def stop_after_discovery(_seconds):
             nonlocal timeout_sleeps
             timeout_sleeps += 1
-            if timeout_sleeps > 1:  # first sleep is after the briefing; second is discovery
+            # The first sleep is the one after the briefing; the second is discovery.
+            if timeout_sleeps > 1:
                 timeout_adapter.proc.stop()
 
         timeout_adapter._discover = lambda: None
@@ -221,7 +242,8 @@ class HermesAdapterTest(RecordingAdapterTest):
         self.assertIn("no Hermes session appeared", self.messages[-1][2])
 
         no_callback = self.make(HermesAdapter)
-        no_callback.proc = Process(); no_callback.screen_text = lambda: "Welcome to Hermes Agent"
+        no_callback.proc = Process()
+        no_callback.screen_text = lambda: "Welcome to Hermes Agent"
         no_callback.on_cli_session = None
         no_callback.send_keys = AsyncMock()
         no_callback.send_key = lambda _key: None
@@ -231,13 +253,15 @@ class HermesAdapterTest(RecordingAdapterTest):
             await no_callback._run()
 
         missing_resume = self.make(HermesAdapter, resume=True, cli_session="")
-        missing_resume.proc = Process(); missing_resume.screen_text = lambda: "Welcome to Hermes Agent"
+        missing_resume.proc = Process()
+        missing_resume.screen_text = lambda: "Welcome to Hermes Agent"
         await missing_resume._run()
         self.assertEqual(missing_resume._session_id, None)
 
     async def test_run_retries_startup_screen_until_process_exits(self):
         adapter = self.make(HermesAdapter)
-        adapter.proc = Process(); adapter.screen_text = lambda: "still starting"
+        adapter.proc = Process()
+        adapter.screen_text = lambda: "still starting"
         sleeps = 0
 
         async def sleep(_seconds):
@@ -252,14 +276,16 @@ class HermesAdapterTest(RecordingAdapterTest):
     async def test_run_resume_uses_cursor_without_briefing(self):
         db = self.make_store()
         db.execute("INSERT INTO messages VALUES(?,?,?,?,?)", (9, "resume-s", "assistant", "old", 1))
-        db.commit(); db.close()
+        db.commit()
+        db.close()
         adapter = self.make(HermesAdapter, resume=True, cli_session="resume-s")
         adapter.proc = Process()
         adapter.screen_text = lambda: "Welcome to Hermes Agent"
         seen = []
 
         async def tail(session_id, last_id):
-            seen.append((session_id, last_id)); adapter.proc.stop()
+            seen.append((session_id, last_id))
+            adapter.proc.stop()
 
         adapter._tail = tail
         await adapter._run()
@@ -270,7 +296,8 @@ class HermesAdapterTest(RecordingAdapterTest):
         db = self.make_store()
         now = time.time()
         db.execute("INSERT INTO sessions VALUES(?,?,?)", ("fresh-s", "/project", now))
-        db.commit(); db.close()
+        db.commit()
+        db.close()
         adapter = self.make(HermesAdapter)
         adapter.spawned_at = now
         adapter.proc = Process()
@@ -282,7 +309,8 @@ class HermesAdapterTest(RecordingAdapterTest):
         adapter.on_cli_session = sessions.append
 
         async def tail(session_id, last_id):
-            sessions.append((session_id, last_id)); adapter.proc.stop()
+            sessions.append((session_id, last_id))
+            adapter.proc.stop()
 
         adapter._tail = tail
         with patch("partyline.adapters.bundled.hermes.adapter.asyncio.sleep", new=AsyncMock()):
@@ -319,7 +347,8 @@ class OpenCodeAdapterTest(RecordingAdapterTest):
             """
         )
         db.execute("INSERT INTO session VALUES(?,?,?)", (session_id, cwd, created or int(time.time() * 1000)))
-        db.commit(); return db
+        db.commit()
+        return db
 
     async def test_build_find_and_release_claims(self):
         plain = self.make(OpenCodeAdapter)
@@ -327,9 +356,12 @@ class OpenCodeAdapterTest(RecordingAdapterTest):
         resumed = self.make(OpenCodeAdapter, resume=True, cli_session="resume-s")
         self.assertEqual(resumed.build_command(), ["fake-cli", "--session", "resume-s"])
 
-        db = self.make_store(); db.close()
-        one = self.make(OpenCodeAdapter); one.spawned_at = time.time()
-        two = self.make(OpenCodeAdapter); two.spawned_at = one.spawned_at
+        db = self.make_store()
+        db.close()
+        one = self.make(OpenCodeAdapter)
+        one.spawned_at = time.time()
+        two = self.make(OpenCodeAdapter)
+        two.spawned_at = one.spawned_at
         self.assertEqual(one._find_session(), "session-1")
         OpenCodeAdapter._CLAIMED.add("session-1")
         self.assertIsNone(two._find_session())
@@ -348,23 +380,35 @@ class OpenCodeAdapterTest(RecordingAdapterTest):
         with patch.object(missing, "_connect", side_effect=sqlite3.OperationalError("locked")):
             self.assertIsNone(missing._find_session())
 
-        flags = self.make(OpenCodeAdapter, command=["opencode", "--session", "already", "-s", "also"], resume=True, cli_session="new")
+        flags = self.make(
+            OpenCodeAdapter,
+            command=["opencode", "--session", "already", "-s", "also"],
+            resume=True,
+            cli_session="new",
+        )
         self.assertEqual(flags.build_command(), ["opencode", "--session", "already", "-s", "also"])
 
     async def test_run_tails_completed_text_parts_and_skips_invalid_parts(self):
         created = int(time.time() * 1000)
         db = self.make_store(created=created)
-        db.executemany("INSERT INTO message VALUES(?,?)", [
-            ("m1", json.dumps({"role": "assistant", "time": {"completed": 1}})),
-            ("m2", json.dumps({"role": "assistant", "time": {"completed": 1}})),
-            ("m3", json.dumps({"role": "user", "time": {"completed": 1}})),
-        ])
-        db.executemany("INSERT INTO part VALUES(?,?,?,?,?)", [
-            ("p1", "m1", "session-1", created, json.dumps({"type": "text", "text": "hello"})),
-            ("p2", "m2", "session-1", created + 1, json.dumps({"type": "text", "text": 123})),
-            ("p3", "m3", "session-1", created + 2, json.dumps({"type": "text", "text": "user"})),
-        ])
-        db.commit(); db.close()
+        db.executemany(
+            "INSERT INTO message VALUES(?,?)",
+            [
+                ("m1", json.dumps({"role": "assistant", "time": {"completed": 1}})),
+                ("m2", json.dumps({"role": "assistant", "time": {"completed": 1}})),
+                ("m3", json.dumps({"role": "user", "time": {"completed": 1}})),
+            ],
+        )
+        db.executemany(
+            "INSERT INTO part VALUES(?,?,?,?,?)",
+            [
+                ("p1", "m1", "session-1", created, json.dumps({"type": "text", "text": "hello"})),
+                ("p2", "m2", "session-1", created + 1, json.dumps({"type": "text", "text": 123})),
+                ("p3", "m3", "session-1", created + 2, json.dumps({"type": "text", "text": "user"})),
+            ],
+        )
+        db.commit()
+        db.close()
         adapter = self.make(OpenCodeAdapter)
         adapter.spawned_at = created / 1000
         adapter.proc = Process()
@@ -373,7 +417,8 @@ class OpenCodeAdapterTest(RecordingAdapterTest):
         adapter.on_cli_session = lambda session: sent.append(("session", session))
 
         async def post(sender, sender_type, body):
-            self.messages.append((sender, sender_type, body)); adapter.proc.stop()
+            self.messages.append((sender, sender_type, body))
+            adapter.proc.stop()
 
         adapter.post = post
         with patch("partyline.adapters.bundled.opencode.adapter.asyncio.sleep", new=AsyncMock()):
@@ -390,17 +435,20 @@ class OpenCodeAdapterTest(RecordingAdapterTest):
         adapter._connect = lambda: RowsConnection([])
         adapter.on_cli_session = None
         resume_sleeps = 0
+
         async def stop_after_poll(_seconds):
             nonlocal resume_sleeps
             resume_sleeps += 1
             if resume_sleeps > 1:
                 adapter.proc.stop()
+
         with patch("partyline.adapters.bundled.opencode.adapter.asyncio.sleep", new=stop_after_poll):
             await adapter._run()
         adapter.send_keys.assert_not_awaited()
 
         dead = self.make(OpenCodeAdapter)
-        dead.proc = Process(); dead.proc.stop()
+        dead.proc = Process()
+        dead.proc.stop()
         with patch("partyline.adapters.bundled.opencode.adapter.asyncio.sleep", new=AsyncMock()):
             await dead._run()
 
@@ -409,11 +457,13 @@ class OpenCodeAdapterTest(RecordingAdapterTest):
         no_session.send_keys = AsyncMock()
         no_session._find_session = lambda: None
         no_session_sleeps = 0
+
         async def stop_after_wait(_seconds):
             nonlocal no_session_sleeps
             no_session_sleeps += 1
             if no_session_sleeps > 1:
                 no_session.proc.stop()
+
         with patch("partyline.adapters.bundled.opencode.adapter.asyncio.sleep", new=stop_after_wait):
             await no_session._run()
         self.assertEqual(self.messages, [])
@@ -422,14 +472,18 @@ class OpenCodeAdapterTest(RecordingAdapterTest):
         adapter = self.make(OpenCodeAdapter)
         adapter.proc = Process()
         adapter._find_session = lambda: "s"
-        adapter._connect = lambda: RowsConnection([("bad", "not json"), ("number", json.dumps({"text": 9})), ("number", json.dumps({"text": 9}))])
+        adapter._connect = lambda: RowsConnection(
+            [("bad", "not json"), ("number", json.dumps({"text": 9})), ("number", json.dumps({"text": 9}))]
+        )
         adapter.send_keys = AsyncMock()
         poll_sleeps = 0
+
         async def stop_after_rows(_seconds):
             nonlocal poll_sleeps
             poll_sleeps += 1
             if poll_sleeps > 1:
                 adapter.proc.stop()
+
         with patch("partyline.adapters.bundled.opencode.adapter.asyncio.sleep", new=stop_after_rows):
             await adapter._run()
         self.assertEqual(self.messages, [])
@@ -440,16 +494,19 @@ class OpenCodeAdapterTest(RecordingAdapterTest):
         error_adapter._connect = lambda: (_ for _ in ()).throw(sqlite3.OperationalError("busy"))
         error_adapter.send_keys = AsyncMock()
         error_sleeps = 0
+
         async def stop_error(_seconds):
             nonlocal error_sleeps
             error_sleeps += 1
             if error_sleeps > 1:
                 error_adapter.proc.stop()
+
         with patch("partyline.adapters.bundled.opencode.adapter.asyncio.sleep", new=stop_error):
             await error_adapter._run()
 
         timeout_adapter = self.make(OpenCodeAdapter)
-        timeout_adapter.proc = Process(); timeout_adapter.send_keys = AsyncMock()
+        timeout_adapter.proc = Process()
+        timeout_adapter.send_keys = AsyncMock()
         timeout_adapter._find_session = lambda: None
         with patch("partyline.adapters.bundled.opencode.adapter.asyncio.sleep", new=AsyncMock()):
             await timeout_adapter._run()
@@ -466,7 +523,8 @@ class OpenCodeAdapterTest(RecordingAdapterTest):
 class PiAdapterTest(RecordingAdapterTest):
     async def test_build_command_uses_private_session_directory(self):
         with tempfile.TemporaryDirectory() as root:
-            old_root = pi_module.SESSION_ROOT; pi_module.SESSION_ROOT = root
+            old_root = pi_module.SESSION_ROOT
+            pi_module.SESSION_ROOT = root
             self.addCleanup(setattr, pi_module, "SESSION_ROOT", old_root)
             adapter = self.make(PiAdapter)
             self.assertEqual(adapter.session_dir(), os.path.join(root, "agent-id"))
@@ -474,14 +532,19 @@ class PiAdapterTest(RecordingAdapterTest):
                 adapter.build_command(),
                 ["fake-cli", "--session-dir", os.path.join(root, "agent-id"), "--session-id", "agent-id"],
             )
-            explicit = self.make(PiAdapter, command=["pi", "--session-dir", "custom", "--session-id", "custom-id"])
-            self.assertEqual(explicit.build_command(), ["pi", "--session-dir", "custom", "--session-id", "custom-id"])
+            explicit = self.make(
+                PiAdapter, command=["pi", "--session-dir", "custom", "--session-id", "custom-id"]
+            )
+            self.assertEqual(
+                explicit.build_command(), ["pi", "--session-dir", "custom", "--session-id", "custom-id"]
+            )
             resumed = self.make(PiAdapter, resume=True)
             self.assertEqual(resumed.build_command(), adapter.build_command())
 
     async def test_run_tails_only_spoken_assistant_text_and_deduplicates(self):
         with tempfile.TemporaryDirectory() as root:
-            old_root = pi_module.SESSION_ROOT; pi_module.SESSION_ROOT = root
+            old_root = pi_module.SESSION_ROOT
+            pi_module.SESSION_ROOT = root
             self.addCleanup(setattr, pi_module, "SESSION_ROOT", old_root)
             adapter = self.make(PiAdapter)
             adapter.proc = Process()
@@ -491,28 +554,48 @@ class PiAdapterTest(RecordingAdapterTest):
                 "not json\n",
                 json.dumps({"type": "other"}) + "\n",
                 json.dumps({"type": "message", "id": "u", "message": {"role": "user"}}) + "\n",
-                json.dumps({
-                    "type": "message", "id": "r1", "timestamp": "not needed",
-                    "message": {"role": "assistant", "content": [
-                        {"type": "thinking", "text": "secret reasoning"},
-                        {"type": "text", "text": "first"},
-                        {"type": "text", "text": "second"},
-                    ]},
-                }) + "\n",
-                json.dumps({
-                    "type": "message", "message": {"role": "assistant", "content": [{"type": "thinking", "text": "only thinking"}]},
-                }) + "\n",
-                json.dumps({
-                    "type": "message", "id": "r1",
-                    "message": {"role": "assistant", "content": [{"type": "text", "text": "duplicate"}]},
-                }) + "\n",
+                json.dumps(
+                    {
+                        "type": "message",
+                        "id": "r1",
+                        "timestamp": "not needed",
+                        "message": {
+                            "role": "assistant",
+                            "content": [
+                                {"type": "thinking", "text": "secret reasoning"},
+                                {"type": "text", "text": "first"},
+                                {"type": "text", "text": "second"},
+                            ],
+                        },
+                    }
+                )
+                + "\n",
+                json.dumps(
+                    {
+                        "type": "message",
+                        "message": {
+                            "role": "assistant",
+                            "content": [{"type": "thinking", "text": "only thinking"}],
+                        },
+                    }
+                )
+                + "\n",
+                json.dumps(
+                    {
+                        "type": "message",
+                        "id": "r1",
+                        "message": {"role": "assistant", "content": [{"type": "text", "text": "duplicate"}]},
+                    }
+                )
+                + "\n",
             ]
             path.write_text("".join(records), encoding="utf-8")
             sent = []
             adapter.send_keys = AsyncMock(side_effect=lambda text: sent.append(text))
 
             async def post(sender, sender_type, body):
-                self.messages.append((sender, sender_type, body)); adapter.proc.stop()
+                self.messages.append((sender, sender_type, body))
+                adapter.proc.stop()
 
             adapter.post = post
             with patch("partyline.adapters.bundled.pi.adapter.asyncio.sleep", new=AsyncMock()):
@@ -522,7 +605,8 @@ class PiAdapterTest(RecordingAdapterTest):
 
     async def test_run_resume_ignores_stale_transcript_records(self):
         with tempfile.TemporaryDirectory() as root:
-            old_root = pi_module.SESSION_ROOT; pi_module.SESSION_ROOT = root
+            old_root = pi_module.SESSION_ROOT
+            pi_module.SESSION_ROOT = root
             self.addCleanup(setattr, pi_module, "SESSION_ROOT", old_root)
             adapter = self.make(PiAdapter, resume=True)
             adapter.proc = Process()
@@ -530,15 +614,32 @@ class PiAdapterTest(RecordingAdapterTest):
             path.parent.mkdir(parents=True)
             now = time.time()
             path.write_text(
-                json.dumps({"type": "message", "id": "old", "timestamp": "2000-01-01T00:00:00Z",
-                            "message": {"role": "assistant", "content": [{"type": "text", "text": "old"}]}}) + "\n" +
-                json.dumps({"type": "message", "id": "new", "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
-                            "message": {"role": "assistant", "content": [{"type": "text", "text": "new"}]}}) + "\n",
+                json.dumps(
+                    {
+                        "type": "message",
+                        "id": "old",
+                        "timestamp": "2000-01-01T00:00:00Z",
+                        "message": {"role": "assistant", "content": [{"type": "text", "text": "old"}]},
+                    }
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "type": "message",
+                        "id": "new",
+                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
+                        "message": {"role": "assistant", "content": [{"type": "text", "text": "new"}]},
+                    }
+                )
+                + "\n",
                 encoding="utf-8",
             )
             adapter.spawned_at = now
+
             async def post(sender, sender_type, body):
-                self.messages.append((sender, sender_type, body)); adapter.proc.stop()
+                self.messages.append((sender, sender_type, body))
+                adapter.proc.stop()
+
             adapter.post = post
             adapter.send_keys = AsyncMock()
             with patch("partyline.adapters.bundled.pi.adapter.asyncio.sleep", new=AsyncMock()):
@@ -548,50 +649,73 @@ class PiAdapterTest(RecordingAdapterTest):
 
     async def test_run_exits_when_process_dies_before_transcript(self):
         with tempfile.TemporaryDirectory() as root:
-            old_root = pi_module.SESSION_ROOT; pi_module.SESSION_ROOT = root
+            old_root = pi_module.SESSION_ROOT
+            pi_module.SESSION_ROOT = root
             self.addCleanup(setattr, pi_module, "SESSION_ROOT", old_root)
             adapter = self.make(PiAdapter)
-            adapter.proc = Process(); adapter.proc.stop()
+            adapter.proc = Process()
+            adapter.proc.stop()
             await adapter._run()
 
             waiting = self.make(PiAdapter)
-            waiting.proc = Process(); waiting.send_keys = AsyncMock()
+            waiting.proc = Process()
+            waiting.send_keys = AsyncMock()
             wait_calls = 0
+
             async def stop_wait(_seconds):
                 nonlocal wait_calls
                 wait_calls += 1
                 if wait_calls > 1:
                     waiting.proc.stop()
-            with patch("partyline.adapters.bundled.pi.adapter.glob.glob", return_value=[]), \
-                 patch("partyline.adapters.bundled.pi.adapter.asyncio.sleep", new=stop_wait):
+
+            with (
+                patch("partyline.adapters.bundled.pi.adapter.glob.glob", return_value=[]),
+                patch("partyline.adapters.bundled.pi.adapter.asyncio.sleep", new=stop_wait),
+            ):
                 await waiting._run()
 
     async def test_run_retries_trust_prompt_and_finds_latest_transcript(self):
         with tempfile.TemporaryDirectory() as root:
-            old_root = pi_module.SESSION_ROOT; pi_module.SESSION_ROOT = root
+            old_root = pi_module.SESSION_ROOT
+            pi_module.SESSION_ROOT = root
             self.addCleanup(setattr, pi_module, "SESSION_ROOT", old_root)
             adapter = self.make(PiAdapter)
-            adapter.proc = Process(); adapter.master = 7
+            adapter.proc = Process()
+            adapter.master = 7
             path = Path(adapter.session_dir()) / "latest.jsonl"
             path.parent.mkdir(parents=True)
-            path.write_text(json.dumps({
-                "type": "message", "id": "ok",
-                "message": {"role": "assistant", "content": [{"type": "text", "text": "ready"}]},
-            }) + "\n", encoding="utf-8")
+            path.write_text(
+                json.dumps(
+                    {
+                        "type": "message",
+                        "id": "ok",
+                        "message": {"role": "assistant", "content": [{"type": "text", "text": "ready"}]},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
             adapter.send_keys = AsyncMock()
             calls = 0
+
             def glob_hits(*_args):
                 nonlocal calls
                 calls += 1
                 return [] if calls <= 12 else [str(path)]
+
             async def no_wait(_seconds):
                 pass
+
             async def post(sender, sender_type, body):
-                self.messages.append((sender, sender_type, body)); adapter.proc.stop()
+                self.messages.append((sender, sender_type, body))
+                adapter.proc.stop()
+
             adapter.post = post
-            with patch("partyline.adapters.bundled.pi.adapter.glob.glob", side_effect=glob_hits), \
-                 patch("partyline.adapters.bundled.pi.adapter.os.write") as write, \
-                 patch("partyline.adapters.bundled.pi.adapter.asyncio.sleep", new=no_wait):
+            with (
+                patch("partyline.adapters.bundled.pi.adapter.glob.glob", side_effect=glob_hits),
+                patch("partyline.adapters.bundled.pi.adapter.os.write") as write,
+                patch("partyline.adapters.bundled.pi.adapter.asyncio.sleep", new=no_wait),
+            ):
                 await adapter._run()
             self.assertEqual(self.messages, [("agent", "agent", "ready")])
             write.assert_called_once_with(7, b"\r")
@@ -599,15 +723,22 @@ class PiAdapterTest(RecordingAdapterTest):
 
     async def test_run_reports_missing_transcript_after_timeout(self):
         with tempfile.TemporaryDirectory() as root:
-            old_root = pi_module.SESSION_ROOT; pi_module.SESSION_ROOT = root
+            old_root = pi_module.SESSION_ROOT
+            pi_module.SESSION_ROOT = root
             self.addCleanup(setattr, pi_module, "SESSION_ROOT", old_root)
             adapter = self.make(PiAdapter)
-            adapter.proc = Process(); adapter.master = 7; adapter.send_keys = AsyncMock()
+            adapter.proc = Process()
+            adapter.master = 7
+            adapter.send_keys = AsyncMock()
+
             async def no_wait(_seconds):
                 pass
-            with patch("partyline.adapters.bundled.pi.adapter.glob.glob", return_value=[]), \
-                 patch("partyline.adapters.bundled.pi.adapter.os.write"), \
-                 patch("partyline.adapters.bundled.pi.adapter.asyncio.sleep", new=no_wait):
+
+            with (
+                patch("partyline.adapters.bundled.pi.adapter.glob.glob", return_value=[]),
+                patch("partyline.adapters.bundled.pi.adapter.os.write"),
+                patch("partyline.adapters.bundled.pi.adapter.asyncio.sleep", new=no_wait),
+            ):
                 await adapter._run()
             self.assertIn("no transcript after 45s", self.messages[-1][2])
 
@@ -628,7 +759,8 @@ class RawAdapterTest(RecordingAdapterTest):
         adapter.QUIET_SECONDS = 0
 
         async def post(sender, sender_type, body):
-            self.messages.append((sender, sender_type, body)); adapter.proc.stop()
+            self.messages.append((sender, sender_type, body))
+            adapter.proc.stop()
 
         adapter.post = post
         with patch("partyline.adapters.bundled.raw.adapter.asyncio.sleep", new=AsyncMock()):
@@ -637,11 +769,13 @@ class RawAdapterTest(RecordingAdapterTest):
 
     async def test_digest_filters_system_and_own_mention_and_send_keys(self):
         adapter = self.make(RawAdapter, name="Raw-Agent")
-        digest = adapter.format_digest([
-            {"sender_type": "system", "body": "@Raw-Agent joined"},
-            {"sender_type": "human", "body": "@raw-agent: please check this"},
-            {"sender_type": "human", "body": "plain follow-up"},
-        ])
+        digest = adapter.format_digest(
+            [
+                {"sender_type": "system", "body": "@Raw-Agent joined"},
+                {"sender_type": "human", "body": "@raw-agent: please check this"},
+                {"sender_type": "human", "body": "plain follow-up"},
+            ]
+        )
         self.assertEqual(digest, "please check this\nplain follow-up")
         adapter.master = 7
         with patch("partyline.adapters.bundled.raw.adapter.os.write") as write:
