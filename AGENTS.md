@@ -32,12 +32,23 @@ excluding its file. A flaky test is worse than an uncovered line.
 Tests must never touch a real database, a real port, or a real CLI: use a temp `PARTYLINE_DB`,
 FastAPI's `TestClient`, and fake transcript files rather than spawning a real coding CLI.
 
-**If you change the frontend, look at it.** `scripts/uishot.py` starts a throwaway server and
-drives the real page in headless Chromium, so a UI change can be seen rather than reasoned
-about — capture the state you changed and actually open the image. Reviewing a screenshot has
-already caught things static reading did not (icon glyphs rendering as tofu; a menu clipped by
-its scroll container). Do not describe a visual change as verified when you have only checked
-that it parses.
+**Reach for a plain unit test first.** If a behavior can be pinned down without a browser, pin
+it down without a browser: unit tests are faster, they cannot flake on rendering, and they are
+what the coverage floor is measured against. A browser test earns its place only when the thing
+under test genuinely needs one — layout, hit-testing, a two-sided client/server protocol.
+
+**But if you change something visual, look at it.** `scripts/uishot.py` starts a throwaway
+server and drives the real page in headless Chromium, so a UI change can be seen rather than
+reasoned about — capture the state you changed and actually open the image. This has already
+caught things static reading did not (icon glyphs rendering as tofu; a menu clipped by its
+scroll container). Do not describe a visual change as verified when you have only checked that
+it parses. Looking is the point; a committed browser test is optional.
+
+**Beware a browser test that passes for the wrong reason.** A page reload closes its WebSocket
+cleanly, timers fire on their own, elements are often visible for reasons unrelated to the
+change. When a browser test protects something subtle, write the control that should fail and
+confirm that it does — a reconnect test here passed until its control proved the reconnect path
+was never being reached.
 
 ```bash
 uv run playwright install chromium                        # once
