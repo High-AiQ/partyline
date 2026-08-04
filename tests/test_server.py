@@ -46,18 +46,37 @@ class JsonRequest:
         return self.payload
 
 
+class StreamWebSocket:
+    def __init__(self, *payloads):
+        self.payloads = list(payloads)
+        self.sent = []
+
+    async def accept(self):
+        pass
+
+    async def receive_json(self):
+        if not self.payloads:
+            raise server.WebSocketDisconnect()
+        return self.payloads.pop(0)
+
+    async def send_json(self, event):
+        self.sent.append(event)
+
+
 class ServerTest(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.original_db = server.db
         self.original_live = server.live
         self.original_sockets = server.sockets
+        self.original_human_handles = server.human_handles
         self.original_adapters = server.ADAPTERS.copy()
         self.original_metadata = server.ADAPTER_METADATA.copy()
         self.original_make_adapter = server.make_adapter
         server.db = Db(f"{self.directory.name}/partyline.db")
         server.live = {}
         server.sockets = {}
+        server.human_handles = {}
         server.ADAPTERS.clear()
         server.ADAPTERS["fake"] = FakeAdapter
         server.ADAPTER_METADATA.clear()
@@ -74,6 +93,7 @@ class ServerTest(unittest.TestCase):
         server.db = self.original_db
         server.live = self.original_live
         server.sockets = self.original_sockets
+        server.human_handles = self.original_human_handles
         server.ADAPTERS.clear()
         server.ADAPTERS.update(self.original_adapters)
         server.ADAPTER_METADATA.clear()
@@ -112,6 +132,33 @@ class ServerTest(unittest.TestCase):
         direct = server.db.add_message("line", "greg", "human", "@gone")
         self.arun(server.route_mentions("line", direct))
         self.assertIn("nothing was delivered", server.db.list_messages("line")[-1]["body"])
+
+    def test_websocket_claims_handle_before_messages_and_blocks_impersonation(self):
+        socket = StreamWebSocket(
+            {"sender": "terra", "body": "too early"},
+            {"type": "hello", "handle": "terra"},
+            {"sender": "luna", "body": "not mine"},
+            {"sender": "terra", "body": "hello"},
+        )
+        self.arun(server.ws_endpoint(socket, "line"))
+        self.assertEqual([event["type"] for event in socket.sent], ["error", "hello", "error", "message"])
+        self.assertEqual(server.db.list_messages("line")[-1]["body"], "hello")
+        self.assertEqual(server.human_handles, {})
+
+    def test_websocket_claim_rejects_invalid_duplicate_and_process_handles(self):
+        self.add_attachment("process", "opus")
+        server.human_handles["line"] = {object(): "terra"}
+        for handle, expected in (("bad name", "alphanumeric"), ("all", "reserved"),
+                                 ("TERRA", "another human"), ("opus", "running process")):
+            socket = StreamWebSocket({"type": "hello", "handle": handle})
+            self.arun(server.ws_endpoint(socket, "line"))
+            self.assertEqual(socket.sent[0]["type"], "error")
+            self.assertIn(expected, socket.sent[0]["message"])
+
+    def test_attach_rejects_handle_claimed_by_a_human(self):
+        server.human_handles["line"] = {object(): "terra"}
+        self.assert_http(409, server.attach("line", server.AttachIn(
+            name="TERRA", adapter="fake", cwd=self.directory.name)))
 
     def test_topic_and_rename_validation_and_notices(self):
         self.assert_http(404, server.set_topic("missing", server.TopicIn(topic="x")))

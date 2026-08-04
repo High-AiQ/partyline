@@ -32,6 +32,9 @@ RESERVED_NAMES = {"all", "system"}  # @all rings everyone; system is the notice 
 
 db = Db(os.environ.get("PARTYLINE_DB", os.path.expanduser("~/.partyline.db")))
 sockets: dict[str, set] = {}          # conv_id -> live websockets
+# Each socket claims one human handle before it may send.  This stays in memory:
+# presence is deliberately about a live connection, not a durable identity.
+human_handles: dict[str, dict[WebSocket, str]] = {}
 live: dict[str, Adapter] = {}         # attachment_id -> adapter
 
 
@@ -56,6 +59,9 @@ async def broadcast(conv_id: str, event: dict):
             await ws.send_json(event)
         except Exception:
             sockets.get(conv_id, set()).discard(ws)
+            human_handles.get(conv_id, {}).pop(ws, None)
+            if not human_handles.get(conv_id):
+                human_handles.pop(conv_id, None)
 
 
 async def post_message(conv_id: str, sender: str, sender_type: str, body: str):
@@ -341,6 +347,8 @@ async def attach(conv_id: str, body: AttachIn):
         raise HTTPException(400, "name must be alphanumeric ([A-Za-z0-9_.-], max 32)")
     if body.name.lower() in RESERVED_NAMES:
         raise HTTPException(400, f"'{body.name}' is a reserved handle")
+    if body.name.lower() in {name.lower() for name in human_handles.get(conv_id, {}).values()}:
+        raise HTTPException(409, f"'{body.name}' is already in use by a human on this line")
     if body.adapter not in ADAPTERS:
         raise HTTPException(400, f"adapter must be one of {sorted(ADAPTERS)}")
     for existing in db.list_attachments(conv_id):
@@ -534,29 +542,79 @@ def _save_preset(preset_id: str, body: PresetIn):
 
 
 # -- WebSocket -------------------------------------------------------------
+def handle_error(handle: str) -> str | None:
+    """Return a user-facing validation error, or ``None`` for a valid handle."""
+    if not NAME_RE.match(handle):
+        return "handle must be alphanumeric ([A-Za-z0-9_.-], max 32)"
+    if handle.lower() in RESERVED_NAMES:
+        return f"'{handle}' is a reserved handle"
+    return None
+
+
+def attachment_handle_taken(conv_id: str, handle: str) -> bool:
+    """Whether a live process already owns ``handle`` on this line."""
+    return any(
+        att["name"].lower() == handle.lower() and att["status"] in ("starting", "running")
+        for att in db.list_attachments(conv_id)
+    )
+
+
 @app.websocket("/ws/{conv_id}")
 async def ws_endpoint(ws: WebSocket, conv_id: str):
     await ws.accept()
     sockets.setdefault(conv_id, set()).add(ws)
+    claimed_handle = None
     try:
         while True:
             data = await ws.receive_json()
-            sender = str(data.get("sender", "")).strip()[:32] or "anon"
-            body = str(data.get("body", "")).strip()
-            if not body:
+            if data.get("type") == "hello":
+                handle = str(data.get("handle", "")).strip()
+                conv = db.get_conversation(conv_id)
+                error = handle_error(handle)
+                if conv is None or conv["archived_at"]:
+                    error = "this line is archived — restore it to talk here"
+                elif not error and attachment_handle_taken(conv_id, handle):
+                    error = "that handle is taken by a running process on this line"
+                elif not error and any(
+                    other is not ws and name.lower() == handle.lower()
+                    for other, name in human_handles.get(conv_id, {}).items()
+                ):
+                    error = "that handle is taken by another human on this line"
+                if error:
+                    await ws.send_json({"type": "error", "conversation_id": conv_id, "message": error})
+                    continue
+                human_handles.setdefault(conv_id, {})[ws] = handle
+                claimed_handle = handle
+                await ws.send_json({"type": "hello", "conversation_id": conv_id, "handle": handle})
                 continue
-            # An archived line can still be reached by a deep link, and typing
-            # into one writes messages nobody will ever see. Refuse out loud.
+
+            # Preserve the useful archived-line error even for an old client
+            # which has not yet learned the hello handshake.
             conv = db.get_conversation(conv_id)
             if conv is None or conv["archived_at"]:
                 await ws.send_json({"type": "error", "conversation_id": conv_id,
                                     "message": "this line is archived — restore it to talk here"})
+                continue
+            if claimed_handle is None:
+                await ws.send_json({"type": "error", "conversation_id": conv_id,
+                                    "message": "choose a handle before sending messages"})
+                continue
+            sender = str(data.get("sender", "")).strip()
+            if sender != claimed_handle:
+                await ws.send_json({"type": "error", "conversation_id": conv_id,
+                                    "message": "messages must use your claimed handle"})
+                continue
+            body = str(data.get("body", "")).strip()
+            if not body:
                 continue
             await post_message(conv_id, sender, "human", body)
     except WebSocketDisconnect:
         pass
     finally:
         sockets.get(conv_id, set()).discard(ws)
+        human_handles.get(conv_id, {}).pop(ws, None)
+        if not human_handles.get(conv_id):
+            human_handles.pop(conv_id, None)
 
 
 def load_dotenv(path: str = ".env"):
