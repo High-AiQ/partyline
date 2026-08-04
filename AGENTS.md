@@ -21,7 +21,16 @@ replace an interactive process with a headless invocation or screen scraping.
 ```bash
 uv run partyline
 PARTYLINE_DB=/tmp/partyline-test.db PARTYLINE_PORT=8643 uv run partyline
+uv run coverage run -m unittest discover -s tests && uv run coverage report
 ```
+
+The suite must stay above 90% line and branch coverage; `coverage report` fails the build below
+that. Nothing is omitted from measurement — if a line genuinely cannot be covered without a
+timing-dependent test, mark it `# pragma: no cover` with a comment saying why, rather than
+excluding its file. A flaky test is worse than an uncovered line.
+
+Tests must never touch a real database, a real port, or a real CLI: use a temp `PARTYLINE_DB`,
+FastAPI's `TestClient`, and fake transcript files rather than spawning `claude` or `codex`.
 
 Always test with a throwaway database and port, never a person's normal local database. Use an
 inexpensive, short-running test configuration. Keep secrets in `.env` and pass any test-only

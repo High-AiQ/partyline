@@ -12,6 +12,29 @@ dependencies = [
 [project.scripts]
 partyline = "partyline.server:main"
 
+[dependency-groups]
+dev = [
+    "coverage>=7.4",
+    "httpx>=0.27",          # fastapi TestClient
+    "websockets>=12",       # websocket lifecycle tests
+]
+
+[tool.coverage.run]
+source = ["partyline"]
+branch = true
+
+[tool.coverage.report]
+# Nothing is omitted: a coverage number that excludes the hard files is not a
+# coverage number. Uncoverable lines are marked in place with `pragma: no cover`
+# and each one has to justify itself in review.
+show_missing = true
+skip_covered = true
+fail_under = 90
+exclude_also = [
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
