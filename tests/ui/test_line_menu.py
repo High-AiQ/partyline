@@ -26,6 +26,35 @@ class LineMenuTest(unittest.TestCase):
             modal.wait_for(state="visible")
             self.assertIn(f"rename line · {selected_name}", modal.text_content())
 
+    def test_menu_closes_on_an_outside_click(self):
+        """`hidden` alone is not enough: an author `display` rule outranks the
+        UA stylesheet's `[hidden]{display:none}`, so the menu stayed on screen
+        even though closeLineMenu() had already released it.
+        """
+        with ui_session(["alpha line", "beta line"]) as ui:
+            page = ui.page
+            menu = ui.open_row_menu()
+            self.assertTrue(menu.is_visible())
+
+            page.mouse.click(640, 400)
+
+            page.locator(".conv-menu").wait_for(state="hidden", timeout=5000)
+            self.assertFalse(page.evaluate("() => !!lineMenu.owner"))
+
+    def test_menu_closes_on_escape(self):
+        with ui_session(["alpha line"]) as ui:
+            page = ui.page
+            ui.open_row_menu()
+            page.keyboard.press("Escape")
+            page.locator(".conv-menu").wait_for(state="hidden", timeout=5000)
+
+    def test_choosing_an_item_closes_the_menu(self):
+        with ui_session(["alpha line"]) as ui:
+            page = ui.page
+            menu = ui.open_row_menu()
+            menu.get_by_text("rename", exact=True).click()
+            page.locator(".conv-menu").wait_for(state="hidden", timeout=5000)
+
     def test_menu_surface_is_opaque_and_lifted_above_rail(self):
         with ui_session(["alpha line"]) as ui:
             page = ui.page
