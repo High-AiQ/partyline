@@ -369,6 +369,8 @@ button.primary:hover{color:var(--ink)}
 #gate h1{font-family:var(--serif);font-weight:400;font-size:64px;color:var(--cream)}
 #gate h1 em{color:var(--copper);font-style:italic}
 #gate p{color:var(--cream-dim);margin:6px 0 26px;font-size:12.5px;letter-spacing:.04em}
+#gate .gate-error{max-width:360px;margin:-12px auto 18px;color:var(--red);font-size:11px;line-height:1.45}
+#gate .gate-error[hidden]{display:none}
 #gate form{display:flex;gap:10px;justify-content:center}
 #gate input{font-size:14px;padding:9px 14px;width:220px;text-align:center}
 
@@ -383,6 +385,7 @@ button.primary:hover{color:var(--ink)}
   <div class="card">
     <h1>party<em>line</em></h1>
     <p>several parties. one wire. pick up.</p>
+    <p id="gateError" class="gate-error" role="alert" hidden></p>
     <form id="gateForm">
       <input id="gateName" placeholder="your handle" maxlength="32" autocomplete="off" autofocus>
       <button class="primary" type="submit">connect</button>
@@ -454,8 +457,8 @@ button.primary:hover{color:var(--ink)}
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
-const state = { me:null, convs:[], conv:null, atts:[], seen:new Set(), ws:null, wsGen:0,
-                humans:new Set(), attention:new Set(), adapters:[], archives:[] };
+const state = { me:null, clientId:null, convs:[], conv:null, atts:[], seen:new Set(), ws:null, wsGen:0,
+                wsReady:false, wsClaimRejected:false, humans:new Set(), attention:new Set(), adapters:[], archives:[] };
 
 /* ── adapters ──
    The list is whatever the server has registered, bundled or imported, so an
@@ -487,15 +490,29 @@ fetch("/api/version").then(r=>r.json()).then(d=>{
 
 /* ── identity ── */
 state.me = localStorage.getItem("partyline_user");
-function showGate(){ $("gate").style.display="flex"; $("gateName").value = state.me||""; $("gateName").focus(); }
+state.clientId = localStorage.getItem("partyline_client_id");
+if(!state.clientId){
+  if(typeof crypto.randomUUID === "function") state.clientId = crypto.randomUUID();
+  else {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    state.clientId = [...bytes].map(x=>x.toString(16).padStart(2, "0")).join("");
+  }
+  localStorage.setItem("partyline_client_id", state.clientId);
+}
+function showGate(message=""){
+  $("gate").style.display="flex"; $("gateName").value = state.me||"";
+  $("gateError").textContent = message; $("gateError").hidden = !message;
+  $("gateName").focus();
+}
 $("gateForm").onsubmit = e => {
   e.preventDefault();
   const v = $("gateName").value.trim().replace(/\s+/g,"-").slice(0,32);
   if(!v) return;
   if(["all","system"].includes(v.toLowerCase())) return alert("that handle is reserved");
   state.me = v; localStorage.setItem("partyline_user", v);
+  state.wsClaimRejected = false;
   $("gate").style.display="none"; $("app").hidden=false; $("meName").textContent=v;
-  loadConvs();
+  if(state.conv) connectWs(state.conv.id); else loadConvs();
 };
 $("meEdit").onclick = showGate;
 if(state.me){ $("gate").style.display="none"; $("app").hidden=false; $("meName").textContent=state.me; loadConvs(); }
@@ -841,6 +858,7 @@ async function openConv(c, opts={}){
 function clearCurrentConversation(removeRoute=true){
   state.wsGen++;
   if(state.ws){ try{state.ws.close();}catch(e){} state.ws=null; }
+  state.wsReady = false; state.wsClaimRejected = false;
   state.conv = null; state.atts = []; state.seen = new Set(); state.humans = new Set(); state.attention = new Set();
   $("convname").textContent = "—"; $("convmeta").hidden = true;
   $("composer").hidden = true;
@@ -911,7 +929,7 @@ function conversationSocketUrl(convId){
   return (location.protocol==="https:"?"wss://":"ws://") + location.host + "/ws/" + convId;
 }
 function sendConversationMessage(convId, body){
-  if(state.conv && state.conv.id===convId && state.ws && state.ws.readyState===WebSocket.OPEN){
+  if(state.conv && state.conv.id===convId && state.wsReady && state.ws && state.ws.readyState===WebSocket.OPEN){
     state.ws.send(JSON.stringify({sender:state.me, body}));
     return Promise.resolve();
   }
@@ -925,6 +943,15 @@ function sendConversationMessage(convId, body){
     };
     const timeout = setTimeout(()=>{ try{ws.close();}catch(e){} finish(new Error("line is not reachable")); }, 4000);
     ws.onopen = ()=>{
+      ws.send(JSON.stringify({type:"hello", handle:state.me, client_id:state.clientId}));
+    };
+    ws.onmessage = ev=>{
+      const event = JSON.parse(ev.data);
+      if(event.type==="error"){
+        clearTimeout(timeout); try{ws.close();}catch(e){}
+        finish(new Error(event.message || "could not claim this line")); return;
+      }
+      if(event.type!=="hello") return;
       ws.send(JSON.stringify({sender:state.me, body}));
       setTimeout(()=>{ clearTimeout(timeout); try{ws.close();}catch(e){} finish(); }, 100);
     };
@@ -1033,14 +1060,35 @@ $("convmeta").onclick = ()=>{
 function connectWs(convId){
   const gen = ++state.wsGen;
   if(state.ws){ try{state.ws.close();}catch(e){} }
+  state.wsReady = false; state.wsClaimRejected = false;
   const ws = new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host+"/ws/"+convId);
   state.ws = ws;
+  ws.onopen = ()=>{
+    if(gen!==state.wsGen) return;
+    ws.send(JSON.stringify({type:"hello", handle:state.me, client_id:state.clientId}));
+  };
   ws.onmessage = ev=>{
+    if(gen!==state.wsGen) return;
     const e = JSON.parse(ev.data);
+    if(e.type==="hello" && e.conversation_id===convId){
+      state.wsReady = true;
+      return;
+    }
     if(e.type==="error" && e.conversation_id===convId){
-      showWireNotice(e.message || "this line is no longer available", "error");
-      if(state.conv && state.conv.id===convId) clearCurrentConversation();
-      loadConvs(); refreshArchivesIfOpen();
+      const message = e.message || "this line is no longer available";
+      const wasReady = state.wsReady;
+      state.wsReady = false;
+      if(message.includes("archived")){
+        showWireNotice(message, "error");
+        if(state.conv && state.conv.id===convId) clearCurrentConversation();
+        loadConvs(); refreshArchivesIfOpen();
+      } else if(!wasReady && !state.wsClaimRejected){
+        state.wsClaimRejected = true;
+        showGate(message);
+        try{ws.close();}catch(err){}
+      } else {
+        showWireNotice(message, "error");
+      }
       return;
     }
     if(e.type==="message"){
@@ -1063,14 +1111,17 @@ function connectWs(convId){
       loadConvs(); refreshArchivesIfOpen();
     }
   };
-  ws.onclose = ()=>{ if(gen===state.wsGen) setTimeout(()=>{ if(gen===state.wsGen) connectWs(convId); }, 1500); };
+  ws.onclose = ()=>{
+    if(gen===state.wsGen && !state.wsClaimRejected)
+      setTimeout(()=>{ if(gen===state.wsGen && !state.wsClaimRejected) connectWs(convId); }, 1500);
+  };
 }
 
 /* ── composer ── */
 const input = $("input");
 function sendNow(){
   const body = input.value.trim();
-  if(!body || !state.ws || state.ws.readyState!==1) return;
+  if(!body || !state.wsReady || !state.ws || state.ws.readyState!==1) return;
   state.ws.send(JSON.stringify({sender:state.me, body}));
   input.value=""; input.style.height="auto";
 }
