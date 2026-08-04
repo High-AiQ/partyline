@@ -1,10 +1,14 @@
 [adapter]
-name = "Pi"
+name = "pi"
 version = "1.0.0"
-description = "Adapter for the Pi interactive terminal application."
+description = "The pi coding agent. Pins --session-id/--session-dir and tails the JSONL transcript."
 entrypoint = "adapter.py"
+class = "PartylineAdapter"
 command = ["pi"]
-requires = []
-capabilities = []
+requires = ["pi"]
 env_unset = []
-output = "quiescent terminal output"
+output = "session transcript"
+
+[adapter.capabilities]
+# Re-attaching reuses the same --session-id, so the process comes back with context.
+resume = true
