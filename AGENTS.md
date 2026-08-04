@@ -30,7 +30,24 @@ timing-dependent test, mark it `# pragma: no cover` with a comment saying why, r
 excluding its file. A flaky test is worse than an uncovered line.
 
 Tests must never touch a real database, a real port, or a real CLI: use a temp `PARTYLINE_DB`,
-FastAPI's `TestClient`, and fake transcript files rather than spawning `claude` or `codex`.
+FastAPI's `TestClient`, and fake transcript files rather than spawning a real coding CLI.
+
+**If you change the frontend, look at it.** `scripts/uishot.py` starts a throwaway server and
+drives the real page in headless Chromium, so a UI change can be seen rather than reasoned
+about — capture the state you changed and actually open the image. Reviewing a screenshot has
+already caught things static reading did not (icon glyphs rendering as tofu; a menu clipped by
+its scroll container). Do not describe a visual change as verified when you have only checked
+that it parses.
+
+```bash
+uv run playwright install chromium                        # once
+uv run python -m scripts.uishot --out /tmp/partyline-ui   # the standard state set
+uv run python -m unittest tests/ui/test_line_menu.py -v   # browser regressions
+```
+
+Browser tests live in `tests/ui/` and are excluded from `unittest discover` on purpose: a
+missing browser must never break the ordinary suite, and they are not counted toward the
+coverage floor.
 
 Always test with a throwaway database and port, never a person's normal local database. Use an
 inexpensive, short-running test configuration. Keep secrets in `.env` and pass any test-only

@@ -95,16 +95,13 @@ body::after{
   background:linear-gradient(90deg,transparent,var(--copper),transparent);opacity:.55;
 }
 .conv-menu button{
-  border:0;background:none;text-align:left;padding:8px 10px;font-size:10.5px;white-space:nowrap;
-  color:var(--cream-dim);border-radius:3px;display:flex;align-items:center;gap:9px;
-  letter-spacing:.04em;transition:background .1s,color .1s;
+  border:0;background:none;text-align:left;padding:8px 11px;font-size:10.5px;white-space:nowrap;
+  color:var(--cream-dim);border-radius:3px;letter-spacing:.06em;
+  transition:background .1s,color .1s;
 }
-.conv-menu button .g{width:12px;color:var(--cream-faint);font-size:11px;transition:color .1s}
 .conv-menu button:hover,.conv-menu button:focus-visible{color:var(--ink);background:var(--copper);outline:0}
-.conv-menu button:hover .g,.conv-menu button:focus-visible .g{color:var(--ink)}
 .conv-menu .delete{color:var(--red)}
 .conv-menu .delete:hover,.conv-menu .delete:focus-visible{color:var(--cream);background:var(--red)}
-.conv-menu .delete:hover .g,.conv-menu .delete:focus-visible .g{color:var(--cream)}
 @media (hover:none){.conv-actions{opacity:1;pointer-events:auto}}
 #newconv{padding:14px 20px;border-top:1px dashed var(--line);display:flex;gap:8px}
 #newconv input{flex:1;min-width:0}
@@ -659,15 +656,17 @@ function closeLineMenu(){
 function openLineMenu(anchor, row, c){
   closeLineMenu();
   lineMenu.innerHTML = "";
-  const item = (label, glyph, className, run)=>{
+  // No icon glyphs: the mono stack renders ✎ and ⌫ as tofu. The rest of this
+  // UI labels things in plain lowercase text, so this does too.
+  const item = (label, className, run)=>{
     const b = document.createElement("button");
     b.type = "button"; if(className) b.className = className;
-    b.innerHTML = `<span class="g">${glyph}</span>${esc(label)}`;
+    b.textContent = label;
     b.onclick = e=>{ e.stopPropagation(); closeLineMenu(); run(c); };
     return b;
   };
-  lineMenu.append(item("rename", "✎", "", renameConversation),
-                  item("delete", "⌫", "delete", deleteConversation));
+  lineMenu.append(item("rename", "", renameConversation),
+                  item("delete", "delete", deleteConversation));
 
   lineMenu.hidden = false;
   lineMenu.owner = anchor;

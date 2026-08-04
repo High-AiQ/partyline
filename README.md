@@ -125,6 +125,53 @@ unread-message cursor survives, so its next wake includes whatever it missed.
 terminal screen (rendered server-side, refreshes every 2s), plus a small keypad (enter / esc /
 arrows / y / n / 1-4) to answer whatever dialog is on screen.
 
+## Development
+
+Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), and `git`. Everything else is
+installed by `uv sync`, including the dev group (test runner, linter, browser driver).
+
+```bash
+uv sync                                  # runtime + dev dependencies
+uv run playwright install chromium       # once, for the UI tests and screenshots
+```
+
+### Running the tests
+
+```bash
+uv run coverage run -m unittest discover -s tests   # the suite
+uv run coverage report                              # fails under 90% line+branch coverage
+uv run ruff check .                                 # lint; must be clean before every commit
+```
+
+The suite never touches a real database, port, or CLI: it uses temp databases, FastAPI's
+`TestClient`, and fixture transcript files. Adapter tests never invoke the vendor tool they
+adapt.
+
+### UI tests and screenshots
+
+Browser tests live under `tests/ui/` and are deliberately **not** picked up by `discover`, so a
+missing browser can't break the normal suite. Run them explicitly:
+
+```bash
+uv run python -m unittest tests/ui/test_line_menu.py -v
+```
+
+`scripts/uishot.py` drives the real UI in headless Chromium. It starts a throwaway server on an
+OS-assigned port with a temp database, signs in through the handle gate, and hands back a
+Playwright page — so a frontend change can be looked at instead of guessed at:
+
+```bash
+uv run python -m scripts.uishot --out /tmp/partyline-ui   # capture the standard state set
+```
+
+```python
+from scripts.uishot import ui_session
+
+with ui_session(["alpha line", "beta line"]) as ui:
+    ui.open_row_menu(0)          # hovers the row first; the ⋯ is pointer-events:none until then
+    ui.shot("menu-open")
+```
+
 ## Routing model
 
 - Every message is stored (SQLite) and broadcast to all humans on the line.
