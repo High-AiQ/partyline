@@ -344,13 +344,11 @@ button.primary:hover{color:var(--ink)}
       </div>
       <label>name (the @handle)</label>
       <input id="aName" placeholder="reviewer" maxlength="32" autocomplete="off">
-      <label>adapter</label>
-      <select id="aAdapter">
-        <option value="opencode">opencode</option>
-        <option value="pi">pi</option>
-        <option value="hermes">hermes</option>
-        <option value="raw">raw — any process</option>
-      </select>
+      <div class="row" style="justify-content:space-between;align-items:baseline">
+        <label>adapter</label>
+        <button type="button" id="adapterImport" title="import adapters from a git repository">+ import…</button>
+      </div>
+      <select id="aAdapter"></select>
       <label>command (blank = adapter default)</label>
       <input id="aCmd" placeholder="blank = adapter default" autocomplete="off">
       <label>working directory</label>
@@ -365,7 +363,30 @@ button.primary:hover{color:var(--ink)}
 "use strict";
 const $ = id => document.getElementById(id);
 const state = { me:null, convs:[], conv:null, atts:[], seen:new Set(), ws:null, wsGen:0,
-                humans:new Set(), attention:new Set() };
+                humans:new Set(), attention:new Set(), adapters:[] };
+
+/* ── adapters ──
+   The list is whatever the server has registered, bundled or imported, so an
+   adapter imported from a repo shows up here without touching this file. */
+function adapterOptions(selected){
+  return state.adapters.map(a=>{
+    const label = a.id==="raw" ? "raw — any process" : a.id;
+    return `<option value="${esc(a.id)}"${a.id===selected?" selected":""}>${esc(label)}</option>`;
+  }).join("");
+}
+function canResume(kind){
+  const a = state.adapters.find(x=>x.id===kind);
+  return !!(a && a.capabilities && a.capabilities.resume);
+}
+async function loadAdapters(){
+  try{
+    state.adapters = await (await fetch("/api/adapters")).json();
+  }catch(e){ state.adapters = []; }
+  const sel = $("aAdapter"), keep = sel.value;
+  sel.innerHTML = adapterOptions(keep || (state.adapters[0]||{}).id);
+  if(keep && state.adapters.some(a=>a.id===keep)) sel.value = keep;
+  renderJacks();
+}
 
 /* ── version badge ── */
 fetch("/api/version").then(r=>r.json()).then(d=>{
@@ -629,7 +650,8 @@ function renderJacks(){
   }
   atts.forEach(a=>{
     const live = a.status==="running"||a.status==="starting";
-    const resumable = false;
+    // Offer resume only for a dead jack whose adapter can reopen its session.
+    const resumable = !live && canResume(a.adapter);
     const needsYou = live && state.attention.has(a.id);
     const el = document.createElement("div");
     el.className = "jack"+(live?"":" dead")+(needsYou?" attention":"");
@@ -688,6 +710,38 @@ $("aPreset").onchange = ()=>{
   $("aName").value = p.name; $("aAdapter").value = p.adapter; $("aCmd").value = p.command;
 };
 loadPresets();
+loadAdapters();
+
+/* Import adapter packages from a git repository, then refresh the picker so the
+   newly registered adapters are immediately attachable. */
+$("adapterImport").onclick = ()=>{
+  modal("import adapters", (body, close)=>{
+    body.innerHTML =
+      `<div class="grid">`+
+      `<label>repository</label><input class="iRepo" placeholder="https://github.com/you/partyline-adapters.git">`+
+      `<label>ref (optional)</label><input class="iRef" placeholder="main">`+
+      `</div>`+
+      `<p class="note" style="margin-top:10px">Imported adapters run as you, unsandboxed. Only import code you trust.</p>`+
+      `<div class="actions"><button type="button" class="primary go">import</button></div>`;
+    const out = document.createElement("p");
+    out.className = "note"; out.style.marginTop = "10px";
+    body.appendChild(out);
+    body.querySelector(".go").onclick = async ()=>{
+      const repository = body.querySelector(".iRepo").value.trim();
+      if(!repository) return;
+      out.textContent = "cloning…";
+      const res = await fetch("/api/adapters/import",{
+        method:"POST", headers:{"content-type":"application/json"},
+        body: JSON.stringify({repository, ref: body.querySelector(".iRef").value.trim() || null}),
+      });
+      const data = await res.json();
+      if(!res.ok){ out.textContent = data.detail || "import failed"; return; }
+      await loadAdapters();
+      out.textContent = "loaded: " + data.loaded.join(", ");
+      setTimeout(close, 1200);
+    };
+  });
+};
 
 function modal(title, build, opts={}){
   const ov = document.createElement("div"); ov.className="overlay";
@@ -734,14 +788,13 @@ function presetCard(p, close){
     `<div class="grid">`+
     `<label>title</label><input class="pTitle" maxlength="48">`+
     `<label>@handle</label><input class="pName" maxlength="32">`+
-    `<label>adapter</label><select class="pAdapter">`+
-      `<option value="opencode">opencode</option><option value="pi">pi</option><option value="hermes">hermes</option><option value="raw">raw</option></select>`+
+    `<label>adapter</label><select class="pAdapter">`+adapterOptions(p.adapter)+`</select>`+
     `<label>command</label><input class="pCmd" placeholder="blank = adapter default">`+
     `</div><div class="actions">`+
     (p.id?`<button type="button" class="del">delete</button>`:"")+
     `<button type="button" class="primary save">${p.id?"save changes":"create preset"}</button></div>`;
   el.querySelector(".pTitle").value = p.title||""; el.querySelector(".pName").value = p.name||"";
-  el.querySelector(".pAdapter").value = p.adapter||"opencode"; el.querySelector(".pCmd").value = p.command||"";
+  el.querySelector(".pCmd").value = p.command||"";
   el.querySelector(".save").onclick = async ()=>{
     const body = {
       title: el.querySelector(".pTitle").value.trim(), name: el.querySelector(".pName").value.trim(),
