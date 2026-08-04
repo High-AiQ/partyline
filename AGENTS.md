@@ -95,6 +95,10 @@ participant in the room — including whoever is doing the work. The rules that 
   then Enter.
 - Keep discovery, manifest validation, import, and reload behavior compatible with external
   adapter repositories. See `skills/add-process-adapter/SKILL.md` before changing this surface.
+- **Adapters bring their own tests, and those tests never run the vendor's CLI.** Test the
+  parsing, claiming, and lifecycle logic against fixture transcript files; do not assert on how
+  a third-party tool behaves, or the suite breaks on someone else's release schedule. This
+  applies to the bundled packages here and to external adapter repositories alike.
 
 ## Data and releases
 

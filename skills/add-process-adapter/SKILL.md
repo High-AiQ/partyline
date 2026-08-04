@@ -67,6 +67,34 @@ these invariants:
 Use the attachment working directory and inherited environment. Do not edit shell profiles or
 persist credentials. If a process needs credentials, document its variable name without a value.
 
+## Ship tests with the adapter
+
+An adapter package owns its own tests. Partyline's own suite covers the adapter *contract* — the
+pty runtime, the manifest loader, the registry — but it cannot cover your adapter's transcript
+format, and it will not install your process to try. Put a test file beside the package and run
+it with whatever plain test runner your language offers; nothing partyline-specific is required.
+
+Test your logic, never the vendor's product:
+
+- **Do** assert on parsing: feed a fixture transcript file you wrote by hand and check which
+  messages come out, that partial and malformed records are survived, and that records predating
+  this attachment are not replayed after a resume.
+- **Do** assert the claiming rule: construct two attachments in one working directory and check
+  the second refuses the first one's transcript.
+- **Do** assert that terminal-screen contents never become chat messages.
+- **Do not** invoke the real executable, reach the network, or assert that the vendor's CLI
+  writes a particular file. Those tests fail on a machine without the tool installed, and break
+  on someone else's release schedule.
+- **Do not** sleep and hope. If a test needs a background loop to advance, drive the condition
+  explicitly — a counted stub for the wait, a flag the loop checks — rather than a real delay
+  tuned to the machine you happened to write it on. A flaky adapter test is worse than none.
+
+A useful shape, portable to any harness: build the adapter object directly, hand it fakes for the
+two callbacks it takes (one collecting posted messages, one collecting status changes), point it
+at a fixture file in a temporary directory, and assert on what the collectors received. That
+works because the adapter is constructed with its effects passed in — no server, no pty, no
+process required.
+
 ## Test locally
 
 Run partyline with a throwaway database and port. Test start, mention delivery, output posting,
