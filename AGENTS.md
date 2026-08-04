@@ -27,6 +27,33 @@ Always test with a throwaway database and port, never a person's normal local da
 inexpensive, short-running test configuration. Keep secrets in `.env` and pass any test-only
 credentials only to the process command; never add them to shell profiles, source, or commits.
 
+**Never `pkill -f partyline`** (or any pattern matching a port or the project name). It matches
+the instance hosting the conversation you are in, and it matches your own shell's command line.
+Find the process that owns the port and kill that pid:
+
+```bash
+ss -ltnp | grep 8643        # → users:(("partyline",pid=NNNNN,...))
+kill NNNNN
+```
+
+## Working on partyline from inside partyline
+
+This project is developed through a running copy of itself, so a careless restart drops every
+participant in the room — including whoever is doing the work. The rules that make that safe:
+
+- **The instance hosting the conversation is never the checkout being edited.** Run the
+  *cockpit* from its own clone at a known-good commit; edit the *workbench* checkout. An agent
+  that edits the code its own line is running has no way to load its own fix.
+- **Test on a throwaway port and database**, one per person, so several agents can test at once
+  without colliding: `PARTYLINE_DB=/tmp/<you>.db PARTYLINE_PORT=864x uv run partyline`.
+- **Restarting the cockpit is a scheduled act, not a side effect.** Announce it, let everyone
+  commit and post status, then restart and resume. Uncommitted work in an agent's head does not
+  survive; committed work always does, and chat history is replayed from SQLite on resume.
+- **Adapter changes do not need a restart** — `POST /api/adapters/reload` re-executes adapter
+  packages in place. Changes to the base class, loader, server, or frontend do.
+- Prefer changes that make a restart cheaper (resume support, adopting live attachments,
+  liveness reporting) over changes that assume restarts are rare.
+
 ## Adapter rules
 
 - One bundled adapter package lives at `partyline/adapters/bundled/<id>/` and has a manifest
