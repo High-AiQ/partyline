@@ -1,12 +1,12 @@
 [adapter]
 name = "Hermes"
 version = "1.0.0"
-description = "Adapter for the Hermes interactive terminal application."
+description = "SQLite transcript adapter for the Hermes interactive terminal application."
 entrypoint = "adapter.py"
-command = ["hermes"]
-requires = []
+command = ["hermes", "--cli", "--pass-session-id"]
+requires = ["hermes"]
 env_unset = []
-output = "quiescent terminal output"
+output = "read-only SQLite session transcript"
 
 [adapter.capabilities]
-resume = false
+resume = true
