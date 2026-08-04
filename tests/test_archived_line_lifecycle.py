@@ -52,6 +52,7 @@ class ArchivedLineLifecycleTest(unittest.TestCase):
                 }])
                 self.assertEqual(server.db.list_messages(conversation["id"]), [])
             finally:
+                server.db.close()
                 server.db = original_db
                 server.sockets = original_sockets
 

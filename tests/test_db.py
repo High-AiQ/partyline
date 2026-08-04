@@ -10,7 +10,7 @@ class DbTest(unittest.TestCase):
         self.db = Db(f"{self.directory.name}/partyline.db")
 
     def tearDown(self):
-        self.db.conn.close()
+        self.db.close()
         self.directory.cleanup()
 
     def test_conversation_lifecycle_and_message_ordering(self):

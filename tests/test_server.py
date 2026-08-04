@@ -74,6 +74,7 @@ class ServerTest(unittest.TestCase):
         self.original_metadata = server.ADAPTER_METADATA.copy()
         self.original_make_adapter = server.make_adapter
         server.db = Db(f"{self.directory.name}/partyline.db")
+        self.addCleanup(server.db.close)
         server.live = {}
         server.sockets = {}
         server.human_handles = {}

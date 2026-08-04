@@ -72,6 +72,12 @@ class Db:
                     pass  # already applied
             self.conn.commit()
 
+    def close(self):
+        """Release the connection. The server holds one for its whole life, so
+        this exists for tests and for anything that opens a second database."""
+        with self.lock:
+            self.conn.close()
+
     def _exec(self, q, args=()):
         with self.lock:
             cur = self.conn.execute(q, args)
