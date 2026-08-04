@@ -93,6 +93,28 @@ def load_bundled_adapters():
         load_adapter(manifest.parent)
 
 
+def load_installed_adapters() -> list[str]:
+    """Re-register everything previously imported into the adapter store.
+
+    Imports have to survive a restart: an attachment in the database names its
+    adapter, so if a checkout were only registered at import time, every
+    attachment using it would break the next time the server came up. A package
+    that fails to load is skipped rather than taking the whole server down with
+    it — one bad checkout should not make partyline unstartable.
+    """
+    loaded = []
+    store = adapter_store()
+    if not store.is_dir():
+        return loaded
+    for checkout in sorted(path for path in store.iterdir() if path.is_dir()):
+        for package in adapter_packages(checkout):
+            try:
+                loaded.append(load_adapter(package))
+            except (ValueError, OSError, SyntaxError):
+                continue
+    return loaded
+
+
 def adapter_packages(root: Path):
     """Yield package directories from a single package or a collection checkout."""
     if (root / "adapter.toml").is_file():
