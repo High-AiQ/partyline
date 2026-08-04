@@ -46,6 +46,9 @@ MIGRATIONS = [
     "ALTER TABLE attachments ADD COLUMN cli_session TEXT",
     # topic: free-text line topic, relayed to agents in briefings and digests
     "ALTER TABLE conversations ADD COLUMN topic TEXT NOT NULL DEFAULT ''",
+    # archived_at: when a line was archived, NULL while it is live. Archiving
+    # hides a line and stops its processes; the history stays until a purge.
+    "ALTER TABLE conversations ADD COLUMN archived_at REAL",
 ]
 
 
@@ -81,8 +84,13 @@ class Db:
         self._exec("INSERT INTO conversations(id,name,created_at) VALUES(?,?,?)", (conv_id, name, ts))
         return self.get_conversation(conv_id)
 
-    def list_conversations(self):
-        cur = self._exec("SELECT * FROM conversations ORDER BY created_at DESC")
+    def list_conversations(self, archived=False):
+        if archived:
+            cur = self._exec(
+                "SELECT * FROM conversations WHERE archived_at IS NOT NULL ORDER BY archived_at DESC")
+        else:
+            cur = self._exec(
+                "SELECT * FROM conversations WHERE archived_at IS NULL ORDER BY created_at DESC")
         return [dict(r) for r in cur.fetchall()]
 
     def get_conversation(self, conv_id):
@@ -96,6 +104,14 @@ class Db:
 
     def rename_conversation(self, conv_id, name):
         self._exec("UPDATE conversations SET name=? WHERE id=?", (name, conv_id))
+        return self.get_conversation(conv_id)
+
+    def archive_conversation(self, conv_id):
+        self._exec("UPDATE conversations SET archived_at=? WHERE id=?", (time.time(), conv_id))
+        return self.get_conversation(conv_id)
+
+    def restore_conversation(self, conv_id):
+        self._exec("UPDATE conversations SET archived_at=NULL WHERE id=?", (conv_id,))
         return self.get_conversation(conv_id)
 
     def delete_conversation(self, conv_id):

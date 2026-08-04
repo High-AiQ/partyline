@@ -57,16 +57,27 @@ body::after{
   padding:0 5px;font-size:9px;letter-spacing:.08em;vertical-align:1px;
 }
 #convs{flex:1;min-height:0;overflow-y:auto;padding:10px 0}
+.conv-row{position:relative;display:flex;align-items:stretch}
 .conv{
-  display:block;width:100%;text-align:left;background:none;border:0;cursor:pointer;
-  font:inherit;color:var(--cream-dim);padding:9px 20px;position:relative;
+  display:block;flex:1;min-width:0;width:100%;text-align:left;background:none;border:0;cursor:pointer;
+  font:inherit;color:var(--cream-dim);padding:9px 54px 9px 20px;position:relative;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 .conv:hover{color:var(--cream);background:var(--ink-3)}
+.conv-row:focus-within .conv{color:var(--cream);background:var(--ink-3)}
 .conv.active{color:var(--copper-hot);background:var(--ink-3)}
 .conv.active::before{
   content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--copper);
 }
+.conv-actions{position:absolute;right:8px;top:50%;transform:translateY(-50%);display:flex;align-items:center;gap:4px;opacity:0;pointer-events:none;transition:opacity .15s}
+.conv-row:hover .conv-actions,.conv-row:focus-within .conv-actions{opacity:1;pointer-events:auto}
+.conv-more{width:44px;height:44px;padding:0;background:var(--ink-2);color:var(--cream-faint);font-size:16px;line-height:1}
+.conv-more:hover,.conv-more[aria-expanded="true"]{color:var(--ink);background:var(--copper)}
+.conv-menu{position:absolute;right:8px;top:38px;z-index:10;display:flex;flex-direction:column;min-width:108px;padding:4px;background:var(--ink-2);border:1px solid var(--line);border-radius:5px;box-shadow:0 12px 28px rgba(0,0,0,.45)}
+.conv-menu button{border:0;background:none;text-align:left;padding:7px 9px;font-size:10.5px;white-space:nowrap}
+.conv-menu button:hover{color:var(--ink);background:var(--copper)}
+.conv-menu .delete{color:var(--red)}
+@media (hover:none){.conv-actions{opacity:1;pointer-events:auto}}
 #newconv{padding:14px 20px;border-top:1px dashed var(--line);display:flex;gap:8px}
 #newconv input{flex:1;min-width:0}
 #me{
@@ -265,6 +276,19 @@ body::after{
 .preset-card .del{color:var(--red);border-color:rgba(201,111,90,.4)}
 .preset-card .del:hover{background:var(--red);border-color:var(--red);color:var(--ink)}
 .modal .content .note{color:var(--cream-faint);font-size:10.5px;font-style:italic}
+.modal .content p{color:var(--cream-dim)}
+.line-form{display:flex;flex-direction:column;gap:7px}
+.line-form label{color:var(--cream-faint);font-size:10px;letter-spacing:.05em}
+.line-form input{width:100%;font-size:13px;padding:9px 10px}
+.line-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
+.line-actions .danger{color:var(--red);border-color:rgba(201,111,90,.5)}
+.line-actions .danger:hover{background:var(--red);border-color:var(--red);color:var(--ink)}
+.live-list{display:flex;flex-direction:column;gap:6px;margin-top:2px}
+.live-item{display:flex;align-items:center;gap:8px;padding:7px 9px;border:1px solid rgba(201,111,90,.35);border-radius:4px;background:rgba(201,111,90,.06);color:var(--cream)}
+.live-item .led{background:var(--green);box-shadow:0 0 6px var(--green)}
+.line-status{min-height:18px;color:var(--cream-faint);font-size:10.5px;font-style:italic}
+.line-status.error{color:var(--red);font-style:normal}
+.warn-sent{color:var(--green);font-style:normal}
 .modal.wide{width:min(980px,96vw)}
 .screen{
   background:#0a0c0b;border:1px solid var(--line);border-radius:5px;
@@ -569,17 +593,52 @@ function addMsg(m, scroll=true){
 }
 
 /* ── conversations ── */
+function conversationRoute(id){ return "#/c/" + encodeURIComponent(id); }
+function routeConversationId(){
+  const match = location.hash.match(/^#\/c\/([^/]+)$/);
+  if(!match) return null;
+  try{ return decodeURIComponent(match[1]); }catch(e){ return null; }
+}
+function setConversationRoute(id, replace=false){
+  const hash = conversationRoute(id);
+  if(location.hash===hash) return;
+  const method = replace ? "replaceState" : "pushState";
+  history[method]({}, "", location.pathname + location.search + hash);
+}
+function clearConversationRoute(){
+  history.replaceState({}, "", location.pathname + location.search);
+}
+
 async function loadConvs(){
   state.convs = await (await fetch("/api/conversations")).json();
   const nav = $("convs"); nav.innerHTML="";
   state.convs.forEach(c=>{
+    const row = document.createElement("div"); row.className = "conv-row";
     const b = document.createElement("button");
     b.className = "conv"+(state.conv && c.id===state.conv.id ? " active":"");
     b.textContent = c.name;
     if(c.topic) b.title = c.topic;
     b.onclick = ()=>openConv(c);
-    nav.appendChild(b);
+    const actions = document.createElement("div"); actions.className = "conv-actions";
+    const more = document.createElement("button");
+    more.className = "conv-more"; more.type = "button"; more.textContent = "⋯";
+    more.title = "line actions"; more.setAttribute("aria-label", "line actions for " + c.name);
+    more.setAttribute("aria-expanded", "false");
+    const menu = document.createElement("div"); menu.className = "conv-menu"; menu.hidden = true;
+    const rename = document.createElement("button"); rename.type = "button"; rename.textContent = "rename";
+    const del = document.createElement("button"); del.type = "button"; del.className = "delete"; del.textContent = "delete";
+    menu.append(rename, del); actions.append(more, menu); row.append(b, actions); nav.appendChild(row);
+    more.onclick = e=>{
+      e.stopPropagation();
+      nav.querySelectorAll(".conv-menu").forEach(m=>{ if(m!==menu) m.hidden=true; });
+      menu.hidden = !menu.hidden; more.setAttribute("aria-expanded", String(!menu.hidden));
+    };
+    rename.onclick = e=>{ e.stopPropagation(); menu.hidden=true; more.setAttribute("aria-expanded", "false"); renameConversation(c); };
+    del.onclick = e=>{ e.stopPropagation(); menu.hidden=true; more.setAttribute("aria-expanded", "false"); deleteConversation(c); };
   });
+  const routedId = routeConversationId();
+  const routed = routedId && state.convs.find(c=>c.id===routedId);
+  if(routed && (!state.conv || state.conv.id!==routed.id)) openConv(routed, {fromRoute:true});
 }
 $("newconv").onsubmit = async e=>{
   e.preventDefault();
@@ -590,12 +649,18 @@ $("newconv").onsubmit = async e=>{
   await loadConvs(); openConv(c);
 };
 
-async function openConv(c){
+async function openConv(c, opts={}){
+  if(!opts.fromRoute) setConversationRoute(c.id);
   state.conv = c; state.seen = new Set(); state.humans = new Set(); state.attention = new Set();
   $("convname").textContent = c.name;
   $("feed").innerHTML = ""; $("composer").hidden = false;
   connectWs(c.id);
-  const d = await (await fetch("/api/conversations/"+c.id)).json();
+  const res = await fetch("/api/conversations/"+c.id);
+  if(!res.ok){
+    if(state.conv && state.conv.id===c.id) clearCurrentConversation();
+    return;
+  }
+  const d = await res.json();
   state.conv = d.conversation; renderTopic();
   d.messages.forEach(m=>addMsg(m,false));
   $("feed").scrollTop = $("feed").scrollHeight;
@@ -603,6 +668,150 @@ async function openConv(c){
   loadConvs();
   if(!d.messages.length)
     $("feed").innerHTML = `<div class="empty"><div class="art">the line is open</div>patch in a process on the right, or just start talking</div>`;
+}
+
+function clearCurrentConversation(removeRoute=true){
+  state.wsGen++;
+  if(state.ws){ try{state.ws.close();}catch(e){} state.ws=null; }
+  state.conv = null; state.atts = []; state.seen = new Set(); state.humans = new Set(); state.attention = new Set();
+  $("convname").textContent = "—"; $("convmeta").hidden = true;
+  $("composer").hidden = true;
+  $("feed").innerHTML = `<div class="empty"><div class="art">no line selected</div>pick a conversation, or open a new one</div>`;
+  if(removeRoute && routeConversationId()) clearConversationRoute();
+}
+
+window.addEventListener("hashchange", ()=>{
+  const id = routeConversationId();
+  const c = id && state.convs.find(x=>x.id===id);
+  if(c){
+    if(!state.conv || state.conv.id!==c.id) openConv(c, {fromRoute:true});
+  } else if(state.conv) {
+    clearCurrentConversation(false);
+  }
+});
+
+function renameConversation(c){
+  modal("rename line · " + c.name, (content, close)=>{
+    content.innerHTML =
+      `<form class="line-form">`+
+      `<label for="renameLine">new line name</label>`+
+      `<input id="renameLine" maxlength="120" autocomplete="off">`+
+      `<div class="line-actions"><button type="button">cancel</button><button class="primary" type="submit">save name</button></div>`+
+      `</form>`;
+    const form = content.querySelector("form");
+    const input = content.querySelector("#renameLine");
+    input.value = c.name;
+    form.querySelector("button[type=button]").onclick = close;
+    form.onsubmit = async e=>{
+      e.preventDefault();
+      const save = form.querySelector("button[type=submit]");
+      const name = input.value.trim();
+      if(!name) return input.focus();
+      save.disabled = true; save.textContent = "saving…";
+      const res = await fetch("/api/conversations/"+c.id+"/name", {
+        method:"PUT", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({name, sender:state.me})
+      });
+      if(!res.ok){
+        let detail = "could not rename line";
+        try{ detail = (await res.json()).detail || detail; }catch(err){}
+        alert(detail); save.disabled=false; save.textContent="save name"; return;
+      }
+      const renamed = await res.json();
+      if(state.conv && state.conv.id===renamed.id){
+        state.conv = renamed; $("convname").textContent = renamed.name; renderTopic();
+      }
+      await loadConvs(); close();
+    };
+    setTimeout(()=>{ input.focus(); input.select(); }, 50);
+  });
+}
+
+function conversationSocketUrl(convId){
+  return (location.protocol==="https:"?"wss://":"ws://") + location.host + "/ws/" + convId;
+}
+function sendConversationMessage(convId, body){
+  if(state.conv && state.conv.id===convId && state.ws && state.ws.readyState===WebSocket.OPEN){
+    state.ws.send(JSON.stringify({sender:state.me, body}));
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject)=>{
+    const ws = new WebSocket(conversationSocketUrl(convId));
+    let settled = false;
+    const finish = err=>{
+      if(settled) return;
+      settled = true;
+      if(err) reject(err); else resolve();
+    };
+    const timeout = setTimeout(()=>{ try{ws.close();}catch(e){} finish(new Error("line is not reachable")); }, 4000);
+    ws.onopen = ()=>{
+      ws.send(JSON.stringify({sender:state.me, body}));
+      setTimeout(()=>{ clearTimeout(timeout); try{ws.close();}catch(e){} finish(); }, 100);
+    };
+    ws.onerror = ()=>{ clearTimeout(timeout); finish(new Error("line is not reachable")); };
+  });
+}
+
+async function deleteConversation(c){
+  modal("delete line · " + c.name, (content, close)=>{
+    content.innerHTML = `<p>Loading the line’s live processes…</p>`;
+    (async()=>{
+      const detailRes = await fetch("/api/conversations/"+c.id);
+      if(!detailRes.ok){ content.innerHTML = `<p class="line-status error">This line is no longer available.</p>`; return; }
+      const detail = await detailRes.json();
+      const live = (detail.attachments || []).filter(a=>a.status==="running" || a.status==="starting");
+      content.innerHTML =
+        `<p>Deleting this line removes it from the sidebar and stops its attached processes.</p>`+
+        `<div class="live-list"></div>`+
+        `<div class="line-status" aria-live="polite"></div>`+
+        `<form class="line-form confirm-form"></form>`;
+      const list = content.querySelector(".live-list");
+      const status = content.querySelector(".line-status");
+      const form = content.querySelector(".confirm-form");
+      if(live.length){
+        list.innerHTML = `<div class="note">running processes — warning them first is recommended</div>`+
+          live.map(a=>`<div class="live-item"><span class="led"></span><span>@${esc(a.name)}</span></div>`).join("");
+        const warn = document.createElement("button"); warn.type="button"; warn.className="primary";
+        warn.textContent = "warn processes first";
+        warn.onclick = async ()=>{
+          warn.disabled = true; warn.textContent = "sending warning…";
+          try{
+            await sendConversationMessage(c.id, "@all this line is being deleted soon. Please commit your work and post status.");
+            warn.textContent = "warning sent"; status.textContent = "The warning was posted to the line."; status.classList.add("warn-sent");
+          }catch(err){
+            warn.disabled = false; warn.textContent = "warn processes first";
+            status.textContent = err.message || "could not send warning"; status.classList.add("error");
+          }
+        };
+        list.appendChild(warn);
+        form.innerHTML =
+          `<label for="confirmDeleteLine">type the line name to confirm</label>`+
+          `<input id="confirmDeleteLine" autocomplete="off" spellcheck="false">`+
+          `<div class="line-actions"><button type="button">cancel</button><button class="danger" type="submit" disabled>delete line</button></div>`;
+        const confirmInput = form.querySelector("input");
+        const confirm = form.querySelector("button[type=submit]");
+        confirmInput.oninput = ()=>{ confirm.disabled = confirmInput.value !== c.name; };
+      } else {
+        list.innerHTML = `<div class="note">no running processes are attached</div>`;
+        form.innerHTML = `<div class="line-actions"><button type="button">cancel</button><button class="danger" type="submit">delete line</button></div>`;
+      }
+      form.querySelector("button[type=button]").onclick = close;
+      form.onsubmit = async e=>{
+        e.preventDefault();
+        const confirm = form.querySelector("button[type=submit]");
+        confirm.disabled = true; confirm.textContent = "removing…";
+        const res = await fetch("/api/conversations/"+c.id,{method:"DELETE"});
+        if(!res.ok){
+          let msg = "could not delete line";
+          try{ msg = (await res.json()).detail || msg; }catch(err){}
+          status.textContent = msg; status.classList.add("error"); confirm.disabled=false; confirm.textContent="delete line"; return;
+        }
+        close();
+        if(state.conv && state.conv.id===c.id) clearCurrentConversation();
+        await loadConvs();
+      };
+    })().catch(()=>{ content.innerHTML = `<p class="line-status error">Could not load this line. Try again.</p>`; });
+  });
 }
 
 /* ── line topic ── */
@@ -661,7 +870,11 @@ function connectWs(convId){
     }
     if(e.type==="attention"){ state.attention.add(e.attachment_id); renderJacks(); }
     if(e.type==="conversation" && state.conv && e.conversation.id===state.conv.id){
-      state.conv = e.conversation; renderTopic(); loadConvs();
+      state.conv = e.conversation; $("convname").textContent = e.conversation.name; renderTopic(); loadConvs();
+    }
+    if(e.type==="conversation_archived" || e.type==="conversation_deleted"){
+      if(state.conv && e.conversation_id===state.conv.id) clearCurrentConversation();
+      loadConvs();
     }
   };
   ws.onclose = ()=>{ if(gen===state.wsGen) setTimeout(()=>{ if(gen===state.wsGen) connectWs(convId); }, 1500); };

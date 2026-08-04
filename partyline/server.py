@@ -199,8 +199,8 @@ async def remove_adapter(adapter_name: str):
 
 
 @app.get("/api/conversations")
-async def conversations():
-    return db.list_conversations()
+async def conversations(archived: bool = False):
+    return db.list_conversations(archived=archived)
 
 
 @app.post("/api/conversations")
@@ -263,14 +263,8 @@ async def rename_conversation(conv_id: str, body: RenameIn):
     return conv
 
 
-@app.delete("/api/conversations/{conv_id}")
-async def delete_conversation(conv_id: str):
-    conv = db.get_conversation(conv_id)
-    if not conv:
-        raise HTTPException(404)
-    # Tell watchers before anything is torn down: once the rows are gone a tab
-    # sitting on this line can only discover it by a 404 on its next fetch.
-    await broadcast(conv_id, {"type": "conversation_deleted", "conversation_id": conv_id})
+async def _stop_attachments(conv_id: str) -> list[str]:
+    """Kill every live process on a line. Returns the handles actually stopped."""
     stopped: list[str] = []
     for att in db.list_attachments(conv_id):
         adapter = live.pop(att["id"], None)
@@ -280,10 +274,61 @@ async def delete_conversation(conv_id: str):
         try:
             await adapter.stop()
         except Exception:
-            pass  # a pty that will not die must not strand the delete
+            # A pty that refuses to die must not strand the archive: the row is
+            # already out of `live`, so nothing can route to it either way.
+            db.set_attachment_status(att["id"], "exited")
+    return stopped
+
+
+@app.delete("/api/conversations/{conv_id}")
+async def archive_conversation(conv_id: str):
+    """Archive a line: stop its processes, hide it, keep the history."""
+    conv = db.get_conversation(conv_id)
+    if not conv:
+        raise HTTPException(404)
+    if conv["archived_at"]:
+        raise HTTPException(409, "line is already archived")
+    # Tell watchers before tearing down: a tab sitting on this line should leave
+    # under its own power rather than discover the archive by a failing fetch.
+    event = {"type": "conversation_archived", "conversation_id": conv_id}
+    await broadcast(conv_id, event)
+    # Alias kept for one version so clients written against the first cut of
+    # this route keep working. Remove in 0.17.
+    await broadcast(conv_id, {**event, "type": "conversation_deleted"})
+    stopped = await _stop_attachments(conv_id)
+    conv = db.archive_conversation(conv_id)
+    sockets.pop(conv_id, None)
+    return {"ok": True, "archived": True, "stopped": stopped, "conversation": conv}
+
+
+@app.post("/api/conversations/{conv_id}/restore")
+async def restore_conversation(conv_id: str):
+    """Bring an archived line back. Its processes stay stopped — a restored
+    attachment is resumed one at a time, through the usual resume route."""
+    conv = db.get_conversation(conv_id)
+    if not conv:
+        raise HTTPException(404)
+    if not conv["archived_at"]:
+        raise HTTPException(409, "line is not archived")
+    conv = db.restore_conversation(conv_id)
+    await post_message(conv_id, "system", "system", "☏ line restored from the archive")
+    return conv
+
+
+@app.delete("/api/conversations/{conv_id}/purge")
+async def purge_conversation(conv_id: str):
+    """Destroy an archived line for good. Archiving first is mandatory: it is
+    the step that stops the processes, and it makes this irreversible act
+    something you have to ask for twice."""
+    conv = db.get_conversation(conv_id)
+    if not conv:
+        raise HTTPException(404)
+    if not conv["archived_at"]:
+        raise HTTPException(409, "archive the line before purging it")
+    await _stop_attachments(conv_id)  # belt and braces: nothing should be live
     db.delete_conversation(conv_id)
     sockets.pop(conv_id, None)
-    return {"ok": True, "stopped": stopped}
+    return {"ok": True, "purged": True}
 
 
 @app.post("/api/conversations/{conv_id}/attachments")
@@ -291,6 +336,8 @@ async def attach(conv_id: str, body: AttachIn):
     conv = db.get_conversation(conv_id)
     if not conv:
         raise HTTPException(404)
+    if conv["archived_at"]:
+        raise HTTPException(409, "restore the line before attaching to it")
     if not NAME_RE.match(body.name):
         raise HTTPException(400, "name must be alphanumeric ([A-Za-z0-9_.-], max 32)")
     if body.name.lower() in RESERVED_NAMES:
@@ -356,6 +403,8 @@ async def resume_attachment(att_id: str):
             raise HTTPException(409, f"'{att['name']}' is already attached")
 
     conv = db.get_conversation(att["conv_id"])
+    if conv["archived_at"]:
+        raise HTTPException(409, "restore the line before resuming its processes")
     att["conv_name"] = conv["name"]
     att["resume"] = True
     att["hook_url"] = _hook_url(att_id)
