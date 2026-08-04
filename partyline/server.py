@@ -11,6 +11,7 @@ import asyncio
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import uuid
 from contextlib import asynccontextmanager
@@ -231,12 +232,17 @@ async def attach(conv_id: str, body: AttachIn):
         if existing["name"].lower() == body.name.lower() and existing["status"] in ("starting", "running"):
             raise HTTPException(409, f"'{body.name}' is already attached")
 
+    metadata = ADAPTER_METADATA[body.adapter]
     command = shlex.split(body.command) if body.command.strip() else []
     if not command:
-        default_command = ADAPTER_METADATA[body.adapter].get("command") or []
+        default_command = metadata.get("command") or []
         if not default_command:
-            raise HTTPException(400, "raw adapter needs an explicit command")
+            raise HTTPException(400, f"the {body.adapter} adapter needs an explicit command")
         command = list(default_command)
+    # Fail here with something readable rather than as a spawn traceback later.
+    for executable in metadata.get("requires") or []:
+        if shutil.which(executable) is None:
+            raise HTTPException(400, f"{executable!r} is not on PATH — install it, or attach with a full path")
 
     cwd = os.path.abspath(os.path.expanduser(body.cwd.strip() or os.getcwd()))
     if not os.path.isdir(cwd):
