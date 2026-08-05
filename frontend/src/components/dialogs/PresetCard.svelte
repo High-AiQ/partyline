@@ -12,19 +12,19 @@
     onremoved?: (_preset: PresetDraft) => void;
   }
 
-  let { preset, onsaved = undefined, onremoved = undefined }: Props = $props();
+  let { preset, onsaved, onremoved }: Props = $props();
 
   // Seeded from the preset, then owned by the form. Each card is keyed by id,
   // so a different preset is a different component instance — there is nothing
   // to stay in sync with.
   /* svelte-ignore state_referenced_locally */
-  let title = $state(preset.title ?? "");
+  let title = $state(preset.title);
   /* svelte-ignore state_referenced_locally */
-  let name = $state(preset.name ?? "");
+  let name = $state(preset.name);
   /* svelte-ignore state_referenced_locally */
-  let adapter = $state(preset.adapter ?? session.adapters[0]?.id ?? "");
+  let adapter = $state(preset.adapter);
   /* svelte-ignore state_referenced_locally */
-  let command = $state(preset.command ?? "");
+  let command = $state(preset.command);
   let error = $state("");
   let busy = $state(false);
 

@@ -32,7 +32,7 @@
     api
       .conversation(conversation.id)
       .then((detail) => {
-        live = (detail.attachments || []).filter(isLive);
+        live = detail.attachments.filter(isLive);
       })
       .catch(() => {
         failed = true;

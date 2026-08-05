@@ -27,7 +27,7 @@
   /** Flip above the anchor rather than hang off the bottom of the window, and
    *  never let the panel run past either edge. */
   function place(): void {
-    if (!panel || !anchor) return;
+    if (!panel) return;
     const at = anchor.getBoundingClientRect();
     const box = panel.getBoundingClientRect();
     const below = at.bottom + 6;
@@ -38,7 +38,7 @@
   $effect(() => {
     // Measure once the panel is in the DOM, then take focus so the menu is
     // usable from the keyboard and Escape has somewhere to fire from.
-    tick().then(() => {
+    void tick().then(() => {
       place();
       panel?.querySelector("button")?.focus();
     });
@@ -66,7 +66,9 @@
 <svelte:window
   on:resize={close}
   on:scroll|capture={close}
-  on:keydown={(e) => e.key === "Escape" && close()}
+  on:keydown={(e) => {
+    if (e.key === "Escape") close();
+  }}
 />
 
 <div

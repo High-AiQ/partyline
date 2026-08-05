@@ -57,7 +57,9 @@
           title="line actions"
           aria-label="line actions for {conversation.name}"
           aria-expanded={open}
-          onclick={(event) => toggle(event, conversation)}>⋯</button
+          onclick={(event) => {
+            toggle(event, conversation);
+          }}>⋯</button
         >
       </div>
     </div>

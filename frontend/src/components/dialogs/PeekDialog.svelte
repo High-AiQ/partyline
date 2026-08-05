@@ -41,11 +41,17 @@
       screen = "(could not reach this process)";
       return;
     }
-    timers.push(setTimeout(refresh, AFTER_KEY_MS));
+    timers.push(
+      setTimeout(() => {
+        void refresh();
+      }, AFTER_KEY_MS),
+    );
   }
 
-  refresh();
-  const interval = setInterval(refresh, REFRESH_MS);
+  void refresh();
+  const interval = setInterval(() => {
+    void refresh();
+  }, REFRESH_MS);
 
   // Both the poll and any pending post-key refresh have to go, or closing the
   // dialog leaves a timer writing into a component that is no longer mounted.

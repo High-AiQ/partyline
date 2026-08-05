@@ -35,7 +35,7 @@
   function onToggle(event: Event): void {
     if (!(event.currentTarget instanceof HTMLDetailsElement)) return;
     room.archiveOpen = event.currentTarget.open;
-    if (room.archiveOpen) load();
+    if (room.archiveOpen) void load();
   }
 
   async function restore(conversation: Conversation): Promise<void> {
@@ -44,7 +44,7 @@
       const restored = await api.restoreConversation(conversation.id);
       await room.loadConversations();
       await load();
-      room.open(restored);
+      void room.open(restored);
     } catch (error: unknown) {
       room.showNotice(error instanceof ApiError ? error.message : "could not restore line", "error");
     } finally {
@@ -56,7 +56,7 @@
 <details id="archiveSection" ontoggle={onToggle}>
   <summary>
     archived lines
-    <span id="archiveCount">{room.archived.length ? `(${room.archived.length})` : ""}</span>
+    <span id="archiveCount">{room.archived.length ? `(${String(room.archived.length)})` : ""}</span>
   </summary>
   <nav id="archivedConvs" aria-label="archived lines">
     {#if loading}
@@ -82,7 +82,9 @@
               type="button"
               class="purge"
               title="permanently delete this line"
-              onclick={() => onpurge(conversation)}>delete forever</button
+              onclick={() => {
+                onpurge(conversation);
+              }}>delete forever</button
             >
           </div>
         </div>

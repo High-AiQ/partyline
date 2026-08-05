@@ -3,6 +3,7 @@
   import ConversationList from "./ConversationList.svelte";
   import ArchiveSection from "./ArchiveSection.svelte";
   import { ApiError } from "../../lib/api";
+  import type { Conversation } from "../../lib/contracts";
   import { room } from "../../state/room.svelte";
   import { session } from "../../state/session.svelte";
   import { dialogs } from "../../state/dialogs.svelte";
@@ -25,6 +26,17 @@
     }
   }
 
+  function renameLine(conversation: Conversation): void {
+    dialogs.open(RenameLineDialog, { conversation });
+  }
+
+  function deleteLine(conversation: Conversation): void {
+    dialogs.open(DeleteLineDialog, { conversation });
+  }
+
+  function purgeLine(conversation: Conversation): void {
+    dialogs.open(PurgeLineDialog, { conversation });
+  }
 </script>
 
 <aside id="rail">
@@ -36,10 +48,7 @@
     </p>
   </div>
 
-  <ConversationList
-    onrename={(conversation) => dialogs.open(RenameLineDialog, { conversation })}
-    ondelete={(conversation) => dialogs.open(DeleteLineDialog, { conversation })}
-  />
+  <ConversationList onrename={renameLine} ondelete={deleteLine} />
 
   <form id="newconv" onsubmit={openLine}>
     <input
@@ -53,17 +62,25 @@
     <button type="submit" aria-label="open a new line">+</button>
   </form>
 
-  <ArchiveSection onpurge={(conversation) => dialogs.open(PurgeLineDialog, { conversation })} />
+  <ArchiveSection onpurge={purgeLine} />
 
   <div id="me">
     <span>operator&nbsp;<b id="meName">{session.handle}</b></span>
     <span class="me-actions">
-      <button id="meEdit" type="button" onclick={() => session.openGate()}>edit</button>
+      <button
+        id="meEdit"
+        type="button"
+        onclick={() => {
+          session.openGate();
+        }}>edit</button
+      >
       <button
         id="stopServer"
         type="button"
         title="stop the partyline server"
-        onclick={() => dialogs.open(StopServerDialog)}>stop</button
+        onclick={() => {
+          dialogs.open(StopServerDialog);
+        }}>stop</button
       >
     </span>
   </div>
