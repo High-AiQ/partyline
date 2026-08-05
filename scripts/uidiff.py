@@ -132,6 +132,17 @@ class Capture:
     unstable: tuple[str, ...]
 
 
+def judgeable(baseline: dict[str, str], unstable: tuple[str, ...]) -> dict[str, str]:
+    """The baseline entries this run is entitled to have an opinion about.
+
+    A state this run could not pin down must not be compared *at all*. Leaving
+    it in would make it look absent and get it reported as removed — telling
+    somebody a state vanished when it merely wobbled, which sends them hunting
+    a deletion that never happened.
+    """
+    return {name: value for name, value in baseline.items() if name not in unstable}
+
+
 def reconcile(first: dict[str, str], second: dict[str, str]) -> Capture:
     """Keep only the states two consecutive captures agreed on.
 
@@ -201,9 +212,13 @@ def check(baseline_dir: Path = BASELINE_DIR) -> int:
     report_unstable(result)
 
     # Only judge states both sides consider trustworthy. One the baseline could
-    # not pin down is not evidence of anything.
-    comparable = {name: value for name, value in result.stable.items() if name in baseline}
-    differences = compare(baseline, comparable)
+    # not pin down is not evidence of anything — and neither is one *this* run
+    # could not pin down, which must not fall through to the comparison and be
+    # reported as "removed". Saying a state vanished when it merely wobbled
+    # sends someone hunting a deletion that never happened.
+    judged = judgeable(baseline, result.unstable)
+    comparable = {name: value for name, value in result.stable.items() if name in judged}
+    differences = compare(judged, comparable)
 
     if not differences:
         print(f"  ✓ all {len(comparable)} comparable states look exactly as they did")

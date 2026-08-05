@@ -357,6 +357,11 @@ def capture_all(out_dir="/tmp/partyline-ui", *, freeze_animations=False) -> list
         ui.open_row_menu(0)
         page.locator(".conv-menu .delete").click()
         page.wait_for_selector("#modal:not([hidden]), .modal, dialog[open]", timeout=5000)
+        # The dialog asks the server which processes are live before it can warn
+        # about them, so the modal exists a beat before it is finished. Shooting
+        # on the modal alone catches "Loading…" some runs and the loaded state
+        # others — which is a difference in the capture, not in the app.
+        page.locator(".modal .live-list").wait_for(state="visible", timeout=5000)
         ui.shot("07-delete-confirm")
 
         # The overlay swallows clicks until the modal is dismissed, and Escape

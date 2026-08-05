@@ -17,6 +17,7 @@ from scripts.uidiff import (  # noqa: E402
     compare,
     digest,
     digests,
+    judgeable,
     reconcile,
     same_shots,
 )
@@ -118,6 +119,36 @@ class ReconcileTest(unittest.TestCase):
     def test_unstable_names_are_sorted_so_the_report_is_stable(self):
         result = reconcile({"c": "1", "a": "1"}, {"c": "2", "a": "2"})
         self.assertEqual(result.unstable, ("a", "c"))
+
+
+class JudgeableTest(unittest.TestCase):
+    """A wobbly state must not be reported as a deleted one.
+
+    This is a reporting bug with teeth: the first run of the parity check on the
+    TypeScript conversion said `07-delete-confirm is gone`, and the honest
+    answer was that its capture had raced a fetch. The wrong wording is worse
+    than no wording, because it names a failure mode that is not happening.
+    """
+
+    BASE = {"a": "1", "b": "2", "c": "3"}
+
+    def test_an_unstable_state_is_withheld_from_judgement(self):
+        self.assertEqual(judgeable(self.BASE, ("b",)), {"a": "1", "c": "3"})
+
+    def test_nothing_unstable_means_everything_is_judged(self):
+        self.assertEqual(judgeable(self.BASE, ()), self.BASE)
+
+    def test_an_unstable_state_is_never_reported_as_removed(self):
+        unstable = ("b",)
+        judged = judgeable(self.BASE, unstable)
+        # `b` is missing from this run's stable set precisely because it wobbled.
+        comparable = {"a": "1", "c": "3"}
+        self.assertEqual(compare(judged, comparable), [])
+
+    def test_a_genuinely_removed_state_is_still_reported(self):
+        # The guard must not swallow the real case it resembles.
+        judged = judgeable(self.BASE, ())
+        self.assertEqual(compare(judged, {"a": "1", "b": "2"}), [Difference("c", Change.REMOVED)])
 
 
 class DescribeTest(unittest.TestCase):
