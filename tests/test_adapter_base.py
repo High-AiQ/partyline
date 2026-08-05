@@ -58,6 +58,33 @@ class Recorder(Adapter):
 
 
 class AdapterLifecycleTest(unittest.IsolatedAsyncioTestCase):
+    async def test_wait_ready_completes_only_after_adapter_marks_ready(self):
+        adapter = Recorder(["sh", "-c", "sleep 30"])
+        await adapter.start()
+        self.addAsyncCleanup(adapter.stop)
+
+        waiting = asyncio.create_task(adapter.wait_ready())
+        await asyncio.sleep(0)
+        self.assertFalse(waiting.done())
+
+        adapter.mark_ready()
+        self.assertTrue(await waiting)
+
+    async def test_wait_ready_returns_false_when_process_exits_first(self):
+        adapter = Recorder(["sh", "-c", "exit 0"])
+        await adapter.start()
+
+        self.assertFalse(await adapter.wait_ready())
+
+    async def test_stopping_before_ready_releases_waiters_as_not_ready(self):
+        adapter = Recorder(["sh", "-c", "sleep 30"])
+        await adapter.start()
+        waiting = asyncio.create_task(adapter.wait_ready())
+
+        await adapter.stop()
+
+        self.assertFalse(await waiting)
+
     async def test_start_reports_running_and_stop_reports_detached(self):
         adapter = Recorder(["sh", "-c", "sleep 30"])
         await adapter.start()

@@ -71,6 +71,8 @@ class Adapter:
         self.spawned_at = 0.0
         self._tasks: list[asyncio.Task] = []
         self._stopping = False
+        self._ready = asyncio.Event()
+        self._ready_result: bool | None = None
         self._term = pyte.Screen(120, 40)
         self._term_stream = pyte.ByteStream(self._term)
 
@@ -128,8 +130,31 @@ class Adapter:
         ]
         await self.on_status("running")
 
+    def mark_ready(self) -> None:
+        """Declare that this adapter has claimed its session and can be resumed safely.
+
+        Adapters call this only after their transcript/session is unambiguous and
+        ready for another process to start. A process that exits or is stopped
+        before then completes ``wait_ready()`` with ``False`` instead of leaving
+        an orchestrator waiting forever.
+        """
+        if self._ready_result is None and not self._stopping:
+            self._ready_result = True
+            self._ready.set()
+
+    async def wait_ready(self) -> bool:
+        """Wait until readiness is declared, or this adapter can never be ready."""
+        await self._ready.wait()
+        return self._ready_result is True
+
+    def _mark_not_ready(self) -> None:
+        if self._ready_result is None:
+            self._ready_result = False
+            self._ready.set()
+
     async def stop(self):
         self._stopping = True
+        self._mark_not_ready()
         if self.proc and self.proc.poll() is None:
             try:
                 os.killpg(self.proc.pid, signal.SIGTERM)
@@ -179,6 +204,7 @@ class Adapter:
     async def _watch_exit(self):
         assert self.proc is not None
         rc = await asyncio.get_running_loop().run_in_executor(None, self.proc.wait)
+        self._mark_not_ready()
         if not self._stopping:
             await self.on_status("exited")
             await self.post("system", "system", f"@{self.att['name']} exited (code {rc})")
