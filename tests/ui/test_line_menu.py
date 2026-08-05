@@ -39,7 +39,7 @@ class LineMenuTest(unittest.TestCase):
             page.mouse.click(640, 400)
 
             page.locator(".conv-menu").wait_for(state="hidden", timeout=5000)
-            self.assertFalse(page.evaluate("() => !!lineMenu.owner"))
+            self.assertEqual(page.locator(".conv-menu").count(), 0)
 
     def test_menu_closes_on_escape(self):
         with ui_session(["alpha line"]) as ui:

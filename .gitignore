@@ -12,5 +12,8 @@ uv.lock
 htmlcov/
 dist/
 build/
+node_modules/
+# partyline/static/ is the Vite build output and IS committed on purpose: a
+# fresh clone, and a wheel, must serve the UI without Node ever running.
 *.sqlite
 *.sqlite3

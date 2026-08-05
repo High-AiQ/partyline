@@ -39,7 +39,7 @@ class HandleClaimTest(unittest.TestCase):
         with ui_session(LINES, handle="first") as ui:
             first = ui.page
             first.locator(".conv-row .conv").first.click()
-            first.wait_for_function("() => window.__handshaken !== false")
+            first.wait_for_function("() => window.partyline.wire.ready")
 
             # A second, entirely separate browser context: its own storage, so
             # its own client id. Same handle, same line.
@@ -122,7 +122,7 @@ class HandleClaimTest(unittest.TestCase):
 
     def test_a_human_cannot_take_a_running_process_handle(self):
         with ui_session(LINES, handle="first") as ui:
-            conv_id = ui.page.evaluate("() => state.convs[0].id")
+            conv_id = ui.page.evaluate("() => window.partyline.room.conversations[0].id")
             ui.page.request.post(
                 f"{ui.base_url}/api/conversations/{conv_id}/attachments",
                 data={"name": "worker", "adapter": "raw", "command": "sleep 60", "cwd": "/tmp"})

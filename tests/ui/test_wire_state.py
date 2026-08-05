@@ -48,11 +48,11 @@ class WireStateTest(unittest.TestCase):
 
             # Drop the socket once from the client side; the server is still up,
             # so the retry succeeds and nothing should ever appear.
-            page.evaluate("() => state.ws.close()")
+            page.evaluate("() => window.partyline.wire.socket.close()")
             page.wait_for_timeout(2500)
 
             self.assertEqual(page.locator("#wireDown").count(), 0)
-            self.assertTrue(page.evaluate("() => state.wsReady"))
+            self.assertTrue(page.evaluate("() => window.partyline.wire.ready"))
 
     def test_a_shutdown_event_says_it_is_not_coming_back(self):
         """The distinction that makes this worth having: a crash is
@@ -64,7 +64,7 @@ class WireStateTest(unittest.TestCase):
 
             # Deliver the event the shutdown route will broadcast.
             page.evaluate(
-                "() => state.ws.dispatchEvent(new MessageEvent('message',"
+                "() => window.partyline.wire.socket.dispatchEvent(new MessageEvent('message',"
                 " {data: JSON.stringify({type: 'shutdown'})}))")
 
             page.locator("#wireDown.stopped").wait_for(state="visible", timeout=5000)

@@ -20,6 +20,7 @@ from pathlib import Path
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
@@ -29,6 +30,7 @@ from .db import Db
 from .runtime import NAME_RE, RESERVED_NAMES, ChatRuntime
 
 STATIC_DIR = Path(__file__).parent / "static"
+ASSETS_DIR = STATIC_DIR / "assets"
 
 runtime = ChatRuntime(Db(os.environ.get("PARTYLINE_DB", os.path.expanduser("~/.partyline.db"))))
 
@@ -75,6 +77,21 @@ class PresetIn(BaseModel):
 @app.get("/")
 async def index():
     return FileResponse(STATIC_DIR / "index.html")
+
+
+# The frontend is built by Vite into `static/`, which emits content-hashed
+# bundles under `assets/`. Hashed names are why these can be cached hard: a new
+# build is a new filename, so nothing served from here is ever stale.
+#
+# The directory is committed, so it is present in a fresh clone and in a wheel
+# without Node ever running. It can still be missing if someone has cleaned it,
+# and `StaticFiles` would answer that with an opaque traceback at import time —
+# so say what actually needs doing instead.
+if not ASSETS_DIR.is_dir():  # pragma: no cover - only reachable with a cleaned tree
+    raise RuntimeError(
+        f"no built frontend at {ASSETS_DIR}. Run `npm install && npm run build` in frontend/."
+    )
+app.mount("/assets", StaticFiles(directory=ASSETS_DIR), name="assets")
 
 
 @app.get("/api/version")
