@@ -1,13 +1,19 @@
-<script>
+<script lang="ts">
   /** Delete an archived line for good. The one action here with no way back. */
   import Modal from "../Modal.svelte";
   import ConfirmForm from "./ConfirmForm.svelte";
-  import { api } from "../../lib/api.js";
+  import { api } from "../../lib/api";
+  import type { Conversation } from "../../lib/contracts";
   import { room } from "../../state/room.svelte.js";
 
-  let { conversation, close } = $props();
+  interface Props {
+    conversation: Conversation;
+    close: () => void;
+  }
 
-  async function purge() {
+  let { conversation, close }: Props = $props();
+
+  async function purge(): Promise<void> {
     await api.purgeConversation(conversation.id);
     close();
     await room.loadArchived();

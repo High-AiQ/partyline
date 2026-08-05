@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   /**
    * Pull adapter packages from a git repository.
    *
@@ -7,19 +7,23 @@
    * field it is warning about.
    */
   import Modal from "../Modal.svelte";
-  import { api } from "../../lib/api.js";
+  import { ApiError, api } from "../../lib/api";
   import { session } from "../../state/session.svelte.js";
 
-  let { close } = $props();
+  interface Props {
+    close: () => void;
+  }
+
+  let { close }: Props = $props();
 
   let repository = $state("");
   let ref = $state("");
   let status = $state("");
   let failed = $state(false);
   let busy = $state(false);
-  let doneTimer = null;
+  let doneTimer: ReturnType<typeof setTimeout> | null = null;
 
-  async function go() {
+  async function go(): Promise<void> {
     if (!repository.trim()) return;
     busy = true;
     failed = false;
@@ -29,8 +33,8 @@
       await session.loadAdapters();
       status = "loaded: " + result.loaded.join(", ");
       doneTimer = setTimeout(close, 1200);
-    } catch (error) {
-      status = error.message;
+    } catch (error: unknown) {
+      status = error instanceof ApiError ? error.message : "import failed";
       failed = true;
       busy = false;
     }
@@ -38,7 +42,9 @@
 
   // Closing during the "loaded" pause must not leave a timer to reopen-close a
   // dialog that is already gone.
-  $effect(() => () => clearTimeout(doneTimer));
+  $effect(() => () => {
+    if (doneTimer !== null) clearTimeout(doneTimer);
+  });
 </script>
 
 <Modal title="import adapters" {close}>

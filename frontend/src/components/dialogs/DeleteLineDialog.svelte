@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   /**
    * Delete a line, and stop whatever is running on it.
    *
@@ -8,15 +8,21 @@
    */
   import Modal from "../Modal.svelte";
   import ConfirmForm from "./ConfirmForm.svelte";
-  import { api } from "../../lib/api.js";
-  import { isLive } from "../../lib/attachments.js";
+  import { ApiError, api } from "../../lib/api";
+  import { isLive } from "../../lib/attachments";
+  import type { Attachment, Conversation } from "../../lib/contracts";
   import { room } from "../../state/room.svelte.js";
 
-  let { conversation, close } = $props();
+  interface Props {
+    conversation: Conversation;
+    close: () => void;
+  }
+
+  let { conversation, close }: Props = $props();
 
   let loading = $state(true);
   let failed = $state(false);
-  let live = $state([]);
+  let live = $state<Attachment[]>([]);
 
   let warning = $state(false);
   let warned = $state(false);
@@ -45,8 +51,8 @@
         "@all this line is being deleted soon. Please commit your work and post status.",
       );
       warned = true;
-    } catch (error) {
-      warnError = error.message || "could not send warning";
+    } catch (error: unknown) {
+      warnError = error instanceof ApiError ? error.message : "could not send warning";
     } finally {
       warning = false;
     }

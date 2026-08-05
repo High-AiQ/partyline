@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   /**
    * A live view of a process's terminal, and a keypad into its pty.
    *
@@ -7,9 +7,15 @@
    */
   import { onDestroy } from "svelte";
   import Modal from "../Modal.svelte";
-  import { api } from "../../lib/api.js";
+  import { api } from "../../lib/api";
+  import type { Attachment } from "../../lib/contracts";
 
-  let { attachment, close } = $props();
+  interface Props {
+    attachment: Attachment;
+    close: () => void;
+  }
+
+  let { attachment, close }: Props = $props();
 
   const KEYS = ["enter", "esc", "up", "down", "tab", "y", "n", "1", "2", "3"];
   const REFRESH_MS = 2000;
@@ -17,9 +23,9 @@
   const AFTER_KEY_MS = 350;
 
   let screen = $state("…");
-  const timers = [];
+  const timers: ReturnType<typeof setTimeout>[] = [];
 
-  async function refresh() {
+  async function refresh(): Promise<void> {
     try {
       const data = await api.screen(attachment.id);
       screen = data.screen || "(blank screen)";
@@ -28,7 +34,7 @@
     }
   }
 
-  async function press(key) {
+  async function press(key: string): Promise<void> {
     try {
       await api.sendKey(attachment.id, key);
     } catch {

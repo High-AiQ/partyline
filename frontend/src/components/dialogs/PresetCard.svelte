@@ -1,10 +1,18 @@
-<script>
+<script lang="ts">
   /** One saved attach configuration, editable in place. */
-  import { adapterLabel } from "../../lib/attachments.js";
-  import { api } from "../../lib/api.js";
+  import { adapterLabel } from "../../lib/attachments";
+  import { ApiError, api } from "../../lib/api";
+  import type { PresetDraft } from "../../lib/api";
+  import type { Preset } from "../../lib/contracts";
   import { session } from "../../state/session.svelte.js";
 
-  let { preset, onsaved = undefined, onremoved = undefined } = $props();
+  interface Props {
+    preset: PresetDraft;
+    onsaved?: (_preset: Preset) => void;
+    onremoved?: (_preset: PresetDraft) => void;
+  }
+
+  let { preset, onsaved = undefined, onremoved = undefined }: Props = $props();
 
   // Seeded from the preset, then owned by the form. Each card is keyed by id,
   // so a different preset is a different component instance — there is nothing
@@ -20,34 +28,36 @@
   let error = $state("");
   let busy = $state(false);
 
-  async function save() {
+  async function save(): Promise<void> {
     busy = true;
     error = "";
     try {
-      const saved = await api.savePreset({
-        id: preset.id,
+      const draft: PresetDraft = {
         title: title.trim(),
         name: name.trim(),
         adapter,
         command: command.trim(),
-      });
+      };
+      if (preset.id) draft.id = preset.id;
+      const saved = await api.savePreset(draft);
       await session.loadPresets();
       onsaved?.(saved);
-    } catch (failure) {
-      error = failure.message;
+    } catch (failure: unknown) {
+      error = failure instanceof ApiError ? failure.message : "save failed";
     } finally {
       busy = false;
     }
   }
 
-  async function remove() {
+  async function remove(): Promise<void> {
+    if (!preset.id) return;
     busy = true;
     try {
       await api.deletePreset(preset.id);
       await session.loadPresets();
       onremoved?.(preset);
-    } catch (failure) {
-      error = failure.message;
+    } catch (failure: unknown) {
+      error = failure instanceof ApiError ? failure.message : "could not delete preset";
       busy = false;
     }
   }

@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   /**
    * The confirming half of a destructive dialog.
    *
@@ -10,7 +10,16 @@
    * When `phrase` is null there is nothing to type — the action is destructive
    * but recoverable, or there is nothing live to lose.
    */
-  let { phrase = null, label, prompt, busyLabel = "working…", onconfirm, oncancel } = $props();
+  interface Props {
+    phrase?: string | null;
+    label: string;
+    prompt: string;
+    busyLabel?: string;
+    onconfirm: () => void | Promise<void>;
+    oncancel: () => void;
+  }
+
+  let { phrase = null, label, prompt, busyLabel = "working…", onconfirm, oncancel }: Props = $props();
 
   let typed = $state("");
   let busy = $state(false);
@@ -18,17 +27,17 @@
 
   const armed = $derived(phrase === null || typed === phrase);
 
-  async function submit(event) {
+  async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     if (!armed) return;
     busy = true;
     error = "";
     try {
       await onconfirm();
-    } catch (failure) {
+    } catch (failure: unknown) {
       // Stay open with the text intact: the usual cause is transient, and
       // making someone retype a line name to retry is a punishment.
-      error = failure?.message || "that did not work";
+      error = failure instanceof Error ? failure.message : "that did not work";
       busy = false;
     }
   }

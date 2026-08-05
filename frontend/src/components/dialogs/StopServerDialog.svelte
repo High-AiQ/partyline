@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   /**
    * Stop partyline itself.
    *
@@ -8,13 +8,18 @@
    */
   import Modal from "../Modal.svelte";
   import ConfirmForm from "./ConfirmForm.svelte";
-  import { api } from "../../lib/api.js";
+  import { api } from "../../lib/api";
+  import type { RunningProcess } from "../../lib/contracts";
   import { wire } from "../../state/wire.svelte.js";
 
-  let { close } = $props();
+  interface Props {
+    close: () => void;
+  }
+
+  let { close }: Props = $props();
 
   let loading = $state(true);
-  let running = $state([]);
+  let running = $state<RunningProcess[]>([]);
 
   $effect(() => {
     // The list is a courtesy — the warning below stands either way, so a
@@ -32,7 +37,7 @@
       });
   });
 
-  async function stop() {
+  async function stop(): Promise<void> {
     await api.shutdown();
     close();
     // The server broadcasts `shutdown` before it goes, but say it here too:

@@ -1,10 +1,14 @@
-<script>
+<script lang="ts">
   /** Every saved preset, editable. */
   import Modal from "../Modal.svelte";
   import PresetCard from "./PresetCard.svelte";
   import { session } from "../../state/session.svelte.js";
 
-  let { close } = $props();
+  interface Props {
+    close: () => void;
+  }
+
+  let { close }: Props = $props();
 </script>
 
 <Modal title="presets" {close}>

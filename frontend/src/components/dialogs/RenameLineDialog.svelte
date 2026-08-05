@@ -1,38 +1,49 @@
-<script>
+<script lang="ts">
   import Modal from "../Modal.svelte";
-  import { api } from "../../lib/api.js";
+  import { ApiError, api } from "../../lib/api";
+  import type { Conversation } from "../../lib/contracts";
   import { room } from "../../state/room.svelte.js";
   import { session } from "../../state/session.svelte.js";
 
-  let { conversation, close } = $props();
+  interface Props {
+    conversation: Conversation;
+    close: () => void;
+  }
+
+  let { conversation, close }: Props = $props();
 
   /* svelte-ignore state_referenced_locally */
   let name = $state(conversation.name);
   let saving = $state(false);
   let error = $state("");
-  let field = $state(null);
+  let field = $state<HTMLInputElement | null>(null);
 
   $effect(() => {
     field?.focus();
     field?.select();
   });
 
-  async function save(event) {
+  async function save(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     const next = name.trim();
     if (!next) return field?.focus();
+    const sender = session.handle;
+    if (!sender) {
+      error = "choose a handle first";
+      return;
+    }
 
     saving = true;
     error = "";
     try {
-      const renamed = await api.renameConversation(conversation.id, next, session.handle);
+      const renamed = await api.renameConversation(conversation.id, next, sender);
       // The socket broadcasts this to everyone else; the tab that asked should
       // not have to wait on its own round trip to see it.
       if (room.conversation?.id === renamed.id) room.conversation = renamed;
       await room.loadConversations();
       close();
-    } catch (failure) {
-      error = failure.message;
+    } catch (failure: unknown) {
+      error = failure instanceof ApiError ? failure.message : "could not rename line";
       saving = false;
     }
   }

@@ -1,34 +1,45 @@
-<script>
+<script lang="ts">
   /** The line's standing brief. Agents receive it when they join, and hear
    *  about changes at their next wake — so it is worth a real editor. */
   import Modal from "../Modal.svelte";
-  import { api } from "../../lib/api.js";
+  import { ApiError, api } from "../../lib/api";
+  import type { Conversation } from "../../lib/contracts";
   import { room } from "../../state/room.svelte.js";
   import { session } from "../../state/session.svelte.js";
 
-  let { close } = $props();
+  interface Props {
+    close: () => void;
+  }
+
+  let { close }: Props = $props();
 
   const MAX = 3000;
-  const conversation = room.conversation;
+  const conversation: Conversation | null = room.conversation;
 
   let topic = $state(conversation?.topic ?? "");
   let saving = $state(false);
   let error = $state("");
-  let field = $state(null);
+  let field = $state<HTMLTextAreaElement | null>(null);
 
   $effect(() => {
     field?.focus();
   });
 
-  async function save() {
+  async function save(): Promise<void> {
+    if (!conversation) return;
+    const sender = session.handle;
+    if (!sender) {
+      error = "choose a handle first";
+      return;
+    }
     saving = true;
     error = "";
     try {
-      room.conversation = await api.setTopic(conversation.id, topic, session.handle);
+      room.conversation = await api.setTopic(conversation.id, topic, sender);
       await room.loadConversations();
       close();
-    } catch (failure) {
-      error = failure.message;
+    } catch (failure: unknown) {
+      error = failure instanceof ApiError ? failure.message : "could not save topic";
       saving = false;
     }
   }
