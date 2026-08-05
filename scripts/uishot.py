@@ -26,6 +26,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -46,6 +47,24 @@ def free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         return sock.getsockname()[1]
+
+
+def _die_with_parent():
+    """Ask the kernel to kill this server if its parent dies.
+
+    The `finally` below handles a normal exit or an exception, but not the
+    parent being killed outright — a timed-out test run, a Ctrl-C, an agent
+    whose turn was cut short. Without this, those leak a live server on a
+    random port that outlives everything and is a nuisance to find later.
+    Linux only; harmless where it is unavailable.
+    """
+    try:
+        import ctypes
+
+        PR_SET_PDEATHSIG = 1
+        ctypes.CDLL("libc.so.6", use_errno=True).prctl(PR_SET_PDEATHSIG, signal.SIGTERM)
+    except Exception:
+        pass
 
 
 def _post(url: str, payload: dict) -> dict:
@@ -141,7 +160,8 @@ def ui_session(lines=(), *, out_dir="/tmp/partyline-ui", headless=True, viewport
     env = dict(os.environ, PARTYLINE_DB=db_path, PARTYLINE_PORT=str(port),
                PARTYLINE_HOST="127.0.0.1")
     server = subprocess.Popen([sys.executable, "-m", "partyline.server"], cwd=REPO_ROOT,
-                              env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                              env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              preexec_fn=_die_with_parent)
     try:
         _await_server(base_url, server)
         for name in lines:
