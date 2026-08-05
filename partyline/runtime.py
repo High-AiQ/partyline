@@ -30,6 +30,20 @@ class ChatRuntime:
         self.human_handles: dict[str, dict[WebSocket, tuple[str, str]]] = {}
         self.live: dict[str, Adapter] = {}
 
+    def running_processes(self) -> list[dict]:
+        """Every live attachment, across every line, newest line first.
+
+        Stopping the server stops all of these, so whoever asks for that has to
+        be shown the whole list — not just the line they happen to be looking at.
+        """
+        found = []
+        for conv in self.db.list_conversations():
+            for att in self.db.list_attachments(conv["id"]):
+                if att["id"] in self.live and att["status"] in ("starting", "running"):
+                    found.append({"name": att["name"], "adapter": att["adapter"],
+                                  "conversation": conv["name"]})
+        return found
+
     async def shutdown(self):
         for adapter in list(self.live.values()):
             try:

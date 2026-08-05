@@ -9,6 +9,7 @@ Routing model (MVP):
 
 import os
 import re
+import signal
 import shlex
 import shutil
 import subprocess
@@ -18,8 +19,9 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, WebSocket
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 
 from . import __version__
 from .adapters import ADAPTERS, ADAPTER_METADATA, import_repository, make_adapter, reload_adapters
@@ -78,6 +80,50 @@ async def index():
 @app.get("/api/version")
 async def version():
     return {"version": __version__}
+
+
+LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+# Set by main(). None when partyline runs under someone else's ASGI server, in
+# which case there is no server object to ask politely and we signal instead.
+_uvicorn_server = None
+
+
+def request_exit():
+    """Ask the process to come down gracefully, running lifespan teardown.
+
+    Never os._exit(): that skips `ChatRuntime.shutdown()`, which is what stops
+    the ptys. Orphaned processes would outlive the server that owns them.
+    """
+    if _uvicorn_server is not None:
+        _uvicorn_server.should_exit = True
+    else:
+        os.kill(os.getpid(), signal.SIGTERM)
+
+
+@app.get("/api/running")
+async def running():
+    return runtime.running_processes()
+
+
+@app.post("/api/shutdown")
+async def shutdown(request: Request):
+    """Stop partyline. Deliberately reachable only from this machine.
+
+    The bind address is configurable, so "it only listens on localhost" is not
+    something to assume — check the caller.
+    """
+    client = request.client.host if request.client else None
+    if client not in LOOPBACK:
+        raise HTTPException(403, "shutdown may only be requested from this machine")
+    stopping = runtime.running_processes()
+    # Tell every open tab before going, so they show a stopped state instead of
+    # reconnecting forever at a socket that is never coming back.
+    for conv_id in list(runtime.sockets):
+        await runtime.broadcast(conv_id, {"type": "shutdown"})
+    # The exit runs *after* this response is flushed; stopping first would drop
+    # the connection before the caller ever learned it had worked.
+    return JSONResponse({"ok": True, "stopping": [p["name"] for p in stopping]},
+                        background=BackgroundTask(request_exit))
 
 
 @app.get("/api/adapters")
@@ -486,7 +532,11 @@ def main():
     load_dotenv()
     host = os.environ.get("PARTYLINE_HOST", "127.0.0.1")
     port = int(os.environ.get("PARTYLINE_PORT", "8642"))
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    global _uvicorn_server
+    # Hold the server object so /api/shutdown can ask it to stop rather than
+    # signalling blindly.
+    _uvicorn_server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="info"))
+    _uvicorn_server.run()
 
 
 if __name__ == "__main__":

@@ -195,6 +195,12 @@ Everything in the UI is also plain HTTP (`/api/conversations`, `/api/adapters`, 
 `/api/attachments/<id>/{resume,screen,keys}`, WebSocket at `/ws/<conv-id>`), so partyline is
 scriptable from anything that can curl.
 
+**Stopping partyline.** `POST /api/shutdown` stops the server gracefully — attached processes are
+stopped through the normal lifespan teardown, so nothing is orphaned — and `GET /api/running`
+lists what would be stopped. Both are also in the UI, as **stop** next to the operator name in
+the sidebar footer. Shutdown is refused unless the request comes from this machine, since the
+bind address is configurable and localhost-only is not something to assume.
+
 ### Credentials for attached processes
 
 An attached process inherits partyline's environment, so that's where its API keys come from.

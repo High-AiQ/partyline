@@ -129,6 +129,9 @@ body::after{
 }
 #me b{color:var(--cream-dim);font-weight:500}
 #me button{font-size:10px;padding:2px 8px}
+#me #stopServer{margin-left:6px;color:var(--cream-faint);border-color:var(--line)}
+#me #stopServer:hover{color:var(--cream);background:var(--red);border-color:var(--red)}
+.live-item .on{color:var(--cream-faint);margin-left:auto;font-size:10px}
 
 /* ── center: the line ──────────────────────────────────── */
 #main{display:flex;flex-direction:column;min-width:0;overflow:hidden;background:
@@ -428,7 +431,9 @@ button.primary:hover{color:var(--ink)}
       <summary>archived lines <span id="archiveCount"></span></summary>
       <nav id="archivedConvs" aria-label="archived lines"><div class="archive-note">open to load the archive</div></nav>
     </details>
-    <div id="me"><span>operator&nbsp;<b id="meName"></b></span><button id="meEdit" type="button">edit</button></div>
+    <div id="me"><span>operator&nbsp;<b id="meName"></b></span>
+      <button id="meEdit" type="button">edit</button>
+      <button id="stopServer" type="button" title="stop the partyline server">stop</button></div>
   </aside>
 
   <main id="main">
@@ -1011,6 +1016,69 @@ function sendConversationMessage(convId, body){
     ws.onerror = ()=>{ clearTimeout(timeout); finish(new Error("line is not reachable")); };
   });
 }
+
+/* ── stop the server ──
+   Deliberately built from the same pieces as the delete-line dialog: same
+   modal(), same .live-list / .line-status / .danger vocabulary. A one-off
+   overlay here would be a second thing to keep in step with the first. */
+$("stopServer").onclick = ()=>{
+  modal("stop partyline", (content, close)=>{
+    content.innerHTML = `<p>Checking what is running…</p>`;
+    (async()=>{
+      let running = [];
+      try{
+        const res = await fetch("/api/running");
+        if(res.ok) running = await res.json();
+      }catch(err){ /* the list is a courtesy; the warning below still stands */ }
+      content.innerHTML =
+        `<p>This stops the partyline server itself — every line, and every process on every `+
+        `line. Nothing here can start it again: you will need a terminal.</p>`+
+        `<div class="live-list"></div>`+
+        `<div class="line-status" aria-live="polite"></div>`+
+        `<form class="line-form confirm-form"></form>`;
+      const list = content.querySelector(".live-list");
+      const status = content.querySelector(".line-status");
+      const form = content.querySelector(".confirm-form");
+      if(running.length){
+        list.innerHTML = `<div class="note">these processes will be stopped</div>`+
+          running.map(p=>`<div class="live-item"><span class="led"></span><span>@${esc(p.name)}</span>`+
+            `<span class="on">on ${esc(p.conversation)}</span></div>`).join("");
+        form.innerHTML =
+          `<label for="confirmStop">type <b>stop</b> to confirm</label>`+
+          `<input id="confirmStop" autocomplete="off" spellcheck="false">`+
+          `<div class="line-actions"><button type="button">cancel</button>`+
+          `<button class="danger" type="submit" disabled>stop partyline</button></div>`;
+        const input = form.querySelector("input");
+        const confirm = form.querySelector("button[type=submit]");
+        input.oninput = ()=>{ confirm.disabled = input.value.trim().toLowerCase() !== "stop"; };
+      } else {
+        list.innerHTML = `<div class="note">no processes are attached</div>`;
+        form.innerHTML = `<div class="line-actions"><button type="button">cancel</button>`+
+          `<button class="danger" type="submit">stop partyline</button></div>`;
+      }
+      form.querySelector("button[type=button]").onclick = close;
+      form.onsubmit = async e=>{
+        e.preventDefault();
+        const confirm = form.querySelector("button[type=submit]");
+        confirm.disabled = true; confirm.textContent = "stopping…";
+        try{
+          const res = await fetch("/api/shutdown", {method:"POST",
+            headers:{"Content-Type":"application/json"}, body:"{}"});
+          if(!res.ok) throw new Error((await res.json()).detail || "could not stop partyline");
+          close();
+          // The server broadcasts `shutdown` before it goes, but say it here too:
+          // this tab asked for it, so it should not wait on a race to find out.
+          state.wireStopped = true;
+          showWireDown("partyline has stopped — start it again to reconnect", true);
+        }catch(err){
+          confirm.disabled = false; confirm.textContent = "stop partyline";
+          status.textContent = err.message || "could not stop partyline";
+          status.classList.add("error");
+        }
+      };
+    })();
+  });
+};
 
 async function deleteConversation(c){
   modal("delete line · " + c.name, (content, close)=>{

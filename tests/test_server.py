@@ -287,3 +287,65 @@ class ServerTest(unittest.TestCase):
                 os.environ.pop("PARTYLINE_PORT", None)
             else:
                 os.environ["PARTYLINE_PORT"] = old_port
+
+
+class FakeRequest:
+    """Just enough Request for the shutdown route's caller check."""
+
+    def __init__(self, host):
+        self.client = type("Client", (), {"host": host})() if host else None
+
+
+class ShutdownTest(ServerTest):
+    def test_running_processes_lists_live_attachments_with_their_line(self):
+        server.runtime.db.add_attachment("a1", "line", "worker", "fake", ["fake"], "/tmp")
+        server.runtime.db.set_attachment_status("a1", "running")
+        server.runtime.live["a1"] = FakeAdapter()
+
+        running = self.arun(server.running())
+
+        self.assertEqual(running, [{"name": "worker", "adapter": "fake", "conversation": "Line"}])
+
+    def test_a_detached_attachment_is_not_reported_as_running(self):
+        server.runtime.db.add_attachment("a1", "line", "worker", "fake", ["fake"], "/tmp")
+        server.runtime.db.set_attachment_status("a1", "exited")
+
+        self.assertEqual(self.arun(server.running()), [])
+
+    def test_shutdown_is_refused_from_a_non_loopback_caller(self):
+        """The bind address is configurable, so the caller must be checked."""
+        exits = []
+        original, server.request_exit = server.request_exit, lambda: exits.append(True)
+        try:
+            self.assert_http(403, server.shutdown(FakeRequest("10.0.0.7")))
+            self.assertEqual(exits, [], "a refused shutdown must not stop the server")
+        finally:
+            server.request_exit = original
+
+    def test_shutdown_reports_what_it_will_stop_and_warns_every_socket(self):
+        server.runtime.db.add_attachment("a1", "line", "worker", "fake", ["fake"], "/tmp")
+        server.runtime.db.set_attachment_status("a1", "running")
+        server.runtime.live["a1"] = FakeAdapter()
+        socket = StreamWebSocket([])
+        server.runtime.sockets["line"] = {socket}
+
+        response = self.arun(server.shutdown(FakeRequest("127.0.0.1")))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'"stopping":["worker"]', response.body)
+        # Every open tab hears about it before the process goes away.
+        self.assertEqual(socket.sent, [{"type": "shutdown"}])
+        # And the exit is deferred until after the response is flushed.
+        self.assertIsNotNone(response.background)
+
+    def test_shutdown_asks_the_server_to_exit_rather_than_killing_the_process(self):
+        """A hard exit would skip lifespan teardown and orphan every pty."""
+        class FakeServer:
+            should_exit = False
+
+        original, server._uvicorn_server = server._uvicorn_server, FakeServer()
+        try:
+            server.request_exit()
+            self.assertTrue(server._uvicorn_server.should_exit)
+        finally:
+            server._uvicorn_server = original
