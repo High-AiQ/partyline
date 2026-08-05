@@ -111,7 +111,6 @@ class ReconcileTest(unittest.TestCase):
         self.assertEqual(compare(baseline.stable, current.stable), [Difference("a", Change.CHANGED)])
 
     def test_a_flake_does_not_reach_the_comparison(self):
-        baseline = reconcile({"a": "old"}, {"a": "old"})
         current = reconcile({"a": "old"}, {"a": "blip"})
         self.assertEqual(current.unstable, ("a",))
         self.assertNotIn("a", current.stable)
