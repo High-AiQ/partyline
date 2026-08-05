@@ -40,6 +40,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 STARTUP_TIMEOUT = 30.0
 VIEWPORT = {"width": 1280, "height": 800}
+# A common phone, and comfortably below the 900px breakpoint where the three
+# columns stop fitting and the rails become drawers.
+NARROW_VIEWPORT = {"width": 390, "height": 844}
+# The same phone with its keyboard up. A soft keyboard shortens the viewport
+# rather than covering it, so this is what `100dvh` has to survive.
+KEYBOARD_VIEWPORT = {"width": 390, "height": 420}
 
 
 def free_port() -> int:
@@ -402,6 +408,41 @@ def capture_all(out_dir="/tmp/partyline-ui", *, freeze_animations=False) -> list
         composer.type("@")
         page.wait_for_selector("#mentionPop .opt")
         ui.shot("13-mention-popover")
+        page.keyboard.press("Escape")
+
+        # ── narrow ──
+        # Last, and in the same session: switching the viewport is one-way for
+        # these captures, because every state above was composed for three
+        # columns. Below the breakpoint the rails become drawers over the line,
+        # and that layout needs the same regression net as the desktop one —
+        # the centre column silently collapsing to zero width is exactly the
+        # kind of thing a person only notices on a phone they are not holding.
+        page.set_viewport_size(NARROW_VIEWPORT)
+        page.wait_for_timeout(250)
+        ui.shot("14-narrow-line")
+
+        page.locator(".drawer-toggle.lines").click()
+        page.wait_for_timeout(350)
+        ui.shot("15-narrow-rail-drawer")
+
+        # Click the strip of backdrop the drawer does not cover: the drawer is
+        # 320px of a 390px screen, so the left edge is the drawer itself.
+        page.locator(".drawer-backdrop").click(position={"x": 375, "y": 400})
+        page.wait_for_timeout(350)
+        page.locator(".drawer-toggle.jacks").click()
+        page.wait_for_timeout(350)
+        ui.shot("16-narrow-board-drawer")
+
+        # An on-screen keyboard does not overlay the page, it shortens the
+        # viewport — which is the case `100dvh` exists for, and the one where a
+        # `vh`-sized layout pushes the composer off the bottom of the screen.
+        # Half height stands in for a keyboard being up.
+        page.locator(".drawer-backdrop").click(position={"x": 20, "y": 400})
+        page.wait_for_timeout(300)
+        page.set_viewport_size(KEYBOARD_VIEWPORT)
+        page.locator("#input").click()
+        page.wait_for_timeout(300)
+        ui.shot("17-narrow-keyboard-up")
 
         return list(ui.shots)
 
