@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   /**
    * The lines you can be on.
    *
@@ -8,18 +8,30 @@
    * down to the menu.
    */
   import LineMenu from "./LineMenu.svelte";
-  import { room } from "../../state/room.svelte.js";
+  import type { Conversation } from "../../lib/contracts";
+  import { room } from "../../state/room.svelte";
 
-  let { onrename, ondelete } = $props();
+  interface Props {
+    onrename: (conversation: Conversation) => void;
+    ondelete: (conversation: Conversation) => void;
+  }
+
+  interface MenuState {
+    anchor: HTMLButtonElement;
+    conversation: Conversation;
+  }
+
+  let { onrename, ondelete }: Props = $props();
 
   /** `{anchor, conversation}` while a menu is open, else null. */
-  let menu = $state(null);
+  let menu = $state<MenuState | null>(null);
 
-  const toggle = (event, conversation) => {
+  function toggle(event: MouseEvent, conversation: Conversation): void {
     event.stopPropagation();
+    if (!(event.currentTarget instanceof HTMLButtonElement)) return;
     const anchor = event.currentTarget;
     menu = menu?.anchor === anchor ? null : { anchor, conversation };
-  };
+  }
 </script>
 
 <!-- Any click that is not on a ⋯ dismisses the menu. The buttons stop their own

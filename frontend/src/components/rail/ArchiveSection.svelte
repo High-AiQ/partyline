@@ -1,21 +1,26 @@
-<script>
+<script lang="ts">
   /**
    * Archived lines: out of the way, but recoverable.
    *
    * Loaded on first open rather than with the rail — most sessions never touch
    * it, and it is the one list that grows without bound.
    */
-  import { room } from "../../state/room.svelte.js";
-  import { ApiError, api } from "../../lib/api.js";
+  import { ApiError, api } from "../../lib/api";
+  import type { Conversation } from "../../lib/contracts";
+  import { room } from "../../state/room.svelte";
 
-  let { onpurge } = $props();
+  interface Props {
+    onpurge: (conversation: Conversation) => void;
+  }
+
+  let { onpurge }: Props = $props();
 
   let loading = $state(false);
   let failed = $state(false);
   /** The id being restored, so only its own button says "restoring…". */
-  let restoring = $state(null);
+  let restoring = $state<string | null>(null);
 
-  async function load() {
+  async function load(): Promise<void> {
     loading = true;
     failed = false;
     try {
@@ -27,19 +32,20 @@
     }
   }
 
-  function onToggle(event) {
+  function onToggle(event: Event): void {
+    if (!(event.currentTarget instanceof HTMLDetailsElement)) return;
     room.archiveOpen = event.currentTarget.open;
     if (room.archiveOpen) load();
   }
 
-  async function restore(conversation) {
+  async function restore(conversation: Conversation): Promise<void> {
     restoring = conversation.id;
     try {
       const restored = await api.restoreConversation(conversation.id);
       await room.loadConversations();
       await load();
       room.open(restored);
-    } catch (error) {
+    } catch (error: unknown) {
       room.showNotice(error instanceof ApiError ? error.message : "could not restore line", "error");
     } finally {
       restoring = null;

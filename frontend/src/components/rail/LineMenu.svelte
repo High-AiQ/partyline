@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   /**
    * The actions panel for one line.
    *
@@ -8,16 +8,25 @@
    * meaning anything, which is what `place()` and the window listeners are for.
    */
   import { tick } from "svelte";
+  import type { Conversation } from "../../lib/contracts";
 
-  let { anchor, conversation, close, onrename, ondelete } = $props();
+  interface Props {
+    anchor: HTMLButtonElement;
+    conversation: Conversation;
+    close: () => void;
+    onrename: (conversation: Conversation) => void;
+    ondelete: (conversation: Conversation) => void;
+  }
 
-  let panel = $state(null);
+  let { anchor, conversation, close, onrename, ondelete }: Props = $props();
+
+  let panel = $state<HTMLDivElement | null>(null);
   let top = $state(0);
   let left = $state(0);
 
   /** Flip above the anchor rather than hang off the bottom of the window, and
    *  never let the panel run past either edge. */
-  function place() {
+  function place(): void {
     if (!panel || !anchor) return;
     const at = anchor.getBoundingClientRect();
     const box = panel.getBoundingClientRect();
@@ -43,11 +52,13 @@
    * evaluates `null.conversation` and throws. Capturing first is not a style
    * preference here; the other order is a crash.
    */
-  const choose = (run) => () => {
+  function choose(run: (conversation: Conversation) => void): () => void {
     const chosen = conversation;
-    close();
-    run(chosen);
-  };
+    return () => {
+      close();
+      run(chosen);
+    };
+  }
 </script>
 
 <!-- A menu pinned to viewport coordinates has to close when those coordinates

@@ -1,10 +1,11 @@
-<script>
+<script lang="ts">
   /** The left rail: who you are, what lines exist, and how to open another. */
   import ConversationList from "./ConversationList.svelte";
   import ArchiveSection from "./ArchiveSection.svelte";
-  import { room } from "../../state/room.svelte.js";
-  import { session } from "../../state/session.svelte.js";
-  import { dialogs } from "../../state/dialogs.svelte.js";
+  import { ApiError } from "../../lib/api";
+  import { room } from "../../state/room.svelte";
+  import { session } from "../../state/session.svelte";
+  import { dialogs } from "../../state/dialogs.svelte";
   import RenameLineDialog from "../dialogs/RenameLineDialog.svelte";
   import DeleteLineDialog from "../dialogs/DeleteLineDialog.svelte";
   import PurgeLineDialog from "../dialogs/PurgeLineDialog.svelte";
@@ -12,17 +13,18 @@
 
   let newLineName = $state("");
 
-  async function openLine(event) {
+  async function openLine(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     const name = newLineName.trim();
     if (!name) return;
     newLineName = "";
     try {
       await room.createConversation(name);
-    } catch (error) {
-      room.showNotice(error.message, "error");
+    } catch (error: unknown) {
+      room.showNotice(error instanceof ApiError ? error.message : "could not open line", "error");
     }
   }
+
 </script>
 
 <aside id="rail">
