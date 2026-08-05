@@ -14,7 +14,7 @@ let nextKey = 0;
 export type DialogProperties = Record<string, unknown>;
 
 export interface DialogCloseProperties {
-  close(): void;
+  close: () => void;
 }
 
 export type DialogInput<Props extends DialogCloseProperties> = Omit<Props, "close">;

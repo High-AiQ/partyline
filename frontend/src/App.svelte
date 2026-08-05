@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   /**
    * The shell: three columns, the gate over the top of them until you have a
    * handle, and the dialog stack over everything.
@@ -16,20 +16,28 @@
   import { dialogs } from "./state/dialogs.svelte.js";
   import { draft } from "./state/draft.svelte.js";
 
-  session.loadVersion();
-  session.loadAdapters();
-  session.loadPresets();
-  if (session.signedIn) room.loadConversations();
+  void session.loadVersion();
+  void session.loadAdapters();
+  void session.loadPresets();
+  if (session.signedIn) void room.loadConversations();
 
   /** Signing in is the point at which the app may start talking to the server. */
-  function connect() {
-    if (room.conversation) room.open(room.conversation, { fromRoute: true });
-    else room.loadConversations();
+  function connect(): void {
+    if (room.conversation) void room.open(room.conversation, { fromRoute: true });
+    else void room.loadConversations();
+  }
+
+  function mention(name: string): void {
+    draft.mention(name);
+  }
+
+  function routeChange(): void {
+    room.onRouteChange();
   }
 </script>
 
 <svelte:window
-  on:hashchange={() => room.onRouteChange()}
+  on:hashchange={routeChange}
   on:keydown={(event) => {
     if (event.key === "Escape" && dialogs.stack.length) dialogs.closeTop();
   }}
@@ -51,14 +59,19 @@
       {/if}
     </main>
 
-    <Board onmention={(name) => draft.mention(name)} />
+    <Board onmention={mention} />
   </div>
 {/if}
 
 <WireBanner />
 
 {#each dialogs.stack as entry (entry.key)}
-  <entry.component {...entry.props} close={() => dialogs.close(entry.key)} />
+  <entry.component
+    {...entry.props}
+    close={() => {
+      dialogs.close(entry.key);
+    }}
+  />
 {/each}
 
 <style>

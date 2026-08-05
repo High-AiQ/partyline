@@ -21,11 +21,11 @@ export default [
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked.map((config) => ({
     ...config,
-    files: ["**/*.ts"],
+    files: ["**/*.{ts,svelte}"],
   })),
   ...tseslint.configs.stylisticTypeChecked.map((config) => ({
     ...config,
-    files: ["**/*.ts"],
+    files: ["**/*.{ts,svelte}"],
   })),
   ...svelte.configs["flat/recommended"],
 
@@ -68,8 +68,15 @@ export default [
 
   {
     files: ["**/*.svelte", "**/*.svelte.js", "**/*.svelte.ts"],
+    plugins: { "@typescript-eslint": tseslint.plugin },
     languageOptions: {
-      parserOptions: { parser: tseslint.parser, svelteConfig },
+      parserOptions: {
+        extraFileExtensions: [".svelte"],
+        parser: tseslint.parser,
+        projectService: true,
+        svelteConfig,
+        tsconfigRootDir: import.meta.dirname,
+      },
     },
     rules: {
       // Core `prefer-const` is actively wrong in a Svelte 5 component: props are
@@ -77,6 +84,8 @@ export default [
       // us, so it "fixes" them into `const` and breaks reactivity. The plugin's
       // version understands runes and only flags the genuinely constant.
       "prefer-const": "off",
+      "no-unused-vars": "off",
+      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", caughtErrors: "none" }],
       "svelte/prefer-const": ["error", { destructuring: "all" }],
       // `placeholder={"a\nb"}` looks redundant but is not: an attribute cannot
       // carry a newline escape any other way.

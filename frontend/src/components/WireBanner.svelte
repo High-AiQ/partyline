@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   /**
    * Two different things that both live at the top of the screen, kept visually
    * distinct on purpose:

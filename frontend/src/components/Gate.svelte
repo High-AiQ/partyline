@@ -1,12 +1,16 @@
-<script>
+<script lang="ts">
   /** First run, and every time the server refuses a handle: pick a name. */
   import { session } from "../state/session.svelte.js";
 
-  let { onconnect } = $props();
+  interface Props {
+    onconnect: () => void;
+  }
+
+  let { onconnect }: Props = $props();
 
   let value = $state(session.handle ?? "");
   let error = $state("");
-  let field = $state(null);
+  let field = $state<HTMLInputElement | null>(null);
 
   // Reopened by a refusal — show the server's reason and preselect the handle
   // so retyping is one keystroke rather than a manual clear.
@@ -18,7 +22,7 @@
     field?.select();
   });
 
-  function submit(event) {
+  function submit(event: SubmitEvent): void {
     event.preventDefault();
     const rejection = session.signIn(value);
     if (rejection) {

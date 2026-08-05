@@ -1,10 +1,19 @@
-<script>
+<script lang="ts">
   /**
    * The one modal chrome. Every dialog in the app is this plus a body, which is
    * why the delete-line, delete-forever and stop-the-server dialogs look and
    * behave alike without three people keeping them in step.
    */
-  let { title, wide = false, close, children } = $props();
+  import type { Snippet } from "svelte";
+
+  interface Props {
+    title: string;
+    wide?: boolean;
+    close: () => void;
+    children: Snippet;
+  }
+
+  let { title, wide = false, close, children }: Props = $props();
 
   /** A click that starts inside the panel and ends on the backdrop is a drag,
    *  not a dismissal — losing a half-typed confirmation to a sloppy text
