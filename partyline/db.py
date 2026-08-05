@@ -4,6 +4,7 @@ import json
 import sqlite3
 import threading
 import time
+from typing import TypedDict
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations(
@@ -49,13 +50,40 @@ MIGRATIONS = [
     # archived_at: when a line was archived, NULL while it is live. Archiving
     # hides a line and stops its processes; the history stays until a purge.
     "ALTER TABLE conversations ADD COLUMN archived_at REAL",
+    # A deliberately singleton restart intent. It is saved before shutdown and
+    # only consumed after the requesting line accepts reattachment on startup.
+    """CREATE TABLE IF NOT EXISTS restart_plan(
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        conversation_id TEXT NOT NULL,
+        attachment_ids TEXT NOT NULL,
+        debrief TEXT NOT NULL,
+        created_at REAL NOT NULL
+    )""",
 ]
+
+
+class RestartPlan(TypedDict):
+    """The one line allowed to offer sequential process reattachment."""
+
+    conversation_id: str
+    attachment_ids: list[str]
+    debrief: str
+    created_at: float
 
 
 def _att_row(row):
     d = dict(row)
     d["command"] = json.loads(d["command"])
     return d
+
+
+def _restart_plan_row(row) -> RestartPlan:
+    return RestartPlan(
+        conversation_id=row["conversation_id"],
+        attachment_ids=json.loads(row["attachment_ids"]),
+        debrief=row["debrief"],
+        created_at=row["created_at"],
+    )
 
 
 class Db:
@@ -130,6 +158,7 @@ class Db:
             self.conn.execute("DELETE FROM messages WHERE conv_id=?", (conv_id,))
             self.conn.execute("DELETE FROM attachments WHERE conv_id=?", (conv_id,))
             self.conn.execute("DELETE FROM conversations WHERE id=?", (conv_id,))
+            self.conn.execute("DELETE FROM restart_plan WHERE conversation_id=?", (conv_id,))
             self.conn.commit()
 
     # -- messages ----------------------------------------------------------
@@ -189,6 +218,39 @@ class Db:
     def mark_stale_attachments(self):
         """On server boot, anything still marked live belongs to a dead process."""
         self._exec("UPDATE attachments SET status='exited' WHERE status IN ('starting','running')")
+
+    # -- restart plans -----------------------------------------------------
+    def save_restart_plan(self, conversation_id: str, attachment_ids: list[str], debrief: str) -> RestartPlan:
+        """Replace the sole pending restart intent, preserving attachment order."""
+        created_at = time.time()
+        self._exec(
+            "INSERT INTO restart_plan(singleton,conversation_id,attachment_ids,debrief,created_at)"
+            " VALUES(1,?,?,?,?) ON CONFLICT(singleton) DO UPDATE SET"
+            " conversation_id=excluded.conversation_id,"
+            " attachment_ids=excluded.attachment_ids,"
+            " debrief=excluded.debrief,"
+            " created_at=excluded.created_at",
+            (conversation_id, json.dumps(attachment_ids), debrief, created_at),
+        )
+        plan = self.get_restart_plan()
+        if plan is None:  # pragma: no cover - a committed INSERT is immediately readable
+            raise RuntimeError("restart plan was not saved")
+        return plan
+
+    def get_restart_plan(self) -> RestartPlan | None:
+        """Read the pending plan without consuming the requesting line's choice."""
+        cur = self._exec("SELECT * FROM restart_plan WHERE singleton=1")
+        row = cur.fetchone()
+        return _restart_plan_row(row) if row else None
+
+    def take_restart_plan(self) -> RestartPlan | None:
+        """Consume the pending plan atomically after the line accepts reattachment."""
+        with self.lock:
+            row = self.conn.execute("SELECT * FROM restart_plan WHERE singleton=1").fetchone()
+            if row:
+                self.conn.execute("DELETE FROM restart_plan WHERE singleton=1")
+                self.conn.commit()
+            return _restart_plan_row(row) if row else None
 
     # -- presets -----------------------------------------------------------
     def list_presets(self):

@@ -60,3 +60,42 @@ class DbTest(unittest.TestCase):
         self.assertIsNone(self.db.get_conversation("line"))
         self.assertEqual(self.db.list_messages("line"), [])
         self.assertEqual(self.db.list_attachments("line"), [])
+
+    def test_restart_plan_replaces_the_single_pending_plan_and_preserves_order(self):
+        first = self.db.save_restart_plan("one", ["old-2", "old-1"], "first debrief")
+        replacement = self.db.save_restart_plan("two", ["new-1", "new-2"], "second debrief")
+
+        self.assertEqual(first["attachment_ids"], ["old-2", "old-1"])
+        self.assertEqual(replacement["conversation_id"], "two")
+        self.assertEqual(replacement["attachment_ids"], ["new-1", "new-2"])
+        self.assertEqual(replacement["debrief"], "second debrief")
+        self.assertEqual(self.db.get_restart_plan(), replacement)
+
+    def test_take_restart_plan_consumes_it_once(self):
+        self.db.save_restart_plan("line", ["first", "second"], "continue from here")
+        plan = self.db.get_restart_plan()
+
+        self.assertIsNotNone(plan)
+        self.assertEqual(self.db.take_restart_plan(), plan)
+        self.assertIsNone(self.db.get_restart_plan())
+        self.assertIsNone(self.db.take_restart_plan())
+
+    def test_restart_plan_survives_a_database_reopen(self):
+        self.db.save_restart_plan("line", ["agent"], "continue")
+        self.db.close()
+        self.db = Db(f"{self.directory.name}/partyline.db")
+
+        plan = self.db.get_restart_plan()
+
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan["conversation_id"], "line")
+        self.assertEqual(plan["attachment_ids"], ["agent"])
+        self.assertEqual(plan["debrief"], "continue")
+
+    def test_deleting_planned_conversation_clears_restart_plan(self):
+        self.db.create_conversation("line", "Line")
+        self.db.save_restart_plan("line", ["agent"], "continue")
+
+        self.db.delete_conversation("line")
+
+        self.assertIsNone(self.db.get_restart_plan())
