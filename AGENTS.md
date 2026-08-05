@@ -126,6 +126,31 @@ uv run python -m scripts.uishot --out /tmp/partyline-ui   # the standard state s
 uv run python -m unittest tests/ui/test_line_menu.py -v   # browser regressions
 ```
 
+**When a change is supposed to be invisible, prove it.** A refactor, a
+conversion, a formatter — anything claiming not to touch the UI — should be
+bracketed by:
+
+```bash
+uv run python -m scripts.uidiff baseline   # before
+uv run python -m scripts.uidiff check      # after; non-zero if anything moved
+```
+
+It renders the standard state set and compares PNG bytes. Two details are
+load-bearing and were both established by measurement rather than assumption:
+
+- **Every command captures twice.** Headless Chromium is *nearly* deterministic
+  — about one run in three has a single state off by a hair, and not the same
+  state each time. A state is only compared if two consecutive captures agree;
+  one that disagrees with itself is named and excluded. This is what separates
+  a timing flake (differs sometimes) from a regression (differs every time),
+  without a fuzz threshold that would hide the small changes worth catching.
+- **Animations are frozen during capture.** A shot taken 20ms into a 120ms fade
+  is a different image every run.
+
+A reported difference is not automatically a bug — an intended visual change
+shows up here too. It has to be *looked at*, then accepted by re-running
+`baseline`.
+
 Browser tests live in `tests/ui/` and are excluded from `unittest discover` on purpose: a
 missing browser must never break the ordinary suite, and they are not counted toward the
 coverage floor.

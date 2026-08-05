@@ -136,9 +136,23 @@ class UiSession:
         return menu
 
 
+# Injected when a caller asks for still frames. CSS animations are the reason
+# two captures of the same build can differ: a screenshot taken 20ms into the
+# menu's 120ms fade catches a different opacity each run. Freezing them is not
+# cosmetic — it is what makes a byte comparison mean anything.
+FREEZE_ANIMATIONS = """
+*, *::before, *::after {
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+}
+"""
+
+
 @contextlib.contextmanager
 def ui_session(lines=(), *, out_dir="/tmp/partyline-ui", headless=True, viewport=None,
-               handle="screenshot"):
+               handle="screenshot", freeze_animations=False):
     """Start a throwaway partyline, open it in a browser, yield a UiSession.
 
     `lines` are conversation names to create before the page loads, so the UI
@@ -179,6 +193,8 @@ def ui_session(lines=(), *, out_dir="/tmp/partyline-ui", headless=True, viewport
             page.wait_for_selector("#convs")
             if lines:
                 page.wait_for_selector(".conv-row")
+            if freeze_animations:
+                page.add_style_tag(content=FREEZE_ANIMATIONS)
             session = UiSession(page=page, base_url=base_url, out_dir=out, server=server)
             session.settle()
             try:
@@ -221,9 +237,9 @@ LINES = ["alpha line", "beta line", "gamma line", "delta line", "epsilon line",
          "zeta line", "eta line", "theta line"]
 
 
-def capture_all(out_dir="/tmp/partyline-ui") -> list[Path]:
+def capture_all(out_dir="/tmp/partyline-ui", *, freeze_animations=False) -> list[Path]:
     """Capture the states a sidebar change should always be checked against."""
-    with ui_session(LINES, out_dir=out_dir) as ui:
+    with ui_session(LINES, out_dir=out_dir, freeze_animations=freeze_animations) as ui:
         page = ui.page
         ui.shot("01-sidebar-idle")
 

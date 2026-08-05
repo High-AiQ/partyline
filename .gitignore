@@ -19,3 +19,5 @@ node_modules/
 *.sqlite3
 # Server logs, mostly from a cockpit clone running in the background.
 *.log
+.ui-baseline/
+.ui-current/
