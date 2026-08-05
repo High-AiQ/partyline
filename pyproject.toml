@@ -5,6 +5,7 @@ description = "A chatroom for humans and interactive processes, routed with @men
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.110",
+    "pydantic>=2",
     "uvicorn[standard]>=0.29",
     "pyte>=0.8",
 ]

@@ -27,6 +27,29 @@ from starlette.background import BackgroundTask
 
 from . import __version__
 from .adapters import ADAPTERS, ADAPTER_METADATA, import_repository, make_adapter, reload_adapters
+from .contracts import (
+    AdapterImportResponse,
+    AdapterMetadataResponse,
+    AdapterRemoveResponse,
+    ArchiveResponse,
+    AttachmentResponse,
+    AttentionEvent,
+    ConversationDetailResponse,
+    ConversationArchivedEvent,
+    ConversationDeletedEvent,
+    ConversationEvent,
+    ConversationResponse,
+    HookEventRequest,
+    LoadedResponse,
+    OkResponse,
+    PresetResponse,
+    PurgeResponse,
+    RunningProcessResponse,
+    ScreenResponse,
+    ShutdownEvent,
+    ShutdownResponse,
+    VersionResponse,
+)
 from .db import Db
 from .runtime import NAME_RE, RESERVED_NAMES, ChatRuntime
 
@@ -111,7 +134,7 @@ if not ASSETS_DIR.is_dir():  # pragma: no cover - only reachable with a cleaned 
 app.mount("/assets", StaticFiles(directory=ASSETS_DIR), name="assets")
 
 
-@app.get("/api/version")
+@app.get("/api/version", response_model=VersionResponse)
 async def version():
     return {"version": __version__, "build": FRONTEND_BUILD}
 
@@ -134,12 +157,12 @@ def request_exit():
         os.kill(os.getpid(), signal.SIGTERM)
 
 
-@app.get("/api/running")
+@app.get("/api/running", response_model=list[RunningProcessResponse])
 async def running():
     return runtime.running_processes()
 
 
-@app.post("/api/shutdown")
+@app.post("/api/shutdown", response_model=ShutdownResponse)
 async def shutdown(request: Request):
     """Stop partyline. Deliberately reachable only from this machine.
 
@@ -153,14 +176,14 @@ async def shutdown(request: Request):
     # Tell every open tab before going, so they show a stopped state instead of
     # reconnecting forever at a socket that is never coming back.
     for conv_id in list(runtime.sockets):
-        await runtime.broadcast(conv_id, {"type": "shutdown"})
+        await runtime.broadcast(conv_id, ShutdownEvent())
     # The exit runs *after* this response is flushed; stopping first would drop
     # the connection before the caller ever learned it had worked.
     return JSONResponse({"ok": True, "stopping": [p["name"] for p in stopping]},
                         background=BackgroundTask(request_exit))
 
 
-@app.get("/api/adapters")
+@app.get("/api/adapters", response_model=list[AdapterMetadataResponse])
 async def adapters():
     return [ADAPTER_METADATA[name] for name in sorted(ADAPTERS)]
 
@@ -170,7 +193,7 @@ class AdapterImportIn(BaseModel):
     ref: str | None = None
 
 
-@app.post("/api/adapters/import")
+@app.post("/api/adapters/import", response_model=AdapterImportResponse)
 async def import_adapters(body: AdapterImportIn):
     try:
         loaded = import_repository(body.repository, body.ref)
@@ -179,7 +202,7 @@ async def import_adapters(body: AdapterImportIn):
     return {"loaded": loaded, "adapters": [ADAPTER_METADATA[name] for name in loaded]}
 
 
-@app.post("/api/adapters/reload")
+@app.post("/api/adapters/reload", response_model=LoadedResponse)
 async def reload_adapter_definitions():
     try:
         loaded = reload_adapters()
@@ -188,7 +211,7 @@ async def reload_adapter_definitions():
     return {"loaded": loaded}
 
 
-@app.delete("/api/adapters/{adapter_name}")
+@app.delete("/api/adapters/{adapter_name}", response_model=AdapterRemoveResponse)
 async def remove_adapter(adapter_name: str):
     # Removing source is intentionally not automatic: an imported checkout may
     # contain several packages. Reloading is sufficient to disable stale code.
@@ -197,18 +220,18 @@ async def remove_adapter(adapter_name: str):
     return {"ok": True, "message": "adapter source remains installed; remove its checkout then reload"}
 
 
-@app.get("/api/conversations")
+@app.get("/api/conversations", response_model=list[ConversationResponse])
 async def conversations(archived: bool = False):
     return runtime.db.list_conversations(archived=archived)
 
 
-@app.post("/api/conversations")
+@app.post("/api/conversations", response_model=ConversationResponse)
 async def create_conversation(body: ConvIn):
     name = body.name.strip() or "untitled"
     return runtime.db.create_conversation(str(uuid.uuid4()), name)
 
 
-@app.get("/api/conversations/{conv_id}")
+@app.get("/api/conversations/{conv_id}", response_model=ConversationDetailResponse)
 async def conversation_detail(conv_id: str):
     conv = runtime.db.get_conversation(conv_id)
     if not conv:
@@ -220,7 +243,7 @@ async def conversation_detail(conv_id: str):
     }
 
 
-@app.put("/api/conversations/{conv_id}/topic")
+@app.put("/api/conversations/{conv_id}/topic", response_model=ConversationResponse)
 async def set_topic(conv_id: str, body: TopicIn):
     conv = runtime.db.get_conversation(conv_id)
     if not conv:
@@ -236,11 +259,11 @@ async def set_topic(conv_id: str, body: TopicIn):
     # their next wake — so every agent picks up the new topic lazily, for free.
     notice = f"☏ topic set{who}: {topic}" if topic else f"☏ topic cleared{who}"
     await runtime.post_message(conv_id, "system", "system", notice)
-    await runtime.broadcast(conv_id, {"type": "conversation", "conversation": conv})
+    await runtime.broadcast(conv_id, ConversationEvent(conversation=conv))
     return conv
 
 
-@app.put("/api/conversations/{conv_id}/name")
+@app.put("/api/conversations/{conv_id}/name", response_model=ConversationResponse)
 async def rename_conversation(conv_id: str, body: RenameIn):
     conv = runtime.db.get_conversation(conv_id)
     if not conv:
@@ -259,11 +282,11 @@ async def rename_conversation(conv_id: str, body: RenameIn):
     # digest, so agents learn the line's new name without costing a turn.
     await runtime.post_message(
         conv_id, "system", "system", f"☏ line renamed{who}: {was} → {name}")
-    await runtime.broadcast(conv_id, {"type": "conversation", "conversation": conv})
+    await runtime.broadcast(conv_id, ConversationEvent(conversation=conv))
     return conv
 
 
-@app.delete("/api/conversations/{conv_id}")
+@app.delete("/api/conversations/{conv_id}", response_model=ArchiveResponse)
 async def archive_conversation(conv_id: str):
     """Archive a line: stop its processes, hide it, keep the history."""
     conv = runtime.db.get_conversation(conv_id)
@@ -273,18 +296,18 @@ async def archive_conversation(conv_id: str):
         raise HTTPException(409, "line is already archived")
     # Tell watchers before tearing down: a tab sitting on this line should leave
     # under its own power rather than discover the archive by a failing fetch.
-    event = {"type": "conversation_archived", "conversation_id": conv_id}
+    event = ConversationArchivedEvent(conversation_id=conv_id)
     await runtime.broadcast(conv_id, event)
     # Alias kept for one version so clients written against the first cut of
     # this route keep working. Remove in 0.17.
-    await runtime.broadcast(conv_id, {**event, "type": "conversation_deleted"})
+    await runtime.broadcast(conv_id, ConversationDeletedEvent(conversation_id=conv_id))
     stopped = await runtime.stop_attachments(conv_id)
     conv = runtime.db.archive_conversation(conv_id)
     runtime.sockets.pop(conv_id, None)
     return {"ok": True, "archived": True, "stopped": stopped, "conversation": conv}
 
 
-@app.post("/api/conversations/{conv_id}/restore")
+@app.post("/api/conversations/{conv_id}/restore", response_model=ConversationResponse)
 async def restore_conversation(conv_id: str):
     """Bring an archived line back. Its processes stay stopped — a restored
     attachment is resumed one at a time, through the usual resume route."""
@@ -299,7 +322,7 @@ async def restore_conversation(conv_id: str):
     return conv
 
 
-@app.delete("/api/conversations/{conv_id}/purge")
+@app.delete("/api/conversations/{conv_id}/purge", response_model=PurgeResponse)
 async def purge_conversation(conv_id: str):
     """Destroy an archived line for good. Archiving first is mandatory: it is
     the step that stops the processes, and it makes this irreversible act
@@ -315,7 +338,7 @@ async def purge_conversation(conv_id: str):
     return {"ok": True, "purged": True}
 
 
-@app.post("/api/conversations/{conv_id}/attachments")
+@app.post("/api/conversations/{conv_id}/attachments", response_model=AttachmentResponse)
 async def attach(conv_id: str, body: AttachIn):
     conv = runtime.db.get_conversation(conv_id)
     if not conv:
@@ -379,7 +402,7 @@ async def attach(conv_id: str, body: AttachIn):
     return runtime.db.get_attachment(att_id)
 
 
-@app.post("/api/attachments/{att_id}/resume")
+@app.post("/api/attachments/{att_id}/resume", response_model=AttachmentResponse)
 async def resume_attachment(att_id: str):
     att = runtime.db.get_attachment(att_id)
     if not att:
@@ -424,7 +447,7 @@ async def resume_attachment(att_id: str):
     return runtime.db.get_attachment(att_id)
 
 
-@app.delete("/api/attachments/{att_id}")
+@app.delete("/api/attachments/{att_id}", response_model=OkResponse)
 async def detach(att_id: str):
     att = runtime.db.get_attachment(att_id)
     if not att:
@@ -449,17 +472,17 @@ def _hook_url(att_id: str) -> str:
 ATTENTION_RE = re.compile(r"permission|approv|trust|login|auth", re.IGNORECASE)
 
 
-@app.post("/api/hooks/{att_id}")
+@app.post("/api/hooks/{att_id}", response_model=OkResponse)
 async def hook_event(att_id: str, request: Request):
     """Receiver for optional process-side attention hooks."""
     att = runtime.db.get_attachment(att_id)
     if not att:
         raise HTTPException(404)
     try:
-        payload = await request.json()
+        payload = HookEventRequest.model_validate(await request.json())
     except Exception:
-        payload = {}
-    message = str(payload.get("message") or payload.get("title") or "").strip()
+        payload = HookEventRequest()
+    message = (payload.message or payload.title or "").strip()
     # Only surface events that mean "a human must look at me" — idle chatter
     # from an agent waiting between mentions would spam the conversation.
     if message and ATTENTION_RE.search(message):
@@ -468,11 +491,11 @@ async def hook_event(att_id: str, request: Request):
             f"⏸ @{att['name']} needs attention: {message} — use peek to view/answer the dialog",
         )
         await runtime.broadcast(
-            att["conv_id"], {"type": "attention", "attachment_id": att_id})
+            att["conv_id"], AttentionEvent(attachment_id=att_id))
     return {"ok": True}
 
 
-@app.get("/api/attachments/{att_id}/screen")
+@app.get("/api/attachments/{att_id}/screen", response_model=ScreenResponse)
 async def attachment_screen(att_id: str):
     adapter = runtime.live.get(att_id)
     if adapter is None:
@@ -484,7 +507,7 @@ class KeyIn(BaseModel):
     key: str
 
 
-@app.post("/api/attachments/{att_id}/keys")
+@app.post("/api/attachments/{att_id}/keys", response_model=OkResponse)
 async def attachment_key(att_id: str, body: KeyIn):
     adapter = runtime.live.get(att_id)
     if adapter is None:
@@ -497,24 +520,24 @@ async def attachment_key(att_id: str, body: KeyIn):
 
 
 # -- presets ---------------------------------------------------------------
-@app.get("/api/presets")
+@app.get("/api/presets", response_model=list[PresetResponse])
 async def presets():
     return runtime.db.list_presets()
 
 
-@app.post("/api/presets")
+@app.post("/api/presets", response_model=PresetResponse)
 async def create_preset(body: PresetIn):
     return _save_preset(str(uuid.uuid4()), body)
 
 
-@app.put("/api/presets/{preset_id}")
+@app.put("/api/presets/{preset_id}", response_model=PresetResponse)
 async def update_preset(preset_id: str, body: PresetIn):
     if not runtime.db.get_preset(preset_id):
         raise HTTPException(404)
     return _save_preset(preset_id, body)
 
 
-@app.delete("/api/presets/{preset_id}")
+@app.delete("/api/presets/{preset_id}", response_model=OkResponse)
 async def delete_preset(preset_id: str):
     runtime.db.delete_preset(preset_id)
     return {"ok": True}

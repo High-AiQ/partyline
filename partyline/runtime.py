@@ -5,6 +5,15 @@ import re
 from fastapi import WebSocket, WebSocketDisconnect
 
 from .adapters import Adapter
+from .contracts import (
+    AttachmentEvent,
+    AttachmentResponse,
+    Event,
+    ErrorEvent,
+    HelloEvent,
+    MessageEvent,
+    MessageResponse,
+)
 from .db import Db
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
@@ -51,10 +60,11 @@ class ChatRuntime:
             except Exception:
                 pass
 
-    async def broadcast(self, conv_id: str, event: dict):
+    async def broadcast(self, conv_id: str, event: Event):
+        payload = event.model_dump(exclude_none=True)
         for ws in list(self.sockets.get(conv_id, ())):
             try:
-                await ws.send_json(event)
+                await ws.send_json(payload)
             except Exception:
                 self.sockets.get(conv_id, set()).discard(ws)
                 self.human_handles.get(conv_id, {}).pop(ws, None)
@@ -63,7 +73,7 @@ class ChatRuntime:
 
     async def post_message(self, conv_id: str, sender: str, sender_type: str, body: str):
         msg = self.db.add_message(conv_id, sender, sender_type, body)
-        await self.broadcast(conv_id, {"type": "message", "message": msg})
+        await self.broadcast(conv_id, MessageEvent(message=MessageResponse.model_validate(msg)))
         await self.route_mentions(conv_id, msg)
         return msg
 
@@ -116,7 +126,8 @@ class ChatRuntime:
         async def on_status(status: str):
             self.db.set_attachment_status(att_id, status)
             att = self.db.get_attachment(att_id)
-            await self.broadcast(conv_id, {"type": "attachment", "attachment": att})
+            await self.broadcast(
+                conv_id, AttachmentEvent(attachment=AttachmentResponse.model_validate(att)))
 
         return on_status
 
@@ -174,7 +185,7 @@ class ChatRuntime:
                         error = "that handle is taken by another human on this line"
                     if error:
                         await ws.send_json(
-                            {"type": "error", "conversation_id": conv_id, "message": error})
+                            ErrorEvent(conversation_id=conv_id, message=error).model_dump())
                         continue
                     # A reconnect can arrive before a half-open old socket times
                     # out. Its durable client id proves it is the same browser, so
@@ -191,43 +202,50 @@ class ChatRuntime:
                                     pass  # a half-open socket cannot be closed cleanly
                     claims[ws] = (handle, client_id)
                     claimed_handle, claimed_client = handle, client_id
-                    hello = {"type": "hello", "conversation_id": conv_id, "handle": handle}
-                    if frontend_build:
-                        hello["build"] = frontend_build
-                    await ws.send_json(hello)
+                    await ws.send_json(
+                        HelloEvent(
+                            conversation_id=conv_id,
+                            handle=handle,
+                            build=frontend_build or None,
+                        ).model_dump(exclude_none=True)
+                    )
                     continue
 
                 # Preserve the useful archived-line error even for an old client
                 # which has not yet learned the hello handshake.
                 conv = self.db.get_conversation(conv_id)
                 if conv is None or conv["archived_at"]:
-                    await ws.send_json({
-                        "type": "error",
-                        "conversation_id": conv_id,
-                        "message": "this line is archived — restore it to talk here",
-                    })
+                    await ws.send_json(
+                        ErrorEvent(
+                            conversation_id=conv_id,
+                            message="this line is archived — restore it to talk here",
+                        ).model_dump()
+                    )
                     continue
                 if claimed_handle is None:
-                    await ws.send_json({
-                        "type": "error",
-                        "conversation_id": conv_id,
-                        "message": "choose a handle before sending messages",
-                    })
+                    await ws.send_json(
+                        ErrorEvent(
+                            conversation_id=conv_id,
+                            message="choose a handle before sending messages",
+                        ).model_dump()
+                    )
                     continue
                 if self.human_handles.get(conv_id, {}).get(ws) != (claimed_handle, claimed_client):
-                    await ws.send_json({
-                        "type": "error",
-                        "conversation_id": conv_id,
-                        "message": "this connection was superseded; reconnect to continue",
-                    })
+                    await ws.send_json(
+                        ErrorEvent(
+                            conversation_id=conv_id,
+                            message="this connection was superseded; reconnect to continue",
+                        ).model_dump()
+                    )
                     continue
                 sender = str(data.get("sender", "")).strip()
                 if sender != claimed_handle:
-                    await ws.send_json({
-                        "type": "error",
-                        "conversation_id": conv_id,
-                        "message": "messages must use your claimed handle",
-                    })
+                    await ws.send_json(
+                        ErrorEvent(
+                            conversation_id=conv_id,
+                            message="messages must use your claimed handle",
+                        ).model_dump()
+                    )
                     continue
                 body = str(data.get("body", "")).strip()
                 if not body:
