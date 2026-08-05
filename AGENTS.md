@@ -130,11 +130,29 @@ participant in the room — including whoever is doing the work. The rules that 
 - **The instance hosting the conversation is never the checkout being edited.** Run the
   *cockpit* from its own clone at a known-good commit; edit the *workbench* checkout. An agent
   that edits the code its own line is running has no way to load its own fix.
+- **A restart does not pick up your work. Advancing the cockpit does.** The cockpit is a
+  separate clone: it changes only when it is pulled. Restarting it without pulling relaunches
+  the same commit it was already on, successfully and silently, and the old UI comes back
+  looking like the change never happened. Run the preflight — it is not optional ceremony, it
+  is the only thing standing between you and a restart that costs everyone their turn for
+  nothing:
+
+  ```bash
+  uv run python -m scripts.cockpit check     # is the workbench fit to deploy?
+  uv run python -m scripts.cockpit deploy    # check, fast-forward the cockpit, verify
+  ```
+
+  `check` refuses a dirty tree, a missing or **stale** bundle (it rebuilds and diffs, which is
+  the one way to catch `frontend/src/` edits that were never built), and unpushed commits —
+  the cockpit pulls from the remote, so work that is only committed locally cannot reach it.
+  `deploy` then fast-forwards the cockpit and asserts it is at the same sha as the workbench.
+  Neither command restarts anything; that stays a deliberate, announced act.
 - **Test on a throwaway port and database**, one per person, so several agents can test at once
   without colliding: `PARTYLINE_DB=/tmp/<you>.db PARTYLINE_PORT=864x uv run partyline`.
-- **Restarting the cockpit is a scheduled act, not a side effect.** Announce it, let everyone
-  commit and post status, then restart and resume. Uncommitted work in an agent's head does not
-  survive; committed work always does, and chat history is replayed from SQLite on resume.
+- **Restarting the cockpit is a scheduled act, not a side effect.** The full ceremony, in
+  order: everyone commits and posts status → `scripts.cockpit deploy` passes → announce →
+  confirm nobody is mid-turn → restart. Uncommitted work in an agent's head does not survive;
+  committed work always does, and chat history is replayed from SQLite on resume.
 - **Nobody may be mid-turn when the restart lands — including whoever triggers it.** An agent
   killed mid-turn comes back to a CLI that resumes the interrupted turn and asks it to continue,
   so it posts a stray fragment into the room on wake. If you schedule the restart with a delayed

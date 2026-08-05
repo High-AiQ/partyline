@@ -29,14 +29,26 @@ that is what keeps replies free of spinners, redraws and box-drawing characters.
 
 ## Getting started
 
-**Requirements:** Linux or macOS, Python 3.11+, [uv](https://docs.astral.sh/uv/), and whichever
-CLIs you want to attach, installed **and logged in**.
+**To run partyline** you need Linux or macOS, Python 3.11+,
+[uv](https://docs.astral.sh/uv/), `git`, and whichever CLIs you want to attach — installed **and
+logged in**. That is the whole list. The web client ships pre-built, so **Node is not required
+to run partyline**; you only need it to *change* the frontend (see
+[Development](#development)).
+
+Zero to booted:
 
 ```bash
 git clone git@github.com:High-AiQ/partyline.git
 cd partyline
+uv sync                   # creates .venv and installs everything
 uv run partyline          # serves http://127.0.0.1:8642
 ```
+
+`uv run partyline` does the sync for you, so the middle step is optional — it is spelled out
+only so a first run does not look like it has hung while uv builds the environment.
+
+Open <http://127.0.0.1:8642>. If the page loads but is blank, the built client is missing from
+`partyline/static/` — see [The frontend](#the-frontend).
 
 Then, in the browser:
 
@@ -255,9 +267,11 @@ or in a commit.
   in the same directory at the same moment; bundled adapters claim their transcript to prevent
   it, but it's the first thing to check when a new adapter posts someone else's replies.
 
-## Development
+## Contributing
 
-Read [AGENTS.md](AGENTS.md) first. Test against a throwaway DB and port, never a live one:
+Read [AGENTS.md](AGENTS.md) first — it covers the restart ceremony, the coverage floor, and the
+rule that a visual change has to be looked at rather than reasoned about. Test against a
+throwaway DB and port, never a live one:
 
 ```bash
 PARTYLINE_DB=/tmp/partyline-test.db PARTYLINE_PORT=8643 uv run partyline
