@@ -160,9 +160,9 @@ Vite into `partyline/static/`:
 cd frontend
 npm install
 npm run dev      # hot reload, proxying /api and /ws to a partyline on $PARTYLINE_PORT
+npm run verify   # format + lint + svelte-check + tests; the gate CI runs
 npm run build    # → partyline/static/ — rebuild before committing a UI change
-npm run check    # svelte-check; kept at zero errors and zero warnings
-npm test         # vitest, covering the pure logic in src/lib/
+npm run format   # apply Prettier
 ```
 
 `src/lib/` holds framework-free functions — markdown rendering, mention candidates, jack

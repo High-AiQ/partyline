@@ -25,11 +25,32 @@ server serves: `/` is `index.html` and `/assets/*` is mounted `StaticFiles`.
 ```bash
 cd frontend
 npm install
+npm run verify    # format:check + lint + svelte-check + tests — the gate
 npm run build     # → partyline/static/  (do this before committing UI changes)
-npm run check     # svelte-check; must be 0 errors, 0 warnings
-npm test          # vitest, the pure libs
 npm run dev       # hot reload against a partyline on $PARTYLINE_PORT (default 8642)
+npm run format    # apply Prettier; `lint:fix` for the auto-fixable lint
 ```
+
+**`npm run verify` must pass before every frontend commit**, and it is what CI
+runs — the same command, so the two can never disagree. It is four gates:
+Prettier formatting, ESLint, `svelte-check` at zero errors *and zero warnings*,
+and the unit tests.
+
+Formatting is Prettier's alone; `eslint-config-prettier` is last in the flat
+config so ESLint has no stylistic opinions left to argue with. Note this is the
+opposite of the Python rule below, where the autoformatter is deliberately not
+enforced — that exception is about hand-wrapped Python, and does not extend to
+the frontend.
+
+Two ESLint settings are load-bearing rather than taste:
+
+- **Core `prefer-const` is off inside Svelte files**, replaced by
+  `svelte/prefer-const`. Props are declared `let { … } = $props()` and are
+  reassigned by the framework rather than by us, so the core rule "fixes" them
+  into `const` and silently breaks reactivity. It wanted to do that to 45
+  declarations.
+- **`svelte/no-useless-mustaches` allows string escapes**, because
+  `placeholder={"a\nb"}` is the only way to get a newline into an attribute.
 
 **`partyline/static/` is committed on purpose.** partyline installs and runs as
 a Python package; requiring Node to build a wheel, or to start a fresh clone,
