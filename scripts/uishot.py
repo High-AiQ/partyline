@@ -64,6 +64,12 @@ class UiSession:
     base_url: str
     out_dir: Path
     shots: list[Path] = field(default_factory=list)
+    server: object = None      # the Popen, so a test can kill the wire
+
+    def stop_server(self):
+        """Kill the server out from under the page, as a crash would."""
+        self.server.terminate()
+        self.server.wait(timeout=10)
 
     def shot(self, name: str, *, clip=None, full_page=False) -> Path:
         path = self.out_dir / f"{name}.png"
@@ -153,7 +159,7 @@ def ui_session(lines=(), *, out_dir="/tmp/partyline-ui", headless=True, viewport
             page.wait_for_selector("#convs")
             if lines:
                 page.wait_for_selector(".conv-row")
-            session = UiSession(page=page, base_url=base_url, out_dir=out)
+            session = UiSession(page=page, base_url=base_url, out_dir=out, server=server)
             session.settle()
             try:
                 yield session

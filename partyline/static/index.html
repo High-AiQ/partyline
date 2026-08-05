@@ -334,6 +334,23 @@ body::after{
 .warn-sent{color:var(--green);font-style:normal}
 #wireNotice{position:fixed;left:50%;top:18px;z-index:70;transform:translateX(-50%);max-width:min(560px,90vw);padding:8px 14px;border:1px solid var(--line);border-radius:5px;background:var(--ink-2);color:var(--cream-dim);box-shadow:0 12px 30px rgba(0,0,0,.45);font-size:11px;animation:arrive .2s ease both}
 #wireNotice.error{color:var(--red);border-color:rgba(201,111,90,.55)}
+/* Distinct from #wireNotice on purpose: that one is a transient toast, this
+   one stays up for as long as the wire is actually down. A dropped server used
+   to look exactly like a slow one. */
+#wireDown{
+  position:fixed;left:50%;top:18px;z-index:71;transform:translateX(-50%);
+  max-width:min(560px,90vw);padding:8px 14px;border-radius:5px;font-size:11px;
+  border:1px solid rgba(201,111,90,.55);background:var(--panel);color:var(--red);
+  box-shadow:0 12px 30px rgba(0,0,0,.45);animation:arrive .2s ease both;
+  display:flex;align-items:center;gap:9px;letter-spacing:.04em;
+}
+#wireDown .pulse{
+  width:6px;height:6px;border-radius:50%;background:var(--red);
+  animation:wirePulse 1.4s ease-in-out infinite;
+}
+@keyframes wirePulse{0%,100%{opacity:.25}50%{opacity:1}}
+#wireDown.stopped{color:var(--cream-dim);border-color:var(--panel-line)}
+#wireDown.stopped .pulse{background:var(--cream-faint);animation:none}
 .modal.wide{width:min(980px,96vw)}
 .screen{
   background:#0a0c0b;border:1px solid var(--line);border-radius:5px;
@@ -869,6 +886,39 @@ function clearCurrentConversation(removeRoute=true){
   if(removeRoute && routeConversationId()) clearConversationRoute();
 }
 
+/* ── wire state ──
+   The socket reconnects on a timer forever, which is right, but silently: a
+   crashed server, a scheduled restart and a slow network all looked identical.
+   Say which one it is. */
+function showWireDown(message, stopped=false){
+  let bar = $("wireDown");
+  if(!bar){
+    bar = document.createElement("div"); bar.id = "wireDown";
+    bar.setAttribute("role", "status"); bar.setAttribute("aria-live", "polite");
+    bar.innerHTML = `<span class="pulse"></span><span class="text"></span>`;
+    document.body.appendChild(bar);
+  }
+  bar.querySelector(".text").textContent = message;
+  bar.classList.toggle("stopped", stopped);
+}
+function clearWireDown(){
+  clearTimeout(wireDownTimer); wireDownTimer = null;
+  $("wireDown")?.remove();
+}
+/* Announce an outage only once the wire has stayed down for a grace period,
+   and let a successful reconnect cancel it. Counting drops instead would make
+   the banner depend on how many times the socket happened to bounce, which is
+   not something the user did anything to cause. */
+const WIRE_GRACE_MS = 3000;
+let wireDownTimer = null;
+function armWireDown(){
+  if(wireDownTimer) return;
+  wireDownTimer = setTimeout(()=>{
+    wireDownTimer = null;
+    showWireDown("the wire is down — reconnecting…");
+  }, WIRE_GRACE_MS);
+}
+
 let wireNoticeTimer = null;
 function showWireNotice(message, kind=""){
   let notice = $("wireNotice");
@@ -1075,6 +1125,15 @@ function connectWs(convId){
     const e = JSON.parse(ev.data);
     if(e.type==="hello" && e.conversation_id===convId){
       state.wsReady = true;
+      clearWireDown();
+      return;
+    }
+    if(e.type==="shutdown"){
+      // The server told us it is going away, so stop pretending a reconnect is
+      // imminent: nothing is coming back until someone starts it again.
+      state.wireStopped = true;
+      showWireDown("partyline has stopped — start it again to reconnect", true);
+      try{ws.close();}catch(err){}
       return;
     }
     if(e.type==="error" && e.conversation_id===convId){
@@ -1115,8 +1174,11 @@ function connectWs(convId){
     }
   };
   ws.onclose = ()=>{
-    if(gen===state.wsGen && !state.wsClaimRejected)
-      setTimeout(()=>{ if(gen===state.wsGen && !state.wsClaimRejected) connectWs(convId); }, 1500);
+    if(gen!==state.wsGen || state.wsClaimRejected || state.wireStopped) return;
+    armWireDown();
+    setTimeout(()=>{
+      if(gen===state.wsGen && !state.wsClaimRejected && !state.wireStopped) connectWs(convId);
+    }, 1500);
   };
 }
 
