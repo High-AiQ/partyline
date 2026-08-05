@@ -50,7 +50,7 @@ class ShutdownTest(unittest.TestCase):
             page.locator(".modal .live-list").wait_for(state="visible")
             page.locator(".modal button.danger").click()
 
-            # The page reports a deliberate stop, not a reconnect it will retry.
+            # The page reports a deliberate stop while it waits for a restart.
             page.locator("#wireDown.stopped").wait_for(state="visible", timeout=10000)
             self.assertIn("stopped", page.locator("#wireDown").inner_text())
             page.wait_for_timeout(1500)

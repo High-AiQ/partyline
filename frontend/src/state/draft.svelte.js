@@ -7,8 +7,45 @@
  * through a relationship neither of them has.
  */
 
+export const DRAFT_STORAGE_KEY = "partyline.composer-draft";
+
+function browserStorage() {
+  try {
+    return globalThis.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+export function restoreDraft(storage = browserStorage()) {
+  try {
+    return storage?.getItem(DRAFT_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+export function persistDraft(text, storage = browserStorage()) {
+  try {
+    if (text) storage?.setItem(DRAFT_STORAGE_KEY, text);
+    else storage?.removeItem(DRAFT_STORAGE_KEY);
+  } catch {
+    // Storage can be disabled without making the composer unusable.
+  }
+}
+
 class Draft {
-  text = $state("");
+  #text = $state(restoreDraft());
+
+  get text() {
+    return this.#text;
+  }
+
+  set text(value) {
+    this.#text = value;
+    persistDraft(value);
+  }
+
   /** Bumped whenever something outside the composer edits the text, so the
    *  composer knows to move the caret and resize rather than leaving both
    *  wherever the user last put them. */

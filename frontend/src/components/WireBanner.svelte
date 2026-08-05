@@ -63,8 +63,8 @@
   }
   @keyframes wire-pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
 
-  /* A deliberate stop is not an outage to wait out: drop the alarm colour and
-     stop the pulse, because nothing is coming back on its own. */
+  /* A deliberate stop is a known state, not an alarm: keep the banner while
+     retrying, but drop the warning colour and pulse until the server returns. */
   #wireDown.stopped { color: var(--color-cream-dim); border-color: var(--color-panel-line); }
   #wireDown.stopped .pulse { background: var(--color-cream-faint); animation: none; }
 </style>

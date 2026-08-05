@@ -7,6 +7,7 @@ Routing model (MVP):
     excluding its own, formatted as `[sender]: text` lines.
 """
 
+import json
 import os
 import re
 import signal
@@ -31,7 +32,23 @@ from .runtime import NAME_RE, RESERVED_NAMES, ChatRuntime
 
 STATIC_DIR = Path(__file__).parent / "static"
 ASSETS_DIR = STATIC_DIR / "assets"
+BUILD_MANIFEST = STATIC_DIR / "build.json"
 
+
+def load_frontend_build(path: Path = BUILD_MANIFEST) -> str:
+    """Read the deterministic id emitted into both the bundle and its manifest."""
+    try:
+        build = json.loads(path.read_text(encoding="utf-8"))["build"]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise RuntimeError(
+            f"no valid frontend build manifest at {path}. "
+            "Run `npm install && npm run build` in frontend/."
+        ) from exc
+    if not isinstance(build, str) or not re.fullmatch(r"[0-9a-f]{16}", build):
+        raise RuntimeError(f"invalid frontend build id in {path}: {build!r}")
+    return build
+
+FRONTEND_BUILD = load_frontend_build()
 runtime = ChatRuntime(Db(os.environ.get("PARTYLINE_DB", os.path.expanduser("~/.partyline.db"))))
 
 
@@ -96,7 +113,7 @@ app.mount("/assets", StaticFiles(directory=ASSETS_DIR), name="assets")
 
 @app.get("/api/version")
 async def version():
-    return {"version": __version__}
+    return {"version": __version__, "build": FRONTEND_BUILD}
 
 
 LOOPBACK = {"127.0.0.1", "::1", "localhost"}
@@ -518,7 +535,7 @@ def _save_preset(preset_id: str, body: PresetIn):
 
 @app.websocket("/ws/{conv_id}")
 async def ws_endpoint(ws: WebSocket, conv_id: str):
-    await runtime.websocket(ws, conv_id)
+    await runtime.websocket(ws, conv_id, FRONTEND_BUILD)
 
 
 def load_dotenv(path: str = ".env"):

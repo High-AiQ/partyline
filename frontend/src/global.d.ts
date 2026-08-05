@@ -8,6 +8,9 @@
  * checker knows about it too, rather than every use needing a cast.
  */
 declare global {
+  /** Injected by Vite for production builds; blank under `npm run dev`. */
+  const __PARTYLINE_BUILD__: string;
+
   interface Window {
     partyline: {
       room: typeof import("./state/room.svelte.js").room;

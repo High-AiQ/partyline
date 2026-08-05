@@ -48,30 +48,65 @@ class WireStateTest(unittest.TestCase):
 
             # Drop the socket once from the client side; the server is still up,
             # so the retry succeeds and nothing should ever appear.
+            page.evaluate("() => { window.__partylineReloadControl = true; }")
             page.evaluate("() => window.partyline.wire.socket.close()")
             page.wait_for_timeout(2500)
 
             self.assertEqual(page.locator("#wireDown").count(), 0)
             self.assertTrue(page.evaluate("() => window.partyline.wire.ready"))
+            self.assertTrue(page.evaluate("() => window.__partylineReloadControl"))
 
-    def test_a_shutdown_event_says_it_is_not_coming_back(self):
-        """The distinction that makes this worth having: a crash is
-        'reconnecting', a deliberate stop is 'it has stopped'."""
+    def test_a_new_frontend_build_reloads_and_restores_the_draft(self):
+        with ui_session(["alpha line"]) as ui:
+            page = ui.page
+            page.locator(".conv-row .conv").first.click()
+            page.locator("#input").wait_for(state="visible")
+            page.locator("#input").fill("keep this unfinished thought")
+            route = page.url.split("#", 1)[1]
+            build = page.evaluate(
+                "() => fetch('/api/version').then(response => response.json()).then(x => x.build)"
+            )
+            other_build = ("0" if build[0] != "0" else "1") + build[1:]
+
+            page.evaluate(
+                """([build]) => {
+                  window.__partylineReloadControl = true;
+                  const conversation_id = window.partyline.room.conversation.id;
+                  window.partyline.wire.socket.dispatchEvent(new MessageEvent('message', {
+                    data: JSON.stringify({type: 'hello', conversation_id, build}),
+                  }));
+                }""",
+                [other_build],
+            )
+
+            page.wait_for_function(
+                "() => window.__partylineReloadControl !== true", timeout=10000)
+            page.locator("#input").wait_for(state="visible", timeout=10000)
+            self.assertEqual(page.url.split("#", 1)[1], route)
+            self.assertEqual(page.locator("#input").input_value(), "keep this unfinished thought")
+
+    def test_a_shutdown_event_waits_then_reconnects_without_reloading(self):
+        """A deliberate stop stays honest while still noticing the restart."""
         with ui_session(["alpha line"]) as ui:
             page = ui.page
             page.locator(".conv-row .conv").first.click()
             page.wait_for_timeout(500)
 
             # Deliver the event the shutdown route will broadcast.
+            page.evaluate("() => { window.__partylineReloadControl = true; }")
             page.evaluate(
                 "() => window.partyline.wire.socket.dispatchEvent(new MessageEvent('message',"
                 " {data: JSON.stringify({type: 'shutdown'})}))")
 
             page.locator("#wireDown.stopped").wait_for(state="visible", timeout=5000)
-            self.assertIn("stopped", page.locator("#wireDown").inner_text())
-            # And it must stop claiming a reconnect is on the way.
-            page.wait_for_timeout(2000)
-            self.assertNotIn("reconnecting", page.locator("#wireDown").inner_text())
+            self.assertIn("waiting for a restart", page.locator("#wireDown").inner_text())
+
+            # The harness server is still alive, standing in for a completed
+            # restart. The retry should reconnect without reloading because its
+            # build id is unchanged.
+            page.wait_for_function("() => window.partyline.wire.ready", timeout=5000)
+            page.locator("#wireDown").wait_for(state="detached", timeout=5000)
+            self.assertTrue(page.evaluate("() => window.__partylineReloadControl"))
 
 
 if __name__ == "__main__":

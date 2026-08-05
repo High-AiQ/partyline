@@ -2,6 +2,7 @@ import asyncio
 import os
 import tempfile
 import unittest
+from pathlib import Path
 
 from fastapi import HTTPException, WebSocketDisconnect
 
@@ -138,8 +139,22 @@ class ServerTest(unittest.TestCase):
         )
         self.arun(server.ws_endpoint(socket, "line"))
         self.assertEqual([event["type"] for event in socket.sent], ["error", "hello", "error", "message"])
+        self.assertEqual(socket.sent[1]["build"], server.FRONTEND_BUILD)
         self.assertEqual(server.runtime.db.list_messages("line")[-1]["body"], "hello")
         self.assertEqual(server.runtime.human_handles, {})
+
+    def test_frontend_build_manifest_is_validated(self):
+        manifest = Path(self.directory.name) / "build.json"
+        manifest.write_text('{"build":"0123456789abcdef"}', encoding="utf-8")
+        self.assertEqual(server.load_frontend_build(manifest), "0123456789abcdef")
+
+        manifest.write_text("not json", encoding="utf-8")
+        with self.assertRaisesRegex(RuntimeError, "no valid frontend build manifest"):
+            server.load_frontend_build(manifest)
+
+        manifest.write_text('{"build":"not-a-digest"}', encoding="utf-8")
+        with self.assertRaisesRegex(RuntimeError, "invalid frontend build id"):
+            server.load_frontend_build(manifest)
 
     def test_websocket_claim_rejects_invalid_duplicate_and_process_handles(self):
         self.add_attachment("process", "opus")

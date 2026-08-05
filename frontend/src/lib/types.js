@@ -86,6 +86,7 @@
  * @typedef {object} WireEvent
  * @property {"hello"|"message"|"attachment"|"attention"|"conversation"|"conversation_archived"|"conversation_deleted"|"error"|"shutdown"} type
  * @property {string} [conversation_id]
+ * @property {string} [build]       frontend build id, present on `hello`
  * @property {Attachment} [attachment]
  * @property {string} [attachment_id]
  * @property {Conversation} [conversation]

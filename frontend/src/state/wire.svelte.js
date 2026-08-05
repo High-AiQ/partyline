@@ -17,7 +17,14 @@
  * successful reconnect cancels it. Counting drops instead would make the banner
  * depend on how many times the socket happened to bounce, which is not
  * something the user did anything to cause.
+ *
+ * **Build identity.** The production bundle contains its own deterministic
+ * build id. A successful hello reports the server's id atomically with the
+ * socket handshake. If they differ, this tab is old and reloads; an ordinary
+ * reconnect stays on the page and keeps everything in place.
  */
+
+import { buildChanged } from "../lib/build.js";
 
 export const GRACE_MS = 3000;
 export const RETRY_MS = 1500;
@@ -72,6 +79,11 @@ class Wire {
       const payload = JSON.parse(event.data);
 
       if (payload.type === "hello" && payload.conversation_id === convId) {
+        if (buildChanged(__PARTYLINE_BUILD__, payload.build)) {
+          location.reload();
+          return;
+        }
+        this.stopped = false;
         this.ready = true;
         this.clearOutage();
         return;
@@ -95,11 +107,11 @@ class Wire {
     };
 
     socket.onclose = () => {
-      if (!current() || this.#claimRejected || this.stopped) return;
+      if (!current() || this.#claimRejected) return;
       this.ready = false;
-      this.#armOutage();
+      if (!this.stopped) this.#armOutage();
       this.#retryTimer = setTimeout(() => {
-        if (current() && !this.#claimRejected && !this.stopped) this.connect(convId, identity, onEvent);
+        if (current() && !this.#claimRejected) this.connect(convId, identity, onEvent);
       }, RETRY_MS);
     };
   }
@@ -124,7 +136,7 @@ class Wire {
     this.ready = false;
     clearTimeout(this.#graceTimer);
     this.#graceTimer = null;
-    this.outage = { message: "partyline has stopped — start it again to reconnect", stopped: true };
+    this.outage = { message: "partyline has stopped — waiting for a restart…", stopped: true };
   }
 
   clearOutage() {

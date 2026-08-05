@@ -149,7 +149,7 @@ class ChatRuntime:
             for att in self.db.list_attachments(conv_id)
         )
 
-    async def websocket(self, ws: WebSocket, conv_id: str):
+    async def websocket(self, ws: WebSocket, conv_id: str, frontend_build: str = ""):
         await ws.accept()
         self.sockets.setdefault(conv_id, set()).add(ws)
         claimed_handle = None
@@ -191,8 +191,10 @@ class ChatRuntime:
                                     pass  # a half-open socket cannot be closed cleanly
                     claims[ws] = (handle, client_id)
                     claimed_handle, claimed_client = handle, client_id
-                    await ws.send_json(
-                        {"type": "hello", "conversation_id": conv_id, "handle": handle})
+                    hello = {"type": "hello", "conversation_id": conv_id, "handle": handle}
+                    if frontend_build:
+                        hello["build"] = frontend_build
+                    await ws.send_json(hello)
                     continue
 
                 # Preserve the useful archived-line error even for an old client

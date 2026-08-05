@@ -3,12 +3,25 @@
 import { defineConfig } from "vitest/config";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import tailwindcss from "@tailwindcss/vite";
+import { createHash } from "node:crypto";
+import { readFileSync, readdirSync } from "node:fs";
+import { basename, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+const frontendDir = fileURLToPath(new URL(".", import.meta.url));
 const outDir = fileURLToPath(new URL("../partyline/static", import.meta.url));
+const buildId = sourceBuildId();
 
-export default defineConfig({
-  plugins: [tailwindcss(), svelte()],
+export default defineConfig(({ command }) => ({
+  plugins: [buildManifest(), tailwindcss(), svelte()],
+  define: {
+    // The production bundle knows which source snapshot made it. The server
+    // reports the same value from build.json on every WebSocket handshake, so
+    // a tab holding an old bundle can reload after a deployment. Leave it
+    // blank under `npm run dev`: the dev client intentionally runs ahead of
+    // the committed backend bundle it proxies to.
+    __PARTYLINE_BUILD__: JSON.stringify(command === "build" ? buildId : ""),
+  },
   build: {
     outDir,
     // The server serves this directory; anything stale in it is a bug waiting
@@ -31,7 +44,40 @@ export default defineConfig({
     environment: "jsdom",
     include: ["src/**/*.test.js"],
   },
-});
+}));
+
+function buildManifest() {
+  return {
+    name: "partyline-build-manifest",
+    generateBundle() {
+      this.emitFile({
+        type: "asset",
+        fileName: "build.json",
+        source: JSON.stringify({ build: buildId }) + "\n",
+      });
+    },
+  };
+}
+
+/** A deterministic identity for the inputs that can change the runtime UI. */
+function sourceBuildId() {
+  const files = ["index.html", "package.json", "package-lock.json", "vite.config.js"];
+  const visit = (directory) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) visit(path);
+      else if (!entry.name.endsWith(".test.js") && !entry.name.endsWith(".d.ts")) files.push(path);
+    }
+  };
+  visit(join(frontendDir, "src"));
+
+  const hash = createHash("sha256");
+  for (const path of files.map((path) => path.startsWith(frontendDir) ? path : join(frontendDir, path)).sort()) {
+    const name = relative(frontendDir, path).split(sep).join("/") || basename(path);
+    hash.update(name).update("\0").update(readFileSync(path)).update("\0");
+  }
+  return hash.digest("hex").slice(0, 16);
+}
 
 function backend() {
   return `http://127.0.0.1:${process.env.PARTYLINE_PORT || 8642}`;
