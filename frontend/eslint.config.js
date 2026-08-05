@@ -2,6 +2,7 @@ import js from "@eslint/js";
 import svelte from "eslint-plugin-svelte";
 import globals from "globals";
 import prettier from "eslint-config-prettier";
+import tseslint from "typescript-eslint";
 import svelteConfig from "./svelte.config.js";
 
 /**
@@ -18,6 +19,14 @@ export default [
   { ignores: ["node_modules/**", "dist/**", "../partyline/static/**"] },
 
   js.configs.recommended,
+  ...tseslint.configs.strictTypeChecked.map((config) => ({
+    ...config,
+    files: ["**/*.ts"],
+  })),
+  ...tseslint.configs.stylisticTypeChecked.map((config) => ({
+    ...config,
+    files: ["**/*.ts"],
+  })),
   ...svelte.configs["flat/recommended"],
 
   {
@@ -44,7 +53,21 @@ export default [
   },
 
   {
-    files: ["**/*.svelte", "**/*.svelte.js"],
+    files: ["**/*.ts"],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      "no-unused-vars": "off",
+      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", caughtErrors: "none" }],
+    },
+  },
+
+  {
+    files: ["**/*.svelte", "**/*.svelte.js", "**/*.svelte.ts"],
     languageOptions: {
       parserOptions: { svelteConfig },
     },
@@ -68,7 +91,7 @@ export default [
   },
 
   {
-    files: ["**/*.test.js"],
+    files: ["**/*.test.{js,ts}"],
     languageOptions: { globals: { ...globals.node } },
   },
 

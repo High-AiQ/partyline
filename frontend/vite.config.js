@@ -42,7 +42,7 @@ export default defineConfig(({ command }) => ({
   },
   test: {
     environment: "jsdom",
-    include: ["src/**/*.test.js"],
+    include: ["src/**/*.test.{js,ts}"],
   },
 }));
 
@@ -66,7 +66,7 @@ function sourceBuildId() {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name);
       if (entry.isDirectory()) visit(path);
-      else if (!entry.name.endsWith(".test.js") && !entry.name.endsWith(".d.ts")) files.push(path);
+      else if (!entry.name.match(/\.test\.[jt]s$/) && !entry.name.endsWith(".d.ts")) files.push(path);
     }
   };
   visit(join(frontendDir, "src"));

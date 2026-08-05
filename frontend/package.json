@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "svelte-check --tsconfig ./jsconfig.json",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"src/**/*.{js,ts,svelte,css}\" \"*.{js,ts,json}\"",
@@ -33,12 +33,14 @@
     "svelte-check": "^4.3.3",
     "svelte-eslint-parser": "^1.8.0",
     "tailwindcss": "^4.1.14",
+    "typescript": "^6.0.3",
     "typescript-eslint": "^8.66.0",
     "vite": "^7.1.9",
     "vitest": "^3.2.4"
   },
   "dependencies": {
     "dompurify": "^3.2.7",
-    "marked": "^16.4.1"
+    "marked": "^16.4.1",
+    "zod": "^4.4.3"
   }
 }
