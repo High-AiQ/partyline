@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, ApiContractError, ApiError } from "./api";
 import type { AttachPayload, PresetDraft } from "./api";
 import type { Conversation } from "./contracts";
+import type { RestartPlan, RestartPlanRequest } from "./contracts";
 
 interface MockResponseOptions {
   ok?: boolean;
@@ -25,6 +26,17 @@ const attachPayload: AttachPayload = {
   adapter: "codex",
   command: "codex",
   cwd: "/tmp/work",
+};
+
+const restartRequest: RestartPlanRequest = {
+  conversation_id: "conv-1",
+  debrief: "Continue the strict TypeScript review.",
+};
+
+const restartPlan: RestartPlan = {
+  ...restartRequest,
+  token: "offer-token",
+  attachments: [{ id: "att-1", name: "sol", adapter: "codex" }],
 };
 
 function response(body: unknown, { ok = true, status = 200 }: MockResponseOptions = {}): MockResponse {
@@ -90,6 +102,31 @@ describe("api", () => {
     await expect(api.shutdown()).rejects.toMatchObject({
       message: "could not stop partyline",
       status: 502,
+    });
+  });
+
+  it("schedules a same-line restart plan with its continuation debrief", async () => {
+    const fetch = vi.fn().mockResolvedValue(response(restartPlan));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(api.planRestart(restartRequest)).resolves.toEqual(restartPlan);
+    expect(fetch).toHaveBeenCalledWith("/api/restart-plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(restartRequest),
+    });
+  });
+
+  it("optionally persists reattachment in the shutdown request", async () => {
+    const result = { ok: true as const, stopping: ["sol"], reattach: restartPlan };
+    const fetch = vi.fn().mockResolvedValue(response(result));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(api.shutdown(restartRequest)).resolves.toEqual(result);
+    expect(fetch).toHaveBeenCalledWith("/api/shutdown", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reattach: restartRequest }),
     });
   });
 

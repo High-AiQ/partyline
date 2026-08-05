@@ -6,6 +6,12 @@ from partyline.contracts import (
     HelloEvent,
     MessageEvent,
     MessageResponse,
+    ReattachCandidateResponse,
+    ReattachCommand,
+    ReattachDecisionEvent,
+    ReattachOfferEvent,
+    RestartPlanResponse,
+    ShutdownResponse,
 )
 
 
@@ -55,3 +61,66 @@ class ContractTest(unittest.TestCase):
             HelloEvent(conversation_id="line", handle="greg").model_dump(exclude_none=True),
             {"type": "hello", "conversation_id": "line", "handle": "greg"},
         )
+
+    def test_restart_contracts_keep_the_offer_token_and_exact_candidate_shape(self):
+        candidate = ReattachCandidateResponse(id="att-1", name="sol", adapter="codex")
+        plan = RestartPlanResponse(
+            conversation_id="line",
+            token="offer-token",
+            attachments=[candidate],
+            debrief="Continue the review.",
+        )
+
+        self.assertEqual(
+            ShutdownResponse(ok=True, stopping=["sol"], reattach=plan).model_dump(),
+            {
+                "ok": True,
+                "stopping": ["sol"],
+                "reattach": {
+                    "conversation_id": "line",
+                    "token": "offer-token",
+                    "attachments": [{"id": "att-1", "name": "sol", "adapter": "codex"}],
+                    "debrief": "Continue the review.",
+                },
+            },
+        )
+        offer = ReattachOfferEvent(
+            conversation_id="line",
+            token="offer-token",
+            attachments=[candidate],
+            debrief="Continue the review.",
+        )
+        self.assertEqual(
+            offer.model_dump(),
+            {
+                "type": "reattach_offer",
+                "conversation_id": "line",
+                "token": "offer-token",
+                "attachments": [{"id": "att-1", "name": "sol", "adapter": "codex"}],
+                "debrief": "Continue the review.",
+            },
+        )
+        self.assertEqual(
+            ReattachDecisionEvent(
+                conversation_id="line",
+                token="offer-token",
+                action="started",
+            ).model_dump(),
+            {
+                "type": "reattach_decision",
+                "conversation_id": "line",
+                "token": "offer-token",
+                "action": "started",
+            },
+        )
+
+    def test_reattach_command_requires_an_explicit_supported_action(self):
+        command = ReattachCommand.model_validate(
+            {"type": "reattach", "token": "offer-token", "action": "accept"}
+        )
+
+        self.assertEqual(command.action, "accept")
+        with self.assertRaises(ValueError):
+            ReattachCommand.model_validate(
+                {"type": "reattach", "token": "offer-token", "action": "later"}
+            )

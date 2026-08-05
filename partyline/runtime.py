@@ -15,6 +15,7 @@ from .contracts import (
     MessageResponse,
 )
 from .db import Db
+from .reattach import ReattachCoordinator
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
 MENTION_RE = re.compile(r"@([A-Za-z0-9][A-Za-z0-9_.-]*)")
@@ -160,7 +161,13 @@ class ChatRuntime:
             for att in self.db.list_attachments(conv_id)
         )
 
-    async def websocket(self, ws: WebSocket, conv_id: str, frontend_build: str = ""):
+    async def websocket(
+        self,
+        ws: WebSocket,
+        conv_id: str,
+        frontend_build: str = "",
+        reattacher: ReattachCoordinator | None = None,
+    ):
         await ws.accept()
         self.sockets.setdefault(conv_id, set()).add(ws)
         claimed_handle = None
@@ -168,6 +175,14 @@ class ChatRuntime:
         try:
             while True:
                 data = await ws.receive_json()
+                if not isinstance(data, dict):
+                    await ws.send_json(
+                        ErrorEvent(
+                            conversation_id=conv_id,
+                            message="WebSocket commands must be JSON objects",
+                        ).model_dump()
+                    )
+                    continue
                 if data.get("type") == "hello":
                     handle = str(data.get("handle", "")).strip()
                     client_id = str(data.get("client_id", "")).strip()
@@ -209,6 +224,8 @@ class ChatRuntime:
                             build=frontend_build or None,
                         ).model_dump(exclude_none=True)
                     )
+                    if reattacher is not None and (offer := reattacher.offer(conv_id)):
+                        await ws.send_json(offer.model_dump())
                     continue
 
                 # Preserve the useful archived-line error even for an old client
@@ -237,6 +254,24 @@ class ChatRuntime:
                             message="this connection was superseded; reconnect to continue",
                         ).model_dump()
                     )
+                    continue
+                if data.get("type") == "reattach":
+                    if reattacher is None:
+                        await ws.send_json(
+                            ErrorEvent(
+                                conversation_id=conv_id,
+                                message="reattachment is not available on this server",
+                            ).model_dump()
+                        )
+                        continue
+                    error = await reattacher.choose(conv_id, data, claimed_handle)
+                    if error is not None:
+                        await ws.send_json(
+                            ErrorEvent(
+                                conversation_id=conv_id,
+                                message=error,
+                            ).model_dump()
+                        )
                     continue
                 sender = str(data.get("sender", "")).strip()
                 if sender != claimed_handle:

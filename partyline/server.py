@@ -26,7 +26,14 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 from . import __version__
-from .adapters import ADAPTERS, ADAPTER_METADATA, import_repository, make_adapter, reload_adapters
+from .adapters import (
+    ADAPTERS,
+    ADAPTER_METADATA,
+    Adapter,
+    import_repository,
+    make_adapter,
+    reload_adapters,
+)
 from .contracts import (
     AdapterImportResponse,
     AdapterMetadataResponse,
@@ -44,13 +51,18 @@ from .contracts import (
     OkResponse,
     PresetResponse,
     PurgeResponse,
+    ReattachCandidateResponse,
+    RestartPlanRequest,
+    RestartPlanResponse,
     RunningProcessResponse,
     ScreenResponse,
     ShutdownEvent,
+    ShutdownRequest,
     ShutdownResponse,
     VersionResponse,
 )
-from .db import Db
+from .db import Db, RestartPlan
+from .reattach import ReattachCoordinator
 from .runtime import NAME_RE, RESERVED_NAMES, ChatRuntime
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -145,6 +157,60 @@ LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 _uvicorn_server = None
 
 
+def require_loopback(request: Request) -> None:
+    """Keep process-control endpoints local even when the server binds widely."""
+    client = request.client.host if request.client else None
+    if client not in LOOPBACK:
+        raise HTTPException(403, "process control may only be requested from this machine")
+
+
+def adapter_can_resume(adapter_id: str) -> bool:
+    capabilities = ADAPTER_METADATA.get(adapter_id, {}).get("capabilities") or {}
+    return (
+        capabilities.get("resume", False)
+        if isinstance(capabilities, dict)
+        else "resume" in capabilities
+    )
+
+
+def restart_plan_response(plan: RestartPlan) -> RestartPlanResponse:
+    attachments = []
+    for attachment_id in plan["attachment_ids"]:
+        attachment = runtime.db.get_attachment(attachment_id)
+        if attachment is not None and attachment["conv_id"] == plan["conversation_id"]:
+            attachments.append(
+                ReattachCandidateResponse(
+                    id=attachment["id"],
+                    name=attachment["name"],
+                    adapter=attachment["adapter"],
+                )
+            )
+    return RestartPlanResponse(
+        conversation_id=plan["conversation_id"],
+        token=plan["token"],
+        attachments=attachments,
+        debrief=plan["debrief"],
+    )
+
+
+def save_restart_plan(body: RestartPlanRequest) -> RestartPlanResponse:
+    conversation = runtime.db.get_conversation(body.conversation_id)
+    if conversation is None or conversation["archived_at"]:
+        raise HTTPException(404, "the requesting line is not available")
+    attachment_ids = [
+        attachment["id"]
+        for attachment in runtime.db.list_attachments(body.conversation_id)
+        if attachment["id"] in runtime.live
+        and attachment["status"] in ("starting", "running")
+        and adapter_can_resume(attachment["adapter"])
+    ]
+    if not attachment_ids:
+        raise HTTPException(409, "this line has no resumable live processes")
+    return restart_plan_response(
+        runtime.db.save_restart_plan(body.conversation_id, attachment_ids, body.debrief.strip())
+    )
+
+
 def request_exit():
     """Ask the process to come down gracefully, running lifespan teardown.
 
@@ -162,16 +228,22 @@ async def running():
     return runtime.running_processes()
 
 
+@app.post("/api/restart-plan", response_model=RestartPlanResponse)
+async def plan_restart(request: Request, body: RestartPlanRequest):
+    """Persist the only line allowed to offer reattachment after a restart."""
+    require_loopback(request)
+    return save_restart_plan(body)
+
+
 @app.post("/api/shutdown", response_model=ShutdownResponse)
-async def shutdown(request: Request):
+async def shutdown(request: Request, body: ShutdownRequest | None = None):
     """Stop partyline. Deliberately reachable only from this machine.
 
     The bind address is configurable, so "it only listens on localhost" is not
     something to assume — check the caller.
     """
-    client = request.client.host if request.client else None
-    if client not in LOOPBACK:
-        raise HTTPException(403, "shutdown may only be requested from this machine")
+    require_loopback(request)
+    planned = save_restart_plan(body.reattach) if body and body.reattach else None
     stopping = runtime.running_processes()
     # Tell every open tab before going, so they show a stopped state instead of
     # reconnecting forever at a socket that is never coming back.
@@ -179,8 +251,15 @@ async def shutdown(request: Request):
         await runtime.broadcast(conv_id, ShutdownEvent())
     # The exit runs *after* this response is flushed; stopping first would drop
     # the connection before the caller ever learned it had worked.
-    return JSONResponse({"ok": True, "stopping": [p["name"] for p in stopping]},
-                        background=BackgroundTask(request_exit))
+    payload = ShutdownResponse(
+        ok=True,
+        stopping=[process["name"] for process in stopping],
+        reattach=planned,
+    )
+    return JSONResponse(
+        payload.model_dump(exclude_none=True),
+        background=BackgroundTask(request_exit),
+    )
 
 
 @app.get("/api/adapters", response_model=list[AdapterMetadataResponse])
@@ -404,16 +483,17 @@ async def attach(conv_id: str, body: AttachIn):
 
 @app.post("/api/attachments/{att_id}/resume", response_model=AttachmentResponse)
 async def resume_attachment(att_id: str):
+    await _resume_adapter(att_id)
+    return runtime.db.get_attachment(att_id)
+
+
+async def _resume_adapter(att_id: str) -> Adapter:
     att = runtime.db.get_attachment(att_id)
     if not att:
         raise HTTPException(404)
     if att["status"] in ("starting", "running") or att_id in runtime.live:
         raise HTTPException(409, f"'{att['name']}' is already live")
-    metadata = ADAPTER_METADATA.get(att["adapter"], {})
-    capabilities = metadata.get("capabilities") or {}
-    can_resume = (capabilities.get("resume", False) if isinstance(capabilities, dict)
-                  else "resume" in capabilities)
-    if not can_resume:
+    if not adapter_can_resume(att["adapter"]):
         raise HTTPException(400, f"the {att['adapter']} adapter has no session to resume")
     for other in runtime.db.list_attachments(att["conv_id"]):
         if other["name"].lower() == att["name"].lower() and other["status"] in ("starting", "running"):
@@ -444,7 +524,7 @@ async def resume_attachment(att_id: str):
         att["conv_id"], "system", "system",
         f"@{att['name']} resumed with full context · session {att.get('cli_session') or att_id}",
     )
-    return runtime.db.get_attachment(att_id)
+    return adapter
 
 
 @app.delete("/api/attachments/{att_id}", response_model=OkResponse)
@@ -558,7 +638,12 @@ def _save_preset(preset_id: str, body: PresetIn):
 
 @app.websocket("/ws/{conv_id}")
 async def ws_endpoint(ws: WebSocket, conv_id: str):
-    await runtime.websocket(ws, conv_id, FRONTEND_BUILD)
+    await runtime.websocket(
+        ws,
+        conv_id,
+        FRONTEND_BUILD,
+        ReattachCoordinator(runtime, _resume_adapter),
+    )
 
 
 def load_dotenv(path: str = ".env"):

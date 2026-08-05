@@ -379,8 +379,10 @@ class TailJsonlTest(unittest.IsolatedAsyncioTestCase):
         return seen
 
     async def test_complete_records_are_handed_over_in_order(self):
-        seen = await self._tail('{"n": 1}\n{"n": 2}\n')
+        adapter = Recorder(["cat"])
+        seen = await self._tail('{"n": 1}\n{"n": 2}\n', adapter)
         self.assertEqual(seen, [{"n": 1}, {"n": 2}])
+        self.assertTrue(await adapter.wait_ready())
 
     async def test_a_corrupt_record_is_skipped_not_fatal(self):
         seen = await self._tail('{"n": 1}\nnot json at all\n{"n": 2}\n')

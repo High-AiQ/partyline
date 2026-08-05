@@ -285,6 +285,10 @@ class Adapter:
     async def _tail_jsonl(self, path: str, handle_line):
         """Follow a JSONL transcript, ignoring incomplete or invalid records."""
         with open(path, encoding="utf-8", errors="replace") as file:
+            # Opening the claimed transcript is the readiness boundary for
+            # transcript adapters: a sequential restart may now safely advance
+            # to the next process without two discovery loops claiming one file.
+            self.mark_ready()
             while True:
                 position = file.tell()
                 line = file.readline()

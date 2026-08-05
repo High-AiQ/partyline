@@ -93,6 +93,9 @@ class PartylineAdapter(Adapter):
             return
         if self.on_cli_session:
             self.on_cli_session(session_id)
+        # The session id is claimed before polling its parts. A restart
+        # orchestrator can now start the next process without discovery races.
+        self.mark_ready()
 
         # Do not repeat old parts when reconnecting to an existing session.
         started_ms = int((self.spawned_at - 1) * 1000)

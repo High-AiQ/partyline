@@ -14,7 +14,14 @@
 
 import { SvelteSet } from "svelte/reactivity";
 import { api } from "../lib/api";
-import type { Attachment, ChatMessage, Conversation, ErrorEvent, WireEvent } from "../lib/contracts";
+import type {
+  Attachment,
+  ChatMessage,
+  Conversation,
+  ErrorEvent,
+  ReattachOfferEvent,
+  WireEvent,
+} from "../lib/contracts";
 import { session } from "./session.svelte.js";
 import { wire, sendOffLine } from "./wire.svelte.js";
 import type { WireContext, WireIdentity } from "./wire.svelte.js";
@@ -46,6 +53,8 @@ class Room {
   conversation = $state<Conversation | null>(null);
   messages = $state<ChatMessage[]>([]);
   attachments = $state<Attachment[]>([]);
+  /** A persisted restart offer is visible only on the line that created it. */
+  reattachOffer = $state<ReattachOfferEvent | null>(null);
 
   /** Handles seen speaking here, for the @ autocomplete. Not persisted: it is a
    *  convenience, and the server is the authority on who may be mentioned.
@@ -102,6 +111,7 @@ class Room {
     this.#seen = new Set<number>();
     this.humans.clear();
     this.attention.clear();
+    this.reattachOffer = null;
 
     wire.connect(conversation.id, this.identity, (event, context) => {
       this.#onWireEvent(event, context);
@@ -133,6 +143,7 @@ class Room {
     this.#seen = new Set<number>();
     this.humans.clear();
     this.attention.clear();
+    this.reattachOffer = null;
     if (clearRoute && routedConversationId()) clearConversationRoute();
   }
 
@@ -184,6 +195,16 @@ class Room {
         this.attention.add(event.attachment_id);
         break;
 
+      case "reattach_offer":
+        if (event.conversation_id === convId) this.reattachOffer = event;
+        break;
+
+      case "reattach_decision":
+        if (event.conversation_id === convId && event.token === this.reattachOffer?.token) {
+          this.reattachOffer = null;
+        }
+        break;
+
       case "conversation":
         if (event.conversation.id === convId) {
           this.conversation = event.conversation;
@@ -202,6 +223,11 @@ class Room {
         if (event.conversation_id === convId) this.#onWireError(event, context);
         break;
     }
+  }
+
+  chooseReattach(action: "accept" | "cancel"): boolean {
+    const offer = this.reattachOffer;
+    return offer ? wire.chooseReattach(offer.token, action) : false;
   }
 
   /**

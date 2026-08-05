@@ -190,6 +190,9 @@ class PartylineAdapter(Adapter):
                     self.on_cli_session(self._session_id)
                 last_id = self._latest_message_id(self._session_id)
 
+            # Both resume and fresh paths have an unambiguous session and a
+            # cursor before the tail begins, which is the safe sequencing point.
+            self.mark_ready()
             await self._tail(self._session_id, last_id)
         finally:
             self._release(self._session_id)

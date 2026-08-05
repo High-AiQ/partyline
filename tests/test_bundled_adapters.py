@@ -291,6 +291,7 @@ class HermesAdapterTest(RecordingAdapterTest):
         await adapter._run()
         self.assertEqual(seen, [("resume-s", 9)])
         self.assertEqual(self.messages, [])
+        self.assertTrue(await adapter.wait_ready())
 
     async def test_run_fresh_discovers_session_and_sends_briefing(self):
         db = self.make_store()
@@ -445,6 +446,7 @@ class OpenCodeAdapterTest(RecordingAdapterTest):
         with patch("partyline.adapters.bundled.opencode.adapter.asyncio.sleep", new=stop_after_poll):
             await adapter._run()
         adapter.send_keys.assert_not_awaited()
+        self.assertTrue(await adapter.wait_ready())
 
         dead = self.make(OpenCodeAdapter)
         dead.proc = Process()

@@ -15,6 +15,8 @@ import {
   RunningProcessSchema,
   ScreenResultSchema,
   ShutdownResultSchema,
+  RestartPlanSchema,
+  RestartPlanRequestSchema,
   VersionInfoSchema,
 } from "./contracts";
 import type {
@@ -30,6 +32,8 @@ import type {
   RunningProcess,
   ScreenResult,
   ShutdownResult,
+  RestartPlan,
+  RestartPlanRequest,
   VersionInfo,
 } from "./contracts";
 
@@ -58,7 +62,8 @@ export interface PresetDraft {
 export interface PartylineApi {
   version(): Promise<VersionInfo>;
   running(): Promise<RunningProcess[]>;
-  shutdown(): Promise<ShutdownResult>;
+  planRestart(plan: RestartPlanRequest): Promise<RestartPlan>;
+  shutdown(plan?: RestartPlanRequest): Promise<ShutdownResult>;
   adapters(): Promise<Adapter[]>;
   importAdapters(repository: string, ref: string): Promise<AdapterImportResult>;
   conversations(archived?: boolean): Promise<Conversation[]>;
@@ -133,11 +138,18 @@ async function request<Output>(path: string, options: RequestOptions<Output>): P
 export const api: PartylineApi = {
   version: () => request("/api/version", { schema: VersionInfoSchema }),
   running: () => request("/api/running", { schema: RunningProcessSchema.array() }),
-  shutdown: () =>
+  planRestart: (plan) =>
+    request("/api/restart-plan", {
+      schema: RestartPlanSchema,
+      method: "POST",
+      body: RestartPlanRequestSchema.parse(plan),
+      fallback: "could not schedule process reattachment",
+    }),
+  shutdown: (plan) =>
     request("/api/shutdown", {
       schema: ShutdownResultSchema,
       method: "POST",
-      body: {},
+      body: plan ? { reattach: RestartPlanRequestSchema.parse(plan) } : {},
       fallback: "could not stop partyline",
     }),
 

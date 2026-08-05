@@ -25,8 +25,13 @@
  */
 
 import { buildChanged } from "../lib/build";
-import { WireEventSchema, WireHelloCommandSchema, WireMessageCommandSchema } from "../lib/contracts";
-import type { WireEvent, WireHelloCommand, WireMessageCommand } from "../lib/contracts";
+import {
+  WireEventSchema,
+  WireHelloCommandSchema,
+  WireMessageCommandSchema,
+  WireReattachCommandSchema,
+} from "../lib/contracts";
+import type { ReattachAction, WireEvent, WireHelloCommand, WireMessageCommand } from "../lib/contracts";
 
 export const GRACE_MS = 3000;
 export const RETRY_MS = 1500;
@@ -167,6 +172,14 @@ class Wire {
   send(payload: WireMessageCommand): boolean {
     if (!this.ready || this.#socket?.readyState !== WebSocket.OPEN) return false;
     this.#socket.send(JSON.stringify(WireMessageCommandSchema.parse(payload)));
+    return true;
+  }
+
+  /** Accept or cancel the exact same-line offer reported by the server. */
+  chooseReattach(token: string, action: ReattachAction): boolean {
+    if (!this.ready || this.#socket?.readyState !== WebSocket.OPEN) return false;
+    const command = WireReattachCommandSchema.parse({ type: "reattach", token, action });
+    this.#socket.send(JSON.stringify(command));
     return true;
   }
 

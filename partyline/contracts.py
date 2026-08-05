@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class VersionResponse(BaseModel):
@@ -67,9 +67,32 @@ class ConversationDetailResponse(BaseModel):
     attachments: list[AttachmentResponse]
 
 
+class ReattachCandidateResponse(BaseModel):
+    id: str
+    name: str
+    adapter: str
+
+
+class RestartPlanRequest(BaseModel):
+    conversation_id: str
+    debrief: str = Field(default="", max_length=10_000)
+
+
+class RestartPlanResponse(BaseModel):
+    conversation_id: str
+    token: str
+    attachments: list[ReattachCandidateResponse]
+    debrief: str
+
+
+class ShutdownRequest(BaseModel):
+    reattach: RestartPlanRequest | None = None
+
+
 class ShutdownResponse(BaseModel):
     ok: bool
     stopping: list[str]
+    reattach: RestartPlanResponse | None = None
 
 
 class AdapterImportResponse(BaseModel):
@@ -153,6 +176,27 @@ class HelloEvent(BaseModel):
     build: str | None = None
 
 
+class ReattachOfferEvent(BaseModel):
+    type: Literal["reattach_offer"] = "reattach_offer"
+    conversation_id: str
+    token: str
+    attachments: list[ReattachCandidateResponse]
+    debrief: str
+
+
+class ReattachDecisionEvent(BaseModel):
+    type: Literal["reattach_decision"] = "reattach_decision"
+    conversation_id: str
+    token: str
+    action: Literal["started", "cancelled"]
+
+
+class ReattachCommand(BaseModel):
+    type: Literal["reattach"]
+    token: str
+    action: Literal["accept", "cancel"]
+
+
 Event = (
     ShutdownEvent
     | MessageEvent
@@ -163,6 +207,8 @@ Event = (
     | ConversationDeletedEvent
     | ErrorEvent
     | HelloEvent
+    | ReattachOfferEvent
+    | ReattachDecisionEvent
 )
 
 

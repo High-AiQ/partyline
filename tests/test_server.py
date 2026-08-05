@@ -28,6 +28,9 @@ class FakeAdapter:
     async def stop(self):
         self.stopped = True
 
+    async def wait_ready(self):
+        return True
+
     def screen_text(self):
         return "screen"
 
@@ -352,6 +355,74 @@ class ShutdownTest(ServerTest):
         self.assertEqual(socket.sent, [{"type": "shutdown"}])
         # And the exit is deferred until after the response is flushed.
         self.assertIsNotNone(response.background)
+
+    def test_restart_plan_is_local_line_scoped_and_only_includes_resumable_live_processes(self):
+        self.add_attachment("a1", "worker")
+        self.add_attachment("dead", "dead", "exited")
+        server.runtime.live["a1"] = FakeAdapter()
+
+        planned = self.arun(
+            server.plan_restart(
+                FakeRequest("127.0.0.1"),
+                server.RestartPlanRequest(
+                    conversation_id="line",
+                    debrief="Continue the interrupted review.",
+                ),
+            )
+        )
+
+        self.assertEqual([attachment.id for attachment in planned.attachments], ["a1"])
+        self.assertEqual(planned.conversation_id, "line")
+        self.assert_http(
+            403,
+            server.plan_restart(
+                FakeRequest("10.0.0.7"),
+                server.RestartPlanRequest(conversation_id="line"),
+            ),
+        )
+
+    def test_requesting_line_gets_offer_and_can_accept_sequential_reattachment(self):
+        self.add_attachment("a1", "worker")
+        server.runtime.live["a1"] = FakeAdapter()
+        planned = server.save_restart_plan(
+            server.RestartPlanRequest(conversation_id="line", debrief="Finish the review.")
+        )
+        server.runtime.live.clear()
+        server.runtime.db.mark_stale_attachments()
+        socket = StreamWebSocket(
+            {"type": "hello", "handle": "greg", "client_id": "browser"},
+            {"type": "reattach", "token": planned.token, "action": "accept"},
+        )
+
+        self.arun(server.ws_endpoint(socket, "line"))
+
+        event_types = [event["type"] for event in socket.sent]
+        self.assertIn("reattach_offer", event_types)
+        self.assertIn("reattach_decision", event_types)
+        self.assertIn("a1", server.runtime.live)
+        self.assertIsNone(server.runtime.db.get_restart_plan())
+        self.assertIn(
+            "sequential reattachment finished",
+            server.runtime.db.list_messages("line")[-1]["body"],
+        )
+
+    def test_other_lines_never_receive_or_consume_a_restart_offer(self):
+        self.add_attachment("a1", "worker")
+        server.runtime.live["a1"] = FakeAdapter()
+        planned = server.save_restart_plan(
+            server.RestartPlanRequest(conversation_id="line", debrief="Continue.")
+        )
+        server.runtime.db.create_conversation("other", "Other")
+        socket = StreamWebSocket(
+            {"type": "hello", "handle": "greg", "client_id": "browser"},
+            {"type": "reattach", "token": planned.token, "action": "accept"},
+        )
+
+        self.arun(server.ws_endpoint(socket, "other"))
+
+        self.assertNotIn("reattach_offer", [event["type"] for event in socket.sent])
+        self.assertEqual(socket.sent[-1]["type"], "error")
+        self.assertIsNotNone(server.runtime.db.get_restart_plan())
 
     def test_shutdown_asks_the_server_to_exit_rather_than_killing_the_process(self):
         """A hard exit would skip lifespan teardown and orphan every pty."""

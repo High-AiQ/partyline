@@ -92,9 +92,31 @@ export const ConversationDetailSchema = z.object({
 });
 export type ConversationDetail = z.infer<typeof ConversationDetailSchema>;
 
+export const ReattachCandidateSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  adapter: z.string(),
+});
+export type ReattachCandidate = z.infer<typeof ReattachCandidateSchema>;
+
+export const RestartPlanRequestSchema = z.object({
+  conversation_id: z.string(),
+  debrief: z.string().max(10_000),
+});
+export type RestartPlanRequest = z.infer<typeof RestartPlanRequestSchema>;
+
+export const RestartPlanSchema = z.object({
+  conversation_id: z.string(),
+  token: z.string(),
+  attachments: z.array(ReattachCandidateSchema),
+  debrief: z.string(),
+});
+export type RestartPlan = z.infer<typeof RestartPlanSchema>;
+
 export const ShutdownResultSchema = z.object({
   ok: z.literal(true),
   stopping: z.array(z.string()),
+  reattach: RestartPlanSchema.optional(),
 });
 export type ShutdownResult = z.infer<typeof ShutdownResultSchema>;
 
@@ -189,6 +211,23 @@ export const ShutdownEventSchema = z.object({
 });
 export type ShutdownEvent = z.infer<typeof ShutdownEventSchema>;
 
+export const ReattachOfferEventSchema = z.object({
+  type: z.literal("reattach_offer"),
+  conversation_id: z.string(),
+  token: z.string(),
+  attachments: z.array(ReattachCandidateSchema),
+  debrief: z.string(),
+});
+export type ReattachOfferEvent = z.infer<typeof ReattachOfferEventSchema>;
+
+export const ReattachDecisionEventSchema = z.object({
+  type: z.literal("reattach_decision"),
+  conversation_id: z.string(),
+  token: z.string(),
+  action: z.enum(["started", "cancelled"]),
+});
+export type ReattachDecisionEvent = z.infer<typeof ReattachDecisionEventSchema>;
+
 export const WireEventSchema = z.discriminatedUnion("type", [
   HelloEventSchema,
   MessageEventSchema,
@@ -199,6 +238,8 @@ export const WireEventSchema = z.discriminatedUnion("type", [
   ConversationDeletedEventSchema,
   ErrorEventSchema,
   ShutdownEventSchema,
+  ReattachOfferEventSchema,
+  ReattachDecisionEventSchema,
 ]);
 export type WireEvent = z.infer<typeof WireEventSchema>;
 
@@ -214,3 +255,13 @@ export const WireMessageCommandSchema = z.object({
   body: z.string(),
 });
 export type WireMessageCommand = z.infer<typeof WireMessageCommandSchema>;
+
+export const ReattachActionSchema = z.enum(["accept", "cancel"]);
+export type ReattachAction = z.infer<typeof ReattachActionSchema>;
+
+export const WireReattachCommandSchema = z.object({
+  type: z.literal("reattach"),
+  token: z.string(),
+  action: ReattachActionSchema,
+});
+export type WireReattachCommand = z.infer<typeof WireReattachCommandSchema>;
