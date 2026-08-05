@@ -1,37 +1,44 @@
 import { describe, expect, it } from "vitest";
-import { adapterLabel, canResume, canResumeJack, isLive, latestJacks } from "./attachments.js";
+import { adapterLabel, canResume, canResumeJack, isLive, latestJacks } from "./attachments";
 
-const jack = (name, status, created_at, extra = {}) => ({
-  id: `${name}-${created_at}`,
+interface FixtureJack {
+  id: string;
+  name: string;
+  status: string;
+  created_at: number;
+  adapter: string;
+}
+
+const jack = (name: string, status: string, created_at: number): FixtureJack => ({
+  id: `${name}-${String(created_at)}`,
   name,
   status,
   created_at,
   adapter: "raw",
-  ...extra,
 });
 
 describe("latestJacks", () => {
   it("shows one jack per handle", () => {
     const jacks = latestJacks([jack("sol", "exited", 1), jack("sol", "running", 2)]);
     expect(jacks).toHaveLength(1);
-    expect(jacks[0].status).toBe("running");
+    expect(jacks.at(0)?.status).toBe("running");
   });
 
   it("prefers a live attachment over a newer dead one", () => {
     // Resume spawns a new row and the old one settles to `exited` afterwards,
     // arriving out of order. Without this the board shows the corpse.
     const jacks = latestJacks([jack("sol", "running", 5), jack("sol", "exited", 9)]);
-    expect(jacks[0].created_at).toBe(5);
+    expect(jacks.at(0)?.created_at).toBe(5);
   });
 
   it("takes the newest when both are dead", () => {
     const jacks = latestJacks([jack("sol", "exited", 1), jack("sol", "exited", 7)]);
-    expect(jacks[0].created_at).toBe(7);
+    expect(jacks.at(0)?.created_at).toBe(7);
   });
 
   it("takes the newest when both are live", () => {
     const jacks = latestJacks([jack("sol", "running", 1), jack("sol", "running", 7)]);
-    expect(jacks[0].created_at).toBe(7);
+    expect(jacks.at(0)?.created_at).toBe(7);
   });
 
   it("treats handles case-insensitively, as mention routing does", () => {
@@ -45,7 +52,7 @@ describe("latestJacks", () => {
   it("does not mutate the list it is given", () => {
     const input = [jack("b", "running", 9), jack("a", "running", 1)];
     latestJacks(input);
-    expect(input[0].name).toBe("b");
+    expect(input.at(0)?.name).toBe("b");
   });
 
   it("handles an empty board", () => {
@@ -55,12 +62,16 @@ describe("latestJacks", () => {
 
 describe("isLive", () => {
   // The four statuses the schema defines; see partyline/db.py.
-  it.each([
+  const statuses: readonly (readonly [string, boolean])[] = [
     ["running", true],
     ["starting", true],
     ["exited", false],
     ["detached", false],
-  ])("%s → %s", (status, expected) => expect(isLive({ status })).toBe(expected));
+  ];
+
+  it.each(statuses)("%s → %s", (status, expected) => {
+    expect(isLive({ status })).toBe(expected);
+  });
 
   it("is false for nothing at all", () => {
     expect(isLive(undefined)).toBe(false);
@@ -95,7 +106,10 @@ describe("canResumeJack", () => {
     { id: "claude", capabilities: { resume: true } },
     { id: "raw", capabilities: {} },
   ];
-  const withAdapter = (adapter, status) => ({ ...jack("sol", status, 1), adapter });
+  const withAdapter = (adapter: string, status: string): FixtureJack => ({
+    ...jack("sol", status, 1),
+    adapter,
+  });
 
   it("offers resume for a dead jack whose adapter can reopen its session", () => {
     expect(canResumeJack(adapters, withAdapter("claude", "exited"))).toBe(true);

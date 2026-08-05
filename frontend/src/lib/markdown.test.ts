@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hue, renderMessage, senderColor } from "./markdown.js";
+import { hue, renderMessage, senderColor } from "./markdown";
 
 describe("renderMessage", () => {
   describe("safety", () => {

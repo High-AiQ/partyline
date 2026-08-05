@@ -14,21 +14,21 @@ const CLIENT_KEY = "partyline_client_id";
 
 export const RESERVED_HANDLES = new Set(["all", "system"]);
 
-export const readHandle = () => localStorage.getItem(HANDLE_KEY);
+export const readHandle = (): string | null => localStorage.getItem(HANDLE_KEY);
 
-export function writeHandle(handle) {
+export function writeHandle(handle: string): string {
   localStorage.setItem(HANDLE_KEY, handle);
   return handle;
 }
 
 /** Handles are one word: spaces become hyphens rather than being rejected. */
-export const normalizeHandle = (raw) => raw.trim().replace(/\s+/g, "-").slice(0, 32);
+export const normalizeHandle = (raw: string): string => raw.trim().replace(/\s+/g, "-").slice(0, 32);
 
-export const isReserved = (handle) => RESERVED_HANDLES.has(handle.toLowerCase());
+export const isReserved = (handle: string): boolean => RESERVED_HANDLES.has(handle.toLowerCase());
 
 /** Mint on first use and keep it forever; `randomUUID` needs a secure context,
  *  and partyline over plain http on a LAN address is not one. */
-export function readOrMintClientId() {
+export function readOrMintClientId(): string {
   const existing = localStorage.getItem(CLIENT_KEY);
   if (existing) return existing;
 

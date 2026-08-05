@@ -28,7 +28,7 @@
  */
 
 import { Marked } from "marked";
-import DOMPurify from "dompurify";
+import DOMPurify, { type Config as DomPurifyConfig } from "dompurify";
 
 /** Handles run to the first non-handle character; trailing `.`/`-`/`_` is sentence
  *  punctuation, not part of the name. "thanks @greg." mentions greg — and the
@@ -43,7 +43,7 @@ const marked = new Marked({
   renderer: {
     heading({ tokens, depth }) {
       const level = Math.min(depth, 3);
-      return `<div class="md-h md-h${level}">${this.parser.parseInline(tokens)}</div>`;
+      return `<div class="md-h md-h${String(level)}">${this.parser.parseInline(tokens)}</div>`;
     },
   },
 });
@@ -58,20 +58,23 @@ const marked = new Marked({
  * had to match `^\s*&gt;` to get them back; not escaping it is the same result
  * without the special case.
  */
-const escapeHtml = (text) =>
-  text.replace(/[&<"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", '"': "&quot;" })[character]);
+const escapeHtml = (text: string): string =>
+  text.replace(/[&<"]/g, (character) =>
+    character === "&" ? "&amp;" : character === "<" ? "&lt;" : "&quot;",
+  );
 
 /** The only classes this renderer emits. Anything else on a node did not come
  *  from us, so it does not survive — belt and braces alongside the escaping. */
 const OUR_CLASSES = new Set(["md-h", "md-h1", "md-h2", "md-h3"]);
 
 DOMPurify.addHook("afterSanitizeAttributes", (node) => {
+  if (!(node instanceof Element)) return;
   // Links leave the app, so they must not carry the opener with them.
   if (node.tagName === "A" && node.hasAttribute("href")) {
     node.setAttribute("target", "_blank");
     node.setAttribute("rel", "noopener noreferrer");
   }
-  if (!node.hasAttribute?.("class")) return;
+  if (!node.hasAttribute("class")) return;
   const kept = [...node.classList].filter((name) => OUR_CLASSES.has(name));
   if (kept.length) node.setAttribute("class", kept.join(" "));
   else node.removeAttribute("class");
@@ -107,7 +110,8 @@ const PURIFY_CONFIG = {
   ALLOWED_ATTR: ["href", "class", "target", "rel"],
   // Anything not on this list — `javascript:`, `data:`, `vbscript:` — is dropped.
   ALLOWED_URI_REGEXP: /^(?:https?|mailto):/i,
-};
+  RETURN_DOM_FRAGMENT: true,
+} as const satisfies DomPurifyConfig;
 
 /**
  * Wrap every @mention in the tree in a highlight span.
@@ -116,22 +120,24 @@ const PURIFY_CONFIG = {
  * and cannot be tricked by an entity-encoded handle. Anything already inside a
  * link or a code span is left alone: `@example` in a code sample is a literal.
  */
-function highlightMentions(root, doc) {
+function highlightMentions(root: HTMLElement, doc: Document): HTMLElement {
   const walker = doc.createTreeWalker(root, 4 /* SHOW_TEXT */);
-  const targets = [];
+  const targets: Text[] = [];
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (!(node instanceof Text)) continue;
     if (node.parentElement?.closest("a, code")) continue;
-    if (MENTION.test(node.nodeValue)) targets.push(node);
+    if (MENTION.test(node.nodeValue ?? "")) targets.push(node);
     MENTION.lastIndex = 0;
   }
 
   for (const node of targets) {
     const fragment = doc.createDocumentFragment();
+    const value = node.nodeValue ?? "";
     let cursor = 0;
-    for (const match of node.nodeValue.matchAll(MENTION)) {
-      const [whole, lead, name] = match;
+    for (const match of value.matchAll(MENTION)) {
+      const [whole = "", lead = "", name = ""] = match;
       const handle = name.replace(/[.\-_]+$/, "");
-      fragment.append(node.nodeValue.slice(cursor, match.index) + lead);
+      fragment.append(value.slice(cursor, match.index) + lead);
 
       const span = doc.createElement("span");
       span.className = "mention";
@@ -140,7 +146,7 @@ function highlightMentions(root, doc) {
 
       cursor = match.index + whole.length;
     }
-    fragment.append(node.nodeValue.slice(cursor));
+    fragment.append(value.slice(cursor));
     node.replaceWith(fragment);
   }
   return root;
@@ -153,29 +159,33 @@ function highlightMentions(root, doc) {
  * @param {boolean} rich full block markdown (processes) vs inline only (people)
  * @returns {string} HTML that is safe to assign to innerHTML
  */
-export function renderMessage(body, rich = false) {
+export function renderMessage(body: string | undefined, rich = false): string {
   const source = escapeHtml(body ?? "");
   // `parse`/`parseInline` are typed as possibly-async for the sake of async
   // extensions; this instance has none, so both are synchronous here.
-  const raw = /** @type {string} */ (rich ? marked.parse(source) : marked.parseInline(source));
-  const doc = /** @type {DocumentFragment} */ (
-    /** @type {any} */ (DOMPurify.sanitize(raw, { ...PURIFY_CONFIG, RETURN_DOM_FRAGMENT: true }))
-  );
+  const parsed = rich ? marked.parse(source) : marked.parseInline(source);
+  if (typeof parsed !== "string") {
+    throw new Error("the message renderer requires synchronous Marked extensions");
+  }
+  const raw = parsed;
+  const doc = DOMPurify.sanitize(raw, PURIFY_CONFIG);
   const host = document.createElement("div");
   host.append(doc);
   return highlightMentions(host, document).innerHTML;
 }
 
 /** Stable per-name colour, so a handle looks the same everywhere it appears. */
-export function hue(name) {
+export function hue(name: string): number {
   let h = 0;
   for (const character of name) h = (h * 31 + character.charCodeAt(0)) % 360;
   return h;
 }
 
 /** The colour a sender's name is drawn in. System lines are deliberately plain. */
-export function senderColor(sender, senderType) {
+type SenderType = "human" | "agent" | "system";
+
+export function senderColor(sender: string, senderType: SenderType): string {
   if (senderType === "system") return "";
   const agent = senderType === "agent";
-  return `hsl(${hue(sender.toLowerCase())} ${agent ? "55%" : "40%"} ${agent ? "68%" : "72%"})`;
+  return `hsl(${String(hue(sender.toLowerCase()))} ${agent ? "55%" : "40%"} ${agent ? "68%" : "72%"})`;
 }

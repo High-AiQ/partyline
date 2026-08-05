@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildChanged } from "./build.js";
+import { buildChanged } from "./build";
 
 describe("buildChanged", () => {
   it("detects a server serving a different frontend", () => {

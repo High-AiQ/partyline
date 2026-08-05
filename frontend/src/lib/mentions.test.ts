@@ -1,7 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { applyMention, mentionCandidates, mentionToken } from "./mentions.js";
+import { applyMention, mentionCandidates, mentionToken } from "./mentions";
+import type { MentionToken } from "./mentions";
 
-const jack = (name, status) => ({ id: name, name, status, adapter: "raw", created_at: 1 });
+interface FixtureJack {
+  id: string;
+  name: string;
+  status: string;
+  adapter: string;
+  created_at: number;
+}
+
+const jack = (name: string, status: string): FixtureJack => ({
+  id: name,
+  name,
+  status,
+  adapter: "raw",
+  created_at: 1,
+});
+
+const tokenAt = (value: string, caret: number): MentionToken => {
+  const token = mentionToken(value, caret);
+  if (!token) throw new Error("expected a mention token");
+  return token;
+};
 
 describe("mentionToken", () => {
   it("finds a token at the start of the line", () => {
@@ -55,8 +76,8 @@ describe("mentionCandidates", () => {
 
   it("offers @all last, because it rings everyone", () => {
     const candidates = mentionCandidates("", attachments, ["sam"]);
-    expect(candidates.at(-1).name).toBe("all");
-    expect(candidates.at(-1).all).toBe(true);
+    expect(candidates.at(-1)?.name).toBe("all");
+    expect(candidates.at(-1)?.all).toBe(true);
   });
 
   it("hides @all when there is nobody running to ring", () => {
@@ -69,7 +90,7 @@ describe("mentionCandidates", () => {
     // and the popover keys by name, so a duplicate is a crash, not a wart.
     const candidates = mentionCandidates("s", [jack("stale", "exited")], ["stale"]);
     expect(candidates).toHaveLength(1);
-    expect(candidates[0].kind).toBe("raw"); // the process record wins
+    expect(candidates.at(0)?.kind).toBe("raw"); // the process record wins
   });
 
   it("treats a case-variant human handle as the same handle", () => {
@@ -84,23 +105,23 @@ describe("mentionCandidates", () => {
     ];
     const candidates = mentionCandidates("sol", history, []);
     expect(candidates).toHaveLength(1);
-    expect(candidates[0].status).toBe("running");
+    expect(candidates.at(0)?.status).toBe("running");
   });
 });
 
 describe("applyMention", () => {
   it("splices the handle in and leaves the caret past the trailing space", () => {
-    const token = mentionToken("hey @so", 7);
+    const token = tokenAt("hey @so", 7);
     expect(applyMention("hey @so", token, "sol")).toEqual({ value: "hey @sol ", caret: 9 });
   });
 
   it("keeps whatever follows the caret", () => {
-    const token = mentionToken("hey @so", 7);
+    const token = tokenAt("hey @so", 7);
     expect(applyMention("hey @so please", token, "sol").value).toBe("hey @sol  please");
   });
 
   it("completes from a bare @", () => {
-    const token = mentionToken("@", 1);
+    const token = tokenAt("@", 1);
     expect(applyMention("@", token, "all")).toEqual({ value: "@all ", caret: 5 });
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { conversationRoute, routedConversationId } from "./routing.js";
+import { conversationRoute, routedConversationId } from "./routing";
 
 describe("conversation routes", () => {
   it("round-trips an id", () => {

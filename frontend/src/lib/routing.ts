@@ -7,14 +7,14 @@
 
 const ROUTE = /^#\/c\/([^/]+)$/;
 
-export const conversationRoute = (id) => "#/c/" + encodeURIComponent(id);
+export const conversationRoute = (id: string): string => "#/c/" + encodeURIComponent(id);
 
 /** The conversation id in the current URL, or null. A malformed escape is not a route. */
-export function routedConversationId(hash = location.hash) {
-  const match = hash.match(ROUTE);
+export function routedConversationId(hash: string = location.hash): string | null {
+  const match = ROUTE.exec(hash);
   if (!match) return null;
   try {
-    return decodeURIComponent(match[1]);
+    return decodeURIComponent(match[1] ?? "");
   } catch {
     return null;
   }
@@ -27,12 +27,16 @@ export function routedConversationId(hash = location.hash) {
  * we just restored onto the history stack a second time, so Back would appear
  * to do nothing.
  */
-export function setConversationRoute(id, { replace = false } = {}) {
+interface RouteOptions {
+  replace?: boolean;
+}
+
+export function setConversationRoute(id: string, { replace = false }: RouteOptions = {}): void {
   const hash = conversationRoute(id);
   if (location.hash === hash) return;
   history[replace ? "replaceState" : "pushState"]({}, "", location.pathname + location.search + hash);
 }
 
-export function clearConversationRoute() {
+export function clearConversationRoute(): void {
   history.replaceState({}, "", location.pathname + location.search);
 }
