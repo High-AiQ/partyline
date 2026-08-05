@@ -72,8 +72,9 @@ class WireStateTest(unittest.TestCase):
                 """([build]) => {
                   window.__partylineReloadControl = true;
                   const conversation_id = window.partyline.room.conversation.id;
+                  const handle = window.partyline.session.handle;
                   window.partyline.wire.socket.dispatchEvent(new MessageEvent('message', {
-                    data: JSON.stringify({type: 'hello', conversation_id, build}),
+                    data: JSON.stringify({type: 'hello', conversation_id, handle, build}),
                   }));
                 }""",
                 [other_build],
