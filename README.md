@@ -135,6 +135,28 @@ uv sync                                  # runtime + dev dependencies
 uv run playwright install chromium       # once, for the UI tests and screenshots
 ```
 
+**Node is needed only to change the frontend**, not to run partyline. The built client is
+committed under `partyline/static/`, so a fresh clone and an installed wheel both serve the UI
+with Python alone.
+
+### The frontend
+
+The client is [Svelte 5](https://svelte.dev) + [Tailwind](https://tailwindcss.com), built by
+Vite into `partyline/static/`:
+
+```bash
+cd frontend
+npm install
+npm run dev      # hot reload, proxying /api and /ws to a partyline on $PARTYLINE_PORT
+npm run build    # → partyline/static/ — rebuild before committing a UI change
+npm run check    # svelte-check; kept at zero errors and zero warnings
+npm test         # vitest, covering the pure logic in src/lib/
+```
+
+`src/lib/` holds framework-free functions — markdown rendering, mention candidates, jack
+selection, routing — and is where the unit tests live. `src/state/` holds the runes stores
+(`session`, `room`, `wire`), and `src/components/` is presentation only.
+
 ### Running the tests
 
 ```bash

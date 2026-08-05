@@ -13,8 +13,57 @@ replace an interactive process with a headless invocation or screen scraping.
 - `partyline/server.py` — FastAPI app: REST, WebSocket, and mention routing
 - `partyline/adapters/` — built-in process adapters and adapter discovery
 - `partyline/db.py` — SQLite schema, migrations, and queries
-- `partyline/static/index.html` — frontend (vanilla JavaScript; no build step)
+- `frontend/` — the web client: Vite + Svelte 5 + Tailwind (see below)
+- `partyline/static/` — **build output, committed.** Never edit by hand
 - `skills/add-process-adapter/` — procedure and contract for new adapters
+
+## Frontend
+
+The client is a Svelte 5 app built by Vite into `partyline/static/`, which the
+server serves: `/` is `index.html` and `/assets/*` is mounted `StaticFiles`.
+
+```bash
+cd frontend
+npm install
+npm run build     # → partyline/static/  (do this before committing UI changes)
+npm run check     # svelte-check; must be 0 errors, 0 warnings
+npm test          # vitest, the pure libs
+npm run dev       # hot reload against a partyline on $PARTYLINE_PORT (default 8642)
+```
+
+**`partyline/static/` is committed on purpose.** partyline installs and runs as
+a Python package; requiring Node to build a wheel, or to start a fresh clone,
+would break that. The cost is that a UI change is two things in one commit — the
+source under `frontend/src/` and the rebuilt bundle. Rebuild before you commit,
+or you will ship a stale UI that matches none of the source.
+
+Layout, and where things belong:
+
+- `src/lib/` — **pure functions, no framework.** Markdown rendering, mention
+  candidates, jack selection, routing, the REST client. Anything with a rule in
+  it belongs here, because this is the layer that gets unit tests.
+- `src/state/*.svelte.js` — runes stores: `session`, `room`, `wire`, `draft`,
+  `dialogs`. One owner per concern; components read them and call methods.
+- `src/components/` — presentation, grouped by region (`rail/`, `chat/`,
+  `board/`, `dialogs/`).
+
+Two rules that are load-bearing rather than stylistic:
+
+- **The wire's generation guard.** `wire.connect()` bumps a counter and every
+  handler checks it. A socket closed while switching lines keeps firing, and
+  without the guard the old line's traffic lands in the new line's feed.
+- **Escape first, then parse.** `renderMessage` escapes the body before
+  `marked` sees it, and DOMPurify runs after. Escaping is not redundant with
+  the sanitiser: it is what keeps a message that *says* `<b>` looking like the
+  text somebody typed, and stops a hand-written `<span class="mention">` from
+  drawing a fake mention.
+
+`window.partyline` exposes `{room, session, wire}` as a deliberate test surface
+for `tests/ui/`, which needs to drop a socket and deliver fabricated events.
+Treat it as API: if you rename a store, fix those tests.
+
+Type checking is `checkJs` without `strict`, which is a stage and not an
+oversight — see the comment in `frontend/jsconfig.json` before turning it up.
 
 ## Run and test
 
@@ -105,9 +154,11 @@ participant in the room — including whoever is doing the work. The rules that 
   broadcasts belong in a thin outer layer; the logic that decides *what* to do should be a
   function you can call in a test with a dict and assert on the return value. When a function is
   hard to test, that is the design telling you the effect is too deep inside it.
-- **Aim for under 300 lines per `.py` file** (tests excepted — they are allowed to be long and
-  boring). This is an encouragement, not a gate: a file crossing it is a prompt to look for the
-  seam, not a reason to split something coherent in half.
+- **Aim for under 300 lines per source file** — `.py`, `.js`, `.ts` and `.svelte` alike (tests
+  excepted; they are allowed to be long and boring). This is an encouragement, not a gate: a file
+  crossing it is a prompt to look for the seam, not a reason to split something coherent in half.
+  A `.svelte` file counts its markup and styles too — a component that needs 300 lines is usually
+  two components and a shared stylesheet.
 - **Lint must pass**: `uv run ruff check .`, clean, before every commit. The autoformatter is
   deliberately not enforced — this codebase hand-wraps for readability, and `ruff format` would
   undo that. Match the surrounding style instead.
