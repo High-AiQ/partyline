@@ -6,6 +6,34 @@ on:
   pull_request:
 
 jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - name: svelte-check
+        run: npm run check
+        working-directory: frontend
+      - name: unit tests
+        run: npm test
+        working-directory: frontend
+      # partyline/static/ is committed so the app installs without Node, which
+      # only works if it is actually the current build. Rebuilding and finding
+      # a diff means someone changed the source and shipped the old bundle.
+      - name: the committed build matches the source
+        run: |
+          npm run build --prefix frontend
+          if ! git diff --exit-code -- partyline/static; then
+            echo "::error::partyline/static/ is stale — run 'npm run build' in frontend/ and commit the result"
+            exit 1
+          fi
+
   conventional-commits:
     runs-on: ubuntu-latest
     steps:
