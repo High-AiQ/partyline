@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from unittest.mock import AsyncMock
 
 from partyline.db import Db
 from partyline.reattach import ReattachCoordinator
@@ -124,6 +125,33 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.failed, ("sol",))
         bodies = [message["body"] for message in self.db.list_messages("line")]
         self.assertTrue(any("readiness timed out after 0.01s" in body for body in bodies))
+
+    async def test_cancel_consumes_the_offer_without_starting_any_process(self):
+        resume = AsyncMock()
+        coordinator = ReattachCoordinator(self.runtime, resume)
+
+        error = await coordinator.choose(
+            "line",
+            {"type": "reattach", "token": self.plan["token"], "action": "cancel"},
+            "greg",
+        )
+
+        self.assertIsNone(error)
+        self.assertIsNone(self.db.get_restart_plan())
+        resume.assert_not_awaited()
+        self.assertIn("declined process reattachment", self.db.list_messages("line")[-1]["body"])
+
+    async def test_a_stale_token_cannot_consume_the_current_offer(self):
+        coordinator = ReattachCoordinator(self.runtime, AsyncMock())
+
+        error = await coordinator.choose(
+            "line",
+            {"type": "reattach", "token": "stale-token", "action": "accept"},
+            "greg",
+        )
+
+        self.assertEqual(error, "that reattachment offer is no longer available")
+        self.assertEqual(self.db.get_restart_plan(), self.plan)
 
 
 if __name__ == "__main__":
