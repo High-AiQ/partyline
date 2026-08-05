@@ -9,6 +9,7 @@
   import MentionPopover from "./MentionPopover.svelte";
   import { room } from "../../state/room.svelte.js";
   import { draft } from "../../state/draft.svelte.js";
+  import { layout } from "../../state/layout.svelte.js";
   import { applyMention, mentionCandidates, mentionToken } from "../../lib/mentions";
   import type { MentionToken } from "../../lib/mentions";
   import type { MentionCandidate } from "../../lib/mentions";
@@ -94,7 +95,11 @@
         return;
       }
     }
-    if (event.key === "Enter" && !event.shiftKey) {
+    // Enter sends on a keyboard, where Shift+Enter is right there for a new
+    // line. On a phone it must not: the on-screen return key is the only way
+    // to break a line, and a composer that fires off a half-written message
+    // every time someone reaches for a paragraph is unusable. Tap send.
+    if (event.key === "Enter" && !event.shiftKey && !layout.narrow) {
       event.preventDefault();
       send();
     }
@@ -163,6 +168,17 @@
     color: var(--color-cream-faint);
     font-size: 10px;
     margin-top: 6px;
+  }
+
+  @media (max-width: 899px) {
+    #composer {
+      padding: 10px 12px 14px;
+    }
+    /* Three lines of keyboard advice, none of which applies to a touch
+       keyboard, on the screen with the least room to spare. */
+    .hint {
+      display: none;
+    }
   }
   #send {
     align-self: flex-end;

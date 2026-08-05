@@ -72,6 +72,13 @@
     margin-top: 12vh;
     font-size: 12.5px;
   }
+  @media (max-width: 899px) {
+    /* Desktop gutters are a luxury at 390px; the message column needs them
+       back more than the layout needs the breathing room. */
+    #feed {
+      padding: 16px 14px 8px;
+    }
+  }
   .art {
     font-family: var(--font-serif);
     font-style: italic;
