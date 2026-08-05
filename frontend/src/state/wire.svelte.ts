@@ -24,31 +24,70 @@
  * reconnect stays on the page and keeps everything in place.
  */
 
-import { buildChanged } from "../lib/build.js";
+import { buildChanged } from "../lib/build";
+import { WireEventSchema, WireHelloCommandSchema, WireMessageCommandSchema } from "../lib/contracts";
+import type { WireEvent, WireHelloCommand, WireMessageCommand } from "../lib/contracts";
 
 export const GRACE_MS = 3000;
 export const RETRY_MS = 1500;
 const HELLO_TIMEOUT_MS = 4000;
 
-export const socketUrl = (convId, loc = location) =>
+export interface SocketLocation {
+  protocol: string;
+  host: string;
+}
+
+export interface WireIdentity {
+  handle: string;
+  clientId: string;
+}
+
+export interface WireContext {
+  wasReady: boolean;
+  claimRejected: boolean;
+  rejectClaim(): void;
+}
+
+export interface WireOutage {
+  message: string;
+  stopped: boolean;
+}
+
+export type WireEventHandler = (event: WireEvent, context: WireContext) => void;
+
+export const socketUrl = (convId: string, loc: SocketLocation = location): string =>
   (loc.protocol === "https:" ? "wss://" : "ws://") + loc.host + "/ws/" + convId;
+
+function helloCommand(identity: WireIdentity): WireHelloCommand {
+  return WireHelloCommandSchema.parse({
+    type: "hello",
+    handle: identity.handle,
+    client_id: identity.clientId,
+  });
+}
+
+function decodeWireEvent(data: unknown): WireEvent {
+  if (typeof data !== "string") throw new Error("partyline WebSocket frames must be text");
+  const decoded: unknown = JSON.parse(data);
+  return WireEventSchema.parse(decoded);
+}
 
 class Wire {
   /** The handshake has completed and this socket may carry messages. */
   ready = $state(false);
   /** What to tell the user about the outage, or null while the wire is healthy. */
-  outage = $state(null);
+  outage = $state<WireOutage | null>(null);
   /** The server said it is going away. Nothing is coming back on its own. */
   stopped = $state(false);
 
   #generation = 0;
-  #socket = null;
-  #graceTimer = null;
-  #retryTimer = null;
+  #socket: WebSocket | null = null;
+  #graceTimer: ReturnType<typeof setTimeout> | null = null;
+  #retryTimer: ReturnType<typeof setTimeout> | null = null;
   #claimRejected = false;
 
   /** The live socket, for tests that need to drop or fake traffic on it. */
-  get socket() {
+  get socket(): WebSocket | null {
     return this.#socket;
   }
 
@@ -59,7 +98,7 @@ class Wire {
    * @param identity  `{handle, clientId}` for the hello handshake
    * @param onEvent   called with each server event, already parsed
    */
-  connect(convId, identity, onEvent) {
+  connect(convId: string, identity: WireIdentity, onEvent: WireEventHandler): void {
     const generation = ++this.#generation;
     this.#teardown();
     this.ready = false;
@@ -67,16 +106,16 @@ class Wire {
 
     const socket = new WebSocket(socketUrl(convId));
     this.#socket = socket;
-    const current = () => generation === this.#generation;
+    const current = (): boolean => generation === this.#generation;
 
     socket.onopen = () => {
       if (!current()) return;
-      socket.send(JSON.stringify({ type: "hello", handle: identity.handle, client_id: identity.clientId }));
+      socket.send(JSON.stringify(helloCommand(identity)));
     };
 
-    socket.onmessage = (event) => {
+    socket.onmessage = (event: MessageEvent<unknown>) => {
       if (!current()) return;
-      const payload = JSON.parse(event.data);
+      const payload = decodeWireEvent(event.data);
 
       if (payload.type === "hello" && payload.conversation_id === convId) {
         if (buildChanged(__PARTYLINE_BUILD__, payload.build)) {
@@ -125,35 +164,35 @@ class Wire {
   }
 
   /** Send on the open wire. Returns false if there is nothing to send on. */
-  send(payload) {
+  send(payload: WireMessageCommand): boolean {
     if (!this.ready || this.#socket?.readyState !== WebSocket.OPEN) return false;
-    this.#socket.send(JSON.stringify(payload));
+    this.#socket.send(JSON.stringify(WireMessageCommandSchema.parse(payload)));
     return true;
   }
 
   /** Close for good: leaving the app, or losing the line we were on. */
-  disconnect() {
+  disconnect(): void {
     this.#generation++;
     this.#teardown();
     this.ready = false;
     this.#claimRejected = false;
   }
 
-  reportStopped() {
+  reportStopped(): void {
     this.stopped = true;
     this.ready = false;
-    clearTimeout(this.#graceTimer);
+    if (this.#graceTimer !== null) clearTimeout(this.#graceTimer);
     this.#graceTimer = null;
     this.outage = { message: "partyline has stopped — waiting for a restart…", stopped: true };
   }
 
-  clearOutage() {
-    clearTimeout(this.#graceTimer);
+  clearOutage(): void {
+    if (this.#graceTimer !== null) clearTimeout(this.#graceTimer);
     this.#graceTimer = null;
     if (!this.stopped) this.outage = null;
   }
 
-  #armOutage() {
+  #armOutage(): void {
     if (this.#graceTimer || this.outage) return;
     this.#graceTimer = setTimeout(() => {
       this.#graceTimer = null;
@@ -161,8 +200,8 @@ class Wire {
     }, GRACE_MS);
   }
 
-  #teardown() {
-    clearTimeout(this.#retryTimer);
+  #teardown(): void {
+    if (this.#retryTimer !== null) clearTimeout(this.#retryTimer);
     this.#retryTimer = null;
     if (this.#socket) {
       try {
@@ -186,11 +225,11 @@ export const wire = new Wire();
  * up — deliberately not touching the shared wire, which is still holding the
  * line the user is actually looking at.
  */
-export function sendOffLine(convId, identity, body) {
-  return new Promise((resolve, reject) => {
+export function sendOffLine(convId: string, identity: WireIdentity, body: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
     const socket = new WebSocket(socketUrl(convId));
     let settled = false;
-    const finish = (error) => {
+    const finish = (error?: Error): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
@@ -199,21 +238,31 @@ export function sendOffLine(convId, identity, body) {
       } catch {
         /* already gone */
       }
-      error ? reject(error) : resolve();
+      if (error) reject(error);
+      else resolve();
     };
-    const timeout = setTimeout(() => finish(new Error("line is not reachable")), HELLO_TIMEOUT_MS);
+    const timeout = setTimeout(() => {
+      finish(new Error("line is not reachable"));
+    }, HELLO_TIMEOUT_MS);
 
     socket.onopen = () => {
-      socket.send(JSON.stringify({ type: "hello", handle: identity.handle, client_id: identity.clientId }));
+      socket.send(JSON.stringify(helloCommand(identity)));
     };
-    socket.onmessage = (event) => {
-      const payload = JSON.parse(event.data);
-      if (payload.type === "error") return finish(new Error(payload.message || "could not claim this line"));
+    socket.onmessage = (event: MessageEvent<unknown>) => {
+      const payload = decodeWireEvent(event.data);
+      if (payload.type === "error") {
+        finish(new Error(payload.message || "could not claim this line"));
+        return;
+      }
       if (payload.type !== "hello") return;
-      socket.send(JSON.stringify({ sender: identity.handle, body }));
+      socket.send(JSON.stringify(WireMessageCommandSchema.parse({ sender: identity.handle, body })));
       // Give the frame a moment to leave before hanging up on ourselves.
-      setTimeout(() => finish(), 100);
+      setTimeout(() => {
+        finish();
+      }, 100);
     };
-    socket.onerror = () => finish(new Error("line is not reachable"));
+    socket.onerror = () => {
+      finish(new Error("line is not reachable"));
+    };
   });
 }

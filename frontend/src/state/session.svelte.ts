@@ -3,26 +3,27 @@
  * the adapter registry, saved presets, and the version badge.
  */
 
-import { api } from "../lib/api.js";
-import { normalizeHandle, isReserved, readHandle, readOrMintClientId, writeHandle } from "../lib/identity.js";
+import { api } from "../lib/api";
+import type { Adapter, Preset } from "../lib/contracts";
+import { normalizeHandle, isReserved, readHandle, readOrMintClientId, writeHandle } from "../lib/identity";
 
 class Session {
   handle = $state(readHandle());
   clientId = readOrMintClientId();
-  version = $state(null);
+  version = $state<string | null>(null);
 
-  adapters = $state([]);
-  presets = $state([]);
+  adapters = $state<Adapter[]>([]);
+  presets = $state<Preset[]>([]);
 
   /** Set when the server refuses the handle, so the gate can say why. */
   gateError = $state("");
   gateOpen = $state(!readHandle());
 
-  get signedIn() {
+  get signedIn(): boolean {
     return Boolean(this.handle) && !this.gateOpen;
   }
 
-  openGate(message = "") {
+  openGate(message = ""): void {
     this.gateError = message;
     this.gateOpen = true;
   }
@@ -31,7 +32,7 @@ class Session {
    * Take a handle from the gate. Returns an error string, or null on success —
    * the caller decides how to show it, this decides whether it is allowed.
    */
-  signIn(raw) {
+  signIn(raw: string): string | null {
     const handle = normalizeHandle(raw);
     if (!handle) return "pick a handle";
     if (isReserved(handle)) return "that handle is reserved";
@@ -42,7 +43,7 @@ class Session {
     return null;
   }
 
-  async loadVersion() {
+  async loadVersion(): Promise<void> {
     try {
       this.version = (await api.version()).version;
     } catch {
@@ -50,7 +51,7 @@ class Session {
     }
   }
 
-  async loadAdapters() {
+  async loadAdapters(): Promise<void> {
     try {
       this.adapters = await api.adapters();
     } catch {
@@ -58,7 +59,7 @@ class Session {
     }
   }
 
-  async loadPresets() {
+  async loadPresets(): Promise<void> {
     try {
       this.presets = await api.presets();
     } catch {

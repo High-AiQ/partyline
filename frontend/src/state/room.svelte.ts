@@ -13,77 +13,99 @@
  */
 
 import { SvelteSet } from "svelte/reactivity";
-import { api } from "../lib/api.js";
+import { api } from "../lib/api";
+import type { Attachment, ChatMessage, Conversation, ErrorEvent, WireEvent } from "../lib/contracts";
 import { session } from "./session.svelte.js";
 import { wire, sendOffLine } from "./wire.svelte.js";
-import { clearConversationRoute, routedConversationId, setConversationRoute } from "../lib/routing.js";
-import { isLive } from "../lib/attachments.js";
+import type { WireContext, WireIdentity } from "./wire.svelte.js";
+import { clearConversationRoute, routedConversationId, setConversationRoute } from "../lib/routing";
+import { isLive } from "../lib/attachments";
+
+export interface RoomNotice {
+  message: string;
+  kind: "" | "error";
+}
+
+interface OpenOptions {
+  fromRoute?: boolean;
+}
+
+interface LeaveOptions {
+  clearRoute?: boolean;
+}
+
+function ignoreBackgroundFailure(): void {
+  // Best-effort refreshes already have a primary UI state to preserve.
+}
 
 class Room {
-  conversations = $state([]);
-  archived = $state([]);
+  conversations = $state<Conversation[]>([]);
+  archived = $state<Conversation[]>([]);
   archiveOpen = $state(false);
 
-  conversation = $state(null);
-  messages = $state([]);
-  attachments = $state([]);
+  conversation = $state<Conversation | null>(null);
+  messages = $state<ChatMessage[]>([]);
+  attachments = $state<Attachment[]>([]);
 
   /** Handles seen speaking here, for the @ autocomplete. Not persisted: it is a
    *  convenience, and the server is the authority on who may be mentioned.
    *  `SvelteSet`, not `Set`: the deep proxy does not see through a native Set's
    *  internals, so `.add()` on one would update nothing on screen. */
-  humans = new SvelteSet();
+  humans = new SvelteSet<string>();
   /** Attachments blocked on a dialog, which the board rings until someone peeks. */
-  attention = new SvelteSet();
+  attention = new SvelteSet<string>();
 
   /** A transient toast, distinct from the wire banner: this one goes away. */
-  notice = $state(null);
+  notice = $state<RoomNotice | null>(null);
 
-  #seen = new Set();
+  #seen = new Set<number>();
   #epoch = 0;
-  #noticeTimer = null;
+  #noticeTimer: ReturnType<typeof setTimeout> | null = null;
 
-  get identity() {
+  get identity(): WireIdentity {
+    if (!session.handle) throw new Error("a handle is required before joining a line");
     return { handle: session.handle, clientId: session.clientId };
   }
 
   // ── the list ───────────────────────────────────────────────────────────
-  async loadConversations() {
+  async loadConversations(): Promise<void> {
     this.conversations = await api.conversations();
     // Arriving on a deep link: the route named a line before the list existed.
     const routedId = routedConversationId();
     if (!routedId) return;
-    const routed = this.conversations.find((c) => c.id === routedId);
-    if (routed && this.conversation?.id !== routed.id) this.open(routed, { fromRoute: true });
+    const routed = this.conversations.find((conversation) => conversation.id === routedId);
+    if (routed && this.conversation?.id !== routed.id) void this.open(routed, { fromRoute: true });
   }
 
-  async loadArchived() {
+  async loadArchived(): Promise<void> {
     this.archived = await api.conversations(true);
   }
 
-  refreshArchiveIfOpen() {
-    if (this.archiveOpen) this.loadArchived().catch(() => {});
+  refreshArchiveIfOpen(): void {
+    if (this.archiveOpen) void this.loadArchived().catch(ignoreBackgroundFailure);
   }
 
-  async createConversation(name) {
+  async createConversation(name: string): Promise<void> {
     const created = await api.createConversation(name);
     await this.loadConversations();
-    this.open(created);
+    void this.open(created);
   }
 
   // ── the line you are on ────────────────────────────────────────────────
-  async open(conversation, { fromRoute = false } = {}) {
+  async open(conversation: Conversation, { fromRoute = false }: OpenOptions = {}): Promise<void> {
     const epoch = ++this.#epoch;
     if (!fromRoute) setConversationRoute(conversation.id);
 
     this.conversation = conversation;
     this.messages = [];
     this.attachments = [];
-    this.#seen = new Set();
+    this.#seen = new Set<number>();
     this.humans.clear();
     this.attention.clear();
 
-    wire.connect(conversation.id, this.identity, (event, context) => this.#onWireEvent(event, context));
+    wire.connect(conversation.id, this.identity, (event, context) => {
+      this.#onWireEvent(event, context);
+    });
 
     let detail;
     try {
@@ -98,55 +120,55 @@ class Room {
     this.conversation = detail.conversation;
     this.attachments = detail.attachments;
     for (const message of detail.messages) this.#absorb(message);
-    this.loadConversations().catch(() => {});
+    void this.loadConversations().catch(ignoreBackgroundFailure);
   }
 
   /** Step off the current line without choosing another. */
-  leave({ clearRoute = true } = {}) {
+  leave({ clearRoute = true }: LeaveOptions = {}): void {
     this.#epoch++;
     wire.disconnect();
     this.conversation = null;
     this.messages = [];
     this.attachments = [];
-    this.#seen = new Set();
+    this.#seen = new Set<number>();
     this.humans.clear();
     this.attention.clear();
     if (clearRoute && routedConversationId()) clearConversationRoute();
   }
 
   /** The URL changed under us — Back, Forward, or a pasted link. */
-  onRouteChange() {
+  onRouteChange(): void {
     const id = routedConversationId();
     const target = id && this.conversations.find((c) => c.id === id);
     if (target) {
-      if (this.conversation?.id !== target.id) this.open(target, { fromRoute: true });
+      if (this.conversation?.id !== target.id) void this.open(target, { fromRoute: true });
     } else if (this.conversation) {
       this.leave({ clearRoute: false });
     }
   }
 
   // ── talking ────────────────────────────────────────────────────────────
-  say(body) {
+  say(body: string): boolean {
     const text = body.trim();
     if (!text) return false;
-    return wire.send({ sender: session.handle, body: text });
+    return wire.send({ sender: this.identity.handle, body: text });
   }
 
   /** Post to a line we are not on — see `sendOffLine`. */
-  warn(convId, body) {
+  warn(convId: string, body: string): Promise<void> {
     return sendOffLine(convId, this.identity, body);
   }
 
-  showNotice(message, kind = "") {
+  showNotice(message: string, kind: RoomNotice["kind"] = ""): void {
     this.notice = { message, kind };
-    clearTimeout(this.#noticeTimer);
+    if (this.#noticeTimer !== null) clearTimeout(this.#noticeTimer);
     this.#noticeTimer = setTimeout(() => {
       this.notice = null;
     }, 4200);
   }
 
   // ── server events ──────────────────────────────────────────────────────
-  #onWireEvent(event, context) {
+  #onWireEvent(event: WireEvent, context: WireContext): void {
     const convId = this.conversation?.id;
 
     switch (event.type) {
@@ -165,14 +187,14 @@ class Room {
       case "conversation":
         if (event.conversation.id === convId) {
           this.conversation = event.conversation;
-          this.loadConversations().catch(() => {});
+          void this.loadConversations().catch(ignoreBackgroundFailure);
         }
         break;
 
       case "conversation_archived":
       case "conversation_deleted":
         if (event.conversation_id === convId) this.leave();
-        this.loadConversations().catch(() => {});
+        void this.loadConversations().catch(ignoreBackgroundFailure);
         this.refreshArchiveIfOpen();
         break;
 
@@ -191,13 +213,13 @@ class Room {
    * successful handshake, the handle was fine and the *line* has gone; that is
    * a toast, not a sign-in problem.
    */
-  #onWireError(event, context) {
+  #onWireError(event: ErrorEvent, context: WireContext): void {
     const message = event.message || "this line is no longer available";
 
     if (message.includes("archived")) {
       this.showNotice(message, "error");
       this.leave();
-      this.loadConversations().catch(() => {});
+      void this.loadConversations().catch(ignoreBackgroundFailure);
       this.refreshArchiveIfOpen();
       return;
     }
@@ -219,8 +241,8 @@ class Room {
    * we get — and a process running with no jack on the board is worse than a
    * jack that arrives twice.
    */
-  upsertAttachment(attachment) {
-    const index = this.attachments.findIndex((a) => a.id === attachment.id);
+  upsertAttachment(attachment: Attachment): void {
+    const index = this.attachments.findIndex((candidate) => candidate.id === attachment.id);
     if (index >= 0) this.attachments[index] = attachment;
     else this.attachments.push(attachment);
     // A process that has exited is no longer waiting on you.
@@ -228,12 +250,12 @@ class Room {
   }
 
   /** Add a message once, remembering who spoke so the autocomplete knows them. */
-  #absorb(message) {
+  #absorb(message: ChatMessage): void {
     if (this.#seen.has(message.id)) return;
     this.#seen.add(message.id);
     if (
       message.sender_type === "human" &&
-      message.sender.toLowerCase() !== (session.handle || "").toLowerCase()
+      message.sender.toLowerCase() !== (session.handle?.toLowerCase() ?? "")
     ) {
       this.humans.add(message.sender);
     }

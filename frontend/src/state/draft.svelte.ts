@@ -9,7 +9,13 @@
 
 export const DRAFT_STORAGE_KEY = "partyline.composer-draft";
 
-function browserStorage() {
+export interface DraftStorage {
+  getItem?(key: string): string | null;
+  setItem?(key: string, value: string): void;
+  removeItem?(key: string): void;
+}
+
+function browserStorage(): Storage | null {
   try {
     return globalThis.sessionStorage;
   } catch {
@@ -17,18 +23,18 @@ function browserStorage() {
   }
 }
 
-export function restoreDraft(storage = browserStorage()) {
+export function restoreDraft(storage: DraftStorage | null = browserStorage()): string {
   try {
-    return storage?.getItem(DRAFT_STORAGE_KEY) || "";
+    return storage?.getItem?.(DRAFT_STORAGE_KEY) ?? "";
   } catch {
     return "";
   }
 }
 
-export function persistDraft(text, storage = browserStorage()) {
+export function persistDraft(text: string, storage: DraftStorage | null = browserStorage()): void {
   try {
-    if (text) storage?.setItem(DRAFT_STORAGE_KEY, text);
-    else storage?.removeItem(DRAFT_STORAGE_KEY);
+    if (text) storage?.setItem?.(DRAFT_STORAGE_KEY, text);
+    else storage?.removeItem?.(DRAFT_STORAGE_KEY);
   } catch {
     // Storage can be disabled without making the composer unusable.
   }
@@ -41,7 +47,7 @@ class Draft {
     return this.#text;
   }
 
-  set text(value) {
+  set text(value: string) {
     this.#text = value;
     persistDraft(value);
   }
@@ -51,12 +57,12 @@ class Draft {
    *  wherever the user last put them. */
   externalEdits = $state(0);
 
-  clear() {
+  clear(): void {
     this.text = "";
   }
 
   /** Append a handle, keeping exactly one space between it and what came before. */
-  mention(name) {
+  mention(name: string): void {
     const lead = this.text && !this.text.endsWith(" ") ? " " : "";
     this.text = this.text + lead + "@" + name + " ";
     this.externalEdits++;

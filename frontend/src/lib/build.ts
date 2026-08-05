@@ -3,5 +3,5 @@
  * just identified. Blank ids mean an old server or `npm run dev`; neither is a
  * reason to enter a reload loop.
  */
-export const buildChanged = (clientBuild: string, serverBuild: string): boolean =>
+export const buildChanged = (clientBuild: string, serverBuild: string | undefined): boolean =>
   Boolean(clientBuild && serverBuild && clientBuild !== serverBuild);

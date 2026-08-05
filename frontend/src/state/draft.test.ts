@@ -1,30 +1,40 @@
 import { describe, expect, it, vi } from "vitest";
 import { DRAFT_STORAGE_KEY, persistDraft, restoreDraft } from "./draft.svelte.js";
+import type { DraftStorage } from "./draft.svelte.js";
 
 describe("draft persistence", () => {
   it("round-trips a draft through session storage", () => {
-    const storage = {
+    const setItem = vi.fn();
+    const storage: DraftStorage = {
       getItem: vi.fn().mockReturnValue("still typing"),
-      setItem: vi.fn(),
+      setItem,
       removeItem: vi.fn(),
     };
 
     expect(restoreDraft(storage)).toBe("still typing");
     persistDraft("hello", storage);
-    expect(storage.setItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY, "hello");
+    expect(setItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY, "hello");
   });
 
   it("removes an empty draft and tolerates unavailable storage", () => {
-    const storage = { removeItem: vi.fn() };
+    const removeItem = vi.fn();
+    const storage: DraftStorage = { removeItem };
     persistDraft("", storage);
-    expect(storage.removeItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY);
+    expect(removeItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY);
 
-    const broken = {
+    const broken: DraftStorage = {
       getItem: () => {
         throw new Error("blocked");
       },
     };
     expect(restoreDraft(broken)).toBe("");
-    expect(() => persistDraft("hello", { setItem: broken.getItem })).not.toThrow();
+    const unavailable: DraftStorage = {
+      setItem: () => {
+        throw new Error("blocked");
+      },
+    };
+    expect(() => {
+      persistDraft("hello", unavailable);
+    }).not.toThrow();
   });
 });

@@ -201,3 +201,16 @@ export const WireEventSchema = z.discriminatedUnion("type", [
   ShutdownEventSchema,
 ]);
 export type WireEvent = z.infer<typeof WireEventSchema>;
+
+export const WireHelloCommandSchema = z.object({
+  type: z.literal("hello"),
+  handle: z.string(),
+  client_id: z.string(),
+});
+export type WireHelloCommand = z.infer<typeof WireHelloCommandSchema>;
+
+export const WireMessageCommandSchema = z.object({
+  sender: z.string(),
+  body: z.string(),
+});
+export type WireMessageCommand = z.infer<typeof WireMessageCommandSchema>;

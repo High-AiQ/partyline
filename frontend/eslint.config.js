@@ -69,7 +69,7 @@ export default [
   {
     files: ["**/*.svelte", "**/*.svelte.js", "**/*.svelte.ts"],
     languageOptions: {
-      parserOptions: { svelteConfig },
+      parserOptions: { parser: tseslint.parser, svelteConfig },
     },
     rules: {
       // Core `prefer-const` is actively wrong in a Svelte 5 component: props are

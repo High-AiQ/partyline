@@ -5,7 +5,9 @@ import { room } from "./state/room.svelte.js";
 import { session } from "./state/session.svelte.js";
 import { wire } from "./state/wire.svelte.js";
 
-const app = mount(App, { target: document.getElementById("root") });
+const root = document.getElementById("root");
+if (!root) throw new Error("partyline requires a #root mount element");
+const app = mount(App, { target: root });
 
 /**
  * A deliberate handle for the browser tests in `tests/ui/`.
