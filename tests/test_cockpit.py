@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.cockpit import (  # noqa: E402
     Finding,
     check_bundle_present,
+    check_tree_clean,
     referenced_assets,
     restart_needed,
 )
@@ -88,6 +89,45 @@ class BundlePresentTest(unittest.TestCase):
         with StaticTree(index_html=None) as root:
             self.assertIn("cockpit", check_bundle_present(root, "cockpit")[0].problem)
             self.assertIn("workbench", check_bundle_present(root, "workbench")[0].problem)
+
+
+class TreeCleanTest(unittest.TestCase):
+    """`check_tree_clean` shells out to git; these stub it to pin the flags."""
+
+    def setUp(self):
+        import scripts.cockpit as cockpit
+
+        self.cockpit = cockpit
+        self.real_git = cockpit.git
+        self.calls = []
+
+    def tearDown(self):
+        self.cockpit.git = self.real_git
+
+    def stub(self, output):
+        def fake(*args, **kwargs):
+            self.calls.append(args)
+            return output
+        self.cockpit.git = fake
+
+    def test_the_workbench_counts_untracked_files(self):
+        # A new source file nobody committed cannot reach the cockpit, which is
+        # the whole thing this script exists to catch.
+        self.stub("?? frontend/src/lib/new.js")
+        self.assertTrue(check_tree_clean(Path("/tmp"), "workbench", untracked=True))
+        self.assertNotIn("--untracked-files=no", self.calls[0])
+
+    def test_the_cockpit_ignores_untracked_files(self):
+        # It is a deployment target: it accumulates logs and databases, and a
+        # stray cockpit.log must not look like unfinished work.
+        self.stub("")
+        self.assertEqual(check_tree_clean(Path("/tmp"), "cockpit", untracked=False), [])
+        self.assertIn("--untracked-files=no", self.calls[0])
+
+    def test_a_modified_tracked_file_stops_either_checkout(self):
+        self.stub(" M partyline/server.py")
+        for untracked in (True, False):
+            self.assertTrue(check_tree_clean(Path("/tmp"), "cockpit", untracked=untracked))
 
 
 class RestartNeededTest(unittest.TestCase):

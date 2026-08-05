@@ -57,8 +57,19 @@ def git(*args: str, cwd: Path = REPO_ROOT) -> str:
 # a finding means, which is what makes them testable without a repository.
 
 
-def check_tree_clean(repo: Path, label: str) -> list[Finding]:
-    if git("status", "--porcelain", cwd=repo):
+def check_tree_clean(repo: Path, label: str, *, untracked: bool) -> list[Finding]:
+    """Is this checkout in a state we can reason about?
+
+    `untracked` differs by role, and the difference is the point. In the
+    workbench an untracked file is usually a new source file nobody has
+    committed — work that cannot reach the cockpit, which is exactly what this
+    script exists to catch. The cockpit is a deployment target: it accumulates
+    logs and databases that are none of our business, and refusing to deploy
+    over a stray `cockpit.log` would be the kind of false alarm that teaches
+    people to skip the preflight.
+    """
+    flags = ["--porcelain"] + ([] if untracked else ["--untracked-files=no"])
+    if git("status", *flags, cwd=repo):
         return [Finding(f"the {label} has uncommitted changes",
                         f"commit or stash them in {repo}")]
     return []
@@ -165,7 +176,7 @@ def report(findings: list[Finding]) -> int:
 def check(repo: Path = REPO_ROOT) -> int:
     print(f"workbench {repo}")
     findings = [
-        *check_tree_clean(repo, "workbench"),
+        *check_tree_clean(repo, "workbench", untracked=True),
         *check_bundle_present(repo, "workbench"),
         *check_bundle_current(repo),
         *check_pushed(repo),
@@ -182,7 +193,7 @@ def deploy(cockpit: Path, repo: Path = REPO_ROOT) -> int:
                                "clone it, or set PARTYLINE_COCKPIT")])
 
     print(f"\ncockpit {cockpit}")
-    if dirty := check_tree_clean(cockpit, "cockpit"):
+    if dirty := check_tree_clean(cockpit, "cockpit", untracked=False):
         return report(dirty)
 
     before = git("rev-parse", "HEAD", cwd=cockpit)

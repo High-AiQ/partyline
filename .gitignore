@@ -17,3 +17,5 @@ node_modules/
 # fresh clone, and a wheel, must serve the UI without Node ever running.
 *.sqlite
 *.sqlite3
+# Server logs, mostly from a cockpit clone running in the background.
+*.log
