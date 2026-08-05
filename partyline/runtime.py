@@ -1,0 +1,226 @@
+"""Live chat state and behavior underneath the HTTP/WebSocket routes."""
+
+import re
+
+from fastapi import WebSocket, WebSocketDisconnect
+
+from .adapters import Adapter
+from .db import Db
+
+NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
+MENTION_RE = re.compile(r"@([A-Za-z0-9][A-Za-z0-9_.-]*)")
+RESERVED_NAMES = {"all", "system"}  # @all rings everyone; system is the notice sender
+
+
+def handle_error(handle: str) -> str | None:
+    """Return a user-facing validation error, or ``None`` for a valid handle."""
+    if not NAME_RE.match(handle):
+        return "handle must be alphanumeric ([A-Za-z0-9_.-], max 32)"
+    if handle.lower() in RESERVED_NAMES:
+        return f"'{handle}' is a reserved handle"
+    return None
+
+
+class ChatRuntime:
+    """Own process-local chat state and the behavior that operates on it."""
+
+    def __init__(self, db: Db):
+        self.db = db
+        self.sockets: dict[str, set] = {}
+        self.human_handles: dict[str, dict[WebSocket, tuple[str, str]]] = {}
+        self.live: dict[str, Adapter] = {}
+
+    async def shutdown(self):
+        for adapter in list(self.live.values()):
+            try:
+                await adapter.stop()
+            except Exception:
+                pass
+
+    async def broadcast(self, conv_id: str, event: dict):
+        for ws in list(self.sockets.get(conv_id, ())):
+            try:
+                await ws.send_json(event)
+            except Exception:
+                self.sockets.get(conv_id, set()).discard(ws)
+                self.human_handles.get(conv_id, {}).pop(ws, None)
+                if not self.human_handles.get(conv_id):
+                    self.human_handles.pop(conv_id, None)
+
+    async def post_message(self, conv_id: str, sender: str, sender_type: str, body: str):
+        msg = self.db.add_message(conv_id, sender, sender_type, body)
+        await self.broadcast(conv_id, {"type": "message", "message": msg})
+        await self.route_mentions(conv_id, msg)
+        return msg
+
+    async def route_mentions(self, conv_id: str, msg: dict):
+        if msg["sender_type"] == "system":
+            return  # join/exit notices mention names but must never wake agents
+        # A handle may legitimately contain "." or "-", but a mention that ends a
+        # sentence picks up its punctuation: "thanks @opus." must still ring opus.
+        # Both readings are accepted rather than guessing which one was meant.
+        names = set()
+        for found in MENTION_RE.findall(msg["body"]):
+            names.add(found.lower())
+            names.add(found.rstrip(".-_").lower())
+        names.discard("")
+        if not names:
+            return
+        ring_all = "all" in names  # reserved handle: rings every running agent
+        unreachable: list[str] = []
+        delivered: set[str] = set()
+        for att in self.db.list_attachments(conv_id):
+            addressed = ring_all or att["name"].lower() in names
+            if not addressed or att["name"].lower() == msg["sender"].lower():
+                continue  # not for them, or no self-pings
+            adapter = self.live.get(att["id"]) if att["status"] == "running" else None
+            if adapter is None:
+                # The process is gone but the mention looked like it landed. Say so:
+                # a silently dropped mention is indistinguishable from an agent that
+                # simply chose not to answer, and can go unnoticed for hours.
+                if not ring_all and att["name"] not in unreachable:
+                    unreachable.append(att["name"])
+                continue
+            delivered.add(att["name"].lower())
+            pending = self.db.messages_after(conv_id, att["last_seen"], exclude_sender=att["name"])
+            self.db.set_last_seen(att["id"], msg["id"])
+            if pending:
+                await adapter.deliver(pending)
+
+        # A handle can have several rows — old detached ones alongside a live one.
+        # Only warn about handles that got no delivery at all.
+        for name in [n for n in unreachable if n.lower() not in delivered]:
+            # A system notice never wakes anyone, so this cannot loop.
+            await self.post_message(
+                conv_id,
+                "system",
+                "system",
+                f"⚠ @{name} was mentioned but is not attached — nothing was delivered",
+            )
+
+    def status_callback(self, att_id: str, conv_id: str):
+        async def on_status(status: str):
+            self.db.set_attachment_status(att_id, status)
+            att = self.db.get_attachment(att_id)
+            await self.broadcast(conv_id, {"type": "attachment", "attachment": att})
+
+        return on_status
+
+    def post_callback(self, conv_id: str):
+        async def post(sender: str, sender_type: str, body: str):
+            await self.post_message(conv_id, sender, sender_type, body)
+
+        return post
+
+    async def stop_attachments(self, conv_id: str) -> list[str]:
+        """Kill every live process on a line. Returns the handles actually stopped."""
+        stopped: list[str] = []
+        for att in self.db.list_attachments(conv_id):
+            adapter = self.live.pop(att["id"], None)
+            if adapter is None:
+                continue
+            stopped.append(att["name"])
+            try:
+                await adapter.stop()
+            except Exception:
+                # A pty that refuses to die must not strand the archive: the row is
+                # already out of `live`, so nothing can route to it either way.
+                self.db.set_attachment_status(att["id"], "exited")
+        return stopped
+
+    def attachment_handle_taken(self, conv_id: str, handle: str) -> bool:
+        """Whether a live process already owns ``handle`` on this line."""
+        return any(
+            att["name"].lower() == handle.lower() and att["status"] in ("starting", "running")
+            for att in self.db.list_attachments(conv_id)
+        )
+
+    async def websocket(self, ws: WebSocket, conv_id: str):
+        await ws.accept()
+        self.sockets.setdefault(conv_id, set()).add(ws)
+        claimed_handle = None
+        claimed_client = None
+        try:
+            while True:
+                data = await ws.receive_json()
+                if data.get("type") == "hello":
+                    handle = str(data.get("handle", "")).strip()
+                    client_id = str(data.get("client_id", "")).strip()
+                    conv = self.db.get_conversation(conv_id)
+                    error = handle_error(handle)
+                    if conv is None or conv["archived_at"]:
+                        error = "this line is archived — restore it to talk here"
+                    elif not error and self.attachment_handle_taken(conv_id, handle):
+                        error = "that handle is taken by a running process on this line"
+                    elif not error and any(
+                        other is not ws and name.lower() == handle.lower()
+                        and (not client_id or client != client_id)
+                        for other, (name, client) in self.human_handles.get(conv_id, {}).items()
+                    ):
+                        error = "that handle is taken by another human on this line"
+                    if error:
+                        await ws.send_json(
+                            {"type": "error", "conversation_id": conv_id, "message": error})
+                        continue
+                    # A reconnect can arrive before a half-open old socket times
+                    # out. Its durable client id proves it is the same browser, so
+                    # let the new socket take over and make the old one inert.
+                    claims = self.human_handles.setdefault(conv_id, {})
+                    if client_id:
+                        for other, (_, client) in list(claims.items()):
+                            if other is not ws and client == client_id:
+                                claims.pop(other)
+                                self.sockets.get(conv_id, set()).discard(other)
+                                try:
+                                    await other.close(code=1000, reason="superseded by reconnect")
+                                except Exception:
+                                    pass  # a half-open socket cannot be closed cleanly
+                    claims[ws] = (handle, client_id)
+                    claimed_handle, claimed_client = handle, client_id
+                    await ws.send_json(
+                        {"type": "hello", "conversation_id": conv_id, "handle": handle})
+                    continue
+
+                # Preserve the useful archived-line error even for an old client
+                # which has not yet learned the hello handshake.
+                conv = self.db.get_conversation(conv_id)
+                if conv is None or conv["archived_at"]:
+                    await ws.send_json({
+                        "type": "error",
+                        "conversation_id": conv_id,
+                        "message": "this line is archived — restore it to talk here",
+                    })
+                    continue
+                if claimed_handle is None:
+                    await ws.send_json({
+                        "type": "error",
+                        "conversation_id": conv_id,
+                        "message": "choose a handle before sending messages",
+                    })
+                    continue
+                if self.human_handles.get(conv_id, {}).get(ws) != (claimed_handle, claimed_client):
+                    await ws.send_json({
+                        "type": "error",
+                        "conversation_id": conv_id,
+                        "message": "this connection was superseded; reconnect to continue",
+                    })
+                    continue
+                sender = str(data.get("sender", "")).strip()
+                if sender != claimed_handle:
+                    await ws.send_json({
+                        "type": "error",
+                        "conversation_id": conv_id,
+                        "message": "messages must use your claimed handle",
+                    })
+                    continue
+                body = str(data.get("body", "")).strip()
+                if not body:
+                    continue
+                await self.post_message(conv_id, sender, "human", body)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            self.sockets.get(conv_id, set()).discard(ws)
+            self.human_handles.get(conv_id, {}).pop(ws, None)
+            if not self.human_handles.get(conv_id):
+                self.human_handles.pop(conv_id, None)

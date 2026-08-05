@@ -17,114 +17,28 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from . import __version__
-from .adapters import ADAPTERS, ADAPTER_METADATA, Adapter, import_repository, make_adapter, reload_adapters
+from .adapters import ADAPTERS, ADAPTER_METADATA, import_repository, make_adapter, reload_adapters
 from .db import Db
+from .runtime import NAME_RE, RESERVED_NAMES, ChatRuntime
 
 STATIC_DIR = Path(__file__).parent / "static"
-NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
-MENTION_RE = re.compile(r"@([A-Za-z0-9][A-Za-z0-9_.-]*)")
-RESERVED_NAMES = {"all", "system"}  # @all rings everyone; system is the notice sender
 
-db = Db(os.environ.get("PARTYLINE_DB", os.path.expanduser("~/.partyline.db")))
-sockets: dict[str, set] = {}          # conv_id -> live websockets
-# Each socket claims one human handle before it may send.  This stays in memory:
-# presence is deliberately about a live connection, not a durable identity.
-human_handles: dict[str, dict[WebSocket, tuple[str, str]]] = {}
-live: dict[str, Adapter] = {}         # attachment_id -> adapter
+runtime = ChatRuntime(Db(os.environ.get("PARTYLINE_DB", os.path.expanduser("~/.partyline.db"))))
 
 
 @asynccontextmanager
 async def lifespan(app):
-    db.mark_stale_attachments()
+    runtime.db.mark_stale_attachments()
     yield
-    for adapter in list(live.values()):
-        try:
-            await adapter.stop()
-        except Exception:
-            pass
+    await runtime.shutdown()
 
 
 app = FastAPI(lifespan=lifespan)
-
-
-# -- fan-out ---------------------------------------------------------------
-async def broadcast(conv_id: str, event: dict):
-    for ws in list(sockets.get(conv_id, ())):
-        try:
-            await ws.send_json(event)
-        except Exception:
-            sockets.get(conv_id, set()).discard(ws)
-            human_handles.get(conv_id, {}).pop(ws, None)
-            if not human_handles.get(conv_id):
-                human_handles.pop(conv_id, None)
-
-
-async def post_message(conv_id: str, sender: str, sender_type: str, body: str):
-    msg = db.add_message(conv_id, sender, sender_type, body)
-    await broadcast(conv_id, {"type": "message", "message": msg})
-    await route_mentions(conv_id, msg)
-    return msg
-
-
-async def route_mentions(conv_id: str, msg: dict):
-    if msg["sender_type"] == "system":
-        return  # join/exit notices mention names but must never wake agents
-    # A handle may legitimately contain "." or "-", but a mention that ends a
-    # sentence picks up its punctuation: "thanks @opus." must still ring opus.
-    # Both readings are accepted rather than guessing which one was meant.
-    names = set()
-    for found in MENTION_RE.findall(msg["body"]):
-        names.add(found.lower())
-        names.add(found.rstrip(".-_").lower())
-    names.discard("")
-    if not names:
-        return
-    ring_all = "all" in names  # reserved handle: rings every running agent
-    unreachable: list[str] = []
-    delivered: set[str] = set()
-    for att in db.list_attachments(conv_id):
-        addressed = ring_all or att["name"].lower() in names
-        if not addressed or att["name"].lower() == msg["sender"].lower():
-            continue  # not for them, or no self-pings
-        adapter = live.get(att["id"]) if att["status"] == "running" else None
-        if adapter is None:
-            # The process is gone but the mention looked like it landed. Say so:
-            # a silently dropped mention is indistinguishable from an agent that
-            # simply chose not to answer, and can go unnoticed for hours.
-            if not ring_all and att["name"] not in unreachable:
-                unreachable.append(att["name"])
-            continue
-        delivered.add(att["name"].lower())
-        pending = db.messages_after(conv_id, att["last_seen"], exclude_sender=att["name"])
-        db.set_last_seen(att["id"], msg["id"])
-        if pending:
-            await adapter.deliver(pending)
-
-    # A handle can have several rows — old detached ones alongside a live one.
-    # Only warn about handles that got no delivery at all.
-    for name in [n for n in unreachable if n.lower() not in delivered]:
-        # A system notice never wakes anyone, so this cannot loop.
-        await post_message(conv_id, "system", "system",
-                           f"⚠ @{name} was mentioned but is not attached — nothing was delivered")
-
-
-def _status_cb(att_id: str, conv_id: str):
-    async def on_status(status: str):
-        db.set_attachment_status(att_id, status)
-        att = db.get_attachment(att_id)
-        await broadcast(conv_id, {"type": "attachment", "attachment": att})
-    return on_status
-
-
-def _post_cb(conv_id: str):
-    async def post(sender: str, sender_type: str, body: str):
-        await post_message(conv_id, sender, sender_type, body)
-    return post
 
 
 # -- REST ------------------------------------------------------------------
@@ -205,30 +119,30 @@ async def remove_adapter(adapter_name: str):
 
 @app.get("/api/conversations")
 async def conversations(archived: bool = False):
-    return db.list_conversations(archived=archived)
+    return runtime.db.list_conversations(archived=archived)
 
 
 @app.post("/api/conversations")
 async def create_conversation(body: ConvIn):
     name = body.name.strip() or "untitled"
-    return db.create_conversation(str(uuid.uuid4()), name)
+    return runtime.db.create_conversation(str(uuid.uuid4()), name)
 
 
 @app.get("/api/conversations/{conv_id}")
 async def conversation_detail(conv_id: str):
-    conv = db.get_conversation(conv_id)
+    conv = runtime.db.get_conversation(conv_id)
     if not conv:
         raise HTTPException(404)
     return {
         "conversation": conv,
-        "messages": db.list_messages(conv_id),
-        "attachments": db.list_attachments(conv_id),
+        "messages": runtime.db.list_messages(conv_id),
+        "attachments": runtime.db.list_attachments(conv_id),
     }
 
 
 @app.put("/api/conversations/{conv_id}/topic")
 async def set_topic(conv_id: str, body: TopicIn):
-    conv = db.get_conversation(conv_id)
+    conv = runtime.db.get_conversation(conv_id)
     if not conv:
         raise HTTPException(404)
     topic = body.topic.strip()
@@ -236,19 +150,19 @@ async def set_topic(conv_id: str, body: TopicIn):
         raise HTTPException(400, "topic is capped at 3000 characters")
     if topic == conv["topic"]:
         return conv
-    conv = db.set_topic(conv_id, topic)
+    conv = runtime.db.set_topic(conv_id, topic)
     who = f" by @{body.sender.strip()}" if body.sender.strip() else ""
     # A system message never wakes agents, but it rides along in the digest at
     # their next wake — so every agent picks up the new topic lazily, for free.
     notice = f"☏ topic set{who}: {topic}" if topic else f"☏ topic cleared{who}"
-    await post_message(conv_id, "system", "system", notice)
-    await broadcast(conv_id, {"type": "conversation", "conversation": conv})
+    await runtime.post_message(conv_id, "system", "system", notice)
+    await runtime.broadcast(conv_id, {"type": "conversation", "conversation": conv})
     return conv
 
 
 @app.put("/api/conversations/{conv_id}/name")
 async def rename_conversation(conv_id: str, body: RenameIn):
-    conv = db.get_conversation(conv_id)
+    conv = runtime.db.get_conversation(conv_id)
     if not conv:
         raise HTTPException(404)
     name = body.name.strip()
@@ -259,36 +173,20 @@ async def rename_conversation(conv_id: str, body: RenameIn):
     if name == conv["name"]:
         return conv
     was = conv["name"]
-    conv = db.rename_conversation(conv_id, name)
+    conv = runtime.db.rename_conversation(conv_id, name)
     who = f" by @{body.sender.strip()}" if body.sender.strip() else ""
     # Like a topic change: never wakes anyone, but rides along in the next
     # digest, so agents learn the line's new name without costing a turn.
-    await post_message(conv_id, "system", "system", f"☏ line renamed{who}: {was} → {name}")
-    await broadcast(conv_id, {"type": "conversation", "conversation": conv})
+    await runtime.post_message(
+        conv_id, "system", "system", f"☏ line renamed{who}: {was} → {name}")
+    await runtime.broadcast(conv_id, {"type": "conversation", "conversation": conv})
     return conv
-
-
-async def _stop_attachments(conv_id: str) -> list[str]:
-    """Kill every live process on a line. Returns the handles actually stopped."""
-    stopped: list[str] = []
-    for att in db.list_attachments(conv_id):
-        adapter = live.pop(att["id"], None)
-        if adapter is None:
-            continue
-        stopped.append(att["name"])
-        try:
-            await adapter.stop()
-        except Exception:
-            # A pty that refuses to die must not strand the archive: the row is
-            # already out of `live`, so nothing can route to it either way.
-            db.set_attachment_status(att["id"], "exited")
-    return stopped
 
 
 @app.delete("/api/conversations/{conv_id}")
 async def archive_conversation(conv_id: str):
     """Archive a line: stop its processes, hide it, keep the history."""
-    conv = db.get_conversation(conv_id)
+    conv = runtime.db.get_conversation(conv_id)
     if not conv:
         raise HTTPException(404)
     if conv["archived_at"]:
@@ -296,13 +194,13 @@ async def archive_conversation(conv_id: str):
     # Tell watchers before tearing down: a tab sitting on this line should leave
     # under its own power rather than discover the archive by a failing fetch.
     event = {"type": "conversation_archived", "conversation_id": conv_id}
-    await broadcast(conv_id, event)
+    await runtime.broadcast(conv_id, event)
     # Alias kept for one version so clients written against the first cut of
     # this route keep working. Remove in 0.17.
-    await broadcast(conv_id, {**event, "type": "conversation_deleted"})
-    stopped = await _stop_attachments(conv_id)
-    conv = db.archive_conversation(conv_id)
-    sockets.pop(conv_id, None)
+    await runtime.broadcast(conv_id, {**event, "type": "conversation_deleted"})
+    stopped = await runtime.stop_attachments(conv_id)
+    conv = runtime.db.archive_conversation(conv_id)
+    runtime.sockets.pop(conv_id, None)
     return {"ok": True, "archived": True, "stopped": stopped, "conversation": conv}
 
 
@@ -310,13 +208,14 @@ async def archive_conversation(conv_id: str):
 async def restore_conversation(conv_id: str):
     """Bring an archived line back. Its processes stay stopped — a restored
     attachment is resumed one at a time, through the usual resume route."""
-    conv = db.get_conversation(conv_id)
+    conv = runtime.db.get_conversation(conv_id)
     if not conv:
         raise HTTPException(404)
     if not conv["archived_at"]:
         raise HTTPException(409, "line is not archived")
-    conv = db.restore_conversation(conv_id)
-    await post_message(conv_id, "system", "system", "☏ line restored from the archive")
+    conv = runtime.db.restore_conversation(conv_id)
+    await runtime.post_message(
+        conv_id, "system", "system", "☏ line restored from the archive")
     return conv
 
 
@@ -325,20 +224,20 @@ async def purge_conversation(conv_id: str):
     """Destroy an archived line for good. Archiving first is mandatory: it is
     the step that stops the processes, and it makes this irreversible act
     something you have to ask for twice."""
-    conv = db.get_conversation(conv_id)
+    conv = runtime.db.get_conversation(conv_id)
     if not conv:
         raise HTTPException(404)
     if not conv["archived_at"]:
         raise HTTPException(409, "archive the line before purging it")
-    await _stop_attachments(conv_id)  # belt and braces: nothing should be live
-    db.delete_conversation(conv_id)
-    sockets.pop(conv_id, None)
+    await runtime.stop_attachments(conv_id)  # belt and braces: nothing should be live
+    runtime.db.delete_conversation(conv_id)
+    runtime.sockets.pop(conv_id, None)
     return {"ok": True, "purged": True}
 
 
 @app.post("/api/conversations/{conv_id}/attachments")
 async def attach(conv_id: str, body: AttachIn):
-    conv = db.get_conversation(conv_id)
+    conv = runtime.db.get_conversation(conv_id)
     if not conv:
         raise HTTPException(404)
     if conv["archived_at"]:
@@ -347,11 +246,12 @@ async def attach(conv_id: str, body: AttachIn):
         raise HTTPException(400, "name must be alphanumeric ([A-Za-z0-9_.-], max 32)")
     if body.name.lower() in RESERVED_NAMES:
         raise HTTPException(400, f"'{body.name}' is a reserved handle")
-    if body.name.lower() in {name.lower() for name, _ in human_handles.get(conv_id, {}).values()}:
+    if body.name.lower() in {
+            name.lower() for name, _ in runtime.human_handles.get(conv_id, {}).values()}:
         raise HTTPException(409, f"'{body.name}' is already in use by a human on this line")
     if body.adapter not in ADAPTERS:
         raise HTTPException(400, f"adapter must be one of {sorted(ADAPTERS)}")
-    for existing in db.list_attachments(conv_id):
+    for existing in runtime.db.list_attachments(conv_id):
         if existing["name"].lower() == body.name.lower() and existing["status"] in ("starting", "running"):
             raise HTTPException(409, f"'{body.name}' is already attached")
 
@@ -373,33 +273,38 @@ async def attach(conv_id: str, body: AttachIn):
         raise HTTPException(400, f"cwd does not exist: {cwd}")
 
     att_id = str(uuid.uuid4())
-    att = db.add_attachment(att_id, conv_id, body.name, body.adapter, command, cwd)
+    att = runtime.db.add_attachment(att_id, conv_id, body.name, body.adapter, command, cwd)
     att["conv_name"] = conv["name"]
     att["topic"] = conv["topic"]
     att["hook_url"] = _hook_url(att_id)
 
-    adapter = make_adapter(body.adapter, att, _post_cb(conv_id), _status_cb(att_id, conv_id),
-                           on_cli_session=lambda s: db.set_cli_session(att_id, s))
+    adapter = make_adapter(
+        body.adapter,
+        att,
+        runtime.post_callback(conv_id),
+        runtime.status_callback(att_id, conv_id),
+        on_cli_session=lambda s: runtime.db.set_cli_session(att_id, s),
+    )
     try:
         await adapter.start()
     except Exception as exc:
-        db.set_attachment_status(att_id, "exited")
+        runtime.db.set_attachment_status(att_id, "exited")
         raise HTTPException(500, f"failed to spawn: {exc}") from exc
-    live[att_id] = adapter
+    runtime.live[att_id] = adapter
 
-    await post_message(
+    await runtime.post_message(
         conv_id, "system", "system",
         f"@{body.name} joined · `{ ' '.join(command) }` · {cwd} · session {att_id}",
     )
-    return db.get_attachment(att_id)
+    return runtime.db.get_attachment(att_id)
 
 
 @app.post("/api/attachments/{att_id}/resume")
 async def resume_attachment(att_id: str):
-    att = db.get_attachment(att_id)
+    att = runtime.db.get_attachment(att_id)
     if not att:
         raise HTTPException(404)
-    if att["status"] in ("starting", "running") or att_id in live:
+    if att["status"] in ("starting", "running") or att_id in runtime.live:
         raise HTTPException(409, f"'{att['name']}' is already live")
     metadata = ADAPTER_METADATA.get(att["adapter"], {})
     capabilities = metadata.get("capabilities") or {}
@@ -407,45 +312,50 @@ async def resume_attachment(att_id: str):
                   else "resume" in capabilities)
     if not can_resume:
         raise HTTPException(400, f"the {att['adapter']} adapter has no session to resume")
-    for other in db.list_attachments(att["conv_id"]):
+    for other in runtime.db.list_attachments(att["conv_id"]):
         if other["name"].lower() == att["name"].lower() and other["status"] in ("starting", "running"):
             raise HTTPException(409, f"'{att['name']}' is already attached")
 
-    conv = db.get_conversation(att["conv_id"])
+    conv = runtime.db.get_conversation(att["conv_id"])
     if conv["archived_at"]:
         raise HTTPException(409, "restore the line before resuming its processes")
     att["conv_name"] = conv["name"]
     att["resume"] = True
     att["hook_url"] = _hook_url(att_id)
 
-    adapter = make_adapter(att["adapter"], att, _post_cb(att["conv_id"]),
-                           _status_cb(att_id, att["conv_id"]),
-                           on_cli_session=lambda s: db.set_cli_session(att_id, s))
+    adapter = make_adapter(
+        att["adapter"],
+        att,
+        runtime.post_callback(att["conv_id"]),
+        runtime.status_callback(att_id, att["conv_id"]),
+        on_cli_session=lambda s: runtime.db.set_cli_session(att_id, s),
+    )
     try:
         await adapter.start()
     except Exception as exc:
-        db.set_attachment_status(att_id, "exited")
+        runtime.db.set_attachment_status(att_id, "exited")
         raise HTTPException(500, f"failed to resume: {exc}") from exc
-    live[att_id] = adapter
+    runtime.live[att_id] = adapter
 
-    await post_message(
+    await runtime.post_message(
         att["conv_id"], "system", "system",
         f"@{att['name']} resumed with full context · session {att.get('cli_session') or att_id}",
     )
-    return db.get_attachment(att_id)
+    return runtime.db.get_attachment(att_id)
 
 
 @app.delete("/api/attachments/{att_id}")
 async def detach(att_id: str):
-    att = db.get_attachment(att_id)
+    att = runtime.db.get_attachment(att_id)
     if not att:
         raise HTTPException(404)
-    adapter = live.pop(att_id, None)
+    adapter = runtime.live.pop(att_id, None)
     if adapter:
         await adapter.stop()
     else:
-        db.set_attachment_status(att_id, "detached")
-    await post_message(att["conv_id"], "system", "system", f"@{att['name']} detached")
+        runtime.db.set_attachment_status(att_id, "detached")
+    await runtime.post_message(
+        att["conv_id"], "system", "system", f"@{att['name']} detached")
     return {"ok": True}
 
 
@@ -462,7 +372,7 @@ ATTENTION_RE = re.compile(r"permission|approv|trust|login|auth", re.IGNORECASE)
 @app.post("/api/hooks/{att_id}")
 async def hook_event(att_id: str, request: Request):
     """Receiver for optional process-side attention hooks."""
-    att = db.get_attachment(att_id)
+    att = runtime.db.get_attachment(att_id)
     if not att:
         raise HTTPException(404)
     try:
@@ -473,17 +383,18 @@ async def hook_event(att_id: str, request: Request):
     # Only surface events that mean "a human must look at me" — idle chatter
     # from an agent waiting between mentions would spam the conversation.
     if message and ATTENTION_RE.search(message):
-        await post_message(
+        await runtime.post_message(
             att["conv_id"], "system", "system",
             f"⏸ @{att['name']} needs attention: {message} — use peek to view/answer the dialog",
         )
-        await broadcast(att["conv_id"], {"type": "attention", "attachment_id": att_id})
+        await runtime.broadcast(
+            att["conv_id"], {"type": "attention", "attachment_id": att_id})
     return {"ok": True}
 
 
 @app.get("/api/attachments/{att_id}/screen")
 async def attachment_screen(att_id: str):
-    adapter = live.get(att_id)
+    adapter = runtime.live.get(att_id)
     if adapter is None:
         raise HTTPException(404, "attachment is not live")
     return {"screen": adapter.screen_text()}
@@ -495,7 +406,7 @@ class KeyIn(BaseModel):
 
 @app.post("/api/attachments/{att_id}/keys")
 async def attachment_key(att_id: str, body: KeyIn):
-    adapter = live.get(att_id)
+    adapter = runtime.live.get(att_id)
     if adapter is None:
         raise HTTPException(404, "attachment is not live")
     try:
@@ -508,7 +419,7 @@ async def attachment_key(att_id: str, body: KeyIn):
 # -- presets ---------------------------------------------------------------
 @app.get("/api/presets")
 async def presets():
-    return db.list_presets()
+    return runtime.db.list_presets()
 
 
 @app.post("/api/presets")
@@ -518,14 +429,14 @@ async def create_preset(body: PresetIn):
 
 @app.put("/api/presets/{preset_id}")
 async def update_preset(preset_id: str, body: PresetIn):
-    if not db.get_preset(preset_id):
+    if not runtime.db.get_preset(preset_id):
         raise HTTPException(404)
     return _save_preset(preset_id, body)
 
 
 @app.delete("/api/presets/{preset_id}")
 async def delete_preset(preset_id: str):
-    db.delete_preset(preset_id)
+    runtime.db.delete_preset(preset_id)
     return {"ok": True}
 
 
@@ -538,103 +449,13 @@ def _save_preset(preset_id: str, body: PresetIn):
         raise HTTPException(400, f"'{body.name}' is a reserved handle")
     if body.adapter not in ADAPTERS:
         raise HTTPException(400, f"adapter must be one of {sorted(ADAPTERS)}")
-    return db.save_preset(preset_id, body.title.strip(), body.name, body.adapter, body.command.strip())
-
-
-# -- WebSocket -------------------------------------------------------------
-def handle_error(handle: str) -> str | None:
-    """Return a user-facing validation error, or ``None`` for a valid handle."""
-    if not NAME_RE.match(handle):
-        return "handle must be alphanumeric ([A-Za-z0-9_.-], max 32)"
-    if handle.lower() in RESERVED_NAMES:
-        return f"'{handle}' is a reserved handle"
-    return None
-
-
-def attachment_handle_taken(conv_id: str, handle: str) -> bool:
-    """Whether a live process already owns ``handle`` on this line."""
-    return any(
-        att["name"].lower() == handle.lower() and att["status"] in ("starting", "running")
-        for att in db.list_attachments(conv_id)
-    )
+    return runtime.db.save_preset(
+        preset_id, body.title.strip(), body.name, body.adapter, body.command.strip())
 
 
 @app.websocket("/ws/{conv_id}")
 async def ws_endpoint(ws: WebSocket, conv_id: str):
-    await ws.accept()
-    sockets.setdefault(conv_id, set()).add(ws)
-    claimed_handle = None
-    claimed_client = None
-    try:
-        while True:
-            data = await ws.receive_json()
-            if data.get("type") == "hello":
-                handle = str(data.get("handle", "")).strip()
-                client_id = str(data.get("client_id", "")).strip()
-                conv = db.get_conversation(conv_id)
-                error = handle_error(handle)
-                if conv is None or conv["archived_at"]:
-                    error = "this line is archived — restore it to talk here"
-                elif not error and attachment_handle_taken(conv_id, handle):
-                    error = "that handle is taken by a running process on this line"
-                elif not error and any(
-                    other is not ws and name.lower() == handle.lower()
-                    and (not client_id or client != client_id)
-                    for other, (name, client) in human_handles.get(conv_id, {}).items()
-                ):
-                    error = "that handle is taken by another human on this line"
-                if error:
-                    await ws.send_json({"type": "error", "conversation_id": conv_id, "message": error})
-                    continue
-                # A reconnect can arrive before a half-open old socket times
-                # out. Its durable client id proves it is the same browser, so
-                # let the new socket take over and make the old one inert.
-                claims = human_handles.setdefault(conv_id, {})
-                if client_id:
-                    for other, (_, client) in list(claims.items()):
-                        if other is not ws and client == client_id:
-                            claims.pop(other)
-                            sockets.get(conv_id, set()).discard(other)
-                            try:
-                                await other.close(code=1000, reason="superseded by reconnect")
-                            except Exception:
-                                pass  # a half-open socket cannot be closed cleanly
-                claims[ws] = (handle, client_id)
-                claimed_handle, claimed_client = handle, client_id
-                await ws.send_json({"type": "hello", "conversation_id": conv_id, "handle": handle})
-                continue
-
-            # Preserve the useful archived-line error even for an old client
-            # which has not yet learned the hello handshake.
-            conv = db.get_conversation(conv_id)
-            if conv is None or conv["archived_at"]:
-                await ws.send_json({"type": "error", "conversation_id": conv_id,
-                                    "message": "this line is archived — restore it to talk here"})
-                continue
-            if claimed_handle is None:
-                await ws.send_json({"type": "error", "conversation_id": conv_id,
-                                    "message": "choose a handle before sending messages"})
-                continue
-            if human_handles.get(conv_id, {}).get(ws) != (claimed_handle, claimed_client):
-                await ws.send_json({"type": "error", "conversation_id": conv_id,
-                                    "message": "this connection was superseded; reconnect to continue"})
-                continue
-            sender = str(data.get("sender", "")).strip()
-            if sender != claimed_handle:
-                await ws.send_json({"type": "error", "conversation_id": conv_id,
-                                    "message": "messages must use your claimed handle"})
-                continue
-            body = str(data.get("body", "")).strip()
-            if not body:
-                continue
-            await post_message(conv_id, sender, "human", body)
-    except WebSocketDisconnect:
-        pass
-    finally:
-        sockets.get(conv_id, set()).discard(ws)
-        human_handles.get(conv_id, {}).pop(ws, None)
-        if not human_handles.get(conv_id):
-            human_handles.pop(conv_id, None)
+    await runtime.websocket(ws, conv_id)
 
 
 def load_dotenv(path: str = ".env"):
