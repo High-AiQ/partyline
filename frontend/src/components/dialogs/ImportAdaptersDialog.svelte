@@ -59,7 +59,20 @@
 </Modal>
 
 <style>
-  .grid { display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; align-items: center; }
-  label { color: var(--color-cream-faint); font-size: 10px; letter-spacing: 0.05em; text-align: right; }
-  .actions { display: flex; justify-content: flex-end; }
+  .grid {
+    display: grid;
+    grid-template-columns: 110px 1fr;
+    gap: 6px 10px;
+    align-items: center;
+  }
+  label {
+    color: var(--color-cream-faint);
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    text-align: right;
+  }
+  .actions {
+    display: flex;
+    justify-content: flex-end;
+  }
 </style>

@@ -18,11 +18,7 @@
       <div class="note">nobody attached yet</div>
     {:else}
       {#each jacks as attachment (attachment.id)}
-        <JackCard
-          {attachment}
-          resumable={canResumeJack(session.adapters, attachment)}
-          {onmention}
-        />
+        <JackCard {attachment} resumable={canResumeJack(session.adapters, attachment)} {onmention} />
       {/each}
     {/if}
   </div>
@@ -39,7 +35,8 @@
     flex-direction: column;
     overflow-y: auto;
   }
-  h2, h3 {
+  h2,
+  h3 {
     font-family: var(--font-serif);
     font-style: italic;
     font-weight: 400;
@@ -47,6 +44,13 @@
     color: var(--color-cream-dim);
     padding: 20px 18px 10px;
   }
-  #jacks { padding: 0 12px 8px; }
-  .note { padding: 0 8px; color: var(--color-cream-faint); font-size: 11px; font-style: italic; }
+  #jacks {
+    padding: 0 12px 8px;
+  }
+  .note {
+    padding: 0 8px;
+    color: var(--color-cream-faint);
+    font-size: 11px;
+    font-style: italic;
+  }
 </style>

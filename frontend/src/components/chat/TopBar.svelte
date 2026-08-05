@@ -17,8 +17,8 @@
       title={topic
         ? `${topic}\n\n(click to edit)`
         : "give this line a topic — agents get it in their briefing"}
-      onclick={() => dialogs.open(TopicDialog)}
-    >{topic || "set a topic…"}</button>
+      onclick={() => dialogs.open(TopicDialog)}>{topic || "set a topic…"}</button
+    >
   {/if}
 </div>
 
@@ -59,6 +59,12 @@
     border-bottom: 1px dashed transparent;
     transition: color 0.15s;
   }
-  #convmeta:hover { color: var(--color-copper-hot); background: none; border-bottom-color: rgb(217 142 74 / 0.4); }
-  #convmeta.unset { color: var(--color-cream-faint); }
+  #convmeta:hover {
+    color: var(--color-copper-hot);
+    background: none;
+    border-bottom-color: rgb(217 142 74 / 0.4);
+  }
+  #convmeta.unset {
+    color: var(--color-cream-faint);
+  }
 </style>

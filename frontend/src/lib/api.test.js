@@ -27,13 +27,14 @@ describe("api", () => {
   });
 
   it("surfaces the server detail and status on an HTTP error", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
-      response({ detail: "that process is already live" }, { ok: false, status: 409 }),
-    ));
-
-    await expect(api.resume("att-1")).rejects.toEqual(
-      new ApiError("that process is already live", 409),
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(response({ detail: "that process is already live" }, { ok: false, status: 409 })),
     );
+
+    await expect(api.resume("att-1")).rejects.toEqual(new ApiError("that process is already live", 409));
   });
 
   it("uses operation-specific wording for a network failure", async () => {

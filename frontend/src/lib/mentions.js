@@ -48,9 +48,7 @@ export function mentionCandidates(prefix, attachments, humans) {
     byHandle.set(handle, candidate);
   }
 
-  const candidates = [...byHandle.values()].sort(
-    (a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name),
-  );
+  const candidates = [...byHandle.values()].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
 
   // The megaphone is deliberately last, and only offered when it would do
   // something: @all rings every running process at once.

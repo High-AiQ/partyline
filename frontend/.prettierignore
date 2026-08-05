@@ -1,0 +1,4 @@
+node_modules
+package-lock.json
+# The build output belongs to Vite, not to us.
+../partyline/static

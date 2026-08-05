@@ -12,7 +12,10 @@
   let error = $state("");
   let field = $state(null);
 
-  $effect(() => { field?.focus(); field?.select(); });
+  $effect(() => {
+    field?.focus();
+    field?.select();
+  });
 
   async function save(event) {
     event.preventDefault();

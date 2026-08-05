@@ -19,10 +19,17 @@
   $effect(() => {
     // The list is a courtesy — the warning below stands either way, so a
     // failure to fetch it must not block the dialog.
-    api.running()
-      .then((processes) => { running = processes; })
-      .catch(() => { running = []; })
-      .finally(() => { loading = false; });
+    api
+      .running()
+      .then((processes) => {
+        running = processes;
+      })
+      .catch(() => {
+        running = [];
+      })
+      .finally(() => {
+        loading = false;
+      });
   });
 
   async function stop() {
@@ -39,8 +46,8 @@
     <p class="dialog-text">Checking what is running…</p>
   {:else}
     <p class="dialog-text">
-      This stops the partyline server itself — every line, and every process on every line.
-      Nothing here can start it again: you will need a terminal.
+      This stops the partyline server itself — every line, and every process on every line. Nothing here can
+      start it again: you will need a terminal.
     </p>
 
     <div class="live-list">

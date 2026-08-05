@@ -64,10 +64,26 @@
     align-items: center;
     justify-content: center;
   }
-  .card { text-align: center; animation: arrive 0.5s ease both; }
-  h1 { font-family: var(--font-serif); font-weight: 400; font-size: 64px; color: var(--color-cream); }
-  h1 em { color: var(--color-copper); font-style: italic; }
-  p { color: var(--color-cream-dim); margin: 6px 0 26px; font-size: 12.5px; letter-spacing: 0.04em; }
+  .card {
+    text-align: center;
+    animation: arrive 0.5s ease both;
+  }
+  h1 {
+    font-family: var(--font-serif);
+    font-weight: 400;
+    font-size: 64px;
+    color: var(--color-cream);
+  }
+  h1 em {
+    color: var(--color-copper);
+    font-style: italic;
+  }
+  p {
+    color: var(--color-cream-dim);
+    margin: 6px 0 26px;
+    font-size: 12.5px;
+    letter-spacing: 0.04em;
+  }
   .gate-error {
     max-width: 360px;
     margin: -12px auto 18px;
@@ -75,6 +91,15 @@
     font-size: 11px;
     line-height: 1.45;
   }
-  form { display: flex; gap: 10px; justify-content: center; }
-  input { font-size: 14px; padding: 9px 14px; width: 220px; text-align: center; }
+  form {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+  }
+  input {
+    font-size: 14px;
+    padding: 9px 14px;
+    width: 220px;
+    text-align: center;
+  }
 </style>

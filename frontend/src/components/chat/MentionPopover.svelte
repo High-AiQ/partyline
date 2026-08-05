@@ -30,7 +30,12 @@
       onclick={() => onpick(index)}
     >
       <span class="led {candidate.status ?? ''}" class:blank={!candidate.status}></span>
-      <span class="nm" style:color={candidate.all ? "var(--color-copper-hot)" : `hsl(${hue(candidate.name.toLowerCase())} 55% 68%)`}>
+      <span
+        class="nm"
+        style:color={candidate.all
+          ? "var(--color-copper-hot)"
+          : `hsl(${hue(candidate.name.toLowerCase())} 55% 68%)`}
+      >
         @{candidate.name}
       </span>
       <span class="kind" style:color={candidate.all ? "var(--color-copper)" : null}>{candidate.kind}</span>
@@ -70,9 +75,25 @@
     cursor: pointer;
     color: var(--color-cream-dim);
   }
-  .opt .led { width: 6px; height: 6px; }
-  .opt .led.blank { background: none; }
-  .nm { font-weight: 600; flex: 1; }
-  .kind { font-size: 9.5px; color: var(--color-cream-faint); letter-spacing: 0.06em; }
-  .opt:hover, .opt.sel { background: var(--color-ink-3); color: var(--color-cream); }
+  .opt .led {
+    width: 6px;
+    height: 6px;
+  }
+  .opt .led.blank {
+    background: none;
+  }
+  .nm {
+    font-weight: 600;
+    flex: 1;
+  }
+  .kind {
+    font-size: 9.5px;
+    color: var(--color-cream-faint);
+    letter-spacing: 0.06em;
+  }
+  .opt:hover,
+  .opt.sel {
+    background: var(--color-ink-3);
+    color: var(--color-cream);
+  }
 </style>

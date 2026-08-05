@@ -140,7 +140,9 @@ class Room {
   showNotice(message, kind = "") {
     this.notice = { message, kind };
     clearTimeout(this.#noticeTimer);
-    this.#noticeTimer = setTimeout(() => { this.notice = null; }, 4200);
+    this.#noticeTimer = setTimeout(() => {
+      this.notice = null;
+    }, 4200);
   }
 
   // ── server events ──────────────────────────────────────────────────────
@@ -229,7 +231,10 @@ class Room {
   #absorb(message) {
     if (this.#seen.has(message.id)) return;
     this.#seen.add(message.id);
-    if (message.sender_type === "human" && message.sender.toLowerCase() !== (session.handle || "").toLowerCase()) {
+    if (
+      message.sender_type === "human" &&
+      message.sender.toLowerCase() !== (session.handle || "").toLowerCase()
+    ) {
       this.humans.add(message.sender);
     }
     this.messages.push(message);

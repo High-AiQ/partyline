@@ -61,8 +61,8 @@
         id="stopServer"
         type="button"
         title="stop the partyline server"
-        onclick={() => dialogs.open(StopServerDialog)}
-      >stop</button>
+        onclick={() => dialogs.open(StopServerDialog)}>stop</button
+      >
     </span>
   </div>
 </aside>
@@ -76,7 +76,10 @@
     min-width: 0;
   }
 
-  #wordmark { padding: 26px 20px 18px; border-bottom: 1px dashed var(--color-line); }
+  #wordmark {
+    padding: 26px 20px 18px;
+    border-bottom: 1px dashed var(--color-line);
+  }
   h1 {
     font-family: var(--font-serif);
     font-weight: 400;
@@ -84,8 +87,16 @@
     letter-spacing: 0.5px;
     color: var(--color-cream);
   }
-  h1 em { color: var(--color-copper); font-style: italic; }
-  #wordmark p { color: var(--color-cream-faint); font-size: 10.5px; margin-top: 4px; letter-spacing: 0.06em; }
+  h1 em {
+    color: var(--color-copper);
+    font-style: italic;
+  }
+  #wordmark p {
+    color: var(--color-cream-faint);
+    font-size: 10.5px;
+    margin-top: 4px;
+    letter-spacing: 0.06em;
+  }
   #ver {
     color: var(--color-copper);
     border: 1px solid rgb(217 142 74 / 0.3);
@@ -96,8 +107,16 @@
     vertical-align: 1px;
   }
 
-  #newconv { padding: 14px 20px; border-top: 1px dashed var(--color-line); display: flex; gap: 8px; }
-  #newconv input { flex: 1; min-width: 0; }
+  #newconv {
+    padding: 14px 20px;
+    border-top: 1px dashed var(--color-line);
+    display: flex;
+    gap: 8px;
+  }
+  #newconv input {
+    flex: 1;
+    min-width: 0;
+  }
 
   #me {
     padding: 12px 20px;
@@ -108,11 +127,29 @@
     justify-content: space-between;
     align-items: center;
   }
-  #me b { color: var(--color-cream-dim); font-weight: 500; }
-  #me button { font-size: 10px; padding: 2px 8px; }
-  .me-actions { display: flex; align-items: center; flex: none; }
+  #me b {
+    color: var(--color-cream-dim);
+    font-weight: 500;
+  }
+  #me button {
+    font-size: 10px;
+    padding: 2px 8px;
+  }
+  .me-actions {
+    display: flex;
+    align-items: center;
+    flex: none;
+  }
   /* Stopping the server is not a routine action: it sits quiet until reached
      for, then goes red — it should never be the brightest thing in the rail. */
-  #stopServer { margin-left: 6px; color: var(--color-cream-faint); border-color: var(--color-line); }
-  #stopServer:hover { color: var(--color-cream); background: var(--color-red); border-color: var(--color-red); }
+  #stopServer {
+    margin-left: 6px;
+    color: var(--color-cream-faint);
+    border-color: var(--color-line);
+  }
+  #stopServer:hover {
+    color: var(--color-cream);
+    background: var(--color-red);
+    border-color: var(--color-red);
+  }
 </style>

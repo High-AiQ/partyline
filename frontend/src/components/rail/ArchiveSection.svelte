@@ -70,13 +70,14 @@
               title="restore this line"
               disabled={restoring === conversation.id}
               onclick={() => restore(conversation)}
-            >{restoring === conversation.id ? "restoring…" : "restore"}</button>
+              >{restoring === conversation.id ? "restoring…" : "restore"}</button
+            >
             <button
               type="button"
               class="purge"
               title="permanently delete this line"
-              onclick={() => onpurge(conversation)}
-            >delete forever</button>
+              onclick={() => onpurge(conversation)}>delete forever</button
+            >
           </div>
         </div>
       {/each}
@@ -91,16 +92,44 @@
     overflow-y: auto;
     color: var(--color-cream-faint);
   }
-  summary { list-style: none; cursor: pointer; padding: 10px 20px; font-size: 10.5px; letter-spacing: 0.05em; }
-  summary::-webkit-details-marker { display: none; }
-  summary::before { content: "▸"; display: inline-block; width: 14px; color: var(--color-cream-faint); }
-  #archiveSection[open] summary::before { content: "▾"; }
-  summary:hover { color: var(--color-cream-dim); background: var(--color-ink-3); }
+  summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 10px 20px;
+    font-size: 10.5px;
+    letter-spacing: 0.05em;
+  }
+  summary::-webkit-details-marker {
+    display: none;
+  }
+  summary::before {
+    content: "▸";
+    display: inline-block;
+    width: 14px;
+    color: var(--color-cream-faint);
+  }
+  #archiveSection[open] summary::before {
+    content: "▾";
+  }
+  summary:hover {
+    color: var(--color-cream-dim);
+    background: var(--color-ink-3);
+  }
 
-  #archiveCount { color: var(--color-cream-faint); font-size: 10px; }
-  #archivedConvs { padding: 0 12px 8px; }
+  #archiveCount {
+    color: var(--color-cream-faint);
+    font-size: 10px;
+  }
+  #archivedConvs {
+    padding: 0 12px 8px;
+  }
 
-  .archive-note { padding: 0 8px 6px; font-size: 10px; font-style: italic; color: var(--color-cream-faint); }
+  .archive-note {
+    padding: 0 8px 6px;
+    font-size: 10px;
+    font-style: italic;
+    color: var(--color-cream-faint);
+  }
   .archive-row {
     display: flex;
     align-items: center;
@@ -111,9 +140,29 @@
     border-radius: 4px;
     color: var(--color-cream-faint);
   }
-  .name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; }
-  .archive-actions { display: flex; gap: 4px; flex: none; }
-  .archive-actions button { padding: 4px 6px; font-size: 9.5px; }
-  .restore { color: var(--color-green); border-color: rgb(127 176 105 / 0.35); }
-  .purge { color: var(--color-red); border-color: rgb(201 111 90 / 0.35); }
+  .name {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 10.5px;
+  }
+  .archive-actions {
+    display: flex;
+    gap: 4px;
+    flex: none;
+  }
+  .archive-actions button {
+    padding: 4px 6px;
+    font-size: 9.5px;
+  }
+  .restore {
+    color: var(--color-green);
+    border-color: rgb(127 176 105 / 0.35);
+  }
+  .purge {
+    color: var(--color-red);
+    border-color: rgb(201 111 90 / 0.35);
+  }
 </style>

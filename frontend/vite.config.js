@@ -72,7 +72,9 @@ function sourceBuildId() {
   visit(join(frontendDir, "src"));
 
   const hash = createHash("sha256");
-  for (const path of files.map((path) => path.startsWith(frontendDir) ? path : join(frontendDir, path)).sort()) {
+  for (const path of files
+    .map((path) => (path.startsWith(frontendDir) ? path : join(frontendDir, path)))
+    .sort()) {
     const name = relative(frontendDir, path).split(sep).join("/") || basename(path);
     hash.update(name).update("\0").update(readFileSync(path)).update("\0");
   }

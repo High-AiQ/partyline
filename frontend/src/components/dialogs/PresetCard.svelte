@@ -94,9 +94,30 @@
     flex-direction: column;
     gap: 7px;
   }
-  .grid { display: grid; grid-template-columns: 78px 1fr; gap: 6px 10px; align-items: center; }
-  .grid label { color: var(--color-cream-faint); font-size: 10px; letter-spacing: 0.05em; text-align: right; }
-  .actions { display: flex; gap: 8px; justify-content: flex-end; }
-  .del { color: var(--color-red); border-color: rgb(201 111 90 / 0.4); }
-  .del:hover { background: var(--color-red); border-color: var(--color-red); color: var(--color-ink); }
+  .grid {
+    display: grid;
+    grid-template-columns: 78px 1fr;
+    gap: 6px 10px;
+    align-items: center;
+  }
+  .grid label {
+    color: var(--color-cream-faint);
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    text-align: right;
+  }
+  .actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+  .del {
+    color: var(--color-red);
+    border-color: rgb(201 111 90 / 0.4);
+  }
+  .del:hover {
+    background: var(--color-red);
+    border-color: var(--color-red);
+    color: var(--color-ink);
+  }
 </style>

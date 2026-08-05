@@ -55,11 +55,13 @@
       type="button"
       style:color="hsl({hue(attachment.name.toLowerCase())} 55% 68%)"
       title="insert @{attachment.name}"
-      onclick={() => onmention(attachment.name)}
-    >{attachment.name}</button>
+      onclick={() => onmention(attachment.name)}>{attachment.name}</button
+    >
     <span class="tag">{attachment.adapter}</span>
     {#if live}
-      <button class="x" type="button" title="detach" aria-label="detach {attachment.name}" onclick={detach}>✕</button>
+      <button class="x" type="button" title="detach" aria-label="detach {attachment.name}" onclick={detach}
+        >✕</button
+      >
     {/if}
   </div>
 
@@ -71,7 +73,13 @@
     </button>
   {/if}
   {#if resumable}
-    <button class="resume" type="button" title="respawn with full session context" disabled={resuming} onclick={resume}>
+    <button
+      class="resume"
+      type="button"
+      title="respawn with full session context"
+      disabled={resuming}
+      onclick={resume}
+    >
       {resuming ? "resuming…" : "↻ resume"}
     </button>
   {/if}
@@ -86,11 +94,27 @@
     margin-bottom: 8px;
     position: relative;
   }
-  .jack.dead { opacity: 0.75; }
-  .row { display: flex; align-items: center; gap: 8px; }
+  .jack.dead {
+    opacity: 0.75;
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
 
-  .name { font-weight: 600; cursor: pointer; background: none; border: 0; padding: 0; font-size: inherit; }
-  .name:hover { color: var(--color-copper-hot) !important; background: none; }
+  .name {
+    font-weight: 600;
+    cursor: pointer;
+    background: none;
+    border: 0;
+    padding: 0;
+    font-size: inherit;
+  }
+  .name:hover {
+    color: var(--color-copper-hot) !important;
+    background: none;
+  }
 
   .tag {
     font-size: 9.5px;
@@ -120,7 +144,10 @@
     font-size: 12px;
     padding: 2px;
   }
-  .x:hover { color: var(--color-red); background: none; }
+  .x:hover {
+    color: var(--color-red);
+    background: none;
+  }
 
   .resume {
     margin-top: 6px;
@@ -129,13 +156,27 @@
     color: var(--color-green);
     border-color: rgb(127 176 105 / 0.4);
   }
-  .resume:hover { background: var(--color-green); border-color: var(--color-green); color: var(--color-ink); }
+  .resume:hover {
+    background: var(--color-green);
+    border-color: var(--color-green);
+    color: var(--color-ink);
+  }
 
   /* a process is stuck on a dialog: the whole jack rings until someone peeks */
-  .jack.attention { border-color: rgb(242 176 107 / 0.7); animation: ring-glow 1.1s ease-in-out infinite; }
+  .jack.attention {
+    border-color: rgb(242 176 107 / 0.7);
+    animation: ring-glow 1.1s ease-in-out infinite;
+  }
   @keyframes ring-glow {
-    0%, 100% { box-shadow: 0 0 0 rgb(242 176 107 / 0); }
-    50% { box-shadow: 0 0 16px rgb(242 176 107 / 0.4), inset 0 0 8px rgb(242 176 107 / 0.08); }
+    0%,
+    100% {
+      box-shadow: 0 0 0 rgb(242 176 107 / 0);
+    }
+    50% {
+      box-shadow:
+        0 0 16px rgb(242 176 107 / 0.4),
+        inset 0 0 8px rgb(242 176 107 / 0.08);
+    }
   }
   .jack.attention .led {
     background: var(--color-copper-hot);
@@ -151,15 +192,33 @@
   }
   /* a burst of rattle, then a beat of rest — like a phone ringing */
   @keyframes jiggle {
-    0%, 35%, 100% { transform: rotate(0); }
-    7% { transform: rotate(-2.5deg) translateX(-1px); }
-    14% { transform: rotate(2deg) translateX(1px); }
-    21% { transform: rotate(-2deg) translateX(-1px); }
-    28% { transform: rotate(1.5deg) translateX(1px); }
+    0%,
+    35%,
+    100% {
+      transform: rotate(0);
+    }
+    7% {
+      transform: rotate(-2.5deg) translateX(-1px);
+    }
+    14% {
+      transform: rotate(2deg) translateX(1px);
+    }
+    21% {
+      transform: rotate(-2deg) translateX(-1px);
+    }
+    28% {
+      transform: rotate(1.5deg) translateX(1px);
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .jack.attention, .jack.attention .led, .jack.attention .peek-btn { animation: none; }
-    .jack.attention { box-shadow: 0 0 12px rgb(242 176 107 / 0.35); }
+    .jack.attention,
+    .jack.attention .led,
+    .jack.attention .peek-btn {
+      animation: none;
+    }
+    .jack.attention {
+      box-shadow: 0 0 12px rgb(242 176 107 / 0.35);
+    }
   }
 </style>

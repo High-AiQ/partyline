@@ -45,8 +45,8 @@
           title="line actions"
           aria-label="line actions for {conversation.name}"
           aria-expanded={open}
-          onclick={(event) => toggle(event, conversation)}
-        >⋯</button>
+          onclick={(event) => toggle(event, conversation)}>⋯</button
+        >
       </div>
     </div>
   {/each}
@@ -63,9 +63,18 @@
 {/if}
 
 <style>
-  #convs { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 0; }
+  #convs {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 10px 0;
+  }
 
-  .conv-row { position: relative; display: flex; align-items: stretch; }
+  .conv-row {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+  }
   .conv {
     display: block;
     flex: 1;
@@ -85,9 +94,15 @@
   }
   .conv:hover,
   .conv-row:focus-within .conv,
-  .conv-row.menu-open .conv { color: var(--color-cream); background: var(--color-ink-3); }
+  .conv-row.menu-open .conv {
+    color: var(--color-cream);
+    background: var(--color-ink-3);
+  }
 
-  .conv.active { color: var(--color-copper-hot); background: var(--color-ink-3); }
+  .conv.active {
+    color: var(--color-copper-hot);
+    background: var(--color-ink-3);
+  }
   .conv.active::before {
     content: "";
     position: absolute;
@@ -112,9 +127,17 @@
   }
   .conv-row:hover .conv-actions,
   .conv-row:focus-within .conv-actions,
-  .conv-row.menu-open .conv-actions { opacity: 1; pointer-events: auto; }
+  .conv-row.menu-open .conv-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
   /* A touch screen has no hover to reveal them with. */
-  @media (hover: none) { .conv-actions { opacity: 1; pointer-events: auto; } }
+  @media (hover: none) {
+    .conv-actions {
+      opacity: 1;
+      pointer-events: auto;
+    }
+  }
 
   .conv-more {
     width: 44px;
@@ -125,5 +148,9 @@
     font-size: 16px;
     line-height: 1;
   }
-  .conv-more:hover, .conv-more[aria-expanded="true"] { color: var(--color-ink); background: var(--color-copper); }
+  .conv-more:hover,
+  .conv-more[aria-expanded="true"] {
+    color: var(--color-ink);
+    background: var(--color-copper);
+  }
 </style>

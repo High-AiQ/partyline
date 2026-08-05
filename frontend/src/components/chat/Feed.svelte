@@ -60,8 +60,18 @@
 </div>
 
 <style>
-  #feed { flex: 1; min-height: 0; overflow-y: auto; padding: 22px 28px 10px; }
-  .empty { color: var(--color-cream-faint); text-align: center; margin-top: 12vh; font-size: 12.5px; }
+  #feed {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 22px 28px 10px;
+  }
+  .empty {
+    color: var(--color-cream-faint);
+    text-align: center;
+    margin-top: 12vh;
+    font-size: 12.5px;
+  }
   .art {
     font-family: var(--font-serif);
     font-style: italic;

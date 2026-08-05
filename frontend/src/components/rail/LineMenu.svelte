@@ -52,7 +52,11 @@
 
 <!-- A menu pinned to viewport coordinates has to close when those coordinates
      stop meaning anything: a scrolled rail, a resized window, a key. -->
-<svelte:window on:resize={close} on:scroll|capture={close} on:keydown={(e) => e.key === "Escape" && close()} />
+<svelte:window
+  on:resize={close}
+  on:scroll|capture={close}
+  on:keydown={(e) => e.key === "Escape" && close()}
+/>
 
 <div
   class="conv-menu"
@@ -104,9 +108,22 @@
     color: var(--color-cream-dim);
     border-radius: 3px;
     letter-spacing: 0.06em;
-    transition: background 0.1s, color 0.1s;
+    transition:
+      background 0.1s,
+      color 0.1s;
   }
-  button:hover, button:focus-visible { color: var(--color-ink); background: var(--color-copper); outline: 0; }
-  .delete { color: var(--color-red); }
-  .delete:hover, .delete:focus-visible { color: var(--color-cream); background: var(--color-red); }
+  button:hover,
+  button:focus-visible {
+    color: var(--color-ink);
+    background: var(--color-copper);
+    outline: 0;
+  }
+  .delete {
+    color: var(--color-red);
+  }
+  .delete:hover,
+  .delete:focus-visible {
+    color: var(--color-cream);
+    background: var(--color-red);
+  }
 </style>

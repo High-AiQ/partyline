@@ -5,18 +5,18 @@
    palette is one source of truth for both Tailwind utilities (`bg-ink`,
    `text-copper`) and the hand-written rules that Tailwind is a poor fit for. */
 @theme {
-  --color-ink: #0e100f;          /* deep exchange-room black-green */
+  --color-ink: #0e100f; /* deep exchange-room black-green */
   --color-ink-2: #141715;
   --color-ink-3: #1b1f1c;
   --color-line: #2a2f2b;
-  --color-panel: #20251f;        /* lifted surface: menus must read above the rail */
+  --color-panel: #20251f; /* lifted surface: menus must read above the rail */
   --color-panel-line: #3a423b;
-  --color-copper: #d98e4a;       /* patch-cable copper */
+  --color-copper: #d98e4a; /* patch-cable copper */
   --color-copper-hot: #f2b06b;
-  --color-cream: #e9e2d4;        /* operator's ledger paper */
+  --color-cream: #e9e2d4; /* operator's ledger paper */
   --color-cream-dim: #9a968a;
   --color-cream-faint: #5d5b52;
-  --color-green: #7fb069;        /* live-line LED */
+  --color-green: #7fb069; /* live-line LED */
   --color-red: #c96f5a;
 
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
@@ -27,24 +27,49 @@
 }
 
 @keyframes arrive {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: none; }
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 @keyframes pulse-led {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0.35; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
 }
 @keyframes menu-in {
-  from { opacity: 0; transform: translateY(-4px); }
-  to   { opacity: 1; transform: none; }
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 @layer base {
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
   /* `#root` is the element Svelte mounts into. It sits between <body> and the
      app grid, so without a height of its own the three columns collapse to
      their content and the page ends in a black band. */
-  html, body, #root { height: 100%; }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
   body {
     background: var(--color-ink);
     color: var(--color-cream);
@@ -65,8 +90,14 @@
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
   }
 
-  input, select, textarea, button { font-family: var(--font-mono); }
-  input, select {
+  input,
+  select,
+  textarea,
+  button {
+    font-family: var(--font-mono);
+  }
+  input,
+  select {
     background: var(--color-ink);
     border: 1px solid var(--color-line);
     border-radius: 4px;
@@ -75,7 +106,10 @@
     font-size: 12px;
     outline: 0;
   }
-  input:focus, select:focus { border-color: var(--color-copper); }
+  input:focus,
+  select:focus {
+    border-color: var(--color-copper);
+  }
   button {
     background: var(--color-ink-3);
     border: 1px solid var(--color-line);
@@ -92,12 +126,25 @@
     background: var(--color-copper);
     border-color: var(--color-copper);
   }
-  button.primary { color: var(--color-copper-hot); border-color: rgb(217 142 74 / 0.5); }
-  button.primary:hover { color: var(--color-ink); }
+  button.primary {
+    color: var(--color-copper-hot);
+    border-color: rgb(217 142 74 / 0.5);
+  }
+  button.primary:hover {
+    color: var(--color-ink);
+  }
 
-  ::-webkit-scrollbar { width: 8px; height: 8px; }
-  ::-webkit-scrollbar-thumb { background: var(--color-line); border-radius: 4px; }
-  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-line);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
 }
 
 /* ── shared dialog vocabulary ──
@@ -105,28 +152,59 @@
    assembled from these, so the three stay in step with each other by
    construction rather than by three people remembering to. */
 @layer components {
-  .line-form { display: flex; flex-direction: column; gap: 7px; }
-  .line-form label { color: var(--color-cream-faint); font-size: 10px; letter-spacing: 0.05em; }
-  .line-form input { width: 100%; font-size: 13px; padding: 9px 10px; }
+  .line-form {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+  .line-form label {
+    color: var(--color-cream-faint);
+    font-size: 10px;
+    letter-spacing: 0.05em;
+  }
+  .line-form input {
+    width: 100%;
+    font-size: 13px;
+    padding: 9px 10px;
+  }
 
-  .line-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
-  .line-actions .danger { color: var(--color-red); border-color: rgb(201 111 90 / 0.5); }
+  .line-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 4px;
+  }
+  .line-actions .danger {
+    color: var(--color-red);
+    border-color: rgb(201 111 90 / 0.5);
+  }
   .line-actions .danger:hover {
     background: var(--color-red);
     border-color: var(--color-red);
     color: var(--color-ink);
   }
 
-  .live-list { display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }
+  .live-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 2px;
+  }
   .live-item {
-    display: flex; align-items: center; gap: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
     padding: 7px 9px;
     border: 1px solid rgb(201 111 90 / 0.35);
     border-radius: 4px;
     background: rgb(201 111 90 / 0.06);
     color: var(--color-cream);
   }
-  .live-item .on { color: var(--color-cream-faint); margin-left: auto; font-size: 10px; }
+  .live-item .on {
+    color: var(--color-cream-faint);
+    margin-left: auto;
+    font-size: 10px;
+  }
 
   .line-status {
     min-height: 18px;
@@ -134,19 +212,42 @@
     font-size: 10.5px;
     font-style: italic;
   }
-  .line-status.error { color: var(--color-red); font-style: normal; }
-  .warn-sent { color: var(--color-green); font-style: normal; }
+  .line-status.error {
+    color: var(--color-red);
+    font-style: normal;
+  }
+  .warn-sent {
+    color: var(--color-green);
+    font-style: normal;
+  }
 
-  .dialog-note { color: var(--color-cream-faint); font-size: 10.5px; font-style: italic; }
-  .dialog-text { color: var(--color-cream-dim); }
+  .dialog-note {
+    color: var(--color-cream-faint);
+    font-size: 10.5px;
+    font-style: italic;
+  }
+  .dialog-text {
+    color: var(--color-cream-dim);
+  }
 
   /* the live-line LED, used by jacks, mention options and dialogs alike */
-  .led { width: 7px; height: 7px; border-radius: 50%; background: var(--color-cream-faint); flex: none; }
+  .led {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--color-cream-faint);
+    flex: none;
+  }
   .led.running {
     background: var(--color-green);
     box-shadow: 0 0 6px var(--color-green);
     animation: pulse-led 2.2s infinite;
   }
-  .led.starting { background: var(--color-copper); box-shadow: 0 0 6px var(--color-copper); }
-  .led.exited { background: var(--color-red); }
+  .led.starting {
+    background: var(--color-copper);
+    box-shadow: 0 0 6px var(--color-copper);
+  }
+  .led.exited {
+    background: var(--color-red);
+  }
 }

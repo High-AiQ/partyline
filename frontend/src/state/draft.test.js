@@ -19,7 +19,11 @@ describe("draft persistence", () => {
     persistDraft("", storage);
     expect(storage.removeItem).toHaveBeenCalledWith(DRAFT_STORAGE_KEY);
 
-    const broken = { getItem: () => { throw new Error("blocked"); } };
+    const broken = {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+    };
     expect(restoreDraft(broken)).toBe("");
     expect(() => persistDraft("hello", { setItem: broken.getItem })).not.toThrow();
   });

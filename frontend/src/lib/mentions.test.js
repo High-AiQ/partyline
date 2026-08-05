@@ -39,7 +39,9 @@ describe("mentionCandidates", () => {
   });
 
   it("sorts alphabetically within a rank", () => {
-    const live = mentionCandidates("s", attachments, []).filter((c) => c.status === "running" || c.status === "starting");
+    const live = mentionCandidates("s", attachments, []).filter(
+      (c) => c.status === "running" || c.status === "starting",
+    );
     expect(live.map((c) => c.name)).toEqual(["sol", "starter"]);
   });
 

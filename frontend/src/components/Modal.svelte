@@ -16,7 +16,9 @@
   class="overlay"
   role="presentation"
   onmousedown={(event) => (pressedBackdrop = event.target === event.currentTarget)}
-  onclick={(event) => { if (event.target === event.currentTarget && pressedBackdrop) close(); }}
+  onclick={(event) => {
+    if (event.target === event.currentTarget && pressedBackdrop) close();
+  }}
 >
   <div class="modal" class:wide role="dialog" aria-modal="true" aria-label={title}>
     <header>
@@ -51,7 +53,9 @@
     box-shadow: 0 24px 60px rgb(0 0 0 / 0.55);
     animation: arrive 0.22s ease both;
   }
-  .modal.wide { width: min(980px, 96vw); }
+  .modal.wide {
+    width: min(980px, 96vw);
+  }
 
   header {
     display: flex;
@@ -75,7 +79,10 @@
     font-size: 14px;
     padding: 4px;
   }
-  .close:hover { color: var(--color-red); background: none; }
+  .close:hover {
+    color: var(--color-red);
+    background: none;
+  }
 
   .content {
     padding: 14px 20px 20px;

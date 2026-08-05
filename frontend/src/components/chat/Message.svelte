@@ -31,20 +31,49 @@
 </div>
 
 <style>
-  .msg { margin: 0 0 14px; max-width: 860px; animation: arrive 0.28s ease both; }
-  .head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 2px; }
-  .who { font-weight: 600; font-size: 12.5px; }
+  .msg {
+    margin: 0 0 14px;
+    max-width: 860px;
+    animation: arrive 0.28s ease both;
+  }
+  .head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 2px;
+  }
+  .who {
+    font-weight: 600;
+    font-size: 12.5px;
+  }
   /* A process gets a patch-cable arrow, so the eye can sort people from
      machines without reading a single name. */
-  .who.agent::before { content: "▸ "; color: var(--color-copper); font-weight: 400; }
-  .when { color: var(--color-cream-faint); font-size: 10px; }
+  .who.agent::before {
+    content: "▸ ";
+    color: var(--color-copper);
+    font-weight: 400;
+  }
+  .when {
+    color: var(--color-cream-faint);
+    font-size: 10px;
+  }
 
-  .body { white-space: pre-wrap; word-wrap: break-word; color: var(--color-cream); }
+  .body {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    color: var(--color-cream);
+  }
   /* Block markdown brings its own paragraphs, so pre-wrap would double every
      gap. Rich bodies wrap normally and let the block margins do the spacing. */
-  .body.rich { white-space: normal; }
+  .body.rich {
+    white-space: normal;
+  }
 
-  .msg.system { max-width: none; text-align: center; margin: 18px 0; }
+  .msg.system {
+    max-width: none;
+    text-align: center;
+    margin: 18px 0;
+  }
   .msg.system .body {
     display: inline-block;
     color: var(--color-cream-faint);
@@ -84,7 +113,11 @@
     font-size: 12.5px;
     white-space: pre;
   }
-  .body :global(pre code) { background: none; border: 0; padding: 0; }
+  .body :global(pre code) {
+    background: none;
+    border: 0;
+    padding: 0;
+  }
 
   /* Headings stay close to body size: this is a chat line, not a document, and
      a 28px h1 in a message bubble reads as shouting. */
@@ -96,8 +129,12 @@
     margin: 10px 0 2px;
     line-height: 1.3;
   }
-  .body :global(.md-h1) { font-size: 19px; }
-  .body :global(.md-h2) { font-size: 17px; }
+  .body :global(.md-h1) {
+    font-size: 19px;
+  }
+  .body :global(.md-h2) {
+    font-size: 17px;
+  }
   .body :global(.md-h3) {
     font-size: 15px;
     font-style: normal;
@@ -106,17 +143,38 @@
     color: var(--color-cream-dim);
     letter-spacing: 0.02em;
   }
-  .body :global(.md-h:first-child) { margin-top: 0; }
+  .body :global(.md-h:first-child) {
+    margin-top: 0;
+  }
 
-  .body :global(p) { margin: 0 0 8px; }
-  .body :global(p:last-child) { margin-bottom: 0; }
+  .body :global(p) {
+    margin: 0 0 8px;
+  }
+  .body :global(p:last-child) {
+    margin-bottom: 0;
+  }
   /* Tailwind's preflight sets `list-style: none` on ul/ol, which is right for
      navigation and wrong for prose. A process writing a list means a list. */
-  .body :global(ul) { list-style: disc; margin: 6px 0 6px 4px; padding-left: 18px; }
-  .body :global(ol) { list-style: decimal; margin: 6px 0 6px 4px; padding-left: 18px; }
-  .body :global(li) { margin: 1px 0; }
-  .body :global(ul li::marker) { color: var(--color-copper); }
-  .body :global(ol li::marker) { color: var(--color-copper); font-size: 11px; }
+  .body :global(ul) {
+    list-style: disc;
+    margin: 6px 0 6px 4px;
+    padding-left: 18px;
+  }
+  .body :global(ol) {
+    list-style: decimal;
+    margin: 6px 0 6px 4px;
+    padding-left: 18px;
+  }
+  .body :global(li) {
+    margin: 1px 0;
+  }
+  .body :global(ul li::marker) {
+    color: var(--color-copper);
+  }
+  .body :global(ol li::marker) {
+    color: var(--color-copper);
+    font-size: 11px;
+  }
   .body :global(blockquote) {
     margin: 8px 0;
     padding: 2px 0 2px 12px;
@@ -124,13 +182,19 @@
     color: var(--color-cream-dim);
     font-style: italic;
   }
-  .body :global(hr) { border: 0; border-top: 1px dashed var(--color-line); margin: 12px 0; }
+  .body :global(hr) {
+    border: 0;
+    border-top: 1px dashed var(--color-line);
+    margin: 12px 0;
+  }
   .body :global(a) {
     color: var(--color-copper-hot);
     text-decoration: none;
     border-bottom: 1px solid rgb(217 142 74 / 0.35);
   }
-  .body :global(a:hover) { border-bottom-color: var(--color-copper-hot); }
+  .body :global(a:hover) {
+    border-bottom-color: var(--color-copper-hot);
+  }
   .body :global(table) {
     border-collapse: collapse;
     margin: 8px 0;
@@ -139,12 +203,19 @@
     overflow-x: auto;
     max-width: 100%;
   }
-  .body :global(th), .body :global(td) {
+  .body :global(th),
+  .body :global(td) {
     border: 1px solid var(--color-line);
     padding: 4px 10px;
     text-align: left;
     vertical-align: top;
   }
-  .body :global(th) { background: var(--color-ink-3); color: var(--color-cream-dim); font-weight: 600; }
-  .body :global(s) { color: var(--color-cream-faint); }
+  .body :global(th) {
+    background: var(--color-ink-3);
+    color: var(--color-cream-dim);
+    font-weight: 600;
+  }
+  .body :global(s) {
+    color: var(--color-cream-faint);
+  }
 </style>

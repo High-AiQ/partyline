@@ -71,11 +71,17 @@
       type="button"
       id="presetSave"
       title="save current name/adapter/command as a preset"
-      onclick={() => dialogs.open(PresetDialog, {
-        preset: { title: name.trim(), name: name.trim(), adapter, command: command.trim() },
-      })}
-    >save</button>
-    <button type="button" id="presetManage" title="view / edit presets" onclick={() => dialogs.open(PresetsDialog)}>
+      onclick={() =>
+        dialogs.open(PresetDialog, {
+          preset: { title: name.trim(), name: name.trim(), adapter, command: command.trim() },
+        })}>save</button
+    >
+    <button
+      type="button"
+      id="presetManage"
+      title="view / edit presets"
+      onclick={() => dialogs.open(PresetsDialog)}
+    >
       manage
     </button>
   </div>
@@ -89,8 +95,8 @@
       type="button"
       id="adapterImport"
       title="import adapters from a git repository"
-      onclick={() => dialogs.open(ImportAdaptersDialog)}
-    >+ import…</button>
+      onclick={() => dialogs.open(ImportAdaptersDialog)}>+ import…</button
+    >
   </div>
   <select id="aAdapter" bind:value={adapter}>
     {#each session.adapters as option (option.id)}
@@ -109,13 +115,42 @@
 </form>
 
 <style>
-  #attach { padding: 4px 12px 20px; display: flex; flex-direction: column; gap: 7px; }
-  label { color: var(--color-cream-faint); font-size: 10px; letter-spacing: 0.05em; margin-bottom: -4px; }
-  .note { color: var(--color-cream-faint); font-size: 10px; font-style: italic; }
+  #attach {
+    padding: 4px 12px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+  label {
+    color: var(--color-cream-faint);
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    margin-bottom: -4px;
+  }
+  .note {
+    color: var(--color-cream-faint);
+    font-size: 10px;
+    font-style: italic;
+  }
 
-  #presetRow { display: flex; gap: 6px; align-items: center; }
-  #presetRow select { flex: 1; min-width: 0; }
-  #presetRow button { padding: 6px 8px; font-size: 10.5px; flex: none; }
+  #presetRow {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  #presetRow select {
+    flex: 1;
+    min-width: 0;
+  }
+  #presetRow button {
+    padding: 6px 8px;
+    font-size: 10.5px;
+    flex: none;
+  }
 
-  .adapter-row { display: flex; justify-content: space-between; align-items: baseline; }
+  .adapter-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
 </style>

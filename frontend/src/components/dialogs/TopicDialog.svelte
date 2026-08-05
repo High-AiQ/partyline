@@ -16,7 +16,9 @@
   let error = $state("");
   let field = $state(null);
 
-  $effect(() => { field?.focus(); });
+  $effect(() => {
+    field?.focus();
+  });
 
   async function save() {
     saving = true;
@@ -63,7 +65,17 @@
     resize: vertical;
     outline: 0;
   }
-  .topicBox:focus { border-color: var(--color-copper); }
-  .topicRow { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-  .count { color: var(--color-cream-faint); font-size: 10px; }
+  .topicBox:focus {
+    border-color: var(--color-copper);
+  }
+  .topicRow {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .count {
+    color: var(--color-cream-faint);
+    font-size: 10px;
+  }
 </style>

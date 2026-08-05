@@ -90,7 +90,11 @@ class Wire {
       }
       if (payload.type === "shutdown") {
         this.reportStopped();
-        try { socket.close(); } catch { /* already gone */ }
+        try {
+          socket.close();
+        } catch {
+          /* already gone */
+        }
         return;
       }
       onEvent(payload, {
@@ -101,7 +105,11 @@ class Wire {
         rejectClaim: () => {
           this.#claimRejected = true;
           this.ready = false;
-          try { socket.close(); } catch { /* already gone */ }
+          try {
+            socket.close();
+          } catch {
+            /* already gone */
+          }
         },
       });
     };
@@ -157,7 +165,11 @@ class Wire {
     clearTimeout(this.#retryTimer);
     this.#retryTimer = null;
     if (this.#socket) {
-      try { this.#socket.close(); } catch { /* already gone */ }
+      try {
+        this.#socket.close();
+      } catch {
+        /* already gone */
+      }
       this.#socket = null;
     }
   }
@@ -182,7 +194,11 @@ export function sendOffLine(convId, identity, body) {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      try { socket.close(); } catch { /* already gone */ }
+      try {
+        socket.close();
+      } catch {
+        /* already gone */
+      }
       error ? reject(error) : resolve();
     };
     const timeout = setTimeout(() => finish(new Error("line is not reachable")), HELLO_TIMEOUT_MS);

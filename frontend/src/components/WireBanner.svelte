@@ -24,7 +24,8 @@
 {/if}
 
 <style>
-  #wireNotice, #wireDown {
+  #wireNotice,
+  #wireDown {
     position: fixed;
     left: 50%;
     top: 18px;
@@ -42,7 +43,10 @@
     background: var(--color-ink-2);
     color: var(--color-cream-dim);
   }
-  #wireNotice.error { color: var(--color-red); border-color: rgb(201 111 90 / 0.55); }
+  #wireNotice.error {
+    color: var(--color-red);
+    border-color: rgb(201 111 90 / 0.55);
+  }
 
   #wireDown {
     z-index: 71;
@@ -61,10 +65,24 @@
     background: var(--color-red);
     animation: wire-pulse 1.4s ease-in-out infinite;
   }
-  @keyframes wire-pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+  @keyframes wire-pulse {
+    0%,
+    100% {
+      opacity: 0.25;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
 
   /* A deliberate stop is a known state, not an alarm: keep the banner while
      retrying, but drop the warning colour and pulse until the server returns. */
-  #wireDown.stopped { color: var(--color-cream-dim); border-color: var(--color-panel-line); }
-  #wireDown.stopped .pulse { background: var(--color-cream-faint); animation: none; }
+  #wireDown.stopped {
+    color: var(--color-cream-dim);
+    border-color: var(--color-panel-line);
+  }
+  #wireDown.stopped .pulse {
+    background: var(--color-cream-faint);
+    animation: none;
+  }
 </style>

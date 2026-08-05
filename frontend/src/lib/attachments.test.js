@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import { adapterLabel, canResume, canResumeJack, isLive, latestJacks } from "./attachments.js";
 
 const jack = (name, status, created_at, extra = {}) => ({
-  id: `${name}-${created_at}`, name, status, created_at, adapter: "raw", ...extra,
+  id: `${name}-${created_at}`,
+  name,
+  status,
+  created_at,
+  adapter: "raw",
+  ...extra,
 });
 
 describe("latestJacks", () => {
@@ -50,8 +55,12 @@ describe("latestJacks", () => {
 
 describe("isLive", () => {
   // The four statuses the schema defines; see partyline/db.py.
-  it.each([["running", true], ["starting", true], ["exited", false], ["detached", false]])(
-    "%s → %s", (status, expected) => expect(isLive({ status })).toBe(expected));
+  it.each([
+    ["running", true],
+    ["starting", true],
+    ["exited", false],
+    ["detached", false],
+  ])("%s → %s", (status, expected) => expect(isLive({ status })).toBe(expected));
 
   it("is false for nothing at all", () => {
     expect(isLive(undefined)).toBe(false);
@@ -82,7 +91,10 @@ describe("canResume", () => {
 });
 
 describe("canResumeJack", () => {
-  const adapters = [{ id: "claude", capabilities: { resume: true } }, { id: "raw", capabilities: {} }];
+  const adapters = [
+    { id: "claude", capabilities: { resume: true } },
+    { id: "raw", capabilities: {} },
+  ];
   const withAdapter = (adapter, status) => ({ ...jack("sol", status, 1), adapter });
 
   it("offers resume for a dead jack whose adapter can reopen its session", () => {

@@ -26,9 +26,7 @@
     resize();
   });
 
-  const candidates = $derived(
-    token ? mentionCandidates(token.prefix, room.attachments, room.humans) : [],
-  );
+  const candidates = $derived(token ? mentionCandidates(token.prefix, room.attachments, room.humans) : []);
   const popoverOpen = $derived(Boolean(token) && candidates.length > 0);
 
   /** Grow with the text, up to a point; past that it scrolls. */
@@ -58,7 +56,10 @@
     });
   }
 
-  const closeToken = () => { token = null; selected = 0; };
+  const closeToken = () => {
+    token = null;
+    selected = 0;
+  };
 
   function send() {
     if (!room.say(draft.text)) return;
@@ -107,19 +108,26 @@
       placeholder="say something… @name to ring an agent"
       aria-label="message"
       onkeydown={onKeydown}
-      oninput={() => { resize(); refreshToken(); }}
+      oninput={() => {
+        resize();
+        refreshToken();
+      }}
       onclick={refreshToken}
-      onblur={() => setTimeout(closeToken, 150)}
-    ></textarea>
+      onblur={() => setTimeout(closeToken, 150)}></textarea>
     <button id="send" class="primary" type="button" onclick={send}>send</button>
   </div>
   <div class="hint">
-    enter to send · shift+enter for a new line · agents only wake when @mentioned · @all rings every running agent
+    enter to send · shift+enter for a new line · agents only wake when @mentioned · @all rings every running
+    agent
   </div>
 </div>
 
 <style>
-  #composer { padding: 14px 28px 20px; border-top: 1px solid var(--color-line); position: relative; }
+  #composer {
+    padding: 14px 28px 20px;
+    border-top: 1px solid var(--color-line);
+    position: relative;
+  }
   .box {
     display: flex;
     align-items: flex-end;
@@ -130,7 +138,9 @@
     padding: 10px 12px;
     transition: border-color 0.15s;
   }
-  .box:focus-within { border-color: var(--color-copper); }
+  .box:focus-within {
+    border-color: var(--color-copper);
+  }
   #input {
     flex: 1;
     background: none;
@@ -142,6 +152,12 @@
     max-height: 180px;
     min-height: 22px;
   }
-  .hint { color: var(--color-cream-faint); font-size: 10px; margin-top: 6px; }
-  #send { align-self: flex-end; }
+  .hint {
+    color: var(--color-cream-faint);
+    font-size: 10px;
+    margin-top: 6px;
+  }
+  #send {
+    align-self: flex-end;
+  }
 </style>

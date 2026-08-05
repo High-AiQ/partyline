@@ -23,17 +23,27 @@
   let warnError = $state("");
 
   $effect(() => {
-    api.conversation(conversation.id)
-      .then((detail) => { live = (detail.attachments || []).filter(isLive); })
-      .catch(() => { failed = true; })
-      .finally(() => { loading = false; });
+    api
+      .conversation(conversation.id)
+      .then((detail) => {
+        live = (detail.attachments || []).filter(isLive);
+      })
+      .catch(() => {
+        failed = true;
+      })
+      .finally(() => {
+        loading = false;
+      });
   });
 
   async function warn() {
     warning = true;
     warnError = "";
     try {
-      await room.warn(conversation.id, "@all this line is being deleted soon. Please commit your work and post status.");
+      await room.warn(
+        conversation.id,
+        "@all this line is being deleted soon. Please commit your work and post status.",
+      );
       warned = true;
     } catch (error) {
       warnError = error.message || "could not send warning";
@@ -57,7 +67,9 @@
   {:else if failed}
     <p class="line-status error">Could not load this line. Try again.</p>
   {:else}
-    <p class="dialog-text">Deleting this line removes it from the sidebar and stops its attached processes.</p>
+    <p class="dialog-text">
+      Deleting this line removes it from the sidebar and stops its attached processes.
+    </p>
 
     <div class="live-list">
       {#if live.length}

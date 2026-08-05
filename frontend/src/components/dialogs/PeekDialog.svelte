@@ -17,7 +17,7 @@
   const AFTER_KEY_MS = 350;
 
   let screen = $state("…");
-  let timers = [];
+  const timers = [];
 
   async function refresh() {
     try {
@@ -75,7 +75,19 @@
     max-height: 56vh;
     white-space: pre;
   }
-  .keypad { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-  .keypad button { font-size: 10.5px; padding: 4px 10px; }
-  .lbl { color: var(--color-cream-faint); font-size: 10px; margin-right: 4px; }
+  .keypad {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .keypad button {
+    font-size: 10.5px;
+    padding: 4px 10px;
+  }
+  .lbl {
+    color: var(--color-cream-faint);
+    font-size: 10px;
+    margin-right: 4px;
+  }
 </style>

@@ -49,19 +49,32 @@ async function request(path, { method = "GET", body, fallback } = {}) {
 export const api = {
   version: () => request("/api/version"),
   running: () => request("/api/running"),
-  shutdown: () => request("/api/shutdown", { method: "POST", body: {}, fallback: "could not stop partyline" }),
+  shutdown: () =>
+    request("/api/shutdown", { method: "POST", body: {}, fallback: "could not stop partyline" }),
 
   adapters: () => request("/api/adapters"),
   importAdapters: (repository, ref) =>
-    request("/api/adapters/import", { method: "POST", body: { repository, ref: ref || null }, fallback: "import failed" }),
+    request("/api/adapters/import", {
+      method: "POST",
+      body: { repository, ref: ref || null },
+      fallback: "import failed",
+    }),
 
   conversations: (archived = false) => request(`/api/conversations${archived ? "?archived=1" : ""}`),
   conversation: (id) => request(`/api/conversations/${id}`),
   createConversation: (name) => request("/api/conversations", { method: "POST", body: { name } }),
   renameConversation: (id, name, sender) =>
-    request(`/api/conversations/${id}/name`, { method: "PUT", body: { name, sender }, fallback: "could not rename line" }),
+    request(`/api/conversations/${id}/name`, {
+      method: "PUT",
+      body: { name, sender },
+      fallback: "could not rename line",
+    }),
   setTopic: (id, topic, sender) =>
-    request(`/api/conversations/${id}/topic`, { method: "PUT", body: { topic, sender }, fallback: "could not save topic" }),
+    request(`/api/conversations/${id}/topic`, {
+      method: "PUT",
+      body: { topic, sender },
+      fallback: "could not save topic",
+    }),
   archiveConversation: (id) =>
     request(`/api/conversations/${id}`, { method: "DELETE", fallback: "could not delete line" }),
   restoreConversation: (id) =>
@@ -70,17 +83,27 @@ export const api = {
     request(`/api/conversations/${id}/purge`, { method: "DELETE", fallback: "could not delete forever" }),
 
   attach: (convId, payload) =>
-    request(`/api/conversations/${convId}/attachments`, { method: "POST", body: payload, fallback: "attach failed" }),
+    request(`/api/conversations/${convId}/attachments`, {
+      method: "POST",
+      body: payload,
+      fallback: "attach failed",
+    }),
   detach: (attId) => request(`/api/attachments/${attId}`, { method: "DELETE", fallback: "could not detach" }),
-  resume: (attId) => request(`/api/attachments/${attId}/resume`, { method: "POST", fallback: "resume failed" }),
+  resume: (attId) =>
+    request(`/api/attachments/${attId}/resume`, { method: "POST", fallback: "resume failed" }),
   screen: (attId) => request(`/api/attachments/${attId}/screen`, { fallback: "attachment is not live" }),
   sendKey: (attId, key) =>
-    request(`/api/attachments/${attId}/keys`, { method: "POST", body: { key }, fallback: "could not send key" }),
+    request(`/api/attachments/${attId}/keys`, {
+      method: "POST",
+      body: { key },
+      fallback: "could not send key",
+    }),
 
   presets: () => request("/api/presets"),
   savePreset: (preset) =>
     preset.id
       ? request(`/api/presets/${preset.id}`, { method: "PUT", body: preset, fallback: "save failed" })
       : request("/api/presets", { method: "POST", body: preset, fallback: "save failed" }),
-  deletePreset: (id) => request(`/api/presets/${id}`, { method: "DELETE", fallback: "could not delete preset" }),
+  deletePreset: (id) =>
+    request(`/api/presets/${id}`, { method: "DELETE", fallback: "could not delete preset" }),
 };

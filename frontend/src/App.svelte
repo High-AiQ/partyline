@@ -30,7 +30,9 @@
 
 <svelte:window
   on:hashchange={() => room.onRouteChange()}
-  on:keydown={(event) => { if (event.key === "Escape" && dialogs.stack.length) dialogs.closeTop(); }}
+  on:keydown={(event) => {
+    if (event.key === "Escape" && dialogs.stack.length) dialogs.closeTop();
+  }}
 />
 
 {#if session.gateOpen}
@@ -66,7 +68,9 @@
     grid-template-rows: minmax(0, 100%);
     height: 100%;
   }
-  #app > :global(*) { min-height: 0; }
+  #app > :global(*) {
+    min-height: 0;
+  }
 
   #main {
     display: flex;
