@@ -84,6 +84,14 @@ class UiSession:
     out_dir: Path
     shots: list[Path] = field(default_factory=list)
     server: object = None      # the Popen, so a test can kill the wire
+    # Settle animations before each shot. On for parity captures, where a
+    # half-played fade is a false difference; off for ordinary screenshots,
+    # which should show the app exactly as it behaves.
+    still_frames: bool = False
+
+    def settle_animations(self):
+        if self.still_frames:
+            self.page.evaluate(SETTLE_ANIMATIONS)
 
     def stop_server(self):
         """Kill the server out from under the page, as a crash would."""
@@ -91,6 +99,7 @@ class UiSession:
         self.server.wait(timeout=10)
 
     def shot(self, name: str, *, clip=None, full_page=False) -> Path:
+        self.settle_animations()
         path = self.out_dir / f"{name}.png"
         self.page.screenshot(path=str(path), clip=clip, full_page=full_page)
         self.shots.append(path)
@@ -98,6 +107,7 @@ class UiSession:
 
     def element_shot(self, name: str, selector: str) -> Path:
         """Screenshot one element, for looking closely at a single component."""
+        self.settle_animations()
         path = self.out_dir / f"{name}.png"
         self.page.locator(selector).screenshot(path=str(path))
         self.shots.append(path)
@@ -136,16 +146,31 @@ class UiSession:
         return menu
 
 
-# Injected when a caller asks for still frames. CSS animations are the reason
-# two captures of the same build can differ: a screenshot taken 20ms into the
-# menu's 120ms fade catches a different opacity each run. Freezing them is not
-# cosmetic — it is what makes a byte comparison mean anything.
-FREEZE_ANIMATIONS = """
-*, *::before, *::after {
-  animation-duration: 0s !important;
-  animation-delay: 0s !important;
-  transition-duration: 0s !important;
-  transition-delay: 0s !important;
+# Run before every still frame. Screenshots are the reason two captures of the
+# same build can differ: a shot taken 20ms into the menu's 120ms fade catches a
+# different opacity each run.
+#
+# The obvious fix — CSS forcing `animation-duration: 0s` — is wrong, and looked
+# right for a while. `.msg` arrives with `animation: arrive .28s both`, and a
+# zero-duration animation with `fill-mode: both` pins it to its *opening*
+# frame, so the whole feed rendered faded. The capture would have been
+# self-consistent and quietly unrepresentative of the app.
+#
+# So: finish what can finish, and pin what cannot. Finite animations and
+# transitions jump to their end state, which is the state a person sees.
+# Infinite ones — the live-line LED pulse, a ringing jack — have no end, so
+# they are paused at a fixed frame instead.
+SETTLE_ANIMATIONS = """
+() => {
+  for (const animation of document.getAnimations()) {
+    const iterations = animation.effect?.getTiming?.().iterations;
+    if (iterations === Infinity) {
+      animation.pause();
+      animation.currentTime = 0;
+    } else {
+      animation.finish();
+    }
+  }
 }
 """
 
@@ -193,9 +218,8 @@ def ui_session(lines=(), *, out_dir="/tmp/partyline-ui", headless=True, viewport
             page.wait_for_selector("#convs")
             if lines:
                 page.wait_for_selector(".conv-row")
-            if freeze_animations:
-                page.add_style_tag(content=FREEZE_ANIMATIONS)
-            session = UiSession(page=page, base_url=base_url, out_dir=out, server=server)
+            session = UiSession(page=page, base_url=base_url, out_dir=out, server=server,
+                                still_frames=freeze_animations)
             session.settle()
             try:
                 yield session
@@ -235,6 +259,73 @@ def _await_server(base_url: str, server: subprocess.Popen):
 # -- the standard state set ------------------------------------------------
 LINES = ["alpha line", "beta line", "gamma line", "delta line", "epsilon line",
          "zeta line", "eta line", "theta line"]
+
+# A fixed instant, so a captured feed renders the same clock face today as it
+# will tomorrow. Real messages carry server time, which would make every
+# screenshot differ from every other one and drown a parity check in noise.
+FIXED_SENT_AT = 1_700_000_000
+
+# One process message exercising everything the renderer can do, because the
+# markdown pipeline is the most intricate rendering in the app and the states
+# below it used to leave it completely uncovered.
+AGENT_BODY = """## Migration status
+
+Ported the pure libraries to **TypeScript**. Notes for @greg and @sol:
+
+- schemas own the boundary
+- `latestJacks()` keeps the *live wins* rule
+- see [the contract](https://example.com/contracts)
+
+| module | lines |
+|---|---|
+| room | 226 |
+| wire | 178 |
+
+> A flaky test is worse than an uncovered line.
+
+```js
+const jacks = latestJacks(room.attachments);
+```
+"""
+
+SEED_ROOM = """
+(seed) => {
+  const room = window.partyline.room;
+  for (const attachment of seed.attachments) room.upsertAttachment(attachment);
+  room.messages = seed.messages;
+}
+"""
+
+
+def seed_room(page):
+    """Put a known feed and a known board on the line, deterministically.
+
+    Deliberately injected through `window.partyline` rather than sent over the
+    wire: the transport is covered by the browser tests, and what a parity
+    check needs is the *rendering* pinned to bytes — same ids, same clock, same
+    order, every run.
+    """
+    jack = lambda name, status, created: {           # noqa: E731 - a fixture, not logic
+        "id": f"att-{name}", "name": name, "adapter": "raw", "command": ["fake", "--headless"],
+        "cwd": "/tmp/project", "status": status, "created_at": created,
+    }
+    message = lambda mid, sender, kind, body: {      # noqa: E731
+        "id": mid, "sender": sender, "sender_type": kind,
+        "body": body, "created_at": FIXED_SENT_AT,
+    }
+    page.evaluate(SEED_ROOM, {
+        "attachments": [jack("sol", "running", 1), jack("terra", "exited", 2)],
+        "messages": [
+            message("m1", "greg", "human",
+                    "# not a heading\n"
+                    "- not a bullet\n"
+                    "> not a quote\n"
+                    "but *this* is italic, **this** is bold, `npm run verify` is code, @sol"),
+            message("m2", "sol", "agent", AGENT_BODY),
+            message("m3", "system", "system", "@terra joined the line"),
+        ],
+    })
+    page.wait_for_selector(".msg .body table")
 
 
 def capture_all(out_dir="/tmp/partyline-ui", *, freeze_animations=False) -> list[Path]:
@@ -276,6 +367,36 @@ def capture_all(out_dir="/tmp/partyline-ui", *, freeze_animations=False) -> list
         if archive.count():
             archive.click()
             ui.shot("08-archive-expanded")
+            archive.click()
+
+        # ── the line itself ──
+        # Everything above this point is the rail. The feed, the board and the
+        # mention popover are where the message renderer, the jack rules and
+        # the autocomplete actually show up, and they were unwatched.
+        # Wait for the line's own detail fetch before seeding. `open()` clears
+        # the room and refills it asynchronously, so a seed that lands first is
+        # silently overwritten. Waiting on a *rendered* proxy is not enough —
+        # the empty feed looks identical before and after the load, which is
+        # how this first showed up as an empty mention popover rather than an
+        # error. Wait on the response itself.
+        is_detail = lambda response: (                    # noqa: E731
+            "/api/conversations/" in response.url and response.request.method == "GET")
+        with page.expect_response(is_detail):
+            page.locator(".conv-row .conv").first.click()
+        page.wait_for_selector("#composer")
+        seed_room(page)
+        ui.shot("09-feed-populated")
+        ui.element_shot("10-message-process", ".msg:nth-of-type(2)")
+        ui.element_shot("11-message-human", ".msg:nth-of-type(1)")
+        ui.element_shot("12-board-jacks", "#jacks")
+
+        # The popover ranks live processes above dead ones above humans, which
+        # is a rule with consequences: mentioning a dead handle does nothing.
+        composer = page.locator("#input")
+        composer.click()
+        composer.type("@")
+        page.wait_for_selector("#mentionPop .opt")
+        ui.shot("13-mention-popover")
 
         return list(ui.shots)
 
