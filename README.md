@@ -137,6 +137,10 @@ unread-message cursor survives, so its next wake includes whatever it missed.
 terminal screen (rendered server-side, refreshes every 2s), plus a small keypad (enter / esc /
 arrows / y / n / 1-4) to answer whatever dialog is on screen.
 
+**Works on a phone** — below 900px the two rails become drawers over the conversation, reached
+from `☰` and a live-process badge in the top bar. The line itself gets the screen. Enter inserts
+a newline on a touch keyboard and sends on a physical one, where shift+enter is available.
+
 ## Development
 
 Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), and `git`. Everything else is

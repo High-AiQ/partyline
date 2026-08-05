@@ -68,6 +68,18 @@ Layout, and where things belong:
 - `src/components/` — presentation, grouped by region (`rail/`, `chat/`,
   `board/`, `dialogs/`).
 
+**Responsive layout.** Three columns need about 900px. Below that the rails
+become drawers over the line and exactly one can be open — before this, the
+centre column computed to `0px` on a phone and the conversation itself was
+invisible while the lines list and attach form took the whole screen.
+
+The breakpoint lives in two places that have to agree, because CSS cannot read
+a TypeScript constant: `NARROW_MAX_WIDTH` in `state/layout.svelte.ts`, and the
+`@media (max-width: 899px)` blocks in the components. If you move one, move the
+other. Everything responsive is inside those blocks on purpose — the desktop
+layout is the app's identity, and keeping it out of the cascade is what lets
+the parity harness prove it has not moved.
+
 Two rules that are load-bearing rather than stylistic:
 
 - **The wire's generation guard.** `wire.connect()` bumps a counter and every
@@ -147,17 +159,31 @@ uv run python -m scripts.uidiff baseline   # before
 uv run python -m scripts.uidiff check      # after; non-zero if anything moved
 ```
 
-It renders the standard state set and compares PNG bytes. Two details are
-load-bearing and were both established by measurement rather than assumption:
+It renders the standard state set — 17 states covering the rail, the menus, the
+dialogs, the populated feed in both message modes, the board, the mention
+popover, and the narrow layout including a shortened keyboard-up viewport — and
+compares PNG bytes. Three details are load-bearing, and each was established by
+measurement after the obvious assumption turned out to be wrong:
 
 - **Every command captures twice.** Headless Chromium is *nearly* deterministic
-  — about one run in three has a single state off by a hair, and not the same
+  — about one run in three had a single state off by a hair, and not the same
   state each time. A state is only compared if two consecutive captures agree;
   one that disagrees with itself is named and excluded. This is what separates
   a timing flake (differs sometimes) from a regression (differs every time),
   without a fuzz threshold that would hide the small changes worth catching.
-- **Animations are frozen during capture.** A shot taken 20ms into a 120ms fade
-  is a different image every run.
+- **Animations are finished before each shot, not suppressed.** Forcing
+  `animation-duration: 0s` looks like the obvious freeze and is wrong: `.msg`
+  arrives with `fill-mode: both`, so a zero-duration animation pins it to its
+  *opening* frame and the whole feed captures faded. Finite animations and
+  transitions are run to their end state; only infinite ones (the LED pulse, a
+  ringing jack) are paused at a fixed frame.
+- **Fixtures carry a fixed timestamp.** Messages render `HH:MM`, so a baseline
+  recorded at 09:15 and checked at 09:20 would otherwise differ every time.
+
+A state that races an async load will wobble rather than fail loudly — wait for
+the *response*, not for a rendered proxy. The empty feed looks identical before
+and after a line loads, which is how a seeding race first showed up as an empty
+mention popover rather than as an error.
 
 A reported difference is not automatically a bug — an intended visual change
 shows up here too. It has to be *looked at*, then accepted by re-running
