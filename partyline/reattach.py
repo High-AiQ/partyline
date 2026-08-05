@@ -42,6 +42,11 @@ ResumeAttachment = Callable[[str], Awaitable[Adapter]]
 class ReattachResult:
     ready: tuple[str, ...]
     failed: tuple[str, ...]
+    # Resumed, alive, and still settling when we stopped waiting. Not a failure:
+    # the process is on the line and will finish claiming its session on its own
+    # schedule. Counted separately so a run that was merely slow cannot be read
+    # as a run that lost processes.
+    slow: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -174,6 +179,7 @@ class ReattachCoordinator:
 
         ready: list[str] = []
         failed: list[str] = []
+        slow: list[str] = []
         for attachment_id in plan["attachment_ids"]:
             attachment = self.runtime.db.get_attachment(attachment_id)
             if attachment is None or attachment["conv_id"] != conv_id:
@@ -197,14 +203,24 @@ class ReattachCoordinator:
                 if not is_ready:
                     raise RuntimeError("the process exited before claiming its session")
             except TimeoutError:
-                failed.append(name)
-                await self._abandon(attachment_id)
+                # Slow is not failed, and killing it is the only real harm.
+                #
+                # Readiness means "the adapter has opened its claimed
+                # transcript". For a resumed codex that file is written lazily,
+                # on the first turn's flush — its own source says the rollout
+                # "may not appear for many minutes". Stopping the process at 90s
+                # took down three healthy agents that were on their way back.
+                #
+                # The wait still earns its place: when readiness does arrive the
+                # next process starts immediately behind it. What it must not do
+                # is treat its own impatience as evidence of a broken process.
+                slow.append(name)
                 await self.runtime.post_message(
                     conv_id,
                     "system",
                     "system",
-                    f"⚠ @{name} could not reattach safely: readiness timed out after "
-                    f"{self.ready_timeout:g}s",
+                    f"☏ @{name} is back but still settling after {self.ready_timeout:g}s — "
+                    f"left running, advancing to the next process",
                 )
                 continue
             except Exception as exc:
@@ -227,6 +243,8 @@ class ReattachCoordinator:
             )
 
         summary = f"{len(ready)} ready"
+        if slow:
+            summary += f", {len(slow)} still settling"
         if failed:
             summary += f", {len(failed)} failed"
         await self.runtime.post_message(
@@ -235,7 +253,7 @@ class ReattachCoordinator:
             "system",
             f"☏ sequential reattachment finished — {summary}",
         )
-        return ReattachResult(tuple(ready), tuple(failed))
+        return ReattachResult(tuple(ready), tuple(failed), tuple(slow))
 
     async def _abandon(self, attachment_id: str) -> None:
         adapter = self.runtime.live.pop(attachment_id, None)

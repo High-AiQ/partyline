@@ -1,3 +1,4 @@
+import asyncio
 import tempfile
 import unittest
 from unittest.mock import AsyncMock
@@ -103,7 +104,17 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.ready, ("terra",))
         self.assertEqual(result.failed, ("missing",))
 
-    async def test_readiness_timeout_is_explained_and_does_not_block_the_sequence(self):
+    async def test_a_slow_process_is_left_running_and_the_sequence_advances(self):
+        """Slow is not failed.
+
+        This is the case that cost us three healthy agents in the first real
+        dogfood. Readiness means "the adapter opened its claimed transcript",
+        and a resumed codex writes that file lazily — its own source says the
+        rollout "may not appear for many minutes". Stopping it at the timeout
+        killed processes that were on their way back, and reported them as
+        failures. The wait may run out of patience; it may not conclude from
+        that that the process is broken.
+        """
         adapters = {}
 
         async def resume(attachment_id):
@@ -111,7 +122,7 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
             self.order.append(f"start:{name}")
             adapter = ReadyAdapter(self.order, name)
             if attachment_id == "one":
-                adapter.wait_ready = lambda: __import__("asyncio").sleep(30)
+                adapter.wait_ready = lambda: asyncio.sleep(30)
             adapters[attachment_id] = adapter
             self.runtime.live[attachment_id] = adapter
             return adapter
@@ -120,11 +131,52 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
             self.plan, "greg"
         )
 
-        self.assertTrue(adapters["one"].stopped)
+        # The whole point: it is still alive and still attached.
+        self.assertFalse(adapters["one"].stopped)
+        self.assertIn("one", self.runtime.live)
+        self.assertEqual(result.slow, ("sol",))
+        self.assertEqual(result.failed, ())
         self.assertEqual(result.ready, ("terra",))
-        self.assertEqual(result.failed, ("sol",))
+        # And the sequence still advanced rather than stalling behind it.
+        self.assertGreater(self.order.index("start:terra"), self.order.index("start:sol"))
+
+    async def test_a_slow_process_is_reported_as_settling_not_as_lost(self):
+        """What the room is told matters as much as what happens to the process:
+        "could not reattach safely" reads as a casualty, and people act on it."""
+
+        async def resume(attachment_id):
+            name = self.db.get_attachment(attachment_id)["name"]
+            adapter = ReadyAdapter(self.order, name)
+            if attachment_id == "one":
+                adapter.wait_ready = lambda: asyncio.sleep(30)
+            self.runtime.live[attachment_id] = adapter
+            return adapter
+
+        await ReattachCoordinator(self.runtime, resume, ready_timeout=0.01).run(self.plan, "greg")
+
         bodies = [message["body"] for message in self.db.list_messages("line")]
-        self.assertTrue(any("readiness timed out after 0.01s" in body for body in bodies))
+        self.assertTrue(any("still settling after 0.01s" in body for body in bodies), bodies)
+        self.assertTrue(any("1 still settling" in body for body in bodies), bodies)
+        self.assertFalse(any("failed" in body for body in bodies), bodies)
+
+    async def test_a_process_that_exits_is_still_a_failure(self):
+        """The control for the two above. Loosening the timeout must not loosen
+        the genuine case: a process that comes back and then dies has not
+        reattached, and saying otherwise would be worse than the bug fixed."""
+        adapters = {}
+
+        async def resume(attachment_id):
+            name = self.db.get_attachment(attachment_id)["name"]
+            adapter = ReadyAdapter(self.order, name, ready=attachment_id != "one")
+            adapters[attachment_id] = adapter
+            self.runtime.live[attachment_id] = adapter
+            return adapter
+
+        result = await ReattachCoordinator(self.runtime, resume).run(self.plan, "greg")
+
+        self.assertEqual(result.failed, ("sol",))
+        self.assertEqual(result.slow, ())
+        self.assertTrue(adapters["one"].stopped)
 
     async def test_cancel_consumes_the_offer_without_starting_any_process(self):
         resume = AsyncMock()
