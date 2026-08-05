@@ -13,7 +13,7 @@ replace an interactive process with a headless invocation or screen scraping.
 - `partyline/server.py` — FastAPI app: REST, WebSocket, and mention routing
 - `partyline/adapters/` — built-in process adapters and adapter discovery
 - `partyline/db.py` — SQLite schema, migrations, and queries
-- `frontend/` — the web client: Vite + Svelte 5 + Tailwind (see below)
+- `frontend/` — the TypeScript web client: Vite + Svelte 5 + Tailwind (see below)
 - `partyline/static/` — **build output, committed.** Never edit by hand
 - `skills/add-process-adapter/` — procedure and contract for new adapters
 
@@ -63,7 +63,7 @@ Layout, and where things belong:
 - `src/lib/` — **pure functions, no framework.** Markdown rendering, mention
   candidates, jack selection, routing, the REST client. Anything with a rule in
   it belongs here, because this is the layer that gets unit tests.
-- `src/state/*.svelte.js` — runes stores: `session`, `room`, `wire`, `draft`,
+- `src/state/*.svelte.ts` — runes stores: `session`, `room`, `wire`, `draft`,
   `dialogs`. One owner per concern; components read them and call methods.
 - `src/components/` — presentation, grouped by region (`rail/`, `chat/`,
   `board/`, `dialogs/`).
@@ -83,8 +83,20 @@ Two rules that are load-bearing rather than stylistic:
 for `tests/ui/`, which needs to drop a socket and deliver fabricated events.
 Treat it as API: if you rename a store, fix those tests.
 
-Type checking is `checkJs` without `strict`, which is a stage and not an
-oversight — see the comment in `frontend/jsconfig.json` before turning it up.
+TypeScript is strict from the compiler through ESLint: `strict`,
+`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, and project-aware
+typescript-eslint rules are all gates. Do not introduce `any`, double casts, or
+blanket suppressions to get through them; narrow `unknown` or fix the contract.
+
+Zod owns external browser boundaries: REST responses, WebSocket frames, and
+persisted browser values are parsed before they enter application state. Name a
+schema `PascalCaseSchema` and derive its TypeScript type with `z.infer` so the
+runtime validator and compile-time contract cannot drift. The server mirrors
+this with named Pydantic v2 request, response, and event models.
+
+Object-shaped values that cross a function, component, store, REST, or wire
+boundary need a named interface, type, or schema. Local object literals are
+normal implementation code; anonymous object *contracts* are what is banned.
 
 ## Run and test
 

@@ -153,8 +153,9 @@ with Python alone.
 
 ### The frontend
 
-The client is [Svelte 5](https://svelte.dev) + [Tailwind](https://tailwindcss.com), built by
-Vite into `partyline/static/`:
+The client is strict TypeScript with [Svelte 5](https://svelte.dev),
+[Tailwind](https://tailwindcss.com), and Zod runtime validation at its REST and WebSocket
+boundaries. Vite builds it into `partyline/static/`:
 
 ```bash
 cd frontend
@@ -168,6 +169,10 @@ npm run format   # apply Prettier
 `src/lib/` holds framework-free functions — markdown rendering, mention candidates, jack
 selection, routing — and is where the unit tests live. `src/state/` holds the runes stores
 (`session`, `room`, `wire`), and `src/components/` is presentation only.
+
+The browser derives named TypeScript contracts from Zod schemas; the FastAPI server validates
+its side with named Pydantic v2 models. `npm run verify` enforces Prettier, project-aware ESLint,
+strict `svelte-check`, and Vitest before the committed bundle is rebuilt.
 
 ### Running the tests
 
