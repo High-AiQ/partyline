@@ -7,6 +7,7 @@ are tested against temp directories rather than a git fixture.
 """
 
 import sys
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -18,8 +19,11 @@ from scripts.cockpit import (  # noqa: E402
     check_bundle_present,
     check_tree_clean,
     referenced_assets,
+    resolve_line,
     restart_needed,
+    schedule_restart_plan,
 )
+from partyline.contracts import ConversationResponse
 
 
 class StaticTree:
@@ -172,6 +176,87 @@ class FindingTest(unittest.TestCase):
         # that something is wrong.
         finding = Finding("the cockpit is behind", "run deploy")
         self.assertTrue(finding.problem and finding.fix)
+
+
+class FakeResponse:
+    def __init__(self, payload):
+        self.payload = json.dumps(payload).encode()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return None
+
+    def read(self):
+        return self.payload
+
+
+class RestartPlanTest(unittest.TestCase):
+    conversations = [
+        ConversationResponse(
+            id="line-1",
+            name="Partyline Refactoring",
+            created_at=1,
+            topic="",
+            archived_at=None,
+        ),
+        ConversationResponse(
+            id="line-2",
+            name="Other",
+            created_at=2,
+            topic="",
+            archived_at=None,
+        ),
+    ]
+
+    def test_line_resolution_prefers_an_exact_id_then_a_unique_name(self):
+        self.assertEqual(resolve_line(self.conversations, "line-2").id, "line-2")
+        self.assertEqual(resolve_line(self.conversations, "partyline refactoring").id, "line-1")
+        with self.assertRaisesRegex(ValueError, "no live line"):
+            resolve_line(self.conversations, "missing")
+
+    def test_an_ambiguous_name_requires_the_id(self):
+        duplicate = self.conversations + [self.conversations[0].model_copy(update={"id": "line-3"})]
+
+        with self.assertRaisesRegex(ValueError, "ambiguous"):
+            resolve_line(duplicate, "Partyline Refactoring")
+
+    def test_plan_posts_the_resolved_line_and_debrief(self):
+        requests = []
+        responses = [
+            FakeResponse([line.model_dump() for line in self.conversations]),
+            FakeResponse(
+                {
+                    "conversation_id": "line-1",
+                    "token": "offer-token",
+                    "attachments": [{"id": "a1", "name": "sol", "adapter": "codex"}],
+                    "debrief": "Continue the restart review.",
+                }
+            ),
+        ]
+
+        def open_url(request):
+            requests.append(request)
+            return responses.pop(0)
+
+        result = schedule_restart_plan(
+            "Partyline Refactoring",
+            "Continue the restart review.",
+            "http://127.0.0.1:8642",
+            open_url,
+        )
+
+        self.assertEqual(result.token, "offer-token")
+        self.assertEqual(requests[0].full_url, "http://127.0.0.1:8642/api/conversations")
+        self.assertEqual(requests[1].full_url, "http://127.0.0.1:8642/api/restart-plan")
+        self.assertEqual(
+            json.loads(requests[1].data),
+            {
+                "conversation_id": "line-1",
+                "debrief": "Continue the restart review.",
+            },
+        )
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ changed.
 
     uv run python -m scripts.cockpit check     # is the workbench fit to deploy?
     uv run python -m scripts.cockpit deploy    # check, advance the cockpit, verify
+    uv run python -m scripts.cockpit plan LINE --debrief "what to continue"
 
 Neither command restarts anything. Stopping the server drops every participant,
 including whoever runs it, so it stays a deliberate act by a person who has
@@ -25,8 +26,18 @@ import os
 import re
 import subprocess
 import sys
+from argparse import ArgumentParser
 from dataclasses import dataclass
+from http.client import HTTPResponse
 from pathlib import Path
+from typing import Protocol
+from urllib.error import HTTPError, URLError
+from urllib.parse import urljoin
+from urllib.request import Request, urlopen
+
+from pydantic import TypeAdapter
+
+from partyline.contracts import ConversationResponse, RestartPlanRequest, RestartPlanResponse
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_COCKPIT = Path(os.environ.get("PARTYLINE_COCKPIT", Path.home() / "partyline-cockpit"))
@@ -34,6 +45,10 @@ DEFAULT_COCKPIT = Path(os.environ.get("PARTYLINE_COCKPIT", Path.home() / "partyl
 # A change anywhere but here needs a restart to take effect. Adapter packages
 # are re-executed in place by POST /api/adapters/reload.
 RELOADABLE = ("partyline/adapters/",)
+
+
+class ResponseOpener(Protocol):
+    def __call__(self, request: Request) -> HTTPResponse: ...
 
 
 @dataclass(frozen=True)
@@ -160,6 +175,42 @@ def restart_needed(repo: Path, old: str, new: str) -> bool:
     return any(not path.startswith(RELOADABLE) for path in changed)
 
 
+def resolve_line(
+    conversations: list[ConversationResponse], selector: str
+) -> ConversationResponse:
+    """Resolve an exact id or unique case-insensitive name without guessing."""
+    if found := next((line for line in conversations if line.id == selector), None):
+        return found
+    matches = [line for line in conversations if line.name.casefold() == selector.casefold()]
+    if len(matches) == 1:
+        return matches[0]
+    if matches:
+        raise ValueError(f"line name {selector!r} is ambiguous; use its id")
+    raise ValueError(f"no live line matches {selector!r}")
+
+
+def schedule_restart_plan(
+    selector: str,
+    debrief: str,
+    base_url: str,
+    open_url: ResponseOpener = urlopen,
+) -> RestartPlanResponse:
+    """Persist a same-line offer in the running cockpit, without restarting it."""
+    conversations_request = Request(urljoin(base_url, "/api/conversations"))
+    with open_url(conversations_request) as response:
+        conversations = TypeAdapter(list[ConversationResponse]).validate_json(response.read())
+    conversation = resolve_line(conversations, selector)
+    body = RestartPlanRequest(conversation_id=conversation.id, debrief=debrief)
+    request = Request(
+        urljoin(base_url, "/api/restart-plan"),
+        data=body.model_dump_json().encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with open_url(request) as response:
+        return RestartPlanResponse.model_validate_json(response.read())
+
+
 # -- commands --------------------------------------------------------------
 
 
@@ -220,6 +271,22 @@ def deploy(cockpit: Path, repo: Path = REPO_ROOT) -> int:
     return 0
 
 
+def plan(selector: str, debrief: str, base_url: str) -> int:
+    try:
+        scheduled = schedule_restart_plan(selector, debrief, base_url)
+    except HTTPError as exc:
+        detail = exc.read().decode(errors="replace")
+        print(f"could not schedule reattachment: HTTP {exc.code} {detail}")
+        return 1
+    except (URLError, ValueError) as exc:
+        print(f"could not schedule reattachment: {exc}")
+        return 1
+    names = ", ".join(candidate.name for candidate in scheduled.attachments)
+    print(f"  ✓ {scheduled.conversation_id}: {names}")
+    print("After restart, only that line will receive the accept/cancel offer.")
+    return 0
+
+
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     command = argv[0] if argv else "check"
@@ -227,6 +294,17 @@ def main(argv=None) -> int:
         return check()
     if command == "deploy":
         return deploy(Path(argv[1]).expanduser() if len(argv) > 1 else DEFAULT_COCKPIT)
+    if command == "plan":
+        parser = ArgumentParser(prog="python -m scripts.cockpit plan")
+        parser.add_argument("line", help="exact line id or unique name")
+        parser.add_argument("--debrief", required=True, help="continuation instructions")
+        parser.add_argument(
+            "--url",
+            default=f"http://127.0.0.1:{os.environ.get('PARTYLINE_PORT', '8642')}",
+            help="running cockpit base URL",
+        )
+        args = parser.parse_args(argv[1:])
+        return plan(args.line, args.debrief, args.url)
     print(__doc__)
     return 2
 

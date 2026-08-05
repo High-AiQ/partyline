@@ -244,6 +244,19 @@ lists what would be stopped. Both are also in the UI, as **stop** next to the op
 the sidebar footer. Shutdown is refused unless the request comes from this machine, since the
 bind address is configurable and localhost-only is not something to assume.
 
+For a deliberate dogfood restart, the current line can optionally preserve a reattachment plan
+and a continuation debrief. The UI offers this in the stop dialog; an operator restarting the
+separate cockpit clone can schedule the same offer without stopping anything:
+
+```bash
+uv run python -m scripts.cockpit plan "partyline refactoring" \
+  --debrief "Continue the TypeScript review from the committed handoff."
+```
+
+After the server returns, only that line sees the offer. Accepting it resumes the recorded
+processes strictly one at a time: partyline waits until one adapter has reclaimed its exact
+session before starting the next. Adapters without safe resume/readiness support are excluded.
+
 ### Credentials for attached processes
 
 An attached process inherits partyline's environment, so that's where its API keys come from.
