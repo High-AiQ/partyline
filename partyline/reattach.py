@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -14,6 +14,8 @@ from .contracts import (
     ReattachCommand,
     ReattachDecisionEvent,
     ReattachOfferEvent,
+    RestartPlanRequest,
+    RestartPlanResponse,
 )
 from .db import Db, RestartPlan
 
@@ -42,6 +44,66 @@ class ReattachResult:
     failed: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class RestartPlanError(Exception):
+    status_code: int
+    detail: str
+
+
+def adapter_can_resume(metadata: Mapping[str, object]) -> bool:
+    capabilities = metadata.get("capabilities") or {}
+    return (
+        bool(capabilities.get("resume", False))
+        if isinstance(capabilities, dict)
+        else "resume" in capabilities
+    )
+
+
+def restart_plan_response(db: Db, plan: RestartPlan) -> RestartPlanResponse:
+    attachments = []
+    for attachment_id in plan["attachment_ids"]:
+        attachment = db.get_attachment(attachment_id)
+        if attachment is not None and attachment["conv_id"] == plan["conversation_id"]:
+            attachments.append(
+                ReattachCandidateResponse(
+                    id=attachment["id"],
+                    name=attachment["name"],
+                    adapter=attachment["adapter"],
+                )
+            )
+    return RestartPlanResponse(
+        conversation_id=plan["conversation_id"],
+        token=plan["token"],
+        attachments=attachments,
+        debrief=plan["debrief"],
+    )
+
+
+def create_restart_plan(
+    runtime: ReattachRuntime,
+    adapter_metadata: Mapping[str, Mapping[str, object]],
+    body: RestartPlanRequest,
+) -> RestartPlanResponse:
+    conversation = runtime.db.get_conversation(body.conversation_id)
+    if conversation is None or conversation["archived_at"]:
+        raise RestartPlanError(404, "the requesting line is not available")
+    attachment_ids = [
+        attachment["id"]
+        for attachment in runtime.db.list_attachments(body.conversation_id)
+        if attachment["id"] in runtime.live
+        and attachment["status"] in ("starting", "running")
+        and adapter_can_resume(adapter_metadata.get(attachment["adapter"], {}))
+    ]
+    if not attachment_ids:
+        raise RestartPlanError(409, "this line has no resumable live processes")
+    plan = runtime.db.save_restart_plan(
+        body.conversation_id,
+        attachment_ids,
+        body.debrief.strip(),
+    )
+    return restart_plan_response(runtime.db, plan)
+
+
 class ReattachCoordinator:
     """Resume and wake one attachment fully before starting the next."""
 
@@ -59,23 +121,13 @@ class ReattachCoordinator:
         plan = self.runtime.db.get_restart_plan()
         if plan is None or plan["conversation_id"] != conv_id:
             return None
-        attachments = []
-        for attachment_id in plan["attachment_ids"]:
-            attachment = self.runtime.db.get_attachment(attachment_id)
-            if attachment is not None and attachment["conv_id"] == conv_id:
-                attachments.append(
-                    ReattachCandidateResponse(
-                        id=attachment["id"],
-                        name=attachment["name"],
-                        adapter=attachment["adapter"],
-                    )
-                )
-        if not attachments:
+        response = restart_plan_response(self.runtime.db, plan)
+        if not response.attachments:
             return None
         return ReattachOfferEvent(
             conversation_id=conv_id,
             token=plan["token"],
-            attachments=attachments,
+            attachments=response.attachments,
             debrief=plan["debrief"],
         )
 

@@ -51,7 +51,6 @@ from .contracts import (
     OkResponse,
     PresetResponse,
     PurgeResponse,
-    ReattachCandidateResponse,
     RestartPlanRequest,
     RestartPlanResponse,
     RunningProcessResponse,
@@ -61,8 +60,13 @@ from .contracts import (
     ShutdownResponse,
     VersionResponse,
 )
-from .db import Db, RestartPlan
-from .reattach import ReattachCoordinator
+from .db import Db
+from .reattach import (
+    ReattachCoordinator,
+    RestartPlanError,
+    adapter_can_resume,
+    create_restart_plan,
+)
 from .runtime import NAME_RE, RESERVED_NAMES, ChatRuntime
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -164,51 +168,11 @@ def require_loopback(request: Request) -> None:
         raise HTTPException(403, "process control may only be requested from this machine")
 
 
-def adapter_can_resume(adapter_id: str) -> bool:
-    capabilities = ADAPTER_METADATA.get(adapter_id, {}).get("capabilities") or {}
-    return (
-        capabilities.get("resume", False)
-        if isinstance(capabilities, dict)
-        else "resume" in capabilities
-    )
-
-
-def restart_plan_response(plan: RestartPlan) -> RestartPlanResponse:
-    attachments = []
-    for attachment_id in plan["attachment_ids"]:
-        attachment = runtime.db.get_attachment(attachment_id)
-        if attachment is not None and attachment["conv_id"] == plan["conversation_id"]:
-            attachments.append(
-                ReattachCandidateResponse(
-                    id=attachment["id"],
-                    name=attachment["name"],
-                    adapter=attachment["adapter"],
-                )
-            )
-    return RestartPlanResponse(
-        conversation_id=plan["conversation_id"],
-        token=plan["token"],
-        attachments=attachments,
-        debrief=plan["debrief"],
-    )
-
-
 def save_restart_plan(body: RestartPlanRequest) -> RestartPlanResponse:
-    conversation = runtime.db.get_conversation(body.conversation_id)
-    if conversation is None or conversation["archived_at"]:
-        raise HTTPException(404, "the requesting line is not available")
-    attachment_ids = [
-        attachment["id"]
-        for attachment in runtime.db.list_attachments(body.conversation_id)
-        if attachment["id"] in runtime.live
-        and attachment["status"] in ("starting", "running")
-        and adapter_can_resume(attachment["adapter"])
-    ]
-    if not attachment_ids:
-        raise HTTPException(409, "this line has no resumable live processes")
-    return restart_plan_response(
-        runtime.db.save_restart_plan(body.conversation_id, attachment_ids, body.debrief.strip())
-    )
+    try:
+        return create_restart_plan(runtime, ADAPTER_METADATA, body)
+    except RestartPlanError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
 
 
 def request_exit():
@@ -493,7 +457,8 @@ async def _resume_adapter(att_id: str) -> Adapter:
         raise HTTPException(404)
     if att["status"] in ("starting", "running") or att_id in runtime.live:
         raise HTTPException(409, f"'{att['name']}' is already live")
-    if not adapter_can_resume(att["adapter"]):
+    capabilities = ADAPTER_METADATA.get(att["adapter"], {})
+    if not adapter_can_resume(capabilities):
         raise HTTPException(400, f"the {att['adapter']} adapter has no session to resume")
     for other in runtime.db.list_attachments(att["conv_id"]):
         if other["name"].lower() == att["name"].lower() and other["status"] in ("starting", "running"):
