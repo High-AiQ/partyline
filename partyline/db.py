@@ -4,6 +4,7 @@ import json
 import sqlite3
 import threading
 import time
+import uuid
 from typing import TypedDict
 
 SCHEMA = """
@@ -55,10 +56,15 @@ MIGRATIONS = [
     """CREATE TABLE IF NOT EXISTS restart_plan(
         singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
         conversation_id TEXT NOT NULL,
+        token TEXT NOT NULL,
         attachment_ids TEXT NOT NULL,
         debrief TEXT NOT NULL,
         created_at REAL NOT NULL
     )""",
+    # A plan token binds a browser's accept click to the exact offer it saw.
+    # Pre-token plans were never offered by a server route, so discard them.
+    "ALTER TABLE restart_plan ADD COLUMN token TEXT",
+    "DELETE FROM restart_plan WHERE token IS NULL",
 ]
 
 
@@ -66,6 +72,7 @@ class RestartPlan(TypedDict):
     """The one line allowed to offer sequential process reattachment."""
 
     conversation_id: str
+    token: str
     attachment_ids: list[str]
     debrief: str
     created_at: float
@@ -80,6 +87,7 @@ def _att_row(row):
 def _restart_plan_row(row) -> RestartPlan:
     return RestartPlan(
         conversation_id=row["conversation_id"],
+        token=row["token"],
         attachment_ids=json.loads(row["attachment_ids"]),
         debrief=row["debrief"],
         created_at=row["created_at"],
@@ -223,14 +231,16 @@ class Db:
     def save_restart_plan(self, conversation_id: str, attachment_ids: list[str], debrief: str) -> RestartPlan:
         """Replace the sole pending restart intent, preserving attachment order."""
         created_at = time.time()
+        token = str(uuid.uuid4())
         self._exec(
-            "INSERT INTO restart_plan(singleton,conversation_id,attachment_ids,debrief,created_at)"
-            " VALUES(1,?,?,?,?) ON CONFLICT(singleton) DO UPDATE SET"
+            "INSERT INTO restart_plan(singleton,conversation_id,token,attachment_ids,debrief,created_at)"
+            " VALUES(1,?,?,?,?,?) ON CONFLICT(singleton) DO UPDATE SET"
             " conversation_id=excluded.conversation_id,"
+            " token=excluded.token,"
             " attachment_ids=excluded.attachment_ids,"
             " debrief=excluded.debrief,"
             " created_at=excluded.created_at",
-            (conversation_id, json.dumps(attachment_ids), debrief, created_at),
+            (conversation_id, token, json.dumps(attachment_ids), debrief, created_at),
         )
         plan = self.get_restart_plan()
         if plan is None:  # pragma: no cover - a committed INSERT is immediately readable
@@ -239,16 +249,22 @@ class Db:
 
     def get_restart_plan(self) -> RestartPlan | None:
         """Read the pending plan without consuming the requesting line's choice."""
-        cur = self._exec("SELECT * FROM restart_plan WHERE singleton=1")
+        cur = self._exec("SELECT * FROM restart_plan WHERE singleton=1 AND token IS NOT NULL")
         row = cur.fetchone()
         return _restart_plan_row(row) if row else None
 
-    def take_restart_plan(self) -> RestartPlan | None:
-        """Consume the pending plan atomically after the line accepts reattachment."""
+    def take_restart_plan(self, conversation_id: str, token: str) -> RestartPlan | None:
+        """Atomically consume the offer accepted by its original line and tab."""
         with self.lock:
-            row = self.conn.execute("SELECT * FROM restart_plan WHERE singleton=1").fetchone()
+            row = self.conn.execute(
+                "SELECT * FROM restart_plan WHERE singleton=1 AND conversation_id=? AND token=?",
+                (conversation_id, token),
+            ).fetchone()
             if row:
-                self.conn.execute("DELETE FROM restart_plan WHERE singleton=1")
+                self.conn.execute(
+                    "DELETE FROM restart_plan WHERE singleton=1 AND conversation_id=? AND token=?",
+                    (conversation_id, token),
+                )
                 self.conn.commit()
             return _restart_plan_row(row) if row else None
 

@@ -67,6 +67,7 @@ class DbTest(unittest.TestCase):
 
         self.assertEqual(first["attachment_ids"], ["old-2", "old-1"])
         self.assertEqual(replacement["conversation_id"], "two")
+        self.assertNotEqual(first["token"], replacement["token"])
         self.assertEqual(replacement["attachment_ids"], ["new-1", "new-2"])
         self.assertEqual(replacement["debrief"], "second debrief")
         self.assertEqual(self.db.get_restart_plan(), replacement)
@@ -76,9 +77,11 @@ class DbTest(unittest.TestCase):
         plan = self.db.get_restart_plan()
 
         self.assertIsNotNone(plan)
-        self.assertEqual(self.db.take_restart_plan(), plan)
+        self.assertIsNone(self.db.take_restart_plan("other-line", plan["token"]))
+        self.assertIsNone(self.db.take_restart_plan("line", "stale-token"))
+        self.assertEqual(self.db.take_restart_plan("line", plan["token"]), plan)
         self.assertIsNone(self.db.get_restart_plan())
-        self.assertIsNone(self.db.take_restart_plan())
+        self.assertIsNone(self.db.take_restart_plan("line", plan["token"]))
 
     def test_restart_plan_survives_a_database_reopen(self):
         self.db.save_restart_plan("line", ["agent"], "continue")
