@@ -113,6 +113,11 @@ export const RestartPlanSchema = z.object({
 });
 export type RestartPlan = z.infer<typeof RestartPlanSchema>;
 
+export const ShutdownRequestSchema = z.object({
+  reattach: RestartPlanRequestSchema.optional(),
+});
+export type ShutdownRequest = z.infer<typeof ShutdownRequestSchema>;
+
 export const ShutdownResultSchema = z.object({
   ok: z.literal(true),
   stopping: z.array(z.string()),

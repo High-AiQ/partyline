@@ -56,7 +56,11 @@
     border: 1px solid var(--color-line);
     border-radius: 8px;
     width: min(560px, 92vw);
-    max-height: 82vh;
+    /* `dvh`: a soft keyboard shortens the viewport rather than covering it, and
+       `vh` keeps measuring the taller pre-keyboard one — which crops exactly
+       the dialogs that ask you to type something, the debrief and the
+       type-the-name confirmations among them. */
+    max-height: 82dvh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 24px 60px rgb(0 0 0 / 0.55);

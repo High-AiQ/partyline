@@ -19,6 +19,7 @@ import type {
   ChatMessage,
   Conversation,
   ErrorEvent,
+  ReattachAction,
   ReattachOfferEvent,
   WireEvent,
 } from "../lib/contracts";
@@ -225,7 +226,7 @@ class Room {
     }
   }
 
-  chooseReattach(action: "accept" | "cancel"): boolean {
+  chooseReattach(action: ReattachAction): boolean {
     const offer = this.reattachOffer;
     return offer ? wire.chooseReattach(offer.token, action) : false;
   }

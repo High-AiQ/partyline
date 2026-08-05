@@ -10,6 +10,7 @@
   import Feed from "./components/chat/Feed.svelte";
   import Composer from "./components/chat/Composer.svelte";
   import Board from "./components/board/Board.svelte";
+  import ReattachOfferDialog from "./components/dialogs/ReattachOfferDialog.svelte";
 
   import { room } from "./state/room.svelte.js";
   import { session } from "./state/session.svelte.js";
@@ -79,9 +80,11 @@
   on:hashchange={routeChange}
   on:keydown={(event) => {
     if (event.key !== "Escape") return;
-    // A dialog sits above a drawer, so it is what Escape means while one is
-    // open. Only once the stack is empty does Escape belong to the drawer.
+    // Escape belongs to whatever is on top, and the reattach offer is not on
+    // the dialog stack — the server owns its lifetime — so it has to be named
+    // here explicitly or Escape would reach past it to the drawer underneath.
     if (dialogs.stack.length) dialogs.closeTop();
+    else if (room.reattachOffer) room.chooseReattach("cancel");
     else if (layout.drawerOpen) layout.close();
   }}
 />
@@ -119,6 +122,15 @@
 {/if}
 
 <WireBanner />
+
+<!-- Rendered from the store rather than pushed onto the dialog stack: the
+     server owns this offer's lifetime. It arrives unprompted after a restart
+     and is cleared by the decision broadcast, in every tab at once — including
+     tabs where nobody touched anything. A stack entry would have to be pushed
+     and popped in reaction to that, and could drift out of step with it. -->
+{#if room.reattachOffer}
+  <ReattachOfferDialog offer={room.reattachOffer} />
+{/if}
 
 {#each dialogs.stack as entry (entry.key)}
   <entry.component

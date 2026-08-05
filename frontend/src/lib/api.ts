@@ -15,6 +15,7 @@ import {
   RunningProcessSchema,
   ScreenResultSchema,
   ShutdownResultSchema,
+  ShutdownRequestSchema,
   RestartPlanSchema,
   RestartPlanRequestSchema,
   VersionInfoSchema,
@@ -149,7 +150,7 @@ export const api: PartylineApi = {
     request("/api/shutdown", {
       schema: ShutdownResultSchema,
       method: "POST",
-      body: plan ? { reattach: RestartPlanRequestSchema.parse(plan) } : {},
+      body: ShutdownRequestSchema.parse(plan ? { reattach: RestartPlanRequestSchema.parse(plan) } : {}),
       fallback: "could not stop partyline",
     }),
 
