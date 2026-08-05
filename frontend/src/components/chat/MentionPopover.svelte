@@ -1,11 +1,18 @@
-<script>
+<script lang="ts">
   /** The @ autocomplete list. Keyboard handling lives in the composer, which
    *  owns the textarea; this only draws and reports clicks. */
-  import { hue } from "../../lib/markdown.js";
+  import { hue } from "../../lib/markdown";
+  import type { MentionCandidate } from "../../lib/mentions";
 
-  let { candidates, selected, onpick } = $props();
+  interface Props {
+    candidates: MentionCandidate[];
+    selected: number;
+    onpick: (_index: number) => void;
+  }
 
-  let list = $state(null);
+  let { candidates, selected, onpick }: Props = $props();
+
+  let list = $state<HTMLDivElement | null>(null);
 
   $effect(() => {
     selected;
@@ -26,7 +33,7 @@
       role="option"
       aria-selected={index === selected}
       tabindex="-1"
-      onmousedown={(event) => event.preventDefault()}
+      onmousedown={(event: MouseEvent) => event.preventDefault()}
       onclick={() => onpick(index)}
     >
       <span class="led {candidate.status ?? ''}" class:blank={!candidate.status}></span>

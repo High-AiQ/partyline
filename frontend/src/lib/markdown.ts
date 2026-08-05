@@ -29,6 +29,7 @@
 
 import { Marked } from "marked";
 import DOMPurify, { type Config as DomPurifyConfig } from "dompurify";
+import type { SenderType } from "./contracts";
 
 /** Handles run to the first non-handle character; trailing `.`/`-`/`_` is sentence
  *  punctuation, not part of the name. "thanks @greg." mentions greg — and the
@@ -182,8 +183,6 @@ export function hue(name: string): number {
 }
 
 /** The colour a sender's name is drawn in. System lines are deliberately plain. */
-type SenderType = "human" | "agent" | "system";
-
 export function senderColor(sender: string, senderType: SenderType): string {
   if (senderType === "system") return "";
   const agent = senderType === "agent";

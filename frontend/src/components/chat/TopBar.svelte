@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   /** The line's name, and its topic — which is also the way in to editing it. */
   import { room } from "../../state/room.svelte.js";
   import { dialogs } from "../../state/dialogs.svelte.js";

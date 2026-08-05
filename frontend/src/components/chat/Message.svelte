@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   /**
    * One line in the feed.
    *
@@ -6,9 +6,14 @@
    * parses it, and runs the result through DOMPurify. Nothing else in this app
    * should reach for `{@html}` on a message body.
    */
-  import { renderMessage, senderColor } from "../../lib/markdown.js";
+  import { renderMessage, senderColor } from "../../lib/markdown";
+  import type { ChatMessage } from "../../lib/contracts";
 
-  let { message } = $props();
+  interface Props {
+    message: ChatMessage;
+  }
+
+  let { message }: Props = $props();
 
   const isSystem = $derived(message.sender_type === "system");
   const body = $derived(renderMessage(message.body, message.sender_type === "agent"));

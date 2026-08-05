@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   /**
    * Where you say things.
    *
@@ -9,10 +9,12 @@
   import MentionPopover from "./MentionPopover.svelte";
   import { room } from "../../state/room.svelte.js";
   import { draft } from "../../state/draft.svelte.js";
-  import { applyMention, mentionCandidates, mentionToken } from "../../lib/mentions.js";
+  import { applyMention, mentionCandidates, mentionToken } from "../../lib/mentions";
+  import type { MentionToken } from "../../lib/mentions";
+  import type { MentionCandidate } from "../../lib/mentions";
 
-  let box = $state(null);
-  let token = $state(null);
+  let box = $state<HTMLTextAreaElement | null>(null);
+  let token = $state<MentionToken | null>(null);
   let selected = $state(0);
 
   // A handle dropped in from the board should leave the caret at the end, ready
@@ -26,23 +28,25 @@
     resize();
   });
 
-  const candidates = $derived(token ? mentionCandidates(token.prefix, room.attachments, room.humans) : []);
+  const candidates = $derived<MentionCandidate[]>(
+    token ? mentionCandidates(token.prefix, room.attachments, room.humans) : [],
+  );
   const popoverOpen = $derived(Boolean(token) && candidates.length > 0);
 
   /** Grow with the text, up to a point; past that it scrolls. */
   const MAX_HEIGHT = 180;
-  function resize() {
+  function resize(): void {
     if (!box) return;
     box.style.height = "auto";
     box.style.height = Math.min(box.scrollHeight, MAX_HEIGHT) + "px";
   }
 
-  function refreshToken() {
+  function refreshToken(): void {
     token = room.conversation ? mentionToken(draft.text, box?.selectionStart ?? 0) : null;
     selected = 0;
   }
 
-  function pick(index) {
+  function pick(index: number): void {
     const candidate = candidates[index];
     if (!candidate || !token) return closeToken();
     const next = applyMention(draft.text, token, candidate.name);
@@ -61,14 +65,14 @@
     selected = 0;
   };
 
-  function send() {
+  function send(): void {
     if (!room.say(draft.text)) return;
     draft.clear();
     closeToken();
     requestAnimationFrame(resize);
   }
 
-  function onKeydown(event) {
+  function onKeydown(event: KeyboardEvent): void {
     if (popoverOpen) {
       const step = { ArrowDown: 1, ArrowUp: -1 }[event.key];
       if (step) {

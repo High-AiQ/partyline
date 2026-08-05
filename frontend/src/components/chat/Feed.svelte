@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   /**
    * The line's history.
    *
@@ -9,7 +9,7 @@
   import Message from "./Message.svelte";
   import { room } from "../../state/room.svelte.js";
 
-  let feed = $state(null);
+  let feed = $state<HTMLDivElement | null>(null);
   /** Within this much of the bottom counts as "following". */
   const STICK_PX = 140;
   let wasFollowing = true;
