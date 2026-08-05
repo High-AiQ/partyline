@@ -15,7 +15,7 @@
   let list = $state<HTMLDivElement | null>(null);
 
   $effect(() => {
-    selected;
+    void selected;
     list?.querySelector(".opt.sel")?.scrollIntoView({ block: "nearest" });
   });
 </script>
@@ -33,15 +33,19 @@
       role="option"
       aria-selected={index === selected}
       tabindex="-1"
-      onmousedown={(event: MouseEvent) => event.preventDefault()}
-      onclick={() => onpick(index)}
+      onmousedown={(event: MouseEvent) => {
+        event.preventDefault();
+      }}
+      onclick={() => {
+        onpick(index);
+      }}
     >
       <span class="led {candidate.status ?? ''}" class:blank={!candidate.status}></span>
       <span
         class="nm"
         style:color={candidate.all
           ? "var(--color-copper-hot)"
-          : `hsl(${hue(candidate.name.toLowerCase())} 55% 68%)`}
+          : `hsl(${String(hue(candidate.name.toLowerCase()))} 55% 68%)`}
       >
         @{candidate.name}
       </span>

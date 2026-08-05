@@ -4,7 +4,7 @@
   import { dialogs } from "../../state/dialogs.svelte.js";
   import TopicDialog from "../dialogs/TopicDialog.svelte";
 
-  const topic = $derived((room.conversation?.topic || "").trim());
+  const topic = $derived((room.conversation?.topic ?? "").trim());
 </script>
 
 <div id="topbar">

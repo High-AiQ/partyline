@@ -20,7 +20,7 @@
   // A handle dropped in from the board should leave the caret at the end, ready
   // to keep typing, rather than wherever it happened to be.
   $effect(() => {
-    draft.externalEdits;
+    void draft.externalEdits;
     if (!box) return;
     const end = draft.text.length;
     box.focus();
@@ -38,7 +38,7 @@
   function resize(): void {
     if (!box) return;
     box.style.height = "auto";
-    box.style.height = Math.min(box.scrollHeight, MAX_HEIGHT) + "px";
+    box.style.height = String(Math.min(box.scrollHeight, MAX_HEIGHT)) + "px";
   }
 
   function refreshToken(): void {
@@ -48,7 +48,10 @@
 
   function pick(index: number): void {
     const candidate = candidates[index];
-    if (!candidate || !token) return closeToken();
+    if (!candidate || !token) {
+      closeToken();
+      return;
+    }
     const next = applyMention(draft.text, token, candidate.name);
     draft.text = next.value;
     closeToken();

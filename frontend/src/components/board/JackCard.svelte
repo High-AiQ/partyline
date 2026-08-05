@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   /**
    * One process on the line.
    *
@@ -6,41 +6,48 @@
    * dialog is blocked until a person answers it, and nothing else on screen
    * would say so. It rings until someone peeks.
    */
-  import { hue } from "../../lib/markdown.js";
-  import { isLive } from "../../lib/attachments.js";
-  import { api } from "../../lib/api.js";
+  import { hue } from "../../lib/markdown";
+  import { isLive } from "../../lib/attachments";
+  import { ApiError, api } from "../../lib/api";
+  import type { Attachment } from "../../lib/contracts";
   import { room } from "../../state/room.svelte.js";
   import { dialogs } from "../../state/dialogs.svelte.js";
   import PeekDialog from "../dialogs/PeekDialog.svelte";
 
-  let { attachment, resumable, onmention } = $props();
+  interface Props {
+    attachment: Attachment;
+    resumable: boolean;
+    onmention: (_name: string) => void;
+  }
+
+  let { attachment, resumable, onmention }: Props = $props();
 
   let resuming = $state(false);
 
   const live = $derived(isLive(attachment));
   const needsYou = $derived(live && room.attention.has(attachment.id));
 
-  async function detach() {
+  async function detach(): Promise<void> {
     try {
       await api.detach(attachment.id);
     } catch (error) {
-      room.showNotice(error.message, "error");
+      room.showNotice(error instanceof ApiError ? error.message : "could not detach", "error");
     }
   }
 
-  function peek() {
+  function peek(): void {
     room.attention.delete(attachment.id);
     dialogs.open(PeekDialog, { attachment });
   }
 
-  async function resume() {
+  async function resume(): Promise<void> {
     resuming = true;
     try {
       // Same reasoning as attach: keyed by id, so recording the REST answer is
       // free, and it is the only news we get if the socket is mid-reconnect.
       room.upsertAttachment(await api.resume(attachment.id));
     } catch (error) {
-      room.showNotice(error.message, "error");
+      room.showNotice(error instanceof ApiError ? error.message : "could not resume", "error");
     } finally {
       resuming = false;
     }
@@ -55,7 +62,9 @@
       type="button"
       style:color="hsl({hue(attachment.name.toLowerCase())} 55% 68%)"
       title="insert @{attachment.name}"
-      onclick={() => onmention(attachment.name)}>{attachment.name}</button
+      onclick={() => {
+        onmention(attachment.name);
+      }}>{attachment.name}</button
     >
     <span class="tag">{attachment.adapter}</span>
     {#if live}

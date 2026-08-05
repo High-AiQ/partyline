@@ -1,7 +1,7 @@
-<script>
+<script lang="ts">
   /** Spawn a real interactive process in a pty and put it on this line. */
-  import { adapterLabel } from "../../lib/attachments.js";
-  import { api } from "../../lib/api.js";
+  import { adapterLabel } from "../../lib/attachments";
+  import { ApiError, api } from "../../lib/api";
   import { room } from "../../state/room.svelte.js";
   import { session } from "../../state/session.svelte.js";
   import { dialogs } from "../../state/dialogs.svelte.js";
@@ -19,10 +19,11 @@
   // The picker's default follows the registry: an adapter imported from a repo
   // is selectable the moment it registers, without this file knowing its name.
   $effect(() => {
-    if (!adapter && session.adapters.length) adapter = session.adapters[0].id;
+    const firstAdapter = session.adapters.at(0);
+    if (!adapter && firstAdapter) adapter = firstAdapter.id;
   });
 
-  function applyPreset() {
+  function applyPreset(): void {
     const preset = session.presets.find((p) => p.id === presetId);
     if (!preset) return;
     name = preset.name;
@@ -30,10 +31,16 @@
     command = preset.command;
   }
 
-  async function attach(event) {
+  async function attach(event: SubmitEvent): Promise<void> {
     event.preventDefault();
-    if (!room.conversation) return room.showNotice("open a line first", "error");
-    if (!name.trim()) return room.showNotice("give it a handle", "error");
+    if (!room.conversation) {
+      room.showNotice("open a line first", "error");
+      return;
+    }
+    if (!name.trim()) {
+      room.showNotice("give it a handle", "error");
+      return;
+    }
 
     attaching = true;
     try {
@@ -51,7 +58,7 @@
       name = "";
       command = "";
     } catch (error) {
-      room.showNotice(error.message, "error");
+      room.showNotice(error instanceof ApiError ? error.message : "attach failed", "error");
     } finally {
       attaching = false;
     }

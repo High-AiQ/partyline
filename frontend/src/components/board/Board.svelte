@@ -1,12 +1,16 @@
-<script>
+<script lang="ts">
   /** The right rail: who is on the line, and how to patch someone in. */
   import JackCard from "./JackCard.svelte";
   import AttachForm from "./AttachForm.svelte";
-  import { canResumeJack, latestJacks } from "../../lib/attachments.js";
+  import { canResumeJack, latestJacks } from "../../lib/attachments";
   import { room } from "../../state/room.svelte.js";
   import { session } from "../../state/session.svelte.js";
 
-  let { onmention } = $props();
+  interface Props {
+    onmention: (_name: string) => void;
+  }
+
+  let { onmention }: Props = $props();
 
   const jacks = $derived(latestJacks(room.attachments));
 </script>

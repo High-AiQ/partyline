@@ -23,19 +23,19 @@
    * when the message was big enough to matter.
    */
   $effect.pre(() => {
-    room.messages.length;
+    void room.messages.length;
     wasFollowing = !feed || feed.scrollHeight - feed.scrollTop - feed.clientHeight < STICK_PX;
   });
 
   $effect(() => {
-    room.messages.length;
+    void room.messages.length;
     if (wasFollowing && feed) feed.scrollTop = feed.scrollHeight;
   });
 
   // Opening a line always lands at the newest message, whatever the previous
   // line's scroll position happened to be.
   $effect(() => {
-    room.conversation?.id;
+    void room.conversation?.id;
     wasFollowing = true;
     if (feed) feed.scrollTop = feed.scrollHeight;
   });
