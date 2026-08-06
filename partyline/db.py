@@ -58,6 +58,8 @@ MIGRATIONS = [
         conversation_id TEXT NOT NULL,
         token TEXT NOT NULL,
         mode TEXT NOT NULL DEFAULT 'offer',
+        claim_owner TEXT,
+        claim_until REAL,
         attachment_ids TEXT NOT NULL,
         debrief TEXT NOT NULL,
         created_at REAL NOT NULL
@@ -69,6 +71,10 @@ MIGRATIONS = [
     # Cockpit plans are trusted, hands-off recovery; ordinary UI plans remain
     # manual offers. Existing plans must keep the safe manual behaviour.
     "ALTER TABLE restart_plan ADD COLUMN mode TEXT NOT NULL DEFAULT 'offer'",
+    # A lease prevents two server lifespans from resuming the same automatic
+    # plan. Nullable values mean no owner currently holds the plan.
+    "ALTER TABLE restart_plan ADD COLUMN claim_owner TEXT",
+    "ALTER TABLE restart_plan ADD COLUMN claim_until REAL",
 ]
 
 
@@ -81,6 +87,8 @@ class RestartPlan(TypedDict):
     conversation_id: str
     token: str
     mode: RestartPlanMode
+    claim_owner: str | None
+    claim_until: float | None
     attachment_ids: list[str]
     debrief: str
     created_at: float
@@ -97,6 +105,8 @@ def _restart_plan_row(row) -> RestartPlan:
         conversation_id=row["conversation_id"],
         token=row["token"],
         mode=row["mode"],
+        claim_owner=row["claim_owner"],
+        claim_until=row["claim_until"],
         attachment_ids=json.loads(row["attachment_ids"]),
         debrief=row["debrief"],
         created_at=row["created_at"],
@@ -248,15 +258,18 @@ class Db:
         created_at = time.time()
         token = str(uuid.uuid4())
         self._exec(
-            "INSERT INTO restart_plan(singleton,conversation_id,token,mode,attachment_ids,debrief,created_at)"
-            " VALUES(1,?,?,?,?,?,?) ON CONFLICT(singleton) DO UPDATE SET"
+            "INSERT INTO restart_plan("
+            "singleton,conversation_id,token,mode,claim_owner,claim_until,attachment_ids,debrief,created_at)"
+            " VALUES(1,?,?,?,?,?,?,?,?) ON CONFLICT(singleton) DO UPDATE SET"
             " conversation_id=excluded.conversation_id,"
             " token=excluded.token,"
             " mode=excluded.mode,"
+            " claim_owner=NULL,"
+            " claim_until=NULL,"
             " attachment_ids=excluded.attachment_ids,"
             " debrief=excluded.debrief,"
             " created_at=excluded.created_at",
-            (conversation_id, token, mode, json.dumps(attachment_ids), debrief, created_at),
+            (conversation_id, token, mode, None, None, json.dumps(attachment_ids), debrief, created_at),
         )
         plan = self.get_restart_plan()
         if plan is None:  # pragma: no cover - a committed INSERT is immediately readable
@@ -268,6 +281,55 @@ class Db:
         cur = self._exec("SELECT * FROM restart_plan WHERE singleton=1 AND token IS NOT NULL")
         row = cur.fetchone()
         return _restart_plan_row(row) if row else None
+
+    def claim_restart_plan(
+        self,
+        mode: RestartPlanMode,
+        owner: str,
+        lease_seconds: float,
+    ) -> RestartPlan | None:
+        """Atomically lease an unclaimed or expired plan to one server lifespan."""
+        now = time.time()
+        with self.lock:
+            row = self.conn.execute(
+                "UPDATE restart_plan SET claim_owner=?, claim_until=?"
+                " WHERE singleton=1 AND mode=?"
+                " AND (claim_owner IS NULL OR claim_until <= ?)"
+                " RETURNING *",
+                (owner, now + lease_seconds, mode, now),
+            ).fetchone()
+            self.conn.commit()
+        return _restart_plan_row(row) if row else None
+
+    def renew_restart_plan_claim(self, token: str, owner: str, lease_seconds: float) -> bool:
+        """Extend a still-held lease; an expired owner cannot revive a stale claim."""
+        now = time.time()
+        cur = self._exec(
+            "UPDATE restart_plan SET claim_until=?"
+            " WHERE singleton=1 AND token=? AND claim_owner=? AND claim_until > ?",
+            (now + lease_seconds, token, owner, now),
+        )
+        return cur.rowcount == 1
+
+    def release_restart_plan_claim(self, token: str, owner: str) -> bool:
+        """Give up a held lease without deleting the recovery plan."""
+        cur = self._exec(
+            "UPDATE restart_plan SET claim_owner=NULL, claim_until=NULL"
+            " WHERE singleton=1 AND token=? AND claim_owner=?",
+            (token, owner),
+        )
+        return cur.rowcount == 1
+
+    def complete_restart_plan(self, token: str, owner: str) -> bool:
+        """Delete only an automatic plan still held by its exact lease owner."""
+        now = time.time()
+        cur = self._exec(
+            "DELETE FROM restart_plan"
+            " WHERE singleton=1 AND token=? AND mode='automatic'"
+            " AND claim_owner=? AND claim_until > ?",
+            (token, owner, now),
+        )
+        return cur.rowcount == 1
 
     def take_restart_plan(
         self,

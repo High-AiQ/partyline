@@ -1,6 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from partyline.db import Db
 
@@ -92,6 +93,69 @@ class DbTest(unittest.TestCase):
         self.assertEqual(plan["mode"], "automatic")
         self.assertIsNone(self.db.take_restart_plan("line", plan["token"], "offer"))
         self.assertEqual(self.db.take_restart_plan("line", plan["token"], "automatic"), plan)
+
+    def test_restart_plan_claim_excludes_a_second_owner_until_expiry(self):
+        self.db.save_restart_plan("line", ["agent"], "continue", mode="automatic")
+        second_lifespan = Db(f"{self.directory.name}/partyline.db")
+        self.addCleanup(second_lifespan.close)
+        with patch("partyline.db.time.time", return_value=10.0):
+            claimed = self.db.claim_restart_plan("automatic", "server-one", 5)
+            blocked = second_lifespan.claim_restart_plan("automatic", "server-two", 5)
+        with patch("partyline.db.time.time", return_value=15.0):
+            reclaimed = second_lifespan.claim_restart_plan("automatic", "server-two", 5)
+
+        self.assertIsNotNone(claimed)
+        self.assertEqual(claimed["claim_owner"], "server-one")
+        self.assertEqual(claimed["claim_until"], 15.0)
+        self.assertIsNone(blocked)
+        self.assertIsNotNone(reclaimed)
+        self.assertEqual(reclaimed["claim_owner"], "server-two")
+
+    def test_restart_plan_claim_requires_the_exact_owner_to_renew_or_release(self):
+        self.db.save_restart_plan("line", ["agent"], "continue", mode="automatic")
+        with patch("partyline.db.time.time", return_value=10.0):
+            claimed = self.db.claim_restart_plan("automatic", "server-one", 5)
+        self.assertIsNotNone(claimed)
+
+        with patch("partyline.db.time.time", return_value=11.0):
+            self.assertFalse(self.db.renew_restart_plan_claim(claimed["token"], "server-two", 10))
+            self.assertFalse(self.db.release_restart_plan_claim(claimed["token"], "server-two"))
+            self.assertTrue(self.db.renew_restart_plan_claim(claimed["token"], "server-one", 10))
+        with patch("partyline.db.time.time", return_value=21.0):
+            self.assertFalse(self.db.renew_restart_plan_claim(claimed["token"], "server-one", 10))
+
+        plan = self.db.get_restart_plan()
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan["claim_until"], 21.0)
+        self.assertTrue(self.db.release_restart_plan_claim(claimed["token"], "server-one"))
+        self.assertIsNone(self.db.get_restart_plan()["claim_owner"])
+        self.assertIsNotNone(self.db.claim_restart_plan("automatic", "server-two", 5))
+
+    def test_replacing_a_plan_clears_its_lease(self):
+        original = self.db.save_restart_plan("line", ["agent"], "continue", mode="automatic")
+        with patch("partyline.db.time.time", return_value=10.0):
+            self.assertIsNotNone(self.db.claim_restart_plan("automatic", "server-one", 5))
+
+        replacement = self.db.save_restart_plan("line", ["replacement"], "new debrief", mode="automatic")
+
+        self.assertIsNone(replacement["claim_owner"])
+        self.assertIsNone(replacement["claim_until"])
+        self.assertFalse(self.db.renew_restart_plan_claim(original["token"], "server-one", 5))
+        self.assertFalse(self.db.release_restart_plan_claim(original["token"], "server-one"))
+        self.assertFalse(self.db.complete_restart_plan(original["token"], "server-one"))
+
+    def test_restart_plan_completion_requires_an_automatic_plan_held_by_its_owner(self):
+        automatic = self.db.save_restart_plan("line", ["agent"], "continue", mode="automatic")
+        with patch("partyline.db.time.time", return_value=10.0):
+            self.assertIsNotNone(self.db.claim_restart_plan("automatic", "server-one", 5))
+            self.assertFalse(self.db.complete_restart_plan(automatic["token"], "server-two"))
+            self.assertTrue(self.db.complete_restart_plan(automatic["token"], "server-one"))
+        self.assertIsNone(self.db.get_restart_plan())
+
+        manual = self.db.save_restart_plan("line", ["agent"], "continue", mode="offer")
+        with patch("partyline.db.time.time", return_value=20.0):
+            self.assertIsNotNone(self.db.claim_restart_plan("offer", "server-one", 5))
+            self.assertFalse(self.db.complete_restart_plan(manual["token"], "server-one"))
 
     def test_restart_plan_survives_a_database_reopen(self):
         self.db.save_restart_plan("line", ["agent"], "continue")
