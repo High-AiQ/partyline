@@ -5,7 +5,9 @@ that moved something and was reported clean. It is pure functions over
 {name: digest} maps, so none of this needs a browser.
 """
 
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -13,6 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.uidiff import (  # noqa: E402
     Change,
+    HarnessBusy,
+    exclusive_run,
     Difference,
     compare,
     digest,
@@ -148,6 +152,69 @@ class JudgeableTest(unittest.TestCase):
         # The guard must not swallow the real case it resembles.
         judged = judgeable(self.BASE, ())
         self.assertEqual(compare(judged, {"a": "1", "b": "2"}), [Difference("c", Change.REMOVED)])
+
+
+class ExclusiveRunTest(unittest.TestCase):
+    """Two captures must never overlap.
+
+    Both commands write fixed directories under the repository, and when two
+    runs shared them they deleted each other's images mid-flight — after which
+    the *missing* screenshots were reported as visual differences. That is the
+    worst failure a parity harness can have: invented regressions look exactly
+    like real ones, and everything it says stops being trustworthy.
+    """
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.lock = Path(self.directory.name) / "uidiff.lock"
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def test_a_second_run_is_refused_while_the_first_holds_the_lock(self):
+        with exclusive_run(self.lock):
+            with self.assertRaises(HarnessBusy):
+                with exclusive_run(self.lock):
+                    self.fail("two captures ran at once")
+
+    def test_the_refusal_says_what_to_do_about_it(self):
+        with exclusive_run(self.lock):
+            with self.assertRaises(HarnessBusy) as refused:
+                with exclusive_run(self.lock):
+                    pass
+        self.assertIn("must not overlap", str(refused.exception))
+
+    def test_the_lock_is_released_when_the_run_finishes(self):
+        with exclusive_run(self.lock):
+            pass
+        with exclusive_run(self.lock):  # would raise if the first never let go
+            pass
+
+    def test_the_lock_is_released_even_when_the_run_fails(self):
+        # A crashed capture must not wedge the harness for everyone after it.
+        with self.assertRaises(ZeroDivisionError):
+            with exclusive_run(self.lock):
+                raise ZeroDivisionError
+        with exclusive_run(self.lock):
+            pass
+
+    def test_a_separate_process_is_refused_too(self):
+        """The control that matters: `flock` is per open file description, so a
+        same-process check could pass while real concurrent *processes* — which
+        is how this actually happened — still trampled each other."""
+        with exclusive_run(self.lock):
+            probe = subprocess.run(
+                [
+                    sys.executable, "-c",
+                    "import fcntl,sys;"
+                    "h=open(sys.argv[1],'w');"
+                    "\ntry:\n fcntl.flock(h,fcntl.LOCK_EX|fcntl.LOCK_NB);print('acquired')"
+                    "\nexcept OSError:\n print('refused')",
+                    str(self.lock),
+                ],
+                capture_output=True, text=True,
+            )
+        self.assertEqual(probe.stdout.strip(), "refused", probe.stderr)
 
 
 class DescribeTest(unittest.TestCase):

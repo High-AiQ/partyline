@@ -33,6 +33,8 @@ rather than being quietly counted as either same or different.
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import hashlib
 import shutil
 import sys
@@ -44,6 +46,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BASELINE_DIR = REPO_ROOT / ".ui-baseline"
 CURRENT_DIRNAME = ".ui-current"
+LOCK_PATH = REPO_ROOT / ".ui-baseline.lock"
 # Which states the baseline run could actually pin down. Without this, a state
 # the baseline found unstable would look merely *absent* on the next run, and
 # get reported as newly added every time.
@@ -55,6 +58,43 @@ def read_stable_list(baseline_dir: Path) -> set[str] | None:
     if not path.is_file():
         return None
     return {line for line in path.read_text(encoding="utf-8").split("\n") if line}
+
+
+class HarnessBusy(RuntimeError):
+    """Another capture already holds the scratch directories."""
+
+
+@contextlib.contextmanager
+def exclusive_run(lock_path: Path = LOCK_PATH):
+    """Refuse to start while another capture is running.
+
+    Both commands write fixed paths under the repository — a baseline anyone
+    can compare against by eye is worth more than a private temp directory
+    nobody can find. Fixed paths and two processes is a race, and this one had
+    the worst possible failure mode: two overlapping runs deleted each other's
+    captures mid-flight and the missing images were then *reported as visual
+    differences*. A harness that invents regressions is worse than no harness,
+    because the invented ones are indistinguishable from real ones.
+
+    So the second run is refused outright rather than allowed to interleave.
+    `flock` is released by the kernel when the process dies, so a crashed or
+    killed run cannot leave the lock stuck.
+    """
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = lock_path.open("w")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as exc:
+        handle.close()
+        raise HarnessBusy(
+            f"another uidiff run holds {lock_path}. Screenshot captures share fixed "
+            f"directories, so they must not overlap — wait for it to finish."
+        ) from exc
+    try:
+        yield
+    finally:
+        fcntl.flock(handle, fcntl.LOCK_UN)
+        handle.close()
 
 
 class Change(StrEnum):
@@ -160,6 +200,16 @@ def reconcile(first: dict[str, str], second: dict[str, str]) -> Capture:
 # -- commands --------------------------------------------------------------
 
 
+def _with_exclusive_run(command):
+    """Every command that touches the scratch directories takes the lock."""
+
+    def guarded(*args, **kwargs):
+        with exclusive_run():
+            return command(*args, **kwargs)
+
+    return guarded
+
+
 def capture(out_dir: Path) -> list[Path]:
     """Render the standard state set into `out_dir`, as still frames."""
     from scripts.uishot import capture_all
@@ -173,17 +223,21 @@ def capture(out_dir: Path) -> list[Path]:
 def capture_twice(keep_dir: Path) -> Capture:
     """Run the state set twice and report only what reproduced.
 
-    The first run's images are kept — they are what a person compares by eye
-    when something is reported — and the second exists solely to decide which
-    of them can be trusted.
+    Both runs go to private temp directories; the first is *then* published to
+    `keep_dir` in one move. Capturing straight into the durable path leaves it
+    half-written for the length of a capture, which is what someone reading it
+    — or a second run — would see.
     """
-    if keep_dir.exists():
-        shutil.rmtree(keep_dir)
-    capture(keep_dir)
-    with tempfile.TemporaryDirectory(prefix="partyline-uidiff-") as second:
-        confirm_dir = Path(second)
+    with tempfile.TemporaryDirectory(prefix="partyline-uidiff-") as workspace:
+        first_dir = Path(workspace) / "first"
+        confirm_dir = Path(workspace) / "confirm"
+        capture(first_dir)
         capture(confirm_dir)
-        return reconcile(digests(keep_dir), digests(confirm_dir))
+        result = reconcile(digests(first_dir), digests(confirm_dir))
+        if keep_dir.exists():
+            shutil.rmtree(keep_dir)
+        shutil.copytree(first_dir, keep_dir)
+    return result
 
 
 def report_unstable(capture_result: Capture) -> None:
@@ -191,6 +245,7 @@ def report_unstable(capture_result: Capture) -> None:
         print(f"  ~ {name} did not reproduce itself; excluded from comparison")
 
 
+@_with_exclusive_run
 def record_baseline(out_dir: Path = BASELINE_DIR) -> int:
     result = capture_twice(out_dir)
     report_unstable(result)
@@ -199,6 +254,7 @@ def record_baseline(out_dir: Path = BASELINE_DIR) -> int:
     return 0
 
 
+@_with_exclusive_run
 def check(baseline_dir: Path = BASELINE_DIR) -> int:
     baseline = digests(baseline_dir)
     trusted = read_stable_list(baseline_dir)
@@ -234,10 +290,14 @@ def check(baseline_dir: Path = BASELINE_DIR) -> int:
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     command = argv[0] if argv else "check"
-    if command == "baseline":
-        return record_baseline()
-    if command == "check":
-        return check()
+    try:
+        if command == "baseline":
+            return record_baseline()
+        if command == "check":
+            return check()
+    except HarnessBusy as busy:
+        print(f"  ✗ {busy}")
+        return 3
     print(__doc__)
     return 2
 

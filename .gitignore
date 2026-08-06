@@ -21,3 +21,4 @@ node_modules/
 *.log
 .ui-baseline/
 .ui-current/
+.ui-baseline.lock
