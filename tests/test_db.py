@@ -1,3 +1,4 @@
+import sqlite3
 import tempfile
 import unittest
 
@@ -68,6 +69,7 @@ class DbTest(unittest.TestCase):
         self.assertEqual(first["attachment_ids"], ["old-2", "old-1"])
         self.assertEqual(replacement["conversation_id"], "two")
         self.assertNotEqual(first["token"], replacement["token"])
+        self.assertEqual(replacement["mode"], "offer")
         self.assertEqual(replacement["attachment_ids"], ["new-1", "new-2"])
         self.assertEqual(replacement["debrief"], "second debrief")
         self.assertEqual(self.db.get_restart_plan(), replacement)
@@ -77,11 +79,19 @@ class DbTest(unittest.TestCase):
         plan = self.db.get_restart_plan()
 
         self.assertIsNotNone(plan)
-        self.assertIsNone(self.db.take_restart_plan("other-line", plan["token"]))
-        self.assertIsNone(self.db.take_restart_plan("line", "stale-token"))
-        self.assertEqual(self.db.take_restart_plan("line", plan["token"]), plan)
+        self.assertIsNone(self.db.take_restart_plan("other-line", plan["token"], "offer"))
+        self.assertIsNone(self.db.take_restart_plan("line", "stale-token", "offer"))
+        self.assertIsNone(self.db.take_restart_plan("line", plan["token"], "automatic"))
+        self.assertEqual(self.db.take_restart_plan("line", plan["token"], "offer"), plan)
         self.assertIsNone(self.db.get_restart_plan())
-        self.assertIsNone(self.db.take_restart_plan("line", plan["token"]))
+        self.assertIsNone(self.db.take_restart_plan("line", plan["token"], "offer"))
+
+    def test_automatic_restart_plan_requires_automatic_take(self):
+        plan = self.db.save_restart_plan("line", ["agent"], "continue", mode="automatic")
+
+        self.assertEqual(plan["mode"], "automatic")
+        self.assertIsNone(self.db.take_restart_plan("line", plan["token"], "offer"))
+        self.assertEqual(self.db.take_restart_plan("line", plan["token"], "automatic"), plan)
 
     def test_restart_plan_survives_a_database_reopen(self):
         self.db.save_restart_plan("line", ["agent"], "continue")
@@ -102,3 +112,24 @@ class DbTest(unittest.TestCase):
         self.db.delete_conversation("line")
 
         self.assertIsNone(self.db.get_restart_plan())
+
+    def test_existing_restart_plan_migrates_to_manual_offer(self):
+        legacy_path = f"{self.directory.name}/legacy.db"
+        legacy = sqlite3.connect(legacy_path)
+        legacy.execute(
+            "CREATE TABLE restart_plan("
+            "singleton INTEGER PRIMARY KEY, conversation_id TEXT NOT NULL, token TEXT NOT NULL,"
+            "attachment_ids TEXT NOT NULL, debrief TEXT NOT NULL, created_at REAL NOT NULL)"
+        )
+        legacy.execute(
+            "INSERT INTO restart_plan VALUES(1, 'line', 'token', '[\"agent\"]', 'continue', 1.0)"
+        )
+        legacy.commit()
+        legacy.close()
+        migrated = Db(legacy_path)
+        self.addCleanup(migrated.close)
+
+        plan = migrated.get_restart_plan()
+
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan["mode"], "offer")

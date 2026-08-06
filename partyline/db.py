@@ -5,7 +5,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations(
@@ -57,6 +57,7 @@ MIGRATIONS = [
         singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
         conversation_id TEXT NOT NULL,
         token TEXT NOT NULL,
+        mode TEXT NOT NULL DEFAULT 'offer',
         attachment_ids TEXT NOT NULL,
         debrief TEXT NOT NULL,
         created_at REAL NOT NULL
@@ -65,7 +66,13 @@ MIGRATIONS = [
     # Pre-token plans were never offered by a server route, so discard them.
     "ALTER TABLE restart_plan ADD COLUMN token TEXT",
     "DELETE FROM restart_plan WHERE token IS NULL",
+    # Cockpit plans are trusted, hands-off recovery; ordinary UI plans remain
+    # manual offers. Existing plans must keep the safe manual behaviour.
+    "ALTER TABLE restart_plan ADD COLUMN mode TEXT NOT NULL DEFAULT 'offer'",
 ]
+
+
+RestartPlanMode = Literal["offer", "automatic"]
 
 
 class RestartPlan(TypedDict):
@@ -73,6 +80,7 @@ class RestartPlan(TypedDict):
 
     conversation_id: str
     token: str
+    mode: RestartPlanMode
     attachment_ids: list[str]
     debrief: str
     created_at: float
@@ -88,6 +96,7 @@ def _restart_plan_row(row) -> RestartPlan:
     return RestartPlan(
         conversation_id=row["conversation_id"],
         token=row["token"],
+        mode=row["mode"],
         attachment_ids=json.loads(row["attachment_ids"]),
         debrief=row["debrief"],
         created_at=row["created_at"],
@@ -228,19 +237,26 @@ class Db:
         self._exec("UPDATE attachments SET status='exited' WHERE status IN ('starting','running')")
 
     # -- restart plans -----------------------------------------------------
-    def save_restart_plan(self, conversation_id: str, attachment_ids: list[str], debrief: str) -> RestartPlan:
+    def save_restart_plan(
+        self,
+        conversation_id: str,
+        attachment_ids: list[str],
+        debrief: str,
+        mode: RestartPlanMode = "offer",
+    ) -> RestartPlan:
         """Replace the sole pending restart intent, preserving attachment order."""
         created_at = time.time()
         token = str(uuid.uuid4())
         self._exec(
-            "INSERT INTO restart_plan(singleton,conversation_id,token,attachment_ids,debrief,created_at)"
-            " VALUES(1,?,?,?,?,?) ON CONFLICT(singleton) DO UPDATE SET"
+            "INSERT INTO restart_plan(singleton,conversation_id,token,mode,attachment_ids,debrief,created_at)"
+            " VALUES(1,?,?,?,?,?,?) ON CONFLICT(singleton) DO UPDATE SET"
             " conversation_id=excluded.conversation_id,"
             " token=excluded.token,"
+            " mode=excluded.mode,"
             " attachment_ids=excluded.attachment_ids,"
             " debrief=excluded.debrief,"
             " created_at=excluded.created_at",
-            (conversation_id, token, json.dumps(attachment_ids), debrief, created_at),
+            (conversation_id, token, mode, json.dumps(attachment_ids), debrief, created_at),
         )
         plan = self.get_restart_plan()
         if plan is None:  # pragma: no cover - a committed INSERT is immediately readable
@@ -253,17 +269,22 @@ class Db:
         row = cur.fetchone()
         return _restart_plan_row(row) if row else None
 
-    def take_restart_plan(self, conversation_id: str, token: str) -> RestartPlan | None:
+    def take_restart_plan(
+        self,
+        conversation_id: str,
+        token: str,
+        mode: RestartPlanMode,
+    ) -> RestartPlan | None:
         """Atomically consume the offer accepted by its original line and tab."""
         with self.lock:
             row = self.conn.execute(
-                "SELECT * FROM restart_plan WHERE singleton=1 AND conversation_id=? AND token=?",
-                (conversation_id, token),
+                "SELECT * FROM restart_plan WHERE singleton=1 AND conversation_id=? AND token=? AND mode=?",
+                (conversation_id, token, mode),
             ).fetchone()
             if row:
                 self.conn.execute(
-                    "DELETE FROM restart_plan WHERE singleton=1 AND conversation_id=? AND token=?",
-                    (conversation_id, token),
+                    "DELETE FROM restart_plan WHERE singleton=1 AND conversation_id=? AND token=? AND mode=?",
+                    (conversation_id, token, mode),
                 )
                 self.conn.commit()
             return _restart_plan_row(row) if row else None
