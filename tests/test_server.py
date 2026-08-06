@@ -3,7 +3,6 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException, WebSocketDisconnect
 
@@ -317,21 +316,22 @@ class FakeRequest:
 
 class ShutdownTest(ServerTest):
     def test_lifespan_starts_automatic_reattachment_without_a_browser(self):
-        automatic = AsyncMock()
-        shutdown = AsyncMock()
+        self.add_attachment("a1", "worker")
+        server.runtime.db.save_restart_plan(
+            "line", ["a1"], "Continue without a browser.", "automatic"
+        )
 
         async def exercise():
-            with (
-                patch.object(server, "_run_automatic_reattachment", automatic),
-                patch.object(server.runtime, "shutdown", shutdown),
-            ):
-                async with server.lifespan(None):
-                    await asyncio.sleep(0)
+            async with server.lifespan(server.app):
+                await server.app.state.automatic_reattach_task
+                self.assertIn("a1", server.runtime.live)
+                self.assertIsNone(server.runtime.db.get_restart_plan())
+                self.assertEqual(server.runtime.sockets, {})
 
         self.arun(exercise())
 
-        automatic.assert_awaited_once_with()
-        shutdown.assert_awaited_once_with()
+        bodies = [message["body"] for message in server.runtime.db.list_messages("line")]
+        self.assertTrue(any("trusted cockpit plan started automatic" in body for body in bodies))
 
     def test_running_processes_lists_live_attachments_with_their_line(self):
         server.runtime.db.add_attachment("a1", "line", "worker", "fake", ["fake"], "/tmp")

@@ -106,6 +106,7 @@ async def _run_automatic_reattachment() -> None:
 async def lifespan(app):
     runtime.db.mark_stale_attachments()
     automatic_task = asyncio.create_task(_run_automatic_reattachment())
+    app.state.automatic_reattach_task = automatic_task
     try:
         yield
     finally:
