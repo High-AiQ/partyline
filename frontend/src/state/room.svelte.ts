@@ -114,9 +114,16 @@ class Room {
     this.attention.clear();
     this.reattachOffer = null;
 
-    wire.connect(conversation.id, this.identity, (event, context) => {
-      this.#onWireEvent(event, context);
-    });
+    wire.connect(
+      conversation.id,
+      this.identity,
+      (event, context) => {
+        this.#onWireEvent(event, context);
+      },
+      () => {
+        void this.resync().catch(ignoreBackgroundFailure);
+      },
+    );
 
     let detail;
     try {
@@ -132,6 +139,32 @@ class Room {
     this.attachments = detail.attachments;
     for (const message of detail.messages) this.#absorb(message);
     void this.loadConversations().catch(ignoreBackgroundFailure);
+  }
+
+  /**
+   * Catch up with the server after the wire came back.
+   *
+   * Events are only delivered to a connected socket, so an outage is a hole in
+   * this tab's knowledge that nothing else fills — `open()` is the only other
+   * thing that fetches, and it runs on line changes, not on recovery. A server
+   * restart lands squarely in that hole: it rewrites every attachment status
+   * with no sockets to tell. The symptom was a process shown as dead while it
+   * was running, cleared only by a manual refresh.
+   *
+   * Attachments are replaced outright because the server is authoritative about
+   * them. Messages are merged, since `#absorb` already dedupes by id and the
+   * feed must not lose anything said while we were away.
+   */
+  async resync(): Promise<void> {
+    const conversation = this.conversation;
+    if (!conversation) return;
+    const epoch = this.#epoch;
+    const detail = await api.conversation(conversation.id);
+    if (epoch !== this.#epoch) return; // the line changed under the fetch
+
+    this.conversation = detail.conversation;
+    this.attachments = detail.attachments;
+    for (const message of detail.messages) this.#absorb(message);
   }
 
   /** Step off the current line without choosing another. */

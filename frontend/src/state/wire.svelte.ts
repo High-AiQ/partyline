@@ -60,6 +60,10 @@ export interface WireOutage {
 
 export type WireEventHandler = (event: WireEvent, context: WireContext) => void;
 
+/** Called when a handshake completes on a line this tab had already joined —
+ *  i.e. after an outage, when whatever the tab believes may be out of date. */
+export type WireResyncHandler = () => void;
+
 export const socketUrl = (convId: string, loc: SocketLocation = location): string =>
   (loc.protocol === "https:" ? "wss://" : "ws://") + loc.host + "/ws/" + convId;
 
@@ -85,6 +89,16 @@ class Wire {
   /** The server said it is going away. Nothing is coming back on its own. */
   stopped = $state(false);
 
+  /**
+   * The line whose handshake has already completed once.
+   *
+   * A *first* hello for a line follows `room.open()`, which has just fetched
+   * everything. A *second* one is a reconnect, and the tab has been deaf for
+   * however long the wire was down — which is exactly when the server rewrote
+   * every attachment status during a restart. That difference is the only
+   * thing this field exists to tell.
+   */
+  #handshakenFor: string | null = null;
   #generation = 0;
   #socket: WebSocket | null = null;
   #graceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -103,7 +117,12 @@ class Wire {
    * @param identity  `{handle, clientId}` for the hello handshake
    * @param onEvent   called with each server event, already parsed
    */
-  connect(convId: string, identity: WireIdentity, onEvent: WireEventHandler): void {
+  connect(
+    convId: string,
+    identity: WireIdentity,
+    onEvent: WireEventHandler,
+    onResync: WireResyncHandler = () => undefined,
+  ): void {
     const generation = ++this.#generation;
     this.#teardown();
     this.ready = false;
@@ -130,6 +149,12 @@ class Wire {
         this.stopped = false;
         this.ready = true;
         this.clearOutage();
+        // Anything that happened while the wire was down reached no tab. The
+        // server is the authority on what is true now, so ask it rather than
+        // carrying on with a picture assembled before the outage.
+        const reconnected = this.#handshakenFor === convId;
+        this.#handshakenFor = convId;
+        if (reconnected) onResync();
         return;
       }
       if (payload.type === "shutdown") {
@@ -163,7 +188,7 @@ class Wire {
       this.ready = false;
       if (!this.stopped) this.#armOutage();
       this.#retryTimer = setTimeout(() => {
-        if (current() && !this.#claimRejected) this.connect(convId, identity, onEvent);
+        if (current() && !this.#claimRejected) this.connect(convId, identity, onEvent, onResync);
       }, RETRY_MS);
     };
   }
@@ -185,6 +210,7 @@ class Wire {
 
   /** Close for good: leaving the app, or losing the line we were on. */
   disconnect(): void {
+    this.#handshakenFor = null;
     this.#generation++;
     this.#teardown();
     this.ready = false;
