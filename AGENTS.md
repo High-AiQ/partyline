@@ -234,6 +234,10 @@ replaced them:
 - **A green test named “does not block the sequence” proved the timeout behavior.** It passed while
   the old path killed the process; a negative control now asserts the timed-out adapter stays live,
   and cross-process tests exercise the real failure mode.
+- **A cursor, screen, or raw transcript grep proved continuation receipt.** The cursor recorded
+  intent, the screen was transient, and investigation tool traffic forged transcript matches; the
+  authoritative oracle is a per-restart nonce in a structured `user_message` record. When the thing
+  being measured can also produce the evidence, choose a signal the investigation cannot forge.
 
 When a component documents a limit or lifecycle assumption, the dependent code must reference or
 enforce it. A prose warning that has no executable guard is not a completed lesson.
