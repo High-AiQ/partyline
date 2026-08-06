@@ -459,6 +459,7 @@ class ServerTest(unittest.TestCase):
         self.arun(server.ws_endpoint(socket, "line"))
         self.assertEqual([event["type"] for event in socket.sent], ["error", "hello", "error", "message"])
         self.assertEqual(socket.sent[1]["build"], server.FRONTEND_BUILD)
+        self.assertEqual(socket.sent[1]["version"], server.__version__)
         self.assertEqual(server.runtime.db.list_messages("line")[-1]["body"], "hello")
         self.assertEqual(server.runtime.human_handles, {})
 

@@ -217,7 +217,8 @@ class ChatRuntime:
         self,
         ws: WebSocket,
         conv_id: str,
-        frontend_build: str = "",
+        frontend_build: str,
+        server_version: str,
         reattacher: ReattachCoordinator | None = None,
     ):
         await ws.accept()
@@ -273,6 +274,7 @@ class ChatRuntime:
                             conversation_id=conv_id,
                             handle=handle,
                             build=frontend_build or None,
+                            version=server_version,
                         ).model_dump(exclude_none=True)
                     )
                     if reattacher is not None and (offer := reattacher.offer(conv_id)):

@@ -654,8 +654,9 @@ async def ws_endpoint(ws: WebSocket, conv_id: str):
     await runtime.websocket(
         ws,
         conv_id,
-        FRONTEND_BUILD,
-        ReattachCoordinator(runtime, _resume_adapter),
+        frontend_build=FRONTEND_BUILD,
+        server_version=__version__,
+        reattacher=ReattachCoordinator(runtime, _resume_adapter),
     )
 
 

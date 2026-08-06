@@ -177,6 +177,7 @@ class HelloEvent(BaseModel):
     conversation_id: str
     handle: str
     build: str | None = None
+    version: str
 
 
 class ReattachOfferEvent(BaseModel):
