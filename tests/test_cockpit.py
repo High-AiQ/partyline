@@ -163,29 +163,52 @@ class AdapterStoreTest(unittest.TestCase):
         self.cockpit.git = fake
 
     def test_no_store_is_not_a_finding(self):
-        self.assertEqual(self.cockpit.check_adapter_store(Path("/nonexistent/store")), [])
+        nowhere = Path("/nonexistent/store")
+        self.assertEqual(self.cockpit.check_adapter_store(nowhere, nowhere), [])
 
     def test_a_dirty_adapter_checkout_blocks_a_restart(self):
-        self.stub({"status": " M adapters/codex/adapter.py"})
+        self.stub({"status": " M adapters/codex/adapter.py", "branch": "  origin/master"})
         with tempfile.TemporaryDirectory() as store:
             (Path(store) / "partyline-adapters" / ".git").mkdir(parents=True)
-            findings = self.cockpit.check_adapter_store(Path(store))
+            findings = self.cockpit.check_adapter_store(Path(store), Path("/nonexistent/sources"))
         self.assertTrue(findings)
         self.assertIn("partyline-adapters", findings[0].problem)
 
-    def test_an_unpushed_adapter_checkout_blocks_a_restart(self):
-        # Committed but only here is still "runs code nobody else can get".
-        self.stub({"status": "", "rev-parse": ["localsha", "othersha"]})
+    def test_a_clean_published_adapter_checkout_passes(self):
+        # Detached at a commit some remote has: the normal, correct state of a
+        # deployment target. Demanding a tracking branch here was this guard's
+        # own first false positive.
+        self.stub({"status": "", "branch": "  origin/master", "rev-parse": "samesha"})
         with tempfile.TemporaryDirectory() as store:
             (Path(store) / "partyline-adapters" / ".git").mkdir(parents=True)
-            findings = self.cockpit.check_adapter_store(Path(store))
-        self.assertTrue(any("upstream" in f.problem for f in findings), findings)
+            self.assertEqual(self.cockpit.check_adapter_store(Path(store), Path("/nonexistent/sources")), [])
 
-    def test_a_clean_pushed_adapter_checkout_passes(self):
-        self.stub({"status": "", "rev-parse": "samesha"})
-        with tempfile.TemporaryDirectory() as store:
+    def test_the_top_level_check_actually_invokes_drift(self):
+        """The helper existed and was tested for a while before anything called
+        it. A tested helper nobody invokes is decorative: it proves the function
+        works, not that the preflight uses it."""
+        self.stub({"status": "", "branch": "  origin/master",
+                   "rev-parse": ["installed", "source"]})
+        with tempfile.TemporaryDirectory() as store, tempfile.TemporaryDirectory() as root:
             (Path(store) / "partyline-adapters" / ".git").mkdir(parents=True)
-            self.assertEqual(self.cockpit.check_adapter_store(Path(store)), [])
+            (Path(root) / "partyline-adapters" / ".git").mkdir(parents=True)
+            findings = self.cockpit.check_adapter_store(Path(store), Path(root))
+        self.assertTrue(any("its source at" in f.problem for f in findings), findings)
+
+    def test_a_missing_source_checkout_is_not_a_finding(self):
+        # Deploying without the source present is legitimate; only disagreement
+        # between two present copies is evidence of anything.
+        self.stub({"status": "", "branch": "  origin/master", "rev-parse": "same"})
+        with tempfile.TemporaryDirectory() as store, tempfile.TemporaryDirectory() as root:
+            (Path(store) / "partyline-adapters" / ".git").mkdir(parents=True)
+            self.assertEqual(self.cockpit.check_adapter_store(Path(store), Path(root)), [])
+
+    def test_a_commit_no_remote_has_blocks_a_restart(self):
+        self.stub({"status": "", "branch": "", "rev-parse": "same"})
+        with tempfile.TemporaryDirectory() as store, tempfile.TemporaryDirectory() as root:
+            (Path(store) / "partyline-adapters" / ".git").mkdir(parents=True)
+            findings = self.cockpit.check_adapter_store(Path(store), Path(root))
+        self.assertTrue(any("no remote has" in f.problem for f in findings), findings)
 
     def test_drift_between_installed_and_source_is_reported(self):
         self.stub({"rev-parse": ["installedsha", "sourcesha"]})

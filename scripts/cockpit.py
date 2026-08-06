@@ -56,6 +56,10 @@ RELOADABLE = ("partyline/adapters/",)
 # running server, so they are as load-bearing as anything in this repository —
 # and until this check existed, nothing verified them at all.
 ADAPTER_STORE = Path(os.environ.get("PARTYLINE_ADAPTERS_DIR", "~/.partyline/adapters")).expanduser()
+# Where the *authoritative* checkouts of those adapters live, by convention
+# `<root>/<same directory name>`. The installed copy is a deployment artefact;
+# this is the thing anyone actually reviews and pushes.
+ADAPTER_SOURCE_ROOT = Path(os.environ.get("PARTYLINE_ADAPTER_SOURCES", "~/code")).expanduser()
 
 
 class ResponseOpener(Protocol):
@@ -177,7 +181,15 @@ def adapter_checkouts(store: Path = ADAPTER_STORE) -> list[Path]:
     return sorted(path for path in store.iterdir() if (path / ".git").is_dir())
 
 
-def check_adapter_store(store: Path = ADAPTER_STORE) -> list[Finding]:
+def adapter_source(checkout: Path, root: Path = ADAPTER_SOURCE_ROOT) -> Path | None:
+    """The authoritative checkout for an installed adapter, if it is on this box."""
+    candidate = root / checkout.name
+    return candidate if (candidate / ".git").is_dir() else None
+
+
+def check_adapter_store(
+    store: Path = ADAPTER_STORE, source_root: Path = ADAPTER_SOURCE_ROOT
+) -> list[Finding]:
     """The code the server actually runs must exist somewhere reproducible.
 
     Adapters are imported into a local store and executed as us. Nothing about
@@ -194,18 +206,34 @@ def check_adapter_store(store: Path = ADAPTER_STORE) -> list[Finding]:
     for checkout in adapter_checkouts(store):
         label = f"adapter repository {checkout.name}"
         findings += check_tree_clean(checkout, label, untracked=True)
+        # Ask whether the running commit exists on a remote, not whether this
+        # checkout tracks a branch. An installed store is a deployment target:
+        # it is legitimately a detached clone pinned to one commit, exactly like
+        # the cockpit. Demanding a tracking branch here confuses "reproducible"
+        # with "someone's working copy" — the same category error that made an
+        # earlier version of this file refuse a perfectly good deployment.
         try:
-            head = git("rev-parse", "HEAD", cwd=checkout)
-            upstream = git("rev-parse", "@{u}", cwd=checkout)
-        except RuntimeError:
-            findings.append(Finding(
-                f"{label} has no upstream to compare against",
-                f"push it, or set one: git -C {checkout} branch --set-upstream-to=origin/main"))
+            remote_refs = git("branch", "-r", "--contains", "HEAD", cwd=checkout)
+        except RuntimeError as exc:
+            findings.append(Finding(f"{label} cannot be inspected: {exc}",
+                                    f"check that {checkout} is a usable git checkout"))
             continue
-        if head != upstream:
+        if not remote_refs.strip():
             findings.append(Finding(
-                f"{label} does not match its upstream",
-                f"push or reset it in {checkout} — the server runs this code"))
+                f"{label} runs a commit no remote has",
+                "push it from its source repository — nobody else can obtain "
+                "the code the server is executing"))
+
+        # The two roles have different obligations. The installed copy must be
+        # clean and identical; the source must additionally be somewhere a
+        # reviewer can reach. Checking only one of them is how a fix lived in
+        # the runtime copy alone for hours while every test passed against a
+        # source that had never seen it.
+        source = adapter_source(checkout, source_root)
+        if source is None:
+            continue
+        findings += check_tree_clean(source, f"{label} source", untracked=True)
+        findings += check_adapter_drift(checkout, source)
     return findings
 
 
