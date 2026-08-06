@@ -51,6 +51,13 @@ class Session {
     }
   }
 
+  /** The release the socket just told us it is. Required on every hello, so
+   *  there is no "leave whatever the badge already said" branch — keeping one
+   *  is how the badge stayed on `v0.21.1` against a `v0.21.3` server. */
+  acceptServerVersion(version: string): void {
+    this.version = version;
+  }
+
   async loadAdapters(): Promise<void> {
     try {
       this.adapters = await api.adapters();

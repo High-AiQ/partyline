@@ -86,6 +86,32 @@ class WireStateTest(unittest.TestCase):
             self.assertEqual(page.url.split("#", 1)[1], route)
             self.assertEqual(page.locator("#input").input_value(), "keep this unfinished thought")
 
+    def test_same_frontend_build_refreshes_version_without_reloading(self):
+        with ui_session(["alpha line"]) as ui:
+            page = ui.page
+            page.locator(".conv-row .conv").first.click()
+            page.locator("#ver").wait_for(state="visible")
+            build = page.evaluate(
+                "() => fetch('/api/version').then(response => response.json()).then(x => x.build)"
+            )
+
+            page.evaluate("() => { window.__partylineReloadControl = true; }")
+            page.evaluate(
+                """([build]) => {
+                  const conversation_id = window.partyline.room.conversation.id;
+                  const handle = window.partyline.session.handle;
+                  window.partyline.wire.socket.dispatchEvent(new MessageEvent('message', {
+                    data: JSON.stringify({
+                      type: 'hello', conversation_id, handle, build, version: '9.9.9',
+                    }),
+                  }));
+                }""",
+                [build],
+            )
+
+            page.wait_for_function("() => document.querySelector('#ver')?.textContent === 'v9.9.9'")
+            self.assertTrue(page.evaluate("() => window.__partylineReloadControl"))
+
     def test_a_shutdown_event_waits_then_reconnects_without_reloading(self):
         """A deliberate stop stays honest while still noticing the restart."""
         with ui_session(["alpha line"]) as ui:

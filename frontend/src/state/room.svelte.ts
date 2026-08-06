@@ -123,6 +123,9 @@ class Room {
       () => {
         void this.resync().catch(ignoreBackgroundFailure);
       },
+      (hello) => {
+        session.acceptServerVersion(hello.version);
+      },
     );
 
     let detail;

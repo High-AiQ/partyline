@@ -165,8 +165,28 @@ export const HelloEventSchema = z.object({
   conversation_id: z.string(),
   handle: z.string(),
   build: z.string().optional(),
+  // Required, not optional. "Version missing, keep whatever the badge already
+  // said" is precisely the bug being removed here — a tab showed v0.21.1
+  // against a v0.21.3 server for hours and nothing was wrong enough to notice.
+  version: z.string(),
 });
 export type HelloEvent = z.infer<typeof HelloEventSchema>;
+
+/**
+ * Just enough of a hello to decide whether this document is simply out of date.
+ *
+ * Deliberately laxer than `HelloEventSchema`, and used only after strict
+ * decoding has already failed. A server old enough to omit a required field is
+ * usually also serving a different bundle — and that tab does not need an error,
+ * it needs to reload into the client that matches. Rejecting it strictly first
+ * would strand the one case that can repair itself.
+ */
+export const LegacyHelloSchema = z.object({
+  type: z.literal("hello"),
+  conversation_id: z.string(),
+  build: z.string().optional(),
+});
+export type LegacyHello = z.infer<typeof LegacyHelloSchema>;
 
 export const MessageEventSchema = z.object({
   type: z.literal("message"),

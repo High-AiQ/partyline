@@ -7,6 +7,7 @@
   import { room } from "../../state/room.svelte";
   import { session } from "../../state/session.svelte";
   import { dialogs } from "../../state/dialogs.svelte";
+  import { describeBuild } from "../../lib/build";
   import RenameLineDialog from "../dialogs/RenameLineDialog.svelte";
   import DeleteLineDialog from "../dialogs/DeleteLineDialog.svelte";
   import PurgeLineDialog from "../dialogs/PurgeLineDialog.svelte";
@@ -44,7 +45,11 @@
     <h1>party<em>line</em></h1>
     <p>
       humans &amp; processes, one wire
-      {#if session.version}<span id="ver">v{session.version}</span>{/if}
+      {#if session.version}<span
+          id="ver"
+          title="server v{session.version} · this tab: {describeBuild(__PARTYLINE_BUILD__)}"
+          >v{session.version}</span
+        >{/if}
     </p>
   </div>
 

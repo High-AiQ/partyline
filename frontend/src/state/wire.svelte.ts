@@ -30,8 +30,15 @@ import {
   WireHelloCommandSchema,
   WireMessageCommandSchema,
   WireReattachCommandSchema,
+  LegacyHelloSchema,
 } from "../lib/contracts";
-import type { ReattachAction, WireEvent, WireHelloCommand, WireMessageCommand } from "../lib/contracts";
+import type {
+  HelloEvent,
+  ReattachAction,
+  WireEvent,
+  WireHelloCommand,
+  WireMessageCommand,
+} from "../lib/contracts";
 
 export const GRACE_MS = 3000;
 export const RETRY_MS = 1500;
@@ -64,6 +71,10 @@ export type WireEventHandler = (event: WireEvent, context: WireContext) => void;
  *  i.e. after an outage, when whatever the tab believes may be out of date. */
 export type WireResyncHandler = () => void;
 
+/** Receives server identity after every successful handshake. Build identity
+ * decides reload; metadata such as version must still refresh when it does not. */
+export type WireHandshakeHandler = (hello: HelloEvent) => void;
+
 export const socketUrl = (convId: string, loc: SocketLocation = location): string =>
   (loc.protocol === "https:" ? "wss://" : "ws://") + loc.host + "/ws/" + convId;
 
@@ -73,6 +84,22 @@ function helloCommand(identity: WireIdentity): WireHelloCommand {
     handle: identity.handle,
     client_id: identity.clientId,
   });
+}
+
+/**
+ * Could an unreadable frame just be an older server telling us to reload?
+ *
+ * Answers only that question, and only for a hello on this line. Anything else
+ * unparseable is a genuine contract failure and must be reported as one.
+ */
+function staleBundle(data: unknown, convId: string): boolean {
+  if (typeof data !== "string") return false;
+  try {
+    const hello = LegacyHelloSchema.parse(JSON.parse(data));
+    return hello.conversation_id === convId && buildChanged(__PARTYLINE_BUILD__, hello.build);
+  } catch {
+    return false;
+  }
 }
 
 function decodeWireEvent(data: unknown): WireEvent {
@@ -122,6 +149,7 @@ class Wire {
     identity: WireIdentity,
     onEvent: WireEventHandler,
     onResync: WireResyncHandler = () => undefined,
+    onHandshake: WireHandshakeHandler = () => undefined,
   ): void {
     const generation = ++this.#generation;
     this.#teardown();
@@ -139,13 +167,40 @@ class Wire {
 
     socket.onmessage = (event: MessageEvent<unknown>) => {
       if (!current()) return;
-      const payload = decodeWireEvent(event.data);
+      let payload: WireEvent;
+      try {
+        payload = decodeWireEvent(event.data);
+      } catch (failure: unknown) {
+        // A frame this tab cannot parse is not a network problem, and must not
+        // be reported as one. Every required field added to the wire makes an
+        // older server unintelligible to a newer bundle — routine under
+        // `npm run dev`, which proxies to whatever server happens to be up —
+        // and without this the socket is fine, `ready` never arrives, and the
+        // tab insists "the wire is down" forever while blaming the network.
+        // Order matters. A tab whose bundle is merely old should reload into
+        // the matching client rather than be told it is broken, so the stale
+        // build is checked *before* the frame is declared unreadable.
+        if (staleBundle(event.data, convId)) {
+          location.reload();
+          return;
+        }
+        this.reportIncompatible(failure);
+        // Terminal for this socket, not merely terminal-looking. Closing alone
+        // is not enough: already-queued or synthetic events would still pass
+        // `current()`. Bumping the generation invalidates this handler the way
+        // `disconnect()` does, so no later frame — even a well-formed one — can
+        // move the badge or readiness on a connection we cannot understand.
+        this.#generation++;
+        this.#teardown();
+        return;
+      }
 
       if (payload.type === "hello" && payload.conversation_id === convId) {
         if (buildChanged(__PARTYLINE_BUILD__, payload.build)) {
           location.reload();
           return;
         }
+        onHandshake(payload);
         this.stopped = false;
         this.ready = true;
         this.clearOutage();
@@ -188,7 +243,9 @@ class Wire {
       this.ready = false;
       if (!this.stopped) this.#armOutage();
       this.#retryTimer = setTimeout(() => {
-        if (current() && !this.#claimRejected) this.connect(convId, identity, onEvent, onResync);
+        if (current() && !this.#claimRejected) {
+          this.connect(convId, identity, onEvent, onResync, onHandshake);
+        }
       }, RETRY_MS);
     };
   }
@@ -215,6 +272,27 @@ class Wire {
     this.#teardown();
     this.ready = false;
     this.#claimRejected = false;
+  }
+
+  /** Say that the server is speaking a protocol this document does not know. */
+  reportIncompatible(failure: unknown): void {
+    if (this.#graceTimer) clearTimeout(this.#graceTimer);
+    this.#graceTimer = null;
+    this.ready = false;
+    // `stopped` suppresses the reconnect timer and the "reconnecting…" banner;
+    // retrying cannot help, since the server will not become compatible by
+    // being asked again.
+    this.stopped = true;
+    this.outage = {
+      // Names what is true — the two sides disagree about the protocol —
+      // rather than guessing which side is wrong. "This tab is out of date"
+      // would be a diagnosis, and a wrong one whenever the server is the stale
+      // party or the mismatch is a defect: reloading would then reproduce it
+      // forever while sounding like a fix.
+      message: "client/server protocol mismatch — reload a matching build to continue",
+      stopped: true,
+    };
+    console.error("partyline: unreadable frame from the server", failure);
   }
 
   reportStopped(): void {
