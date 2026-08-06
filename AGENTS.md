@@ -227,8 +227,10 @@ replaced them:
   *settling*, while an explicit `False` readiness result remains a failure.
 - **A build-id reload kept every tab's state current.** A Python-only restart left stale messages and
   LEDs; a successful wire re-handshake now re-fetches the current line detail and merges messages.
-- **The visual harness's fixed scratch directories were safe to share.** Concurrent checks corrupted
-  captures and invented differences; each run now stages privately and refuses overlap with a lock.
+- **A fixed scratch path two agents can write was safe to share.** Concurrent visual checks corrupted
+  captures and invented differences; any such tool is worse than no tool until each run stages
+  privately and refuses overlap with a lock. We also reported contaminated output before checking
+  whether the result was plausible; conflicting or surprising evidence must be investigated first.
 - **A green test named “does not block the sequence” proved the timeout behavior.** It passed while
   the old path killed the process; a negative control now asserts the timed-out adapter stays live,
   and cross-process tests exercise the real failure mode.
