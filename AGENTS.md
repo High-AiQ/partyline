@@ -217,6 +217,25 @@ This protocol is part of recursive self-improvement: the system should become ha
 each incident, while preserving enough evidence for the next agent to understand why the guard
 exists.
 
+### What we got wrong
+
+These are durable false assumptions from dogfooding, paired with the evidence and guard that
+replaced them:
+
+- **A 90-second readiness timeout proved a resume failed.** Codex documents that a resumed rollout
+  may appear many minutes later; timed-out but live adapters now remain attached and are reported as
+  *settling*, while an explicit `False` readiness result remains a failure.
+- **A build-id reload kept every tab's state current.** A Python-only restart left stale messages and
+  LEDs; a successful wire re-handshake now re-fetches the current line detail and merges messages.
+- **The visual harness's fixed scratch directories were safe to share.** Concurrent checks corrupted
+  captures and invented differences; each run now stages privately and refuses overlap with a lock.
+- **A green test named “does not block the sequence” proved the timeout behavior.** It passed while
+  the old path killed the process; a negative control now asserts the timed-out adapter stays live,
+  and cross-process tests exercise the real failure mode.
+
+When a component documents a limit or lifecycle assumption, the dependent code must reference or
+enforce it. A prose warning that has no executable guard is not a completed lesson.
+
 Always test with a throwaway database and port, never a person's normal local database. Use an
 inexpensive, short-running test configuration. Keep secrets in `.env` and pass any test-only
 credentials only to the process command; never add them to shell profiles, source, or commits.
