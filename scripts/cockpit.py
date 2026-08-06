@@ -17,8 +17,8 @@ changed.
     uv run python -m scripts.cockpit plan LINE --manual-offer --debrief "what to continue"
 
 Neither command restarts anything. Stopping the server drops every participant,
-including whoever runs it, so it stays a deliberate act by a person who has
-announced it — see AGENTS.md.
+including whoever runs it, so it stays a deliberate act by an initiator who has
+announced it — human input is not required; see AGENTS.md.
 """
 
 from __future__ import annotations
