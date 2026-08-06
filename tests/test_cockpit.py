@@ -221,6 +221,49 @@ class AdapterStoreTest(unittest.TestCase):
         self.assertEqual(self.cockpit.check_adapter_drift(Path("/installed"), Path("/source")), [])
 
 
+class PendingPlanTest(unittest.TestCase):
+    """A planned restart that never happened must not stay invisible.
+
+    Two of them did. A supervisor reaped before it fired, then a systemd unit
+    whose inline quoting broke its own generation check — both left a plan
+    persisted at `attempt_count` 0 with the old server still serving, and both
+    were discovered by a person asking why a version number had not changed.
+    The second sat unnoticed for ten hours.
+    """
+
+    NOW = 1_000_000.0
+
+    def plan(self, **overrides):
+        return {"attempt_count": 0, "created_at": self.NOW - 1, **overrides}
+
+    def test_no_plan_is_not_a_finding(self):
+        self.assertEqual(self.cockpit_check(None), [])
+
+    def test_a_fresh_plan_is_a_restart_in_flight_not_a_failure(self):
+        # Arming waits 90 seconds; complaining before then would train people
+        # to ignore this.
+        self.assertEqual(self.cockpit_check(self.plan(created_at=self.NOW - 30)), [])
+
+    def test_a_plan_unclaimed_for_hours_is_reported(self):
+        findings = self.cockpit_check(self.plan(created_at=self.NOW - 36_000))
+        self.assertEqual(len(findings), 1)
+        self.assertIn("600 minutes", findings[0].problem)
+        self.assertIn("journalctl", findings[0].fix)
+
+    def test_a_claimed_plan_is_not_stale_however_old(self):
+        """The trigger fired; whatever happened next is the coordinator's
+        business and has its own reporting. This check is only about a restart
+        that never started."""
+        old = self.plan(attempt_count=1, created_at=self.NOW - 36_000)
+        self.assertEqual(self.cockpit_check(old), [])
+
+    @staticmethod
+    def cockpit_check(plan):
+        import scripts.cockpit as cockpit
+
+        return cockpit.check_pending_plan(PendingPlanTest.NOW, plan)
+
+
 class RestartNeededTest(unittest.TestCase):
     """`restart_needed` shells out to git for the diff, so these stub it."""
 

@@ -24,10 +24,12 @@ announced it — human input is not required; see AGENTS.md.
 from __future__ import annotations
 
 import os
+import time
 import re
 import subprocess
 import sys
 from argparse import ArgumentParser
+from collections.abc import Mapping
 from dataclasses import dataclass
 from http.client import HTTPResponse
 from pathlib import Path
@@ -260,6 +262,38 @@ def check_adapter_drift(installed: Path, source: Path) -> list[Finding]:
     return []
 
 
+# How long a plan may sit unclaimed before it is evidence of a failed trigger
+# rather than a restart still in flight. Arming waits 90 seconds; a claim
+# follows within moments of the new server starting.
+STALE_PLAN_SECONDS = 300.0
+
+
+def check_pending_plan(now: float, plan: Mapping[str, object] | None) -> list[Finding]:
+    """Has a restart been planned and then never happened?
+
+    Two dogfood restarts failed at the trigger — a supervisor reaped before it
+    fired, then a systemd unit whose inline quoting broke its own generation
+    check. Both left this exact state: a plan persisted, `attempt_count` still
+    0, nothing claimed, old server still serving. Both went unnoticed for hours
+    because the only symptom was a version badge nobody was looking at, and the
+    second one was discovered by a person asking why the number had not moved.
+
+    An armed restart consumes its plan within a couple of minutes. One that has
+    not is not waiting; it is not coming.
+    """
+    if plan is None:
+        return []
+    if plan.get("attempt_count"):
+        return []  # claimed at least once: the trigger fired, whatever followed
+    age = now - float(plan.get("created_at") or now)
+    if age < STALE_PLAN_SECONDS:
+        return []
+    return [Finding(
+        f"a restart plan has been pending unclaimed for {int(age // 60)} minutes",
+        "the trigger never fired — check `journalctl --user -u partyline-restart*` "
+        "and re-arm, or clear the plan if it is obsolete")]
+
+
 def check_in_sync(cockpit: Path, expected: str) -> list[Finding]:
     at = git("rev-parse", "HEAD", cwd=cockpit)
     if at != expected:
@@ -321,6 +355,24 @@ def schedule_restart_plan(
 # -- commands --------------------------------------------------------------
 
 
+def read_pending_plan() -> Mapping[str, object] | None:
+    """The persisted plan, read straight from the database.
+
+    Deliberately not over HTTP: the case this exists to catch is a server that
+    never restarted, and asking that server would be asking the wrong process
+    about its own replacement.
+    """
+    from partyline.db import Db
+
+    database = os.environ.get("PARTYLINE_DB", os.path.expanduser("~/.partyline.db"))
+    if not Path(database).is_file():
+        return None
+    try:
+        return Db(database).get_restart_plan()
+    except Exception:
+        return None  # a database we cannot read is not evidence of a stale plan
+
+
 def report(findings: list[Finding]) -> int:
     for finding in findings:
         print(f"  ✗ {finding.problem}\n    → {finding.fix}")
@@ -339,6 +391,7 @@ def check(repo: Path = REPO_ROOT) -> int:
         *check_bundle_current(repo),
         *check_pushed(repo),
         *check_adapter_store(),
+        *check_pending_plan(time.time(), read_pending_plan()),
     ]
     return report(findings)
 
