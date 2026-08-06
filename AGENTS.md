@@ -193,6 +193,30 @@ Browser tests live in `tests/ui/` and are excluded from `unittest discover` on p
 missing browser must never break the ordinary suite, and they are not counted toward the
 coverage floor.
 
+## Self-learning protocol
+
+**A surprising failure must become a durable lesson, not just a local fix.** When an agent finds
+that an assumption was wrong, a test passed for the wrong reason, or tooling produced misleading
+evidence:
+
+1. State the observed symptom and the false assumption in the handoff and the relevant code
+   comment or documentation.
+2. Add a regression test, negative control, or diagnostic assertion that fails against the old
+   behavior and proves the new behavior. A green test without its failing control is incomplete
+   evidence.
+3. Make the failure actionable: distinguish a real regression from an unstable capture,
+   environment failure, timeout, or expected visual delta, and report the exact artifact or
+   command that establishes the distinction.
+4. If the lesson concerns shared state, concurrency, or scratch files, isolate each run or refuse
+   unsafe overlap; never let corruption masquerade as a product failure.
+5. Promote a lesson that can recur into the smallest durable guard—code, test, command, or this
+   document—and mention it in the final handoff. Repeated incidents are a signal to strengthen
+   the guard rather than rely on agent memory.
+
+This protocol is part of recursive self-improvement: the system should become harder to fool after
+each incident, while preserving enough evidence for the next agent to understand why the guard
+exists.
+
 Always test with a throwaway database and port, never a person's normal local database. Use an
 inexpensive, short-running test configuration. Keep secrets in `.env` and pass any test-only
 credentials only to the process command; never add them to shell profiles, source, or commits.
