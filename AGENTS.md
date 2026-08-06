@@ -248,7 +248,8 @@ participant in the room — including whoever is doing the work. The rules that 
   load-bearing for CLIs whose concurrent resume discovery can claim the same rollout. Uncommitted
   work in an agent's head does not survive; committed work always does, and chat history plus the
   debrief are replayed on resume. A slow but live adapter remains attached while the sequence
-  advances; a genuine exit is the failure case.
+  advances; a genuine exit is the failure case. The loop must close without a human: a required
+  button or manual refresh is a correctness bug in the dogfood path, not a normal ceremony step.
 - **Nobody may be mid-turn when the restart lands — including whoever triggers it.** An agent
   killed mid-turn comes back to a CLI that resumes the interrupted turn and asks it to continue,
   so it posts a stray fragment into the room on wake. If you schedule the restart with a delayed

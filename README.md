@@ -251,6 +251,8 @@ once an agent has judged the tree safe, committed and pushed it, passed cockpit 
 restart plan, and cleared active turns, the agent may authorize its own dogfood restart. The agent
 then deploys the selected cockpit, schedules the restart, and resumes the planned line without
 waiting for a browser or a person to click through a recovery dialog.
+The loop must close without a human: a required button or manual refresh is a correctness bug in
+the dogfood path, not a normal step in the ceremony.
 
 For a deliberate dogfood restart, the current line can preserve an automatic reattachment plan and
 a continuation debrief. The command is explicit, local, and line-scoped; it does not stop or restart
