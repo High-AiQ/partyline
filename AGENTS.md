@@ -295,6 +295,13 @@ participant in the room — including whoever is doing the work. The rules that 
   debrief are replayed on resume. A slow but live adapter remains attached while the sequence
   advances; a genuine exit is the failure case. The loop must close without a human: a required
   button or manual refresh is a correctness bug in the dogfood path, not a normal ceremony step.
+- **The dogfood cornerstone is proof, not permission.** A restart may be armed only after machine
+  preflight is green, every participant has explicitly cleared, and no known finding remains; any
+  agent may block it. Automatic recovery must claim the persisted plan through a durable exclusive
+  lease with expiry and reclaim, then reattach sequentially and re-sync open tabs. Green local gates
+  are necessary but not sufficient: the same workflow must run on the real cockpit, and the
+  post-restart proof must include each process's identity, live attachment state, plan completion,
+  and an honest transcript with no unexplained warnings.
 - **Nobody may be mid-turn when the restart lands — including whoever triggers it.** An agent
   killed mid-turn comes back to a CLI that resumes the interrupted turn and asks it to continue,
   so it posts a stray fragment into the room on wake. If you schedule the restart with a delayed
