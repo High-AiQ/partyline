@@ -242,6 +242,11 @@ replaced them:
 When a component documents a limit or lifecycle assumption, the dependent code must reference or
 enforce it. A prose warning that has no executable guard is not a completed lesson.
 
+The recurring root failure is **the code or tool running was not the code or tool being reasoned
+about**: a stale cockpit, an uncommitted adapter, or two harnesses sharing scratch paths. Every
+authoritative-artifact boundary must therefore be checked by the machine before a restart or proof;
+agent memory and a clean main checkout are not enough.
+
 Always test with a throwaway database and port, never a person's normal local database. Use an
 inexpensive, short-running test configuration. Keep secrets in `.env` and pass any test-only
 credentials only to the process command; never add them to shell profiles, source, or commits.
