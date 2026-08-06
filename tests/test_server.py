@@ -1,6 +1,8 @@
 import asyncio
+from contextlib import asynccontextmanager, contextmanager
 import os
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -12,11 +14,13 @@ from partyline.runtime import ChatRuntime
 
 
 class FakeAdapter:
-    def __init__(self, fail_start=False, fail_delivery=False):
+    def __init__(self, fail_start=False, fail_delivery=False, on_status=None, att=None):
         self.deliveries = []
         self.stopped = False
         self.fail_start = fail_start
         self.fail_delivery = fail_delivery
+        self.on_status = on_status
+        self.att = att or {}
         self.keys = []
 
     async def deliver(self, messages):
@@ -33,9 +37,13 @@ class FakeAdapter:
     async def start(self):
         if self.fail_start:
             raise RuntimeError("nope")
+        if self.on_status:
+            await self.on_status("running")
 
     async def stop(self):
         self.stopped = True
+        if self.on_status:
+            await self.on_status("detached")
 
     async def wait_ready(self):
         return True
@@ -47,6 +55,54 @@ class FakeAdapter:
         if key == "bad":
             raise ValueError("bad key")
         self.keys.append(key)
+
+
+class ReplacingDeliveryAdapter(FakeAdapter):
+    """Try to replace this activation at the first instruction of delivery."""
+
+    def __init__(self, replacement, attachment_id, transition="stale", **kwargs):
+        super().__init__(**kwargs)
+        self.replacement = replacement
+        self.attachment_id = attachment_id
+        self.transition = transition
+        self.lock_attempted = threading.Event()
+        self.replacement_finished = threading.Event()
+        self.replacement_crossed_before_write = False
+        self.replacement_task = None
+
+    def replace(self):
+        original_guard = self.replacement._runtime_serialized
+
+        @contextmanager
+        def signalled_guard():
+            self.lock_attempted.set()
+            with original_guard():
+                yield
+
+        self.replacement._runtime_serialized = signalled_guard
+        if self.transition == "stale":
+            self.replacement.mark_stale_attachments()
+        else:
+            self.replacement.set_attachment_status(
+                self.attachment_id, "exited", "old-generation"
+            )
+        self.replacement.claim_attachment(self.attachment_id, "new-generation")
+        self.replacement.set_attachment_status(
+            self.attachment_id, "running", "new-generation"
+        )
+        self.replacement_finished.set()
+
+    async def deliver(self, messages):
+        self.replacement_task = asyncio.create_task(asyncio.to_thread(self.replace))
+        await asyncio.to_thread(self.lock_attempted.wait)
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(self.replacement_finished.wait), timeout=0.05
+            )
+        except TimeoutError:
+            pass
+        self.replacement_crossed_before_write = self.replacement_finished.is_set()
+        self.deliveries.append(messages)
 
 
 class JsonRequest:
@@ -93,7 +149,9 @@ class ServerTest(unittest.TestCase):
             "requires": [],
             "capabilities": {"resume": True},
         }
-        server.make_adapter = lambda *args, **kwargs: FakeAdapter()
+        server.make_adapter = lambda _, att, __, on_status, **kwargs: FakeAdapter(
+            on_status=on_status, att=att
+        )
         self.conv = server.runtime.db.create_conversation("line", "Line")
 
     def tearDown(self):
@@ -117,7 +175,7 @@ class ServerTest(unittest.TestCase):
     def add_attachment(self, ident, name="terra", status="running"):
         server.runtime.db.add_attachment(
             ident, "line", name, "fake", ["fake"], self.directory.name)
-        server.runtime.db.set_attachment_status(ident, status)
+        server.runtime.db.set_attachment_status(ident, status, None)
 
     def test_route_mentions_all_punctuation_self_and_unreachable(self):
         self.add_attachment("one", "terra")
@@ -151,6 +209,245 @@ class ServerTest(unittest.TestCase):
             self.arun(server.runtime.route_mentions("line", message))
 
         self.assertEqual(server.runtime.db.get_attachment("one")["last_seen"], 0)
+
+    def test_stale_adapter_callbacks_cannot_mutate_or_post_after_replacement(self):
+        server.runtime.db.add_attachment(
+            "old",
+            "line",
+            "opus",
+            "fake",
+            ["fake"],
+            self.directory.name,
+            "old-generation",
+        )
+        self.assertTrue(
+            server.runtime.db.set_attachment_status(
+                "old", "running", "old-generation"
+            )
+        )
+        old_status = server.runtime.status_callback(
+            "old", "line", "old-generation"
+        )
+        old_post = server.runtime.post_callback(
+            "old", "line", "old-generation"
+        )
+
+        server.runtime.db.mark_stale_attachments()
+        self.assertTrue(server.runtime.db.claim_attachment("old", "new-generation"))
+        self.assertTrue(
+            server.runtime.db.set_attachment_status(
+                "old", "running", "new-generation"
+            )
+        )
+        self.arun(old_status("detached"))
+        self.arun(old_post("opus", "agent", "stale output"))
+        stale_adapter = FakeAdapter(att={"runtime_owner": "old-generation"})
+        server.runtime.live["old"] = stale_adapter
+        mention = server.runtime.db.add_message(
+            "line", "greg", "human", "@opus continue"
+        )
+        self.arun(server.runtime.route_mentions("line", mention))
+
+        self.assertEqual(server.runtime.db.get_attachment("old")["status"], "running")
+        self.assertEqual(server.runtime.db.get_attachment("old")["last_seen"], 0)
+        self.assertEqual(stale_adapter.deliveries, [])
+        self.assertEqual(server.runtime.db.list_messages("line"), [mention])
+
+    def test_replacement_cannot_cross_owner_validation_before_pty_delivery(self):
+        server.runtime.db.add_attachment(
+            "old",
+            "line",
+            "opus",
+            "fake",
+            ["fake"],
+            self.directory.name,
+            "old-generation",
+        )
+        self.assertTrue(
+            server.runtime.db.set_attachment_status(
+                "old", "running", "old-generation"
+            )
+        )
+        replacement = Db(f"{self.directory.name}/partyline.db")
+        adapter = ReplacingDeliveryAdapter(
+            replacement,
+            "old",
+            att={"runtime_owner": "old-generation"},
+        )
+        server.runtime.live["old"] = adapter
+        message = server.runtime.db.add_message(
+            "line", "greg", "human", "@opus continue"
+        )
+
+        async def deliver_then_wait_for_replacement():
+            await server.runtime.route_mentions("line", message)
+            await adapter.replacement_task
+
+        try:
+            self.arun(deliver_then_wait_for_replacement())
+            self.assertFalse(adapter.replacement_crossed_before_write)
+            self.assertEqual(adapter.deliveries, [[message]])
+            current = replacement.get_attachment("old")
+            self.assertEqual(current["runtime_owner"], "new-generation")
+            self.assertEqual(current["status"], "running")
+        finally:
+            replacement.close()
+
+    def test_exit_cannot_make_attachment_claimable_during_pty_delivery(self):
+        server.runtime.db.add_attachment(
+            "old",
+            "line",
+            "opus",
+            "fake",
+            ["fake"],
+            self.directory.name,
+            "old-generation",
+        )
+        self.assertTrue(
+            server.runtime.db.set_attachment_status(
+                "old", "running", "old-generation"
+            )
+        )
+        replacement = Db(f"{self.directory.name}/partyline.db")
+        adapter = ReplacingDeliveryAdapter(
+            replacement,
+            "old",
+            transition="exit",
+            att={"runtime_owner": "old-generation"},
+        )
+        server.runtime.live["old"] = adapter
+        message = server.runtime.db.add_message(
+            "line", "greg", "human", "@opus continue"
+        )
+
+        async def deliver_then_wait_for_replacement():
+            await server.runtime.route_mentions("line", message)
+            await adapter.replacement_task
+
+        try:
+            self.arun(deliver_then_wait_for_replacement())
+            self.assertFalse(adapter.replacement_crossed_before_write)
+            self.assertEqual(adapter.deliveries, [[message]])
+            current = replacement.get_attachment("old")
+            self.assertEqual(current["runtime_owner"], "new-generation")
+            self.assertEqual(current["status"], "running")
+        finally:
+            replacement.close()
+
+    def test_real_status_callback_waits_for_active_mention_delivery(self):
+        server.runtime.db.add_attachment(
+            "old",
+            "line",
+            "opus",
+            "fake",
+            ["fake"],
+            self.directory.name,
+            "old-generation",
+        )
+        self.assertTrue(
+            server.runtime.db.set_attachment_status(
+                "old", "running", "old-generation"
+            )
+        )
+        replacement = Db(f"{self.directory.name}/partyline.db")
+        replacement_runtime = ChatRuntime(replacement)
+        adapter = FakeAdapter(att={"runtime_owner": "old-generation"})
+        server.runtime.live["old"] = adapter
+        lock_attempted = asyncio.Event()
+        transition_task = None
+        transition_crossed_before_write = False
+        original_async_guard = replacement._runtime_serialized_async
+
+        @asynccontextmanager
+        async def signalled_guard():
+            lock_attempted.set()
+            async with original_async_guard():
+                yield
+
+        replacement._runtime_serialized_async = signalled_guard
+
+        async def exit_then_claim():
+            await replacement_runtime.status_callback(
+                "old", "line", "old-generation"
+            )("exited")
+            self.assertTrue(
+                await replacement.claim_attachment_async("old", "new-generation")
+            )
+            self.assertTrue(
+                await replacement.set_attachment_status_async(
+                    "old", "running", "new-generation"
+                )
+            )
+
+        async def deliver(messages):
+            nonlocal transition_task, transition_crossed_before_write
+            transition_task = asyncio.create_task(exit_then_claim())
+            await lock_attempted.wait()
+            await asyncio.sleep(0.02)
+            transition_crossed_before_write = transition_task.done()
+            adapter.deliveries.append(messages)
+
+        adapter.deliver = deliver
+        message = server.runtime.db.add_message(
+            "line", "greg", "human", "@opus continue"
+        )
+
+        async def deliver_then_wait_for_transition():
+            await server.runtime.route_mentions("line", message)
+            await transition_task
+
+        try:
+            self.arun(deliver_then_wait_for_transition())
+            self.assertFalse(transition_crossed_before_write)
+            self.assertEqual(adapter.deliveries, [[message]])
+            current = replacement.get_attachment("old")
+            self.assertEqual(current["runtime_owner"], "new-generation")
+            self.assertEqual(current["status"], "running")
+        finally:
+            replacement.close()
+
+    def test_real_detach_route_waits_without_blocking_the_event_loop(self):
+        server.runtime.db.add_attachment(
+            "old",
+            "line",
+            "opus",
+            "fake",
+            ["fake"],
+            self.directory.name,
+            "old-generation",
+        )
+        self.assertTrue(
+            server.runtime.db.set_attachment_status(
+                "old", "exited", "old-generation"
+            )
+        )
+
+        async def reserve_then_detach():
+            async with server.runtime.db.reserve_attachment_delivery(
+                "old", "old-generation"
+            ) as reserved:
+                self.assertTrue(reserved)
+                lock_attempted = asyncio.Event()
+                original_async_guard = server.runtime.db._runtime_serialized_async
+
+                @asynccontextmanager
+                async def signalled_guard():
+                    lock_attempted.set()
+                    async with original_async_guard():
+                        yield
+
+                server.runtime.db._runtime_serialized_async = signalled_guard
+                detaching = asyncio.create_task(server.detach("old"))
+                await lock_attempted.wait()
+                await asyncio.sleep(0.02)
+                self.assertFalse(detaching.done())
+            await detaching
+
+        self.arun(reserve_then_detach())
+        self.assertEqual(server.runtime.db.get_attachment("old")["status"], "detached")
+        self.assertEqual(
+            server.runtime.db.list_messages("line")[-1]["body"], "@opus detached"
+        )
 
     def test_websocket_claims_handle_before_messages_and_blocks_impersonation(self):
         socket = StreamWebSocket(
@@ -258,7 +555,7 @@ class ServerTest(unittest.TestCase):
     def test_resume_screen_keys_and_detach(self):
         self.add_attachment("old", status="exited")
         resumed = self.arun(server.resume_attachment("old"))
-        self.assertEqual(resumed["status"], "exited")
+        self.assertEqual(resumed["status"], "running")
         adapter = server.runtime.live["old"]
         self.assertEqual(self.arun(server.attachment_screen("old")), {"screen": "screen"})
         self.assertEqual(self.arun(server.attachment_key("old", server.KeyIn(key="x"))), {"ok": True})
@@ -267,6 +564,46 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(self.arun(server.detach("old")), {"ok": True})
         self.assertTrue(adapter.stopped)
         self.assert_http(404, server.attachment_screen("old"))
+
+    def test_stale_server_cannot_detach_an_attachment_owned_elsewhere(self):
+        server.runtime.db.add_attachment(
+            "other-owner",
+            "line",
+            "worker",
+            "fake",
+            ["fake"],
+            self.directory.name,
+            "old-generation",
+        )
+        server.runtime.db.set_attachment_status(
+            "other-owner", "running", "old-generation"
+        )
+        old_adapter = FakeAdapter(
+            on_status=server.runtime.status_callback(
+                "other-owner", "line", "old-generation"
+            ),
+            att={"runtime_owner": "old-generation"},
+        )
+        server.runtime.live["other-owner"] = old_adapter
+
+        server.runtime.db.mark_stale_attachments()
+        self.assertTrue(
+            server.runtime.db.claim_attachment("other-owner", "new-generation")
+        )
+        self.assertTrue(
+            server.runtime.db.set_attachment_status(
+                "other-owner", "running", "new-generation"
+            )
+        )
+        messages_before = server.runtime.db.list_messages("line")
+
+        self.assert_http(409, server.detach("other-owner"))
+
+        self.assertTrue(old_adapter.stopped)
+        self.assertEqual(
+            server.runtime.db.get_attachment("other-owner")["status"], "running"
+        )
+        self.assertEqual(server.runtime.db.list_messages("line"), messages_before)
 
     def test_presets_and_attention_hook(self):
         self.assert_http(400, server.create_preset(server.PresetIn(title="", name="x", adapter="fake")))
@@ -354,7 +691,7 @@ class ShutdownTest(ServerTest):
 
     def test_running_processes_lists_live_attachments_with_their_line(self):
         server.runtime.db.add_attachment("a1", "line", "worker", "fake", ["fake"], "/tmp")
-        server.runtime.db.set_attachment_status("a1", "running")
+        server.runtime.db.set_attachment_status("a1", "running", None)
         server.runtime.live["a1"] = FakeAdapter()
 
         running = self.arun(server.running())
@@ -363,7 +700,7 @@ class ShutdownTest(ServerTest):
 
     def test_a_detached_attachment_is_not_reported_as_running(self):
         server.runtime.db.add_attachment("a1", "line", "worker", "fake", ["fake"], "/tmp")
-        server.runtime.db.set_attachment_status("a1", "exited")
+        server.runtime.db.set_attachment_status("a1", "exited", None)
 
         self.assertEqual(self.arun(server.running()), [])
 
@@ -379,7 +716,7 @@ class ShutdownTest(ServerTest):
 
     def test_shutdown_reports_what_it_will_stop_and_warns_every_socket(self):
         server.runtime.db.add_attachment("a1", "line", "worker", "fake", ["fake"], "/tmp")
-        server.runtime.db.set_attachment_status("a1", "running")
+        server.runtime.db.set_attachment_status("a1", "running", None)
         server.runtime.live["a1"] = FakeAdapter()
         socket = StreamWebSocket([])
         server.runtime.sockets["line"] = {socket}

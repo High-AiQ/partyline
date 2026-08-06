@@ -280,7 +280,14 @@ class ReattachCoordinator:
                             raise RuntimeError(
                                 "the process exited before accepting its continuation"
                             )
-                        self.runtime.db.set_last_seen(attachment_id, pending[-1]["id"])
+                        if not self.runtime.db.set_last_seen(
+                            attachment_id,
+                            pending[-1]["id"],
+                            adapter.att.get("runtime_owner"),
+                        ):
+                            raise RuntimeError(
+                                "attachment ownership changed before cursor advancement"
+                            )
                         continuation_confirmed = True
 
                     is_ready = await asyncio.wait_for(
@@ -290,8 +297,23 @@ class ReattachCoordinator:
                         raise RuntimeError("the process exited before claiming its session")
 
                     if pending and not resumed.startup_delivery_staged:
-                        await adapter.deliver(pending)
-                        self.runtime.db.set_last_seen(attachment_id, pending[-1]["id"])
+                        runtime_owner = adapter.att.get("runtime_owner")
+                        async with self.runtime.db.reserve_attachment_delivery(
+                            attachment_id, runtime_owner
+                        ) as reserved:
+                            if not reserved:
+                                raise RuntimeError(
+                                    "attachment ownership changed before continuation delivery"
+                                )
+                            await adapter.deliver(pending)
+                            if not self.runtime.db.set_last_seen(
+                                attachment_id,
+                                pending[-1]["id"],
+                                runtime_owner,
+                            ):
+                                raise RuntimeError(
+                                    "attachment ownership changed during continuation delivery"
+                                )
                         continuation_confirmed = True
                     self.runtime.reattaching.discard(attachment_id)
                 except TimeoutError:
@@ -372,4 +394,6 @@ class ReattachCoordinator:
             try:
                 await adapter.stop()
             except Exception:
-                self.runtime.db.set_attachment_status(attachment_id, "exited")
+                await self.runtime.db.set_attachment_status_async(
+                    attachment_id, "exited", adapter.att.get("runtime_owner")
+                )

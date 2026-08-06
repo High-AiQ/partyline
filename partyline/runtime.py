@@ -42,6 +42,11 @@ class ChatRuntime:
         # A planned process is queued behind its durable cursor, not unreachable.
         self.reattaching: set[str] = set()
 
+    @staticmethod
+    def activation_matches(adapter: Adapter, attachment: dict) -> bool:
+        """Whether this process-local adapter owns the shared attachment row."""
+        return adapter.att.get("runtime_owner") == attachment.get("runtime_owner")
+
     def running_processes(self) -> list[dict]:
         """Every live attachment, across every line, newest line first.
 
@@ -51,7 +56,12 @@ class ChatRuntime:
         found = []
         for conv in self.db.list_conversations():
             for att in self.db.list_attachments(conv["id"]):
-                if att["id"] in self.live and att["status"] in ("starting", "running"):
+                adapter = self.live.get(att["id"])
+                if (
+                    adapter is not None
+                    and self.activation_matches(adapter, att)
+                    and att["status"] in ("starting", "running")
+                ):
                     found.append({"name": att["name"], "adapter": att["adapter"],
                                   "conversation": conv["name"]})
         return found
@@ -100,6 +110,12 @@ class ChatRuntime:
             if not addressed or att["name"].lower() == msg["sender"].lower():
                 continue  # not for them, or no self-pings
             adapter = self.live.get(att["id"]) if att["status"] == "running" else None
+            if adapter is not None and not self.activation_matches(adapter, att):
+                # Another server generation owns the running row. This runtime
+                # must neither wake its obsolete local process nor report the
+                # handle as unavailable; the current owner is authoritative.
+                queued.add(att["name"].lower())
+                continue
             if adapter is None:
                 if att["id"] in self.reattaching:
                     queued.add(att["name"].lower())
@@ -110,11 +126,26 @@ class ChatRuntime:
                 if not ring_all and att["name"] not in unreachable:
                     unreachable.append(att["name"])
                 continue
-            delivered.add(att["name"].lower())
             pending = self.db.messages_after(conv_id, att["last_seen"], exclude_sender=att["name"])
             if pending:
-                await adapter.deliver(pending)
-                self.db.set_last_seen(att["id"], pending[-1]["id"])
+                runtime_owner = adapter.att.get("runtime_owner")
+                async with self.db.reserve_attachment_delivery(
+                    att["id"], runtime_owner
+                ) as reserved:
+                    if not reserved:
+                        # Ownership changed after the attachment snapshot was
+                        # read. The current generation will route from the
+                        # durable cursor; never paste into this stale pty.
+                        queued.add(att["name"].lower())
+                        continue
+                    delivered.add(att["name"].lower())
+                    await adapter.deliver(pending)
+                    if not self.db.set_last_seen(
+                        att["id"], pending[-1]["id"], runtime_owner
+                    ):
+                        raise RuntimeError(
+                            "attachment ownership changed during mention delivery"
+                        )
 
         # A handle can have several rows — old detached ones alongside a live one.
         # Only warn about handles that got no delivery at all.
@@ -129,18 +160,31 @@ class ChatRuntime:
                 f"⚠ @{name} was mentioned but is not attached — nothing was delivered",
             )
 
-    def status_callback(self, att_id: str, conv_id: str):
+    def status_callback(self, att_id: str, conv_id: str, runtime_owner: str):
         async def on_status(status: str):
-            self.db.set_attachment_status(att_id, status)
+            if not await self.db.set_attachment_status_async(
+                att_id, status, runtime_owner
+            ):
+                return
             att = self.db.get_attachment(att_id)
             await self.broadcast(
                 conv_id, AttachmentEvent(attachment=AttachmentResponse.model_validate(att)))
 
         return on_status
 
-    def post_callback(self, conv_id: str):
+    def post_callback(
+        self, att_id: str, conv_id: str, runtime_owner: str
+    ):
         async def post(sender: str, sender_type: str, body: str):
-            await self.post_message(conv_id, sender, sender_type, body)
+            msg = self.db.add_owned_message(
+                att_id, runtime_owner, conv_id, sender, sender_type, body
+            )
+            if msg is None:
+                return
+            await self.broadcast(
+                conv_id, MessageEvent(message=MessageResponse.model_validate(msg))
+            )
+            await self.route_mentions(conv_id, msg)
 
         return post
 
@@ -157,7 +201,9 @@ class ChatRuntime:
             except Exception:
                 # A pty that refuses to die must not strand the archive: the row is
                 # already out of `live`, so nothing can route to it either way.
-                self.db.set_attachment_status(att["id"], "exited")
+                await self.db.set_attachment_status_async(
+                    att["id"], "exited", adapter.att.get("runtime_owner")
+                )
         return stopped
 
     def attachment_handle_taken(self, conv_id: str, handle: str) -> bool:

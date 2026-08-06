@@ -1,6 +1,10 @@
 """SQLite persistence for partyline. Small, synchronous, lock-guarded."""
 
+import asyncio
+from contextlib import asynccontextmanager, contextmanager
+import fcntl
 import json
+import os
 import sqlite3
 import threading
 import time
@@ -30,6 +34,7 @@ CREATE TABLE IF NOT EXISTS attachments(
   command TEXT NOT NULL,              -- JSON argv list
   cwd TEXT NOT NULL,
   status TEXT NOT NULL,               -- starting | running | exited | detached
+  runtime_owner TEXT,                 -- one adapter activation; rejects stale callbacks
   last_seen INTEGER NOT NULL DEFAULT 0,  -- id of last message delivered to this agent
   created_at REAL NOT NULL
 );
@@ -78,10 +83,23 @@ MIGRATIONS = [
     "ALTER TABLE restart_plan ADD COLUMN claim_until REAL",
     # A failed continuation may be retried once, but never replayed forever.
     "ALTER TABLE restart_plan ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0",
+    # A retiring server can finish adapter shutdown after its replacement has
+    # already resumed the same attachment. Lifecycle writes are conditional on
+    # this per-activation owner so the old generation cannot clobber the new.
+    "ALTER TABLE attachments ADD COLUMN runtime_owner TEXT",
 ]
 
 
 RestartPlanMode = Literal["offer", "automatic"]
+
+
+class MessageRow(TypedDict):
+    id: int
+    conv_id: str
+    sender: str
+    sender_type: str
+    body: str
+    created_at: float
 
 
 class RestartPlan(TypedDict):
@@ -120,6 +138,12 @@ def _restart_plan_row(row) -> RestartPlan:
 
 class Db:
     def __init__(self, path):
+        self.path = os.path.abspath(os.fspath(path))
+        # SQLite transactions protect rows, but a pty write is outside SQLite.
+        # This cross-process lock makes an ownership transition wait until an
+        # already-authorised delivery has finished, closing the read -> pty
+        # write race between retiring and replacement server generations.
+        self.runtime_lock_path = f"{self.path}.runtime.lock"
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.lock = threading.Lock()
@@ -143,6 +167,56 @@ class Db:
             cur = self.conn.execute(q, args)
             self.conn.commit()
             return cur
+
+    def _open_runtime_lock(self) -> int:
+        return os.open(self.runtime_lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+
+    @contextmanager
+    def _runtime_serialized(self):
+        """Serialize ownership transitions with externally visible effects."""
+        descriptor = self._open_runtime_lock()
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
+
+    @asynccontextmanager
+    async def _runtime_serialized_async(self):
+        """Cancellation-safe async acquisition of the process-shared lock."""
+        descriptor = self._open_runtime_lock()
+        try:
+            while True:
+                try:
+                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    await asyncio.sleep(0.01)
+            yield
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
+
+    @asynccontextmanager
+    async def reserve_attachment_delivery(
+        self, att_id: str, runtime_owner: str | None
+    ):
+        """Hold attachment ownership stable through one pty delivery.
+
+        The lock is deliberately outside SQLite: the protected effect is an
+        adapter write, and holding a database transaction across an ``await``
+        would let unrelated operations join that transaction. Acquisition is
+        non-blocking so another generation cannot freeze this event loop while
+        finishing its own short delivery.
+        """
+        async with self._runtime_serialized_async():
+            with self.lock:
+                row = self.conn.execute(
+                    "SELECT 1 FROM attachments WHERE id=? AND runtime_owner IS ?",
+                    (att_id, runtime_owner),
+                ).fetchone()
+            yield row is not None
 
     # -- conversations -----------------------------------------------------
     def create_conversation(self, conv_id, name):
@@ -194,14 +268,60 @@ class Db:
             self.conn.commit()
 
     # -- messages ----------------------------------------------------------
-    def add_message(self, conv_id, sender, sender_type, body):
+    def add_message(self, conv_id, sender, sender_type, body) -> MessageRow:
         ts = time.time()
         cur = self._exec(
             "INSERT INTO messages(conv_id,sender,sender_type,body,created_at) VALUES(?,?,?,?,?)",
             (conv_id, sender, sender_type, body, ts),
         )
-        return {"id": cur.lastrowid, "conv_id": conv_id, "sender": sender,
-                "sender_type": sender_type, "body": body, "created_at": ts}
+        return MessageRow(
+            id=cur.lastrowid,
+            conv_id=conv_id,
+            sender=sender,
+            sender_type=sender_type,
+            body=body,
+            created_at=ts,
+        )
+
+    def add_owned_message(
+        self,
+        att_id: str,
+        runtime_owner: str | None,
+        conv_id: str,
+        sender: str,
+        sender_type: str,
+        body: str,
+    ) -> MessageRow | None:
+        """Persist adapter output only while that activation owns the row."""
+        created_at = time.time()
+        with self.lock:
+            message = self.conn.execute(
+                "INSERT INTO messages(conv_id,sender,sender_type,body,created_at) "
+                "SELECT ?,?,?,?,? WHERE EXISTS ("
+                "SELECT 1 FROM attachments "
+                "WHERE id=? AND conv_id=? AND runtime_owner IS ?)",
+                (
+                    conv_id,
+                    sender,
+                    sender_type,
+                    body,
+                    created_at,
+                    att_id,
+                    conv_id,
+                    runtime_owner,
+                ),
+            )
+            self.conn.commit()
+            if message.rowcount != 1 or message.lastrowid is None:
+                return None
+            return MessageRow(
+                id=message.lastrowid,
+                conv_id=conv_id,
+                sender=sender,
+                sender_type=sender_type,
+                body=body,
+                created_at=created_at,
+            )
 
     def list_messages(self, conv_id, limit=500):
         cur = self._exec(
@@ -220,12 +340,25 @@ class Db:
         return [dict(r) for r in cur.fetchall()]
 
     # -- attachments -------------------------------------------------------
-    def add_attachment(self, att_id, conv_id, name, adapter, command, cwd):
+    def add_attachment(
+        self, att_id, conv_id, name, adapter, command, cwd, runtime_owner=None
+    ):
         ts = time.time()
         self._exec(
-            "INSERT INTO attachments(id,conv_id,name,adapter,command,cwd,status,created_at)"
-            " VALUES(?,?,?,?,?,?,?,?)",
-            (att_id, conv_id, name, adapter, json.dumps(command), cwd, "starting", ts),
+            "INSERT INTO attachments("
+            "id,conv_id,name,adapter,command,cwd,status,runtime_owner,created_at)"
+            " VALUES(?,?,?,?,?,?,?,?,?)",
+            (
+                att_id,
+                conv_id,
+                name,
+                adapter,
+                json.dumps(command),
+                cwd,
+                "starting",
+                runtime_owner,
+                ts,
+            ),
         )
         return self.get_attachment(att_id)
 
@@ -238,18 +371,120 @@ class Db:
         cur = self._exec("SELECT * FROM attachments WHERE conv_id=? ORDER BY created_at", (conv_id,))
         return [_att_row(r) for r in cur.fetchall()]
 
-    def set_attachment_status(self, att_id, status):
-        self._exec("UPDATE attachments SET status=? WHERE id=?", (status, att_id))
+    def claim_attachment(self, att_id: str, runtime_owner: str) -> bool:
+        """Claim one inactive row for a new adapter activation atomically."""
+        with self._runtime_serialized():
+            return self._claim_attachment(att_id, runtime_owner)
 
-    def set_last_seen(self, att_id, msg_id):
-        self._exec("UPDATE attachments SET last_seen=? WHERE id=? AND last_seen<?", (msg_id, att_id, msg_id))
+    async def claim_attachment_async(self, att_id: str, runtime_owner: str) -> bool:
+        async with self._runtime_serialized_async():
+            return self._claim_attachment(att_id, runtime_owner)
 
-    def set_cli_session(self, att_id, cli_session):
-        self._exec("UPDATE attachments SET cli_session=? WHERE id=?", (cli_session, att_id))
+    def _claim_attachment(self, att_id: str, runtime_owner: str) -> bool:
+        cur = self._exec(
+            "UPDATE attachments SET status='starting',runtime_owner=? "
+            "WHERE id=? AND status NOT IN ('starting','running')",
+            (runtime_owner, att_id),
+        )
+        return cur.rowcount == 1
+
+    def set_attachment_status(self, att_id, status, runtime_owner: str | None) -> bool:
+        """Write lifecycle state unless a newer adapter activation owns the row."""
+        with self._runtime_serialized():
+            return self._set_attachment_status(att_id, status, runtime_owner)
+
+    async def set_attachment_status_async(
+        self, att_id, status, runtime_owner: str | None
+    ) -> bool:
+        async with self._runtime_serialized_async():
+            return self._set_attachment_status(att_id, status, runtime_owner)
+
+    def _set_attachment_status(self, att_id, status, runtime_owner: str | None) -> bool:
+        cur = self._exec(
+            "UPDATE attachments SET status=? WHERE id=? AND runtime_owner IS ?",
+            (status, att_id, runtime_owner),
+        )
+        return cur.rowcount == 1
+
+    def detach_attachment_with_message(
+        self, att_id: str, runtime_owner: str | None, body: str
+    ) -> MessageRow | None:
+        """Detach one inactive activation and persist its notice atomically.
+
+        A replacement may claim the attachment as soon as it is detached. The
+        message belongs in the same transaction as the status transition so a
+        new ``running`` claim can never precede an obsolete "detached" notice.
+        """
+        with self._runtime_serialized():
+            return self._detach_attachment_with_message(att_id, runtime_owner, body)
+
+    async def detach_attachment_with_message_async(
+        self, att_id: str, runtime_owner: str | None, body: str
+    ) -> MessageRow | None:
+        async with self._runtime_serialized_async():
+            return self._detach_attachment_with_message(att_id, runtime_owner, body)
+
+    def _detach_attachment_with_message(
+        self, att_id: str, runtime_owner: str | None, body: str
+    ) -> MessageRow | None:
+        with self.lock:
+            try:
+                attachment = self.conn.execute(
+                    "SELECT conv_id FROM attachments WHERE id=?", (att_id,)
+                ).fetchone()
+                if attachment is None:
+                    return None
+                changed = self.conn.execute(
+                    "UPDATE attachments SET status='detached' "
+                    "WHERE id=? AND status NOT IN ('starting','running') AND runtime_owner IS ?",
+                    (att_id, runtime_owner),
+                )
+                if changed.rowcount != 1:
+                    self.conn.commit()
+                    return None
+                created_at = time.time()
+                message = self.conn.execute(
+                    "INSERT INTO messages(conv_id,sender,sender_type,body,created_at) "
+                    "VALUES(?,?,?,?,?)",
+                    (attachment["conv_id"], "system", "system", body, created_at),
+                )
+                self.conn.commit()
+            except BaseException:
+                self.conn.rollback()
+                raise
+            if message.lastrowid is None:  # pragma: no cover - SQLite assigns this on INSERT
+                return None
+            return MessageRow(
+                id=message.lastrowid,
+                conv_id=attachment["conv_id"],
+                sender="system",
+                sender_type="system",
+                body=body,
+                created_at=created_at,
+            )
+
+    def set_last_seen(self, att_id, msg_id, runtime_owner: str | None) -> bool:
+        cur = self._exec(
+            "UPDATE attachments SET last_seen=MAX(last_seen,?) "
+            "WHERE id=? AND runtime_owner IS ?",
+            (msg_id, att_id, runtime_owner),
+        )
+        return cur.rowcount == 1
+
+    def set_cli_session(self, att_id, cli_session, runtime_owner: str | None) -> bool:
+        cur = self._exec(
+            "UPDATE attachments SET cli_session=? WHERE id=? AND runtime_owner IS ?",
+            (cli_session, att_id, runtime_owner),
+        )
+        return cur.rowcount == 1
 
     def mark_stale_attachments(self):
         """On server boot, anything still marked live belongs to a dead process."""
-        self._exec("UPDATE attachments SET status='exited' WHERE status IN ('starting','running')")
+        with self._runtime_serialized():
+            self._exec(
+                "UPDATE attachments SET status='exited',runtime_owner=NULL "
+                "WHERE status IN ('starting','running')"
+            )
 
     # -- restart plans -----------------------------------------------------
     def save_restart_plan(

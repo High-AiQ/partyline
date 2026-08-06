@@ -1,5 +1,8 @@
+import asyncio
+from contextlib import contextmanager
 import sqlite3
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -9,7 +12,8 @@ from partyline.db import Db
 class DbTest(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
-        self.db = Db(f"{self.directory.name}/partyline.db")
+        self.db_path = f"{self.directory.name}/partyline.db"
+        self.db = Db(self.db_path)
 
     def tearDown(self):
         self.db.close()
@@ -35,15 +39,209 @@ class DbTest(unittest.TestCase):
         self.db.create_conversation("line", "Line")
         attachment = self.db.add_attachment("att", "line", "terra", "fake", ["fake"], "/tmp")
         self.assertEqual(attachment["command"], ["fake"])
-        self.db.set_attachment_status("att", "running")
-        self.db.set_last_seen("att", 9)
-        self.db.set_last_seen("att", 3)
-        self.db.set_cli_session("att", "session")
+        self.db.set_attachment_status("att", "running", None)
+        self.assertTrue(self.db.set_last_seen("att", 9, None))
+        self.assertTrue(self.db.set_last_seen("att", 3, None))
+        self.db.set_cli_session("att", "session", None)
         self.db.mark_stale_attachments()
         attachment = self.db.get_attachment("att")
         self.assertEqual(attachment["status"], "exited")
         self.assertEqual(attachment["last_seen"], 9)
         self.assertEqual(attachment["cli_session"], "session")
+
+    def test_new_activation_rejects_an_old_server_shutdown_write(self):
+        self.db.create_conversation("line", "Line")
+        self.db.add_attachment(
+            "att", "line", "opus", "fake", ["fake"], "/tmp", "old-generation"
+        )
+        self.assertTrue(
+            self.db.set_attachment_status("att", "running", "old-generation")
+        )
+
+        replacement = Db(self.db_path)
+        try:
+            replacement.mark_stale_attachments()
+            self.assertTrue(replacement.claim_attachment("att", "new-generation"))
+            self.assertTrue(
+                replacement.set_attachment_status("att", "running", "new-generation")
+            )
+
+            # The old lifespan releases its port before adapter shutdown is
+            # complete. Its late stop callback must not detach the new process.
+            self.assertFalse(
+                self.db.set_attachment_status("att", "detached", "old-generation")
+            )
+            self.assertFalse(
+                self.db.set_cli_session("att", "stale-session", "old-generation")
+            )
+            self.assertFalse(self.db.set_last_seen("att", 11, "old-generation"))
+            self.assertIsNone(
+                self.db.add_owned_message(
+                    "att",
+                    "old-generation",
+                    "line",
+                    "opus",
+                    "agent",
+                    "stale output",
+                )
+            )
+            self.assertIsNone(
+                self.db.detach_attachment_with_message(
+                    "att", "old-generation", "@opus detached"
+                )
+            )
+            attachment = replacement.get_attachment("att")
+            self.assertEqual(attachment["status"], "running")
+            self.assertEqual(attachment["runtime_owner"], "new-generation")
+            self.assertIsNone(attachment["cli_session"])
+            self.assertEqual(attachment["last_seen"], 0)
+            self.assertEqual(replacement.list_messages("line"), [])
+
+            owned_message = replacement.add_owned_message(
+                "att",
+                "new-generation",
+                "line",
+                "opus",
+                "agent",
+                "current output",
+            )
+            self.assertIsNotNone(owned_message)
+
+            self.assertTrue(
+                replacement.set_attachment_status("att", "exited", "new-generation")
+            )
+            message = replacement.detach_attachment_with_message(
+                "att", "new-generation", "@opus detached"
+            )
+            self.assertIsNotNone(message)
+            self.assertEqual(replacement.get_attachment("att")["status"], "detached")
+            self.assertEqual(
+                replacement.list_messages("line"), [owned_message, message]
+            )
+        finally:
+            replacement.close()
+
+    def test_delivery_reservation_releases_after_an_exception(self):
+        self.db.create_conversation("line", "Line")
+        self.db.add_attachment(
+            "att", "line", "opus", "fake", ["fake"], "/tmp", "old-generation"
+        )
+
+        async def fail_during_delivery():
+            async with self.db.reserve_attachment_delivery(
+                "att", "old-generation"
+            ) as reserved:
+                self.assertTrue(reserved)
+                raise RuntimeError("delivery failed")
+
+        with self.assertRaisesRegex(RuntimeError, "delivery failed"):
+            asyncio.run(fail_during_delivery())
+
+        replacement = Db(self.db_path)
+        try:
+            replacement.mark_stale_attachments()
+            self.assertTrue(replacement.claim_attachment("att", "new-generation"))
+        finally:
+            replacement.close()
+
+    def test_cancelled_delivery_wait_does_not_leak_the_runtime_lock(self):
+        self.db.create_conversation("line", "Line")
+        self.db.add_attachment(
+            "att", "line", "opus", "fake", ["fake"], "/tmp", "old-generation"
+        )
+        contender = Db(self.db_path)
+
+        async def contend_then_cancel():
+            async with self.db.reserve_attachment_delivery(
+                "att", "old-generation"
+            ) as reserved:
+                self.assertTrue(reserved)
+
+                async def wait_for_same_lock():
+                    async with contender.reserve_attachment_delivery(
+                        "att", "old-generation"
+                    ):
+                        self.fail("a second reservation crossed the held lock")
+
+                waiting = asyncio.create_task(wait_for_same_lock())
+                await asyncio.sleep(0.02)
+                waiting.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await waiting
+
+        try:
+            asyncio.run(contend_then_cancel())
+            contender.mark_stale_attachments()
+            self.assertTrue(contender.claim_attachment("att", "new-generation"))
+        finally:
+            contender.close()
+
+    def test_atomic_detach_cannot_cross_an_active_delivery_reservation(self):
+        self.db.create_conversation("line", "Line")
+        self.db.add_attachment(
+            "att", "line", "opus", "fake", ["fake"], "/tmp", "old-generation"
+        )
+        self.assertTrue(
+            self.db.set_attachment_status("att", "exited", "old-generation")
+        )
+        contender = Db(self.db_path)
+        lock_attempted = threading.Event()
+        transition_finished = threading.Event()
+        original_guard = contender._runtime_serialized
+
+        @contextmanager
+        def signalled_guard():
+            lock_attempted.set()
+            with original_guard():
+                yield
+
+        contender._runtime_serialized = signalled_guard
+
+        def detach_then_claim():
+            message = contender.detach_attachment_with_message(
+                "att", "old-generation", "@opus detached"
+            )
+            self.assertIsNotNone(message)
+            self.assertTrue(contender.claim_attachment("att", "new-generation"))
+            transition_finished.set()
+
+        async def reserve_while_detach_starts():
+            async with self.db.reserve_attachment_delivery(
+                "att", "old-generation"
+            ) as reserved:
+                self.assertTrue(reserved)
+                transition = asyncio.create_task(asyncio.to_thread(detach_then_claim))
+                await asyncio.to_thread(lock_attempted.wait)
+                await asyncio.sleep(0.02)
+                self.assertFalse(transition_finished.is_set())
+            await transition
+
+        try:
+            asyncio.run(reserve_while_detach_starts())
+            current = contender.get_attachment("att")
+            self.assertEqual(current["runtime_owner"], "new-generation")
+            self.assertEqual(current["status"], "starting")
+        finally:
+            contender.close()
+
+    def test_detach_rolls_back_when_its_notice_cannot_be_persisted(self):
+        self.db.create_conversation("line", "Line")
+        self.db.add_attachment(
+            "att", "line", "opus", "fake", ["fake"], "/tmp", "generation"
+        )
+        self.assertTrue(self.db.set_attachment_status("att", "exited", "generation"))
+        self.db._exec(
+            "CREATE TRIGGER reject_detach_notice BEFORE INSERT ON messages "
+            "BEGIN SELECT RAISE(ABORT, 'notice rejected'); END"
+        )
+
+        with self.assertRaisesRegex(sqlite3.IntegrityError, "notice rejected"):
+            self.db.detach_attachment_with_message(
+                "att", "generation", "@opus detached"
+            )
+
+        self.assertEqual(self.db.get_attachment("att")["status"], "exited")
+        self.assertEqual(self.db.list_messages("line"), [])
 
     def test_presets_upsert_and_delete(self):
         self.db.save_preset("one", "Zebra", "z", "fake", "run")

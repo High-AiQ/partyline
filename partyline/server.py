@@ -49,6 +49,8 @@ from .contracts import (
     ConversationResponse,
     HookEventRequest,
     LoadedResponse,
+    MessageEvent,
+    MessageResponse,
     OkResponse,
     PresetResponse,
     PurgeResponse,
@@ -440,7 +442,11 @@ async def attach(conv_id: str, body: AttachIn):
         raise HTTPException(400, f"cwd does not exist: {cwd}")
 
     att_id = str(uuid.uuid4())
-    att = runtime.db.add_attachment(att_id, conv_id, body.name, body.adapter, command, cwd)
+    runtime_owner = str(uuid.uuid4())
+    att = runtime.db.add_attachment(
+        att_id, conv_id, body.name, body.adapter, command, cwd, runtime_owner
+    )
+    att["runtime_owner"] = runtime_owner
     att["conv_name"] = conv["name"]
     att["topic"] = conv["topic"]
     att["hook_url"] = _hook_url(att_id)
@@ -448,14 +454,16 @@ async def attach(conv_id: str, body: AttachIn):
     adapter = make_adapter(
         body.adapter,
         att,
-        runtime.post_callback(conv_id),
-        runtime.status_callback(att_id, conv_id),
-        on_cli_session=lambda s: runtime.db.set_cli_session(att_id, s),
+        runtime.post_callback(att_id, conv_id, runtime_owner),
+        runtime.status_callback(att_id, conv_id, runtime_owner),
+        on_cli_session=lambda s: runtime.db.set_cli_session(att_id, s, runtime_owner),
     )
     try:
         await adapter.start()
     except Exception as exc:
-        runtime.db.set_attachment_status(att_id, "exited")
+        await runtime.db.set_attachment_status_async(
+            att_id, "exited", runtime_owner
+        )
         raise HTTPException(500, f"failed to spawn: {exc}") from exc
     runtime.live[att_id] = adapter
 
@@ -493,19 +501,25 @@ async def _resume_adapter(
     att["conv_name"] = conv["name"]
     att["resume"] = True
     att["hook_url"] = _hook_url(att_id)
+    runtime_owner = str(uuid.uuid4())
+    att["runtime_owner"] = runtime_owner
 
     adapter = make_adapter(
         att["adapter"],
         att,
-        runtime.post_callback(att["conv_id"]),
-        runtime.status_callback(att_id, att["conv_id"]),
-        on_cli_session=lambda s: runtime.db.set_cli_session(att_id, s),
+        runtime.post_callback(att_id, att["conv_id"], runtime_owner),
+        runtime.status_callback(att_id, att["conv_id"], runtime_owner),
+        on_cli_session=lambda s: runtime.db.set_cli_session(att_id, s, runtime_owner),
     )
     startup_delivery_staged = adapter.stage_startup_delivery(startup_messages or [])
+    if not await runtime.db.claim_attachment_async(att_id, runtime_owner):
+        raise HTTPException(409, f"'{att['name']}' is already live")
     try:
         await adapter.start()
     except Exception as exc:
-        runtime.db.set_attachment_status(att_id, "exited")
+        await runtime.db.set_attachment_status_async(
+            att_id, "exited", runtime_owner
+        )
         raise HTTPException(500, f"failed to resume: {exc}") from exc
     runtime.live[att_id] = adapter
 
@@ -524,10 +538,20 @@ async def detach(att_id: str):
     adapter = runtime.live.pop(att_id, None)
     if adapter:
         await adapter.stop()
+        runtime_owner = adapter.att.get("runtime_owner")
     else:
-        runtime.db.set_attachment_status(att_id, "detached")
-    await runtime.post_message(
-        att["conv_id"], "system", "system", f"@{att['name']} detached")
+        runtime_owner = att.get("runtime_owner")
+    message = await runtime.db.detach_attachment_with_message_async(
+        att_id, runtime_owner, f"@{att['name']} detached"
+    )
+    if message is None:
+        raise HTTPException(
+            409,
+            "the attachment became live in another server generation; refresh and try again",
+        )
+    await runtime.broadcast(
+        att["conv_id"], MessageEvent(message=MessageResponse.model_validate(message))
+    )
     return {"ok": True}
 
 

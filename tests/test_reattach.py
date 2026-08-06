@@ -1,5 +1,7 @@
 import asyncio
+from contextlib import contextmanager
 import tempfile
+import threading
 import unittest
 from unittest.mock import AsyncMock
 
@@ -21,6 +23,7 @@ class ReadyAdapter:
         self.startup_received = startup_received
         self.deliveries = []
         self.stopped = False
+        self.att = {"runtime_owner": None}
 
     async def deliver(self, messages):
         self.deliveries.append(messages)
@@ -45,6 +48,46 @@ class FailingDeliveryAdapter(ReadyAdapter):
         raise RuntimeError("input was not accepted")
 
 
+class ReplacingDeliveryAdapter(ReadyAdapter):
+    def __init__(self, order, name, replacement, attachment_id):
+        super().__init__(order, name)
+        self.replacement = replacement
+        self.attachment_id = attachment_id
+        self.lock_attempted = threading.Event()
+        self.replacement_finished = threading.Event()
+        self.replacement_crossed_before_write = False
+        self.replacement_task = None
+
+    def replace(self):
+        original_guard = self.replacement._runtime_serialized
+
+        @contextmanager
+        def signalled_guard():
+            self.lock_attempted.set()
+            with original_guard():
+                yield
+
+        self.replacement._runtime_serialized = signalled_guard
+        self.replacement.mark_stale_attachments()
+        self.replacement.claim_attachment(self.attachment_id, "new-generation")
+        self.replacement.set_attachment_status(
+            self.attachment_id, "running", "new-generation"
+        )
+        self.replacement_finished.set()
+
+    async def deliver(self, messages):
+        self.replacement_task = asyncio.create_task(asyncio.to_thread(self.replace))
+        await asyncio.to_thread(self.lock_attempted.wait)
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(self.replacement_finished.wait), timeout=0.05
+            )
+        except TimeoutError:
+            pass
+        self.replacement_crossed_before_write = self.replacement_finished.is_set()
+        await super().deliver(messages)
+
+
 class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -54,7 +97,7 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         self.order = []
         for ident, name in (("one", "sol"), ("two", "terra")):
             self.db.add_attachment(ident, "line", name, "fake", ["fake"], self.directory.name)
-            self.db.set_attachment_status(ident, "exited")
+            self.db.set_attachment_status(ident, "exited", None)
         self.plan = self.db.save_restart_plan(
             "line", ["one", "two"], "Continue the TypeScript review."
         )
@@ -142,6 +185,80 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.db.get_attachment("one")["last_seen"], 0)
         self.assertEqual(self.db.get_attachment("two")["last_seen"], 0)
         self.assertEqual(len(adapters["one"].deliveries), 1)
+
+    async def test_replacement_claim_blocks_fallback_delivery_to_stale_process(self):
+        self.plan["attachment_ids"] = ["one"]
+        adapter = ReadyAdapter(self.order, "sol")
+        adapter.att["runtime_owner"] = "old-generation"
+
+        async def ready_after_replacement():
+            self.assertTrue(
+                self.db.set_attachment_status("one", "exited", "old-generation")
+            )
+            self.assertTrue(self.db.claim_attachment("one", "new-generation"))
+            self.assertTrue(
+                self.db.set_attachment_status("one", "running", "new-generation")
+            )
+            return True
+
+        adapter.wait_ready = ready_after_replacement
+
+        async def resume(attachment_id, _pending):
+            self.assertTrue(
+                self.db.claim_attachment(attachment_id, "old-generation")
+            )
+            self.assertTrue(
+                self.db.set_attachment_status(
+                    attachment_id, "running", "old-generation"
+                )
+            )
+            self.runtime.live[attachment_id] = adapter
+            return ResumedAttachment(adapter, False)
+
+        result = await ReattachCoordinator(self.runtime, resume).run(
+            self.plan, "greg"
+        )
+
+        self.assertEqual(result.failed, ("sol",))
+        self.assertEqual(adapter.deliveries, [])
+        self.assertTrue(adapter.stopped)
+        self.assertEqual(self.db.get_attachment("one")["status"], "running")
+        self.assertEqual(self.db.get_attachment("one")["runtime_owner"], "new-generation")
+        self.assertEqual(self.db.get_attachment("one")["last_seen"], 0)
+
+    async def test_replacement_waits_for_fallback_pty_delivery_reservation(self):
+        self.plan["attachment_ids"] = ["one"]
+        replacement = Db(f"{self.directory.name}/partyline.db")
+        adapter = ReplacingDeliveryAdapter(
+            self.order, "sol", replacement, "one"
+        )
+        adapter.att["runtime_owner"] = "old-generation"
+
+        async def resume(attachment_id, _pending):
+            self.assertTrue(
+                self.db.claim_attachment(attachment_id, "old-generation")
+            )
+            self.assertTrue(
+                self.db.set_attachment_status(
+                    attachment_id, "running", "old-generation"
+                )
+            )
+            self.runtime.live[attachment_id] = adapter
+            return ResumedAttachment(adapter, False)
+
+        try:
+            result = await ReattachCoordinator(self.runtime, resume).run(
+                self.plan, "greg"
+            )
+            await adapter.replacement_task
+            self.assertEqual(result.ready, ("sol",))
+            self.assertFalse(adapter.replacement_crossed_before_write)
+            self.assertEqual(len(adapter.deliveries), 1)
+            current = replacement.get_attachment("one")
+            self.assertEqual(current["runtime_owner"], "new-generation")
+            self.assertEqual(current["status"], "running")
+        finally:
+            replacement.close()
 
     async def test_an_unready_process_is_stopped_before_the_sequence_advances(self):
         adapters = {}
@@ -386,7 +503,7 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
             adapter = ReadyAdapter(self.order, name)
             adapters[attachment_id] = adapter
             self.runtime.live[attachment_id] = adapter
-            self.db.set_attachment_status(attachment_id, "running")
+            self.db.set_attachment_status(attachment_id, "running", None)
             if attachment_id == "one":
                 async def ready_after_post():
                     await self.runtime.post_message(

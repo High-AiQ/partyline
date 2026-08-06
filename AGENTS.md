@@ -238,6 +238,14 @@ replaced them:
   intent, the screen was transient, and investigation tool traffic forged transcript matches; the
   authoritative oracle is a per-restart nonce in a structured `user_message` record. When the thing
   being measured can also produce the evidence, choose a signal the investigation cannot forge.
+- **A replacement server owning a live PTY meant the retiring server could no longer affect it.**
+  Uvicorn releases the listening port before lifespan teardown finishes, so the new server resumed
+  an attachment and reported it ready before the old server's later `stop()` callback rewrote the
+  shared row to `detached`. Every adapter activation now claims a unique runtime owner; lifecycle
+  state, delivery cursors, CLI sessions, and adapter-originated messages are conditional on that
+  owner, so callbacks from an older generation are rejected rather than broadcast as current state.
+  A cross-process reservation also spans owner validation through each PTY write: a read-side owner
+  check alone leaves a check-to-effect race in which replacement can occur before delivery.
 
 When a component documents a limit or lifecycle assumption, the dependent code must reference or
 enforce it. A prose warning that has no executable guard is not a completed lesson.
@@ -332,6 +340,12 @@ participant in the room — including whoever is doing the work. The rules that 
   killed mid-turn comes back to a CLI that resumes the interrupted turn and asks it to continue,
   so it posts a stray fragment into the room on wake. If you schedule the restart with a delayed
   detached command, the delay has to outlast *your own* turn, not just your announcement.
+- **Wait for the exact old server PID to exit before launching its replacement.** A cleared port is
+  not an exit signal: Uvicorn releases the listener before lifespan teardown finishes, which once
+  let the retiring server overwrite a newly resumed attachment. Signal only the PID that owned the
+  port, wait until that PID no longer exists, and only then launch the cockpit. Runtime-owner guards
+  reject late callbacks once both generations support them; they cannot retroactively protect the
+  first deployment from an older binary that still performs unconditional writes.
 - **Adapter changes do not need a restart** — `POST /api/adapters/reload` re-executes adapter
   packages in place. Changes to the base class, loader, server, or frontend do.
 - Prefer changes that make a restart cheaper (resume support, adopting live attachments,
