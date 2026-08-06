@@ -12,14 +12,23 @@ from partyline.runtime import ChatRuntime
 
 
 class FakeAdapter:
-    def __init__(self, fail_start=False):
+    def __init__(self, fail_start=False, fail_delivery=False):
         self.deliveries = []
         self.stopped = False
         self.fail_start = fail_start
+        self.fail_delivery = fail_delivery
         self.keys = []
 
     async def deliver(self, messages):
+        if self.fail_delivery:
+            raise RuntimeError("delivery rejected")
         self.deliveries.append(messages)
+
+    def stage_startup_delivery(self, messages):
+        return False
+
+    async def wait_startup_delivery_received(self):
+        return True
 
     async def start(self):
         if self.fail_start:
@@ -132,6 +141,16 @@ class ServerTest(unittest.TestCase):
         self.arun(server.runtime.route_mentions("line", direct))
         self.assertIn(
             "nothing was delivered", server.runtime.db.list_messages("line")[-1]["body"])
+
+    def test_failed_mention_delivery_does_not_advance_cursor(self):
+        self.add_attachment("one", "terra")
+        server.runtime.live["one"] = FakeAdapter(fail_delivery=True)
+        message = server.runtime.db.add_message("line", "greg", "human", "@terra")
+
+        with self.assertRaisesRegex(RuntimeError, "delivery rejected"):
+            self.arun(server.runtime.route_mentions("line", message))
+
+        self.assertEqual(server.runtime.db.get_attachment("one")["last_seen"], 0)
 
     def test_websocket_claims_handle_before_messages_and_blocks_impersonation(self):
         socket = StreamWebSocket(
