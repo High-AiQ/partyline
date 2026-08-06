@@ -99,7 +99,10 @@ async def _run_automatic_reattachment() -> None:
     try:
         await ReattachCoordinator(runtime, _resume_adapter).run_automatic()
     except Exception:
-        logger.exception("automatic restart-plan reattachment failed")
+        logger.exception(
+            "automatic reattachment stopped unexpectedly; the durable plan was preserved "
+            "and will retry on the next restart"
+        )
 
 
 @asynccontextmanager

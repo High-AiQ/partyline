@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 from partyline.db import Db
 from partyline.reattach import ReattachCoordinator
+from partyline.restart_lease import RestartPlanLeaseLost
 from partyline.runtime import ChatRuntime
 
 
@@ -223,6 +224,9 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.db.get_restart_plan(), automatic)
 
         async def resume(attachment_id):
+            durable = self.db.get_restart_plan()
+            self.assertEqual(durable["token"], automatic["token"])
+            self.assertIsNotNone(durable["claim_owner"])
             adapter = ReadyAdapter(self.order, "sol")
             self.runtime.live[attachment_id] = adapter
             return adapter
@@ -236,6 +240,36 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         bodies = [message["body"] for message in self.db.list_messages("line")]
         self.assertTrue(any("trusted cockpit plan started automatic" in body for body in bodies))
         self.assertNotEqual(automatic["token"], self.plan["token"])
+
+    async def test_automatic_plan_survives_an_unexpected_coordinator_failure(self):
+        automatic = self.db.save_restart_plan(
+            "line", ["one"], "Retry after a failed startup.", "automatic"
+        )
+        original_post = self.runtime.post_message
+        self.runtime.post_message = AsyncMock(side_effect=RuntimeError("database unavailable"))
+        try:
+            with self.assertRaisesRegex(RuntimeError, "database unavailable"):
+                await ReattachCoordinator(self.runtime, AsyncMock()).run_automatic()
+        finally:
+            self.runtime.post_message = original_post
+
+        self.assertEqual(self.db.get_restart_plan(), automatic)
+        self.assertEqual(self.runtime.reattaching, set())
+
+    async def test_lease_is_checked_before_the_first_coordinator_effect(self):
+        resume = AsyncMock()
+
+        def lost_lease():
+            raise RestartPlanLeaseLost("replaced")
+
+        with self.assertRaisesRegex(RestartPlanLeaseLost, "replaced"):
+            await ReattachCoordinator(self.runtime, resume).run(
+                self.plan, None, lost_lease
+            )
+
+        resume.assert_not_awaited()
+        self.assertEqual(self.db.list_messages("line"), [])
+        self.assertEqual(self.runtime.reattaching, set())
 
     async def test_mentions_for_later_processes_are_queued_until_their_turn(self):
         adapters = {}

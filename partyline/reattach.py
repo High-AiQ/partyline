@@ -18,6 +18,7 @@ from .contracts import (
     RestartPlanResponse,
 )
 from .db import Db, RestartPlan
+from .restart_lease import run_automatic_restart_plan
 
 READY_TIMEOUT_SECONDS = 90.0
 
@@ -173,16 +174,16 @@ class ReattachCoordinator:
         return None
 
     async def run_automatic(self) -> ReattachResult | None:
-        """Consume and run a trusted cockpit plan without a browser decision."""
-        pending = self.runtime.db.get_restart_plan()
-        if pending is None or pending["mode"] != "automatic":
-            return None
-        plan = self.runtime.db.take_restart_plan(
-            pending["conversation_id"], pending["token"], "automatic"
-        )
-        return await self.run(plan, None) if plan is not None else None
+        """Run a trusted cockpit plan under recoverable, exclusive ownership."""
+        async def operation(plan: RestartPlan, guard: Callable[[], None]) -> ReattachResult:
+            return await self.run(plan, None, guard)
+        return await run_automatic_restart_plan(self.runtime.db, operation)
 
-    async def run(self, plan: RestartPlan, accepted_by: str | None) -> ReattachResult:
+    async def run(
+        self,
+        plan: RestartPlan, accepted_by: str | None,
+        ensure_owned: Callable[[], None] | None = None,
+    ) -> ReattachResult:
         conv_id = plan["conversation_id"]
         debrief = plan["debrief"].strip() or "Continue the work that was interrupted by the restart."
         start = (
@@ -190,21 +191,28 @@ class ReattachCoordinator:
             if accepted_by is not None
             else "the trusted cockpit plan started automatic sequential reattachment"
         )
-        await self.runtime.post_message(
-            conv_id,
-            "system",
-            "system",
-            f"☏ {start} after the dogfood restart\n\n"
-            f"Continuation debrief: {debrief}",
-        )
-
+        attachment_ids = plan["attachment_ids"]
+        if ensure_owned is not None:
+            ensure_owned()
+        self.runtime.reattaching.update(attachment_ids)
+        try:
+            await self.runtime.post_message(
+                conv_id,
+                "system",
+                "system",
+                f"☏ {start} after the dogfood restart\n\n"
+                f"Continuation debrief: {debrief}",
+            )
+        except BaseException:
+            self.runtime.reattaching.difference_update(attachment_ids)
+            raise
         ready: list[str] = []
         failed: list[str] = []
         slow: list[str] = []
-        attachment_ids = plan["attachment_ids"]
-        self.runtime.reattaching.update(attachment_ids)
         try:
             for attachment_id in attachment_ids:
+                if ensure_owned is not None:
+                    ensure_owned()
                 attachment = self.runtime.db.get_attachment(attachment_id)
                 if attachment is None or attachment["conv_id"] != conv_id:
                     failed.append(attachment_id)
