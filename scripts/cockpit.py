@@ -38,7 +38,12 @@ from urllib.request import Request, urlopen
 
 from pydantic import TypeAdapter
 
-from partyline.contracts import ConversationResponse, RestartPlanRequest, RestartPlanResponse
+from partyline.contracts import (
+    ConversationResponse,
+    RestartPlanMode,
+    RestartPlanRequest,
+    RestartPlanResponse,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_COCKPIT = Path(os.environ.get("PARTYLINE_COCKPIT", Path.home() / "partyline-cockpit"))
@@ -196,7 +201,7 @@ def schedule_restart_plan(
     base_url: str,
     open_url: ResponseOpener = urlopen,
     *,
-    mode: str = "automatic",
+    mode: RestartPlanMode = "automatic",
 ) -> RestartPlanResponse:
     """Persist a same-line plan in the running cockpit, without restarting it."""
     conversations_request = Request(urljoin(base_url, "/api/conversations"))
@@ -278,7 +283,13 @@ def deploy(cockpit: Path, repo: Path = REPO_ROOT) -> int:
     return 0
 
 
-def plan(selector: str, debrief: str, base_url: str, *, mode: str = "automatic") -> int:
+def plan(
+    selector: str,
+    debrief: str,
+    base_url: str,
+    *,
+    mode: RestartPlanMode = "automatic",
+) -> int:
     try:
         scheduled = schedule_restart_plan(selector, debrief, base_url, mode=mode)
     except HTTPError as exc:
@@ -319,7 +330,7 @@ def main(argv=None) -> int:
             help="running cockpit base URL",
         )
         args = parser.parse_args(argv[1:])
-        mode = "offer" if args.manual_offer else "automatic"
+        mode: RestartPlanMode = "offer" if args.manual_offer else "automatic"
         return plan(args.line, args.debrief, args.url, mode=mode)
     print(__doc__)
     return 2
