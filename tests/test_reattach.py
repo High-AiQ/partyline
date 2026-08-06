@@ -205,6 +205,68 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(error, "that reattachment offer is no longer available")
         self.assertEqual(self.db.get_restart_plan(), self.plan)
 
+    async def test_automatic_plan_runs_without_a_browser_and_manual_plan_does_not(self):
+        coordinator = ReattachCoordinator(self.runtime, AsyncMock())
+
+        self.assertIsNone(await coordinator.run_automatic())
+        self.assertEqual(self.db.get_restart_plan(), self.plan)
+
+        automatic = self.db.save_restart_plan(
+            "line", ["one"], "Continue autonomously.", "automatic"
+        )
+        refused = await coordinator.choose(
+            "line",
+            {"type": "reattach", "token": automatic["token"], "action": "accept"},
+            "greg",
+        )
+        self.assertEqual(refused, "that reattachment offer is no longer available")
+        self.assertEqual(self.db.get_restart_plan(), automatic)
+
+        async def resume(attachment_id):
+            adapter = ReadyAdapter(self.order, "sol")
+            self.runtime.live[attachment_id] = adapter
+            return adapter
+
+        coordinator = ReattachCoordinator(self.runtime, resume)
+        self.assertIsNone(coordinator.offer("line"))
+        result = await coordinator.run_automatic()
+
+        self.assertEqual(result.ready, ("sol",))
+        self.assertIsNone(self.db.get_restart_plan())
+        bodies = [message["body"] for message in self.db.list_messages("line")]
+        self.assertTrue(any("trusted cockpit plan started automatic" in body for body in bodies))
+        self.assertNotEqual(automatic["token"], self.plan["token"])
+
+    async def test_mentions_for_later_processes_are_queued_until_their_turn(self):
+        adapters = {}
+
+        async def resume(attachment_id):
+            name = self.db.get_attachment(attachment_id)["name"]
+            adapter = ReadyAdapter(self.order, name)
+            adapters[attachment_id] = adapter
+            self.runtime.live[attachment_id] = adapter
+            self.db.set_attachment_status(attachment_id, "running")
+            if attachment_id == "one":
+                async def ready_after_post():
+                    await self.runtime.post_message(
+                        "line", "sol", "agent", "@terra continue after me"
+                    )
+                    return True
+
+                adapter.wait_ready = ready_after_post
+            return adapter
+
+        await ReattachCoordinator(self.runtime, resume).run(self.plan, "greg")
+
+        bodies = [message["body"] for message in self.db.list_messages("line")]
+        self.assertFalse(any("@terra was mentioned but is not attached" in body for body in bodies))
+        delivered = [
+            message["body"]
+            for batch in adapters["two"].deliveries
+            for message in batch
+        ]
+        self.assertIn("@terra continue after me", delivered)
+
 
 if __name__ == "__main__":
     unittest.main()

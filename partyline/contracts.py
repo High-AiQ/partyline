@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+RestartPlanMode = Literal["offer", "automatic"]
+
 
 class VersionResponse(BaseModel):
     version: str
@@ -76,6 +78,7 @@ class ReattachCandidateResponse(BaseModel):
 class RestartPlanRequest(BaseModel):
     conversation_id: str
     debrief: str = Field(default="", max_length=10_000)
+    mode: RestartPlanMode = "offer"
 
 
 class RestartPlanResponse(BaseModel):

@@ -27,6 +27,7 @@ class ReattachRuntime(Protocol):
 
     db: Db
     live: dict[str, Adapter]
+    reattaching: set[str]
 
     async def post_message(
         self, conv_id: str, sender: str, sender_type: str, body: str
@@ -105,6 +106,7 @@ def create_restart_plan(
         body.conversation_id,
         attachment_ids,
         body.debrief.strip(),
+        body.mode,
     )
     return restart_plan_response(runtime.db, plan)
 
@@ -124,7 +126,11 @@ class ReattachCoordinator:
 
     def offer(self, conv_id: str) -> ReattachOfferEvent | None:
         plan = self.runtime.db.get_restart_plan()
-        if plan is None or plan["conversation_id"] != conv_id:
+        if (
+            plan is None
+            or plan["mode"] != "offer"
+            or plan["conversation_id"] != conv_id
+        ):
             return None
         response = restart_plan_response(self.runtime.db, plan)
         if not response.attachments:
@@ -142,7 +148,7 @@ class ReattachCoordinator:
             command = ReattachCommand.model_validate(data)
         except ValueError:
             return "invalid reattachment choice"
-        plan = self.runtime.db.take_restart_plan(conv_id, command.token)
+        plan = self.runtime.db.take_restart_plan(conv_id, command.token, "offer")
         if plan is None:
             return "that reattachment offer is no longer available"
 
@@ -166,81 +172,103 @@ class ReattachCoordinator:
             )
         return None
 
-    async def run(self, plan: RestartPlan, accepted_by: str) -> ReattachResult:
+    async def run_automatic(self) -> ReattachResult | None:
+        """Consume and run a trusted cockpit plan without a browser decision."""
+        pending = self.runtime.db.get_restart_plan()
+        if pending is None or pending["mode"] != "automatic":
+            return None
+        plan = self.runtime.db.take_restart_plan(
+            pending["conversation_id"], pending["token"], "automatic"
+        )
+        return await self.run(plan, None) if plan is not None else None
+
+    async def run(self, plan: RestartPlan, accepted_by: str | None) -> ReattachResult:
         conv_id = plan["conversation_id"]
         debrief = plan["debrief"].strip() or "Continue the work that was interrupted by the restart."
+        start = (
+            f"@{accepted_by} accepted sequential reattachment"
+            if accepted_by is not None
+            else "the trusted cockpit plan started automatic sequential reattachment"
+        )
         await self.runtime.post_message(
             conv_id,
             "system",
             "system",
-            f"☏ @{accepted_by} accepted sequential reattachment after the dogfood restart\n\n"
+            f"☏ {start} after the dogfood restart\n\n"
             f"Continuation debrief: {debrief}",
         )
 
         ready: list[str] = []
         failed: list[str] = []
         slow: list[str] = []
-        for attachment_id in plan["attachment_ids"]:
-            attachment = self.runtime.db.get_attachment(attachment_id)
-            if attachment is None or attachment["conv_id"] != conv_id:
-                failed.append(attachment_id)
-                continue
+        attachment_ids = plan["attachment_ids"]
+        self.runtime.reattaching.update(attachment_ids)
+        try:
+            for attachment_id in attachment_ids:
+                attachment = self.runtime.db.get_attachment(attachment_id)
+                if attachment is None or attachment["conv_id"] != conv_id:
+                    failed.append(attachment_id)
+                    self.runtime.reattaching.discard(attachment_id)
+                    continue
 
-            name = attachment["name"]
-            try:
-                adapter = await self.resume_attachment(attachment_id)
-                pending = self.runtime.db.messages_after(
-                    conv_id,
-                    attachment["last_seen"],
-                    exclude_sender=name,
-                )
-                if pending:
-                    self.runtime.db.set_last_seen(attachment_id, pending[-1]["id"])
-                    await adapter.deliver(pending)
-                is_ready = await asyncio.wait_for(
-                    adapter.wait_ready(), timeout=self.ready_timeout
-                )
-                if not is_ready:
-                    raise RuntimeError("the process exited before claiming its session")
-            except TimeoutError:
-                # Slow is not failed, and killing it is the only real harm.
-                #
-                # Readiness means "the adapter has opened its claimed
-                # transcript". For a resumed codex that file is written lazily,
-                # on the first turn's flush — its own source says the rollout
-                # "may not appear for many minutes". Stopping the process at 90s
-                # took down three healthy agents that were on their way back.
-                #
-                # The wait still earns its place: when readiness does arrive the
-                # next process starts immediately behind it. What it must not do
-                # is treat its own impatience as evidence of a broken process.
-                slow.append(name)
+                name = attachment["name"]
+                try:
+                    adapter = await self.resume_attachment(attachment_id)
+                    pending = self.runtime.db.messages_after(
+                        conv_id,
+                        attachment["last_seen"],
+                        exclude_sender=name,
+                    )
+                    if pending:
+                        self.runtime.db.set_last_seen(attachment_id, pending[-1]["id"])
+                        await adapter.deliver(pending)
+                    self.runtime.reattaching.discard(attachment_id)
+                    is_ready = await asyncio.wait_for(
+                        adapter.wait_ready(), timeout=self.ready_timeout
+                    )
+                    if not is_ready:
+                        raise RuntimeError("the process exited before claiming its session")
+                except TimeoutError:
+                    # Slow is not failed, and killing it is the only real harm.
+                    #
+                    # Readiness means "the adapter has opened its claimed
+                    # transcript". For a resumed codex that file is written lazily,
+                    # on the first turn's flush — its own source says the rollout
+                    # "may not appear for many minutes". Stopping the process at 90s
+                    # took down three healthy agents that were on their way back.
+                    #
+                    # The wait still earns its place: when readiness does arrive the
+                    # next process starts immediately behind it. What it must not do
+                    # is treat its own impatience as evidence of a broken process.
+                    slow.append(name)
+                    await self.runtime.post_message(
+                        conv_id,
+                        "system",
+                        "system",
+                        f"☏ @{name} is back but still settling after {self.ready_timeout:g}s — "
+                        f"left running, advancing to the next process",
+                    )
+                    continue
+                except Exception as exc:
+                    failed.append(name)
+                    await self._abandon(attachment_id)
+                    await self.runtime.post_message(
+                        conv_id,
+                        "system",
+                        "system",
+                        f"⚠ @{name} could not reattach safely: {exc}",
+                    )
+                    continue
+
+                ready.append(name)
                 await self.runtime.post_message(
                     conv_id,
                     "system",
                     "system",
-                    f"☏ @{name} is back but still settling after {self.ready_timeout:g}s — "
-                    f"left running, advancing to the next process",
+                    f"☏ @{name} is ready after restart; advancing to the next process",
                 )
-                continue
-            except Exception as exc:
-                failed.append(name)
-                await self._abandon(attachment_id)
-                await self.runtime.post_message(
-                    conv_id,
-                    "system",
-                    "system",
-                    f"⚠ @{name} could not reattach safely: {exc}",
-                )
-                continue
-
-            ready.append(name)
-            await self.runtime.post_message(
-                conv_id,
-                "system",
-                "system",
-                f"☏ @{name} is ready after restart; advancing to the next process",
-            )
+        finally:
+            self.runtime.reattaching.difference_update(attachment_ids)
 
         summary = f"{len(ready)} ready"
         if slow:

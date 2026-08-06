@@ -7,7 +7,9 @@ Routing model (MVP):
     excluding its own, formatted as `[sender]: text` lines.
 """
 
+import asyncio
 import json
+import logging
 import os
 import re
 import signal
@@ -15,7 +17,7 @@ import shlex
 import shutil
 import subprocess
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 import uvicorn
@@ -72,6 +74,7 @@ from .runtime import NAME_RE, RESERVED_NAMES, ChatRuntime
 STATIC_DIR = Path(__file__).parent / "static"
 ASSETS_DIR = STATIC_DIR / "assets"
 BUILD_MANIFEST = STATIC_DIR / "build.json"
+logger = logging.getLogger(__name__)
 
 
 def load_frontend_build(path: Path = BUILD_MANIFEST) -> str:
@@ -91,11 +94,25 @@ FRONTEND_BUILD = load_frontend_build()
 runtime = ChatRuntime(Db(os.environ.get("PARTYLINE_DB", os.path.expanduser("~/.partyline.db"))))
 
 
+async def _run_automatic_reattachment() -> None:
+    """Run a trusted cockpit plan at startup without depending on a browser."""
+    try:
+        await ReattachCoordinator(runtime, _resume_adapter).run_automatic()
+    except Exception:
+        logger.exception("automatic restart-plan reattachment failed")
+
+
 @asynccontextmanager
 async def lifespan(app):
     runtime.db.mark_stale_attachments()
-    yield
-    await runtime.shutdown()
+    automatic_task = asyncio.create_task(_run_automatic_reattachment())
+    try:
+        yield
+    finally:
+        automatic_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await automatic_task
+        await runtime.shutdown()
 
 
 app = FastAPI(lifespan=lifespan)

@@ -3,6 +3,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException, WebSocketDisconnect
 
@@ -315,6 +316,23 @@ class FakeRequest:
 
 
 class ShutdownTest(ServerTest):
+    def test_lifespan_starts_automatic_reattachment_without_a_browser(self):
+        automatic = AsyncMock()
+        shutdown = AsyncMock()
+
+        async def exercise():
+            with (
+                patch.object(server, "_run_automatic_reattachment", automatic),
+                patch.object(server.runtime, "shutdown", shutdown),
+            ):
+                async with server.lifespan(None):
+                    await asyncio.sleep(0)
+
+        self.arun(exercise())
+
+        automatic.assert_awaited_once_with()
+        shutdown.assert_awaited_once_with()
+
     def test_running_processes_lists_live_attachments_with_their_line(self):
         server.runtime.db.add_attachment("a1", "line", "worker", "fake", ["fake"], "/tmp")
         server.runtime.db.set_attachment_status("a1", "running")

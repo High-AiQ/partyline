@@ -39,6 +39,8 @@ class ChatRuntime:
         self.sockets: dict[str, set] = {}
         self.human_handles: dict[str, dict[WebSocket, tuple[str, str]]] = {}
         self.live: dict[str, Adapter] = {}
+        # A planned process is queued behind its durable cursor, not unreachable.
+        self.reattaching: set[str] = set()
 
     def running_processes(self) -> list[dict]:
         """Every live attachment, across every line, newest line first.
@@ -81,9 +83,7 @@ class ChatRuntime:
     async def route_mentions(self, conv_id: str, msg: dict):
         if msg["sender_type"] == "system":
             return  # join/exit notices mention names but must never wake agents
-        # A handle may legitimately contain "." or "-", but a mention that ends a
-        # sentence picks up its punctuation: "thanks @opus." must still ring opus.
-        # Both readings are accepted rather than guessing which one was meant.
+        # Accept both a punctuation-bearing handle and its sentence-ending reading.
         names = set()
         for found in MENTION_RE.findall(msg["body"]):
             names.add(found.lower())
@@ -94,12 +94,16 @@ class ChatRuntime:
         ring_all = "all" in names  # reserved handle: rings every running agent
         unreachable: list[str] = []
         delivered: set[str] = set()
+        queued: set[str] = set()
         for att in self.db.list_attachments(conv_id):
             addressed = ring_all or att["name"].lower() in names
             if not addressed or att["name"].lower() == msg["sender"].lower():
                 continue  # not for them, or no self-pings
             adapter = self.live.get(att["id"]) if att["status"] == "running" else None
             if adapter is None:
+                if att["id"] in self.reattaching:
+                    queued.add(att["name"].lower())
+                    continue
                 # The process is gone but the mention looked like it landed. Say so:
                 # a silently dropped mention is indistinguishable from an agent that
                 # simply chose not to answer, and can go unnoticed for hours.
@@ -114,7 +118,9 @@ class ChatRuntime:
 
         # A handle can have several rows — old detached ones alongside a live one.
         # Only warn about handles that got no delivery at all.
-        for name in [n for n in unreachable if n.lower() not in delivered]:
+        unavailable = [name for name in unreachable
+                       if name.lower() not in delivered and name.lower() not in queued]
+        for name in unavailable:
             # A system notice never wakes anyone, so this cannot loop.
             await self.post_message(
                 conv_id,
@@ -204,7 +210,6 @@ class ChatRuntime:
                         continue
                     # A reconnect can arrive before a half-open old socket times
                     # out. Its durable client id proves it is the same browser, so
-                    # let the new socket take over and make the old one inert.
                     claims = self.human_handles.setdefault(conv_id, {})
                     if client_id:
                         for other, (_, client) in list(claims.items()):
