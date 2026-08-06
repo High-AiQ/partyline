@@ -271,7 +271,13 @@ the server itself:
 ```bash
 uv run python -m scripts.cockpit plan "partyline refactoring" \
   --debrief "Continue the TypeScript review from the committed handoff."
+uv run python -m scripts.cockpit arm --pid NNNNN
 ```
+
+`arm` schedules the reviewed restart executable with systemd, verifies the timer and exact process
+generation after scheduling, and keeps a failed unit inspectable. Do not replace it with inline
+shell or a bare background process: those failure modes can leave a plan pending while the old
+server continues to look healthy.
 
 By default this consumes an **automatic** plan after startup; no browser needs to reconnect. The
 explicit `--manual-offer` escape hatch keeps the human stop-dialog flow for cases where an operator

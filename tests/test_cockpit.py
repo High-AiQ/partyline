@@ -8,6 +8,7 @@ are tested against temp directories rather than a git fixture.
 
 import sys
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,13 +16,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.cockpit import (  # noqa: E402
+    CommandResult,
     Finding,
+    PendingPlanInspection,
+    arm_restart,
+    check_adapter_tests,
     check_bundle_present,
     check_tree_clean,
     referenced_assets,
     resolve_line,
     restart_needed,
     schedule_restart_plan,
+    parse_systemd_exec_start,
 )
 from partyline.contracts import ConversationResponse
 
@@ -221,6 +227,30 @@ class AdapterStoreTest(unittest.TestCase):
         self.assertEqual(self.cockpit.check_adapter_drift(Path("/installed"), Path("/source")), [])
 
 
+class AdapterTestEnforcementTest(unittest.TestCase):
+    def test_a_missing_enforcing_runner_blocks_preflight(self):
+        with tempfile.TemporaryDirectory() as directory:
+            findings = check_adapter_tests(Path(directory))
+        self.assertEqual(len(findings), 1)
+        self.assertIn("run_tests.py", findings[0].problem)
+
+    def test_a_green_runner_passes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            (source / "run_tests.py").write_text("raise SystemExit(0)\n")
+            self.assertEqual(check_adapter_tests(source), [])
+
+    def test_a_red_runner_reports_its_adapter_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            (source / "run_tests.py").write_text(
+                "import sys\nprint('FAIL: pi has no tests', file=sys.stderr)\nraise SystemExit(1)\n"
+            )
+            findings = check_adapter_tests(source)
+        self.assertEqual(len(findings), 1)
+        self.assertIn("pi has no tests", findings[0].problem)
+
+
 class PendingPlanTest(unittest.TestCase):
     """A planned restart that never happened must not stay invisible.
 
@@ -262,6 +292,248 @@ class PendingPlanTest(unittest.TestCase):
         import scripts.cockpit as cockpit
 
         return cockpit.check_pending_plan(PendingPlanTest.NOW, plan)
+
+
+class PendingPlanInspectionTest(unittest.TestCase):
+    def test_missing_database_has_no_plan_and_no_finding(self):
+        import scripts.cockpit as cockpit
+
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "missing.db"
+            inspected = cockpit.inspect_pending_plan(database)
+        self.assertIsNone(inspected.plan)
+        self.assertEqual(inspected.findings, [])
+        self.assertFalse(database.exists(), "read-only inspection created the database")
+
+    def test_existing_plan_is_read_without_mutating_its_schema(self):
+        import scripts.cockpit as cockpit
+
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "partyline.db"
+            connection = sqlite3.connect(database)
+            connection.execute(
+                "CREATE TABLE restart_plan("
+                "singleton INTEGER PRIMARY KEY, conversation_id TEXT, token TEXT, mode TEXT, "
+                "attempt_count INTEGER, created_at REAL)"
+            )
+            connection.execute(
+                "INSERT INTO restart_plan VALUES(1,'line','token','automatic',0,123)"
+            )
+            connection.commit()
+            before = connection.execute("PRAGMA schema_version").fetchone()[0]
+            connection.close()
+
+            inspected = cockpit.inspect_pending_plan(database)
+
+            connection = sqlite3.connect(database)
+            after = connection.execute("PRAGMA schema_version").fetchone()[0]
+            columns = [row[1] for row in connection.execute("PRAGMA table_info(restart_plan)")]
+            connection.close()
+        self.assertEqual(inspected.plan["conversation_id"], "line")
+        self.assertEqual(before, after)
+        self.assertEqual(
+            columns,
+            ["singleton", "conversation_id", "token", "mode", "attempt_count", "created_at"],
+            "preflight migrated the database it was meant only to inspect",
+        )
+
+    def test_unreadable_existing_database_is_an_actionable_finding(self):
+        import scripts.cockpit as cockpit
+
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "broken.db"
+            database.write_text("not sqlite")
+            inspected = cockpit.inspect_pending_plan(database)
+        self.assertIsNone(inspected.plan)
+        self.assertEqual(len(inspected.findings), 1)
+        self.assertIn("cannot be inspected", inspected.findings[0].problem)
+        self.assertIn(str(database), inspected.findings[0].fix)
+
+
+class ArmRestartTest(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.cockpit = Path(self.directory.name)
+        for relative in (
+            "scripts/restart_server.py",
+            ".venv/bin/python3",
+            ".venv/bin/partyline",
+        ):
+            path = self.cockpit / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("present")
+        self.calls = []
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    @property
+    def inspection(self):
+        return PendingPlanInspection(
+            {
+                "conversation_id": "line-1",
+                "token": "token",
+                "mode": "automatic",
+                "attempt_count": 0,
+                "created_at": 1,
+            },
+            [],
+        )
+
+    def fake_run(self, args):
+        self.calls.append(args)
+        if args[0] == "systemd-run":
+            return CommandResult(0, "scheduled")
+        if args[:3] == ["systemctl", "--user", "show"] and args[3].endswith(".timer"):
+            return CommandResult(
+                0,
+                "LoadState=loaded\nActiveState=active\nSubState=waiting\n"
+                "Triggers=partyline-restart-test.service\n",
+            )
+        if args[:3] == ["systemctl", "--user", "list-timers"]:
+            return CommandResult(
+                0,
+                "Thu 2026-08-06 19:30:00 EDT 1min - - "
+                "partyline-restart-test.timer partyline-restart-test.service\n",
+            )
+        if args[:3] == ["systemctl", "--user", "show"]:
+            return CommandResult(
+                0,
+                "ExecStart={ path=/python ; argv[]="
+                f"{self.cockpit}/.venv/bin/python3 "
+                f"{self.cockpit}/scripts/restart_server.py 42 1234 "
+                f"{self.cockpit}/.venv/bin/partyline {self.cockpit}/cockpit.log "
+                f"{self.cockpit} --failure-ws ws://127.0.0.1:8642/ws/line-1 "
+                "; ignore_errors=no ; start_time=[n/a] ; }",
+            )
+        return CommandResult(0)
+
+    def test_arm_schedules_the_reviewed_script_without_inline_shell(self):
+        result = arm_restart(
+            self.cockpit,
+            42,
+            90,
+            "http://127.0.0.1:8642",
+            unit="partyline-restart-test",
+            run=self.fake_run,
+            inspection=self.inspection,
+            generation=lambda _pid: "1234",
+        )
+        self.assertEqual(result, 0)
+        scheduled = self.calls[0]
+        self.assertEqual(scheduled[0], "systemd-run")
+        self.assertNotIn("/bin/bash", scheduled)
+        self.assertIn(str(self.cockpit / "scripts/restart_server.py"), scheduled)
+        self.assertIn("--failure-ws", scheduled)
+        self.assertIn("ws://127.0.0.1:8642/ws/line-1", scheduled)
+        self.assertTrue(any(call[:3] == ["systemctl", "--user", "list-timers"]
+                            for call in self.calls), "arm never read its timer back")
+
+    def test_an_unverified_timer_is_stopped_and_refused(self):
+        def missing_timer(args):
+            self.calls.append(args)
+            if args[0] == "systemd-run":
+                return CommandResult(0, "scheduled")
+            return CommandResult(0, "")
+
+        result = arm_restart(
+            self.cockpit,
+            42,
+            90,
+            "http://127.0.0.1:8642",
+            unit="partyline-restart-test",
+            run=missing_timer,
+            inspection=self.inspection,
+            generation=lambda _pid: "1234",
+        )
+        self.assertEqual(result, 1)
+        self.assertIn(
+            ["systemctl", "--user", "stop", "partyline-restart-test.timer"],
+            self.calls,
+        )
+
+    def test_missing_failure_warning_argument_refuses_to_claim_armed(self):
+        def incomplete_readback(args):
+            result = self.fake_run(args)
+            if args[:3] == ["systemctl", "--user", "show"] and args[3].endswith(".service"):
+                return CommandResult(0, result.stdout.replace(
+                    " --failure-ws ws://127.0.0.1:8642/ws/line-1", ""
+                ))
+            return result
+
+        result = arm_restart(
+            self.cockpit,
+            42,
+            90,
+            "http://127.0.0.1:8642",
+            unit="partyline-restart-test",
+            run=incomplete_readback,
+            inspection=self.inspection,
+            generation=lambda _pid: "1234",
+        )
+        self.assertEqual(result, 1)
+
+
+class SystemdReadbackTest(unittest.TestCase):
+    def test_exec_start_preserves_complete_ordered_argv(self):
+        shown = (
+            "ExecStart={ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 /tmp/restart.py "
+            "42 1234 /tmp/server /tmp/log /tmp/cockpit --failure-ws ws://host/ws/line "
+            "; ignore_errors=no ; }"
+        )
+        self.assertEqual(
+            parse_systemd_exec_start(shown),
+            [
+                "/usr/bin/python3", "/tmp/restart.py", "42", "1234", "/tmp/server",
+                "/tmp/log", "/tmp/cockpit", "--failure-ws", "ws://host/ws/line",
+            ],
+        )
+
+
+class FailedRestartUnitTest(unittest.TestCase):
+    def test_a_failed_unit_remains_an_actionable_finding(self):
+        import scripts.cockpit as cockpit
+
+        findings = cockpit.failed_restart_units(lambda _args: CommandResult(
+            0,
+            "partyline-restart-42.service loaded failed failed exact restart\n",
+        ))
+        self.assertEqual(len(findings), 1)
+        self.assertIn("partyline-restart-42.service", findings[0].problem)
+        self.assertIn("journalctl", findings[0].fix)
+
+    def test_no_failed_units_is_clean(self):
+        import scripts.cockpit as cockpit
+
+        self.assertEqual(
+            cockpit.failed_restart_units(lambda _args: CommandResult(0, "")),
+            [],
+        )
+
+
+class ArmDispatchTest(unittest.TestCase):
+    def test_the_top_level_arm_command_reaches_the_scheduler(self):
+        import scripts.cockpit as cockpit
+
+        originals = cockpit.check, cockpit.git, cockpit.check_in_sync, cockpit.arm_restart
+        calls = []
+        try:
+            cockpit.check = lambda: 0
+            cockpit.git = lambda *_args, **_kwargs: "same"
+            cockpit.check_in_sync = lambda *_args, **_kwargs: []
+            cockpit.arm_restart = lambda *args, **kwargs: calls.append((args, kwargs)) or 0
+            result = cockpit.main([
+                "arm",
+                "--pid", "42",
+                "--delay", "90",
+                "--unit", "partyline-restart-test",
+                "--cockpit", "/tmp/cockpit",
+            ])
+        finally:
+            cockpit.check, cockpit.git, cockpit.check_in_sync, cockpit.arm_restart = originals
+        self.assertEqual(result, 0)
+        self.assertEqual(calls[0][0][1:3], (42, 90))
+        self.assertEqual(calls[0][1]["unit"], "partyline-restart-test")
 
 
 class RestartNeededTest(unittest.TestCase):

@@ -255,6 +255,12 @@ replaced them:
   owner, so callbacks from an older generation are rejected rather than broadcast as current state.
   A cross-process reservation also spans owner validation through each PTY write: a read-side owner
   check alone leaves a check-to-effect race in which replacement can occur before delivery.
+- **Creating a delayed supervisor meant a restart was armed.** One `nohup` process was reaped, then
+  a listed systemd timer fired shell whose nested quoting corrupted its own PID-generation check;
+  both left the plan unclaimed while the old server ran for hours. Restart logic is now a tested
+  Python executable, `cockpit arm` verifies the durable timer and exact command after scheduling,
+  failed units remain inspectable, and a plan still at attempt zero after five minutes is an
+  actionable failure rather than an indefinitely pending intention.
 
 When a component documents a limit or lifecycle assumption, the dependent code must reference or
 enforce it. A prose warning that has no executable guard is not a completed lesson.
@@ -296,6 +302,7 @@ participant in the room — including whoever is doing the work. The rules that 
   uv run python -m scripts.cockpit check     # is the workbench fit to deploy?
   uv run python -m scripts.cockpit deploy    # check, fast-forward the cockpit, verify
   uv run python -m scripts.cockpit plan "line name" --debrief "what to continue"
+  uv run python -m scripts.cockpit arm --pid NNNNN  # schedule the exact generation
   # Add --manual-offer only when a human should inspect the plan first.
   ```
 
@@ -303,7 +310,11 @@ participant in the room — including whoever is doing the work. The rules that 
   the one way to catch `frontend/src/` edits that were never built), and unpushed commits —
   the cockpit pulls from the remote, so work that is only committed locally cannot reach it.
   `deploy` then fast-forwards the cockpit and asserts it is at the same sha as the workbench.
-  Neither command restarts anything; that stays a deliberate, announced act.
+  `check`, `deploy`, and `plan` do not restart anything. After the plan and clearances, `arm` is
+  the only supported trigger: it invokes a reviewed Python executable through systemd without
+  inline shell, then reads back the timer, service command, and exact PID generation before
+  reporting success. A failed trigger remains a named failed unit, and an automatic plan left
+  unclaimed at attempt zero becomes a preflight finding after five minutes.
 - **Test on a throwaway port and database**, one per person, so several agents can test at once
   without colliding: `PARTYLINE_DB=/tmp/<you>.db PARTYLINE_PORT=864x uv run partyline`.
 - **Restarting the cockpit is a scheduled act, not a side effect.** This is the

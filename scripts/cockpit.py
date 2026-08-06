@@ -14,28 +14,30 @@ changed.
     uv run python -m scripts.cockpit check     # is the workbench fit to deploy?
     uv run python -m scripts.cockpit deploy    # check, advance the cockpit, verify
     uv run python -m scripts.cockpit plan LINE --debrief "what to continue"
+    uv run python -m scripts.cockpit arm --pid NNNNN
     uv run python -m scripts.cockpit plan LINE --manual-offer --debrief "what to continue"
 
-Neither command restarts anything. Stopping the server drops every participant,
-including whoever runs it, so it stays a deliberate act by an initiator who has
-announced it — human input is not required; see AGENTS.md.
+The first three commands do not restart anything. ``arm`` is the deliberate,
+announced trigger after every participant is clear; human input is not required.
 """
 
 from __future__ import annotations
 
 import os
-import time
 import re
+import shlex
+import sqlite3
 import subprocess
 import sys
+import time
 from argparse import ArgumentParser
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from http.client import HTTPResponse
 from pathlib import Path
 from typing import Protocol
 from urllib.error import HTTPError, URLError
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse, urlunparse
 from urllib.request import Request, urlopen
 
 from pydantic import TypeAdapter
@@ -46,6 +48,7 @@ from partyline.contracts import (
     RestartPlanRequest,
     RestartPlanResponse,
 )
+from scripts.restart_server import process_generation
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_COCKPIT = Path(os.environ.get("PARTYLINE_COCKPIT", Path.home() / "partyline-cockpit"))
@@ -62,6 +65,7 @@ ADAPTER_STORE = Path(os.environ.get("PARTYLINE_ADAPTERS_DIR", "~/.partyline/adap
 # `<root>/<same directory name>`. The installed copy is a deployment artefact;
 # this is the thing anyone actually reviews and pushes.
 ADAPTER_SOURCE_ROOT = Path(os.environ.get("PARTYLINE_ADAPTER_SOURCES", "~/code")).expanduser()
+RESTART_SCRIPT = REPO_ROOT / "scripts" / "restart_server.py"
 
 
 class ResponseOpener(Protocol):
@@ -74,6 +78,19 @@ class Finding:
 
     problem: str
     fix: str
+
+
+@dataclass(frozen=True)
+class PendingPlanInspection:
+    plan: Mapping[str, object] | None
+    findings: list[Finding]
+
+
+@dataclass(frozen=True)
+class CommandResult:
+    returncode: int
+    stdout: str = ""
+    stderr: str = ""
 
 
 def git(*args: str, cwd: Path = REPO_ROOT) -> str:
@@ -236,6 +253,7 @@ def check_adapter_store(
             continue
         findings += check_tree_clean(source, f"{label} source", untracked=True)
         findings += check_adapter_drift(checkout, source)
+        findings += check_adapter_tests(source)
     return findings
 
 
@@ -259,6 +277,29 @@ def check_adapter_drift(installed: Path, source: Path) -> list[Finding]:
             f"the installed {installed.name} is at {installed_head[:9]}, "
             f"its source at {source_head[:9]}",
             "re-import the adapter so the server runs the reviewed commit")]
+    return []
+
+
+def check_adapter_tests(source: Path) -> list[Finding]:
+    """Run the adapter repository's own enforce-all-packages test command."""
+    runner = source / "run_tests.py"
+    if not runner.is_file():
+        return [Finding(
+            f"adapter source {source.name} has no run_tests.py",
+            "add a runner that fails when any adapter lacks its own vendor-free tests",
+        )]
+    done = subprocess.run(
+        [sys.executable, str(runner)],
+        cwd=source,
+        capture_output=True,
+        text=True,
+    )
+    if done.returncode:
+        detail = (done.stderr or done.stdout).strip()[-500:]
+        return [Finding(
+            f"adapter source {source.name} tests fail: {detail}",
+            f"run `{runner}` and fix every adapter suite before restarting",
+        )]
     return []
 
 
@@ -355,22 +396,63 @@ def schedule_restart_plan(
 # -- commands --------------------------------------------------------------
 
 
-def read_pending_plan() -> Mapping[str, object] | None:
-    """The persisted plan, read straight from the database.
+def inspect_pending_plan(database: Path | None = None) -> PendingPlanInspection:
+    """Read the persisted plan without migrating or writing the live database.
 
     Deliberately not over HTTP: the case this exists to catch is a server that
     never restarted, and asking that server would be asking the wrong process
-    about its own replacement.
+    about its own replacement.  ``mode=ro`` is load-bearing: constructing
+    :class:`partyline.db.Db` would apply migrations and commit from a command
+    advertised as a read-only preflight.
     """
-    from partyline.db import Db
-
-    database = os.environ.get("PARTYLINE_DB", os.path.expanduser("~/.partyline.db"))
-    if not Path(database).is_file():
-        return None
+    database = database or Path(
+        os.environ.get("PARTYLINE_DB", os.path.expanduser("~/.partyline.db"))
+    )
+    if not database.is_file():
+        return PendingPlanInspection(None, [])
     try:
-        return Db(database).get_restart_plan()
-    except Exception:
-        return None  # a database we cannot read is not evidence of a stale plan
+        connection = sqlite3.connect(f"{database.resolve().as_uri()}?mode=ro", uri=True)
+        connection.row_factory = sqlite3.Row
+        try:
+            table = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='restart_plan'"
+            ).fetchone()
+            if table is None:
+                return PendingPlanInspection(None, [])
+            row = connection.execute(
+                "SELECT conversation_id, token, mode, attempt_count, created_at "
+                "FROM restart_plan WHERE singleton=1"
+            ).fetchone()
+            return PendingPlanInspection(dict(row) if row else None, [])
+        finally:
+            connection.close()
+    except sqlite3.Error as exc:
+        return PendingPlanInspection(None, [Finding(
+            f"the live restart plan cannot be inspected read-only: {exc}",
+            f"inspect {database} with sqlite3 before trusting restart state",
+        )])
+
+
+def run_command(args: list[str]) -> CommandResult:
+    done = subprocess.run(args, capture_output=True, text=True)
+    return CommandResult(done.returncode, done.stdout, done.stderr)
+
+
+def failed_restart_units(
+    run: Callable[[list[str]], CommandResult] = run_command,
+) -> list[Finding]:
+    """Keep a failed trigger visible after its timer has disappeared."""
+    result = run([
+        "systemctl", "--user", "list-units", "--all", "--state=failed",
+        "--plain", "--no-legend", "partyline-restart-*.service",
+    ])
+    if result.returncode:
+        return []  # systems without a user manager can still develop Partyline
+    units = [line.split()[0] for line in result.stdout.splitlines() if line.strip()]
+    return [Finding(
+        f"restart unit {unit} failed",
+        f"run `journalctl --user -u {unit}` and resolve it before re-arming",
+    ) for unit in units]
 
 
 def report(findings: list[Finding]) -> int:
@@ -385,13 +467,16 @@ def report(findings: list[Finding]) -> int:
 
 def check(repo: Path = REPO_ROOT) -> int:
     print(f"workbench {repo}")
+    plan = inspect_pending_plan()
     findings = [
         *check_tree_clean(repo, "workbench", untracked=True),
         *check_bundle_present(repo, "workbench"),
         *check_bundle_current(repo),
         *check_pushed(repo),
         *check_adapter_store(),
-        *check_pending_plan(time.time(), read_pending_plan()),
+        *plan.findings,
+        *check_pending_plan(time.time(), plan.plan),
+        *failed_restart_units(),
     ]
     return report(findings)
 
@@ -457,6 +542,143 @@ def plan(
     return 0
 
 
+def _websocket_url(base_url: str, conversation_id: str) -> str:
+    parsed = urlparse(base_url)
+    scheme = "wss" if parsed.scheme == "https" else "ws"
+    return urlunparse((scheme, parsed.netloc, f"/ws/{conversation_id}", "", "", ""))
+
+
+def parse_systemd_exec_start(value: str) -> list[str] | None:
+    """Extract the ordered argv from ``systemctl show -p ExecStart``."""
+    marker = "argv[]="
+    if marker not in value:
+        return None
+    encoded = value.partition(marker)[2].partition(" ; ignore_errors=")[0]
+    try:
+        return shlex.split(encoded)
+    except ValueError:
+        return None
+
+
+def arm_restart(
+    cockpit: Path,
+    pid: int,
+    delay_seconds: int,
+    base_url: str,
+    *,
+    unit: str | None = None,
+    run: Callable[[list[str]], CommandResult] = run_command,
+    inspection: PendingPlanInspection | None = None,
+    generation: Callable[[int], str | None] = process_generation,
+) -> int:
+    """Schedule the reviewed restart executable and read the timer back.
+
+    ``systemd-run`` receives an argv, never shell source.  A successful return
+    only proves scheduling, so the timer state, trigger listing, and service
+    command are independently read back before this function says "armed".
+    """
+    inspection = inspection or inspect_pending_plan()
+    if inspection.findings:
+        return report(inspection.findings)
+    plan = inspection.plan
+    if plan is None:
+        return report([Finding(
+            "there is no persisted restart plan",
+            "run `scripts.cockpit plan LINE --debrief ...` before arming",
+        )])
+    if plan.get("mode") != "automatic":
+        return report([Finding(
+            "the persisted restart plan is a manual offer",
+            "replace it with an automatic plan before an unattended restart",
+        )])
+    expected_start = generation(pid)
+    if expected_start is None:
+        return report([Finding(
+            f"pid {pid} has no readable process generation",
+            "resolve the current listener pid again; never guess or reuse an old pid",
+        )])
+    if delay_seconds < 10:
+        return report([Finding(
+            f"the requested {delay_seconds}s delay is too short to end the arming turn",
+            "use at least 10 seconds, normally 90",
+        )])
+
+    script = cockpit / RESTART_SCRIPT.relative_to(REPO_ROOT)
+    python = cockpit / ".venv" / "bin" / "python3"
+    server = cockpit / ".venv" / "bin" / "partyline"
+    logfile = cockpit / "cockpit.log"
+    for path, label in ((script, "restart script"), (python, "cockpit Python"), (server, "server")):
+        if not path.is_file():
+            return report([Finding(f"the deployed {label} is missing at {path}",
+                                   "run `scripts.cockpit deploy` again")])
+
+    unit = unit or f"partyline-restart-{pid}-{int(time.time())}"
+    failure_ws = _websocket_url(base_url, str(plan["conversation_id"]))
+    service_argv = [
+        str(python),
+        str(script),
+        str(pid),
+        expected_start,
+        str(server),
+        str(logfile),
+        str(cockpit),
+        "--failure-ws",
+        failure_ws,
+    ]
+    command = [
+        "systemd-run",
+        "--user",
+        f"--unit={unit}",
+        f"--on-active={delay_seconds}s",
+        f"--working-directory={cockpit}",
+        "--property=Type=exec",
+        "--property=SuccessExitStatus=SIGTERM",
+        *service_argv,
+    ]
+    scheduled = run(command)
+    if scheduled.returncode:
+        return report([Finding(
+            f"systemd refused restart unit {unit}: {scheduled.stderr.strip()}",
+            "resolve the user service error; no process was signalled",
+        )])
+
+    timer = f"{unit}.timer"
+    service = f"{unit}.service"
+    timer_state = run([
+        "systemctl", "--user", "show", timer,
+        "-p", "LoadState", "-p", "ActiveState", "-p", "SubState", "-p", "Triggers",
+    ])
+    timer_listing = run([
+        "systemctl", "--user", "list-timers", timer, "--no-pager", "--no-legend",
+    ])
+    service_state = run([
+        "systemctl", "--user", "show", service, "-p", "ExecStart",
+    ])
+    timer_ok = (
+        timer_state.returncode == 0
+        and "LoadState=loaded" in timer_state.stdout
+        and "ActiveState=active" in timer_state.stdout
+        and "SubState=waiting" in timer_state.stdout
+        and f"Triggers={service}" in timer_state.stdout
+        and timer_listing.returncode == 0
+        and timer in timer_listing.stdout
+    )
+    command_ok = (
+        service_state.returncode == 0
+        and parse_systemd_exec_start(service_state.stdout) == service_argv
+    )
+    if not timer_ok or not command_ok:
+        run(["systemctl", "--user", "stop", timer])
+        return report([Finding(
+            f"restart unit {unit} could not be verified after scheduling",
+            "inspect the unit, then re-arm; an unverified timer is not armed",
+        )])
+
+    trigger = timer_listing.stdout.strip()
+    print(f"  ✓ armed {service}\n  ✓ {trigger}\n  ✓ exact generation {pid}/{expected_start}")
+    return 0
+
+
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     command = argv[0] if argv else "check"
@@ -481,6 +703,35 @@ def main(argv=None) -> int:
         args = parser.parse_args(argv[1:])
         mode: RestartPlanMode = "offer" if args.manual_offer else "automatic"
         return plan(args.line, args.debrief, args.url, mode=mode)
+    if command == "arm":
+        parser = ArgumentParser(prog="python -m scripts.cockpit arm")
+        parser.add_argument("--pid", required=True, type=int, help="exact current server pid")
+        parser.add_argument("--delay", type=int, default=90, help="seconds before signalling")
+        parser.add_argument("--unit", help="stable systemd unit name for tests or diagnosis")
+        parser.add_argument(
+            "--url",
+            default=f"http://127.0.0.1:{os.environ.get('PARTYLINE_PORT', '8642')}",
+            help="running cockpit base URL",
+        )
+        parser.add_argument(
+            "--cockpit",
+            type=Path,
+            default=DEFAULT_COCKPIT,
+            help="deployed cockpit checkout",
+        )
+        args = parser.parse_args(argv[1:])
+        if (failed := check()):
+            return failed
+        expected = git("rev-parse", "HEAD")
+        if findings := check_in_sync(args.cockpit, expected):
+            return report(findings)
+        return arm_restart(
+            args.cockpit,
+            args.pid,
+            args.delay,
+            args.url,
+            unit=args.unit,
+        )
     print(__doc__)
     return 2
 
