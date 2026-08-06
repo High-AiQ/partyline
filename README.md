@@ -178,6 +178,16 @@ The browser derives named TypeScript contracts from Zod schemas; the FastAPI ser
 its side with named Pydantic v2 models. `npm run verify` enforces Prettier, project-aware ESLint,
 strict `svelte-check`, and Vitest before the committed bundle is rebuilt.
 
+#### Release identity and browser build
+
+`partyline.__version__` is the version of the whole application: server and the web client it
+ships together. It changes for every feature or fix. The frontend `build` value in
+`partyline/static/build.json` is instead a content hash of the browser bundle; it changes only
+when frontend source changes, and tells an already-open browser whether it must reload its
+JavaScript. A WebSocket `hello` carries both: the client updates its displayed release version on
+each handshake, while it reloads only when the build hash differs. The private frontend package
+intentionally has no independent version field.
+
 ### Running the tests
 
 ```bash

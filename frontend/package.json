@@ -2,7 +2,6 @@
   "name": "partyline-frontend",
   "private": true,
   "type": "module",
-  "version": "0.0.0",
   "description": "The partyline web client: Svelte 5 + Tailwind, built into partyline/static/.",
   "scripts": {
     "dev": "vite",
