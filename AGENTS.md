@@ -317,6 +317,11 @@ participant in the room — including whoever is doing the work. The rules that 
   `release_restart_plan_claim(token, owner)` on cancellation or error; and complete only after the
   final outcome with `complete_restart_plan(token, owner)`. A lost or expired owner is reclaimable,
   and a runner that loses ownership must launch no further processes.
+- **Automatic recovery is bounded.** A successful automatic claim increments `attempt_count`
+  atomically. The first run with unconfirmed continuation receipt preserves exactly one retry; the
+  second consumes the stale plan and posts an actionable warning naming every unconfirmed process
+  and the debrief's first line. The processes remain live and `reattaching` is cleared—unconfirmed
+  input is not evidence that a healthy process should be killed.
 - **Restart proof has two separate browser claims.** The untouched cockpit tab proves hands-off
   reload and the recovered snapshot. A deliberate socket-drop control must prove reconnect resync
   by changing server state during the gap, observing `tab_reloaded=False`, and verifying catch-up.
