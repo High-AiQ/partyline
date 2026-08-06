@@ -302,6 +302,18 @@ participant in the room — including whoever is doing the work. The rules that 
   are necessary but not sufficient: the same workflow must run on the real cockpit, and the
   post-restart proof must include each process's identity, live attachment state, plan completion,
   and an honest transcript with no unexplained warnings.
+- **The automatic lease has one explicit lifecycle.** Claim with
+  `claim_restart_plan(mode, owner, lease_seconds)`; renew with
+  `renew_restart_plan_claim(token, owner, lease_seconds)` while waiting; release with
+  `release_restart_plan_claim(token, owner)` on cancellation or error; and complete only after the
+  final outcome with `complete_restart_plan(token, owner)`. A lost or expired owner is reclaimable,
+  and a runner that loses ownership must launch no further processes.
+- **Restart proof has two separate browser claims.** The untouched cockpit tab proves hands-off
+  reload and the recovered snapshot. A deliberate socket-drop control must prove reconnect resync
+  by changing server state during the gap, observing `tab_reloaded=False`, and verifying catch-up.
+  The full proof also checks four self-reported process identities, four `/api/running` entries, a
+  deleted completed plan, and no unexplained `⚠` transcript lines; a coordinator summary alone is
+  not sufficient.
 - **Nobody may be mid-turn when the restart lands — including whoever triggers it.** An agent
   killed mid-turn comes back to a CLI that resumes the interrupted turn and asks it to continue,
   so it posts a stray fragment into the room on wake. If you schedule the restart with a delayed
