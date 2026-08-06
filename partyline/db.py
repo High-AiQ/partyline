@@ -60,6 +60,7 @@ MIGRATIONS = [
         mode TEXT NOT NULL DEFAULT 'offer',
         claim_owner TEXT,
         claim_until REAL,
+        attempt_count INTEGER NOT NULL DEFAULT 0,
         attachment_ids TEXT NOT NULL,
         debrief TEXT NOT NULL,
         created_at REAL NOT NULL
@@ -75,6 +76,8 @@ MIGRATIONS = [
     # plan. Nullable values mean no owner currently holds the plan.
     "ALTER TABLE restart_plan ADD COLUMN claim_owner TEXT",
     "ALTER TABLE restart_plan ADD COLUMN claim_until REAL",
+    # A failed continuation may be retried once, but never replayed forever.
+    "ALTER TABLE restart_plan ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0",
 ]
 
 
@@ -89,6 +92,7 @@ class RestartPlan(TypedDict):
     mode: RestartPlanMode
     claim_owner: str | None
     claim_until: float | None
+    attempt_count: int
     attachment_ids: list[str]
     debrief: str
     created_at: float
@@ -107,6 +111,7 @@ def _restart_plan_row(row) -> RestartPlan:
         mode=row["mode"],
         claim_owner=row["claim_owner"],
         claim_until=row["claim_until"],
+        attempt_count=row["attempt_count"],
         attachment_ids=json.loads(row["attachment_ids"]),
         debrief=row["debrief"],
         created_at=row["created_at"],
@@ -259,17 +264,18 @@ class Db:
         token = str(uuid.uuid4())
         self._exec(
             "INSERT INTO restart_plan("
-            "singleton,conversation_id,token,mode,claim_owner,claim_until,attachment_ids,debrief,created_at)"
-            " VALUES(1,?,?,?,?,?,?,?,?) ON CONFLICT(singleton) DO UPDATE SET"
+            "singleton,conversation_id,token,mode,claim_owner,claim_until,attempt_count,attachment_ids,debrief,created_at)"
+            " VALUES(1,?,?,?,?,?,?,?,?,?) ON CONFLICT(singleton) DO UPDATE SET"
             " conversation_id=excluded.conversation_id,"
             " token=excluded.token,"
             " mode=excluded.mode,"
             " claim_owner=NULL,"
             " claim_until=NULL,"
+            " attempt_count=0,"
             " attachment_ids=excluded.attachment_ids,"
             " debrief=excluded.debrief,"
             " created_at=excluded.created_at",
-            (conversation_id, token, mode, None, None, json.dumps(attachment_ids), debrief, created_at),
+            (conversation_id, token, mode, None, None, 0, json.dumps(attachment_ids), debrief, created_at),
         )
         plan = self.get_restart_plan()
         if plan is None:  # pragma: no cover - a committed INSERT is immediately readable
@@ -292,7 +298,8 @@ class Db:
         now = time.time()
         with self.lock:
             row = self.conn.execute(
-                "UPDATE restart_plan SET claim_owner=?, claim_until=?"
+                "UPDATE restart_plan SET claim_owner=?, claim_until=?,"
+                " attempt_count=attempt_count + CASE WHEN mode='automatic' THEN 1 ELSE 0 END"
                 " WHERE singleton=1 AND mode=?"
                 " AND (claim_owner IS NULL OR claim_until <= ?)"
                 " RETURNING *",

@@ -95,7 +95,8 @@ class DbTest(unittest.TestCase):
         self.assertEqual(self.db.take_restart_plan("line", plan["token"], "automatic"), plan)
 
     def test_restart_plan_claim_excludes_a_second_owner_until_expiry(self):
-        self.db.save_restart_plan("line", ["agent"], "continue", mode="automatic")
+        plan = self.db.save_restart_plan("line", ["agent"], "continue", mode="automatic")
+        self.assertEqual(plan["attempt_count"], 0)
         second_lifespan = Db(f"{self.directory.name}/partyline.db")
         self.addCleanup(second_lifespan.close)
         with patch("partyline.db.time.time", return_value=10.0):
@@ -107,9 +108,19 @@ class DbTest(unittest.TestCase):
         self.assertIsNotNone(claimed)
         self.assertEqual(claimed["claim_owner"], "server-one")
         self.assertEqual(claimed["claim_until"], 15.0)
+        self.assertEqual(claimed["attempt_count"], 1)
         self.assertIsNone(blocked)
         self.assertIsNotNone(reclaimed)
         self.assertEqual(reclaimed["claim_owner"], "server-two")
+        self.assertEqual(reclaimed["attempt_count"], 2)
+
+    def test_manual_claim_does_not_count_as_an_automatic_recovery_attempt(self):
+        self.db.save_restart_plan("line", ["agent"], "continue", mode="offer")
+
+        claimed = self.db.claim_restart_plan("offer", "server-one", 5)
+
+        self.assertIsNotNone(claimed)
+        self.assertEqual(claimed["attempt_count"], 0)
 
     def test_restart_plan_claim_requires_the_exact_owner_to_renew_or_release(self):
         self.db.save_restart_plan("line", ["agent"], "continue", mode="automatic")
@@ -140,6 +151,7 @@ class DbTest(unittest.TestCase):
 
         self.assertIsNone(replacement["claim_owner"])
         self.assertIsNone(replacement["claim_until"])
+        self.assertEqual(replacement["attempt_count"], 0)
         self.assertFalse(self.db.renew_restart_plan_claim(original["token"], "server-one", 5))
         self.assertFalse(self.db.release_restart_plan_claim(original["token"], "server-one"))
         self.assertFalse(self.db.complete_restart_plan(original["token"], "server-one"))
