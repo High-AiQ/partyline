@@ -58,6 +58,15 @@ would break that. The cost is that a UI change is two things in one commit — t
 source under `frontend/src/` and the rebuilt bundle. Rebuild before you commit,
 or you will ship a stale UI that matches none of the source.
 
+**Release and frontend build identity are different facts.**
+`partyline/__init__.py` is the single source of truth for Partyline's semver
+release as a whole: server, bundled client, database/protocol behavior, and
+fixes. `partyline/static/build.json` identifies only the frontend bundle and
+decides whether an open document must reload. A reconnect must still refresh
+the release version even when the build ID is unchanged. Adapter repositories
+have independent versions; `frontend/package.json` is not a Partyline release
+source.
+
 Layout, and where things belong:
 
 - `src/lib/` — **pure functions, no framework.** Markdown rendering, mention

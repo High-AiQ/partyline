@@ -1,5 +1,7 @@
 import unittest
 
+from pydantic import ValidationError
+
 from partyline.contracts import (
     AdapterMetadataResponse,
     ConversationResponse,
@@ -58,9 +60,19 @@ class ContractTest(unittest.TestCase):
             {"type": "message", "message": message.model_dump()},
         )
         self.assertEqual(
-            HelloEvent(conversation_id="line", handle="greg").model_dump(exclude_none=True),
-            {"type": "hello", "conversation_id": "line", "handle": "greg"},
+            HelloEvent(conversation_id="line", handle="greg", version="0.21.4")
+            .model_dump(exclude_none=True),
+            {
+                "type": "hello",
+                "conversation_id": "line",
+                "handle": "greg",
+                "version": "0.21.4",
+            },
         )
+
+    def test_hello_requires_release_version(self):
+        with self.assertRaises(ValidationError):
+            HelloEvent(conversation_id="line", handle="greg")
 
     def test_restart_contracts_keep_the_offer_token_and_exact_candidate_shape(self):
         candidate = ReattachCandidateResponse(id="att-1", name="sol", adapter="codex")
