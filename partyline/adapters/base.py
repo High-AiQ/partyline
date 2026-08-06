@@ -73,6 +73,8 @@ class Adapter:
         self._stopping = False
         self._ready = asyncio.Event()
         self._ready_result: bool | None = None
+        self._startup_delivery = asyncio.Event()
+        self._startup_delivery_result: bool | None = None
         self._term = pyte.Screen(120, 40)
         self._term_stream = pyte.ByteStream(self._term)
 
@@ -151,6 +153,9 @@ class Adapter:
         if self._ready_result is None:
             self._ready_result = False
             self._ready.set()
+        if self._startup_delivery_result is None:
+            self._startup_delivery_result = False
+            self._startup_delivery.set()
 
     async def stop(self):
         self._stopping = True
@@ -223,6 +228,29 @@ class Adapter:
         text = self.format_digest(messages)
         if text.strip():
             await self.send_keys(text)
+
+    def stage_startup_delivery(self, messages: list[dict]) -> bool:
+        """Stage a wake in the process command, if this adapter supports it.
+
+        The default interactive-process contract has no safe way to do that:
+        callers must wait for ``wait_ready()`` before writing to its pty. An
+        adapter whose CLI accepts an initial prompt can override this hook and
+        make delivery part of process creation instead. Returning ``True``
+        declares that ``start()`` will include the digest; the adapter must
+        separately mark its structured receipt before the cursor advances.
+        """
+        return False
+
+    def mark_startup_delivery_received(self) -> None:
+        """A staged startup digest appeared as structured process input."""
+        if self._startup_delivery_result is None and not self._stopping:
+            self._startup_delivery_result = True
+            self._startup_delivery.set()
+
+    async def wait_startup_delivery_received(self) -> bool:
+        """Wait for structured receipt, or for the process to exit first."""
+        await self._startup_delivery.wait()
+        return self._startup_delivery_result is True
 
     # Tail of every wake digest. The briefing states the rule once, but in a long
     # session it scrolls far out of the recent context — this keeps the rule next

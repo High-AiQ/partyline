@@ -4,7 +4,11 @@ import unittest
 from unittest.mock import AsyncMock
 
 from partyline.db import Db
-from partyline.reattach import ReattachCoordinator, ResumedAttachment
+from partyline.reattach import (
+    ContinuationDeliveryPending,
+    ReattachCoordinator,
+    ResumedAttachment,
+)
 from partyline.restart_lease import RestartPlanLeaseLost
 from partyline.runtime import ChatRuntime
 
@@ -322,8 +326,42 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         finally:
             self.runtime.post_message = original_post
 
-        self.assertEqual(self.db.get_restart_plan(), automatic)
+        preserved = self.db.get_restart_plan()
+        self.assertEqual(preserved["token"], automatic["token"])
+        self.assertEqual(preserved["attempt_count"], 1)
+        self.assertIsNone(preserved["claim_owner"])
         self.assertEqual(self.runtime.reattaching, set())
+
+    async def test_unconfirmed_automatic_continuation_retries_once_then_stops(self):
+        automatic = self.db.save_restart_plan(
+            "line", ["one"], "Continue the durable recovery review.", "automatic"
+        )
+
+        async def resume(attachment_id, _pending):
+            adapter = ReadyAdapter(self.order, "sol")
+            adapter.wait_startup_delivery_received = lambda: asyncio.sleep(30)
+            self.runtime.live[attachment_id] = adapter
+            return ResumedAttachment(adapter, True)
+
+        coordinator = ReattachCoordinator(self.runtime, resume, ready_timeout=0.01)
+        with self.assertRaisesRegex(ContinuationDeliveryPending, "preserved for one retry"):
+            await coordinator.run_automatic()
+
+        preserved = self.db.get_restart_plan()
+        self.assertEqual(preserved["token"], automatic["token"])
+        self.assertEqual(preserved["attempt_count"], 1)
+        self.assertIn("one", self.runtime.reattaching)
+
+        result = await coordinator.run_automatic()
+
+        self.assertEqual(result.unconfirmed, ("sol",))
+        self.assertIsNone(self.db.get_restart_plan())
+        self.assertIn("one", self.runtime.live)
+        self.assertNotIn("one", self.runtime.reattaching)
+        warning = self.db.list_messages("line")[-1]["body"]
+        self.assertIn("abandoned after 2 attempts", warning)
+        self.assertIn("@sol", warning)
+        self.assertIn("Continue the durable recovery review.", warning)
 
     async def test_lease_is_checked_before_the_first_coordinator_effect(self):
         resume = AsyncMock()

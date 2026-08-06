@@ -76,6 +76,23 @@ class AdapterLifecycleTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(await adapter.wait_ready())
 
+    async def test_startup_delivery_waits_for_structured_receipt(self):
+        adapter = Recorder(["cat"], resume=True)
+        waiter = asyncio.create_task(adapter.wait_startup_delivery_received())
+
+        await asyncio.sleep(0)
+        self.assertFalse(waiter.done())
+        adapter.mark_startup_delivery_received()
+
+        self.assertTrue(await waiter)
+
+    async def test_stopping_releases_unconfirmed_startup_delivery(self):
+        adapter = Recorder(["cat"], resume=True)
+
+        await adapter.stop()
+
+        self.assertFalse(await adapter.wait_startup_delivery_received())
+
     async def test_stopping_before_ready_releases_waiters_as_not_ready(self):
         adapter = Recorder(["sh", "-c", "sleep 30"])
         await adapter.start()

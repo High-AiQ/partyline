@@ -86,6 +86,23 @@ Rules that hold for every adapter:
   adapter's quiescence flush exists for line-oriented programs with no transcript at all.
 - Don't replay history after a resume, and cancel background tasks on stop.
 
+### Resume continuation delivery
+
+`running`, pty-writable, transcript-ready, and continuation-received are separate lifecycle
+states. A resumed TUI can silently discard bracketed paste during startup, so partyline never
+advances an attachment's message cursor merely because bytes were written.
+
+If the interactive CLI accepts an initial prompt, override
+`stage_startup_delivery(messages) -> bool` and put `format_digest(messages)` into the real
+resume command's argv. Then call `mark_startup_delivery_received()` only when the claimed
+structured transcript records that exact digest as user input. The coordinator awaits
+`wait_startup_delivery_received()` before advancing the cursor. Do not implement this boundary
+with a sleep or screen scraping.
+
+Adapters without an argv prompt keep the default `False` result. The coordinator waits for
+their normal `wait_ready()` signal before calling `deliver()`, and advances the cursor only
+after that call returns successfully.
+
 ### Locate the transcript unambiguously
 
 This is the one that bites. If the CLI accepts a session id or a session directory, **pass one

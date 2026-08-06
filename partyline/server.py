@@ -31,7 +31,6 @@ from . import __version__
 from .adapters import (
     ADAPTERS,
     ADAPTER_METADATA,
-    Adapter,
     import_repository,
     make_adapter,
     reload_adapters,
@@ -65,6 +64,7 @@ from .contracts import (
 from .db import Db
 from .reattach import (
     ReattachCoordinator,
+    ResumedAttachment,
     RestartPlanError,
     adapter_can_resume,
     create_restart_plan,
@@ -472,7 +472,9 @@ async def resume_attachment(att_id: str):
     return runtime.db.get_attachment(att_id)
 
 
-async def _resume_adapter(att_id: str) -> Adapter:
+async def _resume_adapter(
+    att_id: str, startup_messages: list[dict] | None = None
+) -> ResumedAttachment:
     att = runtime.db.get_attachment(att_id)
     if not att:
         raise HTTPException(404)
@@ -499,6 +501,7 @@ async def _resume_adapter(att_id: str) -> Adapter:
         runtime.status_callback(att_id, att["conv_id"]),
         on_cli_session=lambda s: runtime.db.set_cli_session(att_id, s),
     )
+    startup_delivery_staged = adapter.stage_startup_delivery(startup_messages or [])
     try:
         await adapter.start()
     except Exception as exc:
@@ -510,7 +513,7 @@ async def _resume_adapter(att_id: str) -> Adapter:
         att["conv_id"], "system", "system",
         f"@{att['name']} resumed with full context · session {att.get('cli_session') or att_id}",
     )
-    return adapter
+    return ResumedAttachment(adapter, startup_delivery_staged)
 
 
 @app.delete("/api/attachments/{att_id}", response_model=OkResponse)

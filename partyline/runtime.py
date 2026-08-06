@@ -112,9 +112,9 @@ class ChatRuntime:
                 continue
             delivered.add(att["name"].lower())
             pending = self.db.messages_after(conv_id, att["last_seen"], exclude_sender=att["name"])
-            self.db.set_last_seen(att["id"], msg["id"])
             if pending:
                 await adapter.deliver(pending)
+                self.db.set_last_seen(att["id"], pending[-1]["id"])
 
         # A handle can have several rows — old detached ones alongside a live one.
         # Only warn about handles that got no delivery at all.

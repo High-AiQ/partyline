@@ -21,6 +21,7 @@ from .db import Db, RestartPlan
 from .restart_lease import run_automatic_restart_plan
 
 READY_TIMEOUT_SECONDS = 90.0
+MAX_AUTOMATIC_ATTEMPTS = 2
 
 
 class ReattachRuntime(Protocol):
@@ -37,7 +38,13 @@ class ReattachRuntime(Protocol):
     async def broadcast(self, conv_id: str, event: Event) -> None: ...
 
 
-ResumeAttachment = Callable[[str], Awaitable[Adapter]]
+@dataclass(frozen=True)
+class ResumedAttachment:
+    adapter: Adapter
+    startup_delivery_staged: bool
+
+
+ResumeAttachment = Callable[[str, list[dict]], Awaitable[ResumedAttachment]]
 
 
 @dataclass(frozen=True)
@@ -49,6 +56,11 @@ class ReattachResult:
     # schedule. Counted separately so a run that was merely slow cannot be read
     # as a run that lost processes.
     slow: tuple[str, ...] = ()
+    unconfirmed: tuple[str, ...] = ()
+
+
+class ContinuationDeliveryPending(RuntimeError):
+    """Automatic recovery stayed live but did not confirm every continuation."""
 
 
 @dataclass(frozen=True)
@@ -176,7 +188,30 @@ class ReattachCoordinator:
     async def run_automatic(self) -> ReattachResult | None:
         """Run a trusted cockpit plan under recoverable, exclusive ownership."""
         async def operation(plan: RestartPlan, guard: Callable[[], None]) -> ReattachResult:
-            return await self.run(plan, None, guard)
+            result = await self.run(plan, None, guard)
+            if result.unconfirmed:
+                names = ", ".join(result.unconfirmed)
+                if plan["attempt_count"] < MAX_AUTOMATIC_ATTEMPTS:
+                    raise ContinuationDeliveryPending(
+                        f"continuation delivery remains unconfirmed for {names}; "
+                        "the automatic plan was preserved for one retry"
+                    )
+                mentions = ", ".join(f"@{name}" for name in result.unconfirmed)
+                debrief = (
+                    plan["debrief"].strip()
+                    or "Continue the work that was interrupted by the restart."
+                )
+                first_line = debrief.splitlines()[0]
+                await self.runtime.post_message(
+                    plan["conversation_id"],
+                    "system",
+                    "system",
+                    f"⚠ automatic continuation abandoned after "
+                    f"{plan['attempt_count']} attempts for {mentions}. "
+                    f"The processes were left running. Debrief: {first_line}",
+                )
+                self.runtime.reattaching.difference_update(plan["attachment_ids"])
+            return result
         return await run_automatic_restart_plan(self.runtime.db, operation)
 
     async def run(
@@ -209,6 +244,8 @@ class ReattachCoordinator:
         ready: list[str] = []
         failed: list[str] = []
         slow: list[str] = []
+        unconfirmed: list[str] = []
+        unconfirmed_ids: set[str] = set()
         try:
             for attachment_id in attachment_ids:
                 if ensure_owned is not None:
@@ -220,22 +257,43 @@ class ReattachCoordinator:
                     continue
 
                 name = attachment["name"]
+                continuation_confirmed = False
                 try:
-                    adapter = await self.resume_attachment(attachment_id)
                     pending = self.runtime.db.messages_after(
                         conv_id,
                         attachment["last_seen"],
                         exclude_sender=name,
                     )
-                    if pending:
+                    resumed = await self.resume_attachment(attachment_id, pending)
+                    adapter = resumed.adapter
+                    continuation_confirmed = not pending
+                    if pending and resumed.startup_delivery_staged:
+                        # The immutable argv removes the pty timing race, but
+                        # process creation still proves only intent. Advance
+                        # the cursor after the claimed structured transcript
+                        # records that digest as user input.
+                        delivered = await asyncio.wait_for(
+                            adapter.wait_startup_delivery_received(),
+                            timeout=self.ready_timeout,
+                        )
+                        if not delivered:
+                            raise RuntimeError(
+                                "the process exited before accepting its continuation"
+                            )
                         self.runtime.db.set_last_seen(attachment_id, pending[-1]["id"])
-                        await adapter.deliver(pending)
-                    self.runtime.reattaching.discard(attachment_id)
+                        continuation_confirmed = True
+
                     is_ready = await asyncio.wait_for(
                         adapter.wait_ready(), timeout=self.ready_timeout
                     )
                     if not is_ready:
                         raise RuntimeError("the process exited before claiming its session")
+
+                    if pending and not resumed.startup_delivery_staged:
+                        await adapter.deliver(pending)
+                        self.runtime.db.set_last_seen(attachment_id, pending[-1]["id"])
+                        continuation_confirmed = True
+                    self.runtime.reattaching.discard(attachment_id)
                 except TimeoutError:
                     # Slow is not failed, and killing it is the only real harm.
                     #
@@ -248,12 +306,18 @@ class ReattachCoordinator:
                     # The wait still earns its place: when readiness does arrive the
                     # next process starts immediately behind it. What it must not do
                     # is treat its own impatience as evidence of a broken process.
-                    slow.append(name)
+                    if continuation_confirmed:
+                        slow.append(name)
+                        detail = "still settling"
+                    else:
+                        unconfirmed.append(name)
+                        unconfirmed_ids.add(attachment_id)
+                        detail = "running but its continuation is still unconfirmed"
                     await self.runtime.post_message(
                         conv_id,
                         "system",
                         "system",
-                        f"☏ @{name} is back but still settling after {self.ready_timeout:g}s — "
+                        f"☏ @{name} is back but {detail} after {self.ready_timeout:g}s — "
                         f"left running, advancing to the next process",
                     )
                     continue
@@ -276,20 +340,31 @@ class ReattachCoordinator:
                     f"☏ @{name} is ready after restart; advancing to the next process",
                 )
         finally:
-            self.runtime.reattaching.difference_update(attachment_ids)
+            # An unconfirmed process stays queued: routing another mention to
+            # its not-yet-ready pty would repeat the same loss this guard just
+            # detected. Automatic plans remain durable and retry on restart.
+            self.runtime.reattaching.difference_update(
+                attachment_id
+                for attachment_id in attachment_ids
+                if attachment_id not in unconfirmed_ids
+            )
 
         summary = f"{len(ready)} ready"
         if slow:
             summary += f", {len(slow)} still settling"
         if failed:
             summary += f", {len(failed)} failed"
+        if unconfirmed:
+            summary += f", {len(unconfirmed)} continuation unconfirmed"
         await self.runtime.post_message(
             conv_id,
             "system",
             "system",
             f"☏ sequential reattachment finished — {summary}",
         )
-        return ReattachResult(tuple(ready), tuple(failed), tuple(slow))
+        return ReattachResult(
+            tuple(ready), tuple(failed), tuple(slow), tuple(unconfirmed)
+        )
 
     async def _abandon(self, attachment_id: str) -> None:
         adapter = self.runtime.live.pop(attachment_id, None)
