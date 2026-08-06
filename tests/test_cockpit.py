@@ -230,6 +230,7 @@ class RestartPlanTest(unittest.TestCase):
                 {
                     "conversation_id": "line-1",
                     "token": "offer-token",
+                    "mode": "automatic",
                     "attachments": [{"id": "a1", "name": "sol", "adapter": "codex"}],
                     "debrief": "Continue the restart review.",
                 }
@@ -255,6 +256,43 @@ class RestartPlanTest(unittest.TestCase):
             {
                 "conversation_id": "line-1",
                 "debrief": "Continue the restart review.",
+                "mode": "automatic",
+            },
+        )
+
+    def test_manual_mode_posts_a_human_offer_plan(self):
+        requests = []
+        responses = [
+            FakeResponse([line.model_dump() for line in self.conversations]),
+            FakeResponse(
+                {
+                    "conversation_id": "line-1",
+                    "token": "offer-token",
+                    "mode": "offer",
+                    "attachments": [{"id": "a1", "name": "sol", "adapter": "codex"}],
+                    "debrief": "Inspect before continuing.",
+                }
+            ),
+        ]
+
+        def open_url(request):
+            requests.append(request)
+            return responses.pop(0)
+
+        schedule_restart_plan(
+            "line-1",
+            "Inspect before continuing.",
+            "http://127.0.0.1:8642",
+            open_url,
+            mode="offer",
+        )
+
+        self.assertEqual(
+            json.loads(requests[1].data),
+            {
+                "conversation_id": "line-1",
+                "debrief": "Inspect before continuing.",
+                "mode": "offer",
             },
         )
 

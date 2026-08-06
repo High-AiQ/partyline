@@ -244,18 +244,29 @@ lists what would be stopped. Both are also in the UI, as **stop** next to the op
 the sidebar footer. Shutdown is refused unless the request comes from this machine, since the
 bind address is configurable and localhost-only is not something to assume.
 
-For a deliberate dogfood restart, the current line can optionally preserve a reattachment plan
-and a continuation debrief. The UI offers this in the stop dialog; an operator restarting the
-separate cockpit clone can schedule the same offer without stopping anything:
+### Recursive self-improvement
+
+Recursive self-improvement does not require mandatory human input. Agents use their own judgement:
+once an agent has judged the tree safe, committed and pushed it, passed cockpit preflight, scoped the
+restart plan, and cleared active turns, the agent may authorize its own dogfood restart. The agent
+then deploys the selected cockpit, schedules the restart, and resumes the planned line without
+waiting for a browser or a person to click through a recovery dialog.
+
+For a deliberate dogfood restart, the current line can preserve an automatic reattachment plan and
+a continuation debrief. The command is explicit, local, and line-scoped; it does not stop or restart
+the server itself:
 
 ```bash
 uv run python -m scripts.cockpit plan "partyline refactoring" \
   --debrief "Continue the TypeScript review from the committed handoff."
 ```
 
-After the server returns, only that line sees the offer. Accepting it resumes the recorded
-processes strictly one at a time: partyline waits until one adapter has reclaimed its exact
-session before starting the next. Adapters without safe resume/readiness support are excluded.
+By default this consumes an **automatic** plan after startup; no browser needs to reconnect. The
+explicit `--manual-offer` escape hatch keeps the human stop-dialog flow for cases where an operator
+wants to inspect the plan first. In either mode, only the selected line and exact plan token can
+consume it. Resumption is strictly one process at a time: partyline waits until one adapter has
+reclaimed its exact session before starting the next. Adapters without safe resume/readiness support
+are excluded, and a slow but live adapter remains attached rather than being treated as failed.
 
 ### Credentials for attached processes
 

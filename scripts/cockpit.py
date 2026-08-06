@@ -14,6 +14,7 @@ changed.
     uv run python -m scripts.cockpit check     # is the workbench fit to deploy?
     uv run python -m scripts.cockpit deploy    # check, advance the cockpit, verify
     uv run python -m scripts.cockpit plan LINE --debrief "what to continue"
+    uv run python -m scripts.cockpit plan LINE --manual-offer --debrief "what to continue"
 
 Neither command restarts anything. Stopping the server drops every participant,
 including whoever runs it, so it stays a deliberate act by a person who has
@@ -194,13 +195,19 @@ def schedule_restart_plan(
     debrief: str,
     base_url: str,
     open_url: ResponseOpener = urlopen,
+    *,
+    mode: str = "automatic",
 ) -> RestartPlanResponse:
-    """Persist a same-line offer in the running cockpit, without restarting it."""
+    """Persist a same-line plan in the running cockpit, without restarting it."""
     conversations_request = Request(urljoin(base_url, "/api/conversations"))
     with open_url(conversations_request) as response:
         conversations = TypeAdapter(list[ConversationResponse]).validate_json(response.read())
     conversation = resolve_line(conversations, selector)
-    body = RestartPlanRequest(conversation_id=conversation.id, debrief=debrief)
+    body = RestartPlanRequest(
+        conversation_id=conversation.id,
+        debrief=debrief,
+        mode=mode,
+    )
     request = Request(
         urljoin(base_url, "/api/restart-plan"),
         data=body.model_dump_json().encode(),
@@ -271,9 +278,9 @@ def deploy(cockpit: Path, repo: Path = REPO_ROOT) -> int:
     return 0
 
 
-def plan(selector: str, debrief: str, base_url: str) -> int:
+def plan(selector: str, debrief: str, base_url: str, *, mode: str = "automatic") -> int:
     try:
-        scheduled = schedule_restart_plan(selector, debrief, base_url)
+        scheduled = schedule_restart_plan(selector, debrief, base_url, mode=mode)
     except HTTPError as exc:
         detail = exc.read().decode(errors="replace")
         print(f"could not schedule reattachment: HTTP {exc.code} {detail}")
@@ -283,7 +290,10 @@ def plan(selector: str, debrief: str, base_url: str) -> int:
         return 1
     names = ", ".join(candidate.name for candidate in scheduled.attachments)
     print(f"  ✓ {scheduled.conversation_id}: {names}")
-    print("After restart, only that line will receive the accept/cancel offer.")
+    if mode == "automatic":
+        print("After restart, that line's plan will be consumed automatically; no browser is required.")
+    else:
+        print("After restart, only that line will receive the accept/cancel offer.")
     return 0
 
 
@@ -299,12 +309,18 @@ def main(argv=None) -> int:
         parser.add_argument("line", help="exact line id or unique name")
         parser.add_argument("--debrief", required=True, help="continuation instructions")
         parser.add_argument(
+            "--manual-offer",
+            action="store_true",
+            help="show the human accept/cancel offer instead of auto-accepting after restart",
+        )
+        parser.add_argument(
             "--url",
             default=f"http://127.0.0.1:{os.environ.get('PARTYLINE_PORT', '8642')}",
             help="running cockpit base URL",
         )
         args = parser.parse_args(argv[1:])
-        return plan(args.line, args.debrief, args.url)
+        mode = "offer" if args.manual_offer else "automatic"
+        return plan(args.line, args.debrief, args.url, mode=mode)
     print(__doc__)
     return 2
 

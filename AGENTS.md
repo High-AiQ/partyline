@@ -225,6 +225,7 @@ participant in the room — including whoever is doing the work. The rules that 
   uv run python -m scripts.cockpit check     # is the workbench fit to deploy?
   uv run python -m scripts.cockpit deploy    # check, fast-forward the cockpit, verify
   uv run python -m scripts.cockpit plan "line name" --debrief "what to continue"
+  # Add --manual-offer only when a human should inspect the plan first.
   ```
 
   `check` refuses a dirty tree, a missing or **stale** bundle (it rebuilds and diffs, which is
@@ -234,15 +235,20 @@ participant in the room — including whoever is doing the work. The rules that 
   Neither command restarts anything; that stays a deliberate, announced act.
 - **Test on a throwaway port and database**, one per person, so several agents can test at once
   without colliding: `PARTYLINE_DB=/tmp/<you>.db PARTYLINE_PORT=864x uv run partyline`.
-- **Restarting the cockpit is a scheduled act, not a side effect.** The full ceremony, in
-  order: everyone commits and posts status → `scripts.cockpit deploy` passes → optionally run
-  `scripts.cockpit plan` for the requesting line with a concrete continuation debrief → announce
-  → confirm nobody is mid-turn → restart. Planning does not restart anything. After startup,
-  only the line named by the plan receives an accept/cancel offer; accepting resumes each saved
-  process fully and waits for its adapter readiness signal before starting the next one. That
-  strict sequence is load-bearing for CLIs whose concurrent resume discovery can claim the same
-  rollout. Uncommitted work in an agent's head does not survive; committed work always does, and
-  chat history plus the debrief are replayed on resume.
+- **Restarting the cockpit is a scheduled act, not a side effect.** This is the
+  **recursive self-improvement** path: agents use their own judgement, and it does not require
+  mandatory human input when an agent has judged the tree safe. The full ceremony remains: everyone
+  commits and posts status →
+  `scripts.cockpit deploy` passes → run `scripts.cockpit plan` for the requesting line with a
+  concrete continuation debrief → announce → confirm nobody is mid-turn → restart. Planning does
+  not restart anything. A cockpit plan is automatic by default and is consumed in the background
+  after startup; use `--manual-offer` when a human should inspect it first. Only the exact line and
+  plan token can consume it. Automatic or accepted plans resume each saved process fully and wait
+  for its adapter readiness signal before starting the next one. That strict sequence is
+  load-bearing for CLIs whose concurrent resume discovery can claim the same rollout. Uncommitted
+  work in an agent's head does not survive; committed work always does, and chat history plus the
+  debrief are replayed on resume. A slow but live adapter remains attached while the sequence
+  advances; a genuine exit is the failure case.
 - **Nobody may be mid-turn when the restart lands — including whoever triggers it.** An agent
   killed mid-turn comes back to a CLI that resumes the interrupted turn and asks it to continue,
   so it posts a stray fragment into the room on wake. If you schedule the restart with a delayed
