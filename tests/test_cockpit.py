@@ -134,6 +134,70 @@ class TreeCleanTest(unittest.TestCase):
             self.assertTrue(check_tree_clean(Path("/tmp"), "cockpit", untracked=untracked))
 
 
+class AdapterStoreTest(unittest.TestCase):
+    """The server executes imported adapters, so they are part of the deployment.
+
+    A restart once ran an adapter that existed only as an uncommitted local
+    edit: the running behaviour was in no repository, the preflight said
+    "ready", and re-importing would have reverted the fix without a trace. Same
+    failure as a cockpit three commits behind — the code being run was not the
+    code anyone had reviewed.
+    """
+
+    def setUp(self):
+        import scripts.cockpit as cockpit
+
+        self.cockpit = cockpit
+        self.real_git = cockpit.git
+
+    def tearDown(self):
+        self.cockpit.git = self.real_git
+
+    def stub(self, responses):
+        """`responses` maps a git subcommand to its output, or an exception."""
+        def fake(*args, **kwargs):
+            answer = responses.get(args[0], "")
+            if isinstance(answer, Exception):
+                raise answer
+            return answer.pop(0) if isinstance(answer, list) else answer
+        self.cockpit.git = fake
+
+    def test_no_store_is_not_a_finding(self):
+        self.assertEqual(self.cockpit.check_adapter_store(Path("/nonexistent/store")), [])
+
+    def test_a_dirty_adapter_checkout_blocks_a_restart(self):
+        self.stub({"status": " M adapters/codex/adapter.py"})
+        with tempfile.TemporaryDirectory() as store:
+            (Path(store) / "partyline-adapters" / ".git").mkdir(parents=True)
+            findings = self.cockpit.check_adapter_store(Path(store))
+        self.assertTrue(findings)
+        self.assertIn("partyline-adapters", findings[0].problem)
+
+    def test_an_unpushed_adapter_checkout_blocks_a_restart(self):
+        # Committed but only here is still "runs code nobody else can get".
+        self.stub({"status": "", "rev-parse": ["localsha", "othersha"]})
+        with tempfile.TemporaryDirectory() as store:
+            (Path(store) / "partyline-adapters" / ".git").mkdir(parents=True)
+            findings = self.cockpit.check_adapter_store(Path(store))
+        self.assertTrue(any("upstream" in f.problem for f in findings), findings)
+
+    def test_a_clean_pushed_adapter_checkout_passes(self):
+        self.stub({"status": "", "rev-parse": "samesha"})
+        with tempfile.TemporaryDirectory() as store:
+            (Path(store) / "partyline-adapters" / ".git").mkdir(parents=True)
+            self.assertEqual(self.cockpit.check_adapter_store(Path(store)), [])
+
+    def test_drift_between_installed_and_source_is_reported(self):
+        self.stub({"rev-parse": ["installedsha", "sourcesha"]})
+        findings = self.cockpit.check_adapter_drift(Path("/installed"), Path("/source"))
+        self.assertEqual(len(findings), 1)
+        self.assertIn("re-import", findings[0].fix)
+
+    def test_matching_installed_and_source_is_silent(self):
+        self.stub({"rev-parse": "samesha"})
+        self.assertEqual(self.cockpit.check_adapter_drift(Path("/installed"), Path("/source")), [])
+
+
 class RestartNeededTest(unittest.TestCase):
     """`restart_needed` shells out to git for the diff, so these stub it."""
 

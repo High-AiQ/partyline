@@ -52,6 +52,11 @@ DEFAULT_COCKPIT = Path(os.environ.get("PARTYLINE_COCKPIT", Path.home() / "partyl
 # are re-executed in place by POST /api/adapters/reload.
 RELOADABLE = ("partyline/adapters/",)
 
+# Where imported adapter repositories are installed. These are *executed* by the
+# running server, so they are as load-bearing as anything in this repository —
+# and until this check existed, nothing verified them at all.
+ADAPTER_STORE = Path(os.environ.get("PARTYLINE_ADAPTERS_DIR", "~/.partyline/adapters")).expanduser()
+
 
 class ResponseOpener(Protocol):
     def __call__(self, request: Request) -> HTTPResponse: ...
@@ -165,6 +170,68 @@ def check_bundle_current(repo: Path) -> list[Finding]:
     return []
 
 
+def adapter_checkouts(store: Path = ADAPTER_STORE) -> list[Path]:
+    """Every imported adapter repository the server would execute."""
+    if not store.is_dir():
+        return []
+    return sorted(path for path in store.iterdir() if (path / ".git").is_dir())
+
+
+def check_adapter_store(store: Path = ADAPTER_STORE) -> list[Finding]:
+    """The code the server actually runs must exist somewhere reproducible.
+
+    Adapters are imported into a local store and executed as us. Nothing about
+    them is covered by this repository's cleanliness, which is how a restart
+    once ran an adapter that existed *only* as an uncommitted local edit: the
+    behaviour under test was in no repository, no preflight mentioned it, and
+    re-importing would have silently reverted the fix.
+
+    This is the same failure as a cockpit sitting three commits behind — the
+    code being run was not the code anyone had reasoned about — so it gets the
+    same treatment: a dirty or unpushed adapter checkout blocks a restart.
+    """
+    findings = []
+    for checkout in adapter_checkouts(store):
+        label = f"adapter repository {checkout.name}"
+        findings += check_tree_clean(checkout, label, untracked=True)
+        try:
+            head = git("rev-parse", "HEAD", cwd=checkout)
+            upstream = git("rev-parse", "@{u}", cwd=checkout)
+        except RuntimeError:
+            findings.append(Finding(
+                f"{label} has no upstream to compare against",
+                f"push it, or set one: git -C {checkout} branch --set-upstream-to=origin/main"))
+            continue
+        if head != upstream:
+            findings.append(Finding(
+                f"{label} does not match its upstream",
+                f"push or reset it in {checkout} — the server runs this code"))
+    return findings
+
+
+def check_adapter_drift(installed: Path, source: Path) -> list[Finding]:
+    """Is the adapter the server executes the same commit as its source?
+
+    The installed store and the authoritative checkout are two copies of the
+    same repository, and nothing keeps them in step. During this incident the
+    installed copy carried a fix that the source repository had never seen, so
+    the running behaviour was correct, unreviewable, and one re-import away
+    from silently reverting.
+    """
+    try:
+        installed_head = git("rev-parse", "HEAD", cwd=installed)
+        source_head = git("rev-parse", "HEAD", cwd=source)
+    except RuntimeError as exc:
+        return [Finding(f"cannot compare {installed.name} with its source: {exc}",
+                        f"check that {source} is a git checkout of the same repository")]
+    if installed_head != source_head:
+        return [Finding(
+            f"the installed {installed.name} is at {installed_head[:9]}, "
+            f"its source at {source_head[:9]}",
+            "re-import the adapter so the server runs the reviewed commit")]
+    return []
+
+
 def check_in_sync(cockpit: Path, expected: str) -> list[Finding]:
     at = git("rev-parse", "HEAD", cwd=cockpit)
     if at != expected:
@@ -243,6 +310,7 @@ def check(repo: Path = REPO_ROOT) -> int:
         *check_bundle_present(repo, "workbench"),
         *check_bundle_current(repo),
         *check_pushed(repo),
+        *check_adapter_store(),
     ]
     return report(findings)
 
