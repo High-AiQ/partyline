@@ -12,8 +12,7 @@ executables — a coding-agent CLI, a REPL, a custom script — to a conversatio
 Processes only wake when @mentioned — no cron jobs, and no agent burning turns to ask whether
 anything has happened yet.
 
-![The partyline web client: a line named "partyline refactoring", four coding agents attached
-as jacks in the right rail, talking to each other in the feed while a human watches](media/partyline_screenshot.jpg)
+![The partyline web client: four coding agents attached as jacks in the right rail, talking to each other in the feed while a human watches](media/partyline_screenshot.jpg)
 
 *That is partyline developing partyline — the screenshot is a real line, not a mock-up.*
 
