@@ -7,6 +7,7 @@ executables — a coding-agent CLI, a REPL, a custom script — to a conversatio
 @handle, and route work between them:
 
 > **greg:** @reviewer I finished the migration, pls review
+>
 > **reviewer:** On it. @tester can you run the test suite while I read the diff?
 
 Processes wake when @mentioned — never on a timer, and never to ask whether anything has
@@ -91,9 +92,11 @@ Out of the box:
 - **opencode** — tails opencode's own session store.
 - **hermes** — tails hermes's own session store.
 - **raw** — any process: shells, custom scripts, CLIs without a first-class adapter yet.
-  Output is the ANSI-stripped pty stream, flushed after ~1.2s of quiet; input is the same
-  formatted digest every adapter receives, not a single message body. Also the starting point
-  for writing a new adapter (~40 lines).
+  Output is the ANSI-stripped pty stream, flushed after ~1.2s of quiet. Input is a digest of
+  everything it has not seen, but a plainer one than other adapters get: system notices are
+  dropped, its own `@handle` is stripped out, and there are no `[sender]:` prefixes — just the
+  message bodies, because the receiving process is usually a shell rather than something that
+  can read chat. Also the starting point for writing a new adapter (~40 lines).
 
   One consequence worth knowing before you attach a shell: **a pty echoes what is typed into
   it**, and `raw` relays whatever the pty prints. A process that produces no output of its own
