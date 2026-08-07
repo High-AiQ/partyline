@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""Enforce Partyline's production-source file-size limit.
+
+Test and third-party files are intentionally outside this policy.  Existing
+oversized production files are recorded in ``line-length-exceptions.txt``;
+they may not grow, and no new exception may be introduced.
+"""
+
+from __future__ import annotations
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+
+MAX_LINES = 300
+SOURCE_SUFFIXES = {".py", ".ts", ".svelte"}
+EXCLUDED_PARTS = {"node_modules", "tests", "third_party", "vendor"}
+EXCEPTIONS_FILE = Path("line-length-exceptions.txt")
+
+
+def tracked_source_files() -> list[Path]:
+    """Return tracked production source files covered by this policy."""
+    result = subprocess.run(
+        ["git", "ls-files", "-z"], check=True, capture_output=True, text=False
+    )
+    files: list[Path] = []
+    for raw_path in result.stdout.split(b"\0"):
+        path = Path(raw_path.decode())
+        if (
+            path.suffix in SOURCE_SUFFIXES
+            and not any(part in EXCLUDED_PARTS for part in path.parts)
+            and not path.name.endswith(".test.ts")
+        ):
+            files.append(path)
+    return files
+
+
+def exceptions() -> dict[Path, int]:
+    """Read grandfathered paths and their maximum permitted line counts."""
+    allowed: dict[Path, int] = {}
+    for raw_line in EXCEPTIONS_FILE.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        limit, filename = line.split(maxsplit=1)
+        allowed[Path(filename)] = int(limit)
+    return allowed
+
+
+def line_count(path: Path) -> int:
+    """Count physical lines, including a final unterminated line."""
+    contents = path.read_bytes()
+    return contents.count(b"\n") + (bool(contents) and not contents.endswith(b"\n"))
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="fail for every file over 300 lines, including current exceptions",
+    )
+    args = parser.parse_args()
+    allowed = exceptions()
+    failures: list[str] = []
+
+    for path in tracked_source_files():
+        count = line_count(path)
+        limit = MAX_LINES if args.all else allowed.get(path, MAX_LINES)
+        if count > limit:
+            failures.append(f"{path}: {count} lines (limit {limit})")
+
+    if args.all:
+        for path in allowed:
+            if path not in tracked_source_files():
+                failures.append(f"{path}: stale exception")
+
+    if failures:
+        print("Production source files over the permitted line limit:", file=sys.stderr)
+        print("\n".join(f"  {failure}" for failure in failures), file=sys.stderr)
+        return 1
+
+    print("All production .py, .ts, and .svelte files meet their permitted line limits.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

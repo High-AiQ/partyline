@@ -417,11 +417,17 @@ participant in the room — including whoever is doing the work. The rules that 
   broadcasts belong in a thin outer layer; the logic that decides *what* to do should be a
   function you can call in a test with a dict and assert on the return value. When a function is
   hard to test, that is the design telling you the effect is too deep inside it.
-- **Aim for under 300 lines per source file** — `.py`, `.js`, `.ts` and `.svelte` alike (tests
-  excepted; they are allowed to be long and boring). This is an encouragement, not a gate: a file
-  crossing it is a prompt to look for the seam, not a reason to split something coherent in half.
-  A `.svelte` file counts its markup and styles too — a component that needs 300 lines is usually
-  two components and a shared stylesheet.
+- **Production source files are capped at 300 lines.** Run `./check-code-lines` before every
+  commit and before cockpit preflight. It covers tracked `.py`, `.ts`, and `.svelte` files only;
+  tests and third-party code are excluded. The temporary entries in
+  `line-length-exceptions.txt` are existing debt: they must never grow, no new exception may be
+  added, and each entry should be removed when its file is split below the cap. Use
+  `./check-code-lines --all` to see the remaining debt. A `.svelte` file counts its markup and
+  styles too — a component that needs 300 lines is usually two components and a shared stylesheet.
+- **`main` is protected.** Work on a branch and open a pull request; do not push directly to
+  `main`. GitHub requires the `backend`, `frontend`, `code-line-limits`, and
+  `conventional-commits` checks before merge. The CI commands are `uv run ruff check .`, the
+  coverage test command in this file, `./check-code-lines`, and `cd frontend && npm run verify`.
 - **Lint must pass**: `uv run ruff check .`, clean, before every commit. The autoformatter is
   deliberately not enforced — this codebase hand-wraps for readability, and `ruff format` would
   undo that. Match the surrounding style instead.

@@ -1,0 +1,16 @@
+# Temporary production-source exceptions. Each entry is:
+# <current maximum line count> <repository-relative path>
+#
+# No new entries are allowed and an existing file may not grow. Remove an entry
+# when its file has been split below 301 lines, then use `./check-code-lines
+# --all` to verify the repository has no remaining exceptions.
+740 scripts/cockpit.py
+699 partyline/server.py
+617 partyline/db.py
+462 scripts/uishot.py
+399 partyline/reattach.py
+385 frontend/src/state/wire.svelte.ts
+355 partyline/runtime.py
+341 partyline/adapters/base.py
+329 frontend/src/state/room.svelte.ts
+306 scripts/uidiff.py
