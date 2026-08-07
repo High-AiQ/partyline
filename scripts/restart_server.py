@@ -52,6 +52,30 @@ def process_generation(pid: int, proc_root: Path = Path("/proc")) -> str | None:
     return start if start.isdigit() else None
 
 
+def process_environment(pid: int, proc_root: Path = Path("/proc")) -> dict[str, str] | None:
+    """Return ``/proc/<pid>/environ`` as a mapping, or None if unreadable.
+
+    The trigger that runs this script lives in a transient systemd unit whose
+    environment is systemd's minimal default — no user PATH, so a server
+    exec'd from here could not find the CLIs it attaches. The replacement must
+    inherit the outgoing server's environment, not the trigger's.
+    """
+    try:
+        raw = (proc_root / str(pid) / "environ").read_bytes()
+    except OSError:
+        return None
+    environment = {}
+    for entry in raw.split(b"\0"):
+        if not entry:
+            continue
+        key, separator, value = entry.partition(b"=")
+        if not separator or not key:
+            continue
+        environment[key.decode(errors="surrogateescape")] = value.decode(
+            errors="surrogateescape")
+    return environment or None
+
+
 def post_failure(ws_url: str, message: str) -> None:
     """Post a visible warning through the old server while it is still live."""
     from websockets.sync.client import connect
@@ -88,7 +112,7 @@ def wait_for_generation_exit(
         sleep(0.2)
 
 
-def launch_server(server: Path, logfile: Path, cwd: Path) -> None:
+def launch_server(server: Path, logfile: Path, cwd: Path, env: dict[str, str]) -> None:
     """Make the deployed server the systemd service's main process."""
     os.chdir(cwd)
     with logfile.open("a") as stream:
@@ -96,7 +120,7 @@ def launch_server(server: Path, logfile: Path, cwd: Path) -> None:
         stream.flush()
         os.dup2(stream.fileno(), sys.stdout.fileno())
         os.dup2(stream.fileno(), sys.stderr.fileno())
-        os.execv(str(server), [str(server)])
+        os.execve(str(server), [str(server)], env)
 
 
 def run_restart(
@@ -107,9 +131,10 @@ def run_restart(
     cwd: Path,
     *,
     generation: Callable[[int], str | None] = process_generation,
+    environment: Callable[[int], dict[str, str] | None] = process_environment,
     signal_process: Callable[[int, int], None] = os.kill,
     wait: Callable[[int, str], None] = wait_for_generation_exit,
-    launch: Callable[[Path, Path, Path], None] = launch_server,
+    launch: Callable[[Path, Path, Path, dict[str, str]], None] = launch_server,
 ) -> None:
     actual_start = generation(pid)
     if actual_start is None:
@@ -124,13 +149,16 @@ def run_restart(
         )
     if not server.is_file() or not os.access(server, os.X_OK):
         raise RestartRefused(f"server binary is not executable: {server}", EXIT_BAD_ARGUMENTS)
+    # Snapshot while the old generation is still alive; after SIGTERM its
+    # /proc entry is gone and only the trigger's stripped environment remains.
+    env = environment(pid) or dict(os.environ)
 
     try:
         signal_process(pid, signal.SIGTERM)
     except OSError as exc:
         raise RestartRefused(f"could not signal pid {pid}: {exc}", EXIT_SIGNAL_FAILED) from exc
     wait(pid, expected_start)
-    launch(server, logfile, cwd)
+    launch(server, logfile, cwd, env)
 
 
 def main(argv: list[str] | None = None) -> int:

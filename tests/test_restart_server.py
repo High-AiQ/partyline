@@ -1,5 +1,6 @@
 """Controls for the exact-generation cockpit restart executable."""
 
+import os
 import signal
 import tempfile
 import unittest
@@ -9,6 +10,7 @@ from scripts.restart_server import (
     EXIT_ALREADY_GONE,
     EXIT_WRONG_GENERATION,
     RestartRefused,
+    process_environment,
     process_generation,
     run_restart,
     wait_for_generation_exit,
@@ -35,6 +37,27 @@ class GenerationParserTest(unittest.TestCase):
             self.assertIsNone(process_generation(42, root))
 
 
+class EnvironmentParserTest(unittest.TestCase):
+    def test_the_old_generations_environ_is_parsed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            environ = Path(directory) / "42" / "environ"
+            environ.parent.mkdir()
+            environ.write_bytes(b"PATH=/home/g/.local/bin:/usr/bin\0EMPTY=\0\0junk\0")
+            self.assertEqual(
+                process_environment(42, Path(directory)),
+                {"PATH": "/home/g/.local/bin:/usr/bin", "EMPTY": ""},
+            )
+
+    def test_a_missing_or_empty_environ_is_none(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.assertIsNone(process_environment(42, root))
+            environ = root / "42" / "environ"
+            environ.parent.mkdir()
+            environ.write_bytes(b"")
+            self.assertIsNone(process_environment(42, root))
+
+
 class RestartTest(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -49,7 +72,8 @@ class RestartTest(unittest.TestCase):
     def tearDown(self):
         self.directory.cleanup()
 
-    def invoke(self, generation, wait=lambda *_: None):
+    def invoke(self, generation, wait=lambda *_: None,
+               environment=lambda _pid: {"PATH": "/old/server/path"}):
         return run_restart(
             42,
             "1234",
@@ -57,10 +81,11 @@ class RestartTest(unittest.TestCase):
             self.log,
             self.root,
             generation=generation,
+            environment=environment,
             signal_process=lambda pid, sig: self.signals.append((pid, sig)),
             wait=wait,
-            launch=lambda server, logfile, cwd: self.executions.append(
-                (server, logfile, cwd)
+            launch=lambda server, logfile, cwd, env: self.executions.append(
+                (server, logfile, cwd, env)
             ),
         )
 
@@ -81,7 +106,21 @@ class RestartTest(unittest.TestCase):
         self.invoke(lambda _pid: "1234", lambda pid, start: waited.append((pid, start)))
         self.assertEqual(self.signals, [(42, signal.SIGTERM)])
         self.assertEqual(waited, [(42, "1234")])
-        self.assertEqual(self.executions, [(self.server, self.log, self.root)])
+        self.assertEqual(
+            self.executions,
+            [(self.server, self.log, self.root, {"PATH": "/old/server/path"})],
+        )
+
+    def test_the_replacement_inherits_the_old_generations_environment(self):
+        """The trigger runs under systemd's stripped PATH; the server must not."""
+        self.invoke(lambda _pid: "1234")
+        _server, _log, _cwd, env = self.executions[0]
+        self.assertEqual(env, {"PATH": "/old/server/path"})
+
+    def test_an_unreadable_environ_falls_back_to_the_triggers(self):
+        self.invoke(lambda _pid: "1234", environment=lambda _pid: None)
+        _server, _log, _cwd, env = self.executions[0]
+        self.assertEqual(env, dict(os.environ))
 
 
 class WaitTest(unittest.TestCase):
