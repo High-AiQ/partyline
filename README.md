@@ -9,18 +9,27 @@ executables — a coding-agent CLI, a REPL, a custom script — to a conversatio
 > **greg:** @reviewer I finished the migration, pls review
 > **reviewer:** On it. @tester can you run the test suite while I read the diff?
 
-Processes only wake when @mentioned. No polling loops, no cron jobs.
+Processes only wake when @mentioned — no cron jobs, and no agent burning turns to ask whether
+anything has happened yet.
+
+![The partyline web client: a line named "partyline refactoring", four coding agents attached
+as jacks in the right rail, talking to each other in the feed while a human watches](media/partyline_screenshot.jpg)
+
+*That is partyline developing partyline — the screenshot is a real line, not a mock-up.*
 
 ## Why a real terminal?
 
 Because the interactive app is the real thing. Headless and one-shot modes are a different
 program with different behaviour, different context discovery, and different auth. partyline
 spawns the **actual interactive executable in a pty** — same startup, same project files, same
-login as typing in your terminal. The trick that keeps it clean: **the screen is never scraped.**
+per-project config and trust settings as running it yourself. It inherits partyline's own
+environment and the working directory you choose, not a fresh login shell, so credentials reach
+it the way they reach the server (see [Credentials](#credentials-for-attached-processes)). The
+trick that keeps it clean: **the screen is never scraped.**
 
 | direction | mechanism |
 |---|---|
-| chat → process | keystrokes written to the pty (bracketed paste + Enter) — the app sees a typed/queued message |
+| chat → process | keystrokes written to the pty — the app sees a typed message. Transcript adapters use bracketed paste; `raw` sends line input |
 | process → chat | tail the app's own structured transcript; its replies become chat messages |
 
 For a process with no transcript of its own, the `raw` adapter falls back to the ANSI-stripped
@@ -38,7 +47,7 @@ to run partyline**; you only need it to *change* the frontend (see
 Zero to booted:
 
 ```bash
-git clone git@github.com:High-AiQ/partyline.git
+git clone https://github.com/High-AiQ/partyline.git   # or the SSH URL, if you have a key
 cd partyline
 uv sync                   # creates .venv and installs everything
 uv run partyline          # serves http://127.0.0.1:8642
@@ -47,8 +56,13 @@ uv run partyline          # serves http://127.0.0.1:8642
 `uv run partyline` does the sync for you, so the middle step is optional — it is spelled out
 only so a first run does not look like it has hung while uv builds the environment.
 
-Open <http://127.0.0.1:8642>. If the page loads but is blank, the built client is missing from
-`partyline/static/` — see [The frontend](#the-frontend).
+Open <http://127.0.0.1:8642>. If the server refuses to start because the built client is missing
+from `partyline/static/`, see [The frontend](#the-frontend) — a clone that skipped the committed
+bundle cannot serve the UI.
+
+> **partyline binds to localhost and has no authentication.** Anyone who can reach the port can
+> attach a process and run commands as you. Do not expose it to a network you do not control;
+> see [Security & caveats](#security--caveats-read-this).
 
 Then, in the browser:
 
@@ -75,8 +89,13 @@ Out of the box:
 - **opencode** — tails opencode's own session store.
 - **hermes** — tails hermes's own session store.
 - **raw** — any process: shells, custom scripts, CLIs without a first-class adapter yet.
-  Output is the ANSI-stripped pty stream, flushed after ~1.2s of quiet; input is the message
-  body verbatim. Also the starting point for writing a new adapter (~40 lines).
+  Output is the ANSI-stripped pty stream, flushed after ~1.2s of quiet; input is the same
+  formatted digest every adapter receives, not a single message body. Also the starting point
+  for writing a new adapter (~40 lines).
+
+  One consequence worth knowing before you attach a shell: **a pty echoes what is typed into
+  it**, and `raw` relays whatever the pty prints. A process that produces no output of its own
+  will appear to "reply" with the text it was just sent.
 
 An adapter is a small package that tells partyline how to start one process and how to turn its
 output into chat. Bundled ones live in `partyline/adapters/bundled/<id>/`; the layout is
@@ -87,6 +106,10 @@ identical wherever they come from:
   adapter.toml   # identity, entrypoint, default command, requires, capabilities
   adapter.py     # defines class PartylineAdapter(Adapter)
 ```
+
+Adapters for the proprietary coding CLIs live in a separate pack,
+[High-AiQ/partyline-adapters](https://github.com/High-AiQ/partyline-adapters), imported with the
+command below rather than bundled here.
 
 To write one, read [docs/adapters.md](docs/adapters.md) or hand your agent the
 [add-process-adapter skill](skills/add-process-adapter/SKILL.md).
