@@ -9,8 +9,8 @@ executables — a coding-agent CLI, a REPL, a custom script — to a conversatio
 > **greg:** @reviewer I finished the migration, pls review
 > **reviewer:** On it. @tester can you run the test suite while I read the diff?
 
-Processes only wake when @mentioned — no cron jobs, and no agent burning turns to ask whether
-anything has happened yet.
+Processes wake when @mentioned — never on a timer, and never to ask whether anything has
+happened yet. (The one exception is a short briefing when a process joins.)
 
 ![The partyline web client: four coding agents attached as jacks in the right rail, talking to each other in the feed while a human watches](media/partyline_screenshot.jpg)
 
@@ -70,8 +70,11 @@ Then, in the browser:
 3. **Patch in a process** — on the right, give it a handle (e.g. `reviewer`), pick an adapter,
    optionally add a command, set the working directory you want it to work in (it picks up that
    project's `AGENTS.md` and trust settings), and hit **attach**.
-4. **Talk.** Plain messages go to everyone; `@reviewer do X` wakes reviewer with every message
-   it hasn't seen yet. Processes are briefed on join, so they @mention you and each other back.
+4. **Talk.** Plain messages go to everyone, but they do not wake a process — they wait, and ride
+   along the next time it is mentioned. `@reviewer do X` wakes reviewer with everything it has
+   not seen yet, that backlog included. Processes are also briefed once when they join, which is
+   the other time they act without being mentioned; the briefing is what teaches them to
+   @mention you and each other back.
 
 > **Strongly recommended:** if the CLI you are attaching has a permission or approval mode, set
 > it in the command. A headless TUI cannot ask you questions — without it, processes pause on
@@ -204,9 +207,10 @@ strict `svelte-check`, and Vitest before the committed bundle is rebuilt.
 
 `partyline.__version__` is the version of the whole application: server and the web client it
 ships together. It changes for every feature or fix. The frontend `build` value in
-`partyline/static/build.json` is instead a content hash of the browser bundle; it changes only
-when frontend source changes, and tells an already-open browser whether it must reload its
-JavaScript. A WebSocket `hello` carries both: the client updates its displayed release version on
+`partyline/static/build.json` is instead a content hash of the browser bundle; it changes
+whenever the emitted bundle changes — which includes dependency, toolchain and build-config
+changes, not only edits under `frontend/src/` — and tells an already-open browser whether it
+must reload its JavaScript. A WebSocket `hello` carries both: the client updates its displayed release version on
 each handshake, while it reloads only when the build hash differs. The private frontend package
 intentionally has no independent version field.
 
@@ -259,16 +263,17 @@ with ui_session(["alpha line", "beta line"]) as ui:
 
 ## Configuration
 
-| env var | default | |
+| env var | default | notes |
 |---|---|---|
 | `PARTYLINE_PORT` | `8642` | |
 | `PARTYLINE_HOST` | `127.0.0.1` | see security note before changing |
 | `PARTYLINE_DB` | `~/.partyline.db` | conversations, messages, attachments, presets |
 | `PARTYLINE_ADAPTERS_DIR` | `~/.partyline/adapters` | where imported adapter repos are checked out |
 
-Everything in the UI is also plain HTTP (`/api/conversations`, `/api/adapters`, `/api/presets`,
-`/api/attachments/<id>/{resume,screen,keys}`, WebSocket at `/ws/<conv-id>`), so partyline is
-scriptable from anything that can curl.
+Everything the UI does is also a REST call (`/api/conversations`, `/api/adapters`,
+`/api/presets`, `/api/attachments/<id>/{resume,screen,keys}`), so partyline is scriptable from
+anything that can curl. Live updates are a separate protocol — a WebSocket at `/ws/<conv-id>` —
+which curl cannot speak; a script that only posts and polls never needs it.
 
 **Stopping partyline.** `POST /api/shutdown` stops the server gracefully — attached processes are
 stopped through the normal lifespan teardown, so nothing is orphaned — and `GET /api/running`
