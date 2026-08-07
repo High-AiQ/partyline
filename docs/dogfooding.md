@@ -7,6 +7,11 @@ the planned line, and continue without a required button, browser refresh, or hu
 This is an operational procedure for contributors. Read [AGENTS.md](../AGENTS.md) before using it;
 that file is the authoritative safety contract and records the failure modes that shaped this one.
 
+> **Platform requirement:** Partyline itself supports Linux and macOS, but the automated
+> `scripts.cockpit arm` procedure requires Linux with a working systemd **user** session. It uses a
+> user transient unit to survive the triggering agent's turn and to make the scheduled restart
+> inspectable.
+
 ## The boundary
 
 The instance hosting a conversation must run from a separate **cockpit** checkout. Edit and test in
