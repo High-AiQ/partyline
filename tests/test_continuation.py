@@ -30,15 +30,37 @@ def transcript(*records) -> Path:
     return Path(handle.name)
 
 
+def delivery(text):
+    """The coordinator's actual wording, which every real wake carries."""
+    return f"\u260f the trusted cockpit plan started automatic sequential " \
+           f"reattachment after the dogfood restart\n\nContinuation debrief: {text}"
+
+
 def wake(text):
     """What a partyline delivery actually looks like in a codex rollout."""
-    return {"payload": {"type": "user_message", "message": f"[opus]: {text}"}}
+    return {"payload": {"type": "user_message", "message": f"[opus]: {delivery(text)}"}}
 
 
 def mirrored_wake(text):
     """The same delivery, in the shape some CLIs also record it as."""
     return {"payload": {"type": "message", "role": "user",
-                        "content": [{"type": "input_text", "text": text}]}}
+                        "content": [{"type": "input_text", "text": delivery(text)}]}}
+
+
+def claude_wake(text):
+    """A Claude transcript record: typed `user`, with `role` nested one level
+    down. Reading only the top-level `role` made these invisible."""
+    return {"type": "user", "message": {"role": "user", "content": delivery(text)}}
+
+
+def room_chat(text):
+    """Another participant *saying* the nonce in the room.
+
+    The initiator announces it before arming, so this lands in every
+    transcript — as a genuine user-role delivery — before the restart even
+    happens. It is the one confound a random token does not defeat."""
+    return {"type": "user", "message": {"role": "user",
+                                        "content": f"[sol]: Restart armed. Nonce {text}."}}
 
 
 def tool_call(text):
@@ -50,6 +72,82 @@ def tool_call(text):
 def tool_output(text):
     """An agent dumping the database while investigating the bug."""
     return {"payload": {"type": "custom_tool_call_output", "output": text}}
+
+
+class ClaudeShapeTest(unittest.TestCase):
+    """The oracle must see every participant's transcript, not most of them.
+
+    It reported CONTINUATION LOST for a Claude process whose transcript plainly
+    contained the debrief, because `role` sits under `message` there rather than
+    at the top level. A restart that had worked was very nearly recorded as a
+    failure on the strength of that.
+    """
+
+    def test_a_claude_delivery_is_a_receipt(self):
+        self.assertTrue(is_input_record(claude_wake(NONCE), NONCE))
+
+    def test_a_claude_transcript_yields_a_receipt(self):
+        path = transcript(claude_wake(NONCE))
+        try:
+            self.assertTrue(read_receipt("opus", path, NONCE).received)
+        finally:
+            path.unlink()
+
+
+class ChatQuotingTest(unittest.TestCase):
+    """Hearing the nonce is not the same as being handed the debrief."""
+
+    def test_room_chat_quoting_the_nonce_is_not_a_receipt(self):
+        self.assertFalse(is_input_record(room_chat(NONCE), NONCE))
+
+    def test_a_process_that_only_heard_it_announced_is_reported_lost(self):
+        """The failure this prevents is the worst kind: a restart that
+        delivered nothing to anybody, reporting four receipts, because the
+        initiator announced the nonce in the room beforehand."""
+        path = transcript(room_chat(NONCE), room_chat(NONCE))
+        try:
+            self.assertFalse(read_receipt("terra", path, NONCE).received)
+        finally:
+            path.unlink()
+
+    def test_a_real_delivery_still_counts_amid_the_chatter(self):
+        path = transcript(room_chat(NONCE), claude_wake(NONCE), room_chat(NONCE))
+        try:
+            self.assertEqual(read_receipt("opus", path, NONCE).delivered, 1)
+        finally:
+            path.unlink()
+
+
+class ToolResultContaminationTest(unittest.TestCase):
+    """The investigation must not be able to manufacture its own receipt.
+
+    Claude addresses tool results to `user` too — because that is who the
+    result is *for* — so an agent grepping its own transcript for the nonce
+    produces a `type=user` record containing both the marker and the nonce.
+    Counting it would mean the act of checking whether a receipt exists creates
+    one, which is the exact confound the nonce was introduced to eliminate.
+    """
+
+    def grep_output(self, text):
+        return {"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "content": delivery(text)}]}}
+
+    def test_a_tool_result_carrying_marker_and_nonce_is_not_a_receipt(self):
+        self.assertFalse(is_input_record(self.grep_output(NONCE), NONCE))
+
+    def test_a_transcript_of_nothing_but_self_inspection_is_reported_lost(self):
+        path = transcript(self.grep_output(NONCE), self.grep_output(NONCE))
+        try:
+            self.assertFalse(read_receipt("opus", path, NONCE).received)
+        finally:
+            path.unlink()
+
+    def test_a_real_delivery_survives_alongside_its_own_investigation(self):
+        path = transcript(self.grep_output(NONCE), claude_wake(NONCE))
+        try:
+            self.assertEqual(read_receipt("opus", path, NONCE).delivered, 1)
+        finally:
+            path.unlink()
 
 
 class InputRecordTest(unittest.TestCase):

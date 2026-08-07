@@ -29,6 +29,31 @@ cannot forge.
 A `--nonce` is strongly preferred: a random token cannot reach a transcript by
 any route except delivery, whereas ordinary debrief prose can be quoted,
 dumped, or passed on a command line by an agent looking into the problem.
+
+That claim needed narrowing after Restart #7, in two directions:
+
+*Nonce alone is not unforgeable.* The initiator announces the nonce in the room
+before arming, so by the time the restart happens every participant's
+transcript already contains it as a genuine, user-role chat message. A receipt
+therefore requires the coordinator's own `Continuation debrief:` marker in the
+same record — not merely the number. On live data this cut the counts from 7-8
+to 2 per process; the surplus was everyone discussing the plan.
+
+*Role alone does not mean "said to".* Claude addresses tool results to `user`
+as well, so an agent grepping its own transcript for the nonce produces a
+`type=user` record containing marker and nonce both. The content must be text
+rather than a `tool_result` block, or the act of looking for a receipt creates
+one.
+
+**Remaining assumption**, stated rather than hidden: this is a *structural*
+test, not a temporal one. It cannot distinguish the current restart's debrief
+from an identically-marked debrief carrying the same nonce in an earlier
+generation of the same transcript. A fresh nonce per restart is what closes
+that gap, and it is the caller's responsibility. An `--after` cutoff would be
+strictly stronger; it is not implemented because a timestamp key common to
+every supported CLI has not been verified, and a cutoff that silently fails to
+parse one format would re-create exactly the blind spot this file exists to
+report.
 """
 
 from __future__ import annotations
@@ -41,6 +66,14 @@ from pathlib import Path
 # Record types a CLI uses for "this was said to the model". A partyline wake
 # arrives as one of these; verified against 139 known-good deliveries.
 DELIVERED_TYPES = {"user_message", "message"}
+# The coordinator's own wording, from `ReattachCoordinator` in reattach.py. A
+# nonce is only unforgeable while nobody says it out loud — and the initiator
+# announces it in the room before arming, so by the time the restart happens
+# every participant's transcript already contains it as ordinary chat. Counting
+# those would let a restart that delivered nothing still report a receipt.
+# Requiring the marker in the same record asks the narrower question that was
+# always meant: was this process handed the debrief, not did it hear the number.
+DEBRIEF_MARKER = "Continuation debrief:"
 # Record types that carry the investigation's own traffic. A hit here proves
 # somebody looked at the problem, not that anybody was told anything.
 ARTEFACT_TYPES = {
@@ -84,9 +117,52 @@ def is_input_record(record: dict, phrase: str) -> bool:
     kind = payload.get("type")
     if kind in ARTEFACT_TYPES:
         return False
-    if kind not in DELIVERED_TYPES and payload.get("role") != "user":
+    if kind not in DELIVERED_TYPES and not is_spoken_input(payload):
         return False
-    return phrase in json.dumps(payload)
+    body = json.dumps(payload)
+    return phrase in body and DEBRIEF_MARKER in body
+
+
+SPOKEN_BLOCKS = {"text", "input_text"}
+
+
+def is_spoken_input(payload: dict) -> bool:
+    """Was this text *said to* the model, or handed back to it by a tool?
+
+    Claude types a tool result `user` as well, because that is who the result
+    is addressed to — so role alone cannot separate "the coordinator woke this
+    process" from "this process ran `grep` for the nonce and got a hit". The
+    investigation into whether a receipt exists would otherwise manufacture the
+    receipt, which is precisely the confound the nonce was introduced to kill.
+
+    Speech is a string, or blocks of text. A `tool_result` block is not speech.
+    """
+    if speaker(payload) != "user":
+        return False
+    content = (payload.get("message") or payload).get("content")
+    if isinstance(content, str):
+        return True
+    if not isinstance(content, list):
+        return False
+    return any(isinstance(block, dict) and block.get("type") in SPOKEN_BLOCKS
+               for block in content)
+
+
+def speaker(payload: dict) -> str | None:
+    """Who said this, whatever shape the CLI records it in.
+
+    Codex puts `role` at the top level; Claude nests it under `message` and
+    types the record `user`. Reading only the top level made every Claude
+    receipt invisible, so the oracle reported CONTINUATION LOST for a process
+    whose transcript plainly contained the debrief — condemning a restart that
+    had in fact worked. An oracle that cannot see one participant's transcript
+    is not a stricter oracle; it is a broken one.
+    """
+    role = payload.get("role")
+    if isinstance(role, str):
+        return role
+    message = payload.get("message")
+    return message.get("role") if isinstance(message, dict) else None
 
 
 def read_receipt(name: str, transcript: Path, phrase: str) -> Receipt:
