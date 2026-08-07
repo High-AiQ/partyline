@@ -122,9 +122,9 @@ normal implementation code; anonymous object *contracts* are what is banned.
 ## Run and test
 
 ```bash
-uv run partyline
-PARTYLINE_DB=/tmp/partyline-test.db PARTYLINE_PORT=8643 uv run partyline
-uv run coverage run -m unittest discover -s tests && uv run coverage report
+uv run --locked partyline
+PARTYLINE_DB=/tmp/partyline-test.db PARTYLINE_PORT=8643 uv run --locked partyline
+uv run --locked coverage run -m unittest discover -s tests && uv run --locked coverage report
 ```
 
 The suite must stay above 90% line and branch coverage; `coverage report` fails the build below
@@ -154,9 +154,9 @@ confirm that it does — a reconnect test here passed until its control proved t
 was never being reached.
 
 ```bash
-uv run playwright install chromium                        # once
-uv run python -m scripts.uishot --out /tmp/partyline-ui   # the standard state set
-uv run python -m unittest tests/ui/test_line_menu.py -v   # browser regressions
+uv run --locked playwright install chromium                        # once
+uv run --locked python -m scripts.uishot --out /tmp/partyline-ui   # the standard state set
+uv run --locked python -m unittest tests/ui/test_line_menu.py -v   # browser regressions
 ```
 
 **When a change is supposed to be invisible, prove it.** A refactor, a
@@ -164,8 +164,8 @@ conversion, a formatter — anything claiming not to touch the UI — should be
 bracketed by:
 
 ```bash
-uv run python -m scripts.uidiff baseline   # before
-uv run python -m scripts.uidiff check      # after; non-zero if anything moved
+uv run --locked python -m scripts.uidiff baseline   # before
+uv run --locked python -m scripts.uidiff check      # after; non-zero if anything moved
 ```
 
 It renders the standard state set — 17 states covering the rail, the menus, the
@@ -329,10 +329,10 @@ participant in the room — including whoever is doing the work. The rules that 
   nothing:
 
   ```bash
-  uv run python -m scripts.cockpit check     # is the workbench fit to deploy?
-  uv run python -m scripts.cockpit deploy    # check, fast-forward the cockpit, verify
-  uv run python -m scripts.cockpit plan "line name" --debrief "what to continue"
-  uv run python -m scripts.cockpit arm --pid NNNNN  # schedule the exact generation
+  uv run --locked python -m scripts.cockpit check     # is the workbench fit to deploy?
+  uv run --locked python -m scripts.cockpit deploy    # check, fast-forward the cockpit, verify
+  uv run --locked python -m scripts.cockpit plan "line name" --debrief "what to continue"
+  uv run --locked python -m scripts.cockpit arm --pid NNNNN  # schedule the exact generation
   # Add --manual-offer only when a human should inspect the plan first.
   ```
 
@@ -346,7 +346,7 @@ participant in the room — including whoever is doing the work. The rules that 
   reporting success. A failed trigger remains a named failed unit, and an automatic plan left
   unclaimed at attempt zero becomes a preflight finding after five minutes.
 - **Test on a throwaway port and database**, one per person, so several agents can test at once
-  without colliding: `PARTYLINE_DB=/tmp/<you>.db PARTYLINE_PORT=864x uv run partyline`.
+  without colliding: `PARTYLINE_DB=/tmp/<you>.db PARTYLINE_PORT=864x uv run --locked partyline`.
 - **Restarting the cockpit is a scheduled act, not a side effect.** This is the
   **recursive self-improvement** path: agents use their own judgement, and it does not require
   mandatory human input when an agent has judged the tree safe. The full ceremony remains: everyone
@@ -425,10 +425,11 @@ participant in the room — including whoever is doing the work. The rules that 
   `./check-code-lines --all` to see the remaining debt. A `.svelte` file counts its markup and
   styles too — a component that needs 300 lines is usually two components and a shared stylesheet.
 - **`main` is protected.** Work on a branch and open a pull request; do not push directly to
-  `main`. GitHub requires the `backend`, `frontend`, `code-line-limits`, and
-  `conventional-commits` checks before merge. The CI commands are `uv run ruff check .`, the
-  coverage test command in this file, `./check-code-lines`, and `cd frontend && npm run verify`.
-- **Lint must pass**: `uv run ruff check .`, clean, before every commit. The autoformatter is
+  `main`. GitHub requires the `backend`, `frontend`, `code-line-limits`,
+  `conventional-commits`, and `version-policy` checks before merge. The CI commands are
+  `uv run --locked ruff check .`, the coverage test command in this file,
+  `./check-code-lines`, and `cd frontend && npm run verify`.
+- **Lint must pass**: `uv run --locked ruff check .`, clean, before every commit. The autoformatter is
   deliberately not enforced — this codebase hand-wraps for readability, and `ruff format` would
   undo that. Match the surrounding style instead.
 
