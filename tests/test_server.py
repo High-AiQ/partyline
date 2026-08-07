@@ -566,6 +566,19 @@ class ServerTest(unittest.TestCase):
         self.assertTrue(adapter.stopped)
         self.assert_http(404, server.attachment_screen("old"))
 
+    def test_a_clean_process_exit_leaves_the_attachment_resumable(self):
+        self.add_attachment("old", status="running")
+        adapter = FakeAdapter(att={"runtime_owner": None})
+        server.runtime.live["old"] = adapter
+
+        self.arun(server.runtime.status_callback("old", "line", None)("exited"))
+
+        self.assertNotIn("old", server.runtime.live)
+        self.assertEqual(server.runtime.db.get_attachment("old")["status"], "exited")
+        resumed = self.arun(server.resume_attachment("old"))
+        self.assertEqual(resumed["status"], "running")
+        self.assertIn("old", server.runtime.live)
+
     def test_stale_server_cannot_detach_an_attachment_owned_elsewhere(self):
         server.runtime.db.add_attachment(
             "other-owner",

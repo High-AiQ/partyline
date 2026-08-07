@@ -166,6 +166,13 @@ class ChatRuntime:
                 att_id, status, runtime_owner
             ):
                 return
+            if status in ("exited", "detached"):
+                adapter = self.live.get(att_id)
+                if (
+                    adapter is not None
+                    and adapter.att.get("runtime_owner") == runtime_owner
+                ):
+                    self.live.pop(att_id, None)
             att = self.db.get_attachment(att_id)
             await self.broadcast(
                 conv_id, AttachmentEvent(attachment=AttachmentResponse.model_validate(att)))

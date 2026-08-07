@@ -281,6 +281,10 @@ replaced them:
   snapshotted from `/proc/<pid>/environ` *before* the signal, because afterwards it is gone.
   The wider lesson is that no clearance gate asked whether the resulting server would *work* —
   only whether the right code would start. Prove the outcome, not just the provenance.
+- **An `exited` database row meant the process was no longer live locally.** A clean Codex exit
+  updated durable status but left its adapter in `runtime.live`; `/api/running` omitted it while
+  `/resume` rejected it as “already live.” Owner-matched terminal status callbacks now remove the
+  process-local adapter, and the regression control proves an exited attachment can resume again.
 
 When a component documents a limit or lifecycle assumption, the dependent code must reference or
 enforce it. A prose warning that has no executable guard is not a completed lesson.
