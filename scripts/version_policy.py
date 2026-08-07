@@ -46,7 +46,12 @@ class Version:
 @dataclass(frozen=True)
 class Change:
     subject: str
-    version: Version
+    before: Version
+    after: Version
+
+    @property
+    def changes_version(self) -> bool:
+        return self.before != self.after
 
 
 def required_bump(subjects: list[str]) -> str | None:
@@ -100,23 +105,19 @@ def verdict(base: Version, head: Version, subjects: list[str]) -> str | None:
     return None
 
 
-def history_verdict(base: Version, changes: list[Change]) -> str | None:
+def history_verdict(base: Version, head: Version, changes: list[Change]) -> str | None:
     """Validate the result and the commit that owns its one version transition."""
     subjects = [change.subject for change in changes]
     bump = required_bump(subjects)
-    head = changes[-1].version
     endpoint_failure = verdict(base, head, subjects)
     if endpoint_failure:
         return endpoint_failure
-    if bump is None:
-        return None
 
-    transitions = []
-    previous = base
-    for change in changes:
-        if change.version != previous:
-            transitions.append(change)
-        previous = change.version
+    transitions = [change for change in changes if change.changes_version]
+    if bump is None:
+        if transitions:
+            return "a non-release change set must not contain a version transition"
+        return None
     if len(transitions) != 1:
         return f"expected one version transition in the change set, found {len(transitions)}"
 
@@ -126,6 +127,17 @@ def history_verdict(base: Version, changes: list[Change]) -> str | None:
         return (
             f"the {bump} version transition belongs in a {bump}-impact commit; "
             f"it occurred in {owner.subject!r}"
+        )
+    expected_after = owner.before.bumped(bump)
+    if owner.after != expected_after:
+        return (
+            f"the version-owning commit must bump {owner.before} to {expected_after}, "
+            f"got {owner.after}"
+        )
+    if owner.after != head:
+        return (
+            f"the version-owning commit ends at {owner.after}, but the change set ends at "
+            f"{head}; update the release commit against the current base"
         )
     return None
 
@@ -145,7 +157,8 @@ def commit_history(base: str, head: str) -> list[Change]:
     return [
         Change(
             subject=git("show", "-s", "--format=%s", revision),
-            version=revision_version(revision),
+            before=revision_version(f"{revision}^"),
+            after=revision_version(revision),
         )
         for revision in output.splitlines()
     ] if output else []
@@ -161,8 +174,8 @@ def main(argv: list[str] | None = None) -> int:
     if not changes:
         parser.error(f"no non-merge commits found in {args.base}..{args.head}")
     base = revision_version(args.base)
-    head = changes[-1].version
-    failure = history_verdict(base, changes)
+    head = revision_version(args.head)
+    failure = history_verdict(base, head, changes)
     if failure:
         print(f"FAIL: {failure}")
         return 1

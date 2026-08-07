@@ -96,26 +96,45 @@ class HistoryVerdictTest(unittest.TestCase):
 
     def test_release_commit_owns_the_version_transition(self):
         changes = [
-            Change("fix(db): close race", Version(0, 21, 8)),
-            Change("test(db): cover cancellation", Version(0, 21, 8)),
+            Change("fix(db): close race", self.BASE, Version(0, 21, 8)),
+            Change("test(db): cover cancellation", Version(0, 21, 8), Version(0, 21, 8)),
         ]
-        self.assertIsNone(history_verdict(self.BASE, changes))
+        self.assertIsNone(history_verdict(self.BASE, Version(0, 21, 8), changes))
 
     def test_a_later_chore_cannot_launder_a_missing_fix_bump(self):
         changes = [
-            Change("fix(db): close race", self.BASE),
-            Change("chore: bump version", Version(0, 21, 8)),
+            Change("fix(db): close race", self.BASE, self.BASE),
+            Change("chore: bump version", self.BASE, Version(0, 21, 8)),
         ]
-        failure = history_verdict(self.BASE, changes)
+        failure = history_verdict(self.BASE, Version(0, 21, 8), changes)
         self.assertIn("occurred in 'chore: bump version'", failure)
 
     def test_two_version_transitions_are_not_one_coherent_release(self):
         changes = [
-            Change("fix(db): first fix", Version(0, 21, 8)),
-            Change("fix(db): second fix", Version(0, 21, 9)),
+            Change("fix(db): first fix", self.BASE, Version(0, 21, 8)),
+            Change("fix(db): second fix", Version(0, 21, 8), Version(0, 21, 9)),
         ]
-        failure = history_verdict(self.BASE, changes)
+        failure = history_verdict(self.BASE, Version(0, 21, 9), changes)
         self.assertIn("expected 0.21.8", failure)
+
+    def test_docs_bump_then_revert_is_not_no_release(self):
+        changes = [
+            Change("docs: bump by mistake", self.BASE, Version(0, 21, 8)),
+            Change("chore: revert bump", Version(0, 21, 8), self.BASE),
+        ]
+        failure = history_verdict(self.BASE, self.BASE, changes)
+        self.assertIn("must not contain a version transition", failure)
+
+    def test_old_docs_commit_stays_valid_after_main_advances(self):
+        old = Version(0, 21, 6)
+        changes = [Change("docs: improve README", old, old)]
+        self.assertIsNone(history_verdict(self.BASE, self.BASE, changes))
+
+    def test_release_commit_must_own_the_current_head_version(self):
+        old = Version(0, 21, 6)
+        changes = [Change("fix(db): close race", old, self.BASE)]
+        failure = history_verdict(self.BASE, Version(0, 21, 8), changes)
+        self.assertIn("update the release commit against the current base", failure)
 
 
 class CliHistoryTest(unittest.TestCase):
@@ -149,8 +168,11 @@ class CliHistoryTest(unittest.TestCase):
         self.command("git", "commit", "-q", "--allow-empty", "-m", subject)
 
     def policy(self):
+        return self.policy_between(self.base, "HEAD")
+
+    def policy_between(self, base, head):
         return self.command(
-            sys.executable, str(SCRIPT), "--base", self.base, "--head", "HEAD", check=False
+            sys.executable, str(SCRIPT), "--base", base, "--head", head, check=False
         )
 
     def test_cli_accepts_a_fix_that_owns_its_patch_bump(self):
@@ -167,6 +189,32 @@ class CliHistoryTest(unittest.TestCase):
         result = self.policy()
         self.assertEqual(result.returncode, 1)
         self.assertIn("occurred in 'chore: bump version'", result.stdout)
+
+    def test_cli_rejects_a_docs_bump_hidden_by_a_revert(self):
+        self.write_version("0.21.8")
+        self.commit("docs: bump by mistake")
+        self.write_version("0.21.7")
+        self.commit("chore: revert bump")
+
+        result = self.policy()
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("must not contain a version transition", result.stdout)
+
+    def test_cli_accepts_an_old_docs_commit_after_main_advances(self):
+        self.command("git", "switch", "-q", "-c", "docs")
+        self.commit("docs: improve README")
+        self.command("git", "switch", "-q", "-")
+        self.write_version("0.21.8")
+        self.commit("fix: advance main release")
+        advanced_base = self.command("git", "rev-parse", "HEAD").stdout.strip()
+        self.command("git", "switch", "-q", "docs")
+        self.command("git", "merge", "-q", "--no-ff", advanced_base, "-m", "Merge main")
+
+        result = self.policy_between(advanced_base, "HEAD")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("no release", result.stdout)
 
 
 if __name__ == "__main__":
