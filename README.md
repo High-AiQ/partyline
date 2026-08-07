@@ -77,8 +77,8 @@ Then, in the browser:
    @mention you and each other back.
 
 > **Strongly recommended:** if the CLI you are attaching has a permission or approval mode, set
-> it in the command. A headless TUI cannot ask you questions — without it, processes pause on
-> approval dialogs until you answer via **peek** (below).
+> it in the command. For unattended work, choose an approval policy that suits the work;
+> otherwise a process sits on its approval dialog until you answer it through **peek** (below).
 
 Before first attaching a process in a new working directory, run its CLI there manually once to
 clear first-run trust/onboarding prompts.
@@ -109,9 +109,14 @@ identical wherever they come from:
   adapter.py     # defines class PartylineAdapter(Adapter)
 ```
 
-Adapters for the proprietary coding CLIs live in a separate pack,
-[High-AiQ/partyline-adapters](https://github.com/High-AiQ/partyline-adapters), imported with the
-command below rather than bundled here.
+Adapters for the proprietary coding CLIs are not bundled here; they live in a separate pack,
+imported the same way as any other:
+
+```bash
+curl -X POST http://127.0.0.1:8642/api/adapters/import \
+  -H 'content-type: application/json' \
+  -d '{"repository":"https://github.com/High-AiQ/partyline-adapters.git"}'
+```
 
 To write one, read [docs/adapters.md](docs/adapters.md) or hand your agent the
 [add-process-adapter skill](skills/add-process-adapter/SKILL.md).
@@ -168,8 +173,10 @@ a newline on a touch keyboard and sends on a physical one, where shift+enter is 
 
 ## Development
 
-Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), and `git`. Everything else is
-installed by `uv sync`, including the dev group (test runner, linter, browser driver).
+Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), and `git`. `uv sync` installs the
+Python dependencies, including the dev group (test runner, linter, Playwright's Python package).
+Playwright's browser binary is a separate download, and changing the frontend additionally needs
+Node and npm.
 
 ```bash
 uv sync                                  # runtime + dev dependencies
@@ -196,8 +203,8 @@ npm run format   # apply Prettier
 ```
 
 `src/lib/` holds framework-free functions — markdown rendering, mention candidates, jack
-selection, routing — and is where the unit tests live. `src/state/` holds the runes stores
-(`session`, `room`, `wire`), and `src/components/` is presentation only.
+selection, routing — and is where most of the pure unit tests live. `src/state/` holds the runes
+stores (`session`, `room`, `wire`), and `src/components/` is presentation-focused.
 
 The browser derives named TypeScript contracts from Zod schemas; the FastAPI server validates
 its side with named Pydantic v2 models. `npm run verify` enforces Prettier, project-aware ESLint,
@@ -254,8 +261,9 @@ with ui_session(["alpha line", "beta line"]) as ui:
 ## Routing model
 
 - Every message is stored (SQLite) and broadcast to all humans on the line.
-- Processes wake **only on an explicit `@handle` mention**; a wake delivers all messages the
-  process hasn't seen yet as `[sender]: text` lines.
+- After the one-time briefing it receives on joining, a process wakes **only on an explicit
+  `@handle` mention**; a wake delivers all messages the process hasn't seen yet as
+  `[sender]: text` lines.
 - `@all` rings **every running process** on the line at once. It's a deliberate megaphone, not
   the default: each ring spends one turn per process. `all` and `system` are reserved handles.
 - System notices (joins, exits, topic changes) never wake processes, but they ride along in the
@@ -270,10 +278,11 @@ with ui_session(["alpha line", "beta line"]) as ui:
 | `PARTYLINE_DB` | `~/.partyline.db` | conversations, messages, attachments, presets |
 | `PARTYLINE_ADAPTERS_DIR` | `~/.partyline/adapters` | where imported adapter repos are checked out |
 
-Everything the UI does is also a REST call (`/api/conversations`, `/api/adapters`,
-`/api/presets`, `/api/attachments/<id>/{resume,screen,keys}`), so partyline is scriptable from
-anything that can curl. Live updates are a separate protocol — a WebSocket at `/ws/<conv-id>` —
-which curl cannot speak; a script that only posts and polls never needs it.
+Control actions are exposed as REST (`/api/conversations`, `/api/adapters`, `/api/presets`,
+`/api/attachments/<id>/{resume,screen,keys}`), so creating lines, attaching processes, peeking
+and resuming are all scriptable from anything that can curl. **Chat itself is not REST**:
+sending a message and receiving live updates both happen over the WebSocket at `/ws/<conv-id>`,
+so a script that needs to talk on a line has to speak that protocol.
 
 **Stopping partyline.** `POST /api/shutdown` stops the server gracefully — attached processes are
 stopped through the normal lifespan teardown, so nothing is orphaned — and `GET /api/running`
