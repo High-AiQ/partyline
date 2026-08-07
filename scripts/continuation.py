@@ -63,9 +63,10 @@ from argparse import ArgumentParser
 from dataclasses import dataclass
 from pathlib import Path
 
-# Record types a CLI uses for "this was said to the model". A partyline wake
-# arrives as one of these; verified against 139 known-good deliveries.
-DELIVERED_TYPES = {"user_message", "message"}
+# Codex's own name for "this was said to the model". These records carry no
+# `role` of their own — the type *is* the claim — so they are allowed on the
+# strength of the type alone.
+CODEX_INPUT_TYPES = {"user_message"}
 # The coordinator's own wording, from `ReattachCoordinator` in reattach.py. A
 # nonce is only unforgeable while nobody says it out loud — and the initiator
 # announces it in the room before arming, so by the time the restart happens
@@ -107,9 +108,14 @@ class Receipt:
 def is_input_record(record: dict, phrase: str) -> bool:
     """Was `phrase` said *to* this process, rather than logged around it?
 
-    `role` is checked as well as `type` because a CLI may mirror one delivery
-    into two shapes; either is evidence, and neither can be produced by a tool
-    call, which is the only confound that matters here.
+    Three things must hold, and each one was learned from a false result:
+
+      * the record is not tool traffic — the confound that broke the first
+        naive grep;
+      * it is a delivery *to* this process — Codex's `user_message` says so by
+        type, everything else has to prove it via role and text content;
+      * it carries the coordinator's marker as well as the phrase, so a
+        participant repeating the nonce in the room does not count as delivery.
     """
     payload = record.get("payload", record)
     if not isinstance(payload, dict):
@@ -117,7 +123,11 @@ def is_input_record(record: dict, phrase: str) -> bool:
     kind = payload.get("type")
     if kind in ARTEFACT_TYPES:
         return False
-    if kind not in DELIVERED_TYPES and not is_spoken_input(payload):
+    # Every other shape — Claude's `user`, the generic `message` — says who is
+    # speaking only via `role`, so an assistant turn quoting the debrief has the
+    # same type as a delivery. Admitting those on type would let a process's own
+    # reply prove its own receipt.
+    if kind not in CODEX_INPUT_TYPES and not is_spoken_input(payload):
         return False
     body = json.dumps(payload)
     return phrase in body and DEBRIEF_MARKER in body

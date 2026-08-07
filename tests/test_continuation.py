@@ -150,6 +150,31 @@ class ToolResultContaminationTest(unittest.TestCase):
             path.unlink()
 
 
+class SpeakerTest(unittest.TestCase):
+    """`message` says nothing about who spoke; only `role` does."""
+
+    def assistant_echo(self, text):
+        """A process's own reply, quoting the debrief it is reporting on —
+        which is what every one of these agents does immediately after
+        resuming. Counting it would let a receipt prove itself."""
+        return {"payload": {"type": "message", "role": "assistant",
+                            "content": [{"type": "text", "text": delivery(text)}]}}
+
+    def test_an_assistant_turn_quoting_the_debrief_is_not_a_receipt(self):
+        self.assertFalse(is_input_record(self.assistant_echo(NONCE), NONCE))
+
+    def test_a_transcript_of_only_self_report_is_reported_lost(self):
+        path = transcript(self.assistant_echo(NONCE))
+        try:
+            self.assertFalse(read_receipt("sol", path, NONCE).received)
+        finally:
+            path.unlink()
+
+    def test_the_codex_delivery_shape_still_counts_without_a_role(self):
+        """Codex's `user_message` carries no `role`; the type is the claim."""
+        self.assertTrue(is_input_record(wake(NONCE), NONCE))
+
+
 class InputRecordTest(unittest.TestCase):
     def test_a_delivered_wake_counts(self):
         self.assertTrue(is_input_record(wake(NONCE), NONCE))
