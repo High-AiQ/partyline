@@ -261,12 +261,38 @@ replaced them:
   Python executable, `cockpit arm` verifies the durable timer and exact command after scheduling,
   failed units remain inspectable, and a plan still at attempt zero after five minutes is an
   actionable failure rather than an indefinitely pending intention.
+- **A replacement server launched by systemd inherited the outgoing server's environment.** The
+  transient unit had systemd's minimal `PATH`, so the new server bound the port successfully but
+  could not find any user-installed adapter CLI; all four resumptions failed while the server still
+  looked healthy. The restart executable now snapshots `/proc/<pid>/environ` from the exact old
+  generation before signalling it and passes that mapping to `execve`. If the snapshot cannot be
+  read, the trigger refuses before `SIGTERM` rather than falling back to the environment that caused
+  the outage.
+
+- **A verified trigger meant a verified restart.** Restart #6 was cleared unanimously on evidence
+  that was entirely about *provenance* — matching commits, an exact ordered `systemd` argv, an
+  identical adapter store, 297 plus 58 passing tests — and every one of those facts was true. The
+  restart still destroyed the room. The replacement server was launched by `systemd`, inherited its
+  minimal default environment, and so had no `~/.local/bin` on `PATH`; all four reattachments failed
+  with `No such file or directory: 'claude'`, and the broken server went on holding the port, so a
+  human starting a fresh one by hand was still served by the broken one. **A process is not defined
+  by its executable alone: its environment is part of what gets deployed, and a new parent means a
+  new environment.** The replacement is now launched with the outgoing generation's environment,
+  snapshotted from `/proc/<pid>/environ` *before* the signal, because afterwards it is gone.
+  The wider lesson is that no clearance gate asked whether the resulting server would *work* —
+  only whether the right code would start. Prove the outcome, not just the provenance.
 
 When a component documents a limit or lifecycle assumption, the dependent code must reference or
 enforce it. A prose warning that has no executable guard is not a completed lesson.
 
+**A silent fallback re-creates the failure it was written to prevent.** Where a guard cannot obtain
+the fact it needs — an unreadable generation, an uncapturable environment — it must refuse and say
+so. Substituting a plausible default is how a stripped environment, an empty `awk` field, and an
+unreadable database each became invisible rather than loud.
+
 The recurring root failure is **the code or tool running was not the code or tool being reasoned
-about**: a stale cockpit, an uncommitted adapter, or two harnesses sharing scratch paths. Every
+about**: a stale cockpit, an uncommitted adapter, two harnesses sharing scratch paths, or a
+replacement server inheriting a different environment from a different parent. Every
 authoritative-artifact boundary must therefore be checked by the machine before a restart or proof;
 agent memory and a clean main checkout are not enough.
 
@@ -366,6 +392,12 @@ participant in the room — including whoever is doing the work. The rules that 
   port, wait until that PID no longer exists, and only then launch the cockpit. Runtime-owner guards
   reject late callbacks once both generations support them; they cannot retroactively protect the
   first deployment from an older binary that still performs unconditional writes.
+- **Preserve the exact old server's execution environment across a scheduled restart.** A transient
+  systemd unit does not inherit the interactive shell's `PATH` or other launch-time variables. Read
+  `/proc/<pid>/environ` from the verified old generation before signalling it and pass that mapping
+  to the replacement with `execve`; an unreadable environment is a safe refusal, not permission to
+  launch from systemd's defaults. The replacement still reloads the cockpit's `.env` from its
+  working directory during normal startup.
 - **Adapter changes do not need a restart** — `POST /api/adapters/reload` re-executes adapter
   packages in place. Changes to the base class, loader, server, or frontend do.
 - Prefer changes that make a restart cheaper (resume support, adopting live attachments,
