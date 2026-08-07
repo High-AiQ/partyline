@@ -275,9 +275,11 @@ uv run python -m scripts.cockpit arm --pid NNNNN
 ```
 
 `arm` schedules the reviewed restart executable with systemd, verifies the timer and exact process
-generation after scheduling, and keeps a failed unit inspectable. Do not replace it with inline
-shell or a bare background process: those failure modes can leave a plan pending while the old
-server continues to look healthy.
+generation after scheduling, snapshots that generation's environment before signalling it, and
+keeps a failed unit inspectable. The environment snapshot is load-bearing: transient systemd units
+do not inherit the user's adapter CLI `PATH`. Do not replace `arm` with inline shell or a bare
+background process; those failure modes can leave a plan pending while the old server continues to
+look healthy.
 
 By default this consumes an **automatic** plan after startup; no browser needs to reconnect. The
 explicit `--manual-offer` escape hatch keeps the human stop-dialog flow for cases where an operator

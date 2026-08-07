@@ -25,6 +25,7 @@ EXIT_BAD_ARGUMENTS = 22
 EXIT_WOULD_NOT_EXIT = 23
 EXIT_LAUNCH_FAILED = 24
 EXIT_SIGNAL_FAILED = 25
+EXIT_ENVIRONMENT_UNREADABLE = 26
 WAIT_SECONDS = 60.0
 
 
@@ -151,7 +152,12 @@ def run_restart(
         raise RestartRefused(f"server binary is not executable: {server}", EXIT_BAD_ARGUMENTS)
     # Snapshot while the old generation is still alive; after SIGTERM its
     # /proc entry is gone and only the trigger's stripped environment remains.
-    env = environment(pid) or dict(os.environ)
+    env = environment(pid)
+    if env is None:
+        raise RestartRefused(
+            f"could not read the environment of pid {pid}",
+            EXIT_ENVIRONMENT_UNREADABLE,
+        )
 
     try:
         signal_process(pid, signal.SIGTERM)

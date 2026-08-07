@@ -1,6 +1,5 @@
 """Controls for the exact-generation cockpit restart executable."""
 
-import os
 import signal
 import tempfile
 import unittest
@@ -8,6 +7,7 @@ from pathlib import Path
 
 from scripts.restart_server import (
     EXIT_ALREADY_GONE,
+    EXIT_ENVIRONMENT_UNREADABLE,
     EXIT_WRONG_GENERATION,
     RestartRefused,
     process_environment,
@@ -117,10 +117,12 @@ class RestartTest(unittest.TestCase):
         _server, _log, _cwd, env = self.executions[0]
         self.assertEqual(env, {"PATH": "/old/server/path"})
 
-    def test_an_unreadable_environ_falls_back_to_the_triggers(self):
-        self.invoke(lambda _pid: "1234", environment=lambda _pid: None)
-        _server, _log, _cwd, env = self.executions[0]
-        self.assertEqual(env, dict(os.environ))
+    def test_an_unreadable_environ_refuses_before_signalling(self):
+        with self.assertRaises(RestartRefused) as raised:
+            self.invoke(lambda _pid: "1234", environment=lambda _pid: None)
+        self.assertEqual(raised.exception.exit_code, EXIT_ENVIRONMENT_UNREADABLE)
+        self.assertEqual(self.signals, [])
+        self.assertEqual(self.executions, [])
 
 
 class WaitTest(unittest.TestCase):
