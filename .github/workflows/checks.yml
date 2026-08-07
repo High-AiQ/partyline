@@ -88,3 +88,19 @@ jobs:
           done
           [ "$fail" = 0 ] && echo "all commits conventional one-liners"
           exit "$fail"
+
+  version-policy:
+    name: version-policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: require the release version implied by this change set
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: uv run python -m scripts.version_policy --base "$BASE_SHA" --head "$HEAD_SHA"
