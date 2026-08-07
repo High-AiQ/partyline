@@ -183,7 +183,7 @@ Node and npm.
 
 ```bash
 uv sync --locked                         # pinned runtime + dev dependencies
-uv run playwright install chromium       # once, for the UI tests and screenshots
+uv run --locked playwright install chromium       # once, for the UI tests and screenshots
 ```
 
 **Node is needed only to change the frontend**, not to run partyline. The built client is
@@ -227,9 +227,9 @@ intentionally has no independent version field.
 ### Running the tests
 
 ```bash
-uv run coverage run -m unittest discover -s tests   # the suite
-uv run coverage report                              # fails under 90% line+branch coverage
-uv run ruff check .                                 # lint; must be clean before every commit
+uv run --locked coverage run -m unittest discover -s tests   # the suite
+uv run --locked coverage report                              # fails under 90% line+branch coverage
+uv run --locked ruff check .                                 # lint; must be clean before every commit
 ```
 
 The suite never touches a real database, port, or CLI: it uses temp databases, FastAPI's
@@ -242,7 +242,7 @@ Browser tests live under `tests/ui/` and are deliberately **not** picked up by `
 missing browser can't break the normal suite. Run them explicitly:
 
 ```bash
-uv run python -m unittest tests/ui/test_line_menu.py -v
+uv run --locked python -m unittest tests/ui/test_line_menu.py -v
 ```
 
 `scripts/uishot.py` drives the real UI in headless Chromium. It starts a throwaway server on an
@@ -250,7 +250,7 @@ OS-assigned port with a temp database, signs in through the handle gate, and han
 Playwright page — so a frontend change can be looked at instead of guessed at:
 
 ```bash
-uv run python -m scripts.uishot --out /tmp/partyline-ui   # capture the standard state set
+uv run --locked python -m scripts.uishot --out /tmp/partyline-ui   # capture the standard state set
 ```
 
 ```python
@@ -312,7 +312,7 @@ OPENROUTER_API_KEY=sk-...
 Anything already set in the real environment wins, so you can still override per-run:
 
 ```bash
-OPENROUTER_API_KEY=$(cat ~/.secrets/openrouter) uv run partyline
+OPENROUTER_API_KEY=$(cat ~/.secrets/openrouter) uv run --locked partyline
 ```
 
 Don't put credentials in adapter manifests, in a stored preset's command, in a shell profile,
@@ -338,14 +338,14 @@ rule that a visual change has to be looked at rather than reasoned about. Test a
 throwaway DB and port, never a live one:
 
 ```bash
-PARTYLINE_DB=/tmp/partyline-test.db PARTYLINE_PORT=8643 uv run partyline
+PARTYLINE_DB=/tmp/partyline-test.db PARTYLINE_PORT=8643 uv run --locked partyline
 ```
 
 Pull requests targeting `main` must pass the same checks as CI:
 
 ```bash
-uv run ruff check .
-uv run coverage run -m unittest discover -s tests && uv run coverage report
+uv run --locked ruff check .
+uv run --locked coverage run -m unittest discover -s tests && uv run --locked coverage report
 ./check-code-lines
 cd frontend && npm ci && npm run verify && npm run build
 ```
