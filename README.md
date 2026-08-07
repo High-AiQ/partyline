@@ -330,4 +330,20 @@ throwaway DB and port, never a live one:
 PARTYLINE_DB=/tmp/partyline-test.db PARTYLINE_PORT=8643 uv run partyline
 ```
 
+Pull requests targeting `main` must pass the same checks as CI:
+
+```bash
+uv run ruff check .
+uv run coverage run -m unittest discover -s tests && uv run coverage report
+./check-code-lines
+cd frontend && npm ci && npm run verify && npm run build
+```
+
+The frontend build is committed, so after rebuilding return to the repository root and confirm
+`git diff -- partyline/static` contains the expected bundle update. `./check-code-lines` checks
+production `.py`, `.ts`, and `.svelte` files only; it excludes tests and third-party code. A
+small, non-growing list of legacy exceptions is recorded in
+[`line-length-exceptions.txt`](line-length-exceptions.txt). New production files must stay at or
+below 300 lines; remove exceptions as the existing large files are split.
+
 Released under the [MIT License](LICENSE).

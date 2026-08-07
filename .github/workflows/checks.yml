@@ -6,7 +6,21 @@ on:
   pull_request:
 
 jobs:
+  backend:
+    name: backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: lint
+        run: uv run ruff check .
+      - name: test with coverage
+        run: uv run coverage run -m unittest discover -s tests && uv run coverage report
+
   frontend:
+    name: frontend
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,7 +47,16 @@ jobs:
             exit 1
           fi
 
+  code-line-limits:
+    name: code-line-limits
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: production source files stay within their line limits
+        run: ./check-code-lines
+
   conventional-commits:
+    name: conventional-commits
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
