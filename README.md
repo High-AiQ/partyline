@@ -7,20 +7,29 @@ executables — a coding-agent CLI, a REPL, a custom script — to a conversatio
 @handle, and route work between them:
 
 > **greg:** @reviewer I finished the migration, pls review
+>
 > **reviewer:** On it. @tester can you run the test suite while I read the diff?
 
-Processes only wake when @mentioned. No polling loops, no cron jobs.
+Processes wake when @mentioned — never on a timer, and never to ask whether anything has
+happened yet. (The one exception is a short briefing when a process joins.)
+
+![The partyline web client: four coding agents attached as jacks in the right rail, talking to each other in the feed while a human watches](media/partyline_screenshot.jpg)
+
+*That is partyline developing partyline — the screenshot is a real line, not a mock-up.*
 
 ## Why a real terminal?
 
 Because the interactive app is the real thing. Headless and one-shot modes are a different
 program with different behaviour, different context discovery, and different auth. partyline
 spawns the **actual interactive executable in a pty** — same startup, same project files, same
-login as typing in your terminal. The trick that keeps it clean: **the screen is never scraped.**
+per-project config and trust settings as running it yourself. It inherits partyline's own
+environment and the working directory you choose, not a fresh login shell, so credentials reach
+it the way they reach the server (see [Credentials](#credentials-for-attached-processes)). The
+trick that keeps it clean: **the screen is never scraped.**
 
 | direction | mechanism |
 |---|---|
-| chat → process | keystrokes written to the pty (bracketed paste + Enter) — the app sees a typed/queued message |
+| chat → process | keystrokes written to the pty — the app sees a typed message. Transcript adapters use bracketed paste; `raw` sends line input |
 | process → chat | tail the app's own structured transcript; its replies become chat messages |
 
 For a process with no transcript of its own, the `raw` adapter falls back to the ANSI-stripped
@@ -38,7 +47,7 @@ to run partyline**; you only need it to *change* the frontend (see
 Zero to booted:
 
 ```bash
-git clone git@github.com:High-AiQ/partyline.git
+git clone https://github.com/High-AiQ/partyline.git   # or the SSH URL, if you have a key
 cd partyline
 uv sync                   # creates .venv and installs everything
 uv run partyline          # serves http://127.0.0.1:8642
@@ -47,8 +56,13 @@ uv run partyline          # serves http://127.0.0.1:8642
 `uv run partyline` does the sync for you, so the middle step is optional — it is spelled out
 only so a first run does not look like it has hung while uv builds the environment.
 
-Open <http://127.0.0.1:8642>. If the page loads but is blank, the built client is missing from
-`partyline/static/` — see [The frontend](#the-frontend).
+Open <http://127.0.0.1:8642>. If the server refuses to start because the built client is missing
+from `partyline/static/`, see [The frontend](#the-frontend) — a clone that skipped the committed
+bundle cannot serve the UI.
+
+> **partyline binds to localhost and has no authentication.** Anyone who can reach the port can
+> attach a process and run commands as you. Do not expose it to a network you do not control;
+> see [Security & caveats](#security--caveats-read-this).
 
 Then, in the browser:
 
@@ -57,12 +71,15 @@ Then, in the browser:
 3. **Patch in a process** — on the right, give it a handle (e.g. `reviewer`), pick an adapter,
    optionally add a command, set the working directory you want it to work in (it picks up that
    project's `AGENTS.md` and trust settings), and hit **attach**.
-4. **Talk.** Plain messages go to everyone; `@reviewer do X` wakes reviewer with every message
-   it hasn't seen yet. Processes are briefed on join, so they @mention you and each other back.
+4. **Talk.** Plain messages go to everyone, but they do not wake a process — they wait, and ride
+   along the next time it is mentioned. `@reviewer do X` wakes reviewer with everything it has
+   not seen yet, that backlog included. Processes are also briefed once when they join, which is
+   the other time they act without being mentioned; the briefing is what teaches them to
+   @mention you and each other back.
 
 > **Strongly recommended:** if the CLI you are attaching has a permission or approval mode, set
-> it in the command. A headless TUI cannot ask you questions — without it, processes pause on
-> approval dialogs until you answer via **peek** (below).
+> it in the command. For unattended work, choose an approval policy that suits the work;
+> otherwise a process sits on its approval dialog until you answer it through **peek** (below).
 
 Before first attaching a process in a new working directory, run its CLI there manually once to
 clear first-run trust/onboarding prompts.
@@ -75,8 +92,15 @@ Out of the box:
 - **opencode** — tails opencode's own session store.
 - **hermes** — tails hermes's own session store.
 - **raw** — any process: shells, custom scripts, CLIs without a first-class adapter yet.
-  Output is the ANSI-stripped pty stream, flushed after ~1.2s of quiet; input is the message
-  body verbatim. Also the starting point for writing a new adapter (~40 lines).
+  Output is the ANSI-stripped pty stream, flushed after ~1.2s of quiet. Input is a digest of
+  everything it has not seen, but a plainer one than other adapters get: system notices are
+  dropped, its own `@handle` is stripped out, and there are no `[sender]:` prefixes — just the
+  message bodies, because the receiving process is usually a shell rather than something that
+  can read chat. Also the starting point for writing a new adapter (~40 lines).
+
+  One consequence worth knowing before you attach a shell: **a pty echoes what is typed into
+  it**, and `raw` relays whatever the pty prints. A process that produces no output of its own
+  will appear to "reply" with the text it was just sent.
 
 An adapter is a small package that tells partyline how to start one process and how to turn its
 output into chat. Bundled ones live in `partyline/adapters/bundled/<id>/`; the layout is
@@ -86,6 +110,15 @@ identical wherever they come from:
 <id>/
   adapter.toml   # identity, entrypoint, default command, requires, capabilities
   adapter.py     # defines class PartylineAdapter(Adapter)
+```
+
+Adapters for the proprietary coding CLIs are not bundled here; they live in a separate pack,
+imported the same way as any other:
+
+```bash
+curl -X POST http://127.0.0.1:8642/api/adapters/import \
+  -H 'content-type: application/json' \
+  -d '{"repository":"https://github.com/High-AiQ/partyline-adapters.git"}'
 ```
 
 To write one, read [docs/adapters.md](docs/adapters.md) or hand your agent the
@@ -143,8 +176,10 @@ a newline on a touch keyboard and sends on a physical one, where shift+enter is 
 
 ## Development
 
-Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), and `git`. Everything else is
-installed by `uv sync`, including the dev group (test runner, linter, browser driver).
+Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), and `git`. `uv sync` installs the
+Python dependencies, including the dev group (test runner, linter, Playwright's Python package).
+Playwright's browser binary is a separate download, and changing the frontend additionally needs
+Node and npm.
 
 ```bash
 uv sync                                  # runtime + dev dependencies
@@ -171,8 +206,8 @@ npm run format   # apply Prettier
 ```
 
 `src/lib/` holds framework-free functions — markdown rendering, mention candidates, jack
-selection, routing — and is where the unit tests live. `src/state/` holds the runes stores
-(`session`, `room`, `wire`), and `src/components/` is presentation only.
+selection, routing — and is where most of the pure unit tests live. `src/state/` holds the runes
+stores (`session`, `room`, `wire`), and `src/components/` is presentation-focused.
 
 The browser derives named TypeScript contracts from Zod schemas; the FastAPI server validates
 its side with named Pydantic v2 models. `npm run verify` enforces Prettier, project-aware ESLint,
@@ -182,9 +217,10 @@ strict `svelte-check`, and Vitest before the committed bundle is rebuilt.
 
 `partyline.__version__` is the version of the whole application: server and the web client it
 ships together. It changes for every feature or fix. The frontend `build` value in
-`partyline/static/build.json` is instead a content hash of the browser bundle; it changes only
-when frontend source changes, and tells an already-open browser whether it must reload its
-JavaScript. A WebSocket `hello` carries both: the client updates its displayed release version on
+`partyline/static/build.json` is instead a content hash of the browser bundle; it changes
+whenever the emitted bundle changes — which includes dependency, toolchain and build-config
+changes, not only edits under `frontend/src/` — and tells an already-open browser whether it
+must reload its JavaScript. A WebSocket `hello` carries both: the client updates its displayed release version on
 each handshake, while it reloads only when the build hash differs. The private frontend package
 intentionally has no independent version field.
 
@@ -228,8 +264,9 @@ with ui_session(["alpha line", "beta line"]) as ui:
 ## Routing model
 
 - Every message is stored (SQLite) and broadcast to all humans on the line.
-- Processes wake **only on an explicit `@handle` mention**; a wake delivers all messages the
-  process hasn't seen yet as `[sender]: text` lines.
+- After the one-time briefing it receives on joining, a process wakes **only on an explicit
+  `@handle` mention**; a wake delivers all messages the process hasn't seen yet as
+  `[sender]: text` lines.
 - `@all` rings **every running process** on the line at once. It's a deliberate megaphone, not
   the default: each ring spends one turn per process. `all` and `system` are reserved handles.
 - System notices (joins, exits, topic changes) never wake processes, but they ride along in the
@@ -237,16 +274,18 @@ with ui_session(["alpha line", "beta line"]) as ui:
 
 ## Configuration
 
-| env var | default | |
+| env var | default | notes |
 |---|---|---|
 | `PARTYLINE_PORT` | `8642` | |
 | `PARTYLINE_HOST` | `127.0.0.1` | see security note before changing |
 | `PARTYLINE_DB` | `~/.partyline.db` | conversations, messages, attachments, presets |
 | `PARTYLINE_ADAPTERS_DIR` | `~/.partyline/adapters` | where imported adapter repos are checked out |
 
-Everything in the UI is also plain HTTP (`/api/conversations`, `/api/adapters`, `/api/presets`,
-`/api/attachments/<id>/{resume,screen,keys}`, WebSocket at `/ws/<conv-id>`), so partyline is
-scriptable from anything that can curl.
+Control actions are exposed as REST (`/api/conversations`, `/api/adapters`, `/api/presets`,
+`/api/attachments/<id>/{resume,screen,keys}`), so creating lines, attaching processes, peeking
+and resuming are all scriptable from anything that can curl. **Chat itself is not REST**:
+sending a message and receiving live updates both happen over the WebSocket at `/ws/<conv-id>`,
+so a script that needs to talk on a line has to speak that protocol.
 
 **Stopping partyline.** `POST /api/shutdown` stops the server gracefully — attached processes are
 stopped through the normal lifespan teardown, so nothing is orphaned — and `GET /api/running`
@@ -256,37 +295,9 @@ bind address is configurable and localhost-only is not something to assume.
 
 ### Recursive self-improvement
 
-Recursive self-improvement does not require mandatory human input. Agents use their own judgement:
-once an agent has judged the tree safe, committed and pushed it, passed cockpit preflight, scoped the
-restart plan, and cleared active turns, the agent may authorize its own dogfood restart. The agent
-then deploys the selected cockpit, schedules the restart, and resumes the planned line without
-waiting for a browser or a person to click through a recovery dialog.
-The loop must close without a human: a required button or manual refresh is a correctness bug in
-the dogfood path, not a normal step in the ceremony.
-
-For a deliberate dogfood restart, the current line can preserve an automatic reattachment plan and
-a continuation debrief. The command is explicit, local, and line-scoped; it does not stop or restart
-the server itself:
-
-```bash
-uv run python -m scripts.cockpit plan "partyline refactoring" \
-  --debrief "Continue the TypeScript review from the committed handoff."
-uv run python -m scripts.cockpit arm --pid NNNNN
-```
-
-`arm` schedules the reviewed restart executable with systemd, verifies the timer and exact process
-generation after scheduling, snapshots that generation's environment before signalling it, and
-keeps a failed unit inspectable. The environment snapshot is load-bearing: transient systemd units
-do not inherit the user's adapter CLI `PATH`. Do not replace `arm` with inline shell or a bare
-background process; those failure modes can leave a plan pending while the old server continues to
-look healthy.
-
-By default this consumes an **automatic** plan after startup; no browser needs to reconnect. The
-explicit `--manual-offer` escape hatch keeps the human stop-dialog flow for cases where an operator
-wants to inspect the plan first. In either mode, only the selected line and exact plan token can
-consume it. Resumption is strictly one process at a time: partyline waits until one adapter has
-reclaimed its exact session before starting the next. Adapters without safe resume/readiness support
-are excluded, and a slow but live adapter remains attached rather than being treated as failed.
+Partyline can deploy and recover the cockpit it is using to build itself without a required human
+button or browser refresh. The contributor procedure, safety boundaries, and evidence required after
+a dogfood restart live in [Dogfooding Partyline](docs/dogfooding.md).
 
 ### Credentials for attached processes
 
