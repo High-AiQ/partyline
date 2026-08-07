@@ -15,9 +15,9 @@ jobs:
         with:
           enable-cache: true
       - name: lint
-        run: uv run ruff check .
+        run: uv run --locked ruff check .
       - name: test with coverage
-        run: uv run coverage run -m unittest discover -s tests && uv run coverage report
+        run: uv run --locked coverage run -m unittest discover -s tests && uv run --locked coverage report
 
   frontend:
     name: frontend
@@ -103,4 +103,4 @@ jobs:
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.sha }}
-        run: uv run python -m scripts.version_policy --base "$BASE_SHA" --head "$HEAD_SHA"
+        run: uv run --locked python -m scripts.version_policy --base "$BASE_SHA" --head "$HEAD_SHA"

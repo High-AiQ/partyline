@@ -3,7 +3,6 @@
 __pycache__/
 *.pyc
 *.db
-uv.lock
 *.egg-info/
 .pytest_cache/
 .mypy_cache/

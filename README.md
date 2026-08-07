@@ -49,11 +49,11 @@ Zero to booted:
 ```bash
 git clone https://github.com/High-AiQ/partyline.git   # or the SSH URL, if you have a key
 cd partyline
-uv sync                   # creates .venv and installs everything
-uv run partyline          # serves http://127.0.0.1:8642
+uv sync --locked                   # creates the pinned .venv and installs everything
+uv run --locked partyline          # serves http://127.0.0.1:8642
 ```
 
-`uv run partyline` does the sync for you, so the middle step is optional — it is spelled out
+`uv run --locked partyline` does the sync for you, so the middle step is optional — it is spelled out
 only so a first run does not look like it has hung while uv builds the environment.
 
 Open <http://127.0.0.1:8642>. If the server refuses to start because the built client is missing
@@ -182,7 +182,7 @@ Playwright's browser binary is a separate download, and changing the frontend ad
 Node and npm.
 
 ```bash
-uv sync                                  # runtime + dev dependencies
+uv sync --locked                         # pinned runtime + dev dependencies
 uv run playwright install chromium       # once, for the UI tests and screenshots
 ```
 
