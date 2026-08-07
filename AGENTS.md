@@ -462,3 +462,6 @@ participant in the room — including whoever is doing the work. The rules that 
 - Versioning is semver, single-sourced from `partyline/__init__.py`. Bump in the same commit:
   feature → minor, fix → patch, breaking change → major. Documentation, test, refactor, and
   chore changes do not bump the version.
+- After every required check passes on `main`, a version-changing merge creates the annotated
+  tag `v<version>`. A merge whose version is unchanged creates no tag. Existing version tags
+  are immutable: automation must accept an idempotent match and refuse a conflicting target.
