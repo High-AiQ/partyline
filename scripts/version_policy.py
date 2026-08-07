@@ -43,6 +43,12 @@ class Version:
         return f"{self.major}.{self.minor}.{self.patch}"
 
 
+@dataclass(frozen=True)
+class Change:
+    subject: str
+    version: Version
+
+
 def required_bump(subjects: list[str]) -> str | None:
     """Return the highest SemVer impact declared by the commit subjects."""
     required = None
@@ -94,6 +100,36 @@ def verdict(base: Version, head: Version, subjects: list[str]) -> str | None:
     return None
 
 
+def history_verdict(base: Version, changes: list[Change]) -> str | None:
+    """Validate the result and the commit that owns its one version transition."""
+    subjects = [change.subject for change in changes]
+    bump = required_bump(subjects)
+    head = changes[-1].version
+    endpoint_failure = verdict(base, head, subjects)
+    if endpoint_failure:
+        return endpoint_failure
+    if bump is None:
+        return None
+
+    transitions = []
+    previous = base
+    for change in changes:
+        if change.version != previous:
+            transitions.append(change)
+        previous = change.version
+    if len(transitions) != 1:
+        return f"expected one version transition in the change set, found {len(transitions)}"
+
+    owner = transitions[0]
+    owner_bump = required_bump([owner.subject])
+    if owner_bump != bump:
+        return (
+            f"the {bump} version transition belongs in a {bump}-impact commit; "
+            f"it occurred in {owner.subject!r}"
+        )
+    return None
+
+
 def git(*args: str) -> str:
     return subprocess.run(
         ["git", *args], check=True, capture_output=True, text=True
@@ -104,9 +140,15 @@ def revision_version(revision: str) -> Version:
     return source_version(git("show", f"{revision}:partyline/__init__.py"))
 
 
-def commit_subjects(base: str, head: str) -> list[str]:
-    output = git("log", "--no-merges", "--format=%s", f"{base}..{head}")
-    return output.splitlines() if output else []
+def commit_history(base: str, head: str) -> list[Change]:
+    output = git("rev-list", "--reverse", "--no-merges", f"{base}..{head}")
+    return [
+        Change(
+            subject=git("show", "-s", "--format=%s", revision),
+            version=revision_version(revision),
+        )
+        for revision in output.splitlines()
+    ] if output else []
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -115,16 +157,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--head", default="HEAD", help="head revision (default: HEAD)")
     args = parser.parse_args(argv)
 
-    subjects = commit_subjects(args.base, args.head)
-    if not subjects:
+    changes = commit_history(args.base, args.head)
+    if not changes:
         parser.error(f"no non-merge commits found in {args.base}..{args.head}")
     base = revision_version(args.base)
-    head = revision_version(args.head)
-    failure = verdict(base, head, subjects)
+    head = changes[-1].version
+    failure = history_verdict(base, changes)
     if failure:
         print(f"FAIL: {failure}")
         return 1
-    bump = required_bump(subjects)
+    bump = required_bump([change.subject for change in changes])
     print(f"version policy satisfied: {base} -> {head} ({bump or 'no release'})")
     return 0
 
