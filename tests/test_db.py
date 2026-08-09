@@ -49,6 +49,23 @@ class DbTest(unittest.TestCase):
         self.assertEqual(attachment["last_seen"], 9)
         self.assertEqual(attachment["cli_session"], "session")
 
+    def test_command_changes_only_while_the_attachment_is_inactive(self):
+        self.db.create_conversation("line", "Line")
+        self.db.add_attachment("att", "line", "terra", "fake", ["old"], "/tmp")
+        self.db.set_attachment_status("att", "exited", None)
+
+        changed = asyncio.run(
+            self.db.update_inactive_attachment_command("att", ["new", "two words"])
+        )
+        self.assertEqual(changed["command"], ["new", "two words"])
+
+        self.assertTrue(self.db.claim_attachment("att", "new-generation"))
+        refused = asyncio.run(
+            self.db.update_inactive_attachment_command("att", ["must-not-land"])
+        )
+        self.assertIsNone(refused)
+        self.assertEqual(self.db.get_attachment("att")["command"], ["new", "two words"])
+
     def test_new_activation_rejects_an_old_server_shutdown_write(self):
         self.db.create_conversation("line", "Line")
         self.db.add_attachment(
