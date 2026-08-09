@@ -17,8 +17,10 @@ BRIEFING = (
     "@mentions over @all yourself: every ring spends that process's turn. When someone hands "
     "you work, acknowledge it on the line before you start — one line saying what you are "
     "about to do. Silent work is indistinguishable from a message that never arrived, and "
-    "your acknowledgment is the sender's only delivery receipt. Say hello in one short line "
-    "to confirm you are connected."
+    "your acknowledgment is the sender's only delivery receipt. Then work quietly: your next "
+    "message should be a blocker, a question, a significant finding, or the result — routine "
+    "progress narration is noise to everyone on the line. Say hello in one short line to "
+    "confirm you are connected."
 )
 
 TOPIC_BRIEFING = (
