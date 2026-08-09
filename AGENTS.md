@@ -285,6 +285,31 @@ replaced them:
   updated durable status but left its adapter in `runtime.live`; `/api/running` omitted it while
   `/resume` rejected it as “already live.” Owner-matched terminal status callbacks now remove the
   process-local adapter, and the regression control proves an exited attachment can resume again.
+- **A delivered mention meant the process could answer.** Newer Codex builds moved speech from
+  `agent_message` events to `item_completed` items; the tail spoke only the old dialect, so two
+  agents received every ping and posted nothing for hours — and their silence read as choice, not
+  breakage. Adapter tests now pin each vendor vocabulary, and a joined process that never lands its
+  hello on the line is a defect to investigate before assigning it work: attachment status proves a
+  process can hear, only a round-trip post proves it can speak.
+- **A rendered prompt meant the TUI accepted input.** A resumed Muse reached `input_ready`, drew
+  its prompt, consumed keystrokes, and discarded them; a fresh attach had “worked” only because the
+  briefing rode argv, so pty input had never been exercised, and a liveness probe was mistaken for
+  an input proof. Input validation must exercise the real pty delivery path and read the durable
+  session-log record as its oracle; rendering and staying alive prove neither. When only one
+  instance misbehaves, compare kernel-level evidence (`/proc` thread wait channels) between the
+  broken and a working instance before theorizing about protocol.
+- **`.nullable()` covered a field the wire might omit.** `broadcast()` serializes with
+  `exclude_none=True` while REST spells the same absence `null`, so the first live event for a
+  fresh attachment failed strict parse and stopped the tab with “protocol mismatch” — and a hard
+  refresh masked it by re-reading state through the REST dialect. Shared schemas now read omitted
+  and null as the same fact, with tests pinning both spellings; a schema at a dual-serialized
+  boundary must accept every dialect that boundary actually produces.
+- **Advancing the cockpit meant a git pull.** The coordinator twice advised manual
+  `git pull` + Ctrl-C restarts while `scripts.cockpit check/deploy/plan/arm` existed, was
+  documented, and did the fast-forward itself — and a deploy that is not promptly followed by a
+  restart leaves new tabs reload-looping against the old server. `docs/dogfooding.md` is the only
+  deploy path; read it before giving restart instructions rather than reconstructing the procedure
+  from memory of the last manual recovery.
 
 When a component documents a limit or lifecycle assumption, the dependent code must reference or
 enforce it. A prose warning that has no executable guard is not a completed lesson.
