@@ -52,6 +52,10 @@ export interface AttachPayload {
   cwd: string;
 }
 
+export interface AttachmentCommandPayload {
+  command: string;
+}
+
 export interface PresetDraft {
   id?: string;
   title: string;
@@ -76,6 +80,7 @@ export interface PartylineApi {
   restoreConversation(id: string): Promise<Conversation>;
   purgeConversation(id: string): Promise<PurgeResult>;
   attach(conversationId: string, payload: AttachPayload): Promise<Attachment>;
+  editAttachmentCommand(attachmentId: string, payload: AttachmentCommandPayload): Promise<Attachment>;
   detach(attachmentId: string): Promise<OkResult>;
   resume(attachmentId: string): Promise<Attachment>;
   screen(attachmentId: string): Promise<ScreenResult>;
@@ -209,6 +214,13 @@ export const api: PartylineApi = {
       method: "POST",
       body: payload,
       fallback: "attach failed",
+    }),
+  editAttachmentCommand: (attachmentId, payload) =>
+    request(`/api/attachments/${attachmentId}`, {
+      schema: AttachmentSchema,
+      method: "PATCH",
+      body: payload,
+      fallback: "could not save command",
     }),
   detach: (attachmentId) =>
     request(`/api/attachments/${attachmentId}`, {

@@ -7,6 +7,43 @@ from pydantic import BaseModel, ConfigDict, Field
 RestartPlanMode = Literal["offer", "automatic"]
 
 
+class ConvIn(BaseModel):
+    name: str
+
+
+class AttachIn(BaseModel):
+    name: str
+    adapter: str = "opencode"
+    command: str = ""
+    cwd: str = ""
+
+
+class TopicIn(BaseModel):
+    topic: str = ""
+    sender: str = ""
+
+
+class RenameIn(BaseModel):
+    name: str
+    sender: str = ""
+
+
+class PresetIn(BaseModel):
+    title: str
+    name: str
+    adapter: str = "opencode"
+    command: str = ""
+
+
+class KeyIn(BaseModel):
+    key: str
+
+
+class AdapterImportIn(BaseModel):
+    repository: str
+    ref: str | None = None
+
+
 class VersionResponse(BaseModel):
     version: str
     build: str
@@ -52,6 +89,10 @@ class AttachmentResponse(BaseModel):
     last_seen: int
     created_at: float
     cli_session: str | None = None
+
+
+class AttachmentCommandRequest(BaseModel):
+    command: str
 
 
 class PresetResponse(BaseModel):

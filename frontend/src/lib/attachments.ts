@@ -47,5 +47,17 @@ export function canResume(adapters: readonly AdapterResumeInfo[], adapterId: str
 export const canResumeJack = (adapters: readonly AdapterResumeInfo[], attachment: Jack): boolean =>
   !isLive(attachment) && canResume(adapters, attachment.adapter);
 
+const SAFE_SHELL_ARG = /^[A-Za-z0-9_@%+=:,./-]+$/;
+
+/** Render argv so Python's shlex can recover every argument unchanged. */
+export function formatCommand(command: readonly string[]): string {
+  return command
+    .map((argument) => {
+      if (argument && SAFE_SHELL_ARG.test(argument)) return argument;
+      return `'${argument.replaceAll("'", `'"'"'`)}'`;
+    })
+    .join(" ");
+}
+
 /** The label an adapter gets in the picker. `raw` is the only one that needs a gloss. */
 export const adapterLabel = (id: string): string => (id === "raw" ? "raw — any process" : id);

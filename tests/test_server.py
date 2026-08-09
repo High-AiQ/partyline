@@ -553,6 +553,55 @@ class ServerTest(unittest.TestCase):
             409, server.attach("line", server.AttachIn(name="TERRA", adapter="fake", cwd=self.directory.name))
         )
 
+    def test_edit_inactive_attachment_command_updates_every_tab(self):
+        self.add_attachment("old", status="detached")
+        server.runtime.db.set_cli_session("old", "kept-session", None)
+        socket = StreamWebSocket()
+        server.runtime.sockets["line"] = {socket}
+
+        updated = self.arun(server.edit_attachment_command(
+            FakeRequest("127.0.0.1"),
+            "old",
+            server.AttachmentCommandRequest(command='fake --label "two words"'),
+        ))
+
+        self.assertEqual(updated["command"], ["fake", "--label", "two words"])
+        self.assertEqual(updated["cli_session"], "kept-session")
+        self.assertEqual(socket.sent[0]["type"], "attachment")
+        self.assertEqual(socket.sent[0]["attachment"]["command"], updated["command"])
+
+    def test_edit_attachment_command_is_local_and_inactive_only(self):
+        self.add_attachment("old", status="detached")
+        body = server.AttachmentCommandRequest(command="fake --changed")
+
+        self.assert_http(
+            403, server.edit_attachment_command(FakeRequest("10.0.0.7"), "old", body)
+        )
+        server.runtime.live["old"] = FakeAdapter()
+        self.assert_http(
+            409, server.edit_attachment_command(FakeRequest("127.0.0.1"), "old", body)
+        )
+        server.runtime.live.clear()
+        server.runtime.db.set_attachment_status("old", "running", None)
+        self.assert_http(
+            409, server.edit_attachment_command(FakeRequest("127.0.0.1"), "old", body)
+        )
+        self.assert_http(
+            404, server.edit_attachment_command(FakeRequest("127.0.0.1"), "missing", body)
+        )
+
+    def test_edit_attachment_command_shares_attach_validation(self):
+        self.add_attachment("old", status="exited")
+        request = FakeRequest("127.0.0.1")
+        server.ADAPTER_METADATA["fake"]["requires"] = ["definitely-not-a-command"]
+        self.assert_http(400, server.edit_attachment_command(
+            request, "old", server.AttachmentCommandRequest(command="fake")
+        ))
+        server.ADAPTER_METADATA["fake"]["requires"] = []
+        self.assert_http(400, server.edit_attachment_command(
+            request, "old", server.AttachmentCommandRequest(command="fake 'unfinished")
+        ))
+
     def test_resume_screen_keys_and_detach(self):
         self.add_attachment("old", status="exited")
         resumed = self.arun(server.resume_attachment("old"))

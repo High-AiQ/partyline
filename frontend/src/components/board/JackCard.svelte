@@ -13,6 +13,7 @@
   import { room } from "../../state/room.svelte.js";
   import { dialogs } from "../../state/dialogs.svelte.js";
   import PeekDialog from "../dialogs/PeekDialog.svelte";
+  import EditJackDialog from "../dialogs/EditJackDialog.svelte";
 
   interface Props {
     attachment: Attachment;
@@ -38,6 +39,10 @@
   function peek(): void {
     room.attention.delete(attachment.id);
     dialogs.open(PeekDialog, { attachment });
+  }
+
+  function edit(): void {
+    dialogs.open(EditJackDialog, { attachment });
   }
 
   async function resume(): Promise<void> {
@@ -90,6 +95,16 @@
       onclick={resume}
     >
       {resuming ? "resuming…" : "↻ resume"}
+    </button>
+  {/if}
+  {#if !live}
+    <button
+      class="resume edit-btn"
+      type="button"
+      title="change the command used on next resume"
+      onclick={edit}
+    >
+      ✎ edit command
     </button>
   {/if}
 </div>
@@ -169,6 +184,15 @@
     background: var(--color-green);
     border-color: var(--color-green);
     color: var(--color-ink);
+  }
+  .edit-btn {
+    color: var(--color-copper);
+    border-color: rgb(217 142 74 / 0.4);
+    margin-left: 5px;
+  }
+  .edit-btn:hover {
+    background: var(--color-copper);
+    border-color: var(--color-copper);
   }
 
   /* a process is stuck on a dialog: the whole jack rings until someone peeks */

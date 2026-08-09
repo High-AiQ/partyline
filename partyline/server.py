@@ -13,8 +13,6 @@ import logging
 import os
 import re
 import signal
-import shlex
-import shutil
 import subprocess
 import uuid
 from contextlib import asynccontextmanager, suppress
@@ -24,10 +22,10 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 from . import __version__
+from .attachment_commands import validated_attachment_command
 from .adapters import (
     ADAPTERS,
     ADAPTER_METADATA,
@@ -36,31 +34,40 @@ from .adapters import (
     reload_adapters,
 )
 from .contracts import (
+    AdapterImportIn,
     AdapterImportResponse,
     AdapterMetadataResponse,
     AdapterRemoveResponse,
     ArchiveResponse,
+    AttachIn,
+    AttachmentCommandRequest,
+    AttachmentEvent,
     AttachmentResponse,
     AttentionEvent,
+    ConvIn,
     ConversationDetailResponse,
     ConversationArchivedEvent,
     ConversationDeletedEvent,
     ConversationEvent,
     ConversationResponse,
     HookEventRequest,
+    KeyIn,
     LoadedResponse,
     MessageEvent,
     MessageResponse,
     OkResponse,
+    PresetIn,
     PresetResponse,
     PurgeResponse,
     RestartPlanRequest,
     RestartPlanResponse,
+    RenameIn,
     RunningProcessResponse,
     ScreenResponse,
     ShutdownEvent,
     ShutdownRequest,
     ShutdownResponse,
+    TopicIn,
     VersionResponse,
 )
 from .db import Db
@@ -125,34 +132,6 @@ app = FastAPI(lifespan=lifespan)
 
 
 # -- REST ------------------------------------------------------------------
-class ConvIn(BaseModel):
-    name: str
-
-
-class AttachIn(BaseModel):
-    name: str
-    adapter: str = "opencode"
-    command: str = ""
-    cwd: str = ""
-
-
-class TopicIn(BaseModel):
-    topic: str = ""
-    sender: str = ""      # who set it, for the system notice
-
-
-class RenameIn(BaseModel):
-    name: str
-    sender: str = ""      # who renamed it, for the system notice
-
-
-class PresetIn(BaseModel):
-    title: str
-    name: str
-    adapter: str = "opencode"
-    command: str = ""
-
-
 @app.get("/")
 async def index():
     return FileResponse(STATIC_DIR / "index.html")
@@ -252,11 +231,6 @@ async def shutdown(request: Request, body: ShutdownRequest | None = None):
 @app.get("/api/adapters", response_model=list[AdapterMetadataResponse])
 async def adapters():
     return [ADAPTER_METADATA[name] for name in sorted(ADAPTERS)]
-
-
-class AdapterImportIn(BaseModel):
-    repository: str
-    ref: str | None = None
 
 
 @app.post("/api/adapters/import", response_model=AdapterImportResponse)
@@ -418,24 +392,16 @@ async def attach(conv_id: str, body: AttachIn):
     if body.name.lower() in {
             name.lower() for name, _ in runtime.human_handles.get(conv_id, {}).values()}:
         raise HTTPException(409, f"'{body.name}' is already in use by a human on this line")
-    if body.adapter not in ADAPTERS:
-        raise HTTPException(400, f"adapter must be one of {sorted(ADAPTERS)}")
     for existing in runtime.db.list_attachments(conv_id):
         if existing["name"].lower() == body.name.lower() and existing["status"] in ("starting", "running"):
             raise HTTPException(409, f"'{body.name}' is already attached")
 
-    metadata = ADAPTER_METADATA[body.adapter]
-    command = shlex.split(body.command) if body.command.strip() else []
-    if not command:
-        default_command = metadata.get("command") or []
-        if not default_command:
-            raise HTTPException(400, f"the {body.adapter} adapter needs an explicit command")
-        command = list(default_command)
-    # Fail here with something readable rather than as a spawn traceback later.
-    for executable in metadata.get("requires") or []:
-        if shutil.which(executable) is None:
-            raise HTTPException(
-                400, f"{executable!r} is not on PATH — install it, or attach with a full path")
+    try:
+        command = validated_attachment_command(
+            body.adapter, body.command, ADAPTERS, ADAPTER_METADATA
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
     cwd = os.path.abspath(os.path.expanduser(body.cwd.strip() or os.getcwd()))
     if not os.path.isdir(cwd):
@@ -530,6 +496,32 @@ async def _resume_adapter(
     return ResumedAttachment(adapter, startup_delivery_staged)
 
 
+@app.patch("/api/attachments/{att_id}", response_model=AttachmentResponse)
+async def edit_attachment_command(
+    request: Request, att_id: str, body: AttachmentCommandRequest
+):
+    require_loopback(request)
+    att = runtime.db.get_attachment(att_id)
+    if not att:
+        raise HTTPException(404)
+    if att_id in runtime.live or att["status"] not in ("exited", "detached"):
+        raise HTTPException(409, f"'{att['name']}' must be stopped before editing its command")
+    try:
+        command = validated_attachment_command(
+            att["adapter"], body.command, ADAPTERS, ADAPTER_METADATA
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    updated = await runtime.db.update_inactive_attachment_command(att_id, command)
+    if updated is None:
+        raise HTTPException(409, f"'{att['name']}' became live; refresh and try again")
+    await runtime.broadcast(
+        att["conv_id"],
+        AttachmentEvent(attachment=AttachmentResponse.model_validate(updated)),
+    )
+    return updated
+
+
 @app.delete("/api/attachments/{att_id}", response_model=OkResponse)
 async def detach(att_id: str):
     att = runtime.db.get_attachment(att_id)
@@ -594,10 +586,6 @@ async def attachment_screen(att_id: str):
     if adapter is None:
         raise HTTPException(404, "attachment is not live")
     return {"screen": adapter.screen_text()}
-
-
-class KeyIn(BaseModel):
-    key: str
 
 
 @app.post("/api/attachments/{att_id}/keys", response_model=OkResponse)
