@@ -233,6 +233,8 @@ class LoadAdapterTest(unittest.TestCase):
         with isolated_registry():
             loader.load_bundled_adapters()
             self.assertEqual(registry.ADAPTER_METADATA["raw"]["source"], "bundled")
+            self.assertEqual(registry.ADAPTER_METADATA["muse"]["source"], "bundled")
+            self.assertTrue(registry.ADAPTER_METADATA["muse"]["capabilities"]["resume"])
 
     def test_reloading_re_executes_the_file_rather_than_reusing_the_module(self):
         with tempfile.TemporaryDirectory() as directory, isolated_registry():
