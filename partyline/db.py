@@ -340,9 +340,7 @@ class Db:
         return [dict(r) for r in cur.fetchall()]
 
     # -- attachments -------------------------------------------------------
-    def add_attachment(
-        self, att_id, conv_id, name, adapter, command, cwd, runtime_owner=None
-    ):
+    def add_attachment(self, att_id, conv_id, name, adapter, command, cwd, runtime_owner=None):
         ts = time.time()
         self._exec(
             "INSERT INTO attachments("
@@ -371,6 +369,13 @@ class Db:
         cur = self._exec("SELECT * FROM attachments WHERE conv_id=? ORDER BY created_at", (conv_id,))
         return [_att_row(r) for r in cur.fetchall()]
 
+    async def update_inactive_attachment_command(self, att_id, command):
+        async with self._runtime_serialized_async():
+            changed = self._exec("UPDATE attachments SET command=? "
+                                 "WHERE id=? AND status IN ('exited','detached')",
+                                 (json.dumps(command), att_id))
+            return self.get_attachment(att_id) if changed.rowcount == 1 else None
+
     def claim_attachment(self, att_id: str, runtime_owner: str) -> bool:
         """Claim one inactive row for a new adapter activation atomically."""
         with self._runtime_serialized():
@@ -393,9 +398,7 @@ class Db:
         with self._runtime_serialized():
             return self._set_attachment_status(att_id, status, runtime_owner)
 
-    async def set_attachment_status_async(
-        self, att_id, status, runtime_owner: str | None
-    ) -> bool:
+    async def set_attachment_status_async(self, att_id, status, runtime_owner: str | None) -> bool:
         async with self._runtime_serialized_async():
             return self._set_attachment_status(att_id, status, runtime_owner)
 
@@ -406,9 +409,7 @@ class Db:
         )
         return cur.rowcount == 1
 
-    def detach_attachment_with_message(
-        self, att_id: str, runtime_owner: str | None, body: str
-    ) -> MessageRow | None:
+    def detach_attachment_with_message(self, att_id, runtime_owner, body) -> MessageRow | None:
         """Detach one inactive activation and persist its notice atomically.
 
         A replacement may claim the attachment as soon as it is detached. The
@@ -419,8 +420,7 @@ class Db:
             return self._detach_attachment_with_message(att_id, runtime_owner, body)
 
     async def detach_attachment_with_message_async(
-        self, att_id: str, runtime_owner: str | None, body: str
-    ) -> MessageRow | None:
+        self, att_id: str, runtime_owner: str | None, body: str) -> MessageRow | None:
         async with self._runtime_serialized_async():
             return self._detach_attachment_with_message(att_id, runtime_owner, body)
 

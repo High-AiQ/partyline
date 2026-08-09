@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { adapterLabel, canResume, canResumeJack, isLive, latestJacks } from "./attachments";
+import { adapterLabel, canResume, canResumeJack, formatCommand, isLive, latestJacks } from "./attachments";
 
 interface FixtureJack {
   id: string;
@@ -130,5 +130,15 @@ describe("adapterLabel", () => {
   it("glosses raw, which is the only one that needs it", () => {
     expect(adapterLabel("raw")).toBe("raw — any process");
     expect(adapterLabel("claude")).toBe("claude");
+  });
+});
+
+describe("formatCommand", () => {
+  it("leaves shell-safe arguments readable", () => {
+    expect(formatCommand(["muse", "--model", "muse-spark-1.2"])).toBe("muse --model muse-spark-1.2");
+  });
+
+  it("losslessly quotes spaces, apostrophes, and empty arguments", () => {
+    expect(formatCommand(["tool", "two words", "it's", ""])).toBe(`tool 'two words' 'it'"'"'s' ''`);
   });
 });

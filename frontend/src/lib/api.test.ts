@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, ApiContractError, ApiError } from "./api";
 import type { AttachPayload, PresetDraft } from "./api";
-import type { Conversation } from "./contracts";
+import type { Attachment, Conversation } from "./contracts";
 import type { RestartPlan, RestartPlanRequest } from "./contracts";
 
 interface MockResponseOptions {
@@ -26,6 +26,19 @@ const attachPayload: AttachPayload = {
   adapter: "codex",
   command: "codex",
   cwd: "/tmp/work",
+};
+
+const attachment: Attachment = {
+  id: "att-1",
+  conv_id: "conv-1",
+  name: "sol",
+  adapter: "codex",
+  command: ["codex"],
+  cwd: "/tmp/work",
+  status: "detached",
+  last_seen: 0,
+  created_at: 1,
+  cli_session: "session-1",
 };
 
 const restartRequest: RestartPlanRequest = {
@@ -114,6 +127,21 @@ describe("api", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(restartRequest),
+    });
+  });
+
+  it("patches a stopped jack command through the attachment contract", async () => {
+    const updated = { ...attachment, command: ["codex", "--model", "new"] };
+    const fetch = vi.fn().mockResolvedValue(response(updated));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(api.editAttachmentCommand("att-1", { command: "codex --model new" })).resolves.toEqual(
+      updated,
+    );
+    expect(fetch).toHaveBeenCalledWith("/api/attachments/att-1", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command: "codex --model new" }),
     });
   });
 

@@ -166,6 +166,9 @@ without spending a turn.
 **Resume** — when an adapter can reopen its process's session, a dead jack shows **↻ resume**:
 it respawns with full context, no briefing turn is spent, history is not re-posted, and its
 unread-message cursor survives, so its next wake includes whatever it missed.
+Every stopped jack also shows **edit command**: change the argv used by its next resume without
+discarding that session or cursor. The server accepts this process-control action only from the
+local machine and refuses it if the jack becomes live.
 
 **Peek & keys** — every running jack has **⌗ peek**: a live view of the process's actual
 terminal screen (rendered server-side, refreshes every 2s), plus a small keypad (enter / esc /
@@ -283,8 +286,9 @@ with ui_session(["alpha line", "beta line"]) as ui:
 | `PARTYLINE_ADAPTERS_DIR` | `~/.partyline/adapters` | where imported adapter repos are checked out |
 
 Control actions are exposed as REST (`/api/conversations`, `/api/adapters`, `/api/presets`,
-`/api/attachments/<id>/{resume,screen,keys}`), so creating lines, attaching processes, peeking
-and resuming are all scriptable from anything that can curl. **Chat itself is not REST**:
+`/api/attachments/<id>/{resume,screen,keys}` plus `PATCH /api/attachments/<id>`), so creating
+lines, attaching processes, editing stopped commands, peeking and resuming are all scriptable
+from anything that can curl. **Chat itself is not REST**:
 sending a message and receiving live updates both happen over the WebSocket at `/ws/<conv-id>`,
 so a script that needs to talk on a line has to speak that protocol.
 
