@@ -80,3 +80,20 @@ cockpit has deployed, restarted, recovered, and continued its own work. Record e
 
 The coordinator summary is useful, but it is not the proof. Keep the command output and transcript
 evidence with the handoff so the next agent can distinguish a completed recovery from an assumption.
+
+## Implementation notes for contributors
+
+- **The automatic lease has one explicit lifecycle.** Claim with
+  `claim_restart_plan(mode, owner, lease_seconds)`; renew with
+  `renew_restart_plan_claim(token, owner, lease_seconds)` while waiting; release with
+  `release_restart_plan_claim(token, owner)` on cancellation or error; and complete only after
+  the final outcome with `complete_restart_plan(token, owner)`. A lost or expired owner is
+  reclaimable, and a runner that loses ownership must launch no further processes.
+- **Nobody may be mid-turn when the restart lands — including whoever triggers it.** An agent
+  killed mid-turn comes back to a CLI that resumes the interrupted turn, so it posts a stray
+  fragment into the room on wake. A scheduled trigger's delay has to outlast *your own* turn,
+  not just your announcement.
+- **Adapter changes do not need a restart** — `POST /api/adapters/reload` re-executes adapter
+  packages in place. Changes to the base class, loader, server, or frontend do.
+- Prefer changes that make a restart cheaper (resume support, adopting live attachments,
+  liveness reporting) over changes that assume restarts are rare.
