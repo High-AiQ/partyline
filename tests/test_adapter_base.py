@@ -17,6 +17,7 @@ from pathlib import Path
 os.environ.setdefault("PARTYLINE_DB", "/tmp/partyline-test-adapter-base.db")
 
 from partyline.adapters.base import Adapter
+from partyline.adapters.terminal import terminal_responses
 from datetime import UTC
 
 
@@ -229,6 +230,45 @@ class AdapterKeystrokeTest(unittest.IsolatedAsyncioTestCase):
         # pyte's display is a fixed 40 rows; the tail of empty ones is dropped.
         self.assertFalse(adapter.screen_text().endswith("\n"))
         self.assertLess(len(adapter.screen_text().split("\n")), 40)
+
+
+class TerminalQueryTest(unittest.TestCase):
+    """A full-screen client must not block on split terminal queries."""
+
+    def test_terminal_answers_are_an_explicit_adapter_capability(self):
+        self.assertFalse(Recorder(["cat"]).answers_terminal_queries)
+
+    def test_terminal_queries_receive_terminal_like_replies_across_chunks(self):
+        adapter = Recorder(["cat"])
+        adapter._term.cursor.x = 12
+        adapter._term.cursor.y = 3
+        replies, tail = terminal_responses(adapter._term, b"", b"before\x1b[6")
+        self.assertEqual(replies, b"")
+        self.assertEqual(tail, b"\x1b[6")
+
+        replies, tail = terminal_responses(
+            adapter._term, tail, b"n\x1b]10;?\x1b\\\x1b]11;?\x07\x1b[c\x1b[?u\x1b[?1004h")
+
+        self.assertEqual(tail, b"")
+        self.assertEqual(
+            replies,
+            b"\x1b[4;13R\x1b]10;rgb:0000/0000/0000\x1b\\"
+            b"\x1b]11;rgb:ffff/ffff/ffff\x07\x1b[?62c",
+        )
+
+
+class TerminalQueryPtyTest(unittest.IsolatedAsyncioTestCase):
+    async def test_opted_in_adapter_answers_a_real_pty_cursor_query(self):
+        class QueryingRecorder(Recorder):
+            answers_terminal_queries = True
+
+        adapter = QueryingRecorder([
+            "sh", "-c", "stty raw -echo; printf '\\033[6n'; "
+            "dd bs=1 count=6 2>/dev/null | od -An -t x1",
+        ])
+        await adapter.start()
+        await until(lambda: adapter.saw("1b 5b 31 3b 31 52"), what="the DSR reply")
+        await adapter.stop()
 
 
 async def _stop(adapter):
