@@ -139,10 +139,20 @@ class PartylineAdapter(Adapter):
 
     @staticmethod
     def _user_prompt(record: dict) -> str | None:
-        if record.get("payload_type") != "runtime.command_intake.received":
-            return None
-        command = (((record.get("payload") or {}).get("record") or {}).get("command") or {})
-        return command.get("prompt") if command.get("kind") == "turn_submit" else None
+        # Two spellings for one fact. The echo provider logs a submitted prompt
+        # as a command_intake record; the meta provider logs it as the run's
+        # `started` event. An adapter that read only the first spelling matched
+        # every echo rehearsal and then timed out on the first real session.
+        if record.get("payload_type") == "runtime.command_intake.received":
+            command = (((record.get("payload") or {}).get("record") or {}).get("command") or {})
+            return command.get("prompt") if command.get("kind") == "turn_submit" else None
+        if record.get("payload_type") == "runtime.session":
+            payload = record.get("payload") or {}
+            event = payload.get("event") or {}
+            if payload.get("kind") == "run" and event.get("kind") == "started":
+                prompt = event.get("prompt")
+                return prompt if isinstance(prompt, str) else None
+        return None
 
     @staticmethod
     def _assistant_message(record: dict) -> tuple[str | None, str] | None:
