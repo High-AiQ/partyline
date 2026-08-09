@@ -20,6 +20,8 @@ from collections.abc import Awaitable, Callable
 
 import pyte
 
+from partyline.adapters.terminal import KEYS, screen_text, terminal_responses
+
 
 BRIEFING = (
     'You are "{name}", one participant in a group chat (conversation "{conv}") with humans '
@@ -52,6 +54,7 @@ class Adapter:
     """Base class for a process connected through a pseudo-terminal."""
 
     kind = "process"
+    answers_terminal_queries = False
 
     def __init__(self, att: dict, post: Post, on_status: Status, on_cli_session=None):
         self.att = att
@@ -77,6 +80,7 @@ class Adapter:
         self._startup_delivery_result: bool | None = None
         self._term = pyte.Screen(120, 40)
         self._term_stream = pyte.ByteStream(self._term)
+        self._terminal_query_tail = b""
 
     async def post(self, sender: str, sender_type: str, body: str):
         """Send something to the chat, unless the process is resuming mid-turn.
@@ -199,6 +203,11 @@ class Adapter:
                     self._term_stream.feed(data)
                 except Exception:
                     pass
+                if self.answers_terminal_queries:
+                    replies, self._terminal_query_tail = terminal_responses(
+                        self._term, self._terminal_query_tail, data)
+                    if replies:
+                        os.write(self.master, replies)  # type: ignore[arg-type]
                 await self.on_output(data)
         finally:
             try:
@@ -270,19 +279,10 @@ class Adapter:
         os.write(self.master, b"\r")
 
     def screen_text(self) -> str:
-        lines = [line.rstrip() for line in self._term.display]
-        while lines and not lines[-1]:
-            lines.pop()
-        return "\n".join(lines)
-
-    KEYS = {
-        "enter": b"\r", "esc": b"\x1b", "tab": b"\t", "space": b" ",
-        "up": b"\x1b[A", "down": b"\x1b[B", "left": b"\x1b[D", "right": b"\x1b[C",
-        "y": b"y", "n": b"n", "1": b"1", "2": b"2", "3": b"3", "4": b"4",
-    }
+        return screen_text(self._term)
 
     def send_key(self, key: str):
-        data = self.KEYS.get(key)
+        data = KEYS.get(key)
         if data is None:
             raise ValueError(f"unsupported key: {key}")
         assert self.master is not None
