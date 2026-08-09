@@ -244,8 +244,8 @@ class Adapter:
     # session it scrolls far out of the recent context — this keeps the rule next
     # to the newest messages, which is where drift actually happens.
     DIGEST_FOOTER = ("(reminder: processes only see messages that @mention them — @name any "
-                     "process your reply is for; untargeted thinking-aloud is fine, humans "
-                     "read everything; acknowledge handed work on the line before starting it)")
+                     "process your reply is for; humans read everything; acknowledge handed "
+                     "work in one line, then speak only for blockers, findings, or results)")
 
     def format_digest(self, messages: list[dict]) -> str:
         lines = "\n".join(f"[{m['sender']}]: {m['body']}" for m in messages)
