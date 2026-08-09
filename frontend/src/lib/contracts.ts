@@ -8,12 +8,19 @@ export type SenderType = z.infer<typeof SenderTypeSchema>;
 export const AttachmentStatusSchema = z.enum(["starting", "running", "exited", "detached"]);
 export type AttachmentStatus = z.infer<typeof AttachmentStatusSchema>;
 
+// These schemas validate two dialects of the same models: REST spells an
+// empty field `null`; the wire omits it, because `broadcast()` serializes
+// with `exclude_none=True`. A field that can be None on the server must read
+// omitted and null as the same fact — `.nullable()` alone rejects the omitted
+// spelling, which surfaced as "client/server protocol mismatch" the moment a
+// fresh attachment (no cli_session yet) arrived on the wire. Absent means null.
+
 export const ConversationSchema = z.object({
   id: z.string(),
   name: z.string(),
   topic: z.string(),
   created_at: z.number(),
-  archived_at: z.number().nullable(),
+  archived_at: z.number().nullable().default(null),
 });
 export type Conversation = z.infer<typeof ConversationSchema>;
 
@@ -37,7 +44,7 @@ export const AttachmentSchema = z.object({
   status: AttachmentStatusSchema,
   last_seen: z.number().int(),
   created_at: z.number(),
-  cli_session: z.string().nullable(),
+  cli_session: z.string().nullable().default(null),
 });
 export type Attachment = z.infer<typeof AttachmentSchema>;
 
