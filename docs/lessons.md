@@ -93,3 +93,10 @@ replaced them:
 
 When a component documents a limit or lifecycle assumption, the dependent code must reference or
 enforce it. A prose warning that has no executable guard is not a completed lesson.
+- **A shared workbench checkout was safe because each agent had its own branch.** The
+  coordinator ran `git checkout -b` in the checkout another agent was actively editing, yanking
+  HEAD off that agent's feature branch mid-work; a later `git add -A` then committed the other
+  agent's half-written module onto the coordinator's branch, where it failed the coordinator's
+  own CI. Branches do not partition a working tree: one checkout has one HEAD, one index, one
+  set of files. An agent entering a checkout it does not currently own must do its own work in
+  a `git worktree`, stage by explicit path rather than `-A`, and leave HEAD where it found it.
