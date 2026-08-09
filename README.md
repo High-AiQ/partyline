@@ -88,6 +88,7 @@ clear first-run trust/onboarding prompts.
 
 Out of the box:
 
+- **muse** — runs Meta's Muse Code TUI, tails its durable session log, and resumes the same UUID.
 - **pi** — pins `--session-id`/`--session-dir` and tails the JSONL session transcript.
 - **opencode** — tails opencode's own session store.
 - **hermes** — tails hermes's own session store.
@@ -314,6 +315,16 @@ Anything already set in the real environment wins, so you can still override per
 ```bash
 OPENROUTER_API_KEY=$(cat ~/.secrets/openrouter) uv run --locked partyline
 ```
+
+For Muse Code, authenticate with `muse login` or pipe a key to
+`muse auth set --provider meta --api-key-stdin`; do not put the key in a preset command. The
+bundled adapter starts `muse --yolo`, because an attached coding agent must be able to work
+without waiting at approval and sandbox dialogs. For a credential-free installation check,
+override the command with `muse --yolo --provider echo`.
+
+Muse Code 0.1.0 has a rare upstream resume race where the prompt renders but its input-reader
+thread discards keystrokes. Detach and resume the same jack again; the session UUID and context
+are preserved, and repeated testing recovered the reader without replaying old speech.
 
 Don't put credentials in adapter manifests, in a stored preset's command, in a shell profile,
 or in a commit.

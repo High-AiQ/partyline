@@ -1,0 +1,10 @@
+[adapter]
+name = "Muse Code"
+version = "1.0.1"
+description = "Interactive Muse Code terminal with durable session-log tailing."
+entrypoint = "adapter.py"
+class = "PartylineAdapter"
+command = ["muse", "--yolo"]
+requires = ["muse"]
+env_unset = []
+capabilities = { resume = true }
