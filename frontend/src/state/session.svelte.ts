@@ -58,6 +58,18 @@ class Session {
     this.version = version;
   }
 
+  /** Everything a handshake makes stale. The adapter list follows the same
+   *  rule as the version badge: every handshake may follow a server whose
+   *  adapters changed — an import, a reload, a restart onto a new release —
+   *  and a Python-only release deliberately reloads no tab, so mount-time
+   *  state would otherwise be the only state a document ever has. A picker
+   *  omitting an adapter the server had offered for an hour was this
+   *  staleness, observed live. */
+  acceptHandshake(version: string): void {
+    this.acceptServerVersion(version);
+    void this.loadAdapters();
+  }
+
   async loadAdapters(): Promise<void> {
     try {
       this.adapters = await api.adapters();
