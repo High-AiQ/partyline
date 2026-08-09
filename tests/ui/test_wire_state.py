@@ -112,6 +112,41 @@ class WireStateTest(unittest.TestCase):
             page.wait_for_function("() => document.querySelector('#ver')?.textContent === 'v9.9.9'")
             self.assertTrue(page.evaluate("() => window.__partylineReloadControl"))
 
+    def test_a_handshake_refreshes_the_adapter_list(self):
+        """An import, reload, or restart can change the server's adapters while
+        a tab stays open — and a Python-only release deliberately reloads no
+        tab, so mount-time state would otherwise be the only state a document
+        ever has. A dropdown missing an adapter the server has offered for an
+        hour is this staleness, observed on a live cockpit."""
+        with ui_session(["alpha line"]) as ui:
+            page = ui.page
+            page.locator(".conv-row .conv").first.click()
+            page.wait_for_function("() => window.partyline.session.adapters.length > 0")
+            build = page.evaluate(
+                "() => fetch('/api/version').then(response => response.json()).then(x => x.build)"
+            )
+
+            # Stand in for a tab whose list predates a server-side change: the
+            # control — without the handshake refresh, this stays empty forever.
+            page.evaluate("() => { window.partyline.session.adapters = []; }")
+            page.evaluate("() => { window.__partylineReloadControl = true; }")
+            page.evaluate(
+                """([build]) => {
+                  const conversation_id = window.partyline.room.conversation.id;
+                  const handle = window.partyline.session.handle;
+                  window.partyline.wire.socket.dispatchEvent(new MessageEvent('message', {
+                    data: JSON.stringify({
+                      type: 'hello', conversation_id, handle, build, version: '9.9.9',
+                    }),
+                  }));
+                }""",
+                [build],
+            )
+
+            page.wait_for_function(
+                "() => window.partyline.session.adapters.length > 0", timeout=5000)
+            self.assertTrue(page.evaluate("() => window.__partylineReloadControl"))
+
     def test_a_shutdown_event_waits_then_reconnects_without_reloading(self):
         """A deliberate stop stays honest while still noticing the restart."""
         with ui_session(["alpha line"]) as ui:
