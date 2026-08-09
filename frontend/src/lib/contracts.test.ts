@@ -9,6 +9,65 @@ const offer = {
   debrief: "Continue the review.",
 };
 
+describe("wire events with server-omitted null fields", () => {
+  // `broadcast()` serializes with `exclude_none=True`, so a None field is
+  // omitted on the wire even though REST spells it `null`. These payloads are
+  // exactly what the server sends; rejecting them stopped the tab with
+  // "client/server protocol mismatch" every time a fresh process was added.
+  it("reads a fresh attachment without cli_session as cli_session null", () => {
+    const event = WireEventSchema.parse({
+      type: "attachment",
+      attachment: {
+        id: "att-1",
+        conv_id: "line",
+        name: "sol",
+        adapter: "codex",
+        command: ["codex"],
+        cwd: "/home/user/project",
+        status: "starting",
+        last_seen: 0,
+        created_at: 1754700000,
+      },
+    });
+    if (event.type !== "attachment") throw new Error("expected attachment event");
+    expect(event.attachment.cli_session).toBeNull();
+  });
+
+  it("reads an unarchived conversation without archived_at as archived_at null", () => {
+    const event = WireEventSchema.parse({
+      type: "conversation",
+      conversation: {
+        id: "line",
+        name: "add muse to partyline",
+        topic: "",
+        created_at: 1754700000,
+      },
+    });
+    if (event.type !== "conversation") throw new Error("expected conversation event");
+    expect(event.conversation.archived_at).toBeNull();
+  });
+
+  it("still accepts the REST spelling, where the empty field is null", () => {
+    const event = WireEventSchema.parse({
+      type: "attachment",
+      attachment: {
+        id: "att-1",
+        conv_id: "line",
+        name: "sol",
+        adapter: "codex",
+        command: ["codex"],
+        cwd: "/home/user/project",
+        status: "running",
+        last_seen: 4,
+        created_at: 1754700000,
+        cli_session: null,
+      },
+    });
+    if (event.type !== "attachment") throw new Error("expected attachment event");
+    expect(event.attachment.cli_session).toBeNull();
+  });
+});
+
 describe("restart wire contracts", () => {
   it("accepts the named same-line offer payload", () => {
     expect(WireEventSchema.parse(offer)).toEqual(offer);
