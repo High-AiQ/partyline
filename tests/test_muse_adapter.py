@@ -76,12 +76,21 @@ def assistant(message_id, text):
     })
 
 
+def run_started(prompt):
+    """The meta provider's spelling of a submitted prompt: no command_intake
+    record is written at all; the prompt rides the run's `started` event."""
+    return record("runtime.session", {
+        "kind": "run",
+        "event": {"kind": "started", "prompt": prompt},
+    })
+
+
 class ManifestTest(unittest.TestCase):
     def test_manifest_enables_real_resume_and_logging(self):
         root = Path(__file__).parents[1] / "partyline" / "adapters" / "bundled" / "muse"
         manifest = (root / "adapter.toml").read_text(encoding="utf-8")
 
-        self.assertIn('version = "1.0.1"', manifest)
+        self.assertIn('version = "1.0.2"', manifest)
         self.assertIn('command = ["muse", "--yolo"]', manifest)
         self.assertIn("resume = true", manifest)
 
@@ -225,6 +234,19 @@ class DiscoveryTest(StoreFixture):
 
         self.assertEqual(adapter._find_and_claim(), path)
         self.assertEqual(adapter._session_id, SESSION_ID)
+
+    def test_fresh_meta_session_is_matched_by_its_run_started_prompt(self):
+        adapter, _, _ = make_adapter()
+        path = self.write_session(SESSION_ID, [metadata(), run_started(adapter.briefing())])
+
+        self.assertEqual(adapter._find_and_claim(), path)
+        self.assertEqual(adapter._session_id, SESSION_ID)
+
+    def test_another_run_started_prompt_is_ignored(self):
+        adapter, _, _ = make_adapter()
+        self.write_session(SESSION_ID, [metadata(), run_started("someone else's briefing")])
+
+        self.assertIsNone(adapter._find_and_claim())
 
     def test_wrong_workspace_prompt_and_preexisting_log_are_ignored(self):
         wrong_cwd, _, _ = make_adapter()
