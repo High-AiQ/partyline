@@ -172,6 +172,48 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
         # should post system notice about no transcript
         self.assertTrue(any("no transcript" in body for _, _, body in posts))
 
+    async def test_run_retries_briefing_at_12_and_24_seconds(self):
+        posts: list[tuple[str, str, str]] = []
+        adapter = self.make_adapter(posts)
+        adapter.resume = False
+        adapter.alive = lambda: True
+        adapter._fresh = lambda timestamp: True
+        adapter.master = 1
+
+        # Need to simulate waited hitting 12 and 24 before transcript appears
+        # We'll mock glob to return empty for first 24 calls, then found
+        call_count = 0
+
+        def fake_glob(pattern):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 25:
+                return []
+            return ["found.jsonl"]
+
+        async def fake_tail(path, handle):
+            await handle(
+                {
+                    "type": "assistant",
+                    "timestamp": "fresh",
+                    "uuid": "u2",
+                    "message": {"content": [{"type": "text", "text": "after retry"}]},
+                }
+            )
+
+        adapter._tail_jsonl = fake_tail
+        with (
+            patch("partyline.adapters.bundled.claude.adapter.asyncio.sleep", AsyncMock()),
+            patch("partyline.adapters.bundled.claude.adapter.glob.glob", side_effect=fake_glob),
+            patch("partyline.adapters.bundled.claude.adapter.os.write") as mock_write,
+            patch.object(adapter, "send_keys", AsyncMock()) as mock_keys,
+        ):
+            await adapter._run()
+        # Should have retried at 12 and 24
+        self.assertEqual(mock_write.call_count, 2)
+        self.assertGreaterEqual(mock_keys.call_count, 3)  # initial + 2 retries
+        self.assertEqual(posts, [("claude", "agent", "after retry")])
+
 
 if __name__ == "__main__":
     unittest.main()
