@@ -7,7 +7,7 @@
    * would say so. It rings until someone peeks.
    */
   import { hue } from "../../lib/markdown";
-  import { isLive } from "../../lib/attachments";
+  import { isLive, overrideExplanation } from "../../lib/attachments";
   import { ApiError, api } from "../../lib/api";
   import type { Attachment } from "../../lib/contracts";
   import { room } from "../../state/room.svelte.js";
@@ -18,10 +18,11 @@
   interface Props {
     attachment: Attachment;
     resumable: boolean;
+    overridesBundled: boolean;
     onmention: (_name: string) => void;
   }
 
-  let { attachment, resumable, onmention }: Props = $props();
+  let { attachment, resumable, overridesBundled, onmention }: Props = $props();
 
   let resuming = $state(false);
 
@@ -72,6 +73,13 @@
       }}>{attachment.name}</button
     >
     <span class="tag">{attachment.adapter}</span>
+    {#if overridesBundled}
+      <span
+        class="override-badge"
+        title={overrideExplanation(attachment.adapter)}
+        aria-label={overrideExplanation(attachment.adapter)}>imported</span
+      >
+    {/if}
     {#if live}
       <button class="x" type="button" title="detach" aria-label="detach {attachment.name}" onclick={detach}
         >✕</button

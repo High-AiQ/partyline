@@ -66,6 +66,7 @@ export const AdapterSchema = z.object({
   output: z.string().optional(),
   capabilities: AdapterCapabilitiesSchema,
   source: z.string().optional(),
+  overrides_bundled: z.boolean().optional().default(false),
 });
 export type Adapter = z.infer<typeof AdapterSchema>;
 

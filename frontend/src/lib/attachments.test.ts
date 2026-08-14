@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { adapterLabel, canResume, canResumeJack, formatCommand, isLive, latestJacks } from "./attachments";
+import {
+  adapterLabel,
+  canResume,
+  canResumeJack,
+  formatCommand,
+  isLive,
+  latestJacks,
+  overrideExplanation,
+} from "./attachments";
 
 interface FixtureJack {
   id: string;
@@ -130,6 +138,15 @@ describe("adapterLabel", () => {
   it("glosses raw, which is the only one that needs it", () => {
     expect(adapterLabel("raw")).toBe("raw — any process");
     expect(adapterLabel("claude")).toBe("claude");
+  });
+});
+
+describe("overrideExplanation", () => {
+  it("explains the current imported replacement without promising a UI action", () => {
+    expect(overrideExplanation("claude")).toBe(
+      "This replaces Partyline's built-in claude. It came from an imported repository. " +
+        "The built-in version is used again when that import is no longer loaded.",
+    );
   });
 });
 
