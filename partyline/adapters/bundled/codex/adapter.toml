@@ -1,0 +1,10 @@
+[adapter]
+name = "Codex"
+version = "1.0.3"
+description = "Interactive Codex terminal with rollout transcript tailing."
+entrypoint = "adapter.py"
+class = "PartylineAdapter"
+command = ["codex"]
+requires = ["codex"]
+env_unset = []
+capabilities = { resume = true }
