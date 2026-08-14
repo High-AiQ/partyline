@@ -1,6 +1,7 @@
 /** The @ autocomplete: who is on the line, and what the caret is asking for. */
 
 import { isLive, latestJacks } from "./attachments";
+import type { TextEdit } from "./composer";
 
 const TOKEN = /(^|\s)@([A-Za-z0-9_.-]*)$/;
 
@@ -14,11 +15,6 @@ export interface MentionCandidate {
   kind: string;
   status: string | null;
   all?: true;
-}
-
-export interface MentionResult {
-  value: string;
-  caret: number;
 }
 
 interface MentionAttachment {
@@ -67,7 +63,7 @@ export function mentionCandidates(
 }
 
 /** Splice a chosen handle over the token being typed. */
-export function applyMention(value: string, token: MentionToken, name: string): MentionResult {
+export function applyMention(value: string, token: MentionToken, name: string): TextEdit {
   const tail = value.slice(token.start + token.prefix.length + 1);
   return {
     value: value.slice(0, token.start) + "@" + name + " " + tail,
