@@ -397,6 +397,50 @@ class CodexDiscoveryTest(unittest.TestCase):
         ), patch("partyline.adapters.bundled.codex.adapter.open", side_effect=json_error_open):
             self.assertIsNone(adapter._find_rollout())
 
+    async def test_non_event_and_stale_records_are_ignored(self):
+        adapter, posted = await self.run_tail_with(
+            {"type": "other", "timestamp": "2026-08-09T00:00:00Z", "payload": {"type": "user_message"}}
+        )
+        self.assertEqual(posted, [])
+        # stale timestamp should also be ignored (mock _fresh returns True, so test with False)
+        from unittest.mock import patch
+
+        from partyline.adapters.bundled.codex.adapter import PartylineAdapter
+
+        async def post2(sender, sender_type, body):
+            posted2.append((sender, sender_type, body))
+
+        posted2: list[tuple] = []
+
+        async def on_status2(status):
+            return None
+
+        adapter2 = PartylineAdapter(
+            {"command": ["codex"], "cli_session": "session-1", "name": "terra", "resume": True},
+            post2,
+            on_status2,
+        )
+        adapter2._fresh = lambda ts: False
+        adapter2.alive = lambda: True
+        adapter2._find_rollout = lambda: "rollout.jsonl"
+        adapter2.stage_startup_delivery([{"sender": "system", "body": "x"}])
+
+        async def tail2(path, handle):
+            await handle(
+                {
+                    "type": "event_msg",
+                    "timestamp": "old",
+                    "payload": {"type": "agent_message", "message": "hi"},
+                }
+            )
+
+        adapter2._tail_jsonl = tail2
+        with patch(
+            "partyline.adapters.bundled.codex.adapter.asyncio.sleep", AsyncMock()
+        ), patch("builtins.open", side_effect=OSError):
+            await adapter2._run()
+        self.assertEqual(posted2, [])
+
 
 if __name__ == "__main__":
     unittest.main()
