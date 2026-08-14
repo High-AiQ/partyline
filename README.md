@@ -148,7 +148,8 @@ identical wherever they come from:
   adapter.py     # defines class PartylineAdapter(Adapter)
 ```
 
-All bundled adapters are included out of the box. Additional adapters can be imported the same way from any adapter repository:
+All bundled adapters are included out of the box. Additional adapters can be imported the same
+way from any adapter repository:
 
 ```bash
 curl -X POST http://127.0.0.1:8642/api/adapters/import \

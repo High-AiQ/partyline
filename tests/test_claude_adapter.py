@@ -70,15 +70,10 @@ class ClaudeCommandTest(unittest.TestCase):
 
 
 class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
-    fixture = (
-        Path(__file__).parent.parent
-        / "partyline"
-        / "adapters"
-        / "bundled"
-        / "claude"
-        / "fixtures"
-        / "transcript.jsonl"
-    )
+    # Test fixtures live beside the tests, not inside the adapter package.
+    # Anything under partyline/ ships in the wheel, so a fixture placed there
+    # is shipped to every user to support a test they will never run.
+    fixture = Path(__file__).parent / "fixtures" / "claude_transcript.jsonl"
 
     def make_adapter(self, posts: list[tuple[str, str, str]]) -> PartylineAdapter:
         async def post(sender: str, sender_type: str, body: str) -> None:
