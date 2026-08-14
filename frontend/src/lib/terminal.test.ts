@@ -5,6 +5,7 @@ import {
   emptyHeldBytes,
   holdLiveBytes,
   isNotLiveClose,
+  LIVE_HOLD_LIMIT,
   newFrameReader,
   newOutputGate,
   openLive,
@@ -104,7 +105,7 @@ describe("holdLiveBytes", () => {
   it("keeps arrival order for the current generation", () => {
     const first = new Uint8Array([1]);
     const second = new Uint8Array([2]);
-    const held = holdLiveBytes(holdLiveBytes(emptyHeldBytes(3), 3, first), 3, second);
+    const held = holdLiveBytes(holdLiveBytes(emptyHeldBytes(3), 3, first).held, 3, second).held;
     expect(takeLiveBytes(held, 3)).toEqual({
       held: { generation: 3, chunks: [] },
       chunks: [first, second],
@@ -112,12 +113,25 @@ describe("holdLiveBytes", () => {
   });
 
   it("drops a stale hold when the generation changes", () => {
-    const stale = holdLiveBytes(emptyHeldBytes(1), 1, new Uint8Array([9]));
-    const live = holdLiveBytes(stale, 2, new Uint8Array([7]));
+    const stale = holdLiveBytes(emptyHeldBytes(1), 1, new Uint8Array([9])).held;
+    const live = holdLiveBytes(stale, 2, new Uint8Array([7])).held;
     expect(takeLiveBytes(live, 2).chunks).toEqual([new Uint8Array([7])]);
     expect(takeLiveBytes(stale, 2)).toEqual({
       held: { generation: 2, chunks: [] },
       chunks: [],
+    });
+  });
+
+  it("overflows at the server queue bound and empties the hold", () => {
+    let held = emptyHeldBytes(1);
+    for (let i = 0; i < LIVE_HOLD_LIMIT; i++) {
+      const next = holdLiveBytes(held, 1, new Uint8Array([i]));
+      expect(next.overflow).toBe(false);
+      held = next.held;
+    }
+    expect(holdLiveBytes(held, 1, new Uint8Array([255]))).toEqual({
+      overflow: true,
+      held: { generation: 1, chunks: [] },
     });
   });
 });
@@ -135,6 +149,7 @@ describe("output gate ordering", () => {
     expect(opened.chunks).toEqual([first, second]);
     const live = receiveOutputBytes(opened.gate, 1, new Uint8Array([0x42]));
     expect(live.write).toEqual(new Uint8Array([0x42]));
+    expect(live.overflow).toBe(false);
   });
 
   it("discards an in-flight paint and its buffer when the generation changes", () => {

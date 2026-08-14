@@ -74,9 +74,24 @@ export interface HeldBytes {
 
 export const emptyHeldBytes = (generation: number): HeldBytes => ({ generation, chunks: [] });
 
-export function holdLiveBytes(held: HeldBytes, generation: number, data: Uint8Array): HeldBytes {
-  if (held.generation !== generation) return { generation, chunks: [data] };
-  return { generation, chunks: [...held.chunks, data] };
+/** Same bound as the server viewer queue. Overflow must resync, not drop a hole. */
+export const LIVE_HOLD_LIMIT = 32;
+
+export interface HoldResult {
+  overflow: boolean;
+  held: HeldBytes;
+}
+
+export function holdLiveBytes(held: HeldBytes, generation: number, data: Uint8Array): HoldResult {
+  if (held.generation !== generation) {
+    return { overflow: false, held: { generation, chunks: [data] } };
+  }
+  if (held.chunks.length >= LIVE_HOLD_LIMIT) {
+    return { overflow: true, held: emptyHeldBytes(generation) };
+  }
+  const chunks = held.chunks.slice();
+  chunks.push(data);
+  return { overflow: false, held: { generation, chunks } };
 }
 
 export function takeLiveBytes(
@@ -127,9 +142,16 @@ export function receiveOutputBytes(
   gate: OutputGate,
   generation: number,
   data: Uint8Array,
-): { gate: OutputGate; write: Uint8Array | null } {
-  if (gate.live && gate.generation === generation) return { gate, write: data };
-  return { gate: { ...gate, held: holdLiveBytes(gate.held, generation, data) }, write: null };
+): { gate: OutputGate; write: Uint8Array | null; overflow: boolean } {
+  if (gate.live && gate.generation === generation) {
+    return { gate, write: data, overflow: false };
+  }
+  const held = holdLiveBytes(gate.held, generation, data);
+  return {
+    gate: { ...gate, live: false, held: held.held },
+    write: null,
+    overflow: held.overflow,
+  };
 }
 
 export function openLive(

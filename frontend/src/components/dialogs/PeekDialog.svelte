@@ -55,6 +55,10 @@
     onBytes(data: Uint8Array) {
       const next = receiveOutputBytes(gate, stream.generation, data);
       gate = next.gate;
+      if (next.overflow) {
+        stream.connect(attachment.id, handlers);
+        return;
+      }
       if (next.write) term?.write(next.write);
     },
     onUnavailable() {
