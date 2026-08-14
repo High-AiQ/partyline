@@ -61,3 +61,8 @@ export function formatCommand(command: readonly string[]): string {
 
 /** The label an adapter gets in the picker. `raw` is the only one that needs a gloss. */
 export const adapterLabel = (id: string): string => (id === "raw" ? "raw — any process" : id);
+
+/** Explain an imported replacement without implying the UI can remove it. */
+export const overrideExplanation = (adapterId: string): string =>
+  `This replaces Partyline's built-in ${adapterId}. It came from an imported repository. ` +
+  "The built-in version is used again when that import is no longer loaded.";

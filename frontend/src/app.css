@@ -230,6 +230,17 @@
     color: var(--color-cream-dim);
   }
 
+  .override-badge {
+    flex: none;
+    color: var(--color-cream-dim);
+    border: 1px solid rgb(127 176 105 / 0.45);
+    border-radius: 3px;
+    padding: 1px 4px;
+    font-size: 8.5px;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+
   /* the live-line LED, used by jacks, mention options and dialogs alike */
   .led {
     width: 7px;

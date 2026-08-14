@@ -13,6 +13,10 @@
   let { onmention }: Props = $props();
 
   const jacks = $derived(latestJacks(room.attachments));
+  // This describes the registry now, not the adapter class used when an
+  // already-running jack was created; reload can change one without the other.
+  const overridesBundled = (adapterId: string): boolean =>
+    session.adapters.find((adapter) => adapter.id === adapterId)?.overrides_bundled ?? false;
 </script>
 
 <aside id="board">
@@ -22,7 +26,12 @@
       <div class="note">nobody attached yet</div>
     {:else}
       {#each jacks as attachment (attachment.id)}
-        <JackCard {attachment} resumable={canResumeJack(session.adapters, attachment)} {onmention} />
+        <JackCard
+          {attachment}
+          resumable={canResumeJack(session.adapters, attachment)}
+          overridesBundled={overridesBundled(attachment.adapter)}
+          {onmention}
+        />
       {/each}
     {/if}
   </div>
