@@ -152,6 +152,26 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(mock_keys.called)
         self.assertEqual(posts, [("claude", "agent", "hi")])
 
+    async def test_run_posts_no_transcript_after_timeout(self):
+        posts: list[tuple[str, str, str]] = []
+        adapter = self.make_adapter(posts)
+        adapter.alive = lambda: True
+        adapter._fresh = lambda timestamp: True
+        adapter.master = 1  # dummy fd for os.write
+
+        async def fake_tail(path, handle):
+            self.fail("should not tail without transcript")
+
+        adapter._tail_jsonl = fake_tail
+        with (
+            patch("partyline.adapters.bundled.claude.adapter.asyncio.sleep", AsyncMock()),
+            patch("partyline.adapters.bundled.claude.adapter.glob.glob", return_value=[]),
+            patch("partyline.adapters.bundled.claude.adapter.os.write"),
+        ):
+            await adapter._run()
+        # should post system notice about no transcript
+        self.assertTrue(any("no transcript" in body for _, _, body in posts))
+
 
 if __name__ == "__main__":
     unittest.main()

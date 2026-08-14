@@ -369,6 +369,34 @@ class CodexDiscoveryTest(unittest.TestCase):
                 found = adapter2._find_rollout()
                 self.assertEqual(found, str(Path(tmp) / "resume-match.jsonl"))
 
+    def test_find_rollout_handles_os_and_json_errors(self):
+        from unittest.mock import patch
+
+        adapter = self.make_adapter()
+
+        def bad_open(path, *args, **kwargs):
+            raise OSError("no read")
+
+        with patch(
+            "partyline.adapters.bundled.codex.adapter.glob.glob", return_value=["/tmp/bad.jsonl"]
+        ), patch(
+            "partyline.adapters.bundled.codex.adapter.os.path.getmtime", return_value=999.9
+        ), patch("partyline.adapters.bundled.codex.adapter.open", side_effect=bad_open):
+            self.assertIsNone(adapter._find_rollout())
+
+        def json_error_open(path, *args, **kwargs):
+            from unittest.mock import mock_open
+
+            m = mock_open(read_data="not json\n")
+            return m(path, *args, **kwargs)
+
+        with patch(
+            "partyline.adapters.bundled.codex.adapter.glob.glob", return_value=["/tmp/bad2.jsonl"]
+        ), patch(
+            "partyline.adapters.bundled.codex.adapter.os.path.getmtime", return_value=999.9
+        ), patch("partyline.adapters.bundled.codex.adapter.open", side_effect=json_error_open):
+            self.assertIsNone(adapter._find_rollout())
+
 
 if __name__ == "__main__":
     unittest.main()
