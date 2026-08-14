@@ -59,6 +59,8 @@ class AdapterMetadataResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     id: str
+    source: str = "bundled"
+    overrides_bundled: bool = False
 
 
 class ConversationResponse(BaseModel):

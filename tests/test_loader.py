@@ -8,11 +8,13 @@ run against a local repository we created ourselves.
 
 import os
 import subprocess
+import shutil
 import tempfile
 import textwrap
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ.setdefault("PARTYLINE_DB", "/tmp/partyline-test-loader.db")
 
@@ -223,6 +225,20 @@ class LoadAdapterTest(unittest.TestCase):
             self.assertEqual(adapter_id, "probe")
             self.assertIn("probe", registry.ADAPTERS)
             self.assertEqual(registry.ADAPTER_METADATA["probe"]["source"], str(path.resolve()))
+            self.assertFalse(registry.ADAPTER_METADATA["probe"]["overrides_bundled"])
+
+    def test_imported_package_reports_when_it_overrides_a_bundle(self):
+        with tempfile.TemporaryDirectory() as directory, isolated_registry():
+            root = Path(directory)
+            bundled_root = root / "bundled"
+            write_package(bundled_root / "probe")
+            imported = write_package(root / "imported" / "probe")
+            with patch.object(loader, "BUNDLED_ROOT", bundled_root):
+                with self.assertLogs("partyline.adapters.loader", level="WARNING") as logs:
+                    loader.load_adapter(imported)
+            metadata = registry.ADAPTER_METADATA["probe"]
+            self.assertTrue(metadata["overrides_bundled"])
+            self.assertIn("overrides bundled adapter", logs.output[0])
 
     def test_an_explicit_id_in_the_manifest_wins_over_the_directory_name(self):
         with tempfile.TemporaryDirectory() as directory, isolated_registry():
@@ -253,6 +269,53 @@ class LoadAdapterTest(unittest.TestCase):
             with self.assertRaises(ValueError) as caught:
                 loader.reload_adapter("never-loaded")
             self.assertIn("not loaded", str(caught.exception))
+
+    def test_reloading_restores_the_bundle_when_an_imported_source_vanished(self):
+        with tempfile.TemporaryDirectory() as directory, isolated_registry():
+            root = Path(directory)
+            bundled_root = root / "bundled"
+            write_package(bundled_root / "probe", source=ENTRYPOINT.replace('"probe"', '"bundled"'))
+            imported = write_package(root / "imported" / "probe")
+            with patch.object(loader, "BUNDLED_ROOT", bundled_root):
+                loader.load_adapter(imported)
+                shutil.rmtree(imported)
+                self.assertEqual(loader.reload_adapter("probe"), "probe")
+            self.assertEqual(registry.ADAPTERS["probe"].marker, "bundled")
+            self.assertEqual(registry.ADAPTER_METADATA["probe"]["source"], "bundled")
+            self.assertFalse(registry.ADAPTER_METADATA["probe"]["overrides_bundled"])
+
+    def test_reloading_a_vanished_non_bundled_source_refuses(self):
+        with tempfile.TemporaryDirectory() as directory, isolated_registry():
+            imported = write_package(Path(directory) / "imported" / "probe")
+            loader.load_adapter(imported)
+            shutil.rmtree(imported)
+            with self.assertRaisesRegex(ValueError, "source is missing"):
+                loader.reload_adapter("probe")
+            self.assertNotIn("probe", registry.ADAPTERS)
+            self.assertNotIn("probe", loader._LOADED_PATHS)
+
+    def test_reloading_a_corrupt_source_keeps_the_existing_adapter(self):
+        with tempfile.TemporaryDirectory() as directory, isolated_registry():
+            path = write_package(Path(directory) / "probe")
+            loader.load_adapter(path)
+            (path / "adapter.py").write_text("def broken(:\n", encoding="utf-8")
+            with self.assertRaises(SyntaxError):
+                loader.reload_adapter("probe")
+            self.assertEqual(registry.ADAPTERS["probe"].marker, "probe")
+            self.assertEqual(loader._LOADED_PATHS["probe"], path.resolve())
+
+    def test_reloading_all_restores_a_bundle_for_a_vanished_import(self):
+        with tempfile.TemporaryDirectory() as directory, isolated_registry():
+            root = Path(directory)
+            bundled_root = root / "bundled"
+            write_package(bundled_root / "probe")
+            imported = write_package(root / "imported" / "probe")
+            with patch.object(loader, "BUNDLED_ROOT", bundled_root):
+                loader._LOADED_PATHS.clear()
+                loader.load_adapter(imported)
+                shutil.rmtree(imported)
+                self.assertEqual(loader.reload_adapters(), ["probe"])
+            self.assertEqual(registry.ADAPTER_METADATA["probe"]["source"], "bundled")
 
     def test_reload_adapters_refreshes_everything_known(self):
         with tempfile.TemporaryDirectory() as directory, isolated_registry():
@@ -327,6 +390,16 @@ class InstalledAdaptersTest(unittest.TestCase):
             self.assertEqual(loader.load_installed_adapters(), ["probe"])
             self.assertIn("probe", registry.ADAPTERS)
 
+    def test_startup_logs_an_imported_adapter_that_overrides_a_bundle(self):
+        with self._store() as store:
+            bundled_root = store.parent / "bundled"
+            write_package(bundled_root / "probe")
+            write_package(store / "checkout" / "adapters" / "probe")
+            with patch.object(loader, "BUNDLED_ROOT", bundled_root):
+                with self.assertLogs("partyline.adapters.loader", level="WARNING") as logs:
+                    self.assertEqual(loader.load_installed_adapters(), ["probe"])
+            self.assertIn("overrides bundled adapter", logs.output[0])
+
     def test_one_broken_checkout_does_not_stop_the_others(self):
         """A bad package on disk must never make partyline unstartable."""
         with self._store() as store:
@@ -347,6 +420,13 @@ class InstalledAdaptersTest(unittest.TestCase):
         with self._store() as store:
             (store / "README.md").write_text("not a checkout", encoding="utf-8")
             self.assertEqual(loader.load_installed_adapters(), [])
+
+    def test_hidden_checkouts_are_skipped_and_logged(self):
+        with self._store() as store:
+            write_package(store / ".disabled" / "adapters" / "probe")
+            with self.assertLogs("partyline.adapters.loader", level="INFO") as logs:
+                self.assertEqual(loader.load_installed_adapters(), [])
+            self.assertIn("skipping hidden adapter checkout", logs.output[0])
 
 
 class ImportRepositoryTest(unittest.TestCase):

@@ -45,6 +45,15 @@ class ContractTest(unittest.TestCase):
 
         self.assertEqual(adapter.model_dump()["capabilities"], {"resume": False})
 
+    def test_adapter_metadata_has_explicit_source_override_fields(self):
+        bundled = AdapterMetadataResponse(id="raw")
+        self.assertEqual(bundled.source, "bundled")
+        self.assertFalse(bundled.overrides_bundled)
+        imported = AdapterMetadataResponse(
+            id="raw", source="/tmp/adapters/raw", overrides_bundled=True
+        )
+        self.assertTrue(imported.overrides_bundled)
+
     def test_wire_events_match_existing_payloads(self):
         message = MessageResponse(
             id=1,
