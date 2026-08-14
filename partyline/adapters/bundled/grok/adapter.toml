@@ -1,0 +1,10 @@
+[adapter]
+name = "Grok Build"
+version = "1.0.0"
+description = "Interactive Grok Build terminal with pinned JSONL transcript tailing."
+entrypoint = "adapter.py"
+class = "PartylineAdapter"
+command = ["grok", "--permission-mode", "bypassPermissions"]
+requires = ["grok"]
+env_unset = []
+capabilities = { resume = true }
