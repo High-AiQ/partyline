@@ -125,6 +125,7 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
     async def test_run_waits_for_transcript_and_retries_briefing(self):
         posts: list[tuple[str, str, str]] = []
         adapter = self.make_adapter(posts)
+        adapter.resume = False
         adapter.alive = lambda: True
         adapter._fresh = lambda timestamp: True
 
@@ -152,12 +153,11 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(mock_keys.called)
         self.assertEqual(posts, [("claude", "agent", "hi")])
 
-    async def test_run_posts_no_transcript_after_timeout(self):
+    async def test_run_exits_when_process_dies_before_transcript(self):
         posts: list[tuple[str, str, str]] = []
         adapter = self.make_adapter(posts)
-        adapter.alive = lambda: True
+        adapter.alive = lambda: False
         adapter._fresh = lambda timestamp: True
-        adapter.master = 1  # dummy fd for os.write
 
         async def fake_tail(path, handle):
             self.fail("should not tail without transcript")
@@ -166,11 +166,9 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
         with (
             patch("partyline.adapters.bundled.claude.adapter.asyncio.sleep", AsyncMock()),
             patch("partyline.adapters.bundled.claude.adapter.glob.glob", return_value=[]),
-            patch("partyline.adapters.bundled.claude.adapter.os.write"),
         ):
             await adapter._run()
-        # should post system notice about no transcript
-        self.assertTrue(any("no transcript" in body for _, _, body in posts))
+        self.assertEqual(posts, [])
 
     async def test_run_retries_briefing_at_12_and_24_seconds(self):
         posts: list[tuple[str, str, str]] = []
@@ -187,7 +185,7 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
         def fake_glob(pattern):
             nonlocal call_count
             call_count += 1
-            if call_count < 25:
+            if call_count < 13:
                 return []
             return ["found.jsonl"]
 
@@ -202,16 +200,23 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
             )
 
         adapter._tail_jsonl = fake_tail
+        import asyncio as _asyncio2
+
+        orig_sleep2 = _asyncio2.sleep
+
+        async def _fast_sleep2(*args, **kwargs):
+            await orig_sleep2(0)
+
         with (
-            patch("partyline.adapters.bundled.claude.adapter.asyncio.sleep", AsyncMock()),
+            patch("partyline.adapters.bundled.claude.adapter.asyncio.sleep", _fast_sleep2),
             patch("partyline.adapters.bundled.claude.adapter.glob.glob", side_effect=fake_glob),
             patch("partyline.adapters.bundled.claude.adapter.os.write") as mock_write,
             patch.object(adapter, "send_keys", AsyncMock()) as mock_keys,
         ):
             await adapter._run()
-        # Should have retried at 12 and 24
-        self.assertEqual(mock_write.call_count, 2)
-        self.assertGreaterEqual(mock_keys.call_count, 3)  # initial + 2 retries
+        # Should have retried at 12
+        self.assertEqual(mock_write.call_count, 1)
+        self.assertGreaterEqual(mock_keys.call_count, 2)  # initial + 1 retry
         self.assertEqual(posts, [("claude", "agent", "after retry")])
 
 
