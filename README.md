@@ -158,6 +158,12 @@ curl -X POST http://127.0.0.1:8642/api/adapters/import \
 ```
 
 That repository also mirrors the bundled adapters for integration testing — see its README.
+An imported id that matches a bundled one **replaces** it. That is deliberate — it is how you
+override a shipped adapter — and it is always visible: overridden adapters carry an `imported`
+badge in the UI, `GET /api/adapters` reports `source` and `overrides_bundled`, and the server
+logs a warning naming each shadowed id. To go back to the bundled version, remove that
+repository's directory from `~/.partyline/adapters/` and reload — see
+[docs/adapters.md](docs/adapters.md#going-back-to-the-bundled-copy).
 
 To write one, read [docs/adapters.md](docs/adapters.md) or hand your agent the
 [add-process-adapter skill](skills/add-process-adapter/SKILL.md).
