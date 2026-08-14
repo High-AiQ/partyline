@@ -48,6 +48,8 @@ Object-shaped values that cross a boundary need a named contract.
 ```bash
 uv run --locked partyline
 PARTYLINE_DB=/tmp/partyline-test.db PARTYLINE_PORT=8643 uv run --locked partyline
+uv run --locked partyline --host 127.0.0.1 --port 8643
+PARTYLINE_HOST=127.0.0.1 PARTYLINE_PORT=8643 uv run --locked partyline
 uv run --locked coverage run -m unittest discover -s tests && uv run --locked coverage report
 ```
 

@@ -26,6 +26,7 @@ EXIT_WOULD_NOT_EXIT = 23
 EXIT_LAUNCH_FAILED = 24
 EXIT_SIGNAL_FAILED = 25
 EXIT_ENVIRONMENT_UNREADABLE = 26
+EXIT_COMMAND_LINE_UNREADABLE = 27
 WAIT_SECONDS = 60.0
 
 
@@ -77,6 +78,20 @@ def process_environment(pid: int, proc_root: Path = Path("/proc")) -> dict[str, 
     return environment or None
 
 
+def process_cmdline(pid: int, proc_root: Path = Path("/proc")) -> list[str] | None:
+    """Return the exact argument vector from ``/proc/<pid>/cmdline``."""
+    try:
+        raw = (proc_root / str(pid) / "cmdline").read_bytes()
+    except OSError:
+        return None
+    arguments = [
+        entry.decode(errors="surrogateescape")
+        for entry in raw.split(b"\0")
+        if entry
+    ]
+    return arguments or None
+
+
 def post_failure(ws_url: str, message: str) -> None:
     """Post a visible warning through the old server while it is still live."""
     from websockets.sync.client import connect
@@ -113,7 +128,13 @@ def wait_for_generation_exit(
         sleep(0.2)
 
 
-def launch_server(server: Path, logfile: Path, cwd: Path, env: dict[str, str]) -> None:
+def launch_server(
+    server: Path,
+    logfile: Path,
+    cwd: Path,
+    env: dict[str, str],
+    arguments: list[str],
+) -> None:
     """Make the deployed server the systemd service's main process."""
     os.chdir(cwd)
     with logfile.open("a") as stream:
@@ -121,7 +142,7 @@ def launch_server(server: Path, logfile: Path, cwd: Path, env: dict[str, str]) -
         stream.flush()
         os.dup2(stream.fileno(), sys.stdout.fileno())
         os.dup2(stream.fileno(), sys.stderr.fileno())
-        os.execve(str(server), [str(server)], env)
+        os.execve(str(server), [str(server), *arguments], env)
 
 
 def run_restart(
@@ -133,9 +154,10 @@ def run_restart(
     *,
     generation: Callable[[int], str | None] = process_generation,
     environment: Callable[[int], dict[str, str] | None] = process_environment,
+    command_line: Callable[[int], list[str] | None] = process_cmdline,
     signal_process: Callable[[int, int], None] = os.kill,
     wait: Callable[[int, str], None] = wait_for_generation_exit,
-    launch: Callable[[Path, Path, Path, dict[str, str]], None] = launch_server,
+    launch: Callable[[Path, Path, Path, dict[str, str], list[str]], None] = launch_server,
 ) -> None:
     actual_start = generation(pid)
     if actual_start is None:
@@ -158,13 +180,20 @@ def run_restart(
             f"could not read the environment of pid {pid}",
             EXIT_ENVIRONMENT_UNREADABLE,
         )
+    command = command_line(pid)
+    if command is None or str(server) not in command:
+        raise RestartRefused(
+            f"could not read the command line of pid {pid}",
+            EXIT_COMMAND_LINE_UNREADABLE,
+        )
+    arguments = command[command.index(str(server)) + 1 :]
 
     try:
         signal_process(pid, signal.SIGTERM)
     except OSError as exc:
         raise RestartRefused(f"could not signal pid {pid}: {exc}", EXIT_SIGNAL_FAILED) from exc
     wait(pid, expected_start)
-    launch(server, logfile, cwd, env)
+    launch(server, logfile, cwd, env, arguments)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -20,6 +20,10 @@ replaced them:
   captures and invented differences; any such tool is worse than no tool until each run stages
   privately and refuses overlap with a lock. We also reported contaminated output before checking
   whether the result was plausible; conflicting or surprising evidence must be investigated first.
+- **Two independent `uv` checks were safe to run in parallel in one worktree.** Concurrent
+  environment setup raced while removing a package directory under the shared `.venv`, so the test
+  process never started even though the other check passed. Run commands that initialize a shared
+  worktree environment sequentially, or give each run its own worktree/environment.
 - **A green test named “does not block the sequence” proved the timeout behavior.** It passed while
   the old path killed the process; a negative control now asserts the timed-out adapter stays live,
   and cross-process tests exercise the real failure mode.
@@ -48,6 +52,13 @@ replaced them:
   generation before signalling it and passes that mapping to `execve`. If the snapshot cannot be
   read, the trigger refuses before `SIGTERM` rather than falling back to the environment that caused
   the outage.
+- **Preserving the environment did not preserve the server's command line.** Once bind settings
+  gained CLI precedence, the restart executable's `execve(server, [server], env)` silently dropped
+  `--host`, `--port`, and future flags; the replacement could come back on a different address while
+  appearing healthy. The trigger now snapshots `/proc/<pid>/cmdline`, carries the arguments after
+  the console-script path, and refuses if that authoritative source is unreadable. A working-
+  directory config has the same lifecycle boundary: cockpit restarts chdir to the cockpit clone, so
+  durable settings belong in an explicit `--config` path or the user config directory.
 
 - **A verified trigger meant a verified restart.** Restart #6 was cleared unanimously on evidence
   that was entirely about *provenance* — matching commits, an exact ordered `systemd` argv, an

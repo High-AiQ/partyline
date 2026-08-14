@@ -14,7 +14,9 @@ import os
 import re
 import signal
 import subprocess
+import sys
 import uuid
+from collections.abc import Sequence
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
@@ -26,6 +28,7 @@ from starlette.background import BackgroundTask
 
 from . import __version__
 from .attachment_commands import validated_attachment_command
+from .bind import BindConfig, load_bind_config, parse_bind_args, resolve_bind
 from .adapters import (
     ADAPTERS,
     ADAPTER_METADATA,
@@ -129,6 +132,7 @@ async def lifespan(app):
 
 
 app = FastAPI(lifespan=lifespan)
+app.state.bind = BindConfig()
 
 
 # -- REST ------------------------------------------------------------------
@@ -166,6 +170,10 @@ _uvicorn_server = None
 def require_loopback(request: Request) -> None:
     """Keep process-control endpoints local even when the server binds widely."""
     client = request.client.host if request.client else None
+    # Dual-stack sockets can represent an IPv4 loopback peer in IPv4-mapped
+    # IPv6 form. Normalize it so local shutdown remains usable on those hosts.
+    if client and client.lower().startswith("::ffff:"):
+        client = client[7:]
     if client not in LOOPBACK:
         raise HTTPException(403, "process control may only be requested from this machine")
 
@@ -415,7 +423,7 @@ async def attach(conv_id: str, body: AttachIn):
     att["runtime_owner"] = runtime_owner
     att["conv_name"] = conv["name"]
     att["topic"] = conv["topic"]
-    att["hook_url"] = _hook_url(att_id)
+    att["hook_url"] = _hook_url(att_id, app.state.bind)
 
     adapter = make_adapter(
         body.adapter,
@@ -466,7 +474,7 @@ async def _resume_adapter(
         raise HTTPException(409, "restore the line before resuming its processes")
     att["conv_name"] = conv["name"]
     att["resume"] = True
-    att["hook_url"] = _hook_url(att_id)
+    att["hook_url"] = _hook_url(att_id, app.state.bind)
     runtime_owner = str(uuid.uuid4())
     att["runtime_owner"] = runtime_owner
 
@@ -548,10 +556,10 @@ async def detach(att_id: str):
 
 
 # -- attachment introspection ----------------------------------------------
-def _hook_url(att_id: str) -> str:
-    host = os.environ.get("PARTYLINE_HOST", "127.0.0.1")
-    port = os.environ.get("PARTYLINE_PORT", "8642")
-    return f"http://{host}:{port}/api/hooks/{att_id}"
+def _hook_url(att_id: str, bind: BindConfig | None = None) -> str:
+    bind = bind or app.state.bind
+    host = f"[{bind.host}]" if ":" in bind.host else bind.host
+    return f"http://{host}:{bind.port}/api/hooks/{att_id}"
 
 
 ATTENTION_RE = re.compile(r"permission|approv|trust|login|auth", re.IGNORECASE)
@@ -672,10 +680,13 @@ def load_dotenv(path: str = ".env"):
         os.environ.setdefault(key, value)
 
 
-def main():
+def main(argv: Sequence[str] | None = None):
     load_dotenv()
-    host = os.environ.get("PARTYLINE_HOST", "127.0.0.1")
-    port = int(os.environ.get("PARTYLINE_PORT", "8642"))
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    parsed = parse_bind_args(arguments)
+    config = load_bind_config(parsed.config)
+    host, port = resolve_bind(parsed, os.environ, config)
+    app.state.bind = BindConfig(host, port)
     global _uvicorn_server
     # Hold the server object so /api/shutdown can ask it to stop rather than
     # signalling blindly.

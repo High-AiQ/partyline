@@ -5,6 +5,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi import HTTPException, WebSocketDisconnect
 
@@ -131,6 +132,158 @@ class StreamWebSocket:
 
     async def send_json(self, event):
         self.sent.append(event)
+
+
+class BindConfigTest(unittest.TestCase):
+    def test_resolve_bind_precedence_is_cli_then_env_then_config_then_default(self):
+        self.assertEqual(server.resolve_bind([], {}, {}), ("127.0.0.1", 8642))
+        self.assertEqual(
+            server.resolve_bind([], {}, {"server": {"host": "config.test", "port": 7000}}),
+            ("config.test", 7000),
+        )
+        self.assertEqual(
+            server.resolve_bind(
+                [], {"PARTYLINE_HOST": "env.test", "PARTYLINE_PORT": "8000"},
+                {"server": {"host": "config.test", "port": 7000}},
+            ),
+            ("env.test", 8000),
+        )
+        self.assertEqual(
+            server.resolve_bind(
+                ["--host", "cli.test", "--port", "9000"],
+                {"PARTYLINE_HOST": "env.test", "PARTYLINE_PORT": "8000"},
+                {"server": {"host": "config.test", "port": 7000}},
+            ),
+            ("cli.test", 9000),
+        )
+        self.assertEqual(
+            server.resolve_bind(
+                ["--host", "cli.test"],
+                {"PARTYLINE_PORT": "8000"},
+                {"server": {"host": "config.test", "port": 7000}},
+            ),
+            ("cli.test", 8000),
+        )
+
+    def test_resolve_bind_normalizes_host_whitespace_and_brackets(self):
+        self.assertEqual(
+            server.resolve_bind([], {}, {"server": {"host": "  [::1]  "}}),
+            ("::1", 8642),
+        )
+        with self.assertRaisesRegex(ValueError, "valid address"):
+            server.resolve_bind([], {}, {"server": {"host": "[::1"}})
+
+    def test_resolve_bind_validates_config(self):
+        with self.assertRaisesRegex(ValueError, "port"):
+            server.resolve_bind([], {}, {"server": {"port": 0}})
+        with self.assertRaisesRegex(ValueError, "table"):
+            server.resolve_bind([], {}, {"server": "wrong"})
+
+    def test_load_bind_config_reads_toml(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "partyline.toml"
+            path.write_text("[server]\nhost = 'config.test'\nport = 7000\n", encoding="utf-8")
+            with self.assertLogs("partyline.bind", level="INFO") as logs:
+                self.assertEqual(
+                    server.load_bind_config(path),
+                    {"server": {"host": "config.test", "port": 7000}},
+                )
+            self.assertIn(str(path), logs.output[0])
+
+    def test_config_without_server_table_does_not_shadow_user_config(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            fallback = home / ".config" / "partyline"
+            fallback.mkdir(parents=True)
+            (root / "partyline.toml").write_text("[other]\nvalue = true\n", encoding="utf-8")
+            (fallback / "config.toml").write_text(
+                "[server]\nhost = 'home.test'\n", encoding="utf-8"
+            )
+            previous = Path.cwd()
+            try:
+                os.chdir(root)
+                with patch.object(Path, "home", return_value=home):
+                    self.assertEqual(
+                        server.load_bind_config(), {"server": {"host": "home.test"}}
+                    )
+            finally:
+                os.chdir(previous)
+
+    def test_config_argument_expands_user(self):
+        parsed = server.parse_bind_args(["--config", "~/partyline.toml"])
+        self.assertEqual(parsed.config, Path.home() / "partyline.toml")
+
+    def test_load_bind_config_prefers_cwd_over_user_config(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            fallback = home / ".config" / "partyline"
+            fallback.mkdir(parents=True)
+            (fallback / "config.toml").write_text(
+                "[server]\nhost = 'home.test'\n", encoding="utf-8"
+            )
+            (root / "partyline.toml").write_text(
+                "[server]\nhost = 'cwd.test'\n", encoding="utf-8"
+            )
+            previous = Path.cwd()
+            try:
+                os.chdir(root)
+                with patch.object(Path, "home", return_value=home):
+                    self.assertEqual(
+                        server.load_bind_config(), {"server": {"host": "cwd.test"}}
+                    )
+            finally:
+                os.chdir(previous)
+
+    def test_malformed_explicit_bind_config_refuses_with_runtime_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "bad.toml"
+            path.write_text("[server\n", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "could not read config file"):
+                server.load_bind_config(path)
+
+    def test_explicit_missing_bind_config_refuses_to_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(RuntimeError, "does not exist"):
+                server.load_bind_config(Path(directory) / "missing.toml")
+
+    def test_main_threads_resolved_bind_to_uvicorn_and_hooks(self):
+        captured = {}
+
+        class FakeServer:
+            def __init__(self, config):
+                captured["config"] = config
+
+            def run(self):
+                captured["ran"] = True
+
+        old_bind = server.app.state.bind
+        try:
+            with patch.object(server, "load_dotenv"), patch.object(
+                server.uvicorn, "Server", FakeServer
+            ):
+                server.main(["--host", "example.test", "--port", "9000"])
+            self.assertEqual(captured["config"].host, "example.test")
+            self.assertEqual(captured["config"].port, 9000)
+            self.assertEqual(
+                server._hook_url("attachment", server.app.state.bind),
+                "http://example.test:9000/api/hooks/attachment",
+            )
+            self.assertTrue(captured["ran"])
+        finally:
+            server.app.state.bind = old_bind
+
+    def test_loopback_guard_handles_missing_and_ipv4_mapped_peers(self):
+        with self.assertRaisesRegex(HTTPException, "process control"):
+            server.require_loopback(FakeRequest(None))
+        server.require_loopback(FakeRequest("::ffff:127.0.0.1"))
+
+    def test_hook_url_formats_ipv6_bind(self):
+        self.assertEqual(
+            server._hook_url("attachment", server.BindConfig("::1", 9000)),
+            "http://[::1]:9000/api/hooks/attachment",
+        )
 
 
 class ServerTest(unittest.TestCase):
@@ -698,17 +851,18 @@ class ServerTest(unittest.TestCase):
         with open(path, "w") as dotenv:
             dotenv.write("NEW=value\nQUOTED=' hello '\n# ignored\nEXISTING=no\n")
         old_existing = os.environ.get("EXISTING")
-        old_host = os.environ.get("PARTYLINE_HOST")
-        old_port = os.environ.get("PARTYLINE_PORT")
         os.environ["EXISTING"] = "yes"
-        os.environ["PARTYLINE_HOST"] = "example.test"
-        os.environ["PARTYLINE_PORT"] = "9999"
+        old_bind = server.app.state.bind
+        server.app.state.bind = server.BindConfig("example.test", 9999)
         try:
             server.load_dotenv(path)
             self.assertEqual(os.environ["NEW"], "value")
             self.assertEqual(os.environ["QUOTED"], " hello ")
             self.assertEqual(os.environ["EXISTING"], "yes")
-            self.assertEqual(server._hook_url("attachment"), "http://example.test:9999/api/hooks/attachment")
+            self.assertEqual(
+                server._hook_url("attachment", server.app.state.bind),
+                "http://example.test:9999/api/hooks/attachment",
+            )
         finally:
             for key in ("NEW", "QUOTED"):
                 os.environ.pop(key, None)
@@ -716,14 +870,7 @@ class ServerTest(unittest.TestCase):
                 os.environ.pop("EXISTING", None)
             else:
                 os.environ["EXISTING"] = old_existing
-            if old_host is None:
-                os.environ.pop("PARTYLINE_HOST", None)
-            else:
-                os.environ["PARTYLINE_HOST"] = old_host
-            if old_port is None:
-                os.environ.pop("PARTYLINE_PORT", None)
-            else:
-                os.environ["PARTYLINE_PORT"] = old_port
+            server.app.state.bind = old_bind
 
 
 class FakeRequest:
