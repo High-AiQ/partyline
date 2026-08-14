@@ -111,9 +111,27 @@ enforce it. A prose warning that has no executable guard is not a completed less
   own CI. Branches do not partition a working tree: one checkout has one HEAD, one index, one
   set of files. An agent entering a checkout it does not currently own must do its own work in
   a `git worktree`, stage by explicit path rather than `-A`, and leave HEAD where it found it.
-- **A tested parser was necessarily part of the transcript path.** Grok's adapter carried a
-  private JSON decoder exercised only by tests; production delegated parsing to the shared JSONL
-  tailer, so the test covered unreachable code while a resume offset of `None` crashed the real
-  path. Remove helpers with no production caller, and drive lifecycle regressions through the
-  adapter's actual `_run()` boundary; the regression now proves an unavailable pre-spawn stat
-  seeks to the transcript end without replaying old speech.
+- **An append-only transcript stays append-only across every lifecycle path.** Grok's fresh
+  session appended correctly, but `grok --resume` atomically replaced `chat_history.jsonl`
+  (`inode 5567721 → 5567734`). An ordinal tail counts assistant records before spawn and the
+  `os.replace` regression proves it follows the replacement without replaying history. That
+  ordinal counts every assistant record, including filtered narration: a saved position must use
+  a unit that does not move when relay policy changes.
+- **A manifest capability is a product claim, not a parser property.** Grok's fixture tests and
+  `--resume` probe proved that the CLI reused context, but only a real detach/resume room showed
+  the resumed jack silently swallowed every reply. A capability such as `resume = true` must be
+  exercised through its user-visible affordance before release; otherwise the UI promises a path
+  the adapter has never completed end to end.
+- **A held file handle is not a subscription to a path.** After Grok rewrote its transcript, the
+  tail kept polling the old unlinked inode: the jack remained `running` and alive but could never
+  post again. Grok's tail now checks every empty read for inode replacement or truncate-in-place,
+  then reopens the path; the live codeword proof confirms the post-resume reply reaches the room.
+- **Dead code can contain an unwired guard.** Grok's private decoder rejected non-object JSON, but
+  production never called it; deleting that helper exposed a crash on `[]`, strings, numbers, or
+  `null`. Removing unreachable code must include checking what it knew. The live shared JSONL
+  tailer now rejects non-object records, with regressions for every observed shape.
+- **A coverage report describes the last coverage artifact, not necessarily the last intended
+  run.** An interrupted `coverage run` left partial data behind, and a later standalone report
+  confidently measured that partial run at 84%. Keep collection and reporting chained in one
+  command (after `coverage erase` when a run was interrupted), so the report cannot silently
+  describe a different execution than the one being handed off.
