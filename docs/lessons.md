@@ -135,3 +135,10 @@ enforce it. A prose warning that has no executable guard is not a completed less
   confidently measured that partial run at 84%. Keep collection and reporting chained in one
   command (after `coverage erase` when a run was interrupted), so the report cannot silently
   describe a different execution than the one being handed off.
+- **Patching `asyncio.sleep` to a non-yielding mock removes a loop's only suspension point and
+  turns a poll into a spin.** A `claude` transcript-tail test patched `asyncio.sleep` with
+  `AsyncMock()` to avoid waiting 30s; the tail's `while alive(): await sleep(1)` lost its
+  suspension point, so the loop spun without yielding, never processed coverage flush, and timed
+  out the suite. Replacing the mock with a counted `alive()` stub that exits after one iteration
+  and a yielding `sleep` (`await orig_sleep(0)`) restores the suspension point. The same pattern
+  applies to any async poll — if you mock the sleep, keep a `yield` or bound the loop.
