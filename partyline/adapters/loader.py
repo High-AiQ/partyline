@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import importlib.util
+import logging
 import os
 import re
 import subprocess
@@ -19,6 +20,7 @@ PACKAGE_ROOT = Path(__file__).parent
 BUNDLED_ROOT = PACKAGE_ROOT / "bundled"
 _LOADED_PATHS: dict[str, Path] = {}
 _GENERATION = 0
+logger = logging.getLogger(__name__)
 
 
 def adapter_store() -> Path:
@@ -75,7 +77,13 @@ def load_adapter(path: str | Path) -> str:
     # An imported package may share an id with a bundled one and take over. That
     # is intentional — it's how you override a shipped adapter — but it has to be
     # visible, so the listing always says where the loaded code came from.
-    manifest["source"] = "bundled" if directory.parent == BUNDLED_ROOT else str(directory)
+    bundled_root = BUNDLED_ROOT.resolve()
+    bundled = directory.parent == bundled_root
+    overrides_bundled = not bundled and (bundled_root / adapter_id / "adapter.toml").is_file()
+    manifest["source"] = "bundled" if bundled else str(directory)
+    manifest["overrides_bundled"] = overrides_bundled
+    if overrides_bundled:
+        logger.warning("imported adapter %s overrides bundled adapter", adapter_id)
     register_adapter(adapter_id, cls, manifest)
     _LOADED_PATHS[adapter_id] = directory
     return adapter_id
@@ -86,8 +94,12 @@ def reload_adapter(adapter_id: str) -> str:
     path = _LOADED_PATHS.get(adapter_id)
     if path is None:
         raise ValueError(f"adapter is not loaded: {adapter_id}")
-    unregister_adapter(adapter_id)
-    return load_adapter(path)
+    replacement = _reload_path(adapter_id, path)
+    if replacement is None:
+        unregister_adapter(adapter_id)
+        _LOADED_PATHS.pop(adapter_id, None)
+        raise ValueError(f"adapter source is missing: {path}")
+    return load_adapter(replacement)
 
 
 def load_bundled_adapters():
@@ -109,6 +121,9 @@ def load_installed_adapters() -> list[str]:
     if not store.is_dir():
         return loaded
     for checkout in sorted(path for path in store.iterdir() if path.is_dir()):
+        if checkout.name.startswith("."):
+            logger.info("skipping hidden adapter checkout %s", checkout)
+            continue
         for package in adapter_packages(checkout):
             try:
                 loaded.append(load_adapter(package))
@@ -128,6 +143,13 @@ def adapter_packages(root: Path):
 
 def _run_git(command: list[str]):
     subprocess.run(command, check=True, capture_output=True, text=True)
+
+
+def _reload_path(adapter_id: str, path: Path) -> Path | None:
+    if (path / "adapter.toml").is_file():
+        return path
+    bundled = BUNDLED_ROOT.resolve() / adapter_id
+    return bundled if (bundled / "adapter.toml").is_file() else None
 
 
 def import_repository(repository: str, ref: str | None = None) -> list[str]:
@@ -161,6 +183,10 @@ def reload_adapters() -> list[str]:
     """Reload known definitions; active attachments retain their loaded class."""
     loaded = []
     for adapter_id, path in list(_LOADED_PATHS.items()):
-        unregister_adapter(adapter_id)
-        loaded.append(load_adapter(path))
+        replacement = _reload_path(adapter_id, path)
+        if replacement is None:
+            unregister_adapter(adapter_id)
+            _LOADED_PATHS.pop(adapter_id, None)
+            raise ValueError(f"adapter source is missing: {path}")
+        loaded.append(load_adapter(replacement))
     return loaded
