@@ -57,13 +57,15 @@
       gate = next.gate;
       if (next.overflow) {
         stream.connect(attachment.id, handlers);
-        gate = discardGeneration(gate, stream.generation);
         return;
       }
       if (next.write) term?.write(next.write);
     },
     onUnavailable() {
       disposeTerm();
+    },
+    onGeneration(generation: number) {
+      invalidateGate(generation);
     },
   };
 
@@ -76,7 +78,7 @@
     // connect() bumps `generation`, which is $state. Tracking it here would
     // tear the socket down and open another on every handshake or retry.
     untrack(() => {
-      invalidateGate(stream.connect(id, handlers));
+      stream.connect(id, handlers);
     });
     return () => {
       stream.disconnect();

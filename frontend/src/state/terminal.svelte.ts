@@ -25,6 +25,8 @@ export interface TerminalHandlers {
   onHandshake(next: TerminalHandshake): void;
   onBytes(data: Uint8Array): void;
   onUnavailable(): void;
+  /** Fired synchronously after every generation bump in `connect()`. */
+  onGeneration(generation: number): void;
 }
 
 export class TerminalStream {
@@ -36,6 +38,7 @@ export class TerminalStream {
 
   connect(attId: string, handlers: TerminalHandlers): number {
     const generation = ++this.generation;
+    handlers.onGeneration(generation);
     this.#teardown();
     this.unavailable = false;
 
