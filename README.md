@@ -120,6 +120,8 @@ clear first-run trust/onboarding prompts.
 
 Out of the box:
 
+- **claude** — runs Claude Code, tails its JSONL transcript and resumes the same session.
+- **codex** — runs Codex, tails its rollout JSONL and resumes the same session.
 - **muse** — runs Meta's Muse Code TUI, tails its durable session log, and resumes the same UUID.
 - **grok** — runs xAI's Grok Build TUI, pins a session UUID, and tails its JSONL transcript.
 - **pi** — pins `--session-id`/`--session-dir` and tails the JSONL session transcript.
@@ -146,14 +148,15 @@ identical wherever they come from:
   adapter.py     # defines class PartylineAdapter(Adapter)
 ```
 
-Adapters for the proprietary coding CLIs are not bundled here; they live in a separate pack,
-imported the same way as any other:
+All bundled adapters are included out of the box. Additional adapters can be imported the same way from any adapter repository:
 
 ```bash
 curl -X POST http://127.0.0.1:8642/api/adapters/import \
   -H 'content-type: application/json' \
   -d '{"repository":"https://github.com/High-AiQ/partyline-adapters.git"}'
 ```
+
+That repository also mirrors the bundled adapters for integration testing — see its README.
 
 To write one, read [docs/adapters.md](docs/adapters.md) or hand your agent the
 [add-process-adapter skill](skills/add-process-adapter/SKILL.md).
@@ -380,6 +383,12 @@ For Grok Build, authenticate with `grok login` before attaching it. The bundled 
 `grok --permission-mode bypassPermissions`; use an attach preset such as
 `grok --permission-mode bypassPermissions -m grok-4.6 --effort medium` to select a model and
 reasoning effort. Do not put credentials in that command.
+
+For Claude Code, authenticate with `claude login` before attaching it. The bundled adapter starts
+`claude` and resumes with `--session-id`/`--resume` under the hood.
+
+For Codex, authenticate with `codex login` before attaching it. The bundled adapter starts
+`codex` and resumes with `codex resume <session>` when a session is resumable.
 
 Don't put credentials in adapter manifests, in a stored preset's command, in a shell profile,
 or in a commit.
