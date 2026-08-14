@@ -31,6 +31,9 @@ describe("TerminalStream retry", () => {
 
     let gate = newOutputGate();
     let paintId = 0;
+    const onGeneration = vi.fn((generation: number) => {
+      gate = discardGeneration(gate, generation);
+    });
     const stream = new TerminalStream();
     stream.connect("att-1", {
       onHandshake() {
@@ -43,20 +46,22 @@ describe("TerminalStream retry", () => {
       onUnavailable() {
         /* a 1000 close after handshake retries instead */
       },
-      onGeneration(generation) {
-        gate = discardGeneration(gate, generation);
-      },
+      onGeneration,
     });
 
     const first = FakeSocket.instances[0];
     if (!first?.onmessage || !first.onclose) throw new Error("expected a live socket");
     first.onmessage({ data: '{"cols":80,"rows":24}' });
     first.onmessage({ data: "screen" });
+    expect(onGeneration).toHaveBeenCalledTimes(1);
+    expect(onGeneration).toHaveBeenLastCalledWith(1);
     expect(paintIsCurrent(gate, 1, paintId)).toBe(true);
     first.onclose({ code: 1000 });
 
     vi.advanceTimersByTime(TERMINAL_RETRY_MS);
     expect(FakeSocket.instances.length).toBe(2);
+    expect(onGeneration).toHaveBeenCalledTimes(2);
+    expect(onGeneration).toHaveBeenLastCalledWith(2);
     expect(paintIsCurrent(gate, 1, paintId)).toBe(false);
   });
 });
