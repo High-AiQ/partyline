@@ -3,13 +3,15 @@
    * Where you say things.
    *
    * The textarea owns the caret, so it also owns the autocomplete's keyboard:
-   * while the popover is open, arrows and Enter belong to it and never reach
-   * the send path. That precedence is the whole reason this is one component.
+   * while the popover is open, arrows and plain Enter belong to it and never
+   * reach the send path; Shift+Enter remains the newline shortcut. That
+   * precedence is the whole reason this is one component.
    */
   import MentionPopover from "./MentionPopover.svelte";
   import { room } from "../../state/room.svelte.js";
   import { draft } from "../../state/draft.svelte.js";
   import { layout } from "../../state/layout.svelte.js";
+  import { insertNewline } from "../../lib/composer";
   import { applyMention, mentionCandidates, mentionToken } from "../../lib/mentions";
   import type { MentionToken } from "../../lib/mentions";
   import type { MentionCandidate } from "../../lib/mentions";
@@ -77,6 +79,19 @@
   }
 
   function onKeydown(event: KeyboardEvent): void {
+    if (event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === "j") {
+      // Chrome and Firefox use Ctrl+J for the downloads panel; preventDefault keeps the shortcut here.
+      event.preventDefault();
+      const next = insertNewline(draft.text, box?.selectionStart ?? 0, box?.selectionEnd ?? 0);
+      draft.text = next.value;
+      closeToken();
+      requestAnimationFrame(() => {
+        box?.setSelectionRange(next.caret, next.caret);
+        box?.focus();
+        resize();
+      });
+      return;
+    }
     if (popoverOpen) {
       const step = { ArrowDown: 1, ArrowUp: -1 }[event.key];
       if (step) {
@@ -84,7 +99,7 @@
         selected = (selected + step + candidates.length) % candidates.length;
         return;
       }
-      if (event.key === "Enter" || event.key === "Tab") {
+      if ((event.key === "Enter" && !event.shiftKey) || event.key === "Tab") {
         event.preventDefault();
         pick(selected);
         return;
@@ -129,8 +144,8 @@
     <button id="send" class="primary" type="button" onclick={send}>send</button>
   </div>
   <div class="hint">
-    enter to send · shift+enter for a new line · agents only wake when @mentioned · @all rings every running
-    agent
+    enter to send · shift+enter or ctrl+j for a new line · agents only wake when @mentioned · @all rings every
+    running agent
   </div>
 </div>
 
