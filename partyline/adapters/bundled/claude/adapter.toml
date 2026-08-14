@@ -1,0 +1,11 @@
+[adapter]
+name = "Claude Code"
+version = "1.0.0"
+description = "Interactive Claude Code terminal with JSONL transcript tailing."
+entrypoint = "adapter.py"
+class = "PartylineAdapter"
+command = ["claude"]
+requires = ["claude"]
+# Don't let the spawned CLI think it is nested inside another harness.
+env_unset = ["CLAUDECODE", "CLAUDE_CODE_*"]
+capabilities = { resume = true }
