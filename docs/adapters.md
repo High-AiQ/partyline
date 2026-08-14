@@ -142,8 +142,44 @@ started with; new attachments get the new code. Changes to partyline itself (the
 loader) still need a restart.
 
 An imported package that shares an id with a bundled one **replaces** it. That is deliberate —
-it is how you override a shipped adapter — and `GET /api/adapters` reports `source` for every
-entry so you can see which code is actually loaded.
+it is how you override a shipped adapter. The loader makes the precedence visible three ways:
+
+- `GET /api/adapters` reports `source` — the literal string `bundled`, or the absolute path of
+  the imported package — and `overrides_bundled`, true when an imported id shadows a bundled one;
+- the UI shows a small `imported` badge wherever the adapter identifies itself: the attach-form
+  picker and the jack in the right rail;
+- the server logs a warning naming each shadowed id, on import, on reload, and at startup when a
+  previously imported store is re-registered.
+
+The logging matters more than it looks. Precedence used to be recorded only in a `source` field
+nobody reads, and an installation was found running seven of its eight adapters from an import
+without a single line of output saying so — every fix shipped to the bundled copies was dead code
+on that machine. A silent override is how that happens.
+
+### Going back to the bundled copy
+
+The adapter store holds one directory per imported **repository**, not per adapter, so removal is
+per checkout:
+
+```bash
+ls ~/.partyline/adapters/                       # one directory per imported repository
+rm -rf ~/.partyline/adapters/<repository-name>  # or move it anywhere outside the store
+curl -X POST http://127.0.0.1:8642/api/adapters/reload
+```
+
+Reload re-registers the bundled package for any id whose imported source has gone. If neither
+exists the id is dropped and the reload fails loudly rather than leaving a half-registered
+adapter behind.
+
+Renaming a checkout to a dot-prefixed name inside the store also disables it: hidden directories
+are skipped and the skip is logged. That is a deliberate affordance for turning an import off
+without deleting it — and it exists because the obvious gesture used to fail silently, leaving a
+"disabled" checkout loading exactly as before.
+
+One thing that looks like it should work and does not: `DELETE /api/adapters/<id>` does **not**
+delete anything. It answers with a reminder to remove the checkout yourself, because a checkout
+may contain several packages, and removing a whole repository to disable one adapter would be a
+surprising thing for a DELETE on a single id to do.
 
 > Importing an adapter executes its code as your user. `adapter.py` runs on import and is not
 > sandboxed. Read what you import.
