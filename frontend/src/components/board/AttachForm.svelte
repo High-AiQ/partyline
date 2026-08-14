@@ -1,6 +1,6 @@
 <script lang="ts">
   /** Spawn a real interactive process in a pty and put it on this line. */
-  import { adapterLabel } from "../../lib/attachments";
+  import { adapterLabel, overrideExplanation } from "../../lib/attachments";
   import { ApiError, api } from "../../lib/api";
   import { room } from "../../state/room.svelte.js";
   import { session } from "../../state/session.svelte.js";
@@ -15,6 +15,8 @@
   let command = $state("");
   let cwd = $state("");
   let attaching = $state(false);
+
+  const selectedAdapter = $derived(session.adapters.find((option) => option.id === adapter));
 
   // The picker's default follows the registry: an adapter imported from a repo
   // is selectable the moment it registers, without this file knowing its name.
@@ -105,11 +107,22 @@
       onclick={() => dialogs.open(ImportAdaptersDialog)}>+ import…</button
     >
   </div>
-  <select id="aAdapter" bind:value={adapter}>
-    {#each session.adapters as option (option.id)}
-      <option value={option.id}>{adapterLabel(option.id)}</option>
-    {/each}
-  </select>
+  <div class="adapter-picker">
+    <select id="aAdapter" bind:value={adapter}>
+      {#each session.adapters as option (option.id)}
+        <option value={option.id}
+          >{adapterLabel(option.id)}{option.overrides_bundled ? " (imported)" : ""}</option
+        >
+      {/each}
+    </select>
+    {#if selectedAdapter?.overrides_bundled}
+      <span
+        class="override-badge"
+        title={overrideExplanation(selectedAdapter.id)}
+        aria-label={overrideExplanation(selectedAdapter.id)}>imported adapter</span
+      >
+    {/if}
+  </div>
 
   <label for="aCmd">command (blank = adapter default)</label>
   <input id="aCmd" bind:value={command} placeholder="blank = adapter default" autocomplete="off" />
@@ -159,5 +172,14 @@
     display: flex;
     justify-content: space-between;
     align-items: baseline;
+  }
+  .adapter-picker {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .adapter-picker select {
+    flex: 1;
+    min-width: 0;
   }
 </style>

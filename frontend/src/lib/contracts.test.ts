@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { WireEventSchema, WireReattachCommandSchema } from "./contracts";
+import { AdapterSchema, WireEventSchema, WireReattachCommandSchema } from "./contracts";
 
 const offer = {
   type: "reattach_offer",
@@ -99,5 +99,21 @@ describe("restart wire contracts", () => {
         action: "later",
       }),
     ).toThrow();
+  });
+});
+
+describe("adapter override metadata", () => {
+  const adapter = {
+    id: "codex",
+    command: ["codex"],
+    capabilities: {},
+  };
+
+  it("defaults absent override metadata for older servers", () => {
+    expect(AdapterSchema.parse(adapter).overrides_bundled).toBe(false);
+  });
+
+  it("preserves an imported adapter's bundled override marker", () => {
+    expect(AdapterSchema.parse({ ...adapter, overrides_bundled: true }).overrides_bundled).toBe(true);
   });
 });
