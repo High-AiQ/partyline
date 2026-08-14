@@ -100,3 +100,9 @@ enforce it. A prose warning that has no executable guard is not a completed less
   own CI. Branches do not partition a working tree: one checkout has one HEAD, one index, one
   set of files. An agent entering a checkout it does not currently own must do its own work in
   a `git worktree`, stage by explicit path rather than `-A`, and leave HEAD where it found it.
+- **A tested parser was necessarily part of the transcript path.** Grok's adapter carried a
+  private JSON decoder exercised only by tests; production delegated parsing to the shared JSONL
+  tailer, so the test covered unreachable code while a resume offset of `None` crashed the real
+  path. Remove helpers with no production caller, and drive lifecycle regressions through the
+  adapter's actual `_run()` boundary; the regression now proves an unavailable pre-spawn stat
+  seeks to the transcript end without replaying old speech.

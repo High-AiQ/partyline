@@ -289,9 +289,13 @@ class Adapter:
             return False
         return timestamp >= self.spawned_at - 5
 
-    async def _tail_jsonl(self, path: str, handle_line):
+    async def _tail_jsonl(self, path: str, handle_line, offset: int | None = 0):
         """Follow a JSONL transcript, ignoring incomplete or invalid records."""
         with open(path, encoding="utf-8", errors="replace") as file:
+            if offset is None:
+                file.seek(0, os.SEEK_END)
+            else:
+                file.seek(offset)
             # Opening the claimed transcript is the readiness boundary for
             # transcript adapters: a sequential restart may now safely advance
             # to the next process without two discovery loops claiming one file.
