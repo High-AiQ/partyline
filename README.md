@@ -64,6 +64,38 @@ bundle cannot serve the UI.
 > attach a process and run commands as you. Do not expose it to a network you do not control;
 > see [Security & caveats](#security--caveats-read-this).
 
+### Serving on a specific IP or port
+
+The default bind is `127.0.0.1:8642`. To choose another address or port, use command-line
+options:
+
+```bash
+uv run --locked partyline --host 192.168.1.20 --port 9000
+```
+
+You can set the same values with `PARTYLINE_HOST` and `PARTYLINE_PORT`:
+
+```bash
+PARTYLINE_HOST=192.168.1.20 PARTYLINE_PORT=9000 uv run --locked partyline
+```
+
+For a persistent setting, create `partyline.toml` in the current directory, or
+`~/.config/partyline/config.toml`:
+
+```toml
+[server]
+host = "192.168.1.20"
+port = 9000
+```
+
+Pass a different file with `--config /path/to/partyline.toml`. Settings are resolved independently
+in this order: command-line option, environment variable, config file, then the defaults above.
+Values loaded from the local `.env` file are part of the environment layer, so they take precedence
+over the TOML config (an explicitly exported environment variable still wins over `.env`).
+Binding to a non-loopback address exposes the chat and its ability to start processes to that
+network; keep the server on a trusted network. Process-control endpoints such as shutdown remain
+restricted to loopback callers.
+
 Then, in the browser:
 
 1. **Pick a handle** — this is your name on the wire (stored locally).
@@ -281,10 +313,23 @@ with ui_session(["alpha line", "beta line"]) as ui:
 
 | env var | default | notes |
 |---|---|---|
-| `PARTYLINE_PORT` | `8642` | |
-| `PARTYLINE_HOST` | `127.0.0.1` | see security note before changing |
+| `PARTYLINE_PORT` | `8642` | bind setting; see [precedence](#serving-on-a-specific-ip-or-port) |
+| `PARTYLINE_HOST` | `127.0.0.1` | bind setting; see [precedence](#serving-on-a-specific-ip-or-port) and the security note |
 | `PARTYLINE_DB` | `~/.partyline.db` | conversations, messages, attachments, presets |
 | `PARTYLINE_ADAPTERS_DIR` | `~/.partyline/adapters` | where imported adapter repos are checked out |
+
+The optional server config file uses `[server] host` and `port`; see
+[Serving on a specific IP or port](#serving-on-a-specific-ip-or-port) for its search paths and
+precedence.
+
+The working-directory `partyline.toml` is relative to the server's current directory. A cockpit
+restart runs from its cockpit clone, so use `--config` or `~/.config/partyline/config.toml` for a
+setting that must survive that restart.
+
+When partyline is served by an external ASGI runner instead of `uv run partyline`, that runner
+does not call `main()` and therefore does not apply `PARTYLINE_HOST`, `PARTYLINE_PORT`, or the TOML
+config automatically. Resolve the settings with `partyline.bind.resolve_bind` and pass the result
+to the ASGI server yourself.
 
 Control actions are exposed as REST (`/api/conversations`, `/api/adapters`, `/api/presets`,
 `/api/attachments/<id>/{resume,screen,keys}` plus `PATCH /api/attachments/<id>`), so creating

@@ -7,9 +7,11 @@ from pathlib import Path
 
 from scripts.restart_server import (
     EXIT_ALREADY_GONE,
+    EXIT_COMMAND_LINE_UNREADABLE,
     EXIT_ENVIRONMENT_UNREADABLE,
     EXIT_WRONG_GENERATION,
     RestartRefused,
+    process_cmdline,
     process_environment,
     process_generation,
     run_restart,
@@ -57,6 +59,25 @@ class EnvironmentParserTest(unittest.TestCase):
             environ.write_bytes(b"")
             self.assertIsNone(process_environment(42, root))
 
+    def test_the_old_generations_cmdline_is_parsed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cmdline = Path(directory) / "42" / "cmdline"
+            cmdline.parent.mkdir()
+            cmdline.write_bytes(b"/usr/bin/python3\0/home/g/.venv/bin/partyline\0--port\09000\0")
+            self.assertEqual(
+                process_cmdline(42, Path(directory)),
+                ["/usr/bin/python3", "/home/g/.venv/bin/partyline", "--port", "9000"],
+            )
+
+    def test_a_missing_or_empty_cmdline_is_none(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.assertIsNone(process_cmdline(42, root))
+            cmdline = root / "42" / "cmdline"
+            cmdline.parent.mkdir()
+            cmdline.write_bytes(b"")
+            self.assertIsNone(process_cmdline(42, root))
+
 
 class RestartTest(unittest.TestCase):
     def setUp(self):
@@ -82,10 +103,11 @@ class RestartTest(unittest.TestCase):
             self.root,
             generation=generation,
             environment=environment,
+            command_line=lambda _pid: [str(self.server)],
             signal_process=lambda pid, sig: self.signals.append((pid, sig)),
             wait=wait,
-            launch=lambda server, logfile, cwd, env: self.executions.append(
-                (server, logfile, cwd, env)
+            launch=lambda server, logfile, cwd, env, arguments: self.executions.append(
+                (server, logfile, cwd, env, arguments)
             ),
         )
 
@@ -108,19 +130,57 @@ class RestartTest(unittest.TestCase):
         self.assertEqual(waited, [(42, "1234")])
         self.assertEqual(
             self.executions,
-            [(self.server, self.log, self.root, {"PATH": "/old/server/path"})],
+            [(self.server, self.log, self.root, {"PATH": "/old/server/path"}, [])],
         )
 
     def test_the_replacement_inherits_the_old_generations_environment(self):
         """The trigger runs under systemd's stripped PATH; the server must not."""
         self.invoke(lambda _pid: "1234")
-        _server, _log, _cwd, env = self.executions[0]
+        _server, _log, _cwd, env, _arguments = self.executions[0]
         self.assertEqual(env, {"PATH": "/old/server/path"})
+
+    def test_the_replacement_inherits_flags_after_the_console_script(self):
+        executions = []
+        run_restart(
+            42,
+            "1234",
+            self.server,
+            self.log,
+            self.root,
+            generation=lambda _pid: "1234",
+            environment=lambda _pid: {"PATH": "/old/server/path"},
+            command_line=lambda _pid: [
+                "/usr/bin/python3", str(self.server), "--host", "0.0.0.0", "--port", "9000"
+            ],
+            signal_process=lambda *_args: None,
+            wait=lambda *_args: None,
+            launch=lambda *args: executions.append(args),
+        )
+        self.assertEqual(executions[0][-1], ["--host", "0.0.0.0", "--port", "9000"])
 
     def test_an_unreadable_environ_refuses_before_signalling(self):
         with self.assertRaises(RestartRefused) as raised:
             self.invoke(lambda _pid: "1234", environment=lambda _pid: None)
         self.assertEqual(raised.exception.exit_code, EXIT_ENVIRONMENT_UNREADABLE)
+        self.assertEqual(self.signals, [])
+        self.assertEqual(self.executions, [])
+
+    def test_an_unreadable_cmdline_refuses_before_signalling(self):
+        with self.assertRaises(RestartRefused) as raised:
+            run_restart(
+                42,
+                "1234",
+                self.server,
+                self.log,
+                self.root,
+                generation=lambda _pid: "1234",
+                environment=lambda _pid: {"PATH": "/old/server/path"},
+                command_line=lambda _pid: None,
+                signal_process=lambda pid, sig: self.signals.append((pid, sig)),
+                wait=lambda *_args: None,
+                launch=lambda *args: self.executions.append(args),
+            )
+        self.assertEqual(raised.exception.exit_code, EXIT_COMMAND_LINE_UNREADABLE)
         self.assertEqual(self.signals, [])
         self.assertEqual(self.executions, [])
 
