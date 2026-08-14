@@ -39,6 +39,11 @@ class KeyIn(BaseModel):
     key: str
 
 
+class TerminalGeometry(BaseModel):
+    cols: int
+    rows: int
+
+
 class AdapterImportIn(BaseModel):
     repository: str
     ref: str | None = None

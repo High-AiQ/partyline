@@ -82,6 +82,7 @@ from .reattach import (
     create_restart_plan,
 )
 from .runtime import NAME_RE, RESERVED_NAMES, ChatRuntime
+from .terminal_stream import register_terminal_route
 
 STATIC_DIR = Path(__file__).parent / "static"
 ASSETS_DIR = STATIC_DIR / "assets"
@@ -133,7 +134,7 @@ async def lifespan(app):
 
 app = FastAPI(lifespan=lifespan)
 app.state.bind = BindConfig()
-
+register_terminal_route(app, runtime)
 
 # -- REST ------------------------------------------------------------------
 @app.get("/")
