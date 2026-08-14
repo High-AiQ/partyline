@@ -422,7 +422,7 @@ class FreshnessTest(unittest.TestCase):
 class TailJsonlTest(unittest.IsolatedAsyncioTestCase):
     """The transcript tail must survive everything a half-written file can be."""
 
-    async def _tail(self, text, adapter=None):
+    async def _tail(self, text, adapter=None, offset=0):
         adapter = adapter or Recorder(["cat"])
         seen = []
 
@@ -432,7 +432,7 @@ class TailJsonlTest(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "transcript.jsonl"
             path.write_text(text, encoding="utf-8")
-            await asyncio.wait_for(adapter._tail_jsonl(str(path), handle), timeout=10)
+            await asyncio.wait_for(adapter._tail_jsonl(str(path), handle, offset), timeout=10)
         return seen
 
     async def test_complete_records_are_handed_over_in_order(self):
@@ -440,6 +440,12 @@ class TailJsonlTest(unittest.IsolatedAsyncioTestCase):
         seen = await self._tail('{"n": 1}\n{"n": 2}\n', adapter)
         self.assertEqual(seen, [{"n": 1}, {"n": 2}])
         self.assertTrue(await adapter.wait_ready())
+
+    async def test_offset_skips_records_before_a_resume_cursor(self):
+        adapter = Recorder(["cat"])
+        text = '{"n": 1}\n{"n": 2}\n'
+        seen = await self._tail(text, adapter, len('{"n": 1}\n'))
+        self.assertEqual(seen, [{"n": 2}])
 
     async def test_a_corrupt_record_is_skipped_not_fatal(self):
         seen = await self._tail('{"n": 1}\nnot json at all\n{"n": 2}\n')
