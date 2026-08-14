@@ -216,7 +216,87 @@ class CodexCommandTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await adapter.wait_startup_delivery_received())
 
 
-class CodexDiscoveryTest(unittest.TestCase):
+    async def test_user_and_agent_message_payloads_are_handled(self):
+        # Direct user_message and agent_message types (older Codex vocab)
+        _, posted = await self.run_tail_with(
+            {
+                "type": "event_msg",
+                "timestamp": "2026-08-09T00:00:00Z",
+                "payload": {"type": "user_message", "message": "hello from user"},
+            }
+        )
+        self.assertEqual(posted, [])
+        _, posted2 = await self.run_tail_with(
+            {
+                "type": "event_msg",
+                "timestamp": "2026-08-09T00:00:00Z",
+                "payload": {"type": "agent_message", "message": "hello from agent"},
+            }
+        )
+        self.assertEqual(posted2, [("terra", "agent", "hello from agent")])
+
+    async def test_non_event_and_stale_records_are_ignored(self):
+        # Non-event type and stale timestamp should not post
+        _, posted = await self.run_tail_with(
+            {"type": "other", "timestamp": "2026-08-09T00:00:00Z", "payload": {"type": "user_message"}}
+        )
+        self.assertEqual(posted, [])
+        # Stale: use a timestamp before spawned_at (mock _fresh to False)
+        from unittest.mock import patch
+
+        from partyline.adapters.bundled.codex.adapter import PartylineAdapter
+
+        posted2: list[tuple] = []
+
+        async def post2(sender, sender_type, body):
+            posted2.append((sender, sender_type, body))
+
+        async def on_status2(status):
+            return None
+
+        adapter2 = PartylineAdapter(
+            {"command": ["codex"], "cli_session": "session-1", "name": "terra", "resume": True},
+            post2,
+            on_status2,
+        )
+        adapter2._fresh = lambda ts: False
+        adapter2.alive = lambda: True
+        adapter2._find_rollout = lambda: "rollout.jsonl"
+        adapter2.stage_startup_delivery([{"sender": "system", "body": "x"}])
+
+        async def tail2(path, handle):
+            await handle(
+                {
+                    "type": "event_msg",
+                    "timestamp": "old",
+                    "payload": {"type": "agent_message", "message": "hi"},
+                }
+            )
+
+        adapter2._tail_jsonl = tail2
+        # Use a counted alive that exits after one handle, and a yielding sleep mock
+        import asyncio as _asyncio
+
+        orig_sleep = _asyncio.sleep
+
+        async def _yield(*_a, **_k):
+            await orig_sleep(0)
+
+        alive_calls = 0
+
+        def alive_once():
+            nonlocal alive_calls
+            alive_calls += 1
+            return alive_calls < 3
+
+        adapter2.alive = alive_once
+        with patch("partyline.adapters.bundled.codex.adapter.asyncio.sleep", side_effect=_yield), patch(
+            "builtins.open", side_effect=OSError
+        ):
+            await adapter2._run()
+        self.assertEqual(posted2, [])
+
+class CodexDiscoveryTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         # reset claimed set between tests
         from partyline.adapters.bundled.codex.adapter import PartylineAdapter as CodexAdapter
@@ -225,11 +305,32 @@ class CodexDiscoveryTest(unittest.TestCase):
         self.addCleanup(CodexAdapter._CLAIMED.clear)
 
     def make_adapter(self, **extra):
+        import asyncio
+
         adapter = PartylineAdapter.__new__(PartylineAdapter)
         adapter.att = {"cwd": "/work", "cli_session": "session-1", "id": "att-1", **extra}
         adapter.spawned_at = 1000.0
         adapter.resume = False
         adapter._CLAIMED = PartylineAdapter._CLAIMED
+        adapter._ready_result = None
+        adapter._ready = asyncio.Event()
+        adapter._tail_task = None
+        adapter._stopping = False
+        adapter._startup_delivery = asyncio.Event()
+        adapter._startup_delivery_result = None
+        adapter._silent_until_wake = False
+
+        async def _noop_post(*a, **k):
+            return None
+
+        async def _noop_status(*a, **k):
+            return None
+
+        adapter._post_to_chat = _noop_post
+        adapter.on_status = _noop_status
+        adapter.proc = None
+        adapter.master = None
+        adapter._tasks = []
         return adapter
 
     def test_find_rollout_matches_cwd_and_claims(self):
@@ -333,9 +434,7 @@ class CodexDiscoveryTest(unittest.TestCase):
                     "payload": {"id": "x", "cwd": "/other"},
                 },
             }
-            name = Path(path).name
-            # map filename to payload key
-            key = name.split("-")[0]
+            key = Path(path).stem
             data = payloads.get(key, payloads["bad-type"])
             m = mock_open(read_data=json.dumps(data) + "\n")
             return m(path, *args, **kwargs)
@@ -397,49 +496,15 @@ class CodexDiscoveryTest(unittest.TestCase):
         ), patch("partyline.adapters.bundled.codex.adapter.open", side_effect=json_error_open):
             self.assertIsNone(adapter._find_rollout())
 
-    async def test_non_event_and_stale_records_are_ignored(self):
-        adapter, posted = await self.run_tail_with(
-            {"type": "other", "timestamp": "2026-08-09T00:00:00Z", "payload": {"type": "user_message"}}
-        )
-        self.assertEqual(posted, [])
-        # stale timestamp should also be ignored (mock _fresh returns True, so test with False)
-        from unittest.mock import patch
-
+    async def test_stop_releases_claimed_rollout(self):
         from partyline.adapters.bundled.codex.adapter import PartylineAdapter
 
-        async def post2(sender, sender_type, body):
-            posted2.append((sender, sender_type, body))
-
-        posted2: list[tuple] = []
-
-        async def on_status2(status):
-            return None
-
-        adapter2 = PartylineAdapter(
-            {"command": ["codex"], "cli_session": "session-1", "name": "terra", "resume": True},
-            post2,
-            on_status2,
-        )
-        adapter2._fresh = lambda ts: False
-        adapter2.alive = lambda: True
-        adapter2._find_rollout = lambda: "rollout.jsonl"
-        adapter2.stage_startup_delivery([{"sender": "system", "body": "x"}])
-
-        async def tail2(path, handle):
-            await handle(
-                {
-                    "type": "event_msg",
-                    "timestamp": "old",
-                    "payload": {"type": "agent_message", "message": "hi"},
-                }
-            )
-
-        adapter2._tail_jsonl = tail2
-        with patch(
-            "partyline.adapters.bundled.codex.adapter.asyncio.sleep", AsyncMock()
-        ), patch("builtins.open", side_effect=OSError):
-            await adapter2._run()
-        self.assertEqual(posted2, [])
+        adapter = self.make_adapter()
+        fake_path = "/tmp/fake-rollout.jsonl"
+        PartylineAdapter._CLAIMED.add(fake_path)
+        adapter._rollout = fake_path
+        await adapter.stop()
+        self.assertNotIn(fake_path, PartylineAdapter._CLAIMED)
 
 
 if __name__ == "__main__":
