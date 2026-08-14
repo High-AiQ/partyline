@@ -2,13 +2,30 @@
   /**
    * A live view of a process's terminal, and a keypad into its pty.
    *
-   * This is how a person answers a dialog a process is stuck on. Keys go
-   * straight through, so it assumes the process may be mid-prompt.
+   * The screen streams over a WebSocket at the server's fixed geometry.
+   * The keypad still POSTs named keys — the phone fallback, and the path
+   * that works when the socket is down. The terminal does not capture
+   * keystrokes until you explicitly drive it; a click to inspect or
+   * select text stays watch-only. scrollback is 0 to match the old
+   * <pre> viewport — the server screen is authoritative, not a local log.
    */
-  import { onDestroy } from "svelte";
+  import { onDestroy, tick, untrack } from "svelte";
+  import type { IDisposable } from "@xterm/xterm";
   import Modal from "../Modal.svelte";
   import { api } from "../../lib/api";
+  import { loadXterm } from "../../lib/xterm";
+  import type { XtermCtor, XtermTerminal } from "../../lib/xterm";
   import type { Attachment } from "../../lib/contracts";
+  import type { TerminalHandshake } from "../../lib/terminal";
+  import {
+    beginHandshake,
+    discardGeneration,
+    newOutputGate,
+    openLive,
+    paintIsCurrent,
+    receiveOutputBytes,
+  } from "../../lib/terminal";
+  import { TerminalStream } from "../../state/terminal.svelte.js";
 
   interface Props {
     attachment: Attachment;
@@ -18,74 +35,213 @@
   let { attachment, close }: Props = $props();
 
   const KEYS = ["enter", "esc", "up", "down", "tab", "y", "n", "1", "2", "3"];
-  const REFRESH_MS = 2000;
-  /** Long enough for the process to react to the key before we look again. */
-  const AFTER_KEY_MS = 350;
 
-  let screen = $state("…");
-  const timers: ReturnType<typeof setTimeout>[] = [];
+  const stream = new TerminalStream();
+  let host = $state<HTMLDivElement | null>(null);
+  let armed = $state(false);
+  let ready = $state(false);
+  let Ctor: XtermCtor | null = null;
+  let term: XtermTerminal | null = null;
+  let input: IDisposable | null = null;
+  let gate = newOutputGate();
+  let keypadError = $state("");
+  let lastGeneration = stream.generation;
 
-  async function refresh(): Promise<void> {
-    try {
-      const data = await api.screen(attachment.id);
-      screen = data.screen || "(blank screen)";
-    } catch {
-      screen = "(attachment is not live)";
+  const handlers = {
+    onHandshake(next: TerminalHandshake) {
+      gate = beginHandshake(gate, stream.generation);
+      void paint(next, stream.generation, gate.paintId);
+    },
+    onBytes(data: Uint8Array) {
+      const next = receiveOutputBytes(gate, stream.generation, data);
+      gate = next.gate;
+      if (next.write) term?.write(next.write);
+    },
+    onUnavailable() {
+      disposeTerm();
+    },
+  };
+
+  void loadXterm().then((loaded) => {
+    Ctor = loaded;
+  });
+
+  $effect(() => {
+    const id = attachment.id;
+    // connect() bumps `generation`, which is $state. Tracking it here would
+    // tear the socket down and open another on every handshake or retry.
+    untrack(() => {
+      stream.connect(id, handlers);
+    });
+    return () => {
+      stream.disconnect();
+    };
+  });
+
+  $effect(() => {
+    const generation = stream.generation;
+    if (generation !== lastGeneration) {
+      lastGeneration = generation;
+      gate = discardGeneration(gate, generation);
+      disarm();
     }
+  });
+
+  async function paint(next: TerminalHandshake, generation: number, paintId: number): Promise<void> {
+    Ctor ??= await loadXterm();
+    await tick();
+    if (!host || !paintIsCurrent(gate, generation, paintId)) return;
+    if (!term) {
+      term = new Ctor({
+        cols: next.geometry.cols,
+        rows: next.geometry.rows,
+        convertEol: true,
+        cursorBlink: false,
+        disableStdin: true,
+        fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+        fontSize: 12,
+        scrollback: 0,
+        theme: { background: "#0a0c0b", foreground: "#c9c4b6", cursor: "#c9c4b6" },
+      });
+      term.open(host);
+    } else {
+      term.reset();
+      term.resize(next.geometry.cols, next.geometry.rows);
+    }
+    if (!paintIsCurrent(gate, generation, paintId)) return;
+    term.write(next.snapshot);
+    const opened = openLive(gate, generation, paintId);
+    if (!paintIsCurrent(opened.gate, generation, paintId)) return;
+    gate = opened.gate;
+    for (const chunk of opened.chunks) term.write(chunk);
+    ready = true;
+  }
+
+  function takeControl(): void {
+    if (!term || stream.unavailable) return;
+    armed = true;
+    term.options.disableStdin = false;
+    input?.dispose();
+    input = term.onData((data) => {
+      stream.send(data);
+    });
+    term.focus();
+  }
+
+  function disarm(): void {
+    if (!armed) return;
+    armed = false;
+    input?.dispose();
+    input = null;
+    if (term) {
+      term.options.disableStdin = true;
+      term.blur();
+    }
+  }
+
+  function onHostFocusOut(event: FocusEvent): void {
+    const next = event.relatedTarget;
+    if (next instanceof Node && host?.contains(next)) return;
+    disarm();
+  }
+
+  function disposeTerm(): void {
+    disarm();
+    term?.dispose();
+    term = null;
+    input = null;
+    gate = discardGeneration(gate, stream.generation);
+    ready = false;
   }
 
   async function press(key: string): Promise<void> {
+    keypadError = "";
     try {
       await api.sendKey(attachment.id, key);
     } catch {
-      screen = "(could not reach this process)";
-      return;
+      keypadError = "could not reach this process";
     }
-    timers.push(
-      setTimeout(() => {
-        void refresh();
-      }, AFTER_KEY_MS),
-    );
   }
 
-  void refresh();
-  const interval = setInterval(() => {
-    void refresh();
-  }, REFRESH_MS);
-
-  // Both the poll and any pending post-key refresh have to go, or closing the
-  // dialog leaves a timer writing into a component that is no longer mounted.
   onDestroy(() => {
-    clearInterval(interval);
-    for (const timer of timers) clearTimeout(timer);
+    disposeTerm();
+    stream.disconnect();
   });
 </script>
 
 <Modal title="peek · {attachment.name}" wide {close}>
-  <pre class="screen" aria-label="terminal for {attachment.name}">{screen}</pre>
+  <div class="viewport">
+    {#if stream.unavailable}
+      <pre class="screen" aria-label="terminal for {attachment.name}">(attachment is not live)</pre>
+    {:else}
+      <div
+        class="host"
+        bind:this={host}
+        aria-label="terminal for {attachment.name}"
+        onfocusout={onHostFocusOut}
+      ></div>
+    {/if}
+  </div>
+  <div class="drive-row">
+    {#if armed}
+      <span class="controlling">controlling @{attachment.name}</span>
+      <span class="caution">this process may be mid-turn — a keystroke lands in its terminal</span>
+    {:else}
+      <button type="button" onclick={takeControl} disabled={!ready || stream.unavailable}
+        >drive this terminal</button
+      >
+    {/if}
+  </div>
   <div class="keypad">
     <span class="lbl">send key:</span>
     {#each KEYS as key (key)}
       <button type="button" onclick={() => press(key)}>{key}</button>
     {/each}
+    {#if keypadError}
+      <span class="caution">{keypadError}</span>
+    {/if}
   </div>
   <div class="dialog-note">
-    live view of the agent’s terminal — refreshes every 2s; keys go straight to its pty
+    live view of the agent’s terminal — keys go through live while driving; the keypad always posts
   </div>
 </Modal>
 
 <style>
-  .screen {
+  .viewport {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: auto;
+    min-height: 88px;
+    max-height: 56vh;
     background: #0a0c0b;
     border: 1px solid var(--color-line);
     border-radius: 5px;
     padding: 12px 14px;
+  }
+  .host {
+    line-height: 0;
+  }
+  .screen {
+    margin: 0;
     font-size: 11px;
     line-height: 1.4;
     color: #c9c4b6;
-    overflow: auto;
-    max-height: 56vh;
     white-space: pre;
+  }
+  .drive-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    align-items: baseline;
+  }
+  .controlling {
+    color: var(--color-copper);
+    font-size: 12px;
+  }
+  .caution {
+    color: var(--color-cream-faint);
+    font-size: 10.5px;
   }
   .keypad {
     display: flex;
