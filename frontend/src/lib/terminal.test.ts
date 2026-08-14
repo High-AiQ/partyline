@@ -152,6 +152,19 @@ describe("output gate ordering", () => {
     expect(live.overflow).toBe(false);
   });
 
+  it("invalidates an in-flight paint when overflow forces a reconnect", () => {
+    let gate = beginHandshake(newOutputGate(), 1);
+    const paintId = gate.paintId;
+    for (let i = 0; i < LIVE_HOLD_LIMIT; i++) {
+      gate = receiveOutputBytes(gate, 1, new Uint8Array([i])).gate;
+    }
+    const overflowed = receiveOutputBytes(gate, 1, new Uint8Array([255]));
+    expect(overflowed.overflow).toBe(true);
+    gate = discardGeneration(overflowed.gate, 2);
+    expect(paintIsCurrent(gate, 1, paintId)).toBe(false);
+    expect(openLive(gate, 1, paintId).chunks).toEqual([]);
+  });
+
   it("discards an in-flight paint and its buffer when the generation changes", () => {
     let gate = beginHandshake(newOutputGate(), 1);
     const staleId = gate.paintId;

@@ -34,7 +34,7 @@ export class TerminalStream {
   #socket: WebSocket | null = null;
   #retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-  connect(attId: string, handlers: TerminalHandlers): void {
+  connect(attId: string, handlers: TerminalHandlers): number {
     const generation = ++this.generation;
     this.#teardown();
     this.unavailable = false;
@@ -76,6 +76,7 @@ export class TerminalStream {
         if (current()) this.connect(attId, handlers);
       }, TERMINAL_RETRY_MS);
     };
+    return generation;
   }
 
   send(data: string): boolean {

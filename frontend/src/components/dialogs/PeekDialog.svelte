@@ -57,6 +57,7 @@
       gate = next.gate;
       if (next.overflow) {
         stream.connect(attachment.id, handlers);
+        gate = discardGeneration(gate, stream.generation);
         return;
       }
       if (next.write) term?.write(next.write);
@@ -75,20 +76,22 @@
     // connect() bumps `generation`, which is $state. Tracking it here would
     // tear the socket down and open another on every handshake or retry.
     untrack(() => {
-      stream.connect(id, handlers);
+      invalidateGate(stream.connect(id, handlers));
     });
     return () => {
       stream.disconnect();
     };
   });
 
+  function invalidateGate(generation: number): void {
+    lastGeneration = generation;
+    gate = discardGeneration(gate, generation);
+    disarm();
+  }
+
   $effect(() => {
     const generation = stream.generation;
-    if (generation !== lastGeneration) {
-      lastGeneration = generation;
-      gate = discardGeneration(gate, generation);
-      disarm();
-    }
+    if (generation !== lastGeneration) invalidateGate(generation);
   });
 
   async function paint(next: TerminalHandshake, generation: number, paintId: number): Promise<void> {
