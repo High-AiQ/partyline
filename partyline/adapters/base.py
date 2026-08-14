@@ -21,8 +21,8 @@ from collections.abc import Awaitable, Callable
 import pyte
 
 from partyline.adapters.briefing import BRIEFING, TOPIC_BRIEFING
-
 from partyline.adapters.terminal import KEYS, screen_text, terminal_responses
+from partyline.terminal_viewers import TerminalViewer, TerminalViewerRegistry
 
 
 Post = Callable[[str, str, str], Awaitable[None]]
@@ -60,6 +60,7 @@ class Adapter:
         self._term = pyte.Screen(120, 40)
         self._term_stream = pyte.ByteStream(self._term)
         self._terminal_query_tail = b""
+        self._terminal_viewers = TerminalViewerRegistry(self.screen_text)
 
     async def post(self, sender: str, sender_type: str, body: str):
         """Send something to the chat, unless the process is resuming mid-turn.
@@ -143,6 +144,7 @@ class Adapter:
     async def stop(self):
         self._stopping = True
         self._mark_not_ready()
+        self._terminal_viewers.close()
         if self.proc and self.proc.poll() is None:
             try:
                 os.killpg(self.proc.pid, signal.SIGTERM)
@@ -182,6 +184,7 @@ class Adapter:
                     self._term_stream.feed(data)
                 except Exception:
                     pass
+                self._terminal_viewers.publish(data)
                 if self.answers_terminal_queries:
                     replies, self._terminal_query_tail = terminal_responses(
                         self._term, self._terminal_query_tail, data)
@@ -193,6 +196,7 @@ class Adapter:
                 loop.remove_reader(self.master)
             except Exception:
                 pass
+            self._terminal_viewers.close()
 
     async def _watch_exit(self):
         assert self.proc is not None
@@ -204,7 +208,6 @@ class Adapter:
 
     async def _run(self):
         """Adapter-specific background task."""
-
     async def on_output(self, data: bytes):
         """Receive bytes from the pty. Transcript adapters can ignore this."""
 
@@ -259,6 +262,19 @@ class Adapter:
 
     def screen_text(self) -> str:
         return screen_text(self._term)
+
+    def attach_terminal_viewer(self) -> TerminalViewer:
+        return self._terminal_viewers.attach()
+
+    def detach_terminal_viewer(self, viewer: TerminalViewer) -> None:
+        self._terminal_viewers.detach(viewer)
+
+    def terminal_dimensions(self) -> tuple[int, int]:
+        return self._term.columns, self._term.lines
+
+    def write_terminal(self, data: bytes) -> None:
+        assert self.master is not None
+        os.write(self.master, data)
 
     def send_key(self, key: str):
         data = KEYS.get(key)
