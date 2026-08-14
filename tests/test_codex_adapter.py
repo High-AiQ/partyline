@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from partyline.adapters.bundled.codex.adapter import PartylineAdapter
+from partyline.terminal_viewers import TerminalViewerRegistry
 
 
 class CodexCommandTest(unittest.IsolatedAsyncioTestCase):
@@ -319,6 +320,7 @@ class CodexDiscoveryTest(unittest.IsolatedAsyncioTestCase):
         adapter._startup_delivery = asyncio.Event()
         adapter._startup_delivery_result = None
         adapter._silent_until_wake = False
+        adapter._terminal_viewers = TerminalViewerRegistry(lambda: "")
 
         async def _noop_post(*a, **k):
             return None
