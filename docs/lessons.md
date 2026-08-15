@@ -142,3 +142,14 @@ enforce it. A prose warning that has no executable guard is not a completed less
   out the suite. Replacing the mock with a counted `alive()` stub that exits after one iteration
   and a yielding `sleep` (`await orig_sleep(0)`) restores the suspension point. The same pattern
   applies to any async poll — if you mock the sleep, keep a `yield` or bound the loop.
+- **A frontend-only deploy was safe without a restart.** `partyline/static/` is served by a
+  `StaticFiles` mount that reads from disk per request, but the build id was captured once at
+  import into `FRONTEND_BUILD`. After `cockpit deploy` swapped the bundle under a running server,
+  the browser was served the *new* JavaScript while `/api/version` and the wire hello kept
+  announcing the *old* id, so the client's reload guard reloaded, fetched the new bundle, saw the
+  same mismatch, and looped forever. The tell was dismissed at the time: the version badge still
+  read `v0.28.0` after a `v0.29.0` deploy, called cosmetic when it was the same stale constant.
+  `current_frontend_build()` now re-reads the manifest so the served bundle and the announced id
+  come from one source, falling back to the last good id if the manifest goes unreadable
+  mid-run. Anything a `StaticFiles` mount serves is deploy-live; anything captured at import is
+  not, and mixing the two in one decision is what loops.

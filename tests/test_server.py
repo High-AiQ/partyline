@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from fastapi import HTTPException, WebSocketDisconnect
 
-from partyline import server
+from partyline import frontend_build, server
 from partyline.db import Db
 from partyline.runtime import ChatRuntime
 
@@ -611,7 +611,7 @@ class ServerTest(unittest.TestCase):
         )
         self.arun(server.ws_endpoint(socket, "line"))
         self.assertEqual([event["type"] for event in socket.sent], ["error", "hello", "error", "message"])
-        self.assertEqual(socket.sent[1]["build"], server.FRONTEND_BUILD)
+        self.assertEqual(socket.sent[1]["build"], frontend_build.FRONTEND_BUILD)
         self.assertEqual(socket.sent[1]["version"], server.__version__)
         self.assertEqual(server.runtime.db.list_messages("line")[-1]["body"], "hello")
         self.assertEqual(server.runtime.human_handles, {})
@@ -619,15 +619,34 @@ class ServerTest(unittest.TestCase):
     def test_frontend_build_manifest_is_validated(self):
         manifest = Path(self.directory.name) / "build.json"
         manifest.write_text('{"build":"0123456789abcdef"}', encoding="utf-8")
-        self.assertEqual(server.load_frontend_build(manifest), "0123456789abcdef")
+        self.assertEqual(frontend_build.load_frontend_build(manifest), "0123456789abcdef")
 
         manifest.write_text("not json", encoding="utf-8")
         with self.assertRaisesRegex(RuntimeError, "no valid frontend build manifest"):
-            server.load_frontend_build(manifest)
+            frontend_build.load_frontend_build(manifest)
 
         manifest.write_text('{"build":"not-a-digest"}', encoding="utf-8")
         with self.assertRaisesRegex(RuntimeError, "invalid frontend build id"):
-            server.load_frontend_build(manifest)
+            frontend_build.load_frontend_build(manifest)
+
+    def test_current_frontend_build_follows_a_rebuild_without_a_restart(self):
+        # A deploy swaps the bundle under a running server. `/assets` is a
+        # StaticFiles mount and serves the new JavaScript immediately, so an id
+        # captured at import would disagree with it forever and the client's
+        # reload guard would loop.
+        manifest = Path(self.directory.name) / "build.json"
+        manifest.write_text('{"build":"0123456789abcdef"}', encoding="utf-8")
+        with patch.object(frontend_build, "BUILD_MANIFEST", manifest):
+            self.assertEqual(frontend_build.current_frontend_build(), "0123456789abcdef")
+            manifest.write_text('{"build":"fedcba9876543210"}', encoding="utf-8")
+            self.assertEqual(frontend_build.current_frontend_build(), "fedcba9876543210")
+            self.assertEqual(self.arun(server.version())["build"], "fedcba9876543210")
+
+            # A manifest that vanishes mid-run keeps the last good id: the
+            # server is already running, which is better evidence the frontend
+            # was valid than one failed read is that it is not.
+            manifest.unlink()
+            self.assertEqual(frontend_build.current_frontend_build(), "fedcba9876543210")
 
     def test_websocket_claim_rejects_invalid_duplicate_and_process_handles(self):
         self.add_attachment("process", "opus")

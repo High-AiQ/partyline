@@ -8,7 +8,6 @@ Routing model (MVP):
 """
 
 import asyncio
-import json
 import logging
 import os
 import re
@@ -74,6 +73,7 @@ from .contracts import (
     VersionResponse,
 )
 from .db import Db
+from .frontend_build import current_frontend_build
 from .reattach import (
     ReattachCoordinator,
     ResumedAttachment,
@@ -86,24 +86,9 @@ from .terminal_stream import register_terminal_route
 
 STATIC_DIR = Path(__file__).parent / "static"
 ASSETS_DIR = STATIC_DIR / "assets"
-BUILD_MANIFEST = STATIC_DIR / "build.json"
 logger = logging.getLogger(__name__)
 
 
-def load_frontend_build(path: Path = BUILD_MANIFEST) -> str:
-    """Read the deterministic id emitted into both the bundle and its manifest."""
-    try:
-        build = json.loads(path.read_text(encoding="utf-8"))["build"]
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        raise RuntimeError(
-            f"no valid frontend build manifest at {path}. "
-            "Run `npm install && npm run build` in frontend/."
-        ) from exc
-    if not isinstance(build, str) or not re.fullmatch(r"[0-9a-f]{16}", build):
-        raise RuntimeError(f"invalid frontend build id in {path}: {build!r}")
-    return build
-
-FRONTEND_BUILD = load_frontend_build()
 runtime = ChatRuntime(Db(os.environ.get("PARTYLINE_DB", os.path.expanduser("~/.partyline.db"))))
 
 
@@ -159,7 +144,7 @@ app.mount("/assets", StaticFiles(directory=ASSETS_DIR), name="assets")
 
 @app.get("/api/version", response_model=VersionResponse)
 async def version():
-    return {"version": __version__, "build": FRONTEND_BUILD}
+    return {"version": __version__, "build": current_frontend_build()}
 
 
 LOOPBACK = {"127.0.0.1", "::1", "localhost"}
@@ -651,7 +636,7 @@ async def ws_endpoint(ws: WebSocket, conv_id: str):
     await runtime.websocket(
         ws,
         conv_id,
-        frontend_build=FRONTEND_BUILD,
+        frontend_build=current_frontend_build(),
         server_version=__version__,
         reattacher=ReattachCoordinator(runtime, _resume_adapter),
     )
