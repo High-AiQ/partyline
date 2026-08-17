@@ -1,9 +1,15 @@
-"""Decoding, limits, and thumbnail derivation for uploaded images.
+"""Decoding, limits, and derived variants for uploaded images.
 
 Nothing here touches the database or the filesystem: an upload is decoded and
 either refused with a reason or turned into a value the store can write. That
 split is what lets every limit be tested without a server, a temp directory, or
 a fixture file.
+
+Every image gets both derived tiers, unconditionally. The earlier cut skipped
+derivation when the original was already small, which meant "the thumbnail" was
+sometimes the full original — a 600×600 upload cost a reader the whole file
+under a name that promised a cheap one. One shape, always three files, nothing
+for a reader to branch on.
 """
 
 from __future__ import annotations
@@ -18,9 +24,18 @@ MAX_IMAGE_BYTES = 20 * 1024 * 1024
 # A modest pixel ceiling refuses a decompression bomb before Pillow ever
 # allocates the full raster for it.
 MAX_PIXELS = 50_000_000
-THUMB_MAX_EDGE = 1600
 MAX_TITLE = 200
 MAX_DESCRIPTION = 2000
+
+# The two derived tiers, both webp: one codec family for everything derived,
+# ~25-35% smaller than jpeg at the same perceptual quality, and alpha survives
+# — a transparent PNG would need a matte colour invented for it under jpeg.
+THUMB_MAX_EDGE = 512
+SLIM_MAX_EDGE = 1600
+DERIVED_QUALITY = 80
+DERIVED_MIME = "image/webp"
+THUMB_SUFFIX = "_thumb.webp"
+SLIM_SUFFIX = "_slim.webp"
 
 FORMATS = {
     "PNG": ("image/png", "png"),
@@ -40,17 +55,30 @@ class MediaError(Exception):
 
 
 @dataclass(frozen=True)
+class Derived:
+    """One derived variant: the bytes, the size they render at, and its name."""
+
+    data: bytes
+    width: int
+    height: int
+    suffix: str
+
+    @property
+    def bytes(self) -> int:
+        return len(self.data)
+
+
+@dataclass(frozen=True)
 class PreparedImage:
-    """A decoded upload, held in memory until its message row exists."""
+    """A decoded upload and both derivations, held until its row exists."""
 
     data: bytes
     mime: str
     ext: str
     width: int
     height: int
-    thumb: bytes | None
-    thumb_width: int
-    thumb_height: int
+    thumb: Derived
+    slim: Derived
 
 
 def _validated_text(value: str | None, limit: int, field: str) -> str | None:
@@ -72,20 +100,22 @@ def validated_metadata(
     )
 
 
-def _thumbnail(image: Image.Image) -> tuple[bytes, int, int] | None:
-    """Derive a cheap-to-read variant, or ``None`` if the original is already one."""
-    if max(image.width, image.height) <= THUMB_MAX_EDGE:
-        return None
+def derived(image: Image.Image, max_edge: int, suffix: str) -> Derived:
+    """Render one variant at or below ``max_edge``, never enlarging.
+
+    A 400px original yields a 400px thumbnail rather than a blurry 512px one:
+    upscaling spends bytes to add nothing a reader can see.
+    """
     mode = "RGBA" if image.mode in ("RGBA", "LA", "PA", "P") else "RGB"
     small = image.convert(mode)
-    small.thumbnail((THUMB_MAX_EDGE, THUMB_MAX_EDGE))
+    small.thumbnail((max_edge, max_edge))  # Pillow never enlarges here
     buffer = BytesIO()
-    small.save(buffer, format="WEBP", quality=82, method=4)
-    return buffer.getvalue(), small.width, small.height
+    small.save(buffer, format="WEBP", quality=DERIVED_QUALITY, method=4)
+    return Derived(buffer.getvalue(), small.width, small.height, suffix)
 
 
 def prepared_image(data: bytes) -> PreparedImage:
-    """Decode one upload and derive its thumbnail, or refuse with a reason.
+    """Decode one upload and derive both tiers, or refuse with a reason.
 
     Nothing here trusts the client's filename or declared content type: the
     bytes are decoded, and what Pillow says they are is what they are.
@@ -116,16 +146,14 @@ def prepared_image(data: bytes) -> PreparedImage:
     if encoding not in FORMATS:
         raise MediaError(400, f"unsupported image format: {encoding or 'unknown'}")
     mime, ext = FORMATS[encoding]
-    thumb = _thumbnail(image)
     return PreparedImage(
         data=data,
         mime=mime,
         ext=ext,
         width=image.width,
         height=image.height,
-        thumb=thumb[0] if thumb else None,
-        thumb_width=thumb[1] if thumb else image.width,
-        thumb_height=thumb[2] if thumb else image.height,
+        thumb=derived(image, THUMB_MAX_EDGE, THUMB_SUFFIX),
+        slim=derived(image, SLIM_MAX_EDGE, SLIM_SUFFIX),
     )
 
 

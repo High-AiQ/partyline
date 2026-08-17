@@ -5,64 +5,34 @@ that a person can point anywhere (a NAS, an encrypted volume), and the database
 holds only paths *relative* to that root, so moving or remounting the root does
 not orphan a single image.
 
-The schema is created here rather than in ``db.py`` because that file sits at
-its line cap; ``CREATE TABLE IF NOT EXISTS`` makes it idempotent and it runs on
-every store construction, which is the same contract ``db.SCHEMA`` has.
-
-Decoding, limits, and thumbnails live in ``media_images``; this module is the
-part that touches SQLite and the disk.
+Decoding and the derived tiers live in ``media_images``; the table and the
+row-to-wire mapping live in ``media_rows``. This module is the part that
+touches SQLite and the disk.
 """
 
 from __future__ import annotations
 
 import os
 import shutil
+import sqlite3
 from pathlib import Path
 import time
 import uuid
 
 from .db import Db
-from .media_contracts import ImageRef, ImageThumb, ImageUrls
+from .media_contracts import ImageRef
+from .media_rows import INSERT, MIGRATIONS, SCHEMA, VARIANTS, ref_from_row
 from .media_images import (
     MAX_DESCRIPTION,
     MAX_IMAGE_BYTES,
     MAX_IMAGES_PER_POST,
     MAX_TITLE,
-    THUMB_MAX_EDGE,
+    DERIVED_MIME,
     MediaError,
     PreparedImage,
     prepared_image,
     prepared_images,
     validated_metadata,
-)
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS images(
-  id TEXT PRIMARY KEY,
-  conv_id TEXT NOT NULL,
-  message_id INTEGER NOT NULL,
-  position INTEGER NOT NULL DEFAULT 0,   -- order within its message
-  title TEXT,
-  description TEXT,
-  mime TEXT NOT NULL,
-  width INTEGER NOT NULL,
-  height INTEGER NOT NULL,
-  bytes INTEGER NOT NULL,
-  path TEXT NOT NULL,                    -- relative to the media root
-  thumb_path TEXT,                       -- NULL when the original is small enough
-  thumb_mime TEXT,
-  thumb_width INTEGER,
-  thumb_height INTEGER,
-  created_at REAL NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_images_message ON images(message_id, position);
-CREATE INDEX IF NOT EXISTS idx_images_conv ON images(conv_id, id);
-"""
-
-INSERT = (
-    "INSERT INTO images(id,conv_id,message_id,position,title,description,mime,"
-    "width,height,bytes,path,thumb_path,thumb_mime,thumb_width,thumb_height,"
-    "created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
 )
 
 # The repository ships README artwork in its own top-level `media/`. Writing a
@@ -98,29 +68,6 @@ def media_root(env, db_path) -> Path:
     return root
 
 
-def _ref(row, base: str = "") -> ImageRef:
-    """Build the wire contract for one stored image row."""
-    thumb = None
-    if row["thumb_path"]:
-        thumb = ImageThumb(
-            mime=row["thumb_mime"], width=row["thumb_width"], height=row["thumb_height"]
-        )
-    return ImageRef(
-        id=row["id"],
-        title=row["title"],
-        description=row["description"],
-        mime=row["mime"],
-        width=row["width"],
-        height=row["height"],
-        bytes=row["bytes"],
-        thumb=thumb,
-        urls=ImageUrls(
-            original=f"{base}/api/media/{row['id']}/original",
-            thumb=f"{base}/api/media/{row['id']}/thumb",
-        ),
-    )
-
-
 class MediaStore:
     """Image bytes on disk, image facts in SQLite, addressed by line."""
 
@@ -129,6 +76,11 @@ class MediaStore:
         self.root = Path(root)
         with db.lock:
             db.conn.executescript(SCHEMA)
+            for migration in MIGRATIONS:
+                try:
+                    db.conn.execute(migration)
+                except sqlite3.OperationalError:
+                    pass  # already applied, exactly as db.MIGRATIONS does it
             db.conn.commit()
 
     def _query(self, sql: str, args=()):
@@ -165,22 +117,24 @@ class MediaStore:
         try:
             for position, item in enumerate(prepared):
                 image_id = str(uuid.uuid4())
-                name = f"{image_id}.{item.ext}"
-                (directory / name).write_bytes(item.data)
-                written.append(directory / name)
-                thumb_name = None
-                if item.thumb is not None:
-                    thumb_name = f"{image_id}.thumb.webp"
-                    (directory / thumb_name).write_bytes(item.thumb)
-                    written.append(directory / thumb_name)
+                names = {"": f"{image_id}.{item.ext}"}
+                for variant in (item.thumb, item.slim):
+                    names[variant.suffix] = f"{image_id}{variant.suffix}"
+                for payload, name in (
+                    (item.data, names[""]),
+                    (item.thumb.data, names[item.thumb.suffix]),
+                    (item.slim.data, names[item.slim.suffix]),
+                ):
+                    (directory / name).write_bytes(payload)
+                    written.append(directory / name)
                 rows.append((
                     image_id, conv_id, message_id, position, title, description,
                     item.mime, item.width, item.height, len(item.data),
-                    f"{conv_id}/{name}",
-                    f"{conv_id}/{thumb_name}" if thumb_name else None,
-                    "image/webp" if thumb_name else None,
-                    item.thumb_width if thumb_name else None,
-                    item.thumb_height if thumb_name else None,
+                    f"{conv_id}/{names['']}",
+                    f"{conv_id}/{names[item.thumb.suffix]}", DERIVED_MIME,
+                    item.thumb.width, item.thumb.height, item.thumb.bytes,
+                    f"{conv_id}/{names[item.slim.suffix]}", DERIVED_MIME,
+                    item.slim.width, item.slim.height, item.slim.bytes,
                     created_at,
                 ))
             with self.db.lock:
@@ -194,7 +148,7 @@ class MediaStore:
 
     def for_message(self, message_id: int, base: str = "") -> list[ImageRef]:
         return [
-            _ref(row, base)
+            ref_from_row(row, base)
             for row in self._query(
                 "SELECT * FROM images WHERE message_id=? ORDER BY position", (message_id,)
             )
@@ -210,31 +164,35 @@ class MediaStore:
         for row in self._query(
             f"SELECT * FROM images WHERE message_id IN ({placeholders}) ORDER BY position", ids
         ):
-            found.setdefault(row["message_id"], []).append(_ref(row))
+            found.setdefault(row["message_id"], []).append(ref_from_row(row))
         return [{**message, "images": found.get(message["id"], [])} for message in messages]
 
     def list_conversation(self, conv_id: str, base: str = "") -> list[ImageRef]:
         return [
-            _ref(row, base)
+            ref_from_row(row, base)
             for row in self._query(
                 "SELECT * FROM images WHERE conv_id=? ORDER BY created_at, position", (conv_id,)
             )
         ]
 
     def file_for(self, image_id: str, variant: str) -> tuple[Path, str] | None:
-        """Resolve one served variant. ``thumb`` falls back to the original.
+        """Resolve one served tier, falling back to the original.
 
-        The fallback is not a silent substitution: a small image genuinely has
-        no derived variant, and the contract says ``urls.thumb`` always
-        resolves, so the caller asked for "the cheap one" and got it.
+        Every image uploaded since the three-tier change has real files for
+        every tier, so the fallback only ever fires for rows written before it.
+        It is not a silent substitution: the contract says all three URLs
+        resolve, and a reader that asked for the cheap one gets the cheapest
+        that exists.
         """
+        if variant not in VARIANTS:
+            return None
         rows = self._query("SELECT * FROM images WHERE id=?", (image_id,))
         if not rows:
             return None
         row = rows[0]
         relative, mime = row["path"], row["mime"]
-        if variant == "thumb" and row["thumb_path"]:
-            relative, mime = row["thumb_path"], row["thumb_mime"]
+        if variant != "original" and row[f"{variant}_path"]:
+            relative, mime = row[f"{variant}_path"], row[f"{variant}_mime"]
         path = (self.root / relative).resolve()
         if not path.is_relative_to(self.root.resolve()) or not path.is_file():
             return None
@@ -257,7 +215,6 @@ __all__ = [
     "MediaError",
     "MediaStore",
     "PreparedImage",
-    "THUMB_MAX_EDGE",
     "media_root",
     "prepared_image",
     "prepared_images",
