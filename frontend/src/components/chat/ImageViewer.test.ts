@@ -13,9 +13,11 @@ function image(position: number): ImageRef {
     height: 560,
     bytes: 100,
     thumb: null,
+    slim: { mime: "image/webp", width: 800, height: 560, bytes: 80 },
     urls: {
       original: `/api/media/image-${String(position)}/original`,
       thumb: `/api/media/image-${String(position)}/thumb`,
+      slim: `/api/media/image-${String(position)}/slim`,
     },
   };
 }
@@ -32,6 +34,19 @@ function expectPosition(title: string, position: string): void {
 }
 
 describe("ImageViewer carousel", () => {
+  it("renders the slim tier while keeping the original download link", async () => {
+    const viewer = mount(ImageViewer, {
+      target: document.body,
+      props: { images: [image(1)], initialIndex: 0, close: vi.fn() },
+    });
+    try {
+      expect(document.querySelector(".stage img")?.getAttribute("src")).toBe("/api/media/image-1/slim");
+      expect(document.querySelector(".details a")?.getAttribute("href")).toBe("/api/media/image-1/original");
+    } finally {
+      await unmount(viewer);
+    }
+  });
+
   it("lands on adjacent images and wraps in both directions", async () => {
     const viewer = mount(ImageViewer, {
       target: document.body,
