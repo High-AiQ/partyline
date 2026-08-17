@@ -9,6 +9,7 @@ from scripts.restart_server import (
     EXIT_ALREADY_GONE,
     EXIT_COMMAND_LINE_UNREADABLE,
     EXIT_ENVIRONMENT_UNREADABLE,
+    EXIT_REPLACEMENT_UNIMPORTABLE,
     EXIT_WRONG_GENERATION,
     RestartRefused,
     process_cmdline,
@@ -109,6 +110,7 @@ class RestartTest(unittest.TestCase):
             launch=lambda server, logfile, cwd, env, arguments: self.executions.append(
                 (server, logfile, cwd, env, arguments)
             ),
+            probe=lambda _cwd, _server: None,
         )
 
     def test_an_unreadable_generation_is_refused_before_signalling(self):
@@ -155,6 +157,7 @@ class RestartTest(unittest.TestCase):
             signal_process=lambda *_args: None,
             wait=lambda *_args: None,
             launch=lambda *args: executions.append(args),
+            probe=lambda _cwd, _server: None,
         )
         self.assertEqual(executions[0][-1], ["--host", "0.0.0.0", "--port", "9000"])
 
@@ -179,10 +182,56 @@ class RestartTest(unittest.TestCase):
                 signal_process=lambda pid, sig: self.signals.append((pid, sig)),
                 wait=lambda *_args: None,
                 launch=lambda *args: self.executions.append(args),
+                probe=lambda _cwd, _server: None,
             )
         self.assertEqual(raised.exception.exit_code, EXIT_COMMAND_LINE_UNREADABLE)
         self.assertEqual(self.signals, [])
         self.assertEqual(self.executions, [])
+
+    def test_an_unimportable_replacement_is_refused_before_signalling(self):
+        """The failing control for the v0.32.0 Pillow outage.
+
+        A tree that imports a dep the cockpit venv does not have must not
+        SIGTERM the live generation. The control error is the one from
+        cockpit.log: ModuleNotFoundError: No module named 'PIL'.
+        """
+        with self.assertRaises(RestartRefused) as raised:
+            run_restart(
+                42,
+                "1234",
+                self.server,
+                self.log,
+                self.root,
+                generation=lambda _pid: "1234",
+                environment=lambda _pid: {"PATH": "/old/server/path"},
+                command_line=lambda _pid: [str(self.server)],
+                signal_process=lambda pid, sig: self.signals.append((pid, sig)),
+                wait=lambda *_args: None,
+                launch=lambda *args: self.executions.append(args),
+                probe=lambda _cwd, _server: "ModuleNotFoundError: No module named 'PIL'",
+            )
+        self.assertEqual(raised.exception.exit_code, EXIT_REPLACEMENT_UNIMPORTABLE)
+        self.assertIn("PIL", str(raised.exception))
+        self.assertEqual(self.signals, [])
+        self.assertEqual(self.executions, [])
+
+    def test_a_bootable_replacement_is_still_signalled(self):
+        run_restart(
+            42,
+            "1234",
+            self.server,
+            self.log,
+            self.root,
+            generation=lambda _pid: "1234",
+            environment=lambda _pid: {"PATH": "/old/server/path"},
+            command_line=lambda _pid: [str(self.server)],
+            signal_process=lambda pid, sig: self.signals.append((pid, sig)),
+            wait=lambda *_args: None,
+            launch=lambda *args: self.executions.append(args),
+            probe=lambda _cwd, _server: None,
+        )
+        self.assertEqual(self.signals, [(42, signal.SIGTERM)])
+        self.assertEqual(len(self.executions), 1)
 
 
 class WaitTest(unittest.TestCase):

@@ -72,6 +72,15 @@ replaced them:
   snapshotted from `/proc/<pid>/environ` *before* the signal, because afterwards it is gone.
   The wider lesson is that no clearance gate asked whether the resulting server would *work* —
   only whether the right code would start. Prove the outcome, not just the provenance.
+- **A fast-forwarded tree is an installed environment.** Deploy of v0.32.0 advanced the
+  cockpit clone to `fc0c6db` and the restart timer fired on schedule. The replacement
+  died in three seconds: `ModuleNotFoundError: No module named 'PIL'`. The lockfile
+  named Pillow; the cockpit `.venv` did not have it. `uv run` later synced and bound
+  the port — that listener is a manual shell child, not the timer. `deploy` now
+  `uv sync --locked`s the cockpit venv, and the restart executable refuses *before*
+  `SIGTERM` unless that interpreter loads *this* cockpit's `partyline` (path and
+  version). A green `import partyline.server` that resolved the workbench via an
+  editable `.pth` is the same failure wearing a passing grade.
 - **An `exited` database row meant the process was no longer live locally.** A clean Codex exit
   updated durable status but left its adapter in `runtime.live`; `/api/running` omitted it while
   `/resume` rejected it as “already live.” Owner-matched terminal status callbacks now remove the

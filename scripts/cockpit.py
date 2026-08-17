@@ -1,24 +1,15 @@
 """Get the cockpit onto the latest build, and prove it before anyone restarts.
 
-partyline is developed through a running copy of itself. The *workbench* is the
-checkout being edited; the *cockpit* is the separate clone hosting the
-conversation. A restart is only worth its cost if the cockpit is actually
-running the code that was just written — and the failure mode is quiet, because
-a cockpit at an old commit starts perfectly happily and serves the old UI.
-
-That is not hypothetical. It is exactly what happened the first time the Svelte
-frontend landed: the workbench was three commits ahead, the cockpit was
-restarted, and the old 1532-line page came back looking like nothing had
-changed.
+The *workbench* is the checkout being edited; the *cockpit* hosts the
+conversation. A restart of a stale cockpit serves the old UI perfectly.
 
     uv run python -m scripts.cockpit check     # is the workbench fit to deploy?
-    uv run python -m scripts.cockpit deploy    # check, advance the cockpit, verify
+    uv run python -m scripts.cockpit deploy    # check, advance, uv sync --locked
     uv run python -m scripts.cockpit plan LINE --debrief "what to continue"
     uv run python -m scripts.cockpit arm --pid NNNNN
     uv run python -m scripts.cockpit plan LINE --manual-offer --debrief "what to continue"
 
-The first three commands do not restart anything. ``arm`` is the deliberate,
-announced trigger after every participant is clear; human input is not required.
+The first three commands do not restart anything. ``arm`` is the announced trigger.
 """
 
 from __future__ import annotations
@@ -48,6 +39,7 @@ from partyline.contracts import (
     RestartPlanRequest,
     RestartPlanResponse,
 )
+from scripts.cockpit_venv import cockpit_can_boot, sync_locked
 from scripts.restart_server import process_generation
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -477,6 +469,7 @@ def check(repo: Path = REPO_ROOT) -> int:
         *plan.findings,
         *check_pending_plan(time.time(), plan.plan),
         *failed_restart_units(),
+        *([Finding(*pair)] if (pair := cockpit_can_boot(DEFAULT_COCKPIT)) else []),
     ]
     return report(findings)
 
@@ -500,6 +493,10 @@ def deploy(cockpit: Path, repo: Path = REPO_ROOT) -> int:
 
     findings = [*check_in_sync(cockpit, git("rev-parse", "HEAD", cwd=repo)),
                 *check_bundle_present(cockpit, "cockpit")]
+    if refused := sync_locked(cockpit):
+        findings.append(Finding(*refused))
+    if refused := cockpit_can_boot(cockpit, required=True):
+        findings.append(Finding(*refused))
     if findings:
         return report(findings)
 
@@ -723,7 +720,10 @@ def main(argv=None) -> int:
         if (failed := check()):
             return failed
         expected = git("rev-parse", "HEAD")
-        if findings := check_in_sync(args.cockpit, expected):
+        findings = [*check_in_sync(args.cockpit, expected)]
+        if refused := cockpit_can_boot(args.cockpit, required=True):
+            findings.append(Finding(*refused))
+        if findings:
             return report(findings)
         return arm_restart(
             args.cockpit,

@@ -8,6 +8,8 @@ dependencies = [
     "pydantic>=2",
     "uvicorn[standard]>=0.29",
     "pyte>=0.8",
+    "pillow>=10.8",
+    "python-multipart>=0.0.32",
 ]
 
 [project.scripts]

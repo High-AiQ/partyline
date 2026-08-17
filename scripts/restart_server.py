@@ -19,6 +19,8 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 
+from scripts.cockpit_venv import probe_server, replacement_python
+
 EXIT_ALREADY_GONE = 20
 EXIT_WRONG_GENERATION = 21
 EXIT_BAD_ARGUMENTS = 22
@@ -27,6 +29,7 @@ EXIT_LAUNCH_FAILED = 24
 EXIT_SIGNAL_FAILED = 25
 EXIT_ENVIRONMENT_UNREADABLE = 26
 EXIT_COMMAND_LINE_UNREADABLE = 27
+EXIT_REPLACEMENT_UNIMPORTABLE = 28
 WAIT_SECONDS = 60.0
 
 
@@ -158,6 +161,7 @@ def run_restart(
     signal_process: Callable[[int, int], None] = os.kill,
     wait: Callable[[int, str], None] = wait_for_generation_exit,
     launch: Callable[[Path, Path, Path, dict[str, str], list[str]], None] = launch_server,
+    probe: Callable[[Path, Path], str | None] | None = None,
 ) -> None:
     actual_start = generation(pid)
     if actual_start is None:
@@ -187,6 +191,18 @@ def run_restart(
             EXIT_COMMAND_LINE_UNREADABLE,
         )
     arguments = command[command.index(str(server)) + 1 :]
+
+    # Prove the replacement can import *before* killing the live server.
+    # A fast-forwarded tree with a stale venv is how v0.32.0 left the room
+    # down: timer fired, old pid exited, new process died on `import PIL`.
+    check = probe or (
+        lambda _cwd, _server: probe_server(replacement_python(_server), _cwd)
+    )
+    if refused := check(cwd, server):
+        raise RestartRefused(
+            f"replacement cannot import partyline.server: {refused}",
+            EXIT_REPLACEMENT_UNIMPORTABLE,
+        )
 
     try:
         signal_process(pid, signal.SIGTERM)

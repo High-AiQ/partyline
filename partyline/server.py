@@ -74,6 +74,8 @@ from .contracts import (
 )
 from .db import Db
 from .frontend_build import current_frontend_build
+from .media import MediaStore, media_root
+from .media_routes import media_router
 from .reattach import (
     ReattachCoordinator,
     ResumedAttachment,
@@ -89,7 +91,39 @@ ASSETS_DIR = STATIC_DIR / "assets"
 logger = logging.getLogger(__name__)
 
 
+def load_dotenv(path: str = ".env"):
+    """Merge a local .env into the environment attached processes inherit.
+
+    Credentials for an attached CLI have to reach it somehow, and the two bad
+    answers are baking them into a stored command or exporting them from a shell
+    profile. A gitignored .env next to the server is the third option. Variables
+    already set in the real environment always win, so an inline
+    `KEY=... uv run partyline` still overrides the file.
+    """
+    try:
+        lines = Path(path).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip().removeprefix("export ").strip(), value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        os.environ.setdefault(key, value)
+
+
+# The .env merge has to happen before anything reads the environment.
+# `runtime`, `media`, and the router below all bind at import, so loading
+# it later — as `main()` used to — meant a .env-only PARTYLINE_MEDIA_DIR or
+# PARTYLINE_DB was read after the values it sets had already been used, and
+# was silently ignored. A configured NAS path that quietly writes somewhere
+# else is the silent-fallback failure `docs/lessons.md` keeps recording.
+load_dotenv()
 runtime = ChatRuntime(Db(os.environ.get("PARTYLINE_DB", os.path.expanduser("~/.partyline.db"))))
+media = MediaStore(runtime.db, media_root(os.environ, runtime.db.path))
 
 
 async def _run_automatic_reattachment() -> None:
@@ -120,6 +154,7 @@ async def lifespan(app):
 app = FastAPI(lifespan=lifespan)
 app.state.bind = BindConfig()
 register_terminal_route(app, runtime)
+app.include_router(media_router(runtime, media))
 
 # -- REST ------------------------------------------------------------------
 @app.get("/")
@@ -272,7 +307,7 @@ async def conversation_detail(conv_id: str):
         raise HTTPException(404)
     return {
         "conversation": conv,
-        "messages": runtime.db.list_messages(conv_id),
+        "messages": media.attach(runtime.db.list_messages(conv_id)),
         "attachments": runtime.db.list_attachments(conv_id),
     }
 
@@ -367,6 +402,7 @@ async def purge_conversation(conv_id: str):
     if not conv["archived_at"]:
         raise HTTPException(409, "archive the line before purging it")
     await runtime.stop_attachments(conv_id)  # belt and braces: nothing should be live
+    media.delete_conversation(conv_id)  # a purge takes the pictures with it
     runtime.db.delete_conversation(conv_id)
     runtime.sockets.pop(conv_id, None)
     return {"ok": True, "purged": True}
@@ -642,32 +678,7 @@ async def ws_endpoint(ws: WebSocket, conv_id: str):
     )
 
 
-def load_dotenv(path: str = ".env"):
-    """Merge a local .env into the environment attached processes inherit.
-
-    Credentials for an attached CLI have to reach it somehow, and the two bad
-    answers are baking them into a stored command or exporting them from a shell
-    profile. A gitignored .env next to the server is the third option. Variables
-    already set in the real environment always win, so an inline
-    `KEY=... uv run partyline` still overrides the file.
-    """
-    try:
-        lines = Path(path).read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key, value = key.strip().removeprefix("export ").strip(), value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
-        os.environ.setdefault(key, value)
-
-
 def main(argv: Sequence[str] | None = None):
-    load_dotenv()
     arguments = list(sys.argv[1:] if argv is None else argv)
     parsed = parse_bind_args(arguments)
     config = load_bind_config(parsed.config)
