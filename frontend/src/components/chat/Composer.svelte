@@ -9,12 +9,13 @@
    */
   import MentionPopover from "./MentionPopover.svelte";
   import ImageAttachmentPicker from "./ImageAttachmentPicker.svelte";
+  import ComposerDropZone from "./ComposerDropZone.svelte";
   import { room } from "../../state/room.svelte.js";
   import { draft } from "../../state/draft.svelte.js";
   import { layout } from "../../state/layout.svelte.js";
   import { insertNewline } from "../../lib/composer";
   import { api } from "../../lib/api";
-  import type { PendingImages } from "../../lib/images";
+  import type { ImageIntake, PendingImages } from "../../lib/images";
   import { applyMention, mentionCandidates, mentionToken } from "../../lib/mentions";
   import type { MentionToken } from "../../lib/mentions";
   import type { MentionCandidate } from "../../lib/mentions";
@@ -25,7 +26,11 @@
   let pendingImages = $state<PendingImages>({ files: [], title: "", description: "" });
   let pickerGeneration = $state(0);
   let openPicker = $state(0);
+  let imageIntake = $state<ImageIntake>({ generation: 0, files: [] });
   let uploading = $state(false);
+  function queueImages(files: File[]): void {
+    imageIntake = { generation: imageIntake.generation + 1, files };
+  }
 
   // A handle dropped in from the board should leave the caret at the end, ready
   // to keep typing, rather than wherever it happened to be.
@@ -99,6 +104,7 @@
         description: pendingImages.description.trim() || null,
       });
       pendingImages = { files: [], title: "", description: "" };
+      imageIntake = { generation: 0, files: [] };
       openPicker = 0;
       pickerGeneration++;
       draft.clear();
@@ -155,7 +161,13 @@
   }
 </script>
 
-<div id="composer">
+<ComposerDropZone
+  disabled={!room.conversation || uploading}
+  onfiles={queueImages}
+  oninvalid={() => {
+    room.showNotice("drop or paste image files only", "error");
+  }}
+>
   {#if popoverOpen}
     <MentionPopover {candidates} {selected} onpick={pick} />
   {/if}
@@ -163,6 +175,7 @@
   {#key pickerGeneration}
     <ImageAttachmentPicker
       {openPicker}
+      intake={imageIntake}
       onselection={(selection: PendingImages) => {
         pendingImages = selection;
       }}
@@ -215,14 +228,9 @@
     enter to send · shift+enter or ctrl+j for a new line · agents only wake when @mentioned · @all rings every
     running agent
   </div>
-</div>
+</ComposerDropZone>
 
 <style>
-  #composer {
-    padding: 14px 28px 20px;
-    border-top: 1px solid var(--color-line);
-    position: relative;
-  }
   .box {
     display: flex;
     align-items: flex-end;
@@ -279,9 +287,6 @@
   }
 
   @media (max-width: 899px) {
-    #composer {
-      padding: 10px 12px 14px;
-    }
     /* Three lines of keyboard advice, none of which applies to a touch
        keyboard, on the screen with the least room to spare. */
     .hint {

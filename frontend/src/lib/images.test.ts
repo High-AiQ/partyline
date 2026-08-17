@@ -11,7 +11,12 @@ const image: ImageRef = {
   height: 800,
   bytes: 42,
   thumb: null,
-  urls: { original: "/api/media/image-1/original", thumb: "/api/media/image-1/thumb" },
+  slim: null,
+  urls: {
+    original: "/api/media/image-1/original",
+    thumb: "/api/media/image-1/thumb",
+    slim: null,
+  },
 };
 
 function message(body: string, images: ImageRef[] = [image]): ChatMessage {

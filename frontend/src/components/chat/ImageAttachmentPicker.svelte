@@ -1,10 +1,11 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import { MAX_IMAGES_PER_MESSAGE } from "../../lib/images";
-  import type { PendingImages } from "../../lib/images";
+  import type { ImageIntake, PendingImages } from "../../lib/images";
 
   interface Props {
     openPicker: number;
+    intake: ImageIntake;
     onselection: (selection: PendingImages) => void;
     onlimit: () => void;
   }
@@ -14,18 +15,25 @@
     preview: string;
   }
 
-  let { openPicker, onselection, onlimit }: Props = $props();
+  let { openPicker, intake, onselection, onlimit }: Props = $props();
   let picker = $state<HTMLInputElement | null>(null);
   const selectedImages = $state<SelectedImage[]>([]);
   let imageTitle = $state("");
   let imageDescription = $state("");
   let openedAt = 0;
+  let intakeGeneration = 0;
 
   $effect(() => {
     if (openPicker !== openedAt) {
       openedAt = openPicker;
       picker?.click();
     }
+  });
+
+  $effect(() => {
+    if (intake.generation === intakeGeneration) return;
+    intakeGeneration = intake.generation;
+    addImages(intake.files);
   });
 
   $effect(() => {
@@ -45,6 +53,10 @@
     if (!(input instanceof HTMLInputElement) || !input.files?.length) return;
     const files = Array.from(input.files);
     input.value = "";
+    addImages(files);
+  }
+
+  function addImages(files: File[]): void {
     if (selectedImages.length + files.length > MAX_IMAGES_PER_MESSAGE) {
       onlimit();
       return;

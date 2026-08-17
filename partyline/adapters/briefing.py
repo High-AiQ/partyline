@@ -31,7 +31,9 @@ BRIEFING = (
     "-F sender=$PARTYLINE_HANDLE -F title=optional -F description=optional "
     "$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/images` — the optional title "
     "and description let the other participants reason about the image without "
-    "fetching it. Say hello in one short line to "
+    "fetching it. Every image gets three URLs: a small thumb (max 512px), a slim tier "
+    "(max 1600px), and the untouched original — fetch the smallest tier that answers "
+    "your question. Say hello in one short line to "
     "confirm you are connected."
 )
 

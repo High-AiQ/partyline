@@ -37,10 +37,10 @@
     <div class="viewer">
       <div class="stage">
         <img
-          src={image.urls.original}
+          src={image.urls.slim ?? image.urls.original}
           alt={imageLabel(image, index)}
-          width={image.width}
-          height={image.height}
+          width={image.slim?.width ?? image.width}
+          height={image.slim?.height ?? image.height}
           decoding="async"
         />
         {#if images.length > 1}

@@ -28,12 +28,14 @@ export const ImageVariantSchema = z.object({
   mime: z.string(),
   width: z.number().int().positive(),
   height: z.number().int().positive(),
+  bytes: z.number().int().nonnegative().nullable().default(null),
 });
 export type ImageVariant = z.infer<typeof ImageVariantSchema>;
 
 export const ImageUrlsSchema = z.object({
   original: z.string(),
   thumb: z.string(),
+  slim: z.string().nullable().default(null),
 });
 export type ImageUrls = z.infer<typeof ImageUrlsSchema>;
 
@@ -46,6 +48,7 @@ export const ImageRefSchema = z.object({
   height: z.number().int().positive(),
   bytes: z.number().int().nonnegative(),
   thumb: ImageVariantSchema.nullable().default(null),
+  slim: ImageVariantSchema.nullable().default(null),
   urls: ImageUrlsSchema,
 });
 export type ImageRef = z.infer<typeof ImageRefSchema>;

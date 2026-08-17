@@ -75,9 +75,11 @@ describe("api", () => {
       height: 800,
       bytes: 256,
       thumb: null,
+      slim: null,
       urls: {
         original: "http://localhost/api/media/image-1/original",
         thumb: "http://localhost/api/media/image-1/thumb",
+        slim: null,
       },
     };
     const uploaded = {
