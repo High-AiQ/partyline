@@ -169,7 +169,7 @@ class RealImportControlTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         self.assertTrue(loaded_from_cockpit(root / "partyline" / "__init__.py", root))
         self.assertIsNone(probe_server(Path(sys.executable), root, run=subprocess.run))
-        self.assertIn("partyline.__file__", IDENTITY)
+        self.assertIn("partyline.server", IDENTITY)
 
     def test_a_poisoned_pth_shadow_is_refused_even_from_the_cockpit_directory(self):
         """Production shape: editable .pth points at another tree.
@@ -185,9 +185,11 @@ class RealImportControlTest(unittest.TestCase):
             (cockpit / "partyline" / "__init__.py").write_text(
                 '__version__ = "0.32.0"\n', encoding="utf-8"
             )
+            (cockpit / "partyline" / "server.py").write_text("", encoding="utf-8")
             (workbench / "partyline" / "__init__.py").write_text(
                 '__version__ = "0.32.2"\n', encoding="utf-8"
             )
+            (workbench / "partyline" / "server.py").write_text("", encoding="utf-8")
             os.environ.setdefault("PARTYLINE_DB", "/tmp/partyline-test-cockpit-venv.db")
 
             def run(command, **kwargs):
@@ -206,3 +208,32 @@ class RealImportControlTest(unittest.TestCase):
             "not the cockpit" in error or "0.32.2" in error,
             error,
         )
+
+    def test_a_server_module_that_imports_a_missing_dep_is_refused(self):
+        """The Pillow outage: __init__ loads, server.py does not.
+
+        A probe that only imports ``partyline`` goes green here. Importing
+        ``partyline.server`` is what would have caught the live crash.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            cockpit = Path(directory)
+            pkg = cockpit / "partyline"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text('__version__ = "0.32.0"\n', encoding="utf-8")
+            (pkg / "server.py").write_text(
+                "from definitely_not_installed_pillow import Image\n", encoding="utf-8"
+            )
+            os.environ.setdefault("PARTYLINE_DB", "/tmp/partyline-test-cockpit-venv.db")
+
+            def run(command, **kwargs):
+                return subprocess.run(
+                    [sys.executable, "-P", "-c", command[command.index("-c") + 1]],
+                    cwd=kwargs.get("cwd"),
+                    env={**os.environ, "PYTHONPATH": str(cockpit)},
+                    capture_output=True,
+                    text=True,
+                )
+
+            error = probe_server(Path(sys.executable), cockpit, run=run)
+        self.assertIsNotNone(error)
+        self.assertIn("definitely_not_installed_pillow", error)

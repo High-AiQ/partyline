@@ -19,7 +19,7 @@ from pathlib import Path
 
 Command = Callable[..., subprocess.CompletedProcess[str]]
 IDENTITY = (
-    "import json, partyline; "
+    "import json, partyline, partyline.server; "
     "print(json.dumps({'file': partyline.__file__, 'version': partyline.__version__}))"
 )
 VERSION_RE = re.compile(r'^__version__\s*=\s*"([^"]+)"', re.M)
