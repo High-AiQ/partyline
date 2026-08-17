@@ -13,13 +13,15 @@ class ImageVariant(BaseModel):
     """A derived rendering of an image: how big it is and what it costs.
 
     ``bytes`` is here so a process can decide what to fetch without fetching
-    anything first — the whole point of the tiers.
+    anything first — the whole point of the tiers. It is ``None`` only for a
+    variant derived before the size was recorded: reporting ``0`` there would
+    read as "free", which is a false price rather than a missing one.
     """
 
     mime: str
     width: int
     height: int
-    bytes: int
+    bytes: int | None = None
 
 
 class ImageUrls(BaseModel):
