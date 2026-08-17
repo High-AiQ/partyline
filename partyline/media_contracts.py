@@ -9,16 +9,21 @@ have consumed nearly all of its remaining headroom. ``contracts.py`` imports
 from pydantic import BaseModel
 
 
-class ImageThumb(BaseModel):
-    """The derived, cheaper-to-read variant of an image."""
+class ImageVariant(BaseModel):
+    """A derived rendering of an image: how big it is and what it costs.
+
+    ``bytes`` is here so a process can decide what to fetch without fetching
+    anything first — the whole point of the tiers.
+    """
 
     mime: str
     width: int
     height: int
+    bytes: int
 
 
 class ImageUrls(BaseModel):
-    """Where the two variants are served from.
+    """Where the three tiers are served from.
 
     Relative in broadcast events (the browser already knows its origin) and
     absolute in the upload response and the agent digest, where the reader is
@@ -27,13 +32,16 @@ class ImageUrls(BaseModel):
 
     original: str
     thumb: str
+    slim: str
 
 
 class ImageRef(BaseModel):
     """One stored image, as it rides along with the message that posted it.
 
-    ``thumb`` is ``None`` when the original was already small enough to serve
-    directly; ``urls.thumb`` still resolves, so a reader never has to branch.
+    Every upload derives both ``thumb`` (max edge 512) and ``slim`` (max edge
+    1600). They are nullable only to describe rows written before those tiers
+    existed; their URLs resolve either way, serving the original where no
+    derivation was ever made.
     """
 
     id: str
@@ -43,5 +51,6 @@ class ImageRef(BaseModel):
     width: int
     height: int
     bytes: int
-    thumb: ImageThumb | None = None
+    thumb: ImageVariant | None = None
+    slim: ImageVariant | None = None
     urls: ImageUrls
