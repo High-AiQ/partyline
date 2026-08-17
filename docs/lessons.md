@@ -171,3 +171,14 @@ enforce it. A prose warning that has no executable guard is not a completed less
   come from one source, falling back to the last good id if the manifest goes unreadable
   mid-run. Anything a `StaticFiles` mount serves is deploy-live; anything captured at import is
   not, and mixing the two in one decision is what loops.
+- **A transcript that exists at resume has finished materializing.** After a dogfood restart,
+  Grok's resumed adapter replayed its entire pre-restart history to the room as new messages.
+  We know the resume-time watermark was exactly **zero**, not merely short: the replay's first
+  line was the session's first reply, and it ran to the exact end of the old history before
+  going live. The count had been taken against a transcript the CLI had recreated but not yet
+  refilled. No CLI signal says "restore finished"; the file going quiet is the only honest one
+  available. The adapter now counts assistant records only after inode, size, and mtime hold
+  still for a settle window, re-checks that identity *after* the scan — quiet before a read is
+  not quiet across it — refuses an empty scan, since an empty history is never a true account
+  of a session that has history to resume, and times out into the existing loud refusal rather
+  than believing a short count. A position taken from a moving file is not a position.
