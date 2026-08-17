@@ -266,13 +266,28 @@ class ResumeTranscriptTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(posted, ["old one", "old two", "brand new"])
 
-    def test_resync_ignores_an_unreadable_replacement(self):
-        adapter = make_adapter()
+    async def test_resync_keeps_its_position_on_an_unreadable_replacement(self):
+        """Awaited on purpose: this ran as an un-awaited coroutine and passed.
+
+        Found by @sol. The method became async and the call did not, so the
+        test exercised no production code at all while reporting green — the
+        repo's "a green test without its failing control proves nothing" class,
+        in its purest form. A refusal here must keep the old position *and*
+        say so out loud, since silently holding a watermark is how a muted
+        process looks identical to an idle one.
+        """
+        posted = []
+
+        async def collect(sender, sender_type, body):
+            posted.append(body)
+
+        adapter = make_adapter(collector=collect)
         adapter._accounted = 7
         adapter._assistant_fingerprints = [b"fingerprint"]
-        with patch.object(Path, "open", side_effect=OSError):
-            adapter._resync_after_replace(Path("/gone"))
+        await adapter._resync_after_replace(Path("/gone"))
+
         self.assertEqual(adapter._accounted, 7)
+        self.assertIn("keeping the previous position", posted[0])
 
 
 class ResumeWatermarkTest(unittest.IsolatedAsyncioTestCase):
@@ -428,6 +443,170 @@ class ResumeWatermarkTest(unittest.IsolatedAsyncioTestCase):
                 await adapter.start()
 
         self.assertIsNone(adapter._accounted)
+
+
+class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
+    """The live shape the first watermark fix did not model.
+
+    Observed 2026-08-17 on the second dogfood restart, isolated by @sol:
+    ``start()`` counts the old transcript, then Grok's resume replaces it with
+    an *empty* file and refills it. The tail sees a replacement, finds no
+    overlap with what it had seen, concludes the history was rewritten from
+    scratch, and zeroes the watermark — so the refill relays the entire
+    session back into the room. Every earlier guard was true and none of them
+    applied: nothing was moving at the moment anything was counted.
+    """
+
+    def history(self, first, count):
+        return "".join(
+            f'{{"type":"assistant","content":"old reply {n}"}}\n'
+            for n in range(first, first + count)
+        )
+
+    async def test_an_empty_replacement_during_resume_does_not_replay_history(self):
+        posted = []
+        running = True
+
+        async def collect(sender, sender_type, body):
+            posted.append(body)
+
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "chat_history.jsonl"
+            transcript.write_text(self.history(0, 3), encoding="utf-8")
+            adapter = make_adapter(resume=True, session_id=SESSION_ID, collector=collect)
+            adapter.POLL_SECONDS = 0.005
+            adapter.SETTLE_SECONDS = 0.02
+            adapter.alive = lambda: running
+
+            # Exactly what a resume does: pre-spawn count of the old file...
+            with patch.object(adapter, "_transcript", return_value=transcript):
+                with patch.object(Adapter, "start", new=AsyncMock()):
+                    await adapter.start()
+                self.assertEqual(adapter._accounted, 3)
+
+                task = asyncio.create_task(adapter._run())
+                await asyncio.sleep(0.05)
+                # ...then the CLI swaps in an empty file and refills it.
+                empty = Path(directory) / "empty.jsonl"
+                empty.write_text("", encoding="utf-8")
+                empty.replace(transcript)
+                await asyncio.sleep(0.05)
+                transcript.write_text(self.history(0, 3), encoding="utf-8")
+                await asyncio.sleep(0.2)
+                # New speech after the restore must still arrive.
+                with transcript.open("a", encoding="utf-8") as file:
+                    file.write('{"type":"assistant","content":"live again"}\n')
+                for _ in range(200):
+                    if "live again" in posted:
+                        break
+                    await asyncio.sleep(0.01)
+                running = False
+                await asyncio.wait_for(task, timeout=3)
+
+        replayed = [body for body in posted if body.startswith("old reply")]
+        self.assertEqual(replayed, [], "the restored history was relayed as new speech")
+        self.assertIn("live again", posted)
+
+
+    async def test_a_partly_refilled_replacement_does_not_replay_history(self):
+        """Found by @sol: a pause mid-restore looks like a finished short file.
+
+        Restoration writes one old record, pauses long enough to satisfy any
+        settle window, then continues. Overlap between the old history's
+        suffix and that partial prefix is empty, so a compaction reading
+        zeroes the watermark and the refill replays. "Settled briefly" cannot
+        prove "restore complete" — only the lifecycle can.
+        """
+        posted = []
+        running = True
+
+        async def collect(sender, sender_type, body):
+            posted.append(body)
+
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "chat_history.jsonl"
+            transcript.write_text(self.history(0, 3), encoding="utf-8")
+            adapter = make_adapter(resume=True, session_id=SESSION_ID, collector=collect)
+            adapter.POLL_SECONDS = 0.005
+            adapter.SETTLE_SECONDS = 0.02
+            adapter.alive = lambda: running
+
+            with patch.object(adapter, "_transcript", return_value=transcript):
+                with patch.object(Adapter, "start", new=AsyncMock()):
+                    await adapter.start()
+                self.assertEqual(adapter._accounted, 3)
+                task = asyncio.create_task(adapter._run())
+                await asyncio.sleep(0.05)
+                # The replacement arrives holding only the first old record,
+                # and rests there long past any settle window.
+                partial = Path(directory) / "partial.jsonl"
+                partial.write_text(self.history(0, 1), encoding="utf-8")
+                partial.replace(transcript)
+                await asyncio.sleep(0.2)
+                transcript.write_text(self.history(0, 3), encoding="utf-8")
+                await asyncio.sleep(0.1)
+                with transcript.open("a", encoding="utf-8") as file:
+                    file.write('{"type":"assistant","content":"live again"}\n')
+                for _ in range(300):
+                    if "live again" in posted:
+                        break
+                    await asyncio.sleep(0.01)
+                running = False
+                await asyncio.wait_for(task, timeout=3)
+
+        self.assertEqual([body for body in posted if body.startswith("old reply")], [])
+        self.assertIn("live again", posted)
+
+
+    async def test_without_a_pre_spawn_count_a_later_replacement_is_a_compaction(self):
+        """The inverse control, from @sol: the flag must record, not assume.
+
+        With no transcript before the spawn, ``_run`` counts the already
+        restored file. The next replacement is then an ordinary compaction, so
+        overlap must decide the watermark — a flag left true by "resume" alone
+        would carry a stale ordinal and mute the process instead.
+        """
+        posted = []
+        running = True
+
+        async def collect(sender, sender_type, body):
+            posted.append(body)
+
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "chat_history.jsonl"
+            adapter = make_adapter(resume=True, session_id=SESSION_ID, collector=collect)
+            adapter.POLL_SECONDS = 0.005
+            adapter.SETTLE_SECONDS = 0.02
+            adapter.alive = lambda: running
+
+            # No transcript before the spawn: nothing to carry across.
+            with patch.object(adapter, "_transcript", return_value=None):
+                with patch.object(Adapter, "start", new=AsyncMock()):
+                    await adapter.start()
+            self.assertIsNone(adapter._accounted)
+            self.assertFalse(adapter._resume_swap_pending)
+
+            transcript.write_text(self.history(0, 3), encoding="utf-8")
+            with patch.object(adapter, "_transcript", return_value=transcript):
+                task = asyncio.create_task(adapter._run())
+                await asyncio.sleep(0.15)
+                self.assertEqual(adapter._accounted, 3)
+                # A real compaction: the tail is dropped, newer speech kept.
+                compacted = Path(directory) / "compacted.jsonl"
+                compacted.write_text(
+                    self.history(2, 1) + '{"type":"assistant","content":"after compaction"}\n',
+                    encoding="utf-8",
+                )
+                compacted.replace(transcript)
+                for _ in range(300):
+                    if "after compaction" in posted:
+                        break
+                    await asyncio.sleep(0.01)
+                running = False
+                await asyncio.wait_for(task, timeout=3)
+
+        self.assertIn("after compaction", posted)
+        self.assertEqual([body for body in posted if body.startswith("old reply")], [])
 
 
 class LifecycleTest(unittest.IsolatedAsyncioTestCase):

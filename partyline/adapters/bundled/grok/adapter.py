@@ -51,6 +51,13 @@ class PartylineAdapter(Adapter):
         # order. The ordinal alone cannot survive Grok rewriting the file with
         # a shorter history (compaction); the sequence can.
         self._assistant_fingerprints: list[bytes] = []
+        # Set only once a pre-spawn count actually succeeds: that is the
+        # lifecycle whose next replacement is a restore rather than a
+        # compaction. Resuming alone does not imply it — with no transcript
+        # before the spawn there is nothing to carry across, and a stale flag
+        # would preserve an ordinal through a real compaction and mute the
+        # process. The flag records what was observed, never what was assumed.
+        self._resume_swap_pending = False
 
     def _transcript(self) -> Path | None:
         """Return the one transcript whose caller-pinned UUID matches."""
@@ -74,6 +81,7 @@ class PartylineAdapter(Adapter):
                 if scanned:
                     self._assistant_fingerprints = scanned
                     self._accounted = len(scanned)
+                    self._resume_swap_pending = True
         await super().start()
 
     def build_command(self) -> list[str]:
@@ -195,7 +203,7 @@ class PartylineAdapter(Adapter):
                         line = file.readline()
                         if not line:
                             if self._replaced(file, path):
-                                self._resync_after_replace(path)
+                                await self._resync_after_replace(path)
                                 break
                             await asyncio.sleep(self.POLL_SECONDS)
                             continue
@@ -213,6 +221,9 @@ class PartylineAdapter(Adapter):
                         if assistant_index <= self._accounted:
                             continue
                         self._accounted += 1
+                        # Genuine new speech proves the restore finished, so a
+                        # later replacement really is a compaction.
+                        self._resume_swap_pending = False
                         self._assistant_fingerprints.append(self._fingerprint(line))
                         await handle(record)
             except OSError:
@@ -220,7 +231,7 @@ class PartylineAdapter(Adapter):
                     return
                 await asyncio.sleep(self.POLL_SECONDS)
 
-    def _resync_after_replace(self, path: Path) -> None:
+    async def _resync_after_replace(self, path: Path) -> None:
         """Re-anchor the replay watermark on the replacement file.
 
         Grok rewrites chat_history.jsonl when it compacts a session, dropping
@@ -230,23 +241,35 @@ class PartylineAdapter(Adapter):
         compaction keeps the recent tail verbatim — and resume after the
         overlap. No overlap means nothing was retained, so every record in the
         replacement is genuinely new and must be relayed.
+
+        The replacement is read only once it has stopped changing. Resuming a
+        session replaces this file with an empty one and refills it, so a
+        replacement read on arrival looks like a rewrite that retained
+        nothing — the watermark drops to zero and the whole session is
+        relayed to the room. That is the shape observed live on 2026-08-17,
+        found by @sol: "no overlap" is only true of a *finished* file. If the
+        replacement never settles, the previous watermark stands: relaying
+        nothing is recoverable, relaying everything is not.
         """
+        if self._resume_swap_pending:
+            # The one replacement a resume performs. The replacement is a
+            # superset of what was counted before the spawn, so the ordinal
+            # carries across it unchanged; consulting overlap here is what
+            # replayed whole sessions into the room, whether the file was
+            # caught empty or caught halfway through its refill.
+            self._resume_swap_pending = False
+            return
         seen = self._assistant_fingerprints
         if not seen:
-            # A resume that only counted history has no sequence to align;
-            # keep the ordinal, which holds for Grok's superset resume swap.
+            # Nothing counted has a sequence to align; keep the ordinal.
             return
-        incoming: list[bytes] = []
-        try:
-            with path.open(encoding="utf-8", errors="replace") as file:
-                for line in file:
-                    try:
-                        record = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if self._is_assistant_record(record):
-                        incoming.append(self._fingerprint(line))
-        except OSError:
+        incoming = await self._settled_assistant_scan(path)
+        if not incoming:
+            await self.post(
+                "system", "system",
+                f"@{self.att['name']}: the Grok transcript was replaced and has not "
+                "settled; keeping the previous position rather than replaying history",
+            )
             return
         low, high = 0, min(len(seen), len(incoming))
         while low < high:

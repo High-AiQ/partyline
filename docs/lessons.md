@@ -171,14 +171,21 @@ enforce it. A prose warning that has no executable guard is not a completed less
   come from one source, falling back to the last good id if the manifest goes unreadable
   mid-run. Anything a `StaticFiles` mount serves is deploy-live; anything captured at import is
   not, and mixing the two in one decision is what loops.
-- **A transcript that exists at resume has finished materializing.** After a dogfood restart,
-  Grok's resumed adapter replayed its entire pre-restart history to the room as new messages.
-  We know the resume-time watermark was exactly **zero**, not merely short: the replay's first
-  line was the session's first reply, and it ran to the exact end of the old history before
-  going live. The count had been taken against a transcript the CLI had recreated but not yet
-  refilled. No CLI signal says "restore finished"; the file going quiet is the only honest one
-  available. The adapter now counts assistant records only after inode, size, and mtime hold
-  still for a settle window, re-checks that identity *after* the scan — quiet before a read is
-  not quiet across it — refuses an empty scan, since an empty history is never a true account
-  of a session that has history to resume, and times out into the existing loud refusal rather
-  than believing a short count. A position taken from a moving file is not a position.
+- **A guard that passes its own control can still be aimed at the wrong door.** After a
+  dogfood restart, Grok's resumed adapter replayed its entire history to the room as new
+  messages. The first diagnosis — the watermark was counted against a transcript still being
+  restored — produced settle-then-count and refuse-empty guards that were true, tested, and
+  irrelevant: the next restart replayed everything again, because the count was fine and the
+  zero came later, when the CLI replaced the transcript with an empty file mid-restore and
+  the compaction resync read "no overlap" as a rewrite that retained nothing. Even then, a
+  settle-the-replacement guard left a door: a restore that writes one record, pauses past the
+  settle window, and continues still looked like a completed compaction. Every wrong turn
+  measured how the file *looked*; the fix that works tracks where the lifecycle *is* — the
+  first replacement after a resume is a restore, never a compaction, so the ordinal carries
+  across it untouched until genuinely new speech clears the state. And the state that records
+  it must be set by what was observed, never by what was assumed: a flag raised from "we are
+  resuming" rather than "we successfully counted" mutes the process instead of replaying it.
+  The settle and refuse-empty guards remain in the code as narrower, still-correct guards.
+  What corrected the story was not more reasoning about the file but three independent live
+  measurements: real INSERTs in the message table, the transcript's post-restart birth time,
+  and a deterministic control run against the deployed build.
