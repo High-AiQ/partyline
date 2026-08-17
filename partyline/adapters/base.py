@@ -20,7 +20,7 @@ from collections.abc import Awaitable, Callable
 
 import pyte
 
-from partyline.adapters.briefing import BRIEFING, TOPIC_BRIEFING
+from partyline.adapters.briefing import BRIEFING, TOPIC_BRIEFING, child_env
 from partyline.adapters.terminal import KEYS, screen_text, terminal_responses
 from partyline.terminal_viewers import TerminalViewer, TerminalViewerRegistry
 
@@ -86,7 +86,7 @@ class Adapter:
     async def start(self):
         master, slave = os.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
-        env = dict(os.environ, TERM="xterm-256color")
+        env = dict(child_env(os.environ, self.att), TERM="xterm-256color")
         # Adapters declare what to strip so a spawned CLI doesn't mistake itself
         # for a nested harness. A trailing "*" clears a whole prefix.
         for key in self.att.get("adapter_metadata", {}).get("env_unset", []):

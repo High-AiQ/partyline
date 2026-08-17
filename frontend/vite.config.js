@@ -14,6 +14,10 @@ const buildId = sourceBuildId();
 
 export default defineConfig(({ command }) => ({
   plugins: [buildManifest(), tailwindcss(), svelte()],
+  // Component tests run in jsdom but still resolve packages through Vite.
+  // Without this condition Svelte's default server export wins, and `mount()`
+  // fails before the browser behavior under test can run.
+  ...(command === "build" ? {} : { resolve: { conditions: ["browser"] } }),
   define: {
     // The production bundle knows which source snapshot made it. The server
     // reports the same value from build.json on every WebSocket handshake, so
