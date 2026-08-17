@@ -65,7 +65,7 @@ def _variant(row, prefix: str) -> ImageVariant | None:
         mime=row[f"{prefix}_mime"],
         width=row[f"{prefix}_width"],
         height=row[f"{prefix}_height"],
-        bytes=row[f"{prefix}_bytes"] or 0,
+        bytes=row[f"{prefix}_bytes"],
     )
 
 
