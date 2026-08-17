@@ -439,6 +439,25 @@ class ImageApiTest(unittest.TestCase):
                 self.post()
         self.assertEqual(self.db.list_messages("line"), [])
 
+    def test_a_variant_of_unknown_size_reports_unknown_not_free(self):
+        """A row derived before sizes were recorded must not price itself at 0.
+
+        Zero reads as "free to fetch", which is the one question the field
+        exists to answer — a false price is worse than a missing one.
+        """
+        image = self.post().json()["images"][0]
+        with self.db.lock:
+            self.db.conn.execute(
+                "UPDATE images SET thumb_bytes=NULL WHERE id=?", (image["id"],)
+            )
+            self.db.conn.commit()
+        legacy = self.store.for_message(self.db.list_messages("line")[-1]["id"])[0]
+        self.assertIsNone(legacy.thumb.bytes)
+        self.assertEqual(legacy.thumb.mime, "image/webp")
+        self.assertEqual(
+            self.client.get(f"/api/media/{image['id']}/thumb").status_code, 200
+        )
+
     def test_attach_of_nothing_is_nothing(self):
         self.assertEqual(self.store.attach([]), [])
 
