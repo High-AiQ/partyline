@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse
 
 from .contracts import ImageRef, ImageUploadResponse, MessageEvent, MessageResponse
 from .media import MediaError, MediaStore, prepared_images, validated_metadata
+from .media_rows import VARIANTS
 from .runtime import handle_error
 
 
@@ -26,9 +27,20 @@ def _sender_type(runtime, conv_id: str, sender: str) -> str:
 
 
 def _digest_line(ref: ImageRef, base: str) -> str:
+    """One line per image, listing every tier a process can choose between.
+
+    All three URLs are always present, so a reader picks by intent — the
+    cheapest look, the readable one, or the bytes exactly as uploaded — and
+    never has to branch on whether a tier was derived.
+    """
     title = ref.title or ("image" if not ref.description else None)
     label = " — ".join(part for part in (title, ref.description) if part)
-    return f"📷 {label} · {ref.width}×{ref.height} · thumb: {base}/api/media/{ref.id}/thumb"
+    return (
+        f"📷 {label} · {ref.width}×{ref.height}"
+        f" · thumb: {base}/api/media/{ref.id}/thumb"
+        f" · slim: {base}/api/media/{ref.id}/slim"
+        f" · original: {base}/api/media/{ref.id}/original"
+    )
 
 
 def _digest_body(caption: str, refs: list[ImageRef], base: str) -> str:
@@ -105,7 +117,7 @@ def media_router(runtime, store: MediaStore) -> APIRouter:
 
     @router.get("/api/media/{image_id}/{variant}")
     async def serve_media(image_id: str, variant: str):
-        if variant not in ("original", "thumb"):
+        if variant not in VARIANTS:
             raise HTTPException(404)
         located = store.file_for(image_id, variant)
         if located is None:
