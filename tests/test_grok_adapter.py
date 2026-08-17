@@ -275,6 +275,161 @@ class ResumeTranscriptTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(adapter._accounted, 7)
 
 
+class ResumeWatermarkTest(unittest.IsolatedAsyncioTestCase):
+    """The failing control for the post-restart replay incident.
+
+    On 2026-08-17 a dogfood restart left @grok reposting its entire
+    pre-restart history to the line, in order, ending exactly at the old end
+    of history. The transcript was one continuous 1MB file whose first
+    assistant record was the session's first reply — so the watermark had to
+    have been zero, not merely short. These tests pin the doors that let a
+    bad count through.
+    """
+
+    def history(self, count):
+        return "".join(
+            f'{{"type":"assistant","content":"old reply {n}"}}\n' for n in range(count)
+        )
+
+    async def settle(self, adapter, target, attribute="_accounted"):
+        """Wait on an observable state change rather than on a duration."""
+        for _ in range(400):
+            if getattr(adapter, attribute) == target:
+                return
+            await asyncio.sleep(0.005)
+        self.fail(f"{attribute} never reached {target}")
+
+    async def test_history_arriving_after_the_count_is_not_replayed(self):
+        posted = []
+        running = True
+
+        async def collect(sender, sender_type, body):
+            posted.append(body)
+
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "chat_history.jsonl"
+            # Grok has recreated the file but has not restored history yet.
+            transcript.write_text("", encoding="utf-8")
+            adapter = make_adapter(resume=True, session_id=SESSION_ID, collector=collect)
+            adapter.POLL_SECONDS = 0.01
+            adapter.SETTLE_SECONDS = 0.03
+            adapter.alive = lambda: running
+            with patch.object(adapter, "_transcript", return_value=transcript):
+                task = asyncio.create_task(adapter._run())
+                await asyncio.sleep(0.02)
+                transcript.write_text(self.history(3), encoding="utf-8")
+                await self.settle(adapter, 3)
+                running = False
+                await asyncio.wait_for(task, timeout=2)
+
+        self.assertEqual(posted, [])
+
+    async def test_speech_after_a_resume_still_reaches_the_room(self):
+        """The guard must not buy silence by muting the process entirely."""
+        posted = []
+        running = True
+
+        async def collect(sender, sender_type, body):
+            posted.append(body)
+
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "chat_history.jsonl"
+            transcript.write_text(self.history(2), encoding="utf-8")
+            adapter = make_adapter(resume=True, session_id=SESSION_ID, collector=collect)
+            adapter.POLL_SECONDS = 0.01
+            adapter.SETTLE_SECONDS = 0.03
+            adapter.alive = lambda: running
+            with patch.object(adapter, "_transcript", return_value=transcript):
+                task = asyncio.create_task(adapter._run())
+                await self.settle(adapter, 2)
+                with transcript.open("a", encoding="utf-8") as file:
+                    file.write('{"type":"assistant","content":"live again"}\n')
+                await self.settle(adapter, 3)
+                running = False
+                await asyncio.wait_for(task, timeout=2)
+
+        self.assertEqual(posted, ["live again"])
+
+    async def test_a_transcript_that_moves_during_the_scan_is_not_accepted(self):
+        """Quiet before the read is not quiet during it.
+
+        Found in review by @sol: the settle window closed, the scan started,
+        and the restore resumed while the file was being read — yielding a
+        count of what the transcript used to hold. A short watermark replays
+        the difference, which is the same failure through a narrower door.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "chat_history.jsonl"
+            transcript.write_text(self.history(1), encoding="utf-8")
+            adapter = make_adapter(resume=True, session_id=SESSION_ID)
+            adapter.POLL_SECONDS = 0.001
+            adapter.SETTLE_SECONDS = 0.002
+            adapter.alive = lambda: True
+            original_scan = adapter._assistant_scan
+            grew = []
+
+            def scan_then_grow(path):
+                scanned = original_scan(path)
+                if not grew:  # the restore resumes mid-read, exactly once
+                    grew.append(True)
+                    with path.open("a", encoding="utf-8") as file:
+                        file.write('{"type":"assistant","content":"old reply 1"}\n')
+                return scanned
+
+            with patch.object(adapter, "_assistant_scan", side_effect=scan_then_grow):
+                accepted = await adapter._settled_assistant_scan(transcript)
+
+        # The count must describe the file as it finally stands, never the
+        # shorter one the scan happened to read.
+        self.assertEqual(len(accepted), 2)
+
+    async def test_a_transcript_that_never_settles_is_refused_out_loud(self):
+        posted = []
+
+        async def collect(sender, sender_type, body):
+            posted.append(body)
+
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "chat_history.jsonl"
+            transcript.write_text("", encoding="utf-8")
+            adapter = make_adapter(resume=True, session_id=SESSION_ID, collector=collect)
+            adapter.POLL_SECONDS = 0.001
+            adapter.SETTLE_TIMEOUT = 0.02
+            adapter.alive = lambda: True
+            writing = True
+
+            async def keep_growing():
+                index = 0
+                while writing:
+                    with transcript.open("a", encoding="utf-8") as file:
+                        file.write(f'{{"type":"assistant","content":"{index}"}}\n')
+                    index += 1
+                    await asyncio.sleep(0)
+
+            writer = asyncio.create_task(keep_growing())
+            with patch.object(adapter, "_transcript", return_value=transcript):
+                await adapter._run()
+            writing = False
+            await writer
+
+        self.assertIn("could not be counted", posted[0])
+        self.assertFalse(await adapter.wait_ready())
+
+    async def test_an_empty_pre_spawn_scan_is_not_accepted_as_a_count(self):
+        """The second door: `start()` counting a transcript already recreated."""
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "chat_history.jsonl"
+            transcript.write_text("", encoding="utf-8")
+            adapter = make_adapter(resume=True, session_id=SESSION_ID)
+            with (
+                patch.object(adapter, "_transcript", return_value=transcript),
+                patch.object(Adapter, "start", new=AsyncMock()),
+            ):
+                await adapter.start()
+
+        self.assertIsNone(adapter._accounted)
+
+
 class LifecycleTest(unittest.IsolatedAsyncioTestCase):
     async def test_start_refuses_resume_without_a_session_before_spawning(self):
         adapter = make_adapter(resume=True)

@@ -9,18 +9,35 @@ from __future__ import annotations
 
 import asyncio
 import glob
-import hashlib
 import json
 import os
 from pathlib import Path
 
 from partyline.adapters import Adapter
+from partyline.adapters.bundled.grok.transcript import (
+    assistant_count,
+    assistant_scan,
+    assistant_text,
+    fingerprint,
+    is_assistant_record,
+)
 
 
 class PartylineAdapter(Adapter):
     kind = "grok"
+    # Kept as class attributes so a test can patch one on an instance, and so
+    # the call sites below read the same as they did before the split.
+    _assistant_text = staticmethod(assistant_text)
+    _is_assistant_record = staticmethod(is_assistant_record)
+    _fingerprint = staticmethod(fingerprint)
+    _assistant_scan = staticmethod(assistant_scan)
+    _assistant_count = staticmethod(assistant_count)
     POLL_SECONDS = 0.5
     TRANSCRIPT_TIMEOUT = 45.0
+    # How long a resumed transcript must stop changing before it is counted,
+    # and how long to wait for that to happen.
+    SETTLE_SECONDS = 1.0
+    SETTLE_TIMEOUT = 30.0
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -50,7 +67,11 @@ class PartylineAdapter(Adapter):
             path = self._transcript()
             if path is not None:
                 scanned = self._assistant_scan(path)
-                if scanned is not None:
+                # An empty scan is never a true account of a resumed session:
+                # a session with a history to resume has spoken at least once.
+                # Accepting zero here is indistinguishable from "count later",
+                # and it is the watermark that replays everything ever said.
+                if scanned:
                     self._assistant_fingerprints = scanned
                     self._accounted = len(scanned)
         await super().start()
@@ -71,62 +92,54 @@ class PartylineAdapter(Adapter):
         return [*cmd, "--session-id", self._session_id, self.briefing()]
 
     @staticmethod
-    def _assistant_text(record: object) -> str | None:
-        if not isinstance(record, dict):
-            return None
-        if record.get("type") != "assistant":
-            return None
-        # Grok's observed tool-using records keep their user-facing content
-        # as a string and put calls in this sibling array. That content is
-        # progress narration, not a completed reply for the room.
-        if record.get("tool_calls"):
-            return None
-        content = record.get("content")
-        if isinstance(content, str):
-            return content if content.strip() else None
-        if not isinstance(content, list):
-            return None
-        # No captured Grok transcript has used blocks; support them only as a
-        # defensive compatibility shape, not as an asserted vendor contract.
-        texts = [
-            block.get("text", "")
-            for block in content
-            if isinstance(block, dict) and block.get("type") == "text"
-            and isinstance(block.get("text"), str)
-        ]
-        body = "\n\n".join(text for text in texts if text.strip())
-        return body if body.strip() else None
-
-    @staticmethod
-    def _is_assistant_record(record: object) -> bool:
-        return isinstance(record, dict) and record.get("type") == "assistant"
-
-    @staticmethod
-    def _fingerprint(line: str) -> bytes:
-        return hashlib.sha256(line.encode("utf-8")).digest()
-
-    @classmethod
-    def _assistant_scan(cls, path: Path) -> list[bytes] | None:
-        """Fingerprint committed assistant records without trusting byte offsets."""
-        fingerprints: list[bytes] = []
+    def _identity(path: Path) -> tuple[int, int, int] | None:
+        """What the file is right now, or ``None`` if it cannot be read."""
         try:
-            with path.open(encoding="utf-8", errors="replace") as file:
-                for line in file:
-                    try:
-                        record = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if cls._is_assistant_record(record):
-                        fingerprints.append(cls._fingerprint(line))
+            status = path.stat()
         except OSError:
             return None
-        return fingerprints
+        return (status.st_ino, status.st_size, status.st_mtime_ns)
 
-    @classmethod
-    def _assistant_count(cls, path: Path) -> int | None:
-        """Count committed assistant records without trusting byte offsets."""
-        scanned = cls._assistant_scan(path)
-        return None if scanned is None else len(scanned)
+    async def _settled_assistant_scan(self, path: Path) -> list[bytes] | None:
+        """Fingerprint a resumed transcript only once it has stopped changing.
+
+        Grok recreates ``chat_history.jsonl`` when it resumes and fills the
+        restored history back into it. Counting the instant the file appears
+        can therefore catch it empty or half-written, and a watermark of zero
+        relays everything the process ever said back into the room as if it
+        were new — the failure this guard exists to make impossible.
+
+        There is no signal from the CLI that the restore is finished, so the
+        only honest one available is the file going quiet. If it never does,
+        return ``None``: the caller refuses out loud rather than tailing from
+        a count it cannot trust.
+
+        Quiet before the scan is not enough. Reading the file takes time, and
+        a restore that resumes mid-read yields a count of what the file used
+        to hold — a short watermark, which is the same replay this guard
+        exists to prevent, arriving through a narrower door. The scan is
+        therefore bracketed: same inode, size, and mtime before and after, or
+        the count is discarded and the stability window starts over.
+        """
+        previous = None
+        stable_for = 0.0
+        waited = 0.0
+        while self.alive() and waited < self.SETTLE_TIMEOUT:
+            current = self._identity(path)
+            if current is None:
+                return None
+            if current == previous:
+                stable_for += self.POLL_SECONDS
+                if stable_for >= self.SETTLE_SECONDS:
+                    scanned = self._assistant_scan(path)
+                    if scanned is not None and self._identity(path) == current:
+                        return scanned
+                    previous, stable_for = None, 0.0
+            else:
+                previous, stable_for = current, 0.0
+            await asyncio.sleep(self.POLL_SECONDS)
+            waited += self.POLL_SECONDS
+        return None
 
     async def _run(self):
         waited = 0.0
@@ -149,8 +162,8 @@ class PartylineAdapter(Adapter):
         if self.resume and self._accounted is None:
             # Do not mistake an unavailable pre-spawn count for an empty
             # history: zero would replay every old reply after resume.
-            scanned = self._assistant_scan(path)
-            if scanned is not None:
+            scanned = await self._settled_assistant_scan(path)
+            if scanned:
                 self._assistant_fingerprints = scanned
                 self._accounted = len(scanned)
         if self._accounted is None:
