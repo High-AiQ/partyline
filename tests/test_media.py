@@ -109,18 +109,27 @@ class MediaRootTest(unittest.TestCase):
 
 
 class PreparationTest(unittest.TestCase):
-    def test_small_image_gets_no_thumbnail(self):
+    def test_every_image_gets_both_derived_tiers(self):
+        # The old contract skipped derivation for a small original, so "the
+        # thumbnail" was sometimes the whole file. Nothing is conditional now.
         prepared = images.prepared_image(png(40, 20))
-        self.assertIsNone(prepared.thumb)
         self.assertEqual((prepared.width, prepared.height), (40, 20))
-        self.assertEqual(prepared.mime, "image/png")
+        for variant in (prepared.thumb, prepared.slim):
+            self.assertEqual(Image.open(BytesIO(variant.data)).format, "WEBP")
+            self.assertEqual(variant.bytes, len(variant.data))
 
-    def test_large_image_is_reduced_to_the_thumbnail_edge(self):
-        prepared = images.prepared_image(png(images.THUMB_MAX_EDGE + 400, 800))
-        self.assertIsNotNone(prepared.thumb)
-        self.assertEqual(prepared.thumb_width, images.THUMB_MAX_EDGE)
-        self.assertLess(prepared.thumb_height, 800)
-        self.assertEqual(Image.open(BytesIO(prepared.thumb)).format, "WEBP")
+    def test_a_small_original_is_never_upscaled(self):
+        prepared = images.prepared_image(png(40, 20))
+        self.assertEqual((prepared.thumb.width, prepared.thumb.height), (40, 20))
+        self.assertEqual((prepared.slim.width, prepared.slim.height), (40, 20))
+
+    def test_each_tier_is_reduced_to_its_own_max_edge(self):
+        prepared = images.prepared_image(png(images.SLIM_MAX_EDGE + 400, 800))
+        self.assertEqual(prepared.thumb.width, images.THUMB_MAX_EDGE)
+        self.assertEqual(prepared.slim.width, images.SLIM_MAX_EDGE)
+        self.assertLess(prepared.thumb.height, prepared.slim.height)
+        # The point of the tier is that it costs less to look at.
+        self.assertLess(prepared.thumb.bytes, prepared.slim.bytes)
 
     def test_palette_image_keeps_its_alpha_channel_in_the_thumbnail(self):
         prepared = images.prepared_image(gif(images.THUMB_MAX_EDGE + 10, 10))
@@ -226,7 +235,9 @@ class ImageApiTest(unittest.TestCase):
         image = payload["images"][0]
         self.assertEqual(image["title"], "A chart")
         self.assertEqual(image["mime"], "image/png")
-        self.assertIsNone(image["thumb"])
+        self.assertEqual(image["thumb"]["mime"], "image/webp")
+        self.assertEqual(image["slim"]["mime"], "image/webp")
+        self.assertGreater(image["thumb"]["bytes"], 0)
         self.assertTrue(image["urls"]["original"].startswith("http://"))
         self.assertEqual(payload["message"]["sender_type"], "human")
         self.assertEqual(payload["message"]["images"][0]["id"], image["id"])
@@ -282,12 +293,36 @@ class ImageApiTest(unittest.TestCase):
         self.assertEqual(served.headers["content-type"], "image/webp")
         self.assertEqual(Image.open(BytesIO(served.content)).width, images.THUMB_MAX_EDGE)
 
-    def test_a_small_image_serves_the_original_as_its_thumbnail(self):
+    def test_every_tier_is_served_as_its_own_file(self):
         image = self.post().json()["images"][0]
-        original = self.client.get(f"/api/media/{image['id']}/original")
-        thumb = self.client.get(f"/api/media/{image['id']}/thumb")
-        self.assertEqual(original.content, thumb.content)
-        self.assertIn("immutable", thumb.headers["cache-control"])
+        served = {
+            tier: self.client.get(f"/api/media/{image['id']}/{tier}")
+            for tier in ("original", "thumb", "slim")
+        }
+        self.assertEqual(served["original"].headers["content-type"], "image/png")
+        for tier in ("thumb", "slim"):
+            self.assertEqual(served[tier].headers["content-type"], "image/webp")
+            self.assertNotEqual(served[tier].content, served["original"].content)
+            self.assertIn("immutable", served[tier].headers["cache-control"])
+
+    def test_the_derived_files_are_named_for_their_tier(self):
+        image = self.post().json()["images"][0]
+        names = sorted(path.name for path in (self.root / "line").iterdir())
+        self.assertEqual(names, sorted([
+            f"{image['id']}.png", f"{image['id']}_slim.webp", f"{image['id']}_thumb.webp",
+        ]))
+
+    def test_the_digest_line_offers_all_three_tiers(self):
+        self.post(title="A chart")
+        line = self.db.list_messages("line")[-1]["body"].splitlines()[-1]
+        image = self.client.get("/api/conversations/line/images").json()[0]
+        self.assertEqual(
+            line,
+            f"📷 A chart · 8×8"
+            f" · thumb: {image['urls']['thumb']}"
+            f" · slim: {image['urls']['slim']}"
+            f" · original: {image['urls']['original']}",
+        )
 
     def test_six_images_are_allowed_and_seven_are_not(self):
         six = [("file", (f"{n}.png", png(), "image/png")) for n in range(6)]
