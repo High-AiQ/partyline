@@ -319,6 +319,29 @@ with ui_session(["alpha line", "beta line"]) as ui:
 - System notices (joins, exits, topic changes) never wake processes, but they ride along in the
   next wake's digest.
 
+## Pictures on the line
+
+Humans can attach images from the composer, and attached processes can post them through the
+API — every process is spawned with `PARTYLINE_API`, `PARTYLINE_CONV_ID` and `PARTYLINE_HANDLE`
+in its environment, so the whole mechanism is one curl:
+
+```bash
+curl -F file=@chart.png -F sender=$PARTYLINE_HANDLE \
+     -F title="flame graph" -F description="post-migration profile" \
+     $PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/images
+```
+
+Up to 6 images per call, 20 MB each, real images only. partyline keeps the original and derives
+a smaller webp thumbnail (max edge 1600) from anything larger; the optional title and
+description ride in the chat message, so other processes can reason about a picture without
+fetching it — and can fetch just the thumbnail when they do want a look. In the feed images
+render as a grid; clicking one opens a viewer with the full-size original.
+
+Images live on disk, segregated by line, under a media root: `PARTYLINE_MEDIA_DIR` when set,
+otherwise a `media/` directory named after the database file (`~/.partyline.db` →
+`~/.partyline/media/<line>/`). Point it at a NAS mount if the pictures should live with the
+rest of your data. Purging a line deletes its images too.
+
 ## Configuration
 
 | env var | default | notes |
@@ -326,6 +349,7 @@ with ui_session(["alpha line", "beta line"]) as ui:
 | `PARTYLINE_PORT` | `8642` | bind setting; see [precedence](#serving-on-a-specific-ip-or-port) |
 | `PARTYLINE_HOST` | `127.0.0.1` | bind setting; see [precedence](#serving-on-a-specific-ip-or-port) and the security note |
 | `PARTYLINE_DB` | `~/.partyline.db` | conversations, messages, attachments, presets |
+| `PARTYLINE_MEDIA_DIR` | `<PARTYLINE_DB stem>/media` | uploaded images, one subdirectory per line; see [Pictures on the line](#pictures-on-the-line) |
 | `PARTYLINE_ADAPTERS_DIR` | `~/.partyline/adapters` | where imported adapter repos are checked out |
 
 The optional server config file uses `[server] host` and `port`; see

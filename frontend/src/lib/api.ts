@@ -9,6 +9,7 @@ import {
   AttachmentSchema,
   ConversationDetailSchema,
   ConversationSchema,
+  ImageUploadResponseSchema,
   OkResultSchema,
   PresetSchema,
   PurgeResultSchema,
@@ -27,6 +28,7 @@ import type {
   Attachment,
   Conversation,
   ConversationDetail,
+  ImageUploadResponse,
   OkResult,
   Preset,
   PurgeResult,
@@ -42,6 +44,7 @@ export interface RequestOptions<Output> {
   schema: ZodType<Output>;
   method?: string;
   body?: unknown;
+  form?: FormData;
   fallback?: string;
 }
 
@@ -64,6 +67,14 @@ export interface PresetDraft {
   command: string;
 }
 
+export interface ImageUpload {
+  files: readonly File[];
+  sender: string;
+  body: string;
+  title: string | null;
+  description: string | null;
+}
+
 export interface PartylineApi {
   version(): Promise<VersionInfo>;
   running(): Promise<RunningProcess[]>;
@@ -79,6 +90,7 @@ export interface PartylineApi {
   archiveConversation(id: string): Promise<ArchiveResult>;
   restoreConversation(id: string): Promise<Conversation>;
   purgeConversation(id: string): Promise<PurgeResult>;
+  uploadImages(conversationId: string, upload: ImageUpload): Promise<ImageUploadResponse>;
   attach(conversationId: string, payload: AttachPayload): Promise<Attachment>;
   editAttachmentCommand(attachmentId: string, payload: AttachmentCommandPayload): Promise<Attachment>;
   detach(attachmentId: string): Promise<OkResult>;
@@ -111,9 +123,11 @@ export class ApiContractError extends Error {
 }
 
 async function request<Output>(path: string, options: RequestOptions<Output>): Promise<Output> {
-  const { schema, method = "GET", body, fallback } = options;
+  const { schema, method = "GET", body, form, fallback } = options;
   const requestInit: RequestInit = { method };
-  if (body !== undefined) {
+  if (form) {
+    requestInit.body = form;
+  } else if (body !== undefined) {
     requestInit.headers = { "Content-Type": "application/json" };
     requestInit.body = JSON.stringify(body);
   }
@@ -207,6 +221,20 @@ export const api: PartylineApi = {
       method: "DELETE",
       fallback: "could not delete forever",
     }),
+  uploadImages: (conversationId, upload) => {
+    const form = new FormData();
+    for (const file of upload.files) form.append("file", file);
+    form.append("sender", upload.sender);
+    if (upload.body) form.append("body", upload.body);
+    if (upload.title) form.append("title", upload.title);
+    if (upload.description) form.append("description", upload.description);
+    return request(`/api/conversations/${conversationId}/images`, {
+      schema: ImageUploadResponseSchema,
+      method: "POST",
+      form,
+      fallback: "image upload failed",
+    });
+  },
 
   attach: (conversationId, payload) =>
     request(`/api/conversations/${conversationId}/attachments`, {

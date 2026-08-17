@@ -17,6 +17,7 @@ from pathlib import Path
 os.environ.setdefault("PARTYLINE_DB", "/tmp/partyline-test-adapter-base.db")
 
 from partyline.adapters.base import Adapter
+from partyline.adapters.briefing import child_env
 from partyline.adapters.terminal import terminal_responses
 from datetime import UTC
 
@@ -171,11 +172,53 @@ class AdapterEnvironmentTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(adapter.saw("[][][kept]"), bytes(adapter.output))
         await adapter.stop()
 
+    async def test_child_processes_inherit_the_partyline_api_coordinates(self):
+        adapter = Recorder(
+            ["sh", "-c", 'printf "[%s][%s][%s]" '
+             '"$PARTYLINE_API" "$PARTYLINE_CONV_ID" "$PARTYLINE_HANDLE"'],
+            conv_id="conv-9", hook_url="http://127.0.0.1:8642/api/hooks/att-1",
+        )
+
+        await adapter.start()
+        await until(lambda: adapter.saw("[http://127.0.0.1:8642][conv-9][dummy]"),
+                    what="the partyline coordinates")
+
+        await adapter.stop()
+
     async def test_build_command_does_not_alias_the_stored_argv(self):
         adapter = Recorder(["cat"])
         built = adapter.build_command()
         built.append("--extra")
         self.assertEqual(adapter.att["command"], ["cat"])
+
+
+class ChildEnvTest(unittest.TestCase):
+    def test_hook_url_supplies_the_api_base(self):
+        env = child_env({}, {"hook_url": "http://[::1]:8642/api/hooks/att-9",
+                             "conv_id": "conv-7", "name": "kimi"})
+        self.assertEqual(env["PARTYLINE_API"], "http://[::1]:8642")
+        self.assertEqual(env["PARTYLINE_CONV_ID"], "conv-7")
+        self.assertEqual(env["PARTYLINE_HANDLE"], "kimi")
+
+    def test_without_a_hook_url_the_servers_own_settings_are_the_fallback(self):
+        env = child_env({"PARTYLINE_HOST": "192.168.1.20", "PARTYLINE_PORT": "9000"}, {})
+        self.assertEqual(env["PARTYLINE_API"], "http://192.168.1.20:9000")
+
+    def test_an_ipv6_fallback_host_is_bracketed(self):
+        env = child_env({"PARTYLINE_HOST": "::1", "PARTYLINE_PORT": "8643"}, {})
+        self.assertEqual(env["PARTYLINE_API"], "http://[::1]:8643")
+
+    def test_no_configuration_at_all_still_yields_the_documented_default(self):
+        env = child_env({}, {})
+        self.assertEqual(env["PARTYLINE_API"], "http://127.0.0.1:8642")
+        self.assertEqual(env["PARTYLINE_CONV_ID"], "")
+        self.assertEqual(env["PARTYLINE_HANDLE"], "")
+
+    def test_the_caller_environment_is_neither_mutated_nor_aliased(self):
+        source = {"KEEP": "me"}
+        env = child_env(source, {})
+        env["KEEP"] = "changed"
+        self.assertEqual(source, {"KEEP": "me"})
 
 
 class AdapterKeystrokeTest(unittest.IsolatedAsyncioTestCase):
@@ -383,6 +426,14 @@ class BriefingTest(unittest.TestCase):
         adapter = Recorder(["cat"])
         adapter.att.pop("conv_name")
         self.assertIn('conversation "?"', adapter.briefing())
+
+    def test_briefing_teaches_the_image_upload_one_liner(self):
+        text = Recorder(["cat"]).briefing()
+        self.assertIn("curl -F file=@", text)
+        self.assertIn("$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/images", text)
+
+    def test_briefing_bans_ack_loops_between_processes(self):
+        self.assertIn("Never trade acknowledgments", Recorder(["cat"]).briefing())
 
 
 class FreshnessTest(unittest.TestCase):

@@ -65,6 +65,59 @@ afterEach(() => {
 });
 
 describe("api", () => {
+  it("uploads image files and optional metadata as multipart form data", async () => {
+    const image = {
+      id: "image-1",
+      title: "Signal map",
+      description: "The partyline process topology",
+      mime: "image/png",
+      width: 1200,
+      height: 800,
+      bytes: 256,
+      thumb: null,
+      urls: {
+        original: "http://localhost/api/media/image-1/original",
+        thumb: "http://localhost/api/media/image-1/thumb",
+      },
+    };
+    const uploaded = {
+      message: {
+        id: 8,
+        conv_id: "conv-1",
+        sender: "greg",
+        sender_type: "human" as const,
+        body: "Topology\n📷 Signal map · 1200×800 · thumb: http://localhost/thumb",
+        created_at: 1,
+        images: [image],
+      },
+      images: [image],
+    };
+    const fetch = vi
+      .fn<(path: string, init: RequestInit) => Promise<MockResponse>>()
+      .mockResolvedValue(response(uploaded));
+    vi.stubGlobal("fetch", fetch);
+    const file = new File(["image bytes"], "signal.png", { type: "image/png" });
+
+    await expect(
+      api.uploadImages("conv-1", {
+        files: [file],
+        sender: "greg",
+        body: "Topology",
+        title: "Signal map",
+        description: "The partyline process topology",
+      }),
+    ).resolves.toEqual(uploaded);
+
+    const init = fetch.mock.calls[0]?.[1];
+    expect(init?.headers).toBeUndefined();
+    if (!(init?.body instanceof FormData)) throw new Error("expected multipart body");
+    expect(init.body.get("file")).toBe(file);
+    expect(init.body.get("sender")).toBe("greg");
+    expect(init.body.get("body")).toBe("Topology");
+    expect(init.body.get("title")).toBe("Signal map");
+    expect(init.body.get("description")).toBe("The partyline process topology");
+  });
+
   it("serializes JSON requests through the shared client", async () => {
     const fetch = vi.fn().mockResolvedValue(response(conversation));
     vi.stubGlobal("fetch", fetch);

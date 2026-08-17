@@ -7,6 +7,8 @@
    * should reach for `{@html}` on a message body.
    */
   import { renderMessage, senderColor } from "../../lib/markdown";
+  import { visibleMessageBody } from "../../lib/images";
+  import ImageGrid from "./ImageGrid.svelte";
   import type { ChatMessage } from "../../lib/contracts";
 
   interface Props {
@@ -16,7 +18,7 @@
   let { message }: Props = $props();
 
   const isSystem = $derived(message.sender_type === "system");
-  const body = $derived(renderMessage(message.body, message.sender_type === "agent"));
+  const body = $derived(renderMessage(visibleMessageBody(message), message.sender_type === "agent"));
   const when = $derived(
     new Date(message.created_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
   );
@@ -33,6 +35,9 @@
   {/if}
   <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised in renderMessage -->
   <div class="body" class:rich={message.sender_type === "agent"}>{@html body}</div>
+  {#if message.images.length}
+    <ImageGrid images={message.images} />
+  {/if}
 </div>
 
 <style>
