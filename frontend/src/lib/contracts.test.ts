@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AdapterSchema, WireEventSchema, WireReattachCommandSchema } from "./contracts";
+import { AdapterSchema, ImageRefSchema, WireEventSchema, WireReattachCommandSchema } from "./contracts";
 
 const offer = {
   type: "reattach_offer",
@@ -83,6 +83,24 @@ describe("image message contracts", () => {
     });
     if (event.type !== "message") throw new Error("expected message event");
     expect(event.message.images).toEqual([]);
+  });
+
+  it("defaults absent slim metadata for stored events from v0.32", () => {
+    const parsed = ImageRefSchema.parse({
+      id: "image-1",
+      title: null,
+      description: null,
+      mime: "image/png",
+      width: 600,
+      height: 600,
+      bytes: 42,
+      thumb: { mime: "image/webp", width: 512, height: 512 },
+      urls: { original: "/original", thumb: "/thumb" },
+    });
+
+    expect(parsed.slim).toBeNull();
+    expect(parsed.urls.slim).toBeNull();
+    expect(parsed.thumb?.bytes).toBeNull();
   });
 });
 

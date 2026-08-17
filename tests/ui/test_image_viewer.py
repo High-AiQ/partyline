@@ -14,11 +14,14 @@ IMAGE = {
     "height": 560,
     "bytes": 100,
     "thumb": None,
+    "slim": {"mime": "image/webp", "width": 800, "height": 560, "bytes": 80},
     "urls": {
         "original": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' "
         "width='800' height='560'%3E%3Crect width='800' height='560' fill='%23d98e4a'/%3E%3C/svg%3E",
         "thumb": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' "
         "width='800' height='560'%3E%3Crect width='800' height='560' fill='%23d98e4a'/%3E%3C/svg%3E",
+        "slim": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' "
+        "width='800' height='560'%3E%3Crect width='800' height='560' fill='%23c8793e'/%3E%3C/svg%3E",
     },
 }
 
@@ -47,7 +50,9 @@ class ImageViewerLayoutTest(unittest.TestCase):
                 "images": [IMAGE],
             }
             page.evaluate("(value) => { window.partyline.room.messages = [value]; }", message)
+            self.assertEqual(page.locator(".grid .tile img").get_attribute("src"), IMAGE["urls"]["thumb"])
             page.locator(".grid .tile").click()
+            self.assertEqual(page.locator(".stage img").get_attribute("src"), IMAGE["urls"]["slim"])
 
             modal = page.locator(".modal").bounding_box()
             header = page.locator(".modal header").bounding_box()
