@@ -8,6 +8,11 @@ export interface PendingImages {
   description: string;
 }
 
+export interface ImageIntake {
+  generation: number;
+  files: File[];
+}
+
 /** Agent-facing image metadata rides in the durable body but not the human UI. */
 export function visibleMessageBody(message: ChatMessage): string {
   if (!message.images.length) return message.body;
