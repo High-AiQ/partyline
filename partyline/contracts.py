@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .media_contracts import ImageRef
+
 RestartPlanMode = Literal["offer", "automatic"]
 
 
@@ -83,6 +85,12 @@ class MessageResponse(BaseModel):
     sender_type: Literal["human", "agent", "system"]
     body: str
     created_at: float
+    images: list[ImageRef] = Field(default_factory=list)
+
+
+class ImageUploadResponse(BaseModel):
+    message: MessageResponse
+    images: list[ImageRef]
 
 
 class AttachmentResponse(BaseModel):

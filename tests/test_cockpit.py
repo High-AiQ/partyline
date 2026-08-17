@@ -515,12 +515,16 @@ class ArmDispatchTest(unittest.TestCase):
     def test_the_top_level_arm_command_reaches_the_scheduler(self):
         import scripts.cockpit as cockpit
 
-        originals = cockpit.check, cockpit.git, cockpit.check_in_sync, cockpit.arm_restart
+        originals = (
+            cockpit.check, cockpit.git, cockpit.check_in_sync,
+            cockpit.cockpit_can_boot, cockpit.arm_restart,
+        )
         calls = []
         try:
             cockpit.check = lambda: 0
             cockpit.git = lambda *_args, **_kwargs: "same"
             cockpit.check_in_sync = lambda *_args, **_kwargs: []
+            cockpit.cockpit_can_boot = lambda *_args, **_kwargs: None
             cockpit.arm_restart = lambda *args, **kwargs: calls.append((args, kwargs)) or 0
             result = cockpit.main([
                 "arm",
@@ -530,7 +534,8 @@ class ArmDispatchTest(unittest.TestCase):
                 "--cockpit", "/tmp/cockpit",
             ])
         finally:
-            cockpit.check, cockpit.git, cockpit.check_in_sync, cockpit.arm_restart = originals
+            (cockpit.check, cockpit.git, cockpit.check_in_sync,
+             cockpit.cockpit_can_boot, cockpit.arm_restart) = originals
         self.assertEqual(result, 0)
         self.assertEqual(calls[0][0][1:3], (42, 90))
         self.assertEqual(calls[0][1]["unit"], "partyline-restart-test")

@@ -24,6 +24,32 @@ export const ConversationSchema = z.object({
 });
 export type Conversation = z.infer<typeof ConversationSchema>;
 
+export const ImageVariantSchema = z.object({
+  mime: z.string(),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+});
+export type ImageVariant = z.infer<typeof ImageVariantSchema>;
+
+export const ImageUrlsSchema = z.object({
+  original: z.string(),
+  thumb: z.string(),
+});
+export type ImageUrls = z.infer<typeof ImageUrlsSchema>;
+
+export const ImageRefSchema = z.object({
+  id: z.string(),
+  title: z.string().max(200).nullable().default(null),
+  description: z.string().max(2000).nullable().default(null),
+  mime: z.string(),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  bytes: z.number().int().nonnegative(),
+  thumb: ImageVariantSchema.nullable().default(null),
+  urls: ImageUrlsSchema,
+});
+export type ImageRef = z.infer<typeof ImageRefSchema>;
+
 export const ChatMessageSchema = z.object({
   id: z.number().int(),
   conv_id: z.string(),
@@ -31,8 +57,15 @@ export const ChatMessageSchema = z.object({
   sender_type: SenderTypeSchema,
   body: z.string(),
   created_at: z.number(),
+  images: z.array(ImageRefSchema).default([]),
 });
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
+
+export const ImageUploadResponseSchema = z.object({
+  message: ChatMessageSchema,
+  images: z.array(ImageRefSchema),
+});
+export type ImageUploadResponse = z.infer<typeof ImageUploadResponseSchema>;
 
 export const AttachmentSchema = z.object({
   id: z.string(),
@@ -168,133 +201,7 @@ export const ApiErrorBodySchema = z.object({
 });
 export type ApiErrorBody = z.infer<typeof ApiErrorBodySchema>;
 
-export const HelloEventSchema = z.object({
-  type: z.literal("hello"),
-  conversation_id: z.string(),
-  handle: z.string(),
-  build: z.string().optional(),
-  // Required, not optional. "Version missing, keep whatever the badge already
-  // said" is precisely the bug being removed here — a tab showed v0.21.1
-  // against a v0.21.3 server for hours and nothing was wrong enough to notice.
-  version: z.string(),
-});
-export type HelloEvent = z.infer<typeof HelloEventSchema>;
-
-/**
- * Just enough of a hello to decide whether this document is simply out of date.
- *
- * Deliberately laxer than `HelloEventSchema`, and used only after strict
- * decoding has already failed. A server old enough to omit a required field is
- * usually also serving a different bundle — and that tab does not need an error,
- * it needs to reload into the client that matches. Rejecting it strictly first
- * would strand the one case that can repair itself.
- */
-export const LegacyHelloSchema = z.object({
-  type: z.literal("hello"),
-  conversation_id: z.string(),
-  build: z.string().optional(),
-});
-export type LegacyHello = z.infer<typeof LegacyHelloSchema>;
-
-export const MessageEventSchema = z.object({
-  type: z.literal("message"),
-  message: ChatMessageSchema,
-});
-export type MessageEvent = z.infer<typeof MessageEventSchema>;
-
-export const AttachmentEventSchema = z.object({
-  type: z.literal("attachment"),
-  attachment: AttachmentSchema,
-});
-export type AttachmentEvent = z.infer<typeof AttachmentEventSchema>;
-
-export const AttentionEventSchema = z.object({
-  type: z.literal("attention"),
-  attachment_id: z.string(),
-});
-export type AttentionEvent = z.infer<typeof AttentionEventSchema>;
-
-export const ConversationEventSchema = z.object({
-  type: z.literal("conversation"),
-  conversation: ConversationSchema,
-});
-export type ConversationEvent = z.infer<typeof ConversationEventSchema>;
-
-export const ConversationArchivedEventSchema = z.object({
-  type: z.literal("conversation_archived"),
-  conversation_id: z.string(),
-});
-export type ConversationArchivedEvent = z.infer<typeof ConversationArchivedEventSchema>;
-
-export const ConversationDeletedEventSchema = z.object({
-  type: z.literal("conversation_deleted"),
-  conversation_id: z.string(),
-});
-export type ConversationDeletedEvent = z.infer<typeof ConversationDeletedEventSchema>;
-
-export const ErrorEventSchema = z.object({
-  type: z.literal("error"),
-  conversation_id: z.string(),
-  message: z.string(),
-});
-export type ErrorEvent = z.infer<typeof ErrorEventSchema>;
-
-export const ShutdownEventSchema = z.object({
-  type: z.literal("shutdown"),
-});
-export type ShutdownEvent = z.infer<typeof ShutdownEventSchema>;
-
-export const ReattachOfferEventSchema = z.object({
-  type: z.literal("reattach_offer"),
-  conversation_id: z.string(),
-  token: z.string(),
-  attachments: z.array(ReattachCandidateSchema),
-  debrief: z.string(),
-});
-export type ReattachOfferEvent = z.infer<typeof ReattachOfferEventSchema>;
-
-export const ReattachDecisionEventSchema = z.object({
-  type: z.literal("reattach_decision"),
-  conversation_id: z.string(),
-  token: z.string(),
-  action: z.enum(["started", "cancelled"]),
-});
-export type ReattachDecisionEvent = z.infer<typeof ReattachDecisionEventSchema>;
-
-export const WireEventSchema = z.discriminatedUnion("type", [
-  HelloEventSchema,
-  MessageEventSchema,
-  AttachmentEventSchema,
-  AttentionEventSchema,
-  ConversationEventSchema,
-  ConversationArchivedEventSchema,
-  ConversationDeletedEventSchema,
-  ErrorEventSchema,
-  ShutdownEventSchema,
-  ReattachOfferEventSchema,
-  ReattachDecisionEventSchema,
-]);
-export type WireEvent = z.infer<typeof WireEventSchema>;
-
-export const WireHelloCommandSchema = z.object({
-  type: z.literal("hello"),
-  handle: z.string(),
-  client_id: z.string(),
-});
-export type WireHelloCommand = z.infer<typeof WireHelloCommandSchema>;
-
-export const WireMessageCommandSchema = z.object({
-  sender: z.string(),
-  body: z.string(),
-});
-export type WireMessageCommand = z.infer<typeof WireMessageCommandSchema>;
-
-export const ReattachActionSchema = z.enum(["accept", "cancel"]);
-export type ReattachAction = z.infer<typeof ReattachActionSchema>;
-
-export const WireReattachCommandSchema = z.object({
-  type: z.literal("reattach"),
-  token: z.string(),
-  action: ReattachActionSchema,
-});
-export type WireReattachCommand = z.infer<typeof WireReattachCommandSchema>;
+// Keep the original import surface stable while the wire-only contracts live
+// in their own file. `events.ts` uses lazy entity schemas to make this
+// intentional re-export cycle safe at runtime.
+export * from "./events";

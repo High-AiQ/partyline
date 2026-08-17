@@ -68,6 +68,24 @@ describe("wire events with server-omitted null fields", () => {
   });
 });
 
+describe("image message contracts", () => {
+  it("defaults images for messages from servers predating the image field", () => {
+    const event = WireEventSchema.parse({
+      type: "message",
+      message: {
+        id: 1,
+        conv_id: "line",
+        sender: "greg",
+        sender_type: "human",
+        body: "hello",
+        created_at: 1,
+      },
+    });
+    if (event.type !== "message") throw new Error("expected message event");
+    expect(event.message.images).toEqual([]);
+  });
+});
+
 describe("restart wire contracts", () => {
   it("accepts the named same-line offer payload", () => {
     expect(WireEventSchema.parse(offer)).toEqual(offer);
