@@ -8,10 +8,13 @@
    * precedence is the whole reason this is one component.
    */
   import MentionPopover from "./MentionPopover.svelte";
+  import ImageAttachmentPicker from "./ImageAttachmentPicker.svelte";
   import { room } from "../../state/room.svelte.js";
   import { draft } from "../../state/draft.svelte.js";
   import { layout } from "../../state/layout.svelte.js";
   import { insertNewline } from "../../lib/composer";
+  import { api } from "../../lib/api";
+  import type { PendingImages } from "../../lib/images";
   import { applyMention, mentionCandidates, mentionToken } from "../../lib/mentions";
   import type { MentionToken } from "../../lib/mentions";
   import type { MentionCandidate } from "../../lib/mentions";
@@ -19,6 +22,10 @@
   let box = $state<HTMLTextAreaElement | null>(null);
   let token = $state<MentionToken | null>(null);
   let selected = $state(0);
+  let pendingImages = $state<PendingImages>({ files: [], title: "", description: "" });
+  let pickerGeneration = $state(0);
+  let openPicker = $state(0);
+  let uploading = $state(false);
 
   // A handle dropped in from the board should leave the caret at the end, ready
   // to keep typing, rather than wherever it happened to be.
@@ -71,11 +78,38 @@
     selected = 0;
   };
 
-  function send(): void {
-    if (!room.say(draft.text)) return;
-    draft.clear();
-    closeToken();
-    requestAnimationFrame(resize);
+  async function send(): Promise<void> {
+    if (uploading) return;
+    if (!pendingImages.files.length) {
+      if (!room.say(draft.text)) return;
+      draft.clear();
+      closeToken();
+      requestAnimationFrame(resize);
+      return;
+    }
+    const conversation = room.conversation;
+    if (!conversation) return;
+    uploading = true;
+    try {
+      await api.uploadImages(conversation.id, {
+        files: pendingImages.files,
+        sender: room.identity.handle,
+        body: draft.text.trim(),
+        title: pendingImages.title.trim() || null,
+        description: pendingImages.description.trim() || null,
+      });
+      pendingImages = { files: [], title: "", description: "" };
+      openPicker = 0;
+      pickerGeneration++;
+      draft.clear();
+      closeToken();
+      await room.resync();
+      requestAnimationFrame(resize);
+    } catch (error) {
+      room.showNotice(error instanceof Error ? error.message : "image upload failed", "error");
+    } finally {
+      uploading = false;
+    }
   }
 
   function onKeydown(event: KeyboardEvent): void {
@@ -116,7 +150,7 @@
     // every time someone reaches for a paragraph is unusable. Tap send.
     if (event.key === "Enter" && !event.shiftKey && !layout.narrow) {
       event.preventDefault();
-      send();
+      void send();
     }
   }
 </script>
@@ -126,7 +160,35 @@
     <MentionPopover {candidates} {selected} onpick={pick} />
   {/if}
 
-  <div class="box">
+  {#key pickerGeneration}
+    <ImageAttachmentPicker
+      {openPicker}
+      onselection={(selection: PendingImages) => {
+        pendingImages = selection;
+      }}
+      onlimit={() => {
+        room.showNotice("attach at most 6 images at once", "error");
+      }}
+    />
+  {/key}
+
+  <div class="box" aria-busy={uploading}>
+    <button
+      class="attach"
+      type="button"
+      aria-label="attach images"
+      title="attach up to 6 images"
+      disabled={!room.conversation || uploading}
+      onclick={() => {
+        openPicker++;
+      }}
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path
+          d="M21.4 11.6 12 21a6 6 0 0 1-8.5-8.5l10-10a4 4 0 1 1 5.7 5.7l-10 10a2 2 0 0 1-2.9-2.8l9.3-9.3"
+        />
+      </svg>
+    </button>
     <textarea
       id="input"
       bind:this={box}
@@ -141,7 +203,13 @@
       }}
       onclick={refreshToken}
       onblur={() => setTimeout(closeToken, 150)}></textarea>
-    <button id="send" class="primary" type="button" onclick={send}>send</button>
+    <button
+      id="send"
+      class="primary"
+      type="button"
+      disabled={uploading || (!draft.text.trim() && !pendingImages.files.length)}
+      onclick={() => void send()}>{uploading ? "uploading…" : "send"}</button
+    >
   </div>
   <div class="hint">
     enter to send · shift+enter or ctrl+j for a new line · agents only wake when @mentioned · @all rings every
@@ -164,6 +232,31 @@
     border-radius: 6px;
     padding: 10px 12px;
     transition: border-color 0.15s;
+  }
+  .attach {
+    display: grid;
+    width: 44px;
+    height: 44px;
+    flex: none;
+    place-items: center;
+    padding: 0;
+  }
+  .attach svg {
+    width: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+  }
+  button:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+  button:disabled:hover {
+    border-color: var(--color-line);
+    background: var(--color-ink-3);
+    color: var(--color-cream-dim);
   }
   .box:focus-within {
     border-color: var(--color-copper);
@@ -197,5 +290,6 @@
   }
   #send {
     align-self: flex-end;
+    min-height: 44px;
   }
 </style>

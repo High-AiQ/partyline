@@ -72,9 +72,11 @@
 
   header {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     justify-content: space-between;
-    padding: 16px 20px 10px;
+    flex: none;
+    min-height: 52px;
+    padding: 4px 8px 4px 20px;
     border-bottom: 1px dashed var(--color-line);
   }
   h2 {
@@ -85,12 +87,14 @@
     color: var(--color-cream);
   }
   .close {
+    width: 44px;
+    height: 44px;
     background: none;
     border: 0;
     color: var(--color-cream-faint);
     cursor: pointer;
     font-size: 14px;
-    padding: 4px;
+    padding: 0;
   }
   .close:hover {
     color: var(--color-red);
@@ -98,6 +102,7 @@
   }
 
   .content {
+    min-height: 0;
     padding: 14px 20px 20px;
     overflow-y: auto;
     display: flex;
