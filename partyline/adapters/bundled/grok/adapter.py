@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import glob
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -29,6 +30,10 @@ class PartylineAdapter(Adapter):
         stored_session = str(self.att.get("cli_session") or "").strip()
         self._session_id = stored_session if self.resume else self.att["id"]
         self._accounted: int | None = None if self.resume else 0
+        # Fingerprints of every assistant record already accounted for, in
+        # order. The ordinal alone cannot survive Grok rewriting the file with
+        # a shorter history (compaction); the sequence can.
+        self._assistant_fingerprints: list[bytes] = []
 
     def _transcript(self) -> Path | None:
         """Return the one transcript whose caller-pinned UUID matches."""
@@ -44,7 +49,10 @@ class PartylineAdapter(Adapter):
                 raise ValueError("Grok resume requires the stored session UUID")
             path = self._transcript()
             if path is not None:
-                self._accounted = self._assistant_count(path)
+                scanned = self._assistant_scan(path)
+                if scanned is not None:
+                    self._assistant_fingerprints = scanned
+                    self._accounted = len(scanned)
         await super().start()
 
     def build_command(self) -> list[str]:
@@ -93,10 +101,14 @@ class PartylineAdapter(Adapter):
     def _is_assistant_record(record: object) -> bool:
         return isinstance(record, dict) and record.get("type") == "assistant"
 
+    @staticmethod
+    def _fingerprint(line: str) -> bytes:
+        return hashlib.sha256(line.encode("utf-8")).digest()
+
     @classmethod
-    def _assistant_count(cls, path: Path) -> int | None:
-        """Count committed assistant records without trusting byte offsets."""
-        count = 0
+    def _assistant_scan(cls, path: Path) -> list[bytes] | None:
+        """Fingerprint committed assistant records without trusting byte offsets."""
+        fingerprints: list[bytes] = []
         try:
             with path.open(encoding="utf-8", errors="replace") as file:
                 for line in file:
@@ -104,10 +116,17 @@ class PartylineAdapter(Adapter):
                         record = json.loads(line)
                     except json.JSONDecodeError:
                         continue
-                    count += cls._is_assistant_record(record)
+                    if cls._is_assistant_record(record):
+                        fingerprints.append(cls._fingerprint(line))
         except OSError:
             return None
-        return count
+        return fingerprints
+
+    @classmethod
+    def _assistant_count(cls, path: Path) -> int | None:
+        """Count committed assistant records without trusting byte offsets."""
+        scanned = cls._assistant_scan(path)
+        return None if scanned is None else len(scanned)
 
     async def _run(self):
         waited = 0.0
@@ -130,7 +149,10 @@ class PartylineAdapter(Adapter):
         if self.resume and self._accounted is None:
             # Do not mistake an unavailable pre-spawn count for an empty
             # history: zero would replay every old reply after resume.
-            self._accounted = self._assistant_count(path)
+            scanned = self._assistant_scan(path)
+            if scanned is not None:
+                self._assistant_fingerprints = scanned
+                self._accounted = len(scanned)
         if self._accounted is None:
             await self.post(
                 "system", "system",
@@ -160,6 +182,7 @@ class PartylineAdapter(Adapter):
                         line = file.readline()
                         if not line:
                             if self._replaced(file, path):
+                                self._resync_after_replace(path)
                                 break
                             await asyncio.sleep(self.POLL_SECONDS)
                             continue
@@ -177,11 +200,49 @@ class PartylineAdapter(Adapter):
                         if assistant_index <= self._accounted:
                             continue
                         self._accounted += 1
+                        self._assistant_fingerprints.append(self._fingerprint(line))
                         await handle(record)
             except OSError:
                 if not self.alive():
                     return
                 await asyncio.sleep(self.POLL_SECONDS)
+
+    def _resync_after_replace(self, path: Path) -> None:
+        """Re-anchor the replay watermark on the replacement file.
+
+        Grok rewrites chat_history.jsonl when it compacts a session, dropping
+        older records, so an ordinal counted against the previous file can
+        exceed every index in the new one and mute all future replies. Align
+        the records already seen with the start of the replacement — a
+        compaction keeps the recent tail verbatim — and resume after the
+        overlap. No overlap means nothing was retained, so every record in the
+        replacement is genuinely new and must be relayed.
+        """
+        seen = self._assistant_fingerprints
+        if not seen:
+            # A resume that only counted history has no sequence to align;
+            # keep the ordinal, which holds for Grok's superset resume swap.
+            return
+        incoming: list[bytes] = []
+        try:
+            with path.open(encoding="utf-8", errors="replace") as file:
+                for line in file:
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if self._is_assistant_record(record):
+                        incoming.append(self._fingerprint(line))
+        except OSError:
+            return
+        low, high = 0, min(len(seen), len(incoming))
+        while low < high:
+            mid = (low + high + 1) // 2
+            if seen[-mid:] == incoming[:mid]:
+                low = mid
+            else:
+                high = mid - 1
+        self._accounted = low
 
     @staticmethod
     def _replaced(file, path: Path) -> bool:

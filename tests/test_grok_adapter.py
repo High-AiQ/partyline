@@ -185,6 +185,95 @@ class ResumeTranscriptTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(posted, ["first reply", "second reply"])
 
+    async def test_compaction_relays_replies_written_after_the_rewrite(self):
+        """A shorter replacement must re-anchor the watermark, not mute the tail."""
+        posted = []
+        caught_up = asyncio.Event()
+        delivered = asyncio.Event()
+        running = True
+
+        async def handle(record):
+            posted.append(record["content"])
+            if len(posted) == 5:
+                caught_up.set()
+            if record["content"] == "post-compaction reply":
+                delivered.set()
+
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "chat_history.jsonl"
+            transcript.write_text(
+                "".join(
+                    f'{{"type":"assistant","content":"reply {n}"}}\n' for n in range(1, 6)
+                ),
+                encoding="utf-8",
+            )
+            adapter = make_adapter()
+            adapter.alive = lambda: running
+            task = asyncio.create_task(adapter._tail_grok_transcript(transcript, handle))
+            await asyncio.wait_for(caught_up.wait(), timeout=1)
+
+            replacement = Path(directory) / "replacement.jsonl"
+            replacement.write_text(
+                '{"type":"assistant","content":"reply 4"}\n'
+                '{"type":"assistant","content":"reply 5"}\n'
+                '{"type":"assistant","content":"post-compaction reply"}\n',
+                encoding="utf-8",
+            )
+            replacement.replace(transcript)
+            await asyncio.wait_for(delivered.wait(), timeout=2)
+            running = False
+            await asyncio.wait_for(task, timeout=2)
+
+        self.assertEqual(
+            posted,
+            [f"reply {n}" for n in range(1, 6)] + ["post-compaction reply"],
+        )
+
+    async def test_fully_rewritten_transcript_relays_everything_it_contains(self):
+        """No retained records means no overlap, so nothing may be skipped."""
+        posted = []
+        caught_up = asyncio.Event()
+        delivered = asyncio.Event()
+        running = True
+
+        async def handle(record):
+            posted.append(record["content"])
+            if len(posted) == 2:
+                caught_up.set()
+            if record["content"] == "brand new":
+                delivered.set()
+
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "chat_history.jsonl"
+            transcript.write_text(
+                '{"type":"assistant","content":"old one"}\n'
+                '{"type":"assistant","content":"old two"}\n',
+                encoding="utf-8",
+            )
+            adapter = make_adapter()
+            adapter.alive = lambda: running
+            task = asyncio.create_task(adapter._tail_grok_transcript(transcript, handle))
+            await asyncio.wait_for(caught_up.wait(), timeout=1)
+
+            replacement = Path(directory) / "replacement.jsonl"
+            replacement.write_text(
+                '{"type":"assistant","content":"brand new"}\n', encoding="utf-8",
+            )
+            replacement.replace(transcript)
+            await asyncio.wait_for(delivered.wait(), timeout=2)
+            running = False
+            await asyncio.wait_for(task, timeout=2)
+
+        self.assertEqual(posted, ["old one", "old two", "brand new"])
+
+    def test_resync_ignores_an_unreadable_replacement(self):
+        adapter = make_adapter()
+        adapter._accounted = 7
+        adapter._assistant_fingerprints = [b"fingerprint"]
+        with patch.object(Path, "open", side_effect=OSError):
+            adapter._resync_after_replace(Path("/gone"))
+        self.assertEqual(adapter._accounted, 7)
+
 
 class LifecycleTest(unittest.IsolatedAsyncioTestCase):
     async def test_start_refuses_resume_without_a_session_before_spawning(self):
@@ -197,12 +286,13 @@ class LifecycleTest(unittest.IsolatedAsyncioTestCase):
         transcript = Path("/tmp/grok-transcript.jsonl")
         with (
             patch.object(adapter, "_transcript", return_value=transcript),
-            patch.object(adapter, "_assistant_count", return_value=3),
+            patch.object(adapter, "_assistant_scan", return_value=[b"a", b"b", b"c"]),
             patch.object(Adapter, "start", new=AsyncMock()),
         ):
             await adapter.start()
 
         self.assertEqual(adapter._accounted, 3)
+        self.assertEqual(adapter._assistant_fingerprints, [b"a", b"b", b"c"])
 
     def test_assistant_count_skips_invalid_and_non_assistant_records(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -230,7 +320,7 @@ class LifecycleTest(unittest.IsolatedAsyncioTestCase):
         adapter.alive = lambda: True
         with (
             patch.object(adapter, "_transcript", return_value=path),
-            patch.object(adapter, "_assistant_count", return_value=None),
+            patch.object(adapter, "_assistant_scan", return_value=None),
         ):
             await adapter._run()
 

@@ -126,6 +126,15 @@ enforce it. A prose warning that has no executable guard is not a completed less
   tail kept polling the old unlinked inode: the jack remained `running` and alive but could never
   post again. Grok's tail now checks every empty read for inode replacement or truncate-in-place,
   then reopens the path; the live codeword proof confirms the post-resume reply reaches the room.
+- **An ordinal watermark cannot survive a history rewrite.** Grok compaction atomically replaced
+  a live `chat_history.jsonl` with a shorter file (152 assistant records collapsed to 41, the
+  older ones moved under `compaction/`). The tail reopened the new inode correctly, but the
+  replay watermark was an ordinal counted against the *previous* file, so every post-compaction
+  reply was skipped as "already relayed" while the jack stayed `running` — the CLI was receiving
+  and answering, and only peeking at its terminal revealed the speech. The watermark is now
+  re-anchored on every replacement by aligning fingerprints of the records already seen with the
+  start of the replacement file, with regressions for a retained-tail compaction and a full
+  rewrite. A position that must survive a rewrite has to live in the records, not in their count.
 - **Dead code can contain an unwired guard.** Grok's private decoder rejected non-object JSON, but
   production never called it; deleting that helper exposed a crash on `[]`, strings, numbers, or
   `null`. Removing unreachable code must include checking what it knew. The live shared JSONL
