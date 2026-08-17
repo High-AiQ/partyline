@@ -431,6 +431,7 @@ class BriefingTest(unittest.TestCase):
         text = Recorder(["cat"]).briefing()
         self.assertIn("curl -F file=@", text)
         self.assertIn("$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/images", text)
+        self.assertIn("smallest tier", text)
 
     def test_briefing_bans_ack_loops_between_processes(self):
         self.assertIn("Never trade acknowledgments", Recorder(["cat"]).briefing())
