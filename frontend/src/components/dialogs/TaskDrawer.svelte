@@ -44,11 +44,13 @@
     error = "";
     try {
       const found = await coordinationApi.tasks(id);
-      if (id === conversationId) tasks = found;
+      if (id !== conversationId) return;
+      tasks = found;
     } catch (caught) {
+      if (id !== conversationId) return;
       error = message(caught, "could not load tasks");
     } finally {
-      loading = false;
+      if (id === conversationId) loading = false;
     }
   }
 
