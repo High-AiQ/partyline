@@ -218,13 +218,13 @@ class Adapter:
         """Receive bytes from the pty. Transcript adapters can ignore this."""
 
     async def deliver(self, messages: list[dict]):
-        # Being woken is the thing that ends post-resume silence: from here on
-        # the process is answering something real rather than finishing a turn
-        # that was cut off.
-        self._silent_until_wake = False
+        # Being woken ends post-resume silence — but only once the wake has
+        # reached the pty. Clearing it first lets a tail release held speech
+        # mid-write, before a delivery watcher has recorded the turn.
         text = self.format_digest(messages)
         if text.strip():
             await self.send_keys(text)
+        self._silent_until_wake = False
 
     def stage_startup_delivery(self, messages: list[dict]) -> bool:
         """Stage a wake in the process command, if this adapter supports it.

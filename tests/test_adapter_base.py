@@ -318,6 +318,46 @@ async def _stop(adapter):
     await adapter.stop()
 
 
+class WakeBoundaryTest(unittest.IsolatedAsyncioTestCase):
+    """Silence must end only once the wake has actually reached the pty.
+
+    Found by @sol: `deliver()` cleared `_silent_until_wake` before writing, so
+    a transcript tail could release held speech during the write — before
+    anything watching deliveries had recorded that a turn began. The badge
+    then lit after the speech that should have cleared it, and stayed lit.
+    """
+
+    async def test_silence_holds_until_the_write_succeeds(self):
+        adapter = Adapter({"id": "x", "name": "n", "command": ["cat"], "cwd": "/tmp"},
+                          _noop_post, _noop_status)
+        adapter._silent_until_wake = True
+        observed = []
+
+        async def send_keys(text):
+            observed.append(adapter._silent_until_wake)
+
+        adapter.send_keys = send_keys
+        await adapter.deliver([{"sender": "greg", "body": "wake up"}])
+
+        self.assertEqual(observed, [True], "speech could be released mid-write")
+        self.assertFalse(adapter._silent_until_wake)
+
+    async def test_a_failed_write_leaves_the_process_silent(self):
+        """If the wake never landed, the turn never started."""
+        adapter = Adapter({"id": "x", "name": "n", "command": ["cat"], "cwd": "/tmp"},
+                          _noop_post, _noop_status)
+        adapter._silent_until_wake = True
+
+        async def send_keys(text):
+            raise OSError("the pty is gone")
+
+        adapter.send_keys = send_keys
+        with self.assertRaises(OSError):
+            await adapter.deliver([{"sender": "greg", "body": "wake up"}])
+
+        self.assertTrue(adapter._silent_until_wake)
+
+
 class DigestTest(unittest.IsolatedAsyncioTestCase):
     def test_a_digest_is_sender_prefixed_lines_plus_the_standing_reminder(self):
         adapter = Recorder(["cat"])
