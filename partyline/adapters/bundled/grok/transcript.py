@@ -9,7 +9,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from pathlib import Path
+
+
+@dataclass(frozen=True)
+class AssistantRecord:
+    """One assistant record in transcript order, whether or not it is speech."""
+
+    fingerprint: bytes
+    body: str | None
 
 
 def assistant_text(record: object) -> str | None:
@@ -47,9 +56,9 @@ def fingerprint(line: str) -> bytes:
     return hashlib.sha256(line.encode("utf-8")).digest()
 
 
-def assistant_scan(path: Path) -> list[bytes] | None:
-    """Fingerprint committed assistant records without trusting byte offsets."""
-    fingerprints: list[bytes] = []
+def assistant_records(path: Path) -> list[AssistantRecord] | None:
+    """Read committed assistant records without trusting byte offsets."""
+    records: list[AssistantRecord] = []
     try:
         with path.open(encoding="utf-8", errors="replace") as file:
             for line in file:
@@ -58,10 +67,16 @@ def assistant_scan(path: Path) -> list[bytes] | None:
                 except json.JSONDecodeError:
                     continue
                 if is_assistant_record(record):
-                    fingerprints.append(fingerprint(line))
+                    records.append(AssistantRecord(fingerprint(line), assistant_text(record)))
     except OSError:
         return None
-    return fingerprints
+    return records
+
+
+def assistant_scan(path: Path) -> list[bytes] | None:
+    """Fingerprint committed assistant records without trusting byte offsets."""
+    records = assistant_records(path)
+    return None if records is None else [record.fingerprint for record in records]
 
 
 def assistant_count(path: Path) -> int | None:

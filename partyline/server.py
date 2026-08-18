@@ -27,6 +27,7 @@ from starlette.background import BackgroundTask
 
 from . import __version__
 from .attachment_commands import validated_attachment_command
+from .attachment_resume import resume_adapter
 from .bind import BindConfig, load_bind_config, load_dotenv, parse_bind_args, resolve_bind
 from .adapters import (
     ADAPTERS,
@@ -81,9 +82,7 @@ from .media_routes import media_router
 from .task_routes import wire_tasks
 from .reattach import (
     ReattachCoordinator,
-    ResumedAttachment,
     RestartPlanError,
-    adapter_can_resume,
     create_restart_plan,
 )
 from .runtime import NAME_RE, RESERVED_NAMES, ChatRuntime
@@ -464,53 +463,13 @@ async def resume_attachment(att_id: str):
 
 async def _resume_adapter(
     att_id: str, startup_messages: list[dict] | None = None
-) -> ResumedAttachment:
-    att = runtime.db.get_attachment(att_id)
-    if not att:
-        raise HTTPException(404)
-    if att["status"] in ("starting", "running") or att_id in runtime.live:
-        raise HTTPException(409, f"'{att['name']}' is already live")
-    capabilities = ADAPTER_METADATA.get(att["adapter"], {})
-    if not adapter_can_resume(capabilities):
-        raise HTTPException(400, f"the {att['adapter']} adapter has no session to resume")
-    for other in runtime.db.list_attachments(att["conv_id"]):
-        if other["name"].lower() == att["name"].lower() and other["status"] in ("starting", "running"):
-            raise HTTPException(409, f"'{att['name']}' is already attached")
-
-    conv = runtime.db.get_conversation(att["conv_id"])
-    if conv["archived_at"]:
-        raise HTTPException(409, "restore the line before resuming its processes")
-    att["conv_name"] = conv["name"]
-    att["resume"] = True
-    att["hook_url"] = _hook_url(att_id, app.state.bind)
-    att["digest_rider"] = lambda: tasks.rider(att["conv_id"])
-    runtime_owner = str(uuid.uuid4())
-    att["runtime_owner"] = runtime_owner
-
-    adapter = make_adapter(
-        att["adapter"],
-        att,
-        presence.posting(conv["id"], att_id, runtime.post_callback(att_id, conv["id"], runtime_owner)),
-        presence.statusing(conv["id"], att_id, runtime.status_callback(att_id, conv["id"], runtime_owner)),
-        on_cli_session=lambda s: runtime.db.set_cli_session(att_id, s, runtime_owner),
+):
+    return await resume_adapter(
+        att_id, startup_messages, runtime=runtime,
+        adapter_metadata=ADAPTER_METADATA, make_adapter=make_adapter,
+        presence=presence, tasks=tasks,
+        hook_url=lambda ident: _hook_url(ident, app.state.bind),
     )
-    startup_delivery_staged = adapter.stage_startup_delivery(startup_messages or [])
-    if not await runtime.db.claim_attachment_async(att_id, runtime_owner):
-        raise HTTPException(409, f"'{att['name']}' is already live")
-    try:
-        await adapter.start()
-    except Exception as exc:
-        await runtime.db.set_attachment_status_async(
-            att_id, "exited", runtime_owner
-        )
-        raise HTTPException(500, f"failed to resume: {exc}") from exc
-    runtime.live[att_id] = presence.watch(adapter, att["conv_id"], att_id)
-
-    await runtime.post_message(
-        att["conv_id"], "system", "system",
-        f"@{att['name']} resumed with full context · session {att.get('cli_session') or att_id}",
-    )
-    return ResumedAttachment(adapter, startup_delivery_staged)
 
 
 @app.patch("/api/attachments/{att_id}", response_model=AttachmentResponse)
