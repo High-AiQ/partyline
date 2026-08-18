@@ -27,7 +27,7 @@ from starlette.background import BackgroundTask
 
 from . import __version__
 from .attachment_commands import validated_attachment_command
-from .bind import BindConfig, load_bind_config, parse_bind_args, resolve_bind
+from .bind import BindConfig, load_bind_config, load_dotenv, parse_bind_args, resolve_bind
 from .adapters import (
     ADAPTERS,
     ADAPTER_METADATA,
@@ -74,6 +74,7 @@ from .contracts import (
 )
 from .db import Db
 from .frontend_build import current_frontend_build
+from .presence import Presence
 from .media import MediaStore, media_root
 from .media_routes import media_router
 from .reattach import (
@@ -91,30 +92,6 @@ ASSETS_DIR = STATIC_DIR / "assets"
 logger = logging.getLogger(__name__)
 
 
-def load_dotenv(path: str = ".env"):
-    """Merge a local .env into the environment attached processes inherit.
-
-    Credentials for an attached CLI have to reach it somehow, and the two bad
-    answers are baking them into a stored command or exporting them from a shell
-    profile. A gitignored .env next to the server is the third option. Variables
-    already set in the real environment always win, so an inline
-    `KEY=... uv run partyline` still overrides the file.
-    """
-    try:
-        lines = Path(path).read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key, value = key.strip().removeprefix("export ").strip(), value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
-        os.environ.setdefault(key, value)
-
-
 # The .env merge has to happen before anything reads the environment.
 # `runtime`, `media`, and the router below all bind at import, so loading
 # it later — as `main()` used to — meant a .env-only PARTYLINE_MEDIA_DIR or
@@ -124,6 +101,7 @@ def load_dotenv(path: str = ".env"):
 load_dotenv()
 runtime = ChatRuntime(Db(os.environ.get("PARTYLINE_DB", os.path.expanduser("~/.partyline.db"))))
 media = MediaStore(runtime.db, media_root(os.environ, runtime.db.path))
+presence = Presence(runtime)
 
 
 async def _run_automatic_reattachment() -> None:
@@ -309,6 +287,7 @@ async def conversation_detail(conv_id: str):
         "conversation": conv,
         "messages": media.attach(runtime.db.list_messages(conv_id)),
         "attachments": runtime.db.list_attachments(conv_id),
+        "working": presence.working_ids(conv_id),
     }
 
 
@@ -450,8 +429,8 @@ async def attach(conv_id: str, body: AttachIn):
     adapter = make_adapter(
         body.adapter,
         att,
-        runtime.post_callback(att_id, conv_id, runtime_owner),
-        runtime.status_callback(att_id, conv_id, runtime_owner),
+        presence.posting(conv_id, att_id, runtime.post_callback(att_id, conv_id, runtime_owner)),
+        presence.statusing(conv_id, att_id, runtime.status_callback(att_id, conv_id, runtime_owner)),
         on_cli_session=lambda s: runtime.db.set_cli_session(att_id, s, runtime_owner),
     )
     try:
@@ -461,7 +440,7 @@ async def attach(conv_id: str, body: AttachIn):
             att_id, "exited", runtime_owner
         )
         raise HTTPException(500, f"failed to spawn: {exc}") from exc
-    runtime.live[att_id] = adapter
+    runtime.live[att_id] = presence.watch(adapter, conv_id, att_id)
 
     await runtime.post_message(
         conv_id, "system", "system",
@@ -503,8 +482,8 @@ async def _resume_adapter(
     adapter = make_adapter(
         att["adapter"],
         att,
-        runtime.post_callback(att_id, att["conv_id"], runtime_owner),
-        runtime.status_callback(att_id, att["conv_id"], runtime_owner),
+        presence.posting(conv["id"], att_id, runtime.post_callback(att_id, conv["id"], runtime_owner)),
+        presence.statusing(conv["id"], att_id, runtime.status_callback(att_id, conv["id"], runtime_owner)),
         on_cli_session=lambda s: runtime.db.set_cli_session(att_id, s, runtime_owner),
     )
     startup_delivery_staged = adapter.stage_startup_delivery(startup_messages or [])
@@ -517,7 +496,7 @@ async def _resume_adapter(
             att_id, "exited", runtime_owner
         )
         raise HTTPException(500, f"failed to resume: {exc}") from exc
-    runtime.live[att_id] = adapter
+    runtime.live[att_id] = presence.watch(adapter, att["conv_id"], att_id)
 
     await runtime.post_message(
         att["conv_id"], "system", "system",

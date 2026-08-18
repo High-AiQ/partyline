@@ -123,6 +123,10 @@ class ConversationDetailResponse(BaseModel):
     conversation: ConversationResponse
     messages: list[MessageResponse]
     attachments: list[AttachmentResponse]
+    # Which attachments are mid-turn right now. A tab that opens or reconnects
+    # during someone's turn would otherwise show nothing until the next
+    # transition — the indicator would be blank exactly when it matters.
+    working: list[str] = []
 
 
 class ReattachCandidateResponse(BaseModel):
@@ -202,6 +206,14 @@ class AttachmentEvent(BaseModel):
     attachment: AttachmentResponse
 
 
+class WorkingEvent(BaseModel):
+    """A process began or finished a turn. Only the server ever sends this."""
+
+    type: Literal["working"] = "working"
+    attachment_id: str
+    working: bool
+
+
 class AttentionEvent(BaseModel):
     type: Literal["attention"] = "attention"
     attachment_id: str
@@ -262,6 +274,7 @@ Event = (
     | MessageEvent
     | AttachmentEvent
     | AttentionEvent
+    | WorkingEvent
     | ConversationEvent
     | ConversationArchivedEvent
     | ConversationDeletedEvent
