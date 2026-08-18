@@ -58,6 +58,9 @@ class PartylineAdapter(Adapter):
         # would preserve an ordinal through a real compaction and mute the
         # process. The flag records what was observed, never what was assumed.
         self._resume_swap_pending = False
+        # Ordinal a resume's refill must reach to count as restored.
+        self._restoring_to: int | None = None
+        self._refused_resync = False  # told the room about a refused re-anchor?
 
     def _transcript(self) -> Path | None:
         """Return the one transcript whose caller-pinned UUID matches."""
@@ -111,23 +114,11 @@ class PartylineAdapter(Adapter):
     async def _settled_assistant_scan(self, path: Path) -> list[bytes] | None:
         """Fingerprint a resumed transcript only once it has stopped changing.
 
-        Grok recreates ``chat_history.jsonl`` when it resumes and fills the
-        restored history back into it. Counting the instant the file appears
-        can therefore catch it empty or half-written, and a watermark of zero
-        relays everything the process ever said back into the room as if it
-        were new — the failure this guard exists to make impossible.
-
-        There is no signal from the CLI that the restore is finished, so the
-        only honest one available is the file going quiet. If it never does,
-        return ``None``: the caller refuses out loud rather than tailing from
-        a count it cannot trust.
-
-        Quiet before the scan is not enough. Reading the file takes time, and
-        a restore that resumes mid-read yields a count of what the file used
-        to hold — a short watermark, which is the same replay this guard
-        exists to prevent, arriving through a narrower door. The scan is
-        therefore bracketed: same inode, size, and mtime before and after, or
-        the count is discarded and the stability window starts over.
+        Counting the instant the file appears can catch it empty or
+        half-written, and a watermark of zero replays everything ever said. No
+        CLI signal says the restore finished; the file going quiet is the only
+        honest one, and quiet *before* the scan is not enough — the scan is
+        bracketed by identity, or discarded. ``None`` means never settled.
         """
         previous = None
         stable_for = 0.0
@@ -205,6 +196,15 @@ class PartylineAdapter(Adapter):
                             if self._replaced(file, path):
                                 await self._resync_after_replace(path)
                                 break
+                            if self._restoring_to is not None:
+                                pass  # a restore is still refilling this file
+                            elif self._accounted > assistant_index:
+                                # A watermark past the end of the file is a mute,
+                                # not a wait: nothing can ever clear it. Refusing
+                                # to replay must not become refusing to speak.
+                                await self._resync_after_replace(path)
+                                await asyncio.sleep(self.POLL_SECONDS)
+                                break
                             await asyncio.sleep(self.POLL_SECONDS)
                             continue
                         if not line.endswith("\n"):
@@ -219,11 +219,13 @@ class PartylineAdapter(Adapter):
                             continue
                         assistant_index += 1
                         if assistant_index <= self._accounted:
+                            if assistant_index == self._restoring_to:
+                                self._restoring_to = None  # the refill caught up
                             continue
                         self._accounted += 1
-                        # Genuine new speech proves the restore finished, so a
-                        # later replacement really is a compaction.
+                        # New speech proves the restore finished.
                         self._resume_swap_pending = False
+                        self._restoring_to = None
                         self._assistant_fingerprints.append(self._fingerprint(line))
                         await handle(record)
             except OSError:
@@ -252,12 +254,13 @@ class PartylineAdapter(Adapter):
         nothing is recoverable, relaying everything is not.
         """
         if self._resume_swap_pending:
-            # The one replacement a resume performs. The replacement is a
-            # superset of what was counted before the spawn, so the ordinal
-            # carries across it unchanged; consulting overlap here is what
-            # replayed whole sessions into the room, whether the file was
-            # caught empty or caught halfway through its refill.
+            # The one replacement a resume performs: a superset of the
+            # pre-spawn count, so the ordinal carries across it untouched —
+            # consulting overlap here replayed whole sessions. The swap is
+            # consumed now, but the file is not restored until the refill
+            # reaches that ordinal, and recovery must keep out of the way.
             self._resume_swap_pending = False
+            self._restoring_to = self._accounted
             return
         seen = self._assistant_fingerprints
         if not seen:
@@ -265,12 +268,16 @@ class PartylineAdapter(Adapter):
             return
         incoming = await self._settled_assistant_scan(path)
         if not incoming:
-            await self.post(
-                "system", "system",
-                f"@{self.att['name']}: the Grok transcript was replaced and has not "
-                "settled; keeping the previous position rather than replaying history",
-            )
+            # Once per episode: the tail retries while the position is stale.
+            if not self._refused_resync:
+                self._refused_resync = True
+                await self.post(
+                    "system", "system",
+                    f"@{self.att['name']}: the Grok transcript was replaced and has not "
+                    "settled; holding position and retrying rather than replaying history",
+                )
             return
+        self._refused_resync = False
         low, high = 0, min(len(seen), len(incoming))
         while low < high:
             mid = (low + high + 1) // 2
