@@ -92,6 +92,10 @@ async def align_delivery_history(adapter, path: Path) -> bool:
         # appended next; refusing replay must not permanently mute it.
         adapter._accounted = len(records)
         adapter._delivery_skip.clear()
+        # A refusal skips the restored history, so there is no flush to
+        # announce. Leaving a count from an earlier alignment here would
+        # attach a stale number to whatever relays next.
+        adapter._pending_backlog = 0
         adapter._delivery_plan = (
             identity, tuple(record.fingerprint for record in records)
         )

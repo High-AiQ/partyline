@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from partyline.adapters import Adapter
 from partyline.adapters.bundled.grok.adapter import PartylineAdapter
 from partyline.adapters.bundled.grok.resume import (
+    align_delivery_history,
     announce_backlog,
     AlignmentError,
     align_delivered_sequence,
@@ -556,6 +557,36 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sender_type, "system")
         self.assertIn("39 message(s) that never reached this line", body)
         self.assertIn("older state", body)
+
+    async def test_a_refused_alignment_drops_an_earlier_pending_count(self):
+        """A count belongs to the alignment that measured it.
+
+        Raised by @sol: if a later alignment refuses, its predecessor's
+        backlog must not survive and describe a flush that no longer exists.
+        """
+        posted = []
+
+        async def collect(sender, sender_type, body):
+            posted.append(body)
+
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "chat_history.jsonl"
+            transcript.write_text(
+                '{"type":"assistant","content":"Idle."}\n'
+                '{"type":"assistant","content":"Idle."}\n',
+                encoding="utf-8",
+            )
+            adapter = make_adapter(resume=True, session_id=SESSION_ID, collector=collect)
+            adapter.POLL_SECONDS = 0.005
+            adapter.SETTLE_SECONDS = 0.01
+            adapter.alive = lambda: True
+            adapter._pending_backlog = 39  # measured by an earlier alignment
+            adapter._delivered_bodies = ["Idle."]  # ambiguous: no unique suffix
+
+            await align_delivery_history(adapter, transcript)
+
+        self.assertEqual(adapter._pending_backlog, 0)
+        self.assertTrue(any("no unique suffix" in body for body in posted))
 
     async def test_a_resume_with_nothing_held_back_says_nothing(self):
         posted = []
