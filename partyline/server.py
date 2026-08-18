@@ -76,6 +76,7 @@ from .db import Db
 from .frontend_build import current_frontend_build
 from .presence import Presence
 from .media import MediaStore, media_root
+from .claim_routes import claims_router, purge_claims
 from .media_routes import media_router
 from .reattach import (
     ReattachCoordinator,
@@ -133,6 +134,7 @@ app = FastAPI(lifespan=lifespan)
 app.state.bind = BindConfig()
 register_terminal_route(app, runtime)
 app.include_router(media_router(runtime, media))
+app.include_router(claims_router(runtime))
 
 # -- REST ------------------------------------------------------------------
 @app.get("/")
@@ -382,6 +384,7 @@ async def purge_conversation(conv_id: str):
         raise HTTPException(409, "archive the line before purging it")
     await runtime.stop_attachments(conv_id)  # belt and braces: nothing should be live
     media.delete_conversation(conv_id)  # a purge takes the pictures with it
+    purge_claims(runtime.db, conv_id)
     runtime.db.delete_conversation(conv_id)
     runtime.sockets.pop(conv_id, None)
     return {"ok": True, "purged": True}
