@@ -191,3 +191,33 @@ enforce it. A prose warning that has no executable guard is not a completed less
   What corrected the story was not more reasoning about the file but three independent live
   measurements: real INSERTs in the message table, the transcript's post-restart birth time,
   and a deterministic control run against the deployed build.
+- **A guard is only as good as the question its control asks.** One night produced four
+  distinct instances of the same shape, each caught by a different pair of eyes and none by
+  the author. A probe test that mocked the subprocess's exit code verified the parsing of an
+  outcome and never the command that produced it, so a probe that had stopped importing
+  `partyline.server` stayed green. A control retyped from memory omitted the blank line
+  GitHub actually emits, so the fix it proved did not match the artifact it was written for.
+  A test whose fixture held one conversation could not see a snapshot that leaked every
+  conversation, and one holding a single jack could not see a badge lighting the wrong card.
+  A test calling a method that had become `async` passed while executing no production code
+  at all. The rules that survive: **the control's input should be captured, not authored**;
+  **a probe needs one real-interpreter control, because mocking the result skips the
+  invocation**; **if the code partitions by X, the fixture needs two Xs**; and when a sync
+  method becomes async, run the suite once with `-W error::RuntimeWarning` — an un-awaited
+  coroutine is a green test that ran nothing.
+- **Refusing to do the wrong thing is not the same as doing the right thing.** A watermark
+  guard was written to stop a resumed process replaying its whole history into the room. It
+  worked: it refused a re-anchor it could not verify and held its position. The transcript
+  then settled shorter than the held ordinal, so no future record could ever clear it, and
+  the process went silent for hours — alive, receiving mentions, producing replies visible
+  only in its own terminal. From the line, "replays everything" and "says nothing" are the
+  same failure: a participant you cannot trust. Every refusal path needs a bound and a way
+  back; holding a position is right, holding it forever is a mute. And prove the recovery
+  with **two beats** — silence proves nothing, so require the process to speak *and* to
+  answer a mention before calling it fixed.
+- **The deployed build is the only thing whose behaviour counts.** Four rounds of reasoning
+  about a file lost to one deterministic control run against the shipped adapter. The same
+  night, a browser regression measured a stale bundle, a cockpit deploy fast-forwarded source
+  without installing its dependencies, and configuration bound at import before `.env` was
+  merged. Reason about source; verify against the artifact that actually runs.
+
