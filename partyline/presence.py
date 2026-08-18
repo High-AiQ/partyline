@@ -30,14 +30,19 @@ class Presence:
 
     def __init__(self, runtime):
         self.runtime = runtime
-        # attachment id -> when its current turn was started by a delivery.
-        self.working: dict[str, float] = {}
+        # attachment id -> (its line, when the turn started). The line is part
+        # of the state because presence is asked per-conversation: a tab open
+        # on one line must never light a jack that belongs to another.
+        self.working: dict[str, tuple[str, float]] = {}
 
     def is_working(self, att_id: str) -> bool:
         return att_id in self.working
 
-    def working_ids(self) -> list[str]:
-        return sorted(self.working)
+    def working_ids(self, conv_id: str) -> list[str]:
+        """Which attachments are mid-turn *on this line*."""
+        return sorted(
+            att_id for att_id, (line, _) in self.working.items() if line == conv_id
+        )
 
     async def _announce(self, conv_id: str, att_id: str, working: bool) -> None:
         await self.runtime.broadcast(
@@ -48,7 +53,7 @@ class Presence:
         """A wake was delivered into this attachment's terminal."""
         if att_id in self.working:
             return  # already mid-turn; a second delivery is not a new turn
-        self.working[att_id] = time.time()
+        self.working[att_id] = (conv_id, time.time())
         await self._announce(conv_id, att_id, True)
 
     async def finished(self, conv_id: str, att_id: str) -> None:

@@ -115,7 +115,7 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
         await second.deliver([{"id": 2}])
         await self.presence.finished("line", "one")
 
-        self.assertEqual(self.presence.working_ids(), ["two"])
+        self.assertEqual(self.presence.working_ids("line"), ["two"])
 
     async def test_forgetting_an_attachment_is_silent(self):
         adapter = self.presence.watch(RecordingAdapter(), "line", "att")
@@ -153,6 +153,7 @@ class SnapshotTest(unittest.IsolatedAsyncioTestCase):
                 await presence.started("line", "busy")
                 await presence.started("line", "also-busy")
                 await presence.finished("line", "also-busy")
+                await presence.started("another-line", "elsewhere")
 
                 detail = await server.conversation_detail("line")
                 self.assertEqual(detail["working"], ["busy"])
@@ -166,7 +167,23 @@ class SnapshotTest(unittest.IsolatedAsyncioTestCase):
         await presence.started("line", "two")
         await presence.finished("line", "one")
 
-        self.assertEqual(presence.working_ids(), ["two"])
+        self.assertEqual(presence.working_ids("line"), ["two"])
+
+    async def test_a_turn_on_another_line_is_not_reported_here(self):
+        """Found by @grok: an unfiltered snapshot lit jacks from other rooms.
+
+        Presence is process-wide, but a tab is not: reporting every mid-turn
+        attachment on the server would light a jack that does not exist on
+        this line, or a stale id with no jack at all. The earlier test had one
+        conversation and could not see it.
+        """
+        presence = Presence(FakeRuntime())
+        await presence.started("line-a", "att-a")
+        await presence.started("line-b", "att-b")
+
+        self.assertEqual(presence.working_ids("line-a"), ["att-a"])
+        self.assertEqual(presence.working_ids("line-b"), ["att-b"])
+        self.assertEqual(presence.working_ids("line-c"), [])
 
 
 class UnforgeableTest(unittest.IsolatedAsyncioTestCase):
