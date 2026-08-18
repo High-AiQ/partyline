@@ -12,6 +12,7 @@ from fastapi import HTTPException, WebSocketDisconnect
 from partyline import frontend_build, server
 from partyline.db import Db
 from partyline.runtime import ChatRuntime
+from partyline.tasks import TaskError
 
 
 class FakeAdapter:
@@ -702,9 +703,12 @@ class ServerTest(unittest.TestCase):
         restored = self.arun(server.restore_conversation("line"))
         self.assertIsNone(restored["archived_at"])
         self.assert_http(409, server.purge_conversation("line"))
+        leftover = server.tasks.add("line", "must die with the line")
         self.arun(server.archive_conversation("line"))
         self.assertEqual(self.arun(server.purge_conversation("line")), {"ok": True, "purged": True})
         self.assertIsNone(server.runtime.db.get_conversation("line"))
+        with self.assertRaises(TaskError):
+            server.tasks.get(leftover["id"])
 
     def test_attach_validation_and_success(self):
         self.assert_http(400, server.attach("line", server.AttachIn(name="bad name", adapter="fake")))

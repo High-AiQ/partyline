@@ -146,6 +146,10 @@ class TaskStore:
         self.get(task_id)
         self._exec("DELETE FROM tasks WHERE id = ?", (task_id,))
 
+    def purge(self, conv_id: str) -> None:
+        """Drop every task on a line — for a purge, next to claims and media."""
+        self._exec("DELETE FROM tasks WHERE conv_id = ?", (conv_id,))
+
     def rider(self, conv_id: str) -> str:
         """The digest rider for a line, as the adapters' hook expects it."""
         return task_rider(self.open_tasks(conv_id))
