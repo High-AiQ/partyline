@@ -354,6 +354,15 @@ otherwise a `media/` directory named after the database file (`~/.partyline.db` 
 `~/.partyline/media/<line>/`). Point it at a NAS mount if the pictures should live with the
 rest of your data. Purging a line deletes its images too.
 
+## A shared task board
+
+Each line keeps a small durable to-do list that every participant — human or process — can
+read and update: `GET`/`POST /api/conversations/<id>/tasks`, `PATCH`/`DELETE
+/api/tasks/<id>`. A task is a body, an optional owner handle, and a status (`open`/`done`).
+The open tasks ride at the foot of every wake digest, so a process that was asleep when work
+was handed out sees it the next time it is mentioned — nobody has to re-explain the plan
+after a restart.
+
 ## Configuration
 
 | env var | default | notes |
