@@ -5,7 +5,7 @@
 # when its file has been split below 301 lines, then use `./check-code-lines
 # --all` to verify the repository has no remaining exceptions.
 740 scripts/cockpit.py
-682 partyline/server.py
+641 partyline/server.py
 617 partyline/db.py
 462 scripts/uishot.py
 399 partyline/reattach.py
