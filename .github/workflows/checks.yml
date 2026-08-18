@@ -83,8 +83,9 @@ jobs:
               echo "FAIL $c — subject is not conventional: $subject"; fail=1
             fi
             # A squash-merge body that is exactly GitHub's auto-generated commit list
-            # ("* subject (#PR)") is metadata, not an author-written body.
-            body=$(git log -1 --format=%B "$c" | tail -n +2)
+            # ("* subject (#PR)") is metadata, not an author-written body. GitHub puts
+            # a blank line between subject and list; drop blank lines before judging.
+            body=$(git log -1 --format=%B "$c" | tail -n +2 | grep -v '^[[:space:]]*$' || true)
             if printf '%s\n' "$body" | grep -q . && ! printf '%s\n' "$body" | grep -qvE '^\* (feat|fix|docs|refactor|test|chore)(\([a-z0-9_.-]+\))?!?: .+( \(#[0-9]+\))?$'; then
               body=""
             fi
