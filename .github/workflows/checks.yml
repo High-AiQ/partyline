@@ -82,7 +82,13 @@ jobs:
             if ! printf '%s' "$subject" | grep -Eq '^(feat|fix|docs|refactor|test|chore)(\([a-z0-9_.-]+\))?!?: .+'; then
               echo "FAIL $c — subject is not conventional: $subject"; fail=1
             fi
-            if [ "$(git log -1 --format=%B "$c" | grep -c .)" -gt 1 ]; then
+            # A squash-merge body that is exactly GitHub's auto-generated commit list
+            # ("* subject (#PR)") is metadata, not an author-written body.
+            body=$(git log -1 --format=%B "$c" | tail -n +2)
+            if printf '%s\n' "$body" | grep -q . && ! printf '%s\n' "$body" | grep -qvE '^\* (feat|fix|docs|refactor|test|chore)(\([a-z0-9_.-]+\))?!?: .+( \(#[0-9]+\))?$'; then
+              body=""
+            fi
+            if printf '%s\n' "$body" | grep -q .; then
               echo "FAIL $c — has a body; one-liner commits only: $subject"; fail=1
             fi
           done
