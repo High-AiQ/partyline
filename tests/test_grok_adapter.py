@@ -10,6 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from partyline.adapters import Adapter
 from partyline.adapters.bundled.grok.adapter import PartylineAdapter
 from partyline.adapters.bundled.grok.resume import (
+    align_delivery_history,
+    announce_backlog,
     AlignmentError,
     align_delivered_sequence,
     delivery_plan_matches,
@@ -529,7 +531,73 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
                 running = False
                 await asyncio.wait_for(task, timeout=3)
 
-        self.assertEqual(posted, ["missed while muted", "old reply 1"])
+        # The notice rides in front of the flush it describes; the speech
+        # itself is unchanged — suppression and ordering still hold.
+        self.assertTrue(posted[0].startswith("@groky: relaying 1 message(s)"))
+        self.assertEqual(posted[1:], ["missed while muted", "old reply 1"])
+
+    async def test_a_resume_says_how_much_of_its_flush_is_history(self):
+        """Stale speech that reads as current nearly cost a merge revert.
+
+        The count comes from the alignment rather than from message volume or
+        record age: the transcript carries no timestamps, so any heuristic
+        would be a guess where an exact number already exists.
+        """
+        posted = []
+
+        async def collect(sender, sender_type, body):
+            posted.append((sender_type, body))
+
+        adapter = make_adapter(resume=True, session_id=SESSION_ID, collector=collect)
+        adapter._pending_backlog = 39
+        await announce_backlog(adapter)
+
+        self.assertEqual(len(posted), 1)
+        sender_type, body = posted[0]
+        self.assertEqual(sender_type, "system")
+        self.assertIn("39 message(s) that never reached this line", body)
+        self.assertIn("older state", body)
+
+    async def test_a_refused_alignment_drops_an_earlier_pending_count(self):
+        """A count belongs to the alignment that measured it.
+
+        Raised by @sol: if a later alignment refuses, its predecessor's
+        backlog must not survive and describe a flush that no longer exists.
+        """
+        posted = []
+
+        async def collect(sender, sender_type, body):
+            posted.append(body)
+
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "chat_history.jsonl"
+            transcript.write_text(
+                '{"type":"assistant","content":"Idle."}\n'
+                '{"type":"assistant","content":"Idle."}\n',
+                encoding="utf-8",
+            )
+            adapter = make_adapter(resume=True, session_id=SESSION_ID, collector=collect)
+            adapter.POLL_SECONDS = 0.005
+            adapter.SETTLE_SECONDS = 0.01
+            adapter.alive = lambda: True
+            adapter._pending_backlog = 39  # measured by an earlier alignment
+            adapter._delivered_bodies = ["Idle."]  # ambiguous: no unique suffix
+
+            await align_delivery_history(adapter, transcript)
+
+        self.assertEqual(adapter._pending_backlog, 0)
+        self.assertTrue(any("no unique suffix" in body for body in posted))
+
+    async def test_a_resume_with_nothing_held_back_says_nothing(self):
+        posted = []
+
+        async def collect(sender, sender_type, body):
+            posted.append(body)
+
+        adapter = make_adapter(resume=True, session_id=SESSION_ID, collector=collect)
+        await announce_backlog(adapter)
+
+        self.assertEqual(posted, [])
 
     def test_an_ambiguous_delivered_suffix_is_refused_not_guessed(self):
         records = [
@@ -658,7 +726,11 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
                 running = False
                 await asyncio.wait_for(task, timeout=3)
 
-        self.assertEqual(posted, [("agent", "missed while muted")])
+        self.assertEqual(
+            [entry for entry in posted if entry[0] == "agent"],
+            [("agent", "missed while muted")],
+        )
+        self.assertEqual(posted[0][0], "system")  # the notice precedes the flush
 
     async def test_a_same_inode_rewrite_cannot_use_an_old_delivery_plan(self):
         with tempfile.TemporaryDirectory() as directory:

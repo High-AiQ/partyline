@@ -209,6 +209,9 @@ without spending a turn.
 **Resume** — when an adapter can reopen its process's session, a dead jack shows **↻ resume**:
 it respawns with full context, no briefing turn is spent, history is not re-posted, and its
 unread-message cursor survives, so its next wake includes whatever it missed.
+If the process spoke while partyline could not relay it, that speech is delivered on the next
+wake rather than lost, preceded by a system notice saying how many messages had never reached the
+line — they are genuine, but they may answer an older state of the room.
 Every stopped jack also shows **edit command**: change the argv used by its next resume without
 discarding that session or cursor. The server accepts this process-control action only from the
 local machine and refuses it if the jack becomes live.

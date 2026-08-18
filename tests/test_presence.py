@@ -77,6 +77,25 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.presence.is_working("att"))
         self.assertEqual(self.runtime.working_events(), [("att", True), ("att", False)])
 
+    async def test_a_system_notice_does_not_end_the_process_turn(self):
+        """Found by @sol: an adapter's own notices ride this same callback.
+
+        A resume posts a backlog notice through the process's post callback
+        before the speech it describes arrives. Treating that as the turn
+        ending clears the badge while the work is still landing — the server
+        talking *about* a process is not the process finishing.
+        """
+        adapter = self.presence.watch(RecordingAdapter(), "line", "att")
+        speak = self.presence.posting("line", "att", lambda *_: asyncio.sleep(0))
+        await adapter.deliver([{"id": 1}])
+        await speak("system", "system", "@groky: relaying 3 message(s)…")
+
+        self.assertTrue(self.presence.is_working("att"))
+        self.assertEqual(self.runtime.working_events(), [("att", True)])
+
+        await speak("groky", "agent", "here is the backlog")
+        self.assertFalse(self.presence.is_working("att"))
+
     async def test_speech_from_an_idle_process_announces_nothing(self):
         """Only a real transition is worth a broadcast."""
         speak = self.presence.posting("line", "att", lambda *_: asyncio.sleep(0))

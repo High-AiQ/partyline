@@ -86,11 +86,19 @@ class Presence:
     def posting(
         self, conv_id: str, att_id: str, post: Callable[..., Awaitable[None]]
     ):
-        """Wrap the runtime's post callback so speech ends the turn."""
+        """Wrap the runtime's post callback so the process's speech ends the turn.
+
+        Only ``agent`` output counts. An adapter also posts *system* notices
+        through this same callback — a resume's backlog notice, a transcript
+        refusal — and those are the server talking about the process, not the
+        process finishing its turn. Ending it there would clear the badge
+        while the work it describes is still arriving.
+        """
 
         async def posted(sender: str, sender_type: str, body: str):
             await post(sender, sender_type, body)
-            await self.finished(conv_id, att_id)
+            if sender_type == "agent":
+                await self.finished(conv_id, att_id)
 
         return posted
 
