@@ -287,7 +287,7 @@ class ResumeTranscriptTest(unittest.IsolatedAsyncioTestCase):
         await adapter._resync_after_replace(Path("/gone"))
 
         self.assertEqual(adapter._accounted, 7)
-        self.assertIn("keeping the previous position", posted[0])
+        self.assertIn("holding position and retrying", posted[0])
 
 
 class ResumeWatermarkTest(unittest.IsolatedAsyncioTestCase):
@@ -607,6 +607,53 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("after compaction", posted)
         self.assertEqual([body for body in posted if body.startswith("old reply")], [])
+
+
+    async def test_a_stale_watermark_recovers_instead_of_muting_forever(self):
+        """Live failure, 2026-08-18: refusing to replay became refusing to speak.
+
+        A re-anchor was refused — correctly, the transcript was moving — and
+        the file then settled *shorter* than the held ordinal. Nothing could
+        ever clear the watermark again, so the process stayed alive, kept its
+        cursor current, and was silent for hours while its terminal showed the
+        replies it was producing. A guard that trades replay for permanent
+        silence has swapped one invisible failure for another.
+        """
+        posted = []
+        running = True
+
+        async def collect(sender, sender_type, body):
+            posted.append(body)
+
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "chat_history.jsonl"
+            transcript.write_text(self.history(0, 2), encoding="utf-8")
+            adapter = make_adapter(resume=True, session_id=SESSION_ID, collector=collect)
+            adapter.POLL_SECONDS = 0.005
+            adapter.SETTLE_SECONDS = 0.02
+            adapter.alive = lambda: running
+            # A watermark inherited from a longer file that has since compacted.
+            adapter._accounted = 9
+            adapter._assistant_fingerprints = [b"x"] * 9
+
+            task = asyncio.create_task(adapter._tail_grok_transcript(transcript, self.relay(posted)))
+            await asyncio.sleep(0.15)
+            with transcript.open("a", encoding="utf-8") as file:
+                file.write('{"type":"assistant","content":"after the mute"}\n')
+            for _ in range(400):
+                if "after the mute" in posted:
+                    break
+                await asyncio.sleep(0.01)
+            running = False
+            await asyncio.wait_for(task, timeout=3)
+
+        self.assertIn("after the mute", posted, "the process stayed muted")
+
+    def relay(self, posted):
+        async def handle(record):
+            posted.append(record["content"])
+
+        return handle
 
 
 class LifecycleTest(unittest.IsolatedAsyncioTestCase):
