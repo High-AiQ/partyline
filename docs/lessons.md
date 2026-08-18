@@ -173,24 +173,26 @@ enforce it. A prose warning that has no executable guard is not a completed less
   come from one source, falling back to the last good id if the manifest goes unreadable
   mid-run. Anything a `StaticFiles` mount serves is deploy-live; anything captured at import is
   not, and mixing the two in one decision is what loops.
-- **A guard that passes its own control can still be aimed at the wrong door.** After a
-  dogfood restart, Grok's resumed adapter replayed its entire history to the room as new
-  messages. The first diagnosis — the watermark was counted against a transcript still being
-  restored — produced settle-then-count and refuse-empty guards that were true, tested, and
-  irrelevant: the next restart replayed everything again, because the count was fine and the
-  zero came later, when the CLI replaced the transcript with an empty file mid-restore and
-  the compaction resync read "no overlap" as a rewrite that retained nothing. Even then, a
-  settle-the-replacement guard left a door: a restore that writes one record, pauses past the
-  settle window, and continues still looked like a completed compaction. Every wrong turn
-  measured how the file *looked*; the fix that works tracks where the lifecycle *is* — the
-  first replacement after a resume is a restore, never a compaction, so the ordinal carries
-  across it untouched until genuinely new speech clears the state. And the state that records
-  it must be set by what was observed, never by what was assumed: a flag raised from "we are
-  resuming" rather than "we successfully counted" mutes the process instead of replaying it.
-  The settle and refuse-empty guards remain in the code as narrower, still-correct guards.
-  What corrected the story was not more reasoning about the file but three independent live
-  measurements: real INSERTs in the message table, the transcript's post-restart birth time,
-  and a deterministic control run against the deployed build.
+- **A guard that passes its own control can still be aimed at the wrong door.** Grok's resume
+  watermark survived four rounds of controls and still failed on a fifth dogfood restart. The
+  early guards were individually true — settle before counting, refuse an empty count, treat the
+  first replacement as a restore — but they all preserved the same false premise: an ordinal in
+  a CLI-owned file could represent what Partyline had delivered. The final restore placed 39
+  never-delivered mute-window messages before an already-delivered tail. Carrying the ordinal
+  skipped part of that backlog and reposted the tail. Two independent reads of the captured
+  artifact found that 19 of 21 apparent duplicate bodies occurred exactly once in the transcript;
+  the CLI had not duplicated or re-serialized them. Sequence alignment then showed only 20
+  already-delivered occurrences: the twenty-first body match was a legitimate new repetition from
+  the mute window. Partyline had moved its own watermark backwards, and body matching had overstated
+  the replay while measuring it. Body deduplication was therefore also the wrong repair: repeated
+  `Idle.` and clearance messages were legitimate separate occurrences. The durable boundary is
+  now Partyline's ordered message
+  history, scoped to the one resume flush. A unique suffix of delivered bodies anchors the restored
+  transcript, occurrence-aware sequence alignment suppresses only matched records, and unmatched
+  records remain backlog. An ambiguous anchor is refused out loud and the existing file is skipped,
+  while later speech still flows — refusal cannot become another permanent mute. The old settling
+  guards remain as narrower protections, but the structural lesson is sharper: **persist and align
+  the fact the product needs; do not repeatedly infer it from a mutable proxy.**
 - **A guard is only as good as the question its control asks.** One night produced four
   distinct instances of the same shape, each caught by a different pair of eyes and none by
   the author. A probe test that mocked the subprocess's exit code verified the parsing of an
@@ -220,4 +222,3 @@ enforce it. A prose warning that has no executable guard is not a completed less
   night, a browser regression measured a stale bundle, a cockpit deploy fast-forwarded source
   without installing its dependencies, and configuration bound at import before `.env` was
   merged. Reason about source; verify against the artifact that actually runs.
-

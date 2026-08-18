@@ -780,9 +780,11 @@ class ServerTest(unittest.TestCase):
 
     def test_resume_screen_keys_and_detach(self):
         self.add_attachment("old", status="exited")
+        server.runtime.db.add_message("line", "terra", "agent", "already delivered")
         resumed = self.arun(server.resume_attachment("old"))
         self.assertEqual(resumed["status"], "running")
         adapter = server.runtime.live["old"]
+        self.assertEqual(adapter.att["delivered_bodies"], ["already delivered"])
         self.assertEqual(self.arun(server.attachment_screen("old")), {"screen": "screen"})
         self.assertEqual(self.arun(server.attachment_key("old", server.KeyIn(key="x"))), {"ok": True})
         self.assertEqual(adapter.keys, ["x"])

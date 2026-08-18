@@ -14,8 +14,16 @@ import os
 from pathlib import Path
 
 from partyline.adapters import Adapter
+from partyline.adapters.bundled.grok.resume import (
+    align_delivery_history,
+    delivery_plan_matches,
+    file_identity,
+    hold_undelivered_until_wake,
+    settled_scan,
+)
 from partyline.adapters.bundled.grok.transcript import (
     assistant_count,
+    assistant_records,
     assistant_scan,
     assistant_text,
     fingerprint,
@@ -31,7 +39,9 @@ class PartylineAdapter(Adapter):
     _is_assistant_record = staticmethod(is_assistant_record)
     _fingerprint = staticmethod(fingerprint)
     _assistant_scan = staticmethod(assistant_scan)
+    _assistant_records = staticmethod(assistant_records)
     _assistant_count = staticmethod(assistant_count)
+    _identity = staticmethod(file_identity)
     POLL_SECONDS = 0.5
     TRANSCRIPT_TIMEOUT = 45.0
     # How long a resumed transcript must stop changing before it is counted,
@@ -47,6 +57,10 @@ class PartylineAdapter(Adapter):
         stored_session = str(self.att.get("cli_session") or "").strip()
         self._session_id = stored_session if self.resume else self.att["id"]
         self._accounted: int | None = None if self.resume else 0
+        history = self.att.get("delivered_bodies")
+        self._delivered_bodies = list(history) if history is not None else None
+        self._delivery_skip: set[int] = set()
+        self._delivery_plan = None
         # Fingerprints of every assistant record already accounted for, in
         # order. The ordinal alone cannot survive Grok rewriting the file with
         # a shorter history (compaction); the sequence can.
@@ -71,7 +85,7 @@ class PartylineAdapter(Adapter):
         return paths[0] if len(paths) == 1 else None
 
     async def start(self):
-        if self.resume:
+        if self.resume and self._delivered_bodies is None:
             if not self._session_id:
                 raise ValueError("Grok resume requires the stored session UUID")
             path = self._transcript()
@@ -102,43 +116,11 @@ class PartylineAdapter(Adapter):
         # ready to tail as soon as it appears.
         return [*cmd, "--session-id", self._session_id, self.briefing()]
 
-    @staticmethod
-    def _identity(path: Path) -> tuple[int, int, int] | None:
-        """What the file is right now, or ``None`` if it cannot be read."""
-        try:
-            status = path.stat()
-        except OSError:
-            return None
-        return (status.st_ino, status.st_size, status.st_mtime_ns)
-
     async def _settled_assistant_scan(self, path: Path) -> list[bytes] | None:
-        """Fingerprint a resumed transcript only once it has stopped changing.
+        return await settled_scan(self, path, self._assistant_scan)
 
-        Counting the instant the file appears can catch it empty or
-        half-written, and a watermark of zero replays everything ever said. No
-        CLI signal says the restore finished; the file going quiet is the only
-        honest one, and quiet *before* the scan is not enough — the scan is
-        bracketed by identity, or discarded. ``None`` means never settled.
-        """
-        previous = None
-        stable_for = 0.0
-        waited = 0.0
-        while self.alive() and waited < self.SETTLE_TIMEOUT:
-            current = self._identity(path)
-            if current is None:
-                return None
-            if current == previous:
-                stable_for += self.POLL_SECONDS
-                if stable_for >= self.SETTLE_SECONDS:
-                    scanned = self._assistant_scan(path)
-                    if scanned is not None and self._identity(path) == current:
-                        return scanned
-                    previous, stable_for = None, 0.0
-            else:
-                previous, stable_for = current, 0.0
-            await asyncio.sleep(self.POLL_SECONDS)
-            waited += self.POLL_SECONDS
-        return None
+    async def _align_delivery_history(self, path: Path) -> bool:
+        return await align_delivery_history(self, path)
 
     async def _run(self):
         waited = 0.0
@@ -158,7 +140,9 @@ class PartylineAdapter(Adapter):
         if self.on_cli_session is not None:
             self.on_cli_session(self._session_id)
 
-        if self.resume and self._accounted is None:
+        if self.resume and self._delivered_bodies is not None:
+            await self._align_delivery_history(path)
+        elif self.resume and self._accounted is None:
             # Do not mistake an unavailable pre-spawn count for an empty
             # history: zero would replay every old reply after resume.
             scanned = await self._settled_assistant_scan(path)
@@ -178,6 +162,8 @@ class PartylineAdapter(Adapter):
             body = self._assistant_text(record)
             if body is not None:
                 await self.post(self.att["name"], "agent", body)
+                if self._delivered_bodies is not None:
+                    self._delivered_bodies.append(body)
 
         await self._tail_grok_transcript(path, handle)
 
@@ -187,6 +173,9 @@ class PartylineAdapter(Adapter):
         while self.alive():
             try:
                 with path.open(encoding="utf-8", errors="replace") as file:
+                    if not delivery_plan_matches(self, file):
+                        await self._resync_after_replace(path)
+                        continue
                     assistant_index = 0
                     self.mark_ready()
                     while self.alive():
@@ -218,11 +207,18 @@ class PartylineAdapter(Adapter):
                         if not self._is_assistant_record(record):
                             continue
                         assistant_index += 1
+                        if hold_undelivered_until_wake(self, assistant_index, record):
+                            assistant_index -= 1
+                            file.seek(position)
+                            await asyncio.sleep(self.POLL_SECONDS)
+                            continue
                         if assistant_index <= self._accounted:
                             if assistant_index == self._restoring_to:
                                 self._restoring_to = None  # the refill caught up
                             continue
                         self._accounted += 1
+                        if assistant_index in self._delivery_skip:
+                            continue
                         # New speech proves the restore finished.
                         self._resume_swap_pending = False
                         self._restoring_to = None
@@ -235,6 +231,9 @@ class PartylineAdapter(Adapter):
 
     async def _resync_after_replace(self, path: Path) -> None:
         """Re-anchor the replay watermark on the replacement file.
+
+        Current server resumes take the delivery-history branch first. The
+        fallback remains for callers without that server-owned boundary.
 
         Grok rewrites chat_history.jsonl when it compacts a session, dropping
         older records, so an ordinal counted against the previous file can
@@ -253,12 +252,13 @@ class PartylineAdapter(Adapter):
         replacement never settles, the previous watermark stands: relaying
         nothing is recoverable, relaying everything is not.
         """
+        if self._delivered_bodies is not None:
+            await self._align_delivery_history(path)
+            return
         if self._resume_swap_pending:
-            # The one replacement a resume performs: a superset of the
-            # pre-spawn count, so the ordinal carries across it untouched —
-            # consulting overlap here replayed whole sessions. The swap is
-            # consumed now, but the file is not restored until the refill
-            # reaches that ordinal, and recovery must keep out of the way.
+            # Legacy fallback for callers without delivery history. Current
+            # server resumes never assume a restored file is a positional
+            # superset; the production incident proved that premise false.
             self._resume_swap_pending = False
             self._restoring_to = self._accounted
             return

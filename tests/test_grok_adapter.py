@@ -9,6 +9,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from partyline.adapters import Adapter
 from partyline.adapters.bundled.grok.adapter import PartylineAdapter
+from partyline.adapters.bundled.grok.resume import (
+    AlignmentError,
+    align_delivered_sequence,
+    delivery_plan_matches,
+)
+from partyline.adapters.bundled.grok.transcript import AssistantRecord
 
 
 SESSION_ID = "12345678-1234-4234-8234-123456789abc"
@@ -22,7 +28,10 @@ async def status(value):
     pass
 
 
-def make_adapter(*, command=None, resume=False, session_id=None, collector=post):
+def make_adapter(
+    *, command=None, resume=False, session_id=None, collector=post,
+    delivered_bodies=None,
+):
     adapter = PartylineAdapter(
         {
             "adapter_metadata": {"env_unset": []},
@@ -33,6 +42,7 @@ def make_adapter(*, command=None, resume=False, session_id=None, collector=post)
             "id": SESSION_ID,
             "name": "groky",
             "resume": resume,
+            "delivered_bodies": delivered_bodies,
         },
         collector,
         status,
@@ -462,6 +472,216 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
             f'{{"type":"assistant","content":"old reply {n}"}}\n'
             for n in range(first, first + count)
         )
+
+    async def test_a_restored_sequence_suppresses_replays_not_missing_speech(self):
+        """Captured v0.38.2 failure: a restored file is not a positional superset.
+
+        Grok wrote speech while its relay was muted, then spoke again after an
+        intervening restart.  The next restore placed the missing speech
+        *before* the already-delivered tail, so carrying the old ordinal
+        skipped part of the backlog and reposted part of that tail.  Partyline
+        must align its own delivered sequence, relay the unmatched backlog,
+        and suppress only the matched records.  A later identical body is new
+        speech and must still relay: this is a resume boundary, never global
+        body deduplication.
+        """
+        posted = []
+        running = True
+
+        async def collect(sender, sender_type, body):
+            posted.append(body)
+
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "chat_history.jsonl"
+            transcript.write_text(self.history(0, 2), encoding="utf-8")
+            adapter = make_adapter(
+                resume=True,
+                session_id=SESSION_ID,
+                collector=collect,
+                delivered_bodies=["old reply 0", "old reply 1"],
+            )
+            adapter.POLL_SECONDS = 0.005
+            adapter.SETTLE_SECONDS = 0.02
+            adapter.alive = lambda: running
+
+            with patch.object(adapter, "_transcript", return_value=transcript):
+                with patch.object(Adapter, "start", new=AsyncMock()):
+                    await adapter.start()
+                task = asyncio.create_task(adapter._run())
+                await asyncio.sleep(0.05)
+                restored = Path(directory) / "restored.jsonl"
+                restored.write_text(
+                    '{"type":"assistant","content":"missed while muted"}\n'
+                    + self.history(0, 2),
+                    encoding="utf-8",
+                )
+                restored.replace(transcript)
+                for _ in range(300):
+                    if "missed while muted" in posted:
+                        break
+                    await asyncio.sleep(0.01)
+                with transcript.open("a", encoding="utf-8") as file:
+                    file.write('{"type":"assistant","content":"old reply 1"}\n')
+                for _ in range(300):
+                    if posted.count("old reply 1") == 1:
+                        break
+                    await asyncio.sleep(0.01)
+                running = False
+                await asyncio.wait_for(task, timeout=3)
+
+        self.assertEqual(posted, ["missed while muted", "old reply 1"])
+
+    def test_an_ambiguous_delivered_suffix_is_refused_not_guessed(self):
+        records = [
+            AssistantRecord(b"fingerprint", body)
+            for body in ["Idle.", "working", "Idle.", "working"]
+        ]
+
+        with self.assertRaisesRegex(AlignmentError, "no unique suffix"):
+            align_delivered_sequence(records, ["Idle.", "working"])
+
+    def test_a_repeated_body_is_matched_by_occurrence_not_globally_deduplicated(self):
+        records = [
+            AssistantRecord(b"fingerprint", body)
+            for body in ["armed", "missed", "checkpoint", "armed", "done"]
+        ]
+
+        aligned = align_delivered_sequence(
+            records, ["older", "checkpoint", "armed", "done"]
+        )
+
+        self.assertEqual(aligned.skip, frozenset({3, 4, 5}))
+        self.assertEqual(aligned.backlog, 2)
+
+    def test_attachment_age_does_not_exhaust_the_alignment(self):
+        delivered = [f"reply {index}" for index in range(2500)]
+        records = [AssistantRecord(b"fingerprint", "missed while muted")]
+        records.extend(
+            AssistantRecord(b"fingerprint", body) for body in delivered
+        )
+
+        aligned = align_delivered_sequence(records, delivered)
+
+        self.assertEqual(len(aligned.skip), 2500)
+        self.assertNotIn(1, aligned.skip)
+        self.assertEqual(aligned.backlog, 1)
+
+    def test_repeated_history_refuses_before_allocating_too_many_pairs(self):
+        delivered = ["Idle."] * 381 + ["unique boundary"]
+        records = [AssistantRecord(b"fingerprint", "missed while muted")]
+        records.extend(
+            AssistantRecord(b"fingerprint", body) for body in delivered
+        )
+
+        with self.assertRaisesRegex(AlignmentError, "101124 occurrence pairs"):
+            align_delivered_sequence(records, delivered)
+
+    async def test_an_ambiguous_restore_skips_history_but_not_new_speech(self):
+        posted = []
+        running = True
+
+        async def collect(sender, sender_type, body):
+            posted.append((sender_type, body))
+
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "chat_history.jsonl"
+            transcript.write_text(
+                '{"type":"assistant","content":"Idle."}\n'
+                '{"type":"assistant","content":"working"}\n'
+                '{"type":"assistant","content":"Idle."}\n'
+                '{"type":"assistant","content":"working"}\n',
+                encoding="utf-8",
+            )
+            adapter = make_adapter(
+                resume=True,
+                session_id=SESSION_ID,
+                collector=collect,
+                delivered_bodies=["Idle.", "working"],
+            )
+            adapter.POLL_SECONDS = 0.005
+            adapter.SETTLE_SECONDS = 0.02
+            adapter.alive = lambda: running
+
+            with patch.object(adapter, "_transcript", return_value=transcript):
+                task = asyncio.create_task(adapter._run())
+                for _ in range(300):
+                    if posted:
+                        break
+                    await asyncio.sleep(0.01)
+                with transcript.open("a", encoding="utf-8") as file:
+                    file.write('{"type":"assistant","content":"Idle."}\n')
+                for _ in range(300):
+                    if ("agent", "Idle.") in posted:
+                        break
+                    await asyncio.sleep(0.01)
+                running = False
+                await asyncio.wait_for(task, timeout=3)
+
+        self.assertEqual([body for kind, body in posted if kind == "agent"], ["Idle."])
+        self.assertIn("skipped restored history", posted[0][1])
+
+    async def test_an_undelivered_flush_waits_for_a_real_wake(self):
+        """Counting transcript speech must never mean Partyline delivered it."""
+        posted = []
+        running = True
+
+        async def collect(sender, sender_type, body):
+            posted.append((sender_type, body))
+
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "chat_history.jsonl"
+            transcript.write_text(
+                '{"type":"assistant","content":"missed while muted"}\n'
+                + self.history(0, 2),
+                encoding="utf-8",
+            )
+            adapter = make_adapter(
+                resume=True,
+                session_id=SESSION_ID,
+                collector=collect,
+                delivered_bodies=["old reply 0", "old reply 1"],
+            )
+            adapter.POLL_SECONDS = 0.005
+            adapter.SETTLE_SECONDS = 0.02
+            adapter.alive = lambda: running
+            adapter._silent_until_wake = True
+
+            with patch.object(adapter, "_transcript", return_value=transcript):
+                task = asyncio.create_task(adapter._run())
+                await asyncio.sleep(0.1)
+                self.assertEqual(posted, [], "suppressed output was counted as delivered")
+                adapter._silent_until_wake = False  # the mention delivery boundary
+                for _ in range(300):
+                    if posted:
+                        break
+                    await asyncio.sleep(0.01)
+                running = False
+                await asyncio.wait_for(task, timeout=3)
+
+        self.assertEqual(posted, [("agent", "missed while muted")])
+
+    async def test_a_same_inode_rewrite_cannot_use_an_old_delivery_plan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "chat_history.jsonl"
+            transcript.write_text(self.history(0, 2), encoding="utf-8")
+            adapter = make_adapter(
+                resume=True,
+                session_id=SESSION_ID,
+                delivered_bodies=["old reply 0", "old reply 1"],
+            )
+            adapter.POLL_SECONDS = 0.005
+            adapter.SETTLE_SECONDS = 0.02
+            adapter.alive = lambda: True
+            self.assertTrue(await adapter._align_delivery_history(transcript))
+
+            # Same path and inode, same-or-larger size, different records.
+            transcript.write_text(
+                '{"type":"assistant","content":"rewritten one"}\n'
+                '{"type":"assistant","content":"rewritten two"}\n',
+                encoding="utf-8",
+            )
+            with transcript.open() as file:
+                self.assertFalse(delivery_plan_matches(adapter, file))
 
     async def test_an_empty_replacement_during_resume_does_not_replay_history(self):
         posted = []
