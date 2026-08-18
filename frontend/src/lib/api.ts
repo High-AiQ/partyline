@@ -122,7 +122,7 @@ export class ApiContractError extends Error {
   }
 }
 
-async function request<Output>(path: string, options: RequestOptions<Output>): Promise<Output> {
+export async function request<Output>(path: string, options: RequestOptions<Output>): Promise<Output> {
   const { schema, method = "GET", body, form, fallback } = options;
   const requestInit: RequestInit = { method };
   if (form) {

@@ -44,6 +44,13 @@ export const AttentionEventSchema = z.object({
 });
 export type AttentionEvent = z.infer<typeof AttentionEventSchema>;
 
+export const WorkingEventSchema = z.object({
+  type: z.literal("working"),
+  attachment_id: z.string(),
+  working: z.boolean(),
+});
+export type WorkingEvent = z.infer<typeof WorkingEventSchema>;
+
 export const ConversationEventSchema = z.object({
   type: z.literal("conversation"),
   conversation: z.lazy(() => ConversationSchema),
@@ -96,6 +103,7 @@ export const WireEventSchema = z.discriminatedUnion("type", [
   MessageEventSchema,
   AttachmentEventSchema,
   AttentionEventSchema,
+  WorkingEventSchema,
   ConversationEventSchema,
   ConversationArchivedEventSchema,
   ConversationDeletedEventSchema,

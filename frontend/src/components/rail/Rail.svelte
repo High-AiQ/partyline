@@ -12,6 +12,7 @@
   import DeleteLineDialog from "../dialogs/DeleteLineDialog.svelte";
   import PurgeLineDialog from "../dialogs/PurgeLineDialog.svelte";
   import StopServerDialog from "../dialogs/StopServerDialog.svelte";
+  import ClaimsDialog from "../dialogs/ClaimsDialog.svelte";
 
   let newLineName = $state("");
 
@@ -35,6 +36,10 @@
     dialogs.open(DeleteLineDialog, { conversation });
   }
 
+  function showClaims(conversation: Conversation): void {
+    dialogs.open(ClaimsDialog, { conversation });
+  }
+
   function purgeLine(conversation: Conversation): void {
     dialogs.open(PurgeLineDialog, { conversation });
   }
@@ -53,7 +58,7 @@
     </p>
   </div>
 
-  <ConversationList onrename={renameLine} ondelete={deleteLine} />
+  <ConversationList onrename={renameLine} onclaims={showClaims} ondelete={deleteLine} />
 
   <form id="newconv" onsubmit={openLine}>
     <input

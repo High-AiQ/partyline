@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { AdapterSchema, ImageRefSchema, WireEventSchema, WireReattachCommandSchema } from "./contracts";
+import {
+  AdapterSchema,
+  ClaimSchema,
+  ConversationDetailSchema,
+  ImageRefSchema,
+  TaskSchema,
+  WireEventSchema,
+  WireReattachCommandSchema,
+} from "./contracts";
 
 const offer = {
   type: "reattach_offer",
@@ -10,6 +18,11 @@ const offer = {
 };
 
 describe("wire events with server-omitted null fields", () => {
+  it("accepts the unforgeable working event shape", () => {
+    const event = { type: "working" as const, attachment_id: "att-1", working: true };
+    expect(WireEventSchema.parse(event)).toEqual(event);
+  });
+
   // `broadcast()` serializes with `exclude_none=True`, so a None field is
   // omitted on the wire even though REST spells it `null`. These payloads are
   // exactly what the server sends; rejecting them stopped the tab with
@@ -65,6 +78,42 @@ describe("wire events with server-omitted null fields", () => {
     });
     if (event.type !== "attachment") throw new Error("expected attachment event");
     expect(event.attachment.cli_session).toBeNull();
+  });
+});
+
+describe("conversation detail compatibility", () => {
+  it("defaults working ids for servers predating wake receipts", () => {
+    const detail = ConversationDetailSchema.parse({
+      conversation: { id: "line", name: "line", topic: "", created_at: 1 },
+      messages: [],
+      attachments: [],
+    });
+    expect(detail.working).toEqual([]);
+  });
+});
+
+describe("coordination contracts", () => {
+  it("parses claims and tasks at the browser boundary", () => {
+    expect(
+      ClaimSchema.parse({
+        id: "claim-1",
+        owner: "sol",
+        paths: ["frontend/**"],
+        created_at: 1,
+        expires_at: 2,
+      }),
+    ).toMatchObject({ owner: "sol", paths: ["frontend/**"] });
+
+    expect(
+      TaskSchema.parse({
+        id: 1,
+        body: "prove the working receipt",
+        status: "open",
+        owner: null,
+        created_at: 1,
+        updated_at: 1,
+      }),
+    ).toMatchObject({ status: "open", owner: null });
   });
 });
 
