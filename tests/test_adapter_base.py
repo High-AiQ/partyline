@@ -328,6 +328,33 @@ class DigestTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[greg]: ship it\n[luna]: on it", digest)
         self.assertIn("processes only see messages that @mention them", digest)
 
+    def test_a_digest_rider_rides_between_the_lines_and_the_reminder(self):
+        adapter = Recorder(["cat"], digest_rider=lambda: "(open tasks: #1 review)")
+        digest = adapter.format_digest([{"sender": "greg", "body": "ship it"}])
+        self.assertIn("[greg]: ship it\n(open tasks: #1 review)\n(reminder:", digest)
+
+    def test_the_rider_is_consulted_at_delivery_time_not_staged(self):
+        state = {"open": ["#1 first"]}
+        adapter = Recorder(
+            ["cat"],
+            digest_rider=lambda: f"(open tasks: {'; '.join(state['open'])})"
+            if state["open"] else "")
+        before = adapter.format_digest([{"sender": "greg", "body": "hi"}])
+        state["open"].clear()
+        after = adapter.format_digest([{"sender": "greg", "body": "hi"}])
+        self.assertIn("#1 first", before)
+        self.assertNotIn("open tasks", after)
+
+    def test_a_failing_rider_degrades_the_rider_never_the_wake(self):
+        def broken():
+            raise RuntimeError("database is locked")
+
+        adapter = Recorder(["cat"], digest_rider=broken)
+        with self.assertLogs("partyline.adapters.briefing", level="WARNING"):
+            digest = adapter.format_digest([{"sender": "greg", "body": "ship it"}])
+        self.assertIn("[greg]: ship it", digest)
+        self.assertIn("processes only see messages", digest)
+
     async def test_deliver_sends_nothing_when_there_is_nothing_to_say(self):
         sent = []
 
@@ -435,6 +462,11 @@ class BriefingTest(unittest.TestCase):
 
     def test_briefing_bans_ack_loops_between_processes(self):
         self.assertIn("Never trade acknowledgments", Recorder(["cat"]).briefing())
+
+    def test_briefing_points_at_the_shared_task_board(self):
+        text = Recorder(["cat"]).briefing()
+        self.assertIn("shared task board", text)
+        self.assertIn("$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/tasks", text)
 
 
 class FreshnessTest(unittest.TestCase):

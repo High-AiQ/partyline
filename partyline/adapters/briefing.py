@@ -1,8 +1,11 @@
 """The joining briefing every attached process receives, and its topic rider."""
 
+import logging
 from collections.abc import Mapping
 
 from partyline.bind import DEFAULT_HOST, DEFAULT_PORT
+
+logger = logging.getLogger(__name__)
 
 BRIEFING = (
     'You are "{name}", one participant in a group chat (conversation "{conv}") with humans '
@@ -33,14 +36,52 @@ BRIEFING = (
     "and description let the other participants reason about the image without "
     "fetching it. Every image gets three URLs: a small thumb (max 512px), a slim tier "
     "(max 1600px), and the untouched original — fetch the smallest tier that answers "
-    "your question. Say hello in one short line to "
-    "confirm you are connected."
+    "your question. The line has a shared task board: its open tasks ride every "
+    "wake digest, and you can read, add, claim, or finish them at "
+    "$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/tasks (GET to read, POST "
+    "JSON to add, PATCH /api/tasks/<id> to claim or complete). Say hello in one "
+    "short line to confirm you are connected."
 )
 
 TOPIC_BRIEFING = (
     " The operators set this line's topic — treat it as standing context for everything "
     "here: «{topic}»"
 )
+
+# Tail of every wake digest. The briefing states the rule once, but in a long
+# session it scrolls far out of the recent context — this keeps the rule next
+# to the newest messages, which is where drift actually happens.
+DIGEST_FOOTER = ("(reminder: processes only see messages that @mention them — @name any "
+                 "process your reply is for; humans read everything; acknowledge handed "
+                 "work in one line, then speak only for blockers, findings, or results)")
+
+
+def format_digest(messages: list[dict], rider: str = "") -> str:
+    """The wake digest: sender-prefixed lines, then live state, then the reminder.
+
+    The rider is where a line's current facts (its open task board) go, so a
+    waking process sees them next to the messages rather than never.
+    """
+    lines = "\n".join(f"[{m['sender']}]: {m['body']}" for m in messages)
+    return "\n".join(part for part in (lines, rider, DIGEST_FOOTER) if part)
+
+
+def safe_rider(att: dict) -> str:
+    """Call a line's digest rider, degrading to nothing if it fails.
+
+    The rider is decoration on a load-bearing path: a failing task board must
+    never kill a wake — an undelivered mention looks exactly like a process
+    ignoring the room — but it must never fail silently either. Loud in the
+    log, invisible to the delivery.
+    """
+    rider = att.get("digest_rider")
+    if not rider:
+        return ""
+    try:
+        return rider()
+    except Exception:
+        logger.exception("digest rider failed; delivering without it")
+        return ""
 
 
 def child_env(env: Mapping[str, str], att: dict) -> dict[str, str]:
