@@ -74,6 +74,7 @@ from .contracts import (
 )
 from .db import Db
 from .frontend_build import current_frontend_build
+from .presence import Presence
 from .media import MediaStore, media_root
 from .media_routes import media_router
 from .reattach import (
@@ -124,6 +125,7 @@ def load_dotenv(path: str = ".env"):
 load_dotenv()
 runtime = ChatRuntime(Db(os.environ.get("PARTYLINE_DB", os.path.expanduser("~/.partyline.db"))))
 media = MediaStore(runtime.db, media_root(os.environ, runtime.db.path))
+presence = Presence(runtime)
 
 
 async def _run_automatic_reattachment() -> None:
@@ -450,8 +452,8 @@ async def attach(conv_id: str, body: AttachIn):
     adapter = make_adapter(
         body.adapter,
         att,
-        runtime.post_callback(att_id, conv_id, runtime_owner),
-        runtime.status_callback(att_id, conv_id, runtime_owner),
+        presence.posting(conv_id, att_id, runtime.post_callback(att_id, conv_id, runtime_owner)),
+        presence.statusing(conv_id, att_id, runtime.status_callback(att_id, conv_id, runtime_owner)),
         on_cli_session=lambda s: runtime.db.set_cli_session(att_id, s, runtime_owner),
     )
     try:
@@ -461,7 +463,7 @@ async def attach(conv_id: str, body: AttachIn):
             att_id, "exited", runtime_owner
         )
         raise HTTPException(500, f"failed to spawn: {exc}") from exc
-    runtime.live[att_id] = adapter
+    runtime.live[att_id] = presence.watch(adapter, conv_id, att_id)
 
     await runtime.post_message(
         conv_id, "system", "system",
@@ -503,8 +505,8 @@ async def _resume_adapter(
     adapter = make_adapter(
         att["adapter"],
         att,
-        runtime.post_callback(att_id, att["conv_id"], runtime_owner),
-        runtime.status_callback(att_id, att["conv_id"], runtime_owner),
+        presence.posting(conv["id"], att_id, runtime.post_callback(att_id, conv["id"], runtime_owner)),
+        presence.statusing(conv["id"], att_id, runtime.status_callback(att_id, conv["id"], runtime_owner)),
         on_cli_session=lambda s: runtime.db.set_cli_session(att_id, s, runtime_owner),
     )
     startup_delivery_staged = adapter.stage_startup_delivery(startup_messages or [])
@@ -517,7 +519,7 @@ async def _resume_adapter(
             att_id, "exited", runtime_owner
         )
         raise HTTPException(500, f"failed to resume: {exc}") from exc
-    runtime.live[att_id] = adapter
+    runtime.live[att_id] = presence.watch(adapter, att["conv_id"], att_id)
 
     await runtime.post_message(
         att["conv_id"], "system", "system",

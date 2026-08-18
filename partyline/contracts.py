@@ -202,6 +202,14 @@ class AttachmentEvent(BaseModel):
     attachment: AttachmentResponse
 
 
+class WorkingEvent(BaseModel):
+    """A process began or finished a turn. Only the server ever sends this."""
+
+    type: Literal["working"] = "working"
+    attachment_id: str
+    working: bool
+
+
 class AttentionEvent(BaseModel):
     type: Literal["attention"] = "attention"
     attachment_id: str
@@ -262,6 +270,7 @@ Event = (
     | MessageEvent
     | AttachmentEvent
     | AttentionEvent
+    | WorkingEvent
     | ConversationEvent
     | ConversationArchivedEvent
     | ConversationDeletedEvent
