@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from scripts.cockpit_venv import (
     IDENTITY,
     cockpit_can_boot,
+    live_version_matches,
     loaded_from_cockpit,
     probe_server,
     replacement_python,
@@ -237,3 +238,63 @@ class RealImportControlTest(unittest.TestCase):
             error = probe_server(Path(sys.executable), cockpit, run=run)
         self.assertIsNotNone(error)
         self.assertIn("definitely_not_installed_pillow", error)
+
+
+class LiveVersionMatchesTest(unittest.TestCase):
+    def test_a_stale_live_server_is_a_loud_finding(self):
+        """Failing control: the process is up, but it is not this tree."""
+        with tempfile.TemporaryDirectory() as directory:
+            cockpit = Path(directory)
+            (cockpit / "partyline").mkdir()
+            (cockpit / "partyline" / "__init__.py").write_text(
+                '__version__ = "0.34.3"\n', encoding="utf-8"
+            )
+            refused = live_version_matches(
+                cockpit,
+                get_json=lambda _url: {"version": "0.34.2", "build": "old"},
+            )
+        self.assertIsNotNone(refused)
+        self.assertIn("0.34.2", refused[0])
+        self.assertIn("0.34.3", refused[0])
+        self.assertIn("restart", refused[1])
+
+    def test_matching_live_and_tree_is_silent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cockpit = Path(directory)
+            (cockpit / "partyline").mkdir()
+            (cockpit / "partyline" / "__init__.py").write_text(
+                '__version__ = "0.34.2"\n', encoding="utf-8"
+            )
+            self.assertIsNone(
+                live_version_matches(
+                    cockpit,
+                    get_json=lambda _url: {"version": "0.34.2", "build": "x"},
+                )
+            )
+
+    def test_a_down_server_is_silent_when_not_required(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cockpit = Path(directory)
+            (cockpit / "partyline").mkdir()
+            (cockpit / "partyline" / "__init__.py").write_text(
+                '__version__ = "0.34.2"\n', encoding="utf-8"
+            )
+
+            def boom(_url):
+                raise OSError("connection refused")
+
+            self.assertIsNone(live_version_matches(cockpit, get_json=boom))
+
+    def test_live_server_matches_this_cockpit_when_reachable(self):
+        """Real /api/version against the running room, if one is listening."""
+        from scripts.cockpit_venv import default_base_url, fetch_version
+        from scripts.cockpit import DEFAULT_COCKPIT
+
+        try:
+            payload = fetch_version(default_base_url())
+        except Exception:
+            self.skipTest("no live partyline on PARTYLINE_PORT")
+        if not DEFAULT_COCKPIT.is_dir():
+            self.skipTest("no cockpit clone")
+        refused = live_version_matches(DEFAULT_COCKPIT, get_json=lambda _url: payload)
+        self.assertIsNone(refused, refused)

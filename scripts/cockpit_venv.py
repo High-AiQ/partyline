@@ -106,6 +106,57 @@ def replacement_python(server: Path) -> Path:
     return server.parent / "python3"
 
 
+def default_base_url() -> str:
+    return f"http://127.0.0.1:{os.environ.get('PARTYLINE_PORT', '8642')}"
+
+
+def fetch_version(base_url: str) -> dict:
+    """Read the live ``/api/version`` JSON. Injected in tests."""
+    from urllib.request import urlopen
+
+    with urlopen(base_url.rstrip("/") + "/api/version", timeout=2) as response:
+        return json.loads(response.read().decode())
+
+
+def live_version_matches(
+    cockpit: Path,
+    base_url: str | None = None,
+    *,
+    required: bool = False,
+    get_json=None,
+) -> tuple[str, str] | None:
+    """Refuse when the running server is not the cockpit tree's version.
+
+    The import probe asks what the *next* process would run. This asks what
+    the *live* process is running. After a deploy, they can disagree on
+    purpose until the restart; ``arm`` therefore skips this gate.
+    """
+    expected = tree_version(cockpit)
+    if expected is None:
+        if not required:
+            return None
+        return (
+            f"could not read __version__ from {cockpit / 'partyline' / '__init__.py'}",
+            "point --cockpit at the deployed clone",
+        )
+    try:
+        payload = (get_json or fetch_version)(base_url or default_base_url())
+        live = str(payload["version"])
+    except Exception as exc:
+        if not required:
+            return None
+        return (
+            f"could not read live /api/version: {exc}",
+            "start the cockpit or pass --url to the running server",
+        )
+    if live != expected:
+        return (
+            f"the live server reports {live}, cockpit tree is {expected}",
+            "restart the cockpit so the running process matches the deployed tree",
+        )
+    return None
+
+
 def cockpit_can_boot(
     cockpit: Path, *, required: bool = False, run: Command = subprocess.run
 ) -> tuple[str, str] | None:

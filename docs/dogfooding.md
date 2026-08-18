@@ -28,7 +28,8 @@ uv run python -m scripts.cockpit arm --pid NNNNN
 ```
 
 `check`, `deploy`, and `plan` do not restart anything. `check` refuses a dirty or unpushed
-workbench, a stale frontend bundle, a mismatched adapter source/runtime checkout, a failed trigger,
+workbench, a stale frontend bundle, a live `/api/version` that does not match
+the cockpit tree, a mismatched adapter source/runtime checkout, a failed trigger,
 or an automatic plan that has remained unclaimed long enough to show that its trigger never fired.
 `deploy` fast-forwards the cockpit, runs `uv sync --locked` in its venv, and
 verifies that the tree matches the workbench. A matching commit with a stale

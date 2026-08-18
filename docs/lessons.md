@@ -80,7 +80,9 @@ replaced them:
   `uv sync --locked`s the cockpit venv, and the restart executable refuses *before*
   `SIGTERM` unless that interpreter loads *this* cockpit's `partyline` (path and
   version). A green `import partyline.server` that resolved the workbench via an
-  editable `.pth` is the same failure wearing a passing grade.
+  editable `.pth` is the same failure wearing a passing grade. ``check`` also
+  reads live ``/api/version`` against the cockpit tree so a healthy-but-stale
+  server cannot hide; ``arm`` skips that gate because restart is the remedy.
 - **An `exited` database row meant the process was no longer live locally.** A clean Codex exit
   updated durable status but left its adapter in `runtime.live`; `/api/running` omitted it while
   `/resume` rejected it as “already live.” Owner-matched terminal status callbacks now remove the

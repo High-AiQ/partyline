@@ -1,15 +1,7 @@
 """Get the cockpit onto the latest build, and prove it before anyone restarts.
 
-The *workbench* is the checkout being edited; the *cockpit* hosts the
-conversation. A restart of a stale cockpit serves the old UI perfectly.
-
-    uv run python -m scripts.cockpit check     # is the workbench fit to deploy?
-    uv run python -m scripts.cockpit deploy    # check, advance, uv sync --locked
-    uv run python -m scripts.cockpit plan LINE --debrief "what to continue"
-    uv run python -m scripts.cockpit arm --pid NNNNN
-    uv run python -m scripts.cockpit plan LINE --manual-offer --debrief "what to continue"
-
-The first three commands do not restart anything. ``arm`` is the announced trigger.
+Workbench is edited; cockpit hosts the line. check / deploy / plan / arm.
+The first three do not restart. ``arm`` is the announced trigger.
 """
 
 from __future__ import annotations
@@ -39,7 +31,7 @@ from partyline.contracts import (
     RestartPlanRequest,
     RestartPlanResponse,
 )
-from scripts.cockpit_venv import cockpit_can_boot, sync_locked
+from scripts.cockpit_venv import cockpit_can_boot, live_version_matches, sync_locked
 from scripts.restart_server import process_generation
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -457,7 +449,7 @@ def report(findings: list[Finding]) -> int:
     return 0
 
 
-def check(repo: Path = REPO_ROOT) -> int:
+def check(repo: Path = REPO_ROOT, *, live: bool = True) -> int:
     print(f"workbench {repo}")
     plan = inspect_pending_plan()
     findings = [
@@ -470,6 +462,7 @@ def check(repo: Path = REPO_ROOT) -> int:
         *check_pending_plan(time.time(), plan.plan),
         *failed_restart_units(),
         *([Finding(*pair)] if (pair := cockpit_can_boot(DEFAULT_COCKPIT)) else []),
+        *([Finding(*pair)] if live and (pair := live_version_matches(DEFAULT_COCKPIT)) else []),
     ]
     return report(findings)
 
@@ -717,7 +710,7 @@ def main(argv=None) -> int:
             help="deployed cockpit checkout",
         )
         args = parser.parse_args(argv[1:])
-        if (failed := check()):
+        if (failed := check(live=False)):
             return failed
         expected = git("rev-parse", "HEAD")
         findings = [*check_in_sync(args.cockpit, expected)]
