@@ -12,6 +12,7 @@
   import type { Attachment } from "../../lib/contracts";
   import { room } from "../../state/room.svelte.js";
   import { dialogs } from "../../state/dialogs.svelte.js";
+  import { presence } from "../../state/presence.svelte.js";
   import PeekDialog from "../dialogs/PeekDialog.svelte";
   import EditJackDialog from "../dialogs/EditJackDialog.svelte";
 
@@ -28,6 +29,7 @@
 
   const live = $derived(isLive(attachment));
   const needsYou = $derived(live && room.attention.has(attachment.id));
+  const working = $derived(live && presence.working.has(attachment.id));
 
   async function detach(): Promise<void> {
     try {
@@ -73,6 +75,9 @@
       }}>{attachment.name}</button
     >
     <span class="tag">{attachment.adapter}</span>
+    {#if working}
+      <span class="working" role="status"><span></span>working…</span>
+    {/if}
     {#if overridesBundled}
       <span
         class="override-badge"
@@ -155,6 +160,28 @@
     border-radius: 3px;
     padding: 0 5px;
     letter-spacing: 0.05em;
+  }
+  .working {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--color-green);
+    font-size: 9px;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+  .working span {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 7px currentColor;
+    animation: working-pulse 1s ease-in-out infinite;
+  }
+  @keyframes working-pulse {
+    50% {
+      opacity: 0.25;
+    }
   }
   .cmd {
     color: var(--color-cream-faint);
@@ -256,6 +283,9 @@
     .jack.attention,
     .jack.attention .led,
     .jack.attention .peek-btn {
+      animation: none;
+    }
+    .working span {
       animation: none;
     }
     .jack.attention {

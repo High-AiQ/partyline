@@ -16,6 +16,7 @@ declare global {
       room: typeof import("./state/room.svelte.js").room;
       session: typeof import("./state/session.svelte.js").session;
       wire: typeof import("./state/wire.svelte.js").wire;
+      presence: typeof import("./state/presence.svelte.js").presence;
     };
   }
 }

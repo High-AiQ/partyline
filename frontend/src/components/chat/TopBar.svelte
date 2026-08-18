@@ -12,6 +12,7 @@
   import { layout } from "../../state/layout.svelte.js";
   import { isLive, latestJacks } from "../../lib/attachments";
   import TopicDialog from "../dialogs/TopicDialog.svelte";
+  import TaskDrawer from "../dialogs/TaskDrawer.svelte";
 
   const topic = $derived((room.conversation?.topic ?? "").trim());
   /** Live jacks only: the badge answers "is anything running", not "how many
@@ -42,6 +43,21 @@
         : "give this line a topic — agents get it in their briefing"}
       onclick={() => dialogs.open(TopicDialog)}>{topic || "set a topic…"}</button
     >
+  {/if}
+
+  {#if room.conversation}
+    <button
+      class="task-toggle"
+      type="button"
+      title="shared line tasks"
+      aria-label="open shared line tasks"
+      onclick={() => dialogs.open(TaskDrawer)}
+    >
+      <svg aria-hidden="true" viewBox="0 0 24 24"
+        ><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" /></svg
+      >
+      <span>tasks</span>
+    </button>
   {/if}
 
   <button
@@ -111,6 +127,22 @@
   .drawer-toggle {
     display: none;
   }
+  .task-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    height: 34px;
+    padding: 0 10px;
+  }
+  .task-toggle svg {
+    width: 15px;
+    height: 15px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-width: 2;
+  }
 
   @media (max-width: 899px) {
     #topbar {
@@ -153,6 +185,19 @@
     }
     .jacks {
       font-size: 12px;
+    }
+    .task-toggle {
+      width: 44px;
+      height: 44px;
+      padding: 0;
+      justify-content: center;
+    }
+    .task-toggle span {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
     }
     .jacks .led {
       width: 6px;

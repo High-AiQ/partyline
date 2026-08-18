@@ -4,6 +4,7 @@ import "./app.css";
 import { room } from "./state/room.svelte.js";
 import { session } from "./state/session.svelte.js";
 import { wire } from "./state/wire.svelte.js";
+import { presence } from "./state/presence.svelte.js";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("partyline requires a #root mount element");
@@ -20,7 +21,7 @@ const app = mount(App, { target: root });
  * exist because the old page never used modules.
  */
 if (typeof window !== "undefined") {
-  window.partyline = { room, session, wire };
+  window.partyline = { room, session, wire, presence };
 }
 
 export default app;

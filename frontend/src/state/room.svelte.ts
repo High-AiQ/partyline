@@ -1,13 +1,9 @@
 /**
  * The room: the list of lines, the line you are on, and everything on it.
  *
- * This is the one place that turns a server event into a change on screen, so
- * the components below it can be dumb about ordering, deduplication and
- * reconnects. Two guards run through it:
- *
- *   - **`#epoch`** rises on every line change, and any `await` that resolves
- *     after it moved is discarded. Clicking two lines quickly used to let the
- *     slower fetch land last and paint the wrong line's history.
+ * This turns server events into screen state and owns two ordering guards:
+ *   - **`#epoch`** rises on line changes, discarding late awaits so a slower
+ *     fetch cannot overwrite the line chosen after it.
  *   - **`#seen`** holds message ids, because a reconnect replays history and
  *     the same message will arrive twice.
  */
@@ -28,6 +24,7 @@ import { wire, sendOffLine } from "./wire.svelte.js";
 import type { WireContext, WireIdentity } from "./wire.svelte.js";
 import { clearConversationRoute, routedConversationId, setConversationRoute } from "../lib/routing";
 import { isLive } from "../lib/attachments";
+import { presence } from "./presence.svelte.js";
 
 export interface RoomNotice {
   message: string;
@@ -57,10 +54,7 @@ class Room {
   /** A persisted restart offer is visible only on the line that created it. */
   reattachOffer = $state<ReattachOfferEvent | null>(null);
 
-  /** Handles seen speaking here, for the @ autocomplete. Not persisted: it is a
-   *  convenience, and the server is the authority on who may be mentioned.
-   *  `SvelteSet`, not `Set`: the deep proxy does not see through a native Set's
-   *  internals, so `.add()` on one would update nothing on screen. */
+  /** Speakers for @ autocomplete. `SvelteSet` makes `.add()` reactive. */
   humans = new SvelteSet<string>();
   /** Attachments blocked on a dialog, which the board rings until someone peeks. */
   attention = new SvelteSet<string>();
@@ -112,6 +106,7 @@ class Room {
     this.#seen = new Set<number>();
     this.humans.clear();
     this.attention.clear();
+    presence.clear();
     this.reattachOffer = null;
 
     wire.connect(
@@ -140,6 +135,7 @@ class Room {
 
     this.conversation = detail.conversation;
     this.attachments = detail.attachments;
+    presence.replace(detail.working);
     for (const message of detail.messages) this.#absorb(message);
     void this.loadConversations().catch(ignoreBackgroundFailure);
   }
@@ -167,6 +163,7 @@ class Room {
 
     this.conversation = detail.conversation;
     this.attachments = detail.attachments;
+    presence.replace(detail.working);
     for (const message of detail.messages) this.#absorb(message);
   }
 
@@ -180,6 +177,7 @@ class Room {
     this.#seen = new Set<number>();
     this.humans.clear();
     this.attention.clear();
+    presence.clear();
     this.reattachOffer = null;
     if (clearRoute && routedConversationId()) clearConversationRoute();
   }
@@ -201,7 +199,6 @@ class Room {
     if (!text) return false;
     return wire.send({ sender: this.identity.handle, body: text });
   }
-
   /** Post to a line we are not on — see `sendOffLine`. */
   warn(convId: string, body: string): Promise<void> {
     return sendOffLine(convId, this.identity, body);
@@ -214,7 +211,6 @@ class Room {
       this.notice = null;
     }, 4200);
   }
-
   // ── server events ──────────────────────────────────────────────────────
   #onWireEvent(event: WireEvent, context: WireContext): void {
     const convId = this.conversation?.id;
@@ -230,6 +226,10 @@ class Room {
 
       case "attention":
         this.attention.add(event.attachment_id);
+        break;
+
+      case "working":
+        presence.apply(event);
         break;
 
       case "reattach_offer":
@@ -312,7 +312,7 @@ class Room {
     if (!isLive(attachment)) this.attention.delete(attachment.id);
   }
 
-  /** Add a message once, remembering who spoke so the autocomplete knows them. */
+  /** Add a message once and remember its human sender for autocomplete. */
   #absorb(message: ChatMessage): void {
     if (this.#seen.has(message.id)) return;
     this.#seen.add(message.id);

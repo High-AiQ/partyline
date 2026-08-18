@@ -133,6 +133,7 @@ export const ConversationDetailSchema = z.object({
   conversation: ConversationSchema,
   messages: z.array(ChatMessageSchema),
   attachments: z.array(AttachmentSchema),
+  working: z.array(z.string()).default([]),
 });
 export type ConversationDetail = z.infer<typeof ConversationDetailSchema>;
 
@@ -198,6 +199,28 @@ export const ScreenResultSchema = z.object({
   screen: z.string(),
 });
 export type ScreenResult = z.infer<typeof ScreenResultSchema>;
+
+export const ClaimSchema = z.object({
+  id: z.string(),
+  owner: z.string(),
+  paths: z.array(z.string()).min(1),
+  created_at: z.number(),
+  expires_at: z.number(),
+});
+export type Claim = z.infer<typeof ClaimSchema>;
+
+export const TaskStatusSchema = z.enum(["open", "done"]);
+export type TaskStatus = z.infer<typeof TaskStatusSchema>;
+
+export const TaskSchema = z.object({
+  id: z.number().int().positive(),
+  body: z.string(),
+  status: TaskStatusSchema,
+  owner: z.string().nullable().default(null),
+  created_at: z.number(),
+  updated_at: z.number(),
+});
+export type Task = z.infer<typeof TaskSchema>;
 
 export const ApiErrorBodySchema = z.object({
   detail: z.string().optional(),

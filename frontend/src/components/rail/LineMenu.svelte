@@ -15,10 +15,11 @@
     conversation: Conversation;
     close: () => void;
     onrename: (conversation: Conversation) => void;
+    onclaims: (conversation: Conversation) => void;
     ondelete: (conversation: Conversation) => void;
   }
 
-  let { anchor, conversation, close, onrename, ondelete }: Props = $props();
+  let { anchor, conversation, close, onrename, onclaims, ondelete }: Props = $props();
 
   let panel = $state<HTMLDivElement | null>(null);
   let top = $state(0);
@@ -80,6 +81,7 @@
   aria-label="line actions for {conversation.name}"
 >
   <button type="button" role="menuitem" onclick={choose(onrename)}>rename</button>
+  <button type="button" role="menuitem" onclick={choose(onclaims)}>claims</button>
   <button type="button" role="menuitem" class="delete" onclick={choose(ondelete)}>delete</button>
 </div>
 
