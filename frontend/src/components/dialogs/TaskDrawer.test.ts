@@ -56,6 +56,39 @@ describe("TaskDrawer", () => {
     }
   });
 
+  it("keeps the spinner up when the losing fetch finishes first", async () => {
+    room.conversation = conversation;
+    let resolveStale!: (tasks: Task[]) => void;
+    let resolveFresh!: (tasks: Task[]) => void;
+    const stale = new Promise<Task[]>((resolve) => (resolveStale = resolve));
+    const fresh = new Promise<Task[]>((resolve) => (resolveFresh = resolve));
+    vi.spyOn(coordinationApi, "tasks")
+      .mockImplementationOnce(() => stale)
+      .mockImplementationOnce(() => fresh);
+
+    const drawer = mount(TaskDrawer, { target: document.body, props: { close: vi.fn() } });
+    try {
+      await vi.waitFor(() => {
+        expect(coordinationApi.tasks).toHaveBeenCalledWith("conv-1");
+      });
+      room.conversation = { ...conversation, id: "conv-2" };
+      await vi.waitFor(() => {
+        expect(coordinationApi.tasks).toHaveBeenCalledWith("conv-2");
+      });
+      resolveStale([task]);
+      await stale;
+      await tick();
+      expect(document.body.textContent).toContain("loading tasks…");
+      expect(document.body.textContent).not.toContain("prove the receipt");
+      resolveFresh([{ ...task, id: 2, body: "fresh line task" }]);
+      await vi.waitFor(() => {
+        expect(document.body.textContent).toContain("fresh line task");
+      });
+    } finally {
+      await unmount(drawer);
+    }
+  });
+
   it("keeps an assigned owner visible and completes a task", async () => {
     room.conversation = conversation;
     vi.spyOn(coordinationApi, "tasks").mockResolvedValue([task]);

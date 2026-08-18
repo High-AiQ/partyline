@@ -94,6 +94,23 @@ class TaskStoreTest(unittest.TestCase):
         with self.assertRaises(TaskError):
             self.store.get(task["id"])
 
+    def test_a_task_on_another_line_is_not_on_this_rider(self):
+        """A one-line fixture cannot see a missing conv_id filter."""
+        self.store.add("line", "here")
+        self.store.add("elsewhere", "elsewhere")
+        rider = self.store.rider("line")
+        self.assertIn("here", rider)
+        self.assertNotIn("elsewhere", rider)
+        self.assertEqual(
+            [t["body"] for t in self.store.list("elsewhere")], ["elsewhere"])
+
+    def test_purge_drops_only_this_line(self):
+        self.store.add("line", "gone")
+        kept = self.store.add("elsewhere", "kept")
+        self.store.purge("line")
+        self.assertEqual(self.store.list("line"), [])
+        self.assertEqual(self.store.get(kept["id"])["body"], "kept")
+
 
 class TaskRiderTest(unittest.TestCase):
     def test_no_open_tasks_means_no_rider_line(self):

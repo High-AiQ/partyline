@@ -387,6 +387,7 @@ async def purge_conversation(conv_id: str):
     await runtime.stop_attachments(conv_id)  # belt and braces: nothing should be live
     media.delete_conversation(conv_id)  # a purge takes the pictures with it
     purge_claims(runtime.db, conv_id)
+    tasks.purge(conv_id)
     runtime.db.delete_conversation(conv_id)
     runtime.sockets.pop(conv_id, None)
     return {"ok": True, "purged": True}
