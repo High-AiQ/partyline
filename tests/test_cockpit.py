@@ -521,7 +521,7 @@ class ArmDispatchTest(unittest.TestCase):
         )
         calls = []
         try:
-            cockpit.check = lambda: 0
+            cockpit.check = lambda **_kwargs: 0
             cockpit.git = lambda *_args, **_kwargs: "same"
             cockpit.check_in_sync = lambda *_args, **_kwargs: []
             cockpit.cockpit_can_boot = lambda *_args, **_kwargs: None
