@@ -27,7 +27,7 @@ from starlette.background import BackgroundTask
 
 from . import __version__
 from .attachment_commands import validated_attachment_command
-from .bind import BindConfig, load_bind_config, parse_bind_args, resolve_bind
+from .bind import BindConfig, load_bind_config, load_dotenv, parse_bind_args, resolve_bind
 from .adapters import (
     ADAPTERS,
     ADAPTER_METADATA,
@@ -90,30 +90,6 @@ from .terminal_stream import register_terminal_route
 STATIC_DIR = Path(__file__).parent / "static"
 ASSETS_DIR = STATIC_DIR / "assets"
 logger = logging.getLogger(__name__)
-
-
-def load_dotenv(path: str = ".env"):
-    """Merge a local .env into the environment attached processes inherit.
-
-    Credentials for an attached CLI have to reach it somehow, and the two bad
-    answers are baking them into a stored command or exporting them from a shell
-    profile. A gitignored .env next to the server is the third option. Variables
-    already set in the real environment always win, so an inline
-    `KEY=... uv run partyline` still overrides the file.
-    """
-    try:
-        lines = Path(path).read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key, value = key.strip().removeprefix("export ").strip(), value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
-        os.environ.setdefault(key, value)
 
 
 # The .env merge has to happen before anything reads the environment.
