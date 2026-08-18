@@ -123,6 +123,10 @@ class ConversationDetailResponse(BaseModel):
     conversation: ConversationResponse
     messages: list[MessageResponse]
     attachments: list[AttachmentResponse]
+    # Which attachments are mid-turn right now. A tab that opens or reconnects
+    # during someone's turn would otherwise show nothing until the next
+    # transition — the indicator would be blank exactly when it matters.
+    working: list[str] = []
 
 
 class ReattachCandidateResponse(BaseModel):

@@ -7,6 +7,7 @@ dead. Every assertion here is about *who* produced the signal as much as when.
 
 import asyncio
 import unittest
+from pathlib import Path
 
 from partyline.presence import Presence
 
@@ -123,6 +124,49 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(self.presence.is_working("att"))
         self.assertEqual(self.runtime.working_events(), [("att", True)])
+
+
+class SnapshotTest(unittest.IsolatedAsyncioTestCase):
+    """A tab that arrives mid-turn must not see an empty room.
+
+    Raised in review by @grok: the events describe transitions, so a browser
+    that opens or reconnects while someone is thinking would show nothing
+    until that turn ended — the indicator blank exactly when it is wanted.
+    """
+
+    async def test_conversation_detail_reports_who_is_working(self):
+        import tempfile
+
+        from partyline import server
+        from partyline.db import Db
+        from partyline.runtime import ChatRuntime
+
+        with tempfile.TemporaryDirectory() as directory:
+            db = Db(f"{directory}/partyline.db")
+            runtime = ChatRuntime(db)
+            presence = Presence(runtime)
+            saved = (server.runtime, server.presence, server.media)
+            server.runtime, server.presence = runtime, presence
+            server.media = server.MediaStore(db, Path(directory) / "media")
+            try:
+                db.create_conversation("line", "Line")
+                await presence.started("line", "busy")
+                await presence.started("line", "also-busy")
+                await presence.finished("line", "also-busy")
+
+                detail = await server.conversation_detail("line")
+                self.assertEqual(detail["working"], ["busy"])
+            finally:
+                server.runtime, server.presence, server.media = saved
+                db.close()
+
+    async def test_the_snapshot_lists_every_open_turn_and_nothing_else(self):
+        presence = Presence(FakeRuntime())
+        await presence.started("line", "one")
+        await presence.started("line", "two")
+        await presence.finished("line", "one")
+
+        self.assertEqual(presence.working_ids(), ["two"])
 
 
 class UnforgeableTest(unittest.IsolatedAsyncioTestCase):
