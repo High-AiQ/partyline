@@ -109,7 +109,36 @@ async def align_delivery_history(adapter, path: Path) -> bool:
         identity, tuple(record.fingerprint for record in records)
     )
     adapter._refused_resync = False
+    adapter._pending_backlog = aligned.backlog
     return True
+
+
+async def announce_backlog(adapter) -> None:
+    """Say how much of a resume's flush had never reached the room before.
+
+    A process that was muted keeps working, and everything it said in that
+    window arrives at once when the mute ends. The words are genuine and worth
+    delivering, but they can answer a room that has moved on — during one
+    incident a lead came close to reverting merged work on instructions that
+    read as current.
+
+    The claim is deliberately narrow. ``backlog`` proves *previously
+    undelivered*, not *old*: the transcript carries no timestamps, and a
+    record may have been produced after the spawn but before alignment. The
+    notice therefore says what was measured and leaves age to the reader.
+
+    It is said as the first held record is relayed, not when the alignment is
+    computed. Announcing a flush that a never-woken process never delivers
+    would be its own false statement.
+    """
+    backlog, adapter._pending_backlog = adapter._pending_backlog, 0
+    if backlog <= 0:
+        return  # nothing was held back; a notice would be noise
+    await adapter.post(
+        "system", "system",
+        f"@{adapter.att['name']}: relaying {backlog} message(s) that never "
+        "reached this line before now — they may answer an older state of it",
+    )
 
 
 def delivery_plan_matches(adapter, file) -> bool:

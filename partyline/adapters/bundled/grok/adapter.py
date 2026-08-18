@@ -18,6 +18,7 @@ from partyline.adapters.bundled.grok.resume import (
     align_delivery_history,
     delivery_plan_matches,
     file_identity,
+    announce_backlog,
     hold_undelivered_until_wake,
     settled_scan,
 )
@@ -60,20 +61,18 @@ class PartylineAdapter(Adapter):
         history = self.att.get("delivered_bodies")
         self._delivered_bodies = list(history) if history is not None else None
         self._delivery_skip: set[int] = set()
+        self._pending_backlog = 0
         self._delivery_plan = None
-        # Fingerprints of every assistant record already accounted for, in
-        # order. The ordinal alone cannot survive Grok rewriting the file with
-        # a shorter history (compaction); the sequence can.
+        # Fingerprints of accounted records, in order: an ordinal alone
+        # cannot survive Grok rewriting the file shorter; the sequence can.
         self._assistant_fingerprints: list[bytes] = []
-        # Set only once a pre-spawn count actually succeeds: that is the
-        # lifecycle whose next replacement is a restore rather than a
-        # compaction. Resuming alone does not imply it — with no transcript
-        # before the spawn there is nothing to carry across, and a stale flag
-        # would preserve an ordinal through a real compaction and mute the
-        # process. The flag records what was observed, never what was assumed.
+        # Set only once a pre-spawn count succeeds: that is the lifecycle
+        # whose next replacement is a restore, not a compaction. Resuming
+        # alone does not imply it, and a stale flag would carry an ordinal
+        # through a real compaction and mute the process. The flag records
+        # what was observed, never what was assumed.
         self._resume_swap_pending = False
-        # Ordinal a resume's refill must reach to count as restored.
-        self._restoring_to: int | None = None
+        self._restoring_to: int | None = None  # refill target to count restored
         self._refused_resync = False  # told the room about a refused re-anchor?
 
     def _transcript(self) -> Path | None:
@@ -223,6 +222,7 @@ class PartylineAdapter(Adapter):
                         self._resume_swap_pending = False
                         self._restoring_to = None
                         self._assistant_fingerprints.append(self._fingerprint(line))
+                        await announce_backlog(self)
                         await handle(record)
             except OSError:
                 if not self.alive():
