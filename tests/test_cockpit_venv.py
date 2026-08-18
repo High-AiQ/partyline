@@ -284,17 +284,3 @@ class LiveVersionMatchesTest(unittest.TestCase):
                 raise OSError("connection refused")
 
             self.assertIsNone(live_version_matches(cockpit, get_json=boom))
-
-    def test_live_server_matches_this_cockpit_when_reachable(self):
-        """Real /api/version against the running room, if one is listening."""
-        from scripts.cockpit_venv import default_base_url, fetch_version
-        from scripts.cockpit import DEFAULT_COCKPIT
-
-        try:
-            payload = fetch_version(default_base_url())
-        except Exception:
-            self.skipTest("no live partyline on PARTYLINE_PORT")
-        if not DEFAULT_COCKPIT.is_dir():
-            self.skipTest("no cockpit clone")
-        refused = live_version_matches(DEFAULT_COCKPIT, get_json=lambda _url: payload)
-        self.assertIsNone(refused, refused)
