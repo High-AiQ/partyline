@@ -20,7 +20,13 @@ from collections.abc import Awaitable, Callable
 
 import pyte
 
-from partyline.adapters.briefing import BRIEFING, TOPIC_BRIEFING, child_env
+from partyline.adapters.briefing import (
+    BRIEFING,
+    TOPIC_BRIEFING,
+    child_env,
+    format_digest,
+    safe_rider,
+)
 from partyline.adapters.terminal import KEYS, screen_text, terminal_responses
 from partyline.terminal_viewers import TerminalViewer, TerminalViewerRegistry
 
@@ -243,16 +249,10 @@ class Adapter:
         await self._startup_delivery.wait()
         return self._startup_delivery_result is True
 
-    # Tail of every wake digest. The briefing states the rule once, but in a long
-    # session it scrolls far out of the recent context — this keeps the rule next
-    # to the newest messages, which is where drift actually happens.
-    DIGEST_FOOTER = ("(reminder: processes only see messages that @mention them — @name any "
-                     "process your reply is for; humans read everything; acknowledge handed "
-                     "work in one line, then speak only for blockers, findings, or results)")
-
+    # The digest's shape lives in briefing.py as pure functions; the rider is
+    # live line state (open tasks), consulted at delivery time, never staged.
     def format_digest(self, messages: list[dict]) -> str:
-        lines = "\n".join(f"[{m['sender']}]: {m['body']}" for m in messages)
-        return f"{lines}\n{self.DIGEST_FOOTER}"
+        return format_digest(messages, safe_rider(self.att))
 
     async def send_keys(self, text: str):
         assert self.master is not None

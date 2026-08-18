@@ -78,6 +78,7 @@ from .presence import Presence
 from .media import MediaStore, media_root
 from .claim_routes import claims_router, purge_claims
 from .media_routes import media_router
+from .task_routes import wire_tasks
 from .reattach import (
     ReattachCoordinator,
     ResumedAttachment,
@@ -135,6 +136,7 @@ app.state.bind = BindConfig()
 register_terminal_route(app, runtime)
 app.include_router(media_router(runtime, media))
 app.include_router(claims_router(runtime))
+tasks = wire_tasks(app, runtime)
 
 # -- REST ------------------------------------------------------------------
 @app.get("/")
@@ -428,6 +430,7 @@ async def attach(conv_id: str, body: AttachIn):
     att["conv_name"] = conv["name"]
     att["topic"] = conv["topic"]
     att["hook_url"] = _hook_url(att_id, app.state.bind)
+    att["digest_rider"] = lambda: tasks.rider(conv_id)
 
     adapter = make_adapter(
         body.adapter,
@@ -479,6 +482,7 @@ async def _resume_adapter(
     att["conv_name"] = conv["name"]
     att["resume"] = True
     att["hook_url"] = _hook_url(att_id, app.state.bind)
+    att["digest_rider"] = lambda: tasks.rider(att["conv_id"])
     runtime_owner = str(uuid.uuid4())
     att["runtime_owner"] = runtime_owner
 
