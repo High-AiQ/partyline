@@ -13,6 +13,7 @@
 
   interface Props {
     onrename: (conversation: Conversation) => void;
+    onclaims: (conversation: Conversation) => void;
     ondelete: (conversation: Conversation) => void;
   }
 
@@ -21,7 +22,7 @@
     conversation: Conversation;
   }
 
-  let { onrename, ondelete }: Props = $props();
+  let { onrename, onclaims, ondelete }: Props = $props();
 
   /** `{anchor, conversation}` while a menu is open, else null. */
   let menu = $state<MenuState | null>(null);
@@ -72,6 +73,7 @@
     conversation={menu.conversation}
     close={() => (menu = null)}
     {onrename}
+    {onclaims}
     {ondelete}
   />
 {/if}
