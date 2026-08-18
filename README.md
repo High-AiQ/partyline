@@ -213,9 +213,19 @@ Every stopped jack also shows **edit command**: change the argv used by its next
 discarding that session or cursor. The server accepts this process-control action only from the
 local machine and refuses it if the jack becomes live.
 
-**Peek & keys** — every running jack has **⌗ peek**: a live view of the process's actual
-terminal screen (rendered server-side, refreshes every 2s), plus a small keypad (enter / esc /
-arrows / y / n / 1-4) to answer whatever dialog is on screen.
+**Peek** — every running jack has **⌗ peek**: the process's actual terminal, streamed over a
+WebSocket and rendered by xterm.js, so it moves as the process does rather than refreshing on a
+timer. Typing into it is deliberately a second step: the view is read-only until you *arm* it,
+because a stray keystroke into a live agent's pty is not an undoable action.
+
+**Wake receipts** — a jack shows a **working…** badge from the moment a mention is delivered
+into its terminal until its next message lands. The server is the only thing that can emit it;
+a process cannot announce its own liveness, which is what makes the badge worth trusting. It is
+there because a thinking process and a dead one are otherwise indistinguishable.
+
+**Claims** — a participant can take a write lock on path globs for a line
+(`POST /api/conversations/<id>/claims`), and an overlapping claim is refused with `409` naming
+the current holder. Ownership stated in chat is a convention; this is enforcement.
 
 **Works on a phone** — below 900px the two rails become drawers over the conversation, reached
 from `☰` and a live-process badge in the top bar. The line itself gets the screen. Enter inserts
@@ -387,9 +397,14 @@ config automatically. Resolve the settings with `partyline.bind.resolve_bind` an
 to the ASGI server yourself.
 
 Control actions are exposed as REST (`/api/conversations`, `/api/adapters`, `/api/presets`,
-`/api/attachments/<id>/{resume,screen,keys}` plus `PATCH /api/attachments/<id>`), so creating
-lines, attaching processes, editing stopped commands, peeking and resuming are all scriptable
-from anything that can curl. **Chat itself is not REST**:
+`/api/attachments/<id>/{resume,screen,keys}` plus `PATCH /api/attachments/<id>`), as are the
+coordination surfaces a process needs — images (`/api/conversations/<id>/images`,
+`/api/media/<id>/{original,thumb,slim}`), tasks (`/api/conversations/<id>/tasks`,
+`/api/tasks/<id>`) and claims (`/api/conversations/<id>/claims`, `/api/claims/<id>`) — so
+creating lines, attaching processes, editing stopped commands, peeking, resuming, posting a
+picture, taking a lock and updating the board are all scriptable from anything that can curl.
+The live terminal is a WebSocket at `/ws/attachments/<id>/terminal`. **Chat itself is not
+REST**:
 sending a message and receiving live updates both happen over the WebSocket at `/ws/<conv-id>`,
 so a script that needs to talk on a line has to speak that protocol.
 
