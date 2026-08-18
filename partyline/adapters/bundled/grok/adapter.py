@@ -58,8 +58,7 @@ class PartylineAdapter(Adapter):
         # would preserve an ordinal through a real compaction and mute the
         # process. The flag records what was observed, never what was assumed.
         self._resume_swap_pending = False
-        # While a resume's replacement is refilling, the ordinal it must reach
-        # before the file counts as restored. None once it has.
+        # Ordinal a resume's refill must reach to count as restored.
         self._restoring_to: int | None = None
         self._refused_resync = False  # told the room about a refused re-anchor?
 
@@ -255,12 +254,13 @@ class PartylineAdapter(Adapter):
         nothing is recoverable, relaying everything is not.
         """
         if self._resume_swap_pending:
-            # The one replacement a resume performs. The replacement is a
-            # superset of what was counted before the spawn, so the ordinal
-            # carries across it unchanged; consulting overlap here is what
-            # replayed whole sessions into the room. The flag stays set until
-            # the refill is observed to have caught up: clearing it here would
-            # call a half-restored file "restored".
+            # The one replacement a resume performs: a superset of the
+            # pre-spawn count, so the ordinal carries across it untouched —
+            # consulting overlap here replayed whole sessions. The swap is
+            # consumed now, but the file is not restored until the refill
+            # reaches that ordinal, and recovery must keep out of the way.
+            self._resume_swap_pending = False
+            self._restoring_to = self._accounted
             return
         seen = self._assistant_fingerprints
         if not seen:

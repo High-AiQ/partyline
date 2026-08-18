@@ -656,6 +656,57 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
         return handle
 
 
+    async def test_a_compaction_after_a_completed_restore_is_not_treated_as_the_swap(self):
+        """@sol's inverse control: the swap is consumed once, not held open.
+
+        A resume replaces the transcript, the refill completes, and Grok is
+        then compacted *before* saying anything new. If the resume flag were
+        still set, that compaction would carry a stale ordinal and mute the
+        process — the same silence, one lifecycle later.
+        """
+        posted = []
+        running = True
+
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "chat_history.jsonl"
+            transcript.write_text(self.history(0, 3), encoding="utf-8")
+            adapter = make_adapter(resume=True, session_id=SESSION_ID)
+            adapter.POLL_SECONDS = 0.005
+            adapter.SETTLE_SECONDS = 0.02
+            adapter.alive = lambda: running
+
+            with patch.object(adapter, "_transcript", return_value=transcript):
+                with patch.object(Adapter, "start", new=AsyncMock()):
+                    await adapter.start()
+                task = asyncio.create_task(
+                    adapter._tail_grok_transcript(transcript, self.relay(posted))
+                )
+                await asyncio.sleep(0.05)
+                # The resume swap: same history, new file, refilled at once.
+                swap = Path(directory) / "swap.jsonl"
+                swap.write_text(self.history(0, 3), encoding="utf-8")
+                swap.replace(transcript)
+                await asyncio.sleep(0.15)
+                self.assertIsNone(adapter._restoring_to, "the refill never registered")
+
+                # A real compaction, before any new speech: keeps the tail.
+                compacted = Path(directory) / "compacted.jsonl"
+                compacted.write_text(
+                    self.history(2, 1) + '{"type":"assistant","content":"after compaction"}\n',
+                    encoding="utf-8",
+                )
+                compacted.replace(transcript)
+                for _ in range(400):
+                    if "after compaction" in posted:
+                        break
+                    await asyncio.sleep(0.01)
+                running = False
+                await asyncio.wait_for(task, timeout=3)
+
+        self.assertIn("after compaction", posted, "muted by a stale resume flag")
+        self.assertEqual([body for body in posted if body.startswith("old reply")], [])
+
+
 class LifecycleTest(unittest.IsolatedAsyncioTestCase):
     async def test_start_refuses_resume_without_a_session_before_spawning(self):
         adapter = make_adapter(resume=True)
