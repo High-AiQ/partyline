@@ -13,6 +13,7 @@
   import { isLive, latestJacks } from "../../lib/attachments";
   import TopicDialog from "../dialogs/TopicDialog.svelte";
   import TaskDrawer from "../dialogs/TaskDrawer.svelte";
+  import AccountMenu from "./AccountMenu.svelte";
 
   const topic = $derived((room.conversation?.topic ?? "").trim());
   /** Live jacks only: the badge answers "is anything running", not "how many
@@ -59,6 +60,8 @@
       <span>tasks</span>
     </button>
   {/if}
+
+  <AccountMenu />
 
   <button
     class="drawer-toggle jacks"

@@ -1,7 +1,7 @@
 <script lang="ts">
   /**
-   * The shell: three columns, the gate over the top of them until you have a
-   * handle, and the dialog stack over everything.
+   * The shell: three columns, the auth gate until the server validates a user,
+   * and the dialog stack over everything.
    */
   import Gate from "./components/Gate.svelte";
   import WireBanner from "./components/WireBanner.svelte";
@@ -56,15 +56,31 @@
   });
 
   void session.loadVersion();
-  void session.loadAdapters();
-  void session.loadPresets();
-  if (session.signedIn) void room.loadConversations();
+  void session.loadCurrentUser();
 
   /** Signing in is the point at which the app may start talking to the server. */
   function connect(): void {
+    void session.loadAdapters();
+    void session.loadPresets();
     if (room.conversation) void room.open(room.conversation, { fromRoute: true });
     else void room.loadConversations();
   }
+
+  /** Auth can change in this tab or arrive through localStorage from another.
+   *  The rising edge must initialize the whole app; the falling edge tears
+   *  down every reconnect loop before showing the gate. */
+  let wasSignedIn = false;
+  $effect(() => {
+    const signedIn = session.signedIn;
+    if (signedIn && !wasSignedIn) {
+      connect();
+    } else if (!signedIn && wasSignedIn) {
+      room.leave();
+      dialogs.closeAll();
+      layout.close();
+    }
+    wasSignedIn = signedIn;
+  });
 
   function mention(name: string): void {
     draft.mention(name);
@@ -90,11 +106,11 @@
   }}
 />
 
-{#if session.gateOpen}
-  <Gate onconnect={connect} />
+{#if !session.signedIn}
+  <Gate />
 {/if}
 
-{#if session.handle}
+{#if session.signedIn}
   <div id="app" class="drawer-{layout.drawer ?? 'none'}">
     <Rail />
 

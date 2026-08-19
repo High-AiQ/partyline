@@ -1,6 +1,7 @@
 <script lang="ts">
   import ImageViewer from "./ImageViewer.svelte";
   import { imageLabel } from "../../lib/images";
+  import { authenticatedResourceUrl } from "../../lib/socket-auth";
   import { dialogs } from "../../state/dialogs.svelte.js";
   import type { ImageRef } from "../../lib/contracts";
 
@@ -32,7 +33,7 @@
       }}
     >
       <img
-        src={image.urls.thumb}
+        src={authenticatedResourceUrl(image.urls.thumb)}
         alt={imageLabel(image, index)}
         width={image.thumb?.width ?? image.width}
         height={image.thumb?.height ?? image.height}

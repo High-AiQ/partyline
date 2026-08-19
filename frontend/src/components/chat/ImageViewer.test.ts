@@ -34,14 +34,15 @@ function expectPosition(title: string, position: string): void {
 }
 
 describe("ImageViewer carousel", () => {
-  it("renders the slim tier while keeping the original download link", async () => {
+  it("renders the slim tier without putting the original token in a link", async () => {
     const viewer = mount(ImageViewer, {
       target: document.body,
       props: { images: [image(1)], initialIndex: 0, close: vi.fn() },
     });
     try {
       expect(document.querySelector(".stage img")?.getAttribute("src")).toBe("/api/media/image-1/slim");
-      expect(document.querySelector(".details a")?.getAttribute("href")).toBe("/api/media/image-1/original");
+      expect(document.querySelector(".details a")).toBeNull();
+      expect(document.querySelector(".download")?.textContent).toContain("download original");
     } finally {
       await unmount(viewer);
     }

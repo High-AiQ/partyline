@@ -25,6 +25,12 @@ describe("terminalSocketUrl", () => {
     );
   });
 
+  it("authenticates the terminal socket with an encoded access token", () => {
+    expect(terminalSocketUrl("att-1", { protocol: "https:", host: "example.test" }, "jwt+/=")).toBe(
+      "wss://example.test/ws/attachments/att-1/terminal?token=jwt%2B%2F%3D",
+    );
+  });
+
   it("uses ws on http", () => {
     expect(terminalSocketUrl("att-1", { protocol: "http:", host: "127.0.0.1:8642" })).toBe(
       "ws://127.0.0.1:8642/ws/attachments/att-1/terminal",
