@@ -11,6 +11,7 @@ from fastapi import HTTPException, WebSocketDisconnect
 
 from partyline import frontend_build, server
 from partyline.db import Db
+from partyline.hook_routes import handle_hook
 from partyline.runtime import ChatRuntime
 from partyline.tasks import TaskError
 
@@ -268,8 +269,8 @@ class BindConfigTest(unittest.TestCase):
             self.assertEqual(captured["config"].host, "example.test")
             self.assertEqual(captured["config"].port, 9000)
             self.assertEqual(
-                server._hook_url("attachment", server.app.state.bind),
-                "http://example.test:9000/api/hooks/attachment",
+                server._hook_url("attachment", server.app.state.bind, "token-9"),
+                "http://example.test:9000/api/hooks/attachment/token-9",
             )
             self.assertTrue(captured["ran"])
         finally:
@@ -282,8 +283,8 @@ class BindConfigTest(unittest.TestCase):
 
     def test_hook_url_formats_ipv6_bind(self):
         self.assertEqual(
-            server._hook_url("attachment", server.BindConfig("::1", 9000)),
-            "http://[::1]:9000/api/hooks/attachment",
+            server._hook_url("attachment", server.BindConfig("::1", 9000), "token-9"),
+            "http://[::1]:9000/api/hooks/attachment/token-9",
         )
 
 
@@ -326,10 +327,10 @@ class ServerTest(unittest.TestCase):
             self.arun(coroutine)
         self.assertEqual(raised.exception.status_code, status)
 
-    def add_attachment(self, ident, name="terra", status="running"):
+    def add_attachment(self, ident, name="terra", status="running", owner=None):
         server.runtime.db.add_attachment(
-            ident, "line", name, "fake", ["fake"], self.directory.name)
-        server.runtime.db.set_attachment_status(ident, status, None)
+            ident, "line", name, "fake", ["fake"], self.directory.name, owner)
+        server.runtime.db.set_attachment_status(ident, status, owner)
 
     def test_route_mentions_all_punctuation_self_and_unreachable(self):
         self.add_attachment("one", "terra")
@@ -863,13 +864,86 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(updated["title"], "New")
         self.assertEqual(self.arun(server.delete_preset(preset["id"])), {"ok": True})
 
-        self.add_attachment("hook")
-        self.arun(server.hook_event("hook", JsonRequest({"message": "Permission needed"})))
+        self.add_attachment("hook", owner="owner-1")
+        self.arun(
+            hook_event("hook", "owner-1", JsonRequest({"message": "Permission needed"}))
+        )
         self.assertIn("needs attention", server.runtime.db.list_messages("line")[-1]["body"])
         count = len(server.runtime.db.list_messages("line"))
-        self.arun(server.hook_event("hook", JsonRequest({"title": "idle"})))
-        self.arun(server.hook_event("hook", JsonRequest(fails=True)))
+        self.arun(hook_event("hook", "owner-1", JsonRequest({"title": "idle"})))
+        self.arun(hook_event("hook", "owner-1", JsonRequest(fails=True)))
         self.assertEqual(len(server.runtime.db.list_messages("line")), count)
+
+    def test_a_hook_without_the_current_activation_token_is_refused(self):
+        """The attachment id is public; the hook must not be writable from it.
+
+        It is printed in the join notice, used as the CLI session name, and
+        now reachable from the whole LAN. A caller that guesses one is told
+        404 either way, so this also does not confirm which ids exist.
+        """
+        self.add_attachment("hook", owner="owner-1")
+        payload = JsonRequest({"message": "Permission needed"})
+        count = len(server.runtime.db.list_messages("line"))
+
+        self.assert_http(404, hook_event("hook", "owner-0", payload))
+        self.assert_http(404, hook_event("hook", "", payload))
+        self.assert_http(404, hook_event("missing", "owner-1", payload))
+        self.assertEqual(len(server.runtime.db.list_messages("line")), count)
+
+    def test_a_harness_turn_boundary_opens_and_closes_the_badge(self):
+        """The receipt intake: paired hook events, nothing else."""
+        self.add_attachment("hook", owner="owner-1")
+        server.presence.register("hook", "receipt")
+        self.arun(server.presence.started("line", "hook", owner="owner-1"))
+
+        self.arun(hook_event("hook", "owner-1", JsonRequest({"hookEventName": "Stop"})))
+        self.assertFalse(server.presence.is_working("hook"))
+        server.presence.forget("hook")
+
+    def test_a_subagent_stop_is_not_the_parent_turn_ending(self):
+        """@grok: a subagent finishing would clear the badge mid-work."""
+        self.add_attachment("hook", owner="owner-1")
+        self.arun(server.presence.started("line", "hook", owner="owner-1"))
+
+        for name in ("SubagentStop", "Notification", "PreToolUse", "", None):
+            self.arun(hook_event("hook", "owner-1", JsonRequest({"hookEventName": name})))
+        self.assertTrue(server.presence.is_working("hook"))
+        server.presence.forget("hook")
+
+    def test_a_receipt_from_another_session_cannot_close_this_turn(self):
+        """A user-global hook fires for every session of that CLI on the box."""
+        self.add_attachment("hook", owner="owner-1")
+        self.arun(server.presence.started("line", "hook", owner="owner-1"))
+
+        self.assert_http(
+            404, hook_event("hook", "owner-9", JsonRequest({"hookEventName": "Stop"}))
+        )
+        self.assertTrue(server.presence.is_working("hook"))
+        server.presence.forget("hook")
+
+    def test_a_hook_body_that_is_not_json_ends_nothing(self):
+        self.add_attachment("hook", owner="owner-1")
+        self.arun(server.presence.started("line", "hook", owner="owner-1"))
+
+        self.arun(hook_event("hook", "owner-1", JsonRequest(fails=True)))
+        self.assertTrue(server.presence.is_working("hook"))
+        server.presence.forget("hook")
+
+    def test_a_hook_for_a_superseded_activation_is_refused(self):
+        """A resumed attachment gets a new owner; the old harness keeps firing."""
+        self.add_attachment("hook", owner="owner-1", status="exited")
+        self.assertTrue(server.runtime.db.claim_attachment("hook", "owner-2"))
+        payload = JsonRequest({"message": "Permission needed"})
+
+        self.assert_http(404, hook_event("hook", "owner-1", payload))
+        self.arun(hook_event("hook", "owner-2", payload))
+        self.assertIn("needs attention", server.runtime.db.list_messages("line")[-1]["body"])
+
+    def test_an_attachment_with_no_activation_has_no_reachable_hook(self):
+        self.add_attachment("hook")
+        payload = JsonRequest({"message": "Permission needed"})
+
+        self.assert_http(404, hook_event("hook", "", payload))
 
     def test_load_dotenv_and_hook_url(self):
         path = f"{self.directory.name}/.env"
@@ -885,8 +959,8 @@ class ServerTest(unittest.TestCase):
             self.assertEqual(os.environ["QUOTED"], " hello ")
             self.assertEqual(os.environ["EXISTING"], "yes")
             self.assertEqual(
-                server._hook_url("attachment", server.app.state.bind),
-                "http://example.test:9999/api/hooks/attachment",
+                server._hook_url("attachment", server.app.state.bind, "token-9"),
+                "http://example.test:9999/api/hooks/attachment/token-9",
             )
         finally:
             for key in ("NEW", "QUOTED"):
@@ -896,6 +970,11 @@ class ServerTest(unittest.TestCase):
             else:
                 os.environ["EXISTING"] = old_existing
             server.app.state.bind = old_bind
+
+
+def hook_event(att_id, token, request):
+    """The route handler, called directly rather than over HTTP."""
+    return handle_hook(server.runtime, server.presence, att_id, token, request)
 
 
 class FakeRequest:

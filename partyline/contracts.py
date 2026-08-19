@@ -130,6 +130,8 @@ class ConversationDetailResponse(BaseModel):
     working: list[str] = []
     # None means the server has not adopted structured presence yet; clients
     # keep consuming the legacy list until the endpoint supplies this field.
+    # This server always supplies it, including idle tombstones: their
+    # revisions stop a buffered pre-snapshot event relighting a cleared badge.
     presence: list[PresenceState] | None = None
 
 
