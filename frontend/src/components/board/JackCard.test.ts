@@ -94,6 +94,30 @@ describe("JackCard badge treatments", () => {
     }
   });
 
+  it("keeps an aged receipt turn working rather than guessing stalled", async () => {
+    const card = mountCard();
+    try {
+      presence.apply({
+        type: "working",
+        attachment_id: attachment.id,
+        working: true,
+        phase: "working",
+        completion: "receipt",
+        since: 1,
+        turn: 1,
+        revision: 2,
+      });
+      await tick();
+      const badge = document.querySelector(".working");
+      expect(badge?.textContent).toContain("working…");
+      expect(badge?.textContent).not.toContain("stalled?");
+      expect(badge?.className).toContain("filled");
+      expect(badge?.className).toContain("live");
+    } finally {
+      await unmount(card);
+    }
+  });
+
   it("renders an aged none adapter hollow, still working, with the guess explained", async () => {
     const card = mountCard();
     try {
