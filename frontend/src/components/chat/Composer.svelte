@@ -7,6 +7,7 @@
    * reach the send path; Shift+Enter remains the newline shortcut. That
    * precedence is the whole reason this is one component.
    */
+  import { untrack } from "svelte";
   import MentionPopover from "./MentionPopover.svelte";
   import ImageAttachmentPicker from "./ImageAttachmentPicker.svelte";
   import ComposerDropZone from "./ComposerDropZone.svelte";
@@ -17,8 +18,7 @@
   import { api } from "../../lib/api";
   import type { ImageIntake, PendingImages } from "../../lib/images";
   import { applyMention, mentionCandidates, mentionToken } from "../../lib/mentions";
-  import type { MentionToken } from "../../lib/mentions";
-  import type { MentionCandidate } from "../../lib/mentions";
+  import type { MentionToken, MentionCandidate } from "../../lib/mentions";
 
   let box = $state<HTMLTextAreaElement | null>(null);
   let token = $state<MentionToken | null>(null);
@@ -32,12 +32,12 @@
     imageIntake = { generation: imageIntake.generation + 1, files };
   }
 
-  // A handle dropped in from the board should leave the caret at the end, ready
-  // to keep typing, rather than wherever it happened to be.
+  // A handle dropped in from the board should leave the caret at the end. The
+  // trigger is externalEdits alone — draft.text is untracked so typing can't move it.
   $effect(() => {
     void draft.externalEdits;
     if (!box) return;
-    const end = draft.text.length;
+    const end = untrack(() => draft.text.length);
     box.focus();
     box.setSelectionRange(end, end);
     resize();
