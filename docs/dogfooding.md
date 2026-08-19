@@ -49,6 +49,19 @@ then reads back the timer and complete service argv before reporting success. It
 server by PID **and** process-generation start time, waits for that exact generation to exit, and
 then launches the deployed cockpit.
 
+When the replacement must use a durable bind or instance label, pass an explicit config through the
+trigger rather than relying on the cockpit checkout's current directory:
+
+```bash
+uv run python -m scripts.cockpit arm --pid NNNNN \
+  --server-config ~/.config/partyline/cockpit.toml
+```
+
+The arm preflight resolves that file and records its absolute path in the verified service argv.
+The trigger resolves it again against the outgoing process's exact argv and environment before it
+signals anything; if preserved bind/instance argv or environment values would change the explicit
+config's result, the restart refuses instead of returning on an unexpected address.
+
 The replacement receives an environment snapshot from the verified outgoing process. This is
 load-bearing: a transient systemd unit does not inherit the interactive user's `PATH`, and attached
 CLIs may live in a user-local directory. If the old environment cannot be read, the trigger refuses
