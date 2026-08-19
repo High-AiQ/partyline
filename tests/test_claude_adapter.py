@@ -8,6 +8,14 @@ from unittest.mock import AsyncMock, patch
 from partyline.adapters.bundled.claude.adapter import PartylineAdapter
 
 
+class ClaudeManifestTest(unittest.TestCase):
+    def test_manifest_declares_receipt_turn_end(self):
+        root = Path(__file__).parents[1] / "partyline" / "adapters" / "bundled" / "claude"
+        manifest = (root / "adapter.toml").read_text(encoding="utf-8")
+        self.assertIn("resume = true", manifest)
+        self.assertIn('turn_end = "receipt"', manifest)
+
+
 class ClaudeCommandTest(unittest.TestCase):
     def make_adapter(self, *, command: list[str], resume: bool, hook_url: str | None = None):
         """Build only the pure argv seam; no pty or Claude CLI is involved."""
@@ -55,6 +63,14 @@ class ClaudeCommandTest(unittest.TestCase):
         self.assertIn("curl -s -m 5 -X POST", hook["command"])
         self.assertIn("hooks.example.test", hook["command"])
         self.assertIn("--data-binary @-", hook["command"])
+        self.assertEqual(
+            settings["hooks"]["Stop"][0]["hooks"][0]["command"], hook["command"],
+        )
+        self.assertEqual(
+            settings["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"],
+            hook["command"],
+        )
+        self.assertNotIn("SubagentStop", settings["hooks"])
 
     def test_existing_settings_are_not_replaced(self):
         adapter = self.make_adapter(
