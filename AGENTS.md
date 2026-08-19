@@ -16,7 +16,7 @@ replace an interactive process with a headless invocation or screen scraping.
 - `partyline/db.py` — SQLite schema, migrations, and queries
 - `frontend/` — the TypeScript web client: Vite + Svelte 5 + Tailwind (see `docs/frontend.md`)
 - `partyline/static/` — **build output, committed.** Never edit by hand
-- `docs/` — depth: `frontend.md`, `dogfooding.md`, `adapters.md`, `lessons.md`
+- `docs/` — depth: `frontend.md`, `dogfooding.md`, `adapters.md`, `lessons.md`, `releases.md`
 - `skills/` — procedures: `add-process-adapter/`, `verify-visual-change/`
 
 ## Frontend
@@ -191,6 +191,10 @@ rather than reconstructing the procedure from memory. The rules that make it saf
   `.ts`, and `.svelte` files only; tests and third-party code are excluded. The temporary entries
   in `line-length-exceptions.txt` are existing debt: they must never grow, no new exception may be
   added, and each entry should be removed when its file is split below the cap.
+- **Tags are the release record; there are no GitHub Releases.** CI tags every version change
+  automatically. Do not create a Release by hand — the last attempt lapsed and left the front page
+  advertising a version eight behind the code. `docs/releases.md` has the policy and says when to
+  revisit it.
 - **`main` is protected.** Work on a branch and open a pull request; do not push directly to
   `main`. GitHub requires the `backend`, `frontend`, `code-line-limits`,
   `conventional-commits`, and `version-policy` checks before merge. The CI commands are
