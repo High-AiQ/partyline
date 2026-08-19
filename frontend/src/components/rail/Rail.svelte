@@ -78,13 +78,6 @@
     <span>operator&nbsp;<b id="meName">{session.handle}</b></span>
     <span class="me-actions">
       <button
-        id="meEdit"
-        type="button"
-        onclick={() => {
-          session.openGate();
-        }}>edit</button
-      >
-      <button
         id="stopServer"
         type="button"
         title="stop the partyline server"

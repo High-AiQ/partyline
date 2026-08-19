@@ -131,6 +131,40 @@ export const VersionInfoSchema = z.object({
 });
 export type VersionInfo = z.infer<typeof VersionInfoSchema>;
 
+export const HandleSchema = z.string().regex(/^[A-Za-z0-9_.-]{3,32}$/);
+export type Handle = z.infer<typeof HandleSchema>;
+
+export const AuthUserSchema = z.object({
+  id: z.number().int().positive(),
+  email: z.email(),
+  handle: HandleSchema,
+});
+export type AuthUser = z.infer<typeof AuthUserSchema>;
+
+export const AuthTokenResponseSchema = z.object({
+  access_token: z.string().min(1),
+  refresh_token: z.string().min(1),
+  token_type: z.literal("bearer"),
+  user: AuthUserSchema,
+});
+export type AuthTokenResponse = z.infer<typeof AuthTokenResponseSchema>;
+
+export const AuthRegisterRequestSchema = z.object({
+  email: z.email().max(254),
+  password: z.string().min(8).max(1024),
+  handle: HandleSchema,
+});
+export type AuthRegisterRequest = z.infer<typeof AuthRegisterRequestSchema>;
+
+export const AuthLoginRequestSchema = z.object({
+  email: z.email().max(254),
+  password: z.string().min(8).max(1024),
+});
+export type AuthLoginRequest = z.infer<typeof AuthLoginRequestSchema>;
+
+export const HandleUpdateRequestSchema = z.object({ handle: HandleSchema });
+export type HandleUpdateRequest = z.infer<typeof HandleUpdateRequestSchema>;
+
 export const PresencePhaseSchema = z.enum(["idle", "working", "speaking", "quiet"]);
 export type PresencePhase = z.infer<typeof PresencePhaseSchema>;
 

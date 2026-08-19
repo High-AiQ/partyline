@@ -107,7 +107,8 @@ class ResyncTest(unittest.TestCase):
             # Said while this tab was deaf, through a channel it is not watching.
             page.request.post(
                 f"{ui.base_url}/api/conversations/{conversation_id}/topic",
-                data={"topic": "spoken during the outage", "sender": "someone-else"},
+                data={"topic": "spoken during the outage"},
+                headers=ui.auth_headers,
             )
 
             page.wait_for_function("() => window.partyline.wire.ready === true", timeout=15000)
@@ -115,7 +116,9 @@ class ResyncTest(unittest.TestCase):
             # Assert the property rather than a notice's wording: after catching
             # up, the tab must hold every message the server has.
             page.wait_for_function(
-                """() => fetch(`/api/conversations/${window.partyline.room.conversation.id}`)
+                """() => fetch(`/api/conversations/${window.partyline.room.conversation.id}`, {
+                       headers: {Authorization: `Bearer ${localStorage.getItem('partyline_access_token')}`}
+                     })
                      .then(r => r.json())
                      .then(d => {
                        const here = new Set(window.partyline.room.messages.map(m => m.id));

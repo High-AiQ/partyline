@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  AuthTokenResponseSchema,
+  HandleSchema,
   AdapterSchema,
   ClaimSchema,
   ConversationDetailSchema,
@@ -17,6 +19,24 @@ const offer = {
   attachments: [{ id: "att-1", name: "sol", adapter: "codex" }],
   debrief: "Continue the review.",
 };
+
+describe("auth contracts", () => {
+  it("accepts the issued JWT pair with its authenticated user", () => {
+    const response = {
+      access_token: "access",
+      refresh_token: "refresh",
+      token_type: "bearer",
+      user: { id: 1, email: "greg@example.com", handle: "greg" },
+    };
+    expect(AuthTokenResponseSchema.parse(response)).toEqual(response);
+  });
+
+  it("rejects handles outside the shared server syntax", () => {
+    expect(HandleSchema.safeParse("sol.review").success).toBe(true);
+    expect(HandleSchema.safeParse("two words").success).toBe(false);
+    expect(HandleSchema.safeParse("ab").success).toBe(false);
+  });
+});
 
 describe("wire events with server-omitted null fields", () => {
   it("defaults an omitted instance label and keeps a configured one", () => {

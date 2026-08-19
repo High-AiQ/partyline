@@ -1,14 +1,22 @@
 /**
- * The operator, and the things that belong to the server rather than to a line:
- * the adapter registry, saved presets, and the version badge.
+ * The authenticated operator, and the things that belong to the server rather
+ * than to a line: the adapter registry, saved presets, and version badge.
  */
 
 import { api } from "../lib/api";
-import type { Adapter, Preset } from "../lib/contracts";
-import { normalizeHandle, isReserved, readHandle, readOrMintClientId, writeHandle } from "../lib/identity";
+import type { Adapter, AuthTokenResponse, AuthUser, Preset } from "../lib/contracts";
+import {
+  clearStoredTokens,
+  configureAuthHandlers,
+  isAuthStorageKey,
+  readAccessToken,
+  storeTokens,
+} from "../lib/http";
+import { readOrMintClientId } from "../lib/identity";
 
 class Session {
-  handle = $state(readHandle());
+  user = $state<AuthUser | null>(null);
+  authReady = $state(false);
   clientId = readOrMintClientId();
   version = $state<string | null>(null);
   instanceName = $state<string | null>(null);
@@ -16,32 +24,60 @@ class Session {
   adapters = $state<Adapter[]>([]);
   presets = $state<Preset[]>([]);
 
-  /** Set when the server refuses the handle, so the gate can say why. */
-  gateError = $state("");
-  gateOpen = $state(!readHandle());
+  get handle(): string | null {
+    return this.user?.handle ?? null;
+  }
 
   get signedIn(): boolean {
-    return Boolean(this.handle) && !this.gateOpen;
+    return this.authReady && this.user !== null;
   }
 
-  openGate(message = ""): void {
-    this.gateError = message;
-    this.gateOpen = true;
+  async register(email: string, password: string, handle: string): Promise<void> {
+    this.acceptTokens(await api.register({ email, password, handle }));
   }
 
-  /**
-   * Take a handle from the gate. Returns an error string, or null on success —
-   * the caller decides how to show it, this decides whether it is allowed.
-   */
-  signIn(raw: string): string | null {
-    const handle = normalizeHandle(raw);
-    if (!handle) return "pick a handle";
-    if (isReserved(handle)) return "that handle is reserved";
+  async login(email: string, password: string): Promise<void> {
+    this.acceptTokens(await api.login({ email, password }));
+  }
 
-    this.handle = writeHandle(handle);
-    this.gateError = "";
-    this.gateOpen = false;
-    return null;
+  async changeHandle(handle: string): Promise<void> {
+    this.user = await api.changeHandle({ handle });
+  }
+
+  /** Validate a cached access token without letting an old request clobber a
+   *  login that completed while `/me` was in flight. */
+  async loadCurrentUser(): Promise<void> {
+    const startedWith = readAccessToken();
+    if (!startedWith) {
+      this.user = null;
+      this.authReady = true;
+      return;
+    }
+    try {
+      const user = await api.me();
+      if (readAccessToken() === startedWith) this.user = user;
+    } catch {
+      // The transport clears only on an unrecoverable 401. A network or
+      // contract failure must not destroy a still-valid persisted session.
+    } finally {
+      this.authReady = true;
+    }
+  }
+
+  logout(): void {
+    this.clearSession();
+  }
+
+  acceptTokens(tokens: AuthTokenResponse): void {
+    storeTokens(tokens.access_token, tokens.refresh_token);
+    this.user = tokens.user;
+    this.authReady = true;
+  }
+
+  clearSession(): void {
+    clearStoredTokens();
+    this.user = null;
+    this.authReady = true;
   }
 
   async loadVersion(): Promise<void> {
@@ -68,9 +104,10 @@ class Session {
    *  state would otherwise be the only state a document ever has. A picker
    *  omitting an adapter the server had offered for an hour was this
    *  staleness, observed live. */
-  acceptHandshake(version: string, instanceName: string | null): void {
+  acceptHandshake(version: string, instanceName: string | null, handle: string): void {
     this.acceptServerVersion(version);
     this.instanceName = instanceName;
+    if (this.user && this.user.handle !== handle) this.user = { ...this.user, handle };
     void this.loadAdapters();
   }
 
@@ -92,3 +129,22 @@ class Session {
 }
 
 export const session = new Session();
+
+configureAuthHandlers({
+  onRefreshed: (tokens) => {
+    session.user = tokens.user;
+  },
+  onSessionCleared: () => {
+    session.clearSession();
+  },
+});
+
+// Tokens are shared between tabs; keep the in-memory user equally shared.
+// Storage events fire only in the other documents, never the writer itself.
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (event) => {
+    if (event.storageArea === localStorage && isAuthStorageKey(event.key)) {
+      void session.loadCurrentUser();
+    }
+  });
+}

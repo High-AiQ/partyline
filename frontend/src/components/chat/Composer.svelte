@@ -98,7 +98,6 @@
     try {
       await api.uploadImages(conversation.id, {
         files: pendingImages.files,
-        sender: room.identity.handle,
         body: draft.text.trim(),
         title: pendingImages.title.trim() || null,
         description: pendingImages.description.trim() || null,

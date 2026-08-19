@@ -55,6 +55,10 @@ class Dialogs {
   closeTop(): void {
     this.stack.pop();
   }
+
+  closeAll(): void {
+    this.stack = [];
+  }
 }
 
 export const dialogs = new Dialogs();

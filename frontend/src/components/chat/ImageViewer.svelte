@@ -1,6 +1,8 @@
 <script lang="ts">
   import Modal from "../Modal.svelte";
   import { imageLabel } from "../../lib/images";
+  import { requestBlob } from "../../lib/http";
+  import { authenticatedResourceUrl } from "../../lib/socket-auth";
   import type { ImageRef } from "../../lib/contracts";
 
   interface Props {
@@ -12,6 +14,8 @@
   let { images, initialIndex, close }: Props = $props();
   let index = $derived(initialIndex);
   const image = $derived(images[index] ?? images[0]);
+  let downloadError = $state("");
+  let downloading = $state(false);
 
   function move(delta: number): void {
     index = (index + delta + images.length) % images.length;
@@ -28,6 +32,30 @@
       move(1);
     }
   }
+
+  async function downloadOriginal(): Promise<void> {
+    const selected = image;
+    if (!selected || downloading) return;
+    downloading = true;
+    downloadError = "";
+    try {
+      const blob = await requestBlob(selected.urls.original);
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const extension = selected.mime.split("/")[1]?.split("+")[0] ?? "bin";
+      const stem = (selected.title ?? selected.id).replace(/[^A-Za-z0-9_.-]+/g, "-");
+      link.href = objectUrl;
+      link.download = `${stem}.${extension}`;
+      link.click();
+      setTimeout(() => {
+        URL.revokeObjectURL(objectUrl);
+      }, 60_000);
+    } catch {
+      downloadError = "could not download the original image";
+    } finally {
+      downloading = false;
+    }
+  }
 </script>
 
 <svelte:window onkeydown={onKeydown} />
@@ -37,7 +65,7 @@
     <div class="viewer">
       <div class="stage">
         <img
-          src={image.urls.slim ?? image.urls.original}
+          src={authenticatedResourceUrl(image.urls.slim ?? image.urls.original)}
           alt={imageLabel(image, index)}
           width={image.slim?.width ?? image.width}
           height={image.slim?.height ?? image.height}
@@ -74,8 +102,11 @@
             >{image.width}×{image.height} · {(image.bytes / 1_000_000).toFixed(2)} MB</span
           >
         </div>
-        <a href={image.urls.original} target="_blank" rel="noreferrer">open original ↗</a>
+        <button class="download" type="button" disabled={downloading} onclick={downloadOriginal}
+          >{downloading ? "downloading…" : "download original ↓"}</button
+        >
       </div>
+      <div class="download-error" aria-live="polite">{downloadError}</div>
       {#if images.length > 1}
         <div class="position" aria-live="polite">{index + 1} / {images.length}</div>
       {/if}
@@ -149,16 +180,29 @@
     color: var(--color-cream-faint);
     font-size: 10px;
   }
-  a {
+  .download {
     flex: none;
     min-height: 44px;
+    padding: 0;
+    border: 0;
+    background: transparent;
     color: var(--color-copper-hot);
     font-size: 11px;
     line-height: 44px;
-    text-decoration: none;
   }
-  a:hover {
+  .download:hover {
+    background: transparent;
     text-decoration: underline;
+  }
+  .download:disabled {
+    cursor: wait;
+    opacity: 0.6;
+  }
+  .download-error {
+    min-height: 14px;
+    color: var(--color-red);
+    font-size: 10px;
+    text-align: right;
   }
   .position {
     text-align: center;

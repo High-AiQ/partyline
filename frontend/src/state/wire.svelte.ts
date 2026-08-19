@@ -25,35 +25,16 @@
  */
 
 import { buildChanged } from "../lib/build";
-import {
-  WireEventSchema,
-  WireHelloCommandSchema,
-  WireMessageCommandSchema,
-  WireReattachCommandSchema,
-  LegacyHelloSchema,
-} from "../lib/contracts";
-import type {
-  HelloEvent,
-  ReattachAction,
-  WireEvent,
-  WireHelloCommand,
-  WireMessageCommand,
-} from "../lib/contracts";
+import { AUTH_REQUIRED_CLOSE, readAccessToken, recoverSocketAuthentication } from "../lib/http";
+import type { SocketAuthPhase } from "../lib/http";
+import { authenticatedSocketUrl } from "../lib/socket-auth";
+import { decodeWireEvent, helloCommand } from "../lib/wire-commands";
+import type { WireIdentity } from "../lib/wire-commands";
+import { WireMessageCommandSchema, WireReattachCommandSchema, LegacyHelloSchema } from "../lib/contracts";
+import type { HelloEvent, ReattachAction, WireEvent, WireMessageCommand } from "../lib/contracts";
 
 export const GRACE_MS = 3000;
 export const RETRY_MS = 1500;
-const HELLO_TIMEOUT_MS = 4000;
-
-export interface SocketLocation {
-  protocol: string;
-  host: string;
-}
-
-export interface WireIdentity {
-  handle: string;
-  clientId: string;
-}
-
 export interface WireContext {
   wasReady: boolean;
   claimRejected: boolean;
@@ -75,17 +56,6 @@ export type WireResyncHandler = () => void;
  * decides reload; metadata such as version must still refresh when it does not. */
 export type WireHandshakeHandler = (hello: HelloEvent) => void;
 
-export const socketUrl = (convId: string, loc: SocketLocation = location): string =>
-  (loc.protocol === "https:" ? "wss://" : "ws://") + loc.host + "/ws/" + convId;
-
-function helloCommand(identity: WireIdentity): WireHelloCommand {
-  return WireHelloCommandSchema.parse({
-    type: "hello",
-    handle: identity.handle,
-    client_id: identity.clientId,
-  });
-}
-
 /**
  * Could an unreadable frame just be an older server telling us to reload?
  *
@@ -100,12 +70,6 @@ function staleBundle(data: unknown, convId: string): boolean {
   } catch {
     return false;
   }
-}
-
-function decodeWireEvent(data: unknown): WireEvent {
-  if (typeof data !== "string") throw new Error("partyline WebSocket frames must be text");
-  const decoded: unknown = JSON.parse(data);
-  return WireEventSchema.parse(decoded);
 }
 
 class Wire {
@@ -141,7 +105,7 @@ class Wire {
    * Open the wire to a line, replacing whatever was open before.
    *
    * @param convId    the conversation to join
-   * @param identity  `{handle, clientId}` for the hello handshake
+   * @param identity  the tab-scoped client id for reconnect takeover
    * @param onEvent   called with each server event, already parsed
    */
   connect(
@@ -150,13 +114,15 @@ class Wire {
     onEvent: WireEventHandler,
     onResync: WireResyncHandler = () => undefined,
     onHandshake: WireHandshakeHandler = () => undefined,
+    authenticationPhase: SocketAuthPhase = "initial",
   ): void {
     const generation = ++this.#generation;
     this.#teardown();
     this.ready = false;
     this.#claimRejected = false;
 
-    const socket = new WebSocket(socketUrl(convId));
+    const startedWith = readAccessToken();
+    const socket = new WebSocket(authenticatedSocketUrl(`/ws/${convId}`, location, startedWith));
     this.#socket = socket;
     const current = (): boolean => generation === this.#generation;
 
@@ -201,6 +167,7 @@ class Wire {
           return;
         }
         onHandshake(payload);
+        authenticationPhase = "initial";
         this.stopped = false;
         this.ready = true;
         this.clearOutage();
@@ -222,7 +189,7 @@ class Wire {
         return;
       }
       onEvent(payload, {
-        /** Was the handshake ever granted? A refusal before it means the handle
+        /** Was the handshake ever granted? A refusal before it means the line
          *  was rejected; after it means the line went away underneath us. */
         wasReady: this.ready,
         claimRejected: this.#claimRejected,
@@ -238,9 +205,27 @@ class Wire {
       });
     };
 
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       if (!current() || this.#claimRejected) return;
       this.ready = false;
+      if (event.code === AUTH_REQUIRED_CLOSE) {
+        void recoverSocketAuthentication(startedWith, authenticationPhase)
+          .then((recovery) => {
+            if (current() && recovery.retry) {
+              this.connect(convId, identity, onEvent, onResync, onHandshake, recovery.phase);
+            }
+          })
+          .catch(() => {
+            if (!current()) return;
+            if (!this.stopped) this.#armOutage();
+            this.#retryTimer = setTimeout(() => {
+              if (current()) {
+                this.connect(convId, identity, onEvent, onResync, onHandshake, authenticationPhase);
+              }
+            }, RETRY_MS);
+          });
+        return;
+      }
       if (!this.stopped) this.#armOutage();
       this.#retryTimer = setTimeout(() => {
         if (current() && !this.#claimRejected) {
@@ -332,54 +317,3 @@ class Wire {
 }
 
 export const wire = new Wire();
-
-/**
- * Post one message to a line without joining it.
- *
- * This exists for "warn processes first" in the delete dialog: you can delete a
- * line you are not currently on, and the warning has to reach it anyway. It
- * opens its own short-lived socket, completes the handshake, sends, and hangs
- * up — deliberately not touching the shared wire, which is still holding the
- * line the user is actually looking at.
- */
-export function sendOffLine(convId: string, identity: WireIdentity, body: string): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    const socket = new WebSocket(socketUrl(convId));
-    let settled = false;
-    const finish = (error?: Error): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      try {
-        socket.close();
-      } catch {
-        /* already gone */
-      }
-      if (error) reject(error);
-      else resolve();
-    };
-    const timeout = setTimeout(() => {
-      finish(new Error("line is not reachable"));
-    }, HELLO_TIMEOUT_MS);
-
-    socket.onopen = () => {
-      socket.send(JSON.stringify(helloCommand(identity)));
-    };
-    socket.onmessage = (event: MessageEvent<unknown>) => {
-      const payload = decodeWireEvent(event.data);
-      if (payload.type === "error") {
-        finish(new Error(payload.message || "could not claim this line"));
-        return;
-      }
-      if (payload.type !== "hello") return;
-      socket.send(JSON.stringify(WireMessageCommandSchema.parse({ sender: identity.handle, body })));
-      // Give the frame a moment to leave before hanging up on ourselves.
-      setTimeout(() => {
-        finish();
-      }, 100);
-    };
-    socket.onerror = () => {
-      finish(new Error("line is not reachable"));
-    };
-  });
-}

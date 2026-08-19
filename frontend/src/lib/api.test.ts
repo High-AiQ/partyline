@@ -61,6 +61,7 @@ function response(body: unknown, { ok = true, status = 200 }: MockResponseOption
 }
 
 afterEach(() => {
+  localStorage.clear();
   vi.unstubAllGlobals();
 });
 
@@ -103,7 +104,6 @@ describe("api", () => {
     await expect(
       api.uploadImages("conv-1", {
         files: [file],
-        sender: "greg",
         body: "Topology",
         title: "Signal map",
         description: "The partyline process topology",
@@ -114,7 +114,7 @@ describe("api", () => {
     expect(init?.headers).toBeUndefined();
     if (!(init?.body instanceof FormData)) throw new Error("expected multipart body");
     expect(init.body.get("file")).toBe(file);
-    expect(init.body.get("sender")).toBe("greg");
+    expect(init.body.has("sender")).toBe(false);
     expect(init.body.get("body")).toBe("Topology");
     expect(init.body.get("title")).toBe("Signal map");
     expect(init.body.get("description")).toBe("The partyline process topology");
