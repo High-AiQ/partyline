@@ -244,3 +244,10 @@ enforce it. A prose warning that has no executable guard is not a completed less
   host, the bound belongs in the runner, not in the reviewer's attention.** Corollary for
   refactors: moving a function to a new module moves every patch target aimed at it, and a
   test that patches the old location still passes — it just no longer patches anything.
+- **Speech that shares a Grok record with ``tool_calls`` is not "progress narration".** The
+  grok adapter dropped any assistant record that had a `tool_calls` array, on the belief
+  that Grok only put throwaway status there. Live session `060f33b4` (2026-08-19) put the
+  required one-line ack on that same record; peek showed it on the pty, the room never
+  got it, and only a later tools-free reply posted. Empty tool-call records stay silent;
+  non-empty content is speech. The control is the captured ack plus tools, which must
+  round-trip through `assistant_text`.
