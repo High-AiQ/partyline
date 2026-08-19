@@ -60,6 +60,9 @@ uncovered line.
 
 Tests must never touch a real database, a real port, or a real CLI: use a temp `PARTYLINE_DB`,
 FastAPI's `TestClient`, and fake transcript files rather than spawning a real coding CLI.
+When a test stops an async poll by mocking sleep, patch the wait the loop actually
+awaits (for Grok, `adapter._poll`), not `adapter.asyncio.sleep` after the loop has
+moved to another module — that is a hang that can fill RAM.
 
 **Reach for a plain unit test first.** A browser test earns its place only when the thing under
 test genuinely needs one — layout, hit-testing, a two-sided protocol. Browser tests live in

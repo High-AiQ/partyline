@@ -162,6 +162,14 @@ enforce it. A prose warning that has no executable guard is not a completed less
   out the suite. Replacing the mock with a counted `alive()` stub that exits after one iteration
   and a yielding `sleep` (`await orig_sleep(0)`) restores the suspension point. The same pattern
   applies to any async poll — if you mock the sleep, keep a `yield` or bound the loop.
+- **Patching `asyncio.sleep` on the adapter module stops a tail that no longer lives there.** On
+  2026-08-19 a presence-stack split moved the Grok wait into `tail.py`. Tests still patched
+  `partyline.adapters.bundled.grok.adapter.asyncio.sleep`; the loop never yielded. Combined with
+  `test_a_transcript_that_never_settles_is_refused_out_loud`'s `keep_growing()` writer, that
+  filled ~31 GB twice and OOM-killed WSL. The tail now waits only on `adapter._poll`. A source
+  scan fails if `tail.py`/`resume.py` call `asyncio.sleep`, and a regression fails if a stop
+  patch on `_poll` never runs. Do not "repro" this by running `tests.test_grok_adapter` uncapped
+  on the dogfood VM.
 - **A frontend-only deploy was safe without a restart.** `partyline/static/` is served by a
   `StaticFiles` mount that reads from disk per request, but the build id was captured once at
   import into `FRONTEND_BUILD`. After `cockpit deploy` swapped the bundle under a running server,
