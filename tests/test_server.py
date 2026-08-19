@@ -765,6 +765,53 @@ class ServerTest(unittest.TestCase):
             409, server.attach("line", server.AttachIn(name="TERRA", adapter="fake", cwd=self.directory.name))
         )
 
+    def test_update_true_without_a_command_is_400_before_a_row_exists(self):
+        before = server.runtime.db.list_attachments("line")
+        self.assert_http(
+            400,
+            server.attach(
+                "line",
+                server.AttachIn(
+                    name="probe", adapter="fake", cwd=self.directory.name, update=True
+                ),
+            ),
+        )
+        self.assertEqual(server.runtime.db.list_attachments("line"), before)
+
+    def test_a_failed_update_still_attaches_and_posts_the_output(self):
+        from partyline.adapter_update import UpdateResult, format_notice
+
+        server.ADAPTER_METADATA["fake"]["update_command"] = ["fake-cli", "update"]
+
+        async def fake_apply(post, conv_id, handle, argv, **kwargs):
+            await post(
+                conv_id, "system", "system",
+                format_notice(handle, argv, UpdateResult(1, "already newest")),
+            )
+            return UpdateResult(1, "already newest")
+
+        with patch("partyline.server.apply_update", side_effect=fake_apply):
+            attached = self.arun(
+                server.attach(
+                    "line",
+                    server.AttachIn(
+                        name="probe", adapter="fake",
+                        cwd=self.directory.name, update=True,
+                    ),
+                )
+            )
+        self.assertEqual(attached["name"], "probe")
+        self.assertIn(attached["id"], server.runtime.live)
+        bodies = [row["body"] for row in server.runtime.db.list_messages("line")]
+        self.assertTrue(any("already newest" in body and "@probe" in body for body in bodies))
+
+    def test_resume_does_not_run_an_update(self):
+        server.ADAPTER_METADATA["fake"]["update_command"] = ["fake-cli", "update"]
+        self.add_attachment("old", status="exited")
+        with patch("partyline.adapter_update.default_runner") as runner:
+            self.arun(server.resume_attachment("old"))
+            runner.assert_not_called()
+
     def test_edit_inactive_attachment_command_updates_every_tab(self):
         self.add_attachment("old", status="detached")
         server.runtime.db.set_cli_session("old", "kept-session", None)

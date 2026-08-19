@@ -9,3 +9,4 @@ requires = ["claude"]
 # Don't let the spawned CLI think it is nested inside another harness.
 env_unset = ["CLAUDECODE", "CLAUDE_CODE_*"]
 capabilities = { resume = true, turn_end = "receipt" }
+update_command = ["claude", "update"]

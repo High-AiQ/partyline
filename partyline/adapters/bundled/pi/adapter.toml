@@ -9,6 +9,8 @@ requires = ["pi"]
 env_unset = []
 output = "session transcript"
 
+update_command = ["pi", "update", "--self"]
+
 [adapter.capabilities]
 # Re-attaching reuses the same --session-id, so the process comes back with context.
 resume = true

@@ -36,6 +36,7 @@ command = ["example-process"]
 requires = ["example-process"]
 env_unset = []
 capabilities = { resume = false }
+update_command = ["example-process", "update"]
 ```
 
 | key | meaning |
@@ -47,6 +48,7 @@ capabilities = { resume = false }
 | `requires` | executables that must be on `PATH` |
 | `env_unset` | inherited variables to drop before spawning; a trailing `*` clears a whole prefix |
 | `capabilities` | table; `resume = true` only if re-attaching genuinely reopens the previous session |
+| `update_command` | optional argv to check/install CLI updates before a fresh attach; omit or `[]` if the process has no updater. Never a shell string. A pipe install belongs in one `bash -lc` argument. |
 
 Never put secrets or machine-specific paths in a manifest.
 

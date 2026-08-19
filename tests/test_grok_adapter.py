@@ -62,6 +62,7 @@ class ManifestTest(unittest.TestCase):
         self.assertIn('command = ["grok", "--permission-mode", "bypassPermissions"]', manifest)
         self.assertIn("resume = true", manifest)
         self.assertIn('turn_end = "receipt"', manifest)
+        self.assertIn('update_command = ["grok", "update"]', manifest)
 
 
 class CommandTest(unittest.TestCase):

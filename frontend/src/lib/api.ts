@@ -53,6 +53,7 @@ export interface AttachPayload {
   adapter: string;
   command: string;
   cwd: string;
+  update?: boolean;
 }
 
 export interface AttachmentCommandPayload {
