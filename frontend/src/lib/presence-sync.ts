@@ -3,7 +3,7 @@ import type { PresenceState, WorkingEvent } from "./contracts";
 export interface PresenceSink {
   apply(event: WorkingEvent): void;
   clear(): void;
-  replace(attachmentIds: readonly string[]): void;
+  replaceLegacy(attachmentIds: readonly string[]): void;
 }
 
 export interface PresenceFetch {
@@ -116,7 +116,7 @@ export function replacePresenceSnapshot(
   legacyWorking: readonly string[],
 ): void {
   if (snapshot === null) {
-    sink.replace(legacyWorking);
+    sink.replaceLegacy(legacyWorking);
     return;
   }
   sink.clear();
