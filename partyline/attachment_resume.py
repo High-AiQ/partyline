@@ -14,6 +14,7 @@ import uuid
 from fastapi import HTTPException
 
 from .adapter_capabilities import adapter_completion
+from .auth_store import ensure_api_token
 from .reattach import ResumedAttachment, adapter_can_resume
 
 
@@ -68,6 +69,9 @@ async def resume_adapter(
     # the one the previous activation's harness was configured with.
     runtime_owner = str(uuid.uuid4())
     att["runtime_owner"] = runtime_owner
+    # The machine token, unlike the activation owner, is stable on purpose:
+    # a resumed process keeps the PARTYLINE_TOKEN its briefing already named.
+    att["api_token"] = ensure_api_token(runtime.db, att_id)
     att["hook_url"] = hook_url(att_id, runtime_owner)
     att["digest_rider"] = lambda: tasks.rider(att["conv_id"])
     att["delivered_bodies"] = delivered_bodies(runtime.db, att)

@@ -1,11 +1,14 @@
 import asyncio
 import os
+import tempfile
 import unittest
 from types import SimpleNamespace
 
 from fastapi import WebSocketDisconnect
 
 from partyline.adapters.base import Adapter
+from partyline.auth_store import ensure_api_token
+from partyline.db import Db
 from partyline.terminal_stream import terminal_endpoint
 from partyline.terminal_viewers import VIEWER_QUEUE_LIMIT, TerminalViewerRegistry
 
@@ -19,11 +22,13 @@ async def eventually(predicate, what):
 
 
 class FakeWebSocket:
-    def __init__(self):
+    def __init__(self, token: str = ""):
         self.accepted = asyncio.Event()
         self.incoming: asyncio.Queue[str | None] = asyncio.Queue()
         self.sent: list[tuple[str, str | bytes]] = []
         self.closed = None
+        self.headers: dict[str, str] = {}
+        self.query_params = {"token": token} if token else {}
 
     async def accept(self):
         self.accepted.set()
@@ -139,10 +144,19 @@ class TerminalDrainTest(unittest.IsolatedAsyncioTestCase):
 
 
 class TerminalEndpointTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.db = Db(f"{self.directory.name}/terminal.db")
+        self.addCleanup(self.db.close)
+        self.db.create_conversation("line", "Line")
+        self.db.add_attachment("att-1", "line", "opus", "fake", ["fake"], "/tmp")
+        self.token = ensure_api_token(self.db, "att-1")
+
     async def test_endpoint_orders_geometry_snapshot_then_live_bytes_and_writes_raw_input(self):
         adapter = FakeTerminalAdapter()
-        ws = FakeWebSocket()
-        runtime = SimpleNamespace(live={"att-1": adapter})
+        ws = FakeWebSocket(token=self.token)
+        runtime = SimpleNamespace(live={"att-1": adapter}, db=self.db)
         endpoint = terminal_endpoint(runtime)
         task = asyncio.create_task(endpoint(ws, "att-1"))
 
@@ -159,11 +173,21 @@ class TerminalEndpointTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(adapter.detached), 1)
 
     async def test_missing_attachment_is_closed(self):
-        ws = FakeWebSocket()
-        await terminal_endpoint(SimpleNamespace(live={"other": object()}))(ws, "missing")
+        ws = FakeWebSocket(token=self.token)
+        await terminal_endpoint(
+            SimpleNamespace(live={"other": object()}, db=self.db))(ws, "missing")
 
         self.assertTrue(ws.accepted.is_set())
         self.assertEqual(ws.closed, (4404, "attachment is not live"))
+
+    async def test_unauthenticated_socket_is_closed_4401(self):
+        # A terminal socket can type into a real pty; without a credential it
+        # must close before the adapter is even looked up.
+        ws = FakeWebSocket()
+        await terminal_endpoint(
+            SimpleNamespace(live={}, db=self.db))(ws, "att-1")
+
+        self.assertEqual(ws.closed, (4401, "authentication required"))
 
 
 if __name__ == "__main__":

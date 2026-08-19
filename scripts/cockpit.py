@@ -19,19 +19,15 @@ from http.client import HTTPResponse
 from pathlib import Path
 from typing import Protocol
 from urllib.error import HTTPError, URLError
-from urllib.parse import urljoin
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
-from pydantic import TypeAdapter
 
 from partyline.contracts import (
-    ConversationResponse,
     RestartPlanMode,
-    RestartPlanRequest,
-    RestartPlanResponse,
 )
 from scripts.cockpit_venv import cockpit_can_boot, live_version_matches, sync_locked
-from scripts.cockpit_arm import parse_systemd_exec_start, preflight_server_config, websocket_url
+from scripts.cockpit_api import schedule_restart_plan
+from scripts.cockpit_arm import parse_systemd_exec_start, preflight_server_config
 from scripts.restart_server import process_generation
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -335,48 +331,6 @@ def restart_needed(repo: Path, old: str, new: str) -> bool:
     return any(not path.startswith(RELOADABLE) for path in changed)
 
 
-def resolve_line(
-    conversations: list[ConversationResponse], selector: str
-) -> ConversationResponse:
-    """Resolve an exact id or unique case-insensitive name without guessing."""
-    if found := next((line for line in conversations if line.id == selector), None):
-        return found
-    matches = [line for line in conversations if line.name.casefold() == selector.casefold()]
-    if len(matches) == 1:
-        return matches[0]
-    if matches:
-        raise ValueError(f"line name {selector!r} is ambiguous; use its id")
-    raise ValueError(f"no live line matches {selector!r}")
-
-
-def schedule_restart_plan(
-    selector: str,
-    debrief: str,
-    base_url: str,
-    open_url: ResponseOpener = urlopen,
-    *,
-    mode: RestartPlanMode = "automatic",
-) -> RestartPlanResponse:
-    """Persist a same-line plan in the running cockpit, without restarting it."""
-    conversations_request = Request(urljoin(base_url, "/api/conversations"))
-    with open_url(conversations_request) as response:
-        conversations = TypeAdapter(list[ConversationResponse]).validate_json(response.read())
-    conversation = resolve_line(conversations, selector)
-    body = RestartPlanRequest(
-        conversation_id=conversation.id,
-        debrief=debrief,
-        mode=mode,
-    )
-    request = Request(
-        urljoin(base_url, "/api/restart-plan"),
-        data=body.model_dump_json().encode(),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with open_url(request) as response:
-        return RestartPlanResponse.model_validate_json(response.read())
-
-
 # -- commands --------------------------------------------------------------
 
 
@@ -403,9 +357,15 @@ def inspect_pending_plan(database: Path | None = None) -> PendingPlanInspection:
             ).fetchone()
             if table is None:
                 return PendingPlanInspection(None, [])
+            # A plan written by a pre-auth server has no report_token column;
+            # select it only when it exists so the preflight stays readable.
+            names = {info[1] for info in connection.execute(
+                "PRAGMA table_info(restart_plan)")}
+            fields = "conversation_id, token, mode, attempt_count, created_at"
+            if "report_token" in names:
+                fields += ", report_token"
             row = connection.execute(
-                "SELECT conversation_id, token, mode, attempt_count, created_at "
-                "FROM restart_plan WHERE singleton=1"
+                f"SELECT {fields} FROM restart_plan WHERE singleton=1"
             ).fetchone()
             return PendingPlanInspection(dict(row) if row else None, [])
         finally:
@@ -593,7 +553,6 @@ def arm_restart(
                                    "run `scripts.cockpit deploy` again")])
 
     unit = unit or f"partyline-restart-{pid}-{int(time.time())}"
-    failure_ws = websocket_url(base_url, str(plan["conversation_id"]))
     service_argv = [
         str(python),
         str(script),
@@ -602,9 +561,14 @@ def arm_restart(
         str(server),
         str(logfile),
         str(cockpit),
-        "--failure-ws",
-        failure_ws,
+        "--failure-url",
+        base_url,
     ]
+    if report_token := plan.get("report_token"):
+        service_argv.extend(["--report-token", report_token])
+    else:
+        print("  ! plan predates report tokens: a refused restart cannot post "
+              "to the line — watch the trigger unit's journal instead")
     if config_proof:
         service_argv.extend(["--server-config", str(config_proof.path)])
     command = [

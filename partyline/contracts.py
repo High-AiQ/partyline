@@ -22,14 +22,14 @@ class AttachIn(BaseModel):
     update: bool = False
 
 
+# Neither carries a sender: who changed a topic or name is derived from the
+# authenticated principal, never from a client-supplied field.
 class TopicIn(BaseModel):
     topic: str = ""
-    sender: str = ""
 
 
 class RenameIn(BaseModel):
     name: str
-    sender: str = ""
 
 
 class PresetIn(BaseModel):

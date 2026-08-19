@@ -15,7 +15,6 @@ import os
 import signal
 import sys
 import time
-import uuid
 from collections.abc import Callable
 from pathlib import Path
 
@@ -117,21 +116,28 @@ def process_cmdline(pid: int, proc_root: Path = Path("/proc")) -> list[str] | No
     return arguments or None
 
 
-def post_failure(ws_url: str, message: str) -> None:
-    """Post a visible warning through the old server while it is still live."""
-    from websockets.sync.client import connect
+def post_failure(base_url: str, report_token: str, message: str) -> None:
+    """Post a visible warning through the old server while it is still live.
 
-    handle = f"restart-watchdog-{os.getpid()}"
-    with connect(ws_url, open_timeout=5, close_timeout=1) as socket:
-        socket.send(json.dumps({
-            "type": "hello",
-            "handle": handle,
-            "client_id": str(uuid.uuid4()),
-        }))
-        response = json.loads(socket.recv(timeout=5))
-        if response.get("type") != "hello":
-            raise RuntimeError(f"restart watchdog could not claim a handle: {response}")
-        socket.send(json.dumps({"sender": handle, "body": f"⚠ {message}"}))
+    The watchdog is neither an attachment nor a user, so it never impersonates
+    one: it presents the plan's own ``report_token`` to the failure-report
+    route, which posts a *system* notice to the planned line. A missing token
+    is refused here, loudly, before any network call.
+    """
+    from urllib.request import Request, urlopen
+
+    if not report_token:
+        raise RuntimeError(
+            "no failure report token was provided; the report cannot authenticate"
+        )
+    request = Request(
+        base_url.rstrip("/") + "/api/restart-plan/failure",
+        data=json.dumps({"token": report_token, "message": message}).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urlopen(request, timeout=5) as response:
+        response.read()
 
 
 def wait_for_generation_exit(
@@ -256,7 +262,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("server", type=Path)
     parser.add_argument("logfile", type=Path)
     parser.add_argument("cwd", type=Path)
-    parser.add_argument("--failure-ws")
+    parser.add_argument("--failure-url")
+    parser.add_argument("--report-token")
     parser.add_argument("--server-config", type=Path)
     try:
         args = parser.parse_args(argv)
@@ -270,10 +277,11 @@ def main(argv: list[str] | None = None) -> int:
         )
     except RestartRefused as exc:
         print(exc, file=sys.stderr)
-        if args.failure_ws:
+        if args.failure_url:
             try:
                 post_failure(
-                    args.failure_ws,
+                    args.failure_url,
+                    args.report_token or "",
                     f"automatic restart trigger refused: {exc}. The pending plan remains unclaimed.",
                 )
             except Exception as report_error:

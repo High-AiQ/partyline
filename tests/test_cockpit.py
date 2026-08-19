@@ -8,10 +8,12 @@ are tested against temp directories rather than a git fixture.
 
 import sys
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -24,11 +26,10 @@ from scripts.cockpit import (  # noqa: E402
     check_bundle_present,
     check_tree_clean,
     referenced_assets,
-    resolve_line,
     restart_needed,
-    schedule_restart_plan,
     parse_systemd_exec_start,
 )
+from scripts.cockpit_api import resolve_line, schedule_restart_plan  # noqa: E402
 from partyline.contracts import ConversationResponse
 
 
@@ -373,6 +374,7 @@ class ArmRestartTest(unittest.TestCase):
             {
                 "conversation_id": "line-1",
                 "token": "token",
+                "report_token": "plan-cap-1",
                 "mode": "automatic",
                 "attempt_count": 0,
                 "created_at": 1,
@@ -422,8 +424,10 @@ class ArmRestartTest(unittest.TestCase):
         self.assertEqual(scheduled[0], "systemd-run")
         self.assertNotIn("/bin/bash", scheduled)
         self.assertIn(str(self.cockpit / "scripts/restart_server.py"), scheduled)
-        self.assertIn("--failure-ws", scheduled)
-        self.assertIn("ws://127.0.0.1:8642/ws/line-1", scheduled)
+        self.assertIn("--failure-url", scheduled)
+        self.assertIn("http://127.0.0.1:8642", scheduled)
+        self.assertIn("--report-token", scheduled)
+        self.assertIn("plan-cap-1", scheduled)
         self.assertTrue(any(call[:3] == ["systemctl", "--user", "list-timers"]
                             for call in self.calls), "arm never read its timer back")
 
@@ -491,7 +495,7 @@ class ArmRestartTest(unittest.TestCase):
             result = self.fake_run(args)
             if args[:3] == ["systemctl", "--user", "show"] and args[3].endswith(".service"):
                 return CommandResult(0, result.stdout.replace(
-                    " --failure-ws ws://127.0.0.1:8642/ws/line-1", ""
+                    " --failure-url http://127.0.0.1:8642", ""
                 ))
             return result
 
@@ -684,15 +688,17 @@ class RestartPlanTest(unittest.TestCase):
             requests.append(request)
             return responses.pop(0)
 
-        result = schedule_restart_plan(
-            "Partyline Refactoring",
-            "Continue the restart review.",
-            "http://127.0.0.1:8642",
-            open_url,
-        )
+        with mock.patch.dict(os.environ, {"PARTYLINE_TOKEN": "att-token"}):
+            result = schedule_restart_plan(
+                "Partyline Refactoring",
+                "Continue the restart review.",
+                "http://127.0.0.1:8642",
+                open_url,
+            )
 
         self.assertEqual(result.token, "offer-token")
         self.assertEqual(requests[0].full_url, "http://127.0.0.1:8642/api/conversations")
+        self.assertEqual(requests[0].get_header("Authorization"), "Bearer att-token")
         self.assertEqual(requests[1].full_url, "http://127.0.0.1:8642/api/restart-plan")
         self.assertEqual(
             json.loads(requests[1].data),
@@ -702,6 +708,15 @@ class RestartPlanTest(unittest.TestCase):
                 "mode": "automatic",
             },
         )
+
+    def test_a_missing_credential_refuses_before_the_network(self):
+        dialed = []
+        cleaned = {k: v for k, v in os.environ.items() if k != "PARTYLINE_TOKEN"}
+        with mock.patch.dict(os.environ, cleaned, clear=True):
+            with self.assertRaisesRegex(SystemExit, "PARTYLINE_TOKEN"):
+                schedule_restart_plan(
+                    "line-1", "Continue.", "http://127.0.0.1:8642", dialed.append)
+        self.assertEqual(dialed, [])
 
     def test_manual_mode_posts_a_human_offer_plan(self):
         requests = []
@@ -722,13 +737,14 @@ class RestartPlanTest(unittest.TestCase):
             requests.append(request)
             return responses.pop(0)
 
-        schedule_restart_plan(
-            "line-1",
-            "Inspect before continuing.",
-            "http://127.0.0.1:8642",
-            open_url,
-            mode="offer",
-        )
+        with mock.patch.dict(os.environ, {"PARTYLINE_TOKEN": "att-token"}):
+            schedule_restart_plan(
+                "line-1",
+                "Inspect before continuing.",
+                "http://127.0.0.1:8642",
+                open_url,
+                mode="offer",
+            )
 
         self.assertEqual(
             json.loads(requests[1].data),

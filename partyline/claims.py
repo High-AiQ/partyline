@@ -39,8 +39,8 @@ class Claim(BaseModel):
     expires_at: float
 
 
+# No owner field: the claim's owner is always the authenticated caller.
 class ClaimIn(BaseModel):
-    owner: str
     paths: list[str] = Field(min_length=1, max_length=MAX_PATHS)
 
 
