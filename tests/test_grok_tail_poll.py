@@ -9,6 +9,7 @@ Do not reproduce that by running ``tests.test_grok_adapter`` on this machine.
 from __future__ import annotations
 
 import ast
+import inspect
 import tempfile
 import unittest
 from pathlib import Path
@@ -80,6 +81,11 @@ class TailPollTargetTest(unittest.TestCase):
                 ):
                     hits.append(f"{node.name}:{child.lineno}")
         self.assertEqual(hits, [])
+
+    def test_poll_is_called_with_no_arguments(self):
+        """A leftover sleep(delay) stub TypeErrors and looks like a hang."""
+        params = list(inspect.signature(PartylineAdapter._poll).parameters)
+        self.assertEqual(params, ["self"])
 
 
 class StopPollRunsTest(unittest.IsolatedAsyncioTestCase):
