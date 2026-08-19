@@ -1,12 +1,45 @@
 # Lessons: the false-assumptions ledger
 
 Every entry here was a belief an agent acted on that turned out to be wrong, paired with the
-evidence that disproved it and the guard that replaced it. The [self-learning
-protocol](../AGENTS.md#self-learning-protocol) is what adds entries; read this file when an
-incident feels familiar — most of them rhyme.
+evidence that disproved it and the guard that replaced it. Read this file when an incident
+feels familiar — most of them rhyme.
 
-The distilled patterns live in AGENTS.md and are the part every agent must know. This file is
-the case law behind them.
+## The self-learning protocol
+
+When an assumption proves wrong, a test passes for the wrong reason, or tooling produces
+misleading evidence:
+
+1. State the observed symptom and the false assumption in the handoff and the relevant code
+   comment or documentation.
+2. Add a regression test, negative control, or diagnostic assertion that fails against the old
+   behavior and proves the new one. A green test without its failing control is incomplete
+   evidence.
+3. Make the failure actionable: distinguish a real regression from an unstable capture,
+   environment failure, timeout, or expected visual delta, and report the exact artifact or
+   command that establishes the distinction.
+4. If the lesson concerns shared state, concurrency, or scratch files, isolate each run or
+   refuse unsafe overlap; never let corruption masquerade as a product failure.
+5. Promote a lesson that can recur into the smallest durable guard — code, test, command, or an
+   entry in this file — and mention it in the final handoff. Repeated incidents are a signal to
+   strengthen the guard rather than rely on agent memory.
+
+## The distilled patterns
+
+- **The recurring root failure is that the code or tool running was not the code being reasoned
+  about**: a stale cockpit, an uncommitted adapter, shared scratch paths, a replacement server
+  inheriting a different environment. Every authoritative-artifact boundary must be checked by
+  the machine before a restart or proof; agent memory and a clean checkout are not enough.
+- **A silent fallback re-creates the failure it was written to prevent.** Where a guard cannot
+  obtain the fact it needs, it must refuse and say so; substituting a plausible default is how
+  three separate outages became invisible rather than loud.
+- **Prove the outcome, not just the provenance.** Matching commits and green gates once cleared
+  a restart that destroyed the room; no gate had asked whether the resulting server would work.
+- **Choose a signal the investigation cannot forge.** When the thing being measured can also
+  produce the evidence — a screen, a transcript grep — use a structured oracle it cannot fake.
+- When a component documents a limit or lifecycle assumption, the dependent code must reference
+  or enforce it. A prose warning with no executable guard is not a completed lesson.
+
+## The case law
 
 These are durable false assumptions from dogfooding, paired with the evidence and guard that
 replaced them:
