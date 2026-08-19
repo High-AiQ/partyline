@@ -108,6 +108,27 @@ name = "Development"
 The label appears in a compact banner above the line. It does not change storage, networking, or
 authentication, and an unset label leaves the existing interface unchanged.
 
+### Two servers, two databases
+
+Partyline is HTTP. TLS belongs on a reverse proxy in front of it, not in this process.
+Each running server owns one SQLite file (`PARTYLINE_DB`, default `~/.partyline.db`). **Two
+servers must not open the same file.** If they do, humans on one instance see a process speak
+in peek while the other instance's chat never gets the post — WebSocket broadcasts are
+per-process; the database is not a bus.
+
+A second instance needs its own port, database, media directory, and instance name:
+
+```bash
+PARTYLINE_DB=$HOME/.partyline-lan.db \
+PARTYLINE_MEDIA_DIR=$HOME/.partyline-lan-media \
+uv run --locked partyline --host 0.0.0.0 --port 8643 --instance-name Partyline \
+  --config ~/.config/partyline/lan.toml
+```
+
+`uv run partyline` with no `PARTYLINE_DB` still opens `~/.partyline.db`. A durable unit or
+wrapper that exports the lan path is safer than remembering the flags. Put homelab bind and
+database paths in `~/.config/partyline/`, not in this public repository.
+
 Then, in the browser:
 
 1. **Pick a handle** — this is your name on the wire (stored locally).
@@ -136,6 +157,8 @@ Out of the box:
 - **codex** — runs Codex, tails its rollout JSONL and resumes the same session.
 - **muse** — runs Meta's Muse Code TUI, tails its durable session log, and resumes the same UUID.
 - **grok** — runs xAI's Grok Build TUI, pins a session UUID, and tails its JSONL transcript.
+  User-facing text on an assistant record is posted even when that record also has
+  `tool_calls`; empty tool-call records stay silent. Peek is the pty; chat is the transcript.
 - **pi** — pins `--session-id`/`--session-dir` and tails the JSONL session transcript.
 - **opencode** — tails opencode's own session store.
 - **hermes** — tails hermes's own session store.
@@ -304,6 +327,9 @@ uv run --locked coverage report                              # fails under 90% l
 uv run --locked ruff check .                                 # lint; must be clean before every commit
 ```
 
+On a developer machine run the suite through `./scripts/capped-test` so a hung test that
+allocates dies at a 2 GB kernel cap instead of taking the host. CI runs the bare command.
+
 The suite never touches a real database, port, or CLI: it uses temp databases, FastAPI's
 `TestClient`, and fixture transcript files. Adapter tests never invoke the vendor tool they
 adapt.
@@ -395,7 +421,7 @@ after a restart.
 | `PARTYLINE_PORT` | `8642` | bind setting; see [precedence](#serving-on-a-specific-ip-or-port) |
 | `PARTYLINE_HOST` | `127.0.0.1` | bind setting; see [precedence](#serving-on-a-specific-ip-or-port) and the security note |
 | `PARTYLINE_INSTANCE_NAME` | unset | optional label shown above every line; CLI/config precedence matches bind settings |
-| `PARTYLINE_DB` | `~/.partyline.db` | conversations, messages, attachments, presets |
+| `PARTYLINE_DB` | `~/.partyline.db` | conversations, messages, attachments, presets. One file per running server; see [Two servers, two databases](#two-servers-two-databases) |
 | `PARTYLINE_MEDIA_DIR` | `<PARTYLINE_DB stem>/media` | uploaded images, one subdirectory per line; see [Pictures on the line](#pictures-on-the-line) |
 | `PARTYLINE_ADAPTERS_DIR` | `~/.partyline/adapters` | where imported adapter repos are checked out |
 
