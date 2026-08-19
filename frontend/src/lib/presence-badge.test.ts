@@ -37,10 +37,17 @@ describe("badge treatment", () => {
     expect(speaking).toMatchObject({ label: "working…", dot: "filled", pulse: "none" });
   });
 
-  it("marks a receipt adapter that has gone quiet as stalled, a guess by look", () => {
+  it("does not guess stalled from a long silent receipt turn", () => {
+    // Control: 700s is past the old 10-minute timer. The server still says
+    // working, so the badge must too — grok thinks in silence.
     const treatment = badgeTreatment(entry({ completion: "receipt" }), 1_000_000 + 700);
-    expect(treatment).toMatchObject({ label: "stalled?", tone: "copper", dot: "hollow", pulse: "slow" });
-    expect(treatment?.tooltip).toContain("no turn signal");
+    expect(treatment).toMatchObject({
+      label: "working…",
+      tone: "green",
+      dot: "filled",
+      pulse: "live",
+      tooltip: "",
+    });
   });
 
   it("decays a none adapter to hollow without ever dropping the working label", () => {
