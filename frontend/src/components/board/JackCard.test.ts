@@ -57,3 +57,96 @@ describe("JackCard working receipt", () => {
     }
   });
 });
+
+describe("JackCard badge treatments", () => {
+  function mountCard(overrides: Partial<Attachment> = {}) {
+    return mount(JackCard, {
+      target: document.body,
+      props: {
+        attachment: { ...attachment, ...overrides },
+        resumable: false,
+        overridesBundled: false,
+        onmention: vi.fn(),
+      },
+    });
+  }
+
+  it("solidifies the dot when speaking but keeps the working label", async () => {
+    const card = mountCard();
+    try {
+      presence.apply({
+        type: "working",
+        attachment_id: attachment.id,
+        working: true,
+        phase: "speaking",
+        completion: "receipt",
+        since: Date.now() / 1000,
+        turn: 1,
+        revision: 2,
+      });
+      await tick();
+      const badge = document.querySelector(".working");
+      expect(badge?.textContent).toContain("working…");
+      expect(badge?.className).toContain("none");
+      expect(badge?.className).toContain("filled");
+    } finally {
+      await unmount(card);
+    }
+  });
+
+  it("renders an aged none adapter hollow, still working, with the guess explained", async () => {
+    const card = mountCard();
+    try {
+      presence.apply({
+        type: "working",
+        attachment_id: attachment.id,
+        working: true,
+        phase: "working",
+        completion: "none",
+        since: 1,
+        turn: 1,
+        revision: 2,
+      });
+      await tick();
+      const badge = document.querySelector(".working");
+      expect(badge?.textContent).toContain("working…");
+      expect(badge?.className).toContain("hollow");
+      expect(badge?.getAttribute("title")).toContain("no turn-end signal");
+    } finally {
+      await unmount(card);
+    }
+  });
+
+  it("renders the reserved quiet guess as done, never as confident work", async () => {
+    const card = mountCard();
+    try {
+      presence.apply({
+        type: "working",
+        attachment_id: attachment.id,
+        working: false,
+        phase: "quiet",
+        completion: "none",
+        since: 1,
+        turn: 1,
+        revision: 2,
+      });
+      await tick();
+      const badge = document.querySelector(".working");
+      expect(badge?.textContent).toContain("done?");
+      expect(badge?.className).toContain("hollow");
+    } finally {
+      await unmount(card);
+    }
+  });
+
+  it("shows no badge on a jack that is not live", async () => {
+    const card = mountCard({ status: "exited" });
+    try {
+      presence.apply({ type: "working", attachment_id: attachment.id, working: true });
+      await tick();
+      expect(document.querySelectorAll(".working")).toHaveLength(0);
+    } finally {
+      await unmount(card);
+    }
+  });
+});

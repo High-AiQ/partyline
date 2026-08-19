@@ -13,6 +13,7 @@ import uuid
 
 from fastapi import HTTPException
 
+from .adapter_capabilities import adapter_completion
 from .reattach import ResumedAttachment, adapter_can_resume
 
 
@@ -62,11 +63,14 @@ async def resume_adapter(
         raise HTTPException(409, "restore the line before resuming its processes")
     att["conv_name"] = conv["name"]
     att["resume"] = True
-    att["hook_url"] = hook_url(att_id)
-    att["digest_rider"] = lambda: tasks.rider(att["conv_id"])
-    att["delivered_bodies"] = delivered_bodies(runtime.db, att)
+    # The activation is minted before the hook URL because the URL carries it
+    # as a capability: a resumed process must get this generation's token, not
+    # the one the previous activation's harness was configured with.
     runtime_owner = str(uuid.uuid4())
     att["runtime_owner"] = runtime_owner
+    att["hook_url"] = hook_url(att_id, runtime_owner)
+    att["digest_rider"] = lambda: tasks.rider(att["conv_id"])
+    att["delivered_bodies"] = delivered_bodies(runtime.db, att)
 
     adapter = make_adapter(
         att["adapter"],
@@ -93,7 +97,9 @@ async def resume_adapter(
     except Exception as exc:
         await runtime.db.set_attachment_status_async(att_id, "exited", runtime_owner)
         raise HTTPException(500, f"failed to resume: {exc}") from exc
-    runtime.live[att_id] = presence.watch(adapter, att["conv_id"], att_id)
+    runtime.live[att_id] = presence.watch(
+        adapter, att["conv_id"], att_id, adapter_completion(att["adapter"])
+    )
 
     await runtime.post_message(
         att["conv_id"],

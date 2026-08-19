@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from partyline.adapters import Adapter
 from partyline.adapters.bundled.grok.adapter import PartylineAdapter
+from partyline.adapters.bundled.grok import turn_hooks
 from partyline.adapters.bundled.grok.resume import (
     align_delivery_history,
     announce_backlog,
@@ -60,6 +61,7 @@ class ManifestTest(unittest.TestCase):
 
         self.assertIn('command = ["grok", "--permission-mode", "bypassPermissions"]', manifest)
         self.assertIn("resume = true", manifest)
+        self.assertIn('turn_end = "receipt"', manifest)
 
 
 class CommandTest(unittest.TestCase):
@@ -86,6 +88,32 @@ class CommandTest(unittest.TestCase):
     def test_equals_form_of_user_supplied_session_id_is_refused(self):
         with self.assertRaisesRegex(ValueError, "managed by Partyline"):
             make_adapter(command=["grok", f"--session-id={SESSION_ID}"]).build_command()
+
+
+class TurnHookTest(unittest.TestCase):
+    def test_payload_is_a_session_filtered_pair_without_subagent_stop(self):
+        url = "http://127.0.0.1:9/api/hooks/a/tok"
+        doc = turn_hooks.payload(url, SESSION_ID)
+        self.assertEqual(set(doc["hooks"]), {"UserPromptSubmit", "Stop"})
+        command = doc["hooks"]["Stop"][0]["hooks"][0]["command"]
+        self.assertEqual(command, doc["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"])
+        self.assertIn(SESSION_ID, command)
+        self.assertIn(url, command)
+        self.assertNotIn("SubagentStop", doc["hooks"])
+
+    def test_install_lives_under_partyline_and_registers_hooks_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            att = {
+                "grok_hooks_dir": str(Path(tmp) / "hooks"),
+                "grok_hooks_paths": str(Path(tmp) / "hooks-paths"),
+            }
+            path = turn_hooks.install("http://example.test/h", SESSION_ID, att)
+            self.assertTrue(path.is_file())
+            self.assertEqual(path.parent, Path(att["grok_hooks_dir"]))
+            self.assertIn(str(path.resolve()), Path(att["grok_hooks_paths"]).read_text())
+            turn_hooks.uninstall(SESSION_ID, att)
+            self.assertFalse(path.exists())
+            self.assertNotIn(str(path.resolve()), Path(att["grok_hooks_paths"]).read_text())
 
 
 class TranscriptTest(unittest.TestCase):
@@ -425,20 +453,31 @@ class ResumeWatermarkTest(unittest.IsolatedAsyncioTestCase):
             adapter.alive = lambda: True
             writing = True
 
+            # 2026-08-19: this writer was unbounded and `_run()` had no
+            # timeout. A regression that made `_run()` not return turned the
+            # pair into the 31 GB climb that OOM-killed the cockpit twice
+            # (crash_report.md). The cap bounds the bomb; the assertion below
+            # proves the cap was never the reason the writer stopped.
+            writer_cap = 50_000
+
             async def keep_growing():
                 index = 0
-                while writing:
+                while writing and index < writer_cap:
                     with transcript.open("a", encoding="utf-8") as file:
                         file.write(f'{{"type":"assistant","content":"{index}"}}\n')
                     index += 1
                     await asyncio.sleep(0)
+                return index
 
             writer = asyncio.create_task(keep_growing())
-            with patch.object(adapter, "_transcript", return_value=transcript):
-                await adapter._run()
-            writing = False
-            await writer
+            try:
+                with patch.object(adapter, "_transcript", return_value=transcript):
+                    await asyncio.wait_for(adapter._run(), timeout=5)
+            finally:
+                writing = False
+                written = await asyncio.wait_for(writer, timeout=2)
 
+        self.assertLess(written, writer_cap)
         self.assertIn("could not be counted", posted[0])
         self.assertFalse(await adapter.wait_ready())
 
@@ -1018,6 +1057,23 @@ class LifecycleTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(adapter._accounted, 3)
         self.assertEqual(adapter._assistant_fingerprints, [b"a", b"b", b"c"])
 
+    async def test_start_installs_session_filtered_hooks_then_cleans_them_up(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            att_hooks = {
+                "grok_hooks_dir": str(Path(tmp) / "hooks"),
+                "grok_hooks_paths": str(Path(tmp) / "hooks-paths"),
+            }
+            adapter = make_adapter()
+            adapter.att["hook_url"] = "http://127.0.0.1:9/api/hooks/a/tok"
+            adapter.att.update(att_hooks)
+            with patch.object(Adapter, "start", new=AsyncMock()):
+                await adapter.start()
+            path = turn_hooks.hook_file(SESSION_ID, adapter.att)
+            self.assertTrue(path.is_file())
+            self.assertNotIn("SubagentStop", json.loads(path.read_text())["hooks"])
+            await adapter.stop()
+            self.assertFalse(path.exists())
+
     def test_assistant_count_skips_invalid_and_non_assistant_records(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "chat_history.jsonl"
@@ -1142,14 +1198,14 @@ class LifecycleTest(unittest.IsolatedAsyncioTestCase):
         adapter.alive = lambda: running
         adapter._accounted = 0
 
-        async def stop_sleep(_):
+        async def stop_sleep():
             nonlocal running
             running = False
 
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "chat_history.jsonl"
             path.write_text('{"type":"assistant"', encoding="utf-8")
-            with patch("partyline.adapters.bundled.grok.adapter.asyncio.sleep", stop_sleep):
+            with patch.object(adapter, "_poll", stop_sleep):
                 await adapter._tail_grok_transcript(path, AsyncMock())
 
     async def test_tail_retries_after_an_open_error(self):
@@ -1157,12 +1213,12 @@ class LifecycleTest(unittest.IsolatedAsyncioTestCase):
         adapter = make_adapter()
         adapter.alive = lambda: running
 
-        async def stop_sleep(_):
+        async def stop_sleep():
             nonlocal running
             running = False
 
         with patch.object(Path, "open", side_effect=OSError), \
-                patch("partyline.adapters.bundled.grok.adapter.asyncio.sleep", stop_sleep):
+                patch.object(adapter, "_poll", stop_sleep):
             await adapter._tail_grok_transcript(Path("/unreadable"), AsyncMock())
 
     def test_replaced_treats_a_stat_error_as_replacement(self):

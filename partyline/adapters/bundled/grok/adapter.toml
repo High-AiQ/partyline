@@ -7,4 +7,4 @@ class = "PartylineAdapter"
 command = ["grok", "--permission-mode", "bypassPermissions"]
 requires = ["grok"]
 env_unset = []
-capabilities = { resume = true }
+capabilities = { resume = true, turn_end = "receipt" }
