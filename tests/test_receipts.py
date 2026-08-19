@@ -37,11 +37,13 @@ class ReceiptTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured["body"], {"hookEventName": "UserPromptSubmit"})
         self.assertEqual(captured["timeout"], 5)
 
-    async def test_a_failed_post_is_swallowed(self):
+    async def test_a_failed_post_is_logged_but_swallowed(self):
         """A lost receipt degrades to the pre-receipt wedged badge; it must
-        never raise into the transcript loop that emitted it."""
+        never raise into the transcript loop that emitted it — but it must be
+        loud in the log, or a dead receipt path is invisible."""
         with patch("urllib.request.urlopen", side_effect=OSError("connection refused")):
-            await receipt({"hook_url": "http://gone/"}, ENDED)
+            with self.assertLogs("partyline.adapters.receipts", level="ERROR"):
+                await receipt({"hook_url": "http://gone/", "name": "agent"}, ENDED)
 
 
 if __name__ == "__main__":

@@ -13,7 +13,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import urllib.request
+
+logger = logging.getLogger(__name__)
 
 # The event names the hook contract already folds: a pasted digest begins a
 # turn, and any completed non-tool-calls assistant message ends one.
@@ -36,9 +39,11 @@ async def receipt(att: dict, event: str) -> None:
     """Fire-and-forget a turn boundary; never raise into a tail loop.
 
     A lost receipt degrades to the pre-receipt behavior — a badge that stays
-    lit until the process exits — so failures are swallowed rather than
-    retried: the tail cannot know whether a retry would land after a newer
-    turn has already opened, and presence treats a stale ending as a lie.
+    lit until the process exits — so failures are never retried: the tail
+    cannot know whether a retry would land after a newer turn has already
+    opened, and presence treats a stale ending as a lie. But a systematically
+    dead receipt path must stay diagnosable: loud in the log, invisible to
+    the delivery.
     """
     url = att.get("hook_url")
     if not url:
@@ -46,4 +51,4 @@ async def receipt(att: dict, event: str) -> None:
     try:
         await asyncio.to_thread(_post, url, event)
     except Exception:
-        pass
+        logger.exception("turn receipt %r for @%s never arrived", event, att.get("name"))

@@ -59,6 +59,18 @@ Layout, and where things belong:
 - `src/components/` — presentation, grouped by region (`rail/`, `chat/`,
   `board/`, `dialogs/`).
 
+**Authentication.** `src/lib/http.ts` owns the credential lifecycle. Access and refresh tokens
+live in `localStorage` (shared, so a second tab is already signed in); the socket `client_id`
+lives in `sessionStorage` (per tab, so two tabs are two distinct connections rather than one
+tab's reconnect killing the other). REST calls send `Authorization: Bearer`; WebSocket URLs
+take `?token=`, because a browser cannot set headers on an upgrade — the structural cost is
+that tokens land in the server's access logs, which is why the deployment story stays
+loopback/LAN. Concurrent 401s share one in-flight refresh and retry once. A socket closed with
+code 4401 is not assumed expired — a handle change closes healthy sockets with 4401 too — so
+the stored access token gets one retry before any refresh, and only a genuine auth failure
+(401, or no stored refresh token) clears the session; network and 5xx answers keep the tokens
+and fall back to the reconnect timer. Auth payloads are Zod-parsed like every other boundary.
+
 **Responsive layout.** Three columns need about 900px. Below that the rails
 become drawers over the line and exactly one can be open — before this, the
 centre column computed to `0px` on a phone and the conversation itself was
@@ -82,7 +94,7 @@ Two rules that are load-bearing rather than stylistic:
   text somebody typed, and stops a hand-written `<span class="mention">` from
   drawing a fake mention.
 
-`window.partyline` exposes `{room, session, wire}` as a deliberate test surface
+`window.partyline` exposes `{room, session, wire, presence}` as a deliberate test surface
 for `tests/ui/`, which needs to drop a socket and deliver fabricated events.
 Treat it as API: if you rename a store, fix those tests.
 
