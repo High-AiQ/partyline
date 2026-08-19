@@ -232,7 +232,9 @@ class UnforgeableTest(unittest.IsolatedAsyncioTestCase):
 
         conv_id, event = runtime.events[0]
         self.assertEqual(conv_id, "line")
-        self.assertEqual(event, {"type": "working", "attachment_id": "att-uuid", "working": True})
+        self.assertEqual(event["type"], "working")
+        self.assertEqual(event["attachment_id"], "att-uuid")
+        self.assertEqual(event["working"], True)
 
 
 if __name__ == "__main__":

@@ -24,7 +24,7 @@ import { wire, sendOffLine } from "./wire.svelte.js";
 import type { WireContext, WireIdentity } from "./wire.svelte.js";
 import { clearConversationRoute, routedConversationId, setConversationRoute } from "../lib/routing";
 import { isLive } from "../lib/attachments";
-import { presence } from "./presence.svelte.js";
+import { presenceSync } from "./presence-coordinator.svelte.js";
 
 export interface RoomNotice {
   message: string;
@@ -98,6 +98,7 @@ class Room {
   // ── the line you are on ────────────────────────────────────────────────
   async open(conversation: Conversation, { fromRoute = false }: OpenOptions = {}): Promise<void> {
     const epoch = ++this.#epoch;
+    const presenceFetch = presenceSync.open();
     if (!fromRoute) setConversationRoute(conversation.id);
 
     this.conversation = conversation;
@@ -106,7 +107,6 @@ class Room {
     this.#seen = new Set<number>();
     this.humans.clear();
     this.attention.clear();
-    presence.clear();
     this.reattachOffer = null;
 
     wire.connect(
@@ -135,7 +135,7 @@ class Room {
 
     this.conversation = detail.conversation;
     this.attachments = detail.attachments;
-    presence.replace(detail.working);
+    presenceSync.finish(presenceFetch, detail.presence, detail.working);
     for (const message of detail.messages) this.#absorb(message);
     void this.loadConversations().catch(ignoreBackgroundFailure);
   }
@@ -158,18 +158,19 @@ class Room {
     const conversation = this.conversation;
     if (!conversation) return;
     const epoch = this.#epoch;
-    const detail = await api.conversation(conversation.id);
+    const [detail, presenceFetch] = await presenceSync.fetch(api.conversation(conversation.id));
     if (epoch !== this.#epoch) return; // the line changed under the fetch
 
     this.conversation = detail.conversation;
     this.attachments = detail.attachments;
-    presence.replace(detail.working);
+    presenceSync.finish(presenceFetch, detail.presence, detail.working);
     for (const message of detail.messages) this.#absorb(message);
   }
 
   /** Step off the current line without choosing another. */
   leave({ clearRoute = true }: LeaveOptions = {}): void {
     this.#epoch++;
+    presenceSync.reset();
     wire.disconnect();
     this.conversation = null;
     this.messages = [];
@@ -177,7 +178,6 @@ class Room {
     this.#seen = new Set<number>();
     this.humans.clear();
     this.attention.clear();
-    presence.clear();
     this.reattachOffer = null;
     if (clearRoute && routedConversationId()) clearConversationRoute();
   }
@@ -229,7 +229,7 @@ class Room {
         break;
 
       case "working":
-        presence.apply(event);
+        presenceSync.apply(event);
         break;
 
       case "reattach_offer":
