@@ -60,9 +60,10 @@ Open <http://127.0.0.1:8642>. If the server refuses to start because the built c
 from `partyline/static/`, see [The frontend](#the-frontend) — a clone that skipped the committed
 bundle cannot serve the UI.
 
-> **partyline binds to localhost and has no authentication.** Anyone who can reach the port can
-> attach a process and run commands as you. Do not expose it to a network you do not control;
-> see [Security & caveats](#security--caveats-read-this).
+> **partyline requires an account, but an account is not a sandbox.** Authentication keeps
+> casual traffic out; anyone you let in can still attach a process and run commands as you.
+> Bind to localhost or a network you control, and see
+> [Security & caveats](#security--caveats-read-this).
 
 ### Serving on a specific IP or port
 
@@ -131,7 +132,8 @@ database paths in `~/.config/partyline/`, not in this public repository.
 
 Then, in the browser:
 
-1. **Pick a handle** — this is your name on the wire (stored locally).
+1. **Sign in** — register an account on first visit (email, password, handle); your handle is
+   your name on the wire. See [Accounts and authentication](#accounts-and-authentication).
 2. **Open a line** — type a conversation name in the left rail, hit `+`.
 3. **Patch in a process** — on the right, give it a handle (e.g. `reviewer`), pick an adapter,
    optionally add a command, set the working directory you want it to work in (it picks up that
@@ -148,6 +150,44 @@ Then, in the browser:
 
 Before first attaching a process in a new working directory, run its CLI there manually once to
 clear first-run trust/onboarding prompts.
+
+## Accounts and authentication
+
+Every route except the login screen requires a credential, and there are exactly two kinds:
+
+- **People** hold an account. The first visit lands on a login/register screen; registering
+  (email, password of 8+ characters, and a handle) signs you in immediately. Handles are 1–32
+  characters of `A–Z a–z 0–9 _ . -`, must start with a letter or digit, and cannot be the
+  reserved `all` or `system`. They are unique across people *and* attached processes, and
+  changeable later from the header — a rename force-closes every socket your account holds, so
+  each open tab reconnects under the new name rather than speaking with a stale one.
+- **Attached processes** hold a machine token they never have to manage: each attachment owns a
+  stable `api_token`, injected into the process's environment as `PARTYLINE_TOKEN` next to
+  `PARTYLINE_API`. A process that calls the API directly — posting a picture, moving a task
+  card — sends `Authorization: Bearer $PARTYLINE_TOKEN`; the briefing every process receives on
+  attach spells this out. Tokens survive detaches and resumes, so a re-attached process keeps
+  working credentials.
+
+Sender identity on every write derives from the credential, never from a client-supplied field:
+an authenticated sender cannot be impersonated, and a handle cannot collide with a taken one.
+
+Passwords are stored as scrypt hashes. Sessions are stateless JWTs signed with a per-instance
+secret minted into that server's own database on first use, so two servers with separate
+databases can never accept each other's tokens — and deleting a database invalidates every
+session it issued. Access tokens live 30 minutes; the client renews them silently with a
+30-day refresh token, which is rotated on every use. Rotation is not revocation, though: with
+no server-side denylist, a stolen refresh token stays usable until it expires. Logout is the
+tab forgetting its tokens, and a leaked access token is usable for at most its remaining
+lifetime.
+
+A browser cannot set headers on a WebSocket upgrade or an `<img>` tag, so those carry the token
+as a `?token=` query parameter — which means **tokens appear in the server's own access logs**.
+The trust model this assumes is unchanged: loopback, or a LAN you control, with TLS on a
+reverse proxy in front if you go further. Exempt from the gate, exactly: the `/api/auth/*`
+endpoints themselves, `/api/version`, `/` and `/assets/*` (the login screen has to load), and
+`/api/hooks/*` plus `/api/restart-plan/failure`, which carry their own capability tokens —
+per-activation for hooks, per-plan plus a loopback check for the restart failure report.
+Everything else answers 401.
 
 ## Adapters
 
@@ -504,8 +544,10 @@ or in a commit.
 
 ## Security & caveats (read this)
 
-- **No auth. Binds localhost by default. Anyone who can reach the port can spawn processes as
-  you.** Do not expose it to a network as-is; if you must, tunnel (SSH/tailscale).
+- **Accounts are a gate, not a sandbox.** Anyone with an account can spawn processes as you.
+  Keep the bind on localhost or a LAN you trust; if you expose it further, tunnel (SSH/
+  tailscale) or put TLS on a reverse proxy. WebSocket and image tokens travel as `?token=`
+  query parameters, so they appear in the server's access logs.
 - Processes run with your user, your CLI logins, and the cwd you chose. The chat is a shared
   terminal, not a sandbox.
 - Imported adapters are executed code. Review before importing.
