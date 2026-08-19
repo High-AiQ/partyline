@@ -58,7 +58,7 @@ describe("presence snapshot reconciliation", () => {
     const calls: string[] = [];
     const sink: PresenceSink = {
       clear: () => calls.push("clear"),
-      replace: () => calls.push("legacy"),
+      replaceLegacy: () => calls.push("legacy"),
       apply: (value) => calls.push(`${value.attachment_id}:${String(value.phase)}:${String(value.revision)}`),
     };
 
@@ -71,7 +71,7 @@ describe("presence snapshot reconciliation", () => {
     let applied: WorkingEvent | undefined;
     const sink: PresenceSink = {
       clear: () => undefined,
-      replace: () => undefined,
+      replaceLegacy: () => undefined,
       apply: (value) => (applied = value),
     };
 
@@ -84,7 +84,7 @@ describe("presence snapshot reconciliation", () => {
     const replacements: readonly string[][] = [];
     const sink: PresenceSink = {
       clear: () => undefined,
-      replace: (ids) => (replacements as string[][]).push([...ids]),
+      replaceLegacy: (ids) => (replacements as string[][]).push([...ids]),
       apply: () => undefined,
     };
 
@@ -136,7 +136,7 @@ describe("presence snapshot coordinator", () => {
     const calls: string[] = [];
     const sink: PresenceSink = {
       clear: () => calls.push("clear"),
-      replace: () => calls.push("legacy"),
+      replaceLegacy: () => calls.push("legacy"),
       apply: (value) => calls.push(`${String(value.phase)}:${String(value.revision)}`),
     };
     const sync = new PresenceSnapshotSync(sink);
@@ -154,7 +154,7 @@ describe("presence snapshot coordinator", () => {
     const phases: string[] = [];
     const sink: PresenceSink = {
       clear: () => undefined,
-      replace: () => undefined,
+      replaceLegacy: () => undefined,
       apply: (value) => phases.push(String(value.phase)),
     };
     const sync = new PresenceSnapshotSync(sink);
