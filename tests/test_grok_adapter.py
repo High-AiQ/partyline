@@ -427,7 +427,7 @@ class ResumeWatermarkTest(unittest.IsolatedAsyncioTestCase):
 
             async def keep_growing():
                 index = 0
-                while writing:
+                while writing and index < 200:
                     with transcript.open("a", encoding="utf-8") as file:
                         file.write(f'{{"type":"assistant","content":"{index}"}}\n')
                     index += 1
@@ -435,9 +435,9 @@ class ResumeWatermarkTest(unittest.IsolatedAsyncioTestCase):
 
             writer = asyncio.create_task(keep_growing())
             with patch.object(adapter, "_transcript", return_value=transcript):
-                await adapter._run()
+                await asyncio.wait_for(adapter._run(), timeout=5)
             writing = False
-            await writer
+            await asyncio.wait_for(writer, timeout=2)
 
         self.assertIn("could not be counted", posted[0])
         self.assertFalse(await adapter.wait_ready())
