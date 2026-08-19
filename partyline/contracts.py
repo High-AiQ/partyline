@@ -54,6 +54,7 @@ class AdapterImportIn(BaseModel):
 class VersionResponse(BaseModel):
     version: str
     build: str
+    instance_name: str | None = None
 
 
 class RunningProcessResponse(BaseModel):
@@ -246,6 +247,7 @@ class HelloEvent(BaseModel):
     handle: str
     build: str | None = None
     version: str
+    instance_name: str | None = None
 
 
 class ReattachOfferEvent(BaseModel):

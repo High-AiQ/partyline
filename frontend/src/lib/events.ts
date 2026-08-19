@@ -15,6 +15,7 @@ export const HelloEventSchema = z.object({
   build: z.string().optional(),
   // Required: an old tab must not retain a stale release badge after reconnect.
   version: z.string(),
+  instance_name: z.string().nullable().default(null),
 });
 export type HelloEvent = z.infer<typeof HelloEventSchema>;
 

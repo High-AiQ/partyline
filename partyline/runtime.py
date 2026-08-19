@@ -10,10 +10,10 @@ from .contracts import (
     AttachmentResponse,
     Event,
     ErrorEvent,
-    HelloEvent,
     MessageEvent,
     MessageResponse,
 )
+from .handshake import hello_payload
 from .db import Db
 from .reattach import ReattachCoordinator
 
@@ -226,6 +226,7 @@ class ChatRuntime:
         conv_id: str,
         frontend_build: str,
         server_version: str,
+        instance_name: str | None = None,
         reattacher: ReattachCoordinator | None = None,
     ):
         await ws.accept()
@@ -276,14 +277,9 @@ class ChatRuntime:
                                     pass  # a half-open socket cannot be closed cleanly
                     claims[ws] = (handle, client_id)
                     claimed_handle, claimed_client = handle, client_id
-                    await ws.send_json(
-                        HelloEvent(
-                            conversation_id=conv_id,
-                            handle=handle,
-                            build=frontend_build or None,
-                            version=server_version,
-                        ).model_dump(exclude_none=True)
-                    )
+                    await ws.send_json(hello_payload(
+                        conv_id, handle, frontend_build, server_version, instance_name
+                    ))
                     if reattacher is not None and (offer := reattacher.offer(conv_id)):
                         await ws.send_json(offer.model_dump())
                     continue

@@ -20,6 +20,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from scripts.cockpit_venv import probe_server, replacement_python
+from scripts.cockpit_arm import preflight_server_config, resolve_server_config
 
 EXIT_ALREADY_GONE = 20
 EXIT_WRONG_GENERATION = 21
@@ -39,6 +40,27 @@ class RestartRefused(RuntimeError):
     def __init__(self, message: str, exit_code: int):
         super().__init__(message)
         self.exit_code = exit_code
+
+
+def with_server_config(arguments: list[str], config: Path) -> list[str]:
+    """Replace only the server's explicit config argument, preserving all else."""
+    rewritten = list(arguments)
+    positions = [
+        index for index, value in enumerate(rewritten)
+        if value == "--config" or value.startswith("--config=")
+    ]
+    if len(positions) > 1:
+        raise RestartRefused("server command has several --config arguments", EXIT_BAD_ARGUMENTS)
+    if not positions:
+        return [*rewritten, "--config", str(config)]
+    index = positions[0]
+    if rewritten[index] == "--config":
+        if index + 1 >= len(rewritten) or rewritten[index + 1].startswith("--"):
+            raise RestartRefused("server command has --config without a path", EXIT_BAD_ARGUMENTS)
+        rewritten[index + 1] = str(config)
+    else:
+        rewritten[index] = f"--config={config}"
+    return rewritten
 
 
 def process_generation(pid: int, proc_root: Path = Path("/proc")) -> str | None:
@@ -155,6 +177,7 @@ def run_restart(
     logfile: Path,
     cwd: Path,
     *,
+    server_config: Path | None = None,
     generation: Callable[[int], str | None] = process_generation,
     environment: Callable[[int], dict[str, str] | None] = process_environment,
     command_line: Callable[[int], list[str] | None] = process_cmdline,
@@ -191,6 +214,20 @@ def run_restart(
             EXIT_COMMAND_LINE_UNREADABLE,
         )
     arguments = command[command.index(str(server)) + 1 :]
+    if server_config is not None:
+        arguments = with_server_config(arguments, server_config)
+        try:
+            expected = preflight_server_config(server_config)
+            effective = resolve_server_config(server_config, arguments, env)
+        except (RuntimeError, ValueError) as exc:
+            raise RestartRefused(
+                f"explicit server config is unusable: {exc}", EXIT_BAD_ARGUMENTS
+            ) from exc
+        if effective != expected:
+            raise RestartRefused(
+                "outgoing server argv or environment overrides the explicit config",
+                EXIT_BAD_ARGUMENTS,
+            )
 
     # Prove the replacement can import *before* killing the live server.
     # A fast-forwarded tree with a stale venv is how v0.32.0 left the room
@@ -220,13 +257,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("logfile", type=Path)
     parser.add_argument("cwd", type=Path)
     parser.add_argument("--failure-ws")
+    parser.add_argument("--server-config", type=Path)
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
         return EXIT_BAD_ARGUMENTS if exc.code else 0
 
     try:
-        run_restart(args.old_pid, args.old_start, args.server, args.logfile, args.cwd)
+        run_restart(
+            args.old_pid, args.old_start, args.server, args.logfile, args.cwd,
+            server_config=args.server_config,
+        )
     except RestartRefused as exc:
         print(exc, file=sys.stderr)
         if args.failure_ws:
