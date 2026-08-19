@@ -18,7 +18,14 @@ from pathlib import Path
 DEFAULT_HOOKS_DIR = "~/.partyline/hooks"
 DEFAULT_HOOKS_PATHS = "~/.grok/hooks-paths"
 
-_TURN_EVENTS = frozenset({"stop", "userpromptsubmit"})
+# Canonical names after stripping underscores. Grok's payload uses `stop` /
+# `user_prompt_submit`; Claude-style hooks use `Stop` / `UserPromptSubmit`.
+# `StopFailure` and `StopCancelled` replace `Stop` when a turn errors or is
+# interrupted — without them a HOLD that cancels the previous turn never
+# clears the badge.
+_TURN_EVENTS = frozenset({
+    "stop", "userpromptsubmit", "stopfailure", "stopcancelled",
+})
 
 
 def hooks_dir(att: dict | None = None) -> Path:
@@ -49,7 +56,7 @@ def filter_command(hook_url: str, session_id: str) -> str:
         "name=(ev.get('hookEventName') or os.environ.get('GROK_HOOK_EVENT') or '')\n"
         "name=name.replace('_','').lower()\n"
         "if got!=SID: raise SystemExit(0)\n"
-        "if name not in ('stop','userpromptsubmit'): raise SystemExit(0)\n"
+        f"if name not in {tuple(sorted(_TURN_EVENTS))!r}: raise SystemExit(0)\n"
         "urllib.request.urlopen(urllib.request.Request("
         "URL,data=json.dumps(ev).encode(),method='POST',"
         "headers={'Content-Type':'application/json'}),timeout=5)\n"
@@ -62,6 +69,8 @@ def payload(hook_url: str, session_id: str) -> dict:
     return {"hooks": {
         "UserPromptSubmit": handler,
         "Stop": handler,
+        "StopFailure": handler,
+        "StopCancelled": handler,
     }}
 
 
