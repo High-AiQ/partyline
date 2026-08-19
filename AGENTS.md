@@ -50,8 +50,18 @@ uv run --locked partyline
 PARTYLINE_DB=/tmp/partyline-test.db PARTYLINE_PORT=8643 uv run --locked partyline
 uv run --locked partyline --host 127.0.0.1 --port 8643
 PARTYLINE_HOST=127.0.0.1 PARTYLINE_PORT=8643 uv run --locked partyline
+./scripts/capped-test && uv run --locked coverage report
 uv run --locked coverage run -m unittest discover -s tests && uv run --locked coverage report
 ```
+
+**Run the suite through `./scripts/capped-test` on a developer machine.** It runs the same
+command under a 2 GB kernel memory cap. A hung test that allocates has twice taken this whole
+machine down instead of failing — 19 GB on 2026-08-14, 31 GB on 2026-08-19 — and the second
+one killed the running cockpit, every attached CLI, and systemd's boot with it. A healthy full
+run peaks around 165 MB, so the cap has roughly twelve times the headroom an honest test needs.
+Exit 137 from it means *allocated without bound*, not *assertion failed*. Use
+`--memory` to change the cap and pass any other command after `--`. CI runs the bare command;
+the cap is for the machine a person is sitting at.
 
 The suite must stay above 90% line and branch coverage; `coverage report` fails the build below
 that. Nothing is omitted from measurement — a line that genuinely cannot be covered gets

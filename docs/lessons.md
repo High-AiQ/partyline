@@ -222,3 +222,17 @@ enforce it. A prose warning that has no executable guard is not a completed less
   night, a browser regression measured a stale bundle, a cockpit deploy fast-forwarded source
   without installing its dependencies, and configuration bound at import before `.env` was
   merged. Reason about source; verify against the artifact that actually runs.
+- **A runaway test should cost one command, not one machine.** Twice a Python test process has
+  grown without bound — `coverage` to 19 GB (2026-08-14), `unittest` to 30.6 GB and then
+  31.0 GB (2026-08-19) — and both times the first symptom anyone saw was the VM disappearing:
+  the OOM killer took the cockpit, every attached CLI, and finally systemd's boot, which then
+  reboot-looped until a human ran `wsl --shutdown`. Neither cause was exotic. The second was a
+  poll whose `asyncio.sleep` had been patched in the module it used to live in, after the tail
+  was split into its own file, plus a test writer appending a line on every `sleep(0)` — this
+  same file's oldest lesson, reappearing because a *refactor* moved the patch target rather
+  than because anyone wrote a new mistake. The durable guard is not another review rule: it is
+  `./scripts/capped-test`, which runs the suite under a kernel memory cap so the runaway dies
+  in seconds and the machine survives to show you the failure. **When a hang can take the
+  host, the bound belongs in the runner, not in the reviewer's attention.** Corollary for
+  refactors: moving a function to a new module moves every patch target aimed at it, and a
+  test that patches the old location still passes — it just no longer patches anything.
