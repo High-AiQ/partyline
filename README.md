@@ -96,6 +96,18 @@ Binding to a non-loopback address exposes the chat and its ability to start proc
 network; keep the server on a trusted network. Process-control endpoints such as shutdown remain
 restricted to loopback callers.
 
+When several Partyline servers are reachable from the same browser, give each one a visible,
+deployment-neutral label with `--instance-name`, `PARTYLINE_INSTANCE_NAME`, or an `[instance]`
+table in the same config file:
+
+```toml
+[instance]
+name = "Development"
+```
+
+The label appears in a compact banner above the line. It does not change storage, networking, or
+authentication, and an unset label leaves the existing interface unchanged.
+
 Then, in the browser:
 
 1. **Pick a handle** — this is your name on the wire (stored locally).
@@ -382,11 +394,12 @@ after a restart.
 |---|---|---|
 | `PARTYLINE_PORT` | `8642` | bind setting; see [precedence](#serving-on-a-specific-ip-or-port) |
 | `PARTYLINE_HOST` | `127.0.0.1` | bind setting; see [precedence](#serving-on-a-specific-ip-or-port) and the security note |
+| `PARTYLINE_INSTANCE_NAME` | unset | optional label shown above every line; CLI/config precedence matches bind settings |
 | `PARTYLINE_DB` | `~/.partyline.db` | conversations, messages, attachments, presets |
 | `PARTYLINE_MEDIA_DIR` | `<PARTYLINE_DB stem>/media` | uploaded images, one subdirectory per line; see [Pictures on the line](#pictures-on-the-line) |
 | `PARTYLINE_ADAPTERS_DIR` | `~/.partyline/adapters` | where imported adapter repos are checked out |
 
-The optional server config file uses `[server] host` and `port`; see
+The optional server config file uses `[server] host` and `port`, plus optional `[instance] name`; see
 [Serving on a specific IP or port](#serving-on-a-specific-ip-or-port) for its search paths and
 precedence.
 

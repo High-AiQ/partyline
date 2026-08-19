@@ -16,6 +16,7 @@ from scripts.restart_server import (
     process_environment,
     process_generation,
     run_restart,
+    with_server_config,
     wait_for_generation_exit,
 )
 
@@ -78,6 +79,33 @@ class EnvironmentParserTest(unittest.TestCase):
             cmdline.parent.mkdir()
             cmdline.write_bytes(b"")
             self.assertIsNone(process_cmdline(42, root))
+
+
+class ServerConfigArgumentsTest(unittest.TestCase):
+    def test_it_adds_or_replaces_only_the_config_argument(self):
+        config = Path("/tmp/cockpit.toml")
+        self.assertEqual(
+            with_server_config(["--host", "127.0.0.1", "--port", "9000"], config),
+            ["--host", "127.0.0.1", "--port", "9000", "--config", str(config)],
+        )
+        self.assertEqual(
+            with_server_config(["--config", "old.toml", "--port", "9000"], config),
+            ["--config", str(config), "--port", "9000"],
+        )
+        self.assertEqual(
+            with_server_config(["--config=old.toml", "--port", "9000"], config),
+            [f"--config={config}", "--port", "9000"],
+        )
+
+    def test_ambiguous_or_missing_config_arguments_are_refused(self):
+        for arguments in (
+            ["--config"],
+            ["--config", "--port", "9000"],
+            ["--config", "one", "--config=two"],
+        ):
+            with self.subTest(arguments=arguments), self.assertRaises(RestartRefused) as raised:
+                with_server_config(arguments, Path("replacement.toml"))
+            self.assertEqual(raised.exception.exit_code, 22)
 
 
 class RestartTest(unittest.TestCase):
@@ -160,6 +188,78 @@ class RestartTest(unittest.TestCase):
             probe=lambda _cwd, _server: None,
         )
         self.assertEqual(executions[0][-1], ["--host", "0.0.0.0", "--port", "9000"])
+
+    def test_server_config_rewrites_only_argv_and_preserves_environment(self):
+        executions = []
+        config = self.root / "cockpit.toml"
+        config.write_text("[server]\nhost = '0.0.0.0'\nport = 8642\n")
+        run_restart(
+            42,
+            "1234",
+            self.server,
+            self.log,
+            self.root,
+            server_config=config,
+            generation=lambda _pid: "1234",
+            environment=lambda _pid: {"PATH": "/old/server/path", "TOKEN": "kept"},
+            command_line=lambda _pid: [
+                "/usr/bin/python3", str(self.server), "--config", "old.toml",
+                "--host", "0.0.0.0", "--port", "8642",
+            ],
+            signal_process=lambda *_args: None,
+            wait=lambda *_args: None,
+            launch=lambda *args: executions.append(args),
+            probe=lambda _cwd, _server: None,
+        )
+        self.assertEqual(executions[0][-2], {"PATH": "/old/server/path", "TOKEN": "kept"})
+        self.assertEqual(
+            executions[0][-1], [
+                "--config", str(config), "--host", "0.0.0.0", "--port", "8642"
+            ]
+        )
+
+    def test_a_higher_precedence_bind_override_refuses_before_signalling(self):
+        config = self.root / "cockpit.toml"
+        config.write_text("[server]\nhost = '0.0.0.0'\nport = 8642\n")
+        with self.assertRaisesRegex(RestartRefused, "overrides") as raised:
+            run_restart(
+                42,
+                "1234",
+                self.server,
+                self.log,
+                self.root,
+                server_config=config,
+                generation=lambda _pid: "1234",
+                environment=lambda _pid: {"PARTYLINE_HOST": "127.0.0.1"},
+                command_line=lambda _pid: [str(self.server)],
+                signal_process=lambda pid, sig: self.signals.append((pid, sig)),
+                wait=lambda *_args: None,
+                launch=lambda *args: self.executions.append(args),
+                probe=lambda _cwd, _server: None,
+            )
+        self.assertEqual(raised.exception.exit_code, 22)
+        self.assertEqual(self.signals, [])
+
+    def test_a_config_removed_after_arming_refuses_before_signalling(self):
+        missing = self.root / "removed.toml"
+        with self.assertRaisesRegex(RestartRefused, "unusable") as raised:
+            run_restart(
+                42,
+                "1234",
+                self.server,
+                self.log,
+                self.root,
+                server_config=missing,
+                generation=lambda _pid: "1234",
+                environment=lambda _pid: {"PATH": "/old/server/path"},
+                command_line=lambda _pid: [str(self.server)],
+                signal_process=lambda pid, sig: self.signals.append((pid, sig)),
+                wait=lambda *_args: None,
+                launch=lambda *args: self.executions.append(args),
+                probe=lambda _cwd, _server: None,
+            )
+        self.assertEqual(raised.exception.exit_code, 22)
+        self.assertEqual(self.signals, [])
 
     def test_an_unreadable_environ_refuses_before_signalling(self):
         with self.assertRaises(RestartRefused) as raised:
