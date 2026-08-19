@@ -11,7 +11,6 @@ Use as a library:
     with ui_session(lines=["alpha", "beta"]) as ui:
         ui.page.click(".conv-row:first-child .conv-more")
         ui.shot("menu-open")
-
 Or from the command line, which captures a standard set of states:
 
     uv run python -m scripts.uishot                 # writes to /tmp/partyline-ui/
@@ -24,7 +23,6 @@ the port is chosen by the OS so several of these can run at once.
 from __future__ import annotations
 
 import contextlib
-import json
 import os
 import signal
 import socket
@@ -37,6 +35,12 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from scripts.ui_auth import (
+    authorization_headers,
+    browser_auth_script,
+    post_json,
+    register_test_account,
+)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 STARTUP_TIMEOUT = 30.0
 VIEWPORT = {"width": 1280, "height": 800}
@@ -73,14 +77,6 @@ def _die_with_parent():
         pass
 
 
-def _post(url: str, payload: dict) -> dict:
-    request = urllib.request.Request(
-        url, method="POST", data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(request) as response:
-        return json.load(response)
-
-
 @dataclass
 class UiSession:
     """A live server, a browser page pointed at it, and a screenshot sink."""
@@ -88,6 +84,8 @@ class UiSession:
     page: object
     base_url: str
     out_dir: Path
+    auth_headers: dict[str, str]
+    auth_credentials: tuple[str, str]
     shots: list[Path] = field(default_factory=list)
     server: object = None      # the Popen, so a test can kill the wire
     # Settle animations before each shot. On for parity captures, where a
@@ -187,7 +185,8 @@ def ui_session(lines=(), *, out_dir="/tmp/partyline-ui", headless=True, viewport
     """Start a throwaway partyline, open it in a browser, yield a UiSession.
 
     `lines` are conversation names to create before the page loads, so the UI
-    has something to render. `handle` is the name typed into the connect gate.
+    has something to render. `handle` names the throwaway account registered
+    for the browser session.
     Everything is torn down on exit, including the server process and the temp
     database.
     """
@@ -209,22 +208,23 @@ def ui_session(lines=(), *, out_dir="/tmp/partyline-ui", headless=True, viewport
                               preexec_fn=_die_with_parent)
     try:
         _await_server(base_url, server)
+        tokens, credentials = register_test_account(base_url, handle)
         for name in lines:
-            _post(f"{base_url}/api/conversations", {"name": name})
+            post_json(f"{base_url}/api/conversations", {"name": name}, tokens["access_token"])
 
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=headless)
-            page = browser.new_page(viewport=viewport or VIEWPORT)
+            context = browser.new_context(viewport=viewport or VIEWPORT)
+            context.add_init_script(browser_auth_script(tokens))
+            page = context.new_page()
             page.goto(base_url)
-            # The app is behind a handle gate, and the handle lives in
-            # localStorage — a fresh browser context always starts gated.
-            page.wait_for_selector("#gateName")
-            page.fill("#gateName", handle)
-            page.click("#gateForm button[type=submit]")
             page.wait_for_selector("#convs")
             if lines:
                 page.wait_for_selector(".conv-row")
-            session = UiSession(page=page, base_url=base_url, out_dir=out, server=server,
+            session = UiSession(page=page, base_url=base_url, out_dir=out,
+                                auth_headers=authorization_headers(tokens),
+                                auth_credentials=credentials,
+                                server=server,
                                 still_frames=freeze_animations)
             session.settle()
             try:

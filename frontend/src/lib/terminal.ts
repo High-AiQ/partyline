@@ -1,6 +1,9 @@
 /** Wire rules for the live terminal peek socket. */
 
 import { z } from "zod";
+import { readAccessToken } from "./http";
+import { authenticatedSocketUrl } from "./socket-auth";
+import type { SocketLocation } from "./socket-auth";
 
 export const NOT_LIVE_CLOSE = 4404;
 
@@ -10,10 +13,7 @@ export const TerminalGeometrySchema = z.object({
 });
 export type TerminalGeometry = z.infer<typeof TerminalGeometrySchema>;
 
-export interface SocketLocation {
-  protocol: string;
-  host: string;
-}
+export type { SocketLocation } from "./socket-auth";
 
 export interface TerminalHandshake {
   geometry: TerminalGeometry;
@@ -35,8 +35,13 @@ export const isNotLiveClose = (code: number): boolean => code === NOT_LIVE_CLOSE
 export const shouldRetryClose = (code: number, handshaken: boolean): boolean =>
   handshaken && !isNotLiveClose(code);
 
-export const terminalSocketUrl = (attId: string, loc: SocketLocation): string =>
-  (loc.protocol === "https:" ? "wss://" : "ws://") + loc.host + "/ws/attachments/" + attId + "/terminal";
+export const terminalSocketUrl = (
+  attId: string,
+  loc: SocketLocation,
+  accessToken: string | null = readAccessToken(),
+): string => {
+  return authenticatedSocketUrl(`/ws/attachments/${attId}/terminal`, loc, accessToken);
+};
 
 /** First text frame is geometry JSON; the second is the pyte snapshot. */
 export function readTextFrame(reader: FrameReader, text: string): TextFrameResult {

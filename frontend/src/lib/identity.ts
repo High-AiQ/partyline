@@ -1,35 +1,21 @@
 /**
- * Who this browser says it is.
- *
- * Two separate things, and conflating them breaks a real case:
- *
- *   - the **handle** is the name on your messages, and you can change it;
- *   - the **client id** is this browser, minted once and never shown. It is
- *     what lets a reload reclaim a handle whose socket the server still
- *     believes is live, while a genuinely different browser is refused.
+ * The browser's stable client id. Human identity comes from the authenticated
+ * user; this id only distinguishes browser connections belonging to that user.
  */
 
-const HANDLE_KEY = "partyline_user";
 const CLIENT_KEY = "partyline_client_id";
 
-export const RESERVED_HANDLES = new Set(["all", "system"]);
-
-export const readHandle = (): string | null => localStorage.getItem(HANDLE_KEY);
-
-export function writeHandle(handle: string): string {
-  localStorage.setItem(HANDLE_KEY, handle);
-  return handle;
-}
-
-/** Handles are one word: spaces become hyphens rather than being rejected. */
-export const normalizeHandle = (raw: string): string => raw.trim().replace(/\s+/g, "-").slice(0, 32);
-
-export const isReserved = (handle: string): boolean => RESERVED_HANDLES.has(handle.toLowerCase());
-
-/** Mint on first use and keep it forever; `randomUUID` needs a secure context,
- *  and partyline over plain http on a LAN address is not one. */
+/** Mint once per tab and retain it across reloads. `sessionStorage` is
+ *  intentionally tab-scoped: two tabs belonging to one authenticated account
+ *  may hold sockets concurrently, while a reload can still supersede its own
+ *  half-open connection. */
 export function readOrMintClientId(): string {
-  const existing = localStorage.getItem(CLIENT_KEY);
+  let existing: string | null = null;
+  try {
+    existing = sessionStorage.getItem(CLIENT_KEY);
+  } catch {
+    // A storage policy may prevent reconnect takeover, but must not crash chat.
+  }
   if (existing) return existing;
 
   const id =
@@ -38,6 +24,10 @@ export function readOrMintClientId(): string {
       : [...crypto.getRandomValues(new Uint8Array(16))]
           .map((byte) => byte.toString(16).padStart(2, "0"))
           .join("");
-  localStorage.setItem(CLIENT_KEY, id);
+  try {
+    sessionStorage.setItem(CLIENT_KEY, id);
+  } catch {
+    // This tab can still use its in-memory id for the current document.
+  }
   return id;
 }

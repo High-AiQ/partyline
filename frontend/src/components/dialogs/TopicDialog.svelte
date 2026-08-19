@@ -5,7 +5,6 @@
   import { ApiError, api } from "../../lib/api";
   import type { Conversation } from "../../lib/contracts";
   import { room } from "../../state/room.svelte.js";
-  import { session } from "../../state/session.svelte.js";
 
   interface Props {
     close: () => void;
@@ -27,15 +26,10 @@
 
   async function save(): Promise<void> {
     if (!conversation) return;
-    const sender = session.handle;
-    if (!sender) {
-      error = "choose a handle first";
-      return;
-    }
     saving = true;
     error = "";
     try {
-      room.conversation = await api.setTopic(conversation.id, topic, sender);
+      room.conversation = await api.setTopic(conversation.id, topic);
       await room.loadConversations();
       close();
     } catch (failure: unknown) {

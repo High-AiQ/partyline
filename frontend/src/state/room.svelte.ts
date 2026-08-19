@@ -20,8 +20,10 @@ import type {
   WireEvent,
 } from "../lib/contracts";
 import { session } from "./session.svelte.js";
-import { wire, sendOffLine } from "./wire.svelte.js";
-import type { WireContext, WireIdentity } from "./wire.svelte.js";
+import { sendOffLine } from "../lib/offline-wire";
+import type { WireIdentity } from "../lib/wire-commands";
+import { wire } from "./wire.svelte.js";
+import type { WireContext } from "./wire.svelte.js";
 import { clearConversationRoute, routedConversationId, setConversationRoute } from "../lib/routing";
 import { isLive } from "../lib/attachments";
 import { presenceSync } from "./presence-coordinator.svelte.js";
@@ -67,8 +69,8 @@ class Room {
   #noticeTimer: ReturnType<typeof setTimeout> | null = null;
 
   get identity(): WireIdentity {
-    if (!session.handle) throw new Error("a handle is required before joining a line");
-    return { handle: session.handle, clientId: session.clientId };
+    if (!session.handle) throw new Error("authentication is required before joining a line");
+    return { clientId: session.clientId };
   }
 
   // ── the list ───────────────────────────────────────────────────────────
@@ -119,7 +121,7 @@ class Room {
         void this.resync().catch(ignoreBackgroundFailure);
       },
       (hello) => {
-        session.acceptHandshake(hello.version, hello.instance_name);
+        session.acceptHandshake(hello.version, hello.instance_name, hello.handle);
       },
     );
 
@@ -197,7 +199,7 @@ class Room {
   say(body: string): boolean {
     const text = body.trim();
     if (!text) return false;
-    return wire.send({ sender: this.identity.handle, body: text });
+    return wire.send({ body: text });
   }
   /** Post to a line we are not on — see `sendOffLine`. */
   warn(convId: string, body: string): Promise<void> {
@@ -271,10 +273,8 @@ class Room {
    * A refusal means one of two quite different things, and the page used to
    * show the same thing for both.
    *
-   * Before the handshake ever succeeded, the *handle* was refused — someone
-   * else holds it on this line — so the gate reopens saying why. After a
-   * successful handshake, the handle was fine and the *line* has gone; that is
-   * a toast, not a sign-in problem.
+   * A pre-handshake refusal is terminal for this connection; retrying the same
+   * rejected line forever would hide the server's useful error behind a banner.
    */
   #onWireError(event: ErrorEvent, context: WireContext): void {
     const message = event.message || "this line is no longer available";
@@ -288,7 +288,7 @@ class Room {
     }
     if (!context.wasReady && !context.claimRejected) {
       context.rejectClaim();
-      session.openGate(message);
+      this.showNotice(message, "error");
       return;
     }
     this.showNotice(message, "error");

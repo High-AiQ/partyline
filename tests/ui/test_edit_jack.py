@@ -26,6 +26,7 @@ class EditJackTest(unittest.TestCase):
                     "command": "/bin/sleep 60",
                     "cwd": "/tmp",
                 },
+                headers=ui.auth_headers,
             )
             self.assertTrue(attached.ok, attached.text())
             attachment_id = attached.json()["id"]
@@ -35,7 +36,8 @@ class EditJackTest(unittest.TestCase):
             edit = jack.locator("button[title='change the command used on next resume']")
             self.assertEqual(edit.count(), 0, "a live jack must not offer command editing")
 
-            detached = page.request.delete(f"{ui.base_url}/api/attachments/{attachment_id}")
+            detached = page.request.delete(
+                f"{ui.base_url}/api/attachments/{attachment_id}", headers=ui.auth_headers)
             self.assertTrue(detached.ok, detached.text())
             edit.wait_for(state="visible")
             edit.click()

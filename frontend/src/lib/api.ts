@@ -1,10 +1,8 @@
 /** The REST surface, decoded once against the shared Zod contracts. */
 
-import type { ZodError, ZodType } from "zod";
 import {
   AdapterImportResultSchema,
   AdapterSchema,
-  ApiErrorBodySchema,
   ArchiveResultSchema,
   AttachmentSchema,
   ConversationDetailSchema,
@@ -20,6 +18,11 @@ import {
   RestartPlanSchema,
   RestartPlanRequestSchema,
   VersionInfoSchema,
+  AuthLoginRequestSchema,
+  AuthRegisterRequestSchema,
+  AuthTokenResponseSchema,
+  AuthUserSchema,
+  HandleUpdateRequestSchema,
 } from "./contracts";
 import type {
   Adapter,
@@ -38,15 +41,14 @@ import type {
   RestartPlan,
   RestartPlanRequest,
   VersionInfo,
+  AuthLoginRequest,
+  AuthRegisterRequest,
+  AuthTokenResponse,
+  AuthUser,
+  HandleUpdateRequest,
 } from "./contracts";
-
-export interface RequestOptions<Output> {
-  schema: ZodType<Output>;
-  method?: string;
-  body?: unknown;
-  form?: FormData;
-  fallback?: string;
-}
+import { request } from "./http";
+export { ApiContractError, ApiError, request } from "./http";
 
 export interface AttachPayload {
   name: string;
@@ -70,13 +72,16 @@ export interface PresetDraft {
 
 export interface ImageUpload {
   files: readonly File[];
-  sender: string;
   body: string;
   title: string | null;
   description: string | null;
 }
 
 export interface PartylineApi {
+  register(payload: AuthRegisterRequest): Promise<AuthTokenResponse>;
+  login(payload: AuthLoginRequest): Promise<AuthTokenResponse>;
+  me(): Promise<AuthUser>;
+  changeHandle(payload: HandleUpdateRequest): Promise<AuthUser>;
   version(): Promise<VersionInfo>;
   running(): Promise<RunningProcess[]>;
   planRestart(plan: RestartPlanRequest): Promise<RestartPlan>;
@@ -86,8 +91,8 @@ export interface PartylineApi {
   conversations(archived?: boolean): Promise<Conversation[]>;
   conversation(id: string): Promise<ConversationDetail>;
   createConversation(name: string): Promise<Conversation>;
-  renameConversation(id: string, name: string, sender: string): Promise<Conversation>;
-  setTopic(id: string, topic: string, sender: string): Promise<Conversation>;
+  renameConversation(id: string, name: string): Promise<Conversation>;
+  setTopic(id: string, topic: string): Promise<Conversation>;
   archiveConversation(id: string): Promise<ArchiveResult>;
   restoreConversation(id: string): Promise<Conversation>;
   purgeConversation(id: string): Promise<PurgeResult>;
@@ -103,60 +108,31 @@ export interface PartylineApi {
   deletePreset(id: string): Promise<OkResult>;
 }
 
-export class ApiError extends Error {
-  readonly status: number;
-
-  constructor(message: string, status: number) {
-    super(message);
-    this.name = "ApiError";
-    this.status = status;
-  }
-}
-
-export class ApiContractError extends Error {
-  readonly path: string;
-
-  constructor(path: string, cause: ZodError) {
-    super(`the server returned invalid data for ${path}`, { cause });
-    this.name = "ApiContractError";
-    this.path = path;
-  }
-}
-
-export async function request<Output>(path: string, options: RequestOptions<Output>): Promise<Output> {
-  const { schema, method = "GET", body, form, fallback } = options;
-  const requestInit: RequestInit = { method };
-  if (form) {
-    requestInit.body = form;
-  } else if (body !== undefined) {
-    requestInit.headers = { "Content-Type": "application/json" };
-    requestInit.body = JSON.stringify(body);
-  }
-  let response: Response;
-  try {
-    response = await fetch(path, requestInit);
-  } catch {
-    throw new ApiError(fallback ?? "the line is not reachable", 0);
-  }
-
-  if (!response.ok) {
-    let detail = fallback ?? `request failed (${String(response.status)})`;
-    try {
-      const parsed = ApiErrorBodySchema.safeParse(await response.json());
-      if (parsed.success && parsed.data.detail) detail = parsed.data.detail;
-    } catch {
-      // A non-JSON error body is still an error; keep the fallback wording.
-    }
-    throw new ApiError(detail, response.status);
-  }
-
-  const payload: unknown = response.status === 204 ? null : await response.json();
-  const parsed = schema.safeParse(payload);
-  if (!parsed.success) throw new ApiContractError(path, parsed.error);
-  return parsed.data;
-}
-
 export const api: PartylineApi = {
+  register: (payload) =>
+    request("/api/auth/register", {
+      schema: AuthTokenResponseSchema,
+      method: "POST",
+      body: AuthRegisterRequestSchema.parse(payload),
+      fallback: "could not create your account",
+      skipRefresh: true,
+    }),
+  login: (payload) =>
+    request("/api/auth/login", {
+      schema: AuthTokenResponseSchema,
+      method: "POST",
+      body: AuthLoginRequestSchema.parse(payload),
+      fallback: "could not sign in",
+      skipRefresh: true,
+    }),
+  me: () => request("/api/auth/me", { schema: AuthUserSchema }),
+  changeHandle: (payload) =>
+    request("/api/auth/me", {
+      schema: AuthUserSchema,
+      method: "PATCH",
+      body: HandleUpdateRequestSchema.parse(payload),
+      fallback: "could not change your handle",
+    }),
   version: () => request("/api/version", { schema: VersionInfoSchema }),
   running: () => request("/api/running", { schema: RunningProcessSchema.array() }),
   planRestart: (plan) =>
@@ -190,18 +166,18 @@ export const api: PartylineApi = {
   conversation: (id) => request(`/api/conversations/${id}`, { schema: ConversationDetailSchema }),
   createConversation: (name) =>
     request("/api/conversations", { schema: ConversationSchema, method: "POST", body: { name } }),
-  renameConversation: (id, name, sender) =>
+  renameConversation: (id, name) =>
     request(`/api/conversations/${id}/name`, {
       schema: ConversationSchema,
       method: "PUT",
-      body: { name, sender },
+      body: { name },
       fallback: "could not rename line",
     }),
-  setTopic: (id, topic, sender) =>
+  setTopic: (id, topic) =>
     request(`/api/conversations/${id}/topic`, {
       schema: ConversationSchema,
       method: "PUT",
-      body: { topic, sender },
+      body: { topic },
       fallback: "could not save topic",
     }),
   archiveConversation: (id) =>
@@ -225,7 +201,6 @@ export const api: PartylineApi = {
   uploadImages: (conversationId, upload) => {
     const form = new FormData();
     for (const file of upload.files) form.append("file", file);
-    form.append("sender", upload.sender);
     if (upload.body) form.append("body", upload.body);
     if (upload.title) form.append("title", upload.title);
     if (upload.description) form.append("description", upload.description);

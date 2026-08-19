@@ -17,6 +17,8 @@ import {
   shouldRetryClose,
   terminalSocketUrl,
 } from "../lib/terminal";
+import { AUTH_REQUIRED_CLOSE, readAccessToken, recoverSocketAuthentication } from "../lib/http";
+import type { SocketAuthPhase } from "../lib/http";
 import type { FrameReader, TerminalHandshake } from "../lib/terminal";
 
 export const TERMINAL_RETRY_MS = 1500;
@@ -36,13 +38,18 @@ export class TerminalStream {
   #socket: WebSocket | null = null;
   #retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-  connect(attId: string, handlers: TerminalHandlers): number {
+  connect(
+    attId: string,
+    handlers: TerminalHandlers,
+    authenticationPhase: SocketAuthPhase = "initial",
+  ): number {
     const generation = ++this.generation;
     handlers.onGeneration(generation);
     this.#teardown();
     this.unavailable = false;
 
-    const socket = new WebSocket(terminalSocketUrl(attId, location));
+    const startedWith = readAccessToken();
+    const socket = new WebSocket(terminalSocketUrl(attId, location, startedWith));
     socket.binaryType = "arraybuffer";
     this.#socket = socket;
     let reader: FrameReader = newFrameReader();
@@ -56,6 +63,7 @@ export class TerminalStream {
         if (!next.ok) return;
         reader = next.reader;
         if (next.handshake) {
+          authenticationPhase = "initial";
           handshaken = true;
           handlers.onHandshake(next.handshake);
         }
@@ -70,6 +78,19 @@ export class TerminalStream {
     socket.onclose = (event: CloseEvent) => {
       if (!current()) return;
       this.#socket = null;
+      if (event.code === AUTH_REQUIRED_CLOSE) {
+        void recoverSocketAuthentication(startedWith, authenticationPhase)
+          .then((recovery) => {
+            if (current() && recovery.retry) this.connect(attId, handlers, recovery.phase);
+          })
+          .catch(() => {
+            if (!current()) return;
+            this.#retryTimer = setTimeout(() => {
+              if (current()) this.connect(attId, handlers, authenticationPhase);
+            }, TERMINAL_RETRY_MS);
+          });
+        return;
+      }
       if (!shouldRetryClose(event.code, handshaken)) {
         this.unavailable = true;
         handlers.onUnavailable();

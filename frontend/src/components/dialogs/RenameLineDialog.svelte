@@ -3,7 +3,6 @@
   import { ApiError, api } from "../../lib/api";
   import type { Conversation } from "../../lib/contracts";
   import { room } from "../../state/room.svelte.js";
-  import { session } from "../../state/session.svelte.js";
 
   interface Props {
     conversation: Conversation;
@@ -27,16 +26,10 @@
     event.preventDefault();
     const next = name.trim();
     if (!next) return field?.focus();
-    const sender = session.handle;
-    if (!sender) {
-      error = "choose a handle first";
-      return;
-    }
-
     saving = true;
     error = "";
     try {
-      const renamed = await api.renameConversation(conversation.id, next, sender);
+      const renamed = await api.renameConversation(conversation.id, next);
       // The socket broadcasts this to everyone else; the tab that asked should
       // not have to wait on its own round trip to see it.
       if (room.conversation?.id === renamed.id) room.conversation = renamed;
