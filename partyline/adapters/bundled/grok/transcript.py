@@ -26,11 +26,10 @@ def assistant_text(record: object) -> str | None:
         return None
     if record.get("type") != "assistant":
         return None
-    # Grok's observed tool-using records keep their user-facing content
-    # as a string and put calls in this sibling array. That content is
-    # progress narration, not a completed reply for the room.
-    if record.get("tool_calls"):
-        return None
+    # Grok often puts the user-facing sentence on the same record as
+    # ``tool_calls``. That text is on the pty (peek sees it). Dropping it
+    # because tools were present made acknowledgments vanish from the room.
+    # Empty tool-call records stay silent via the content checks below.
     content = record.get("content")
     if isinstance(content, str):
         return content if content.strip() else None

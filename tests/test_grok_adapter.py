@@ -134,8 +134,15 @@ class TranscriptTest(unittest.TestCase):
         self.assertIsNone(PartylineAdapter._assistant_text({"type": "reasoning", "content": "secret"}))
         self.assertIsNone(PartylineAdapter._assistant_text({"type": "assistant", "content": []}))
         self.assertIsNone(PartylineAdapter._assistant_text({"type": "assistant", "content": 3}))
+        self.assertEqual(
+            PartylineAdapter._assistant_text({
+                "type": "assistant", "content": "I am about to work",
+                "tool_calls": [{"id": "x"}],
+            }),
+            "I am about to work",
+        )
         self.assertIsNone(PartylineAdapter._assistant_text({
-            "type": "assistant", "content": "I am about to work", "tool_calls": [{"id": "x"}],
+            "type": "assistant", "content": "  ", "tool_calls": [{"id": "x"}],
         }))
         self.assertEqual(
             PartylineAdapter._assistant_text({
@@ -143,6 +150,19 @@ class TranscriptTest(unittest.TestCase):
             }),
             "finished reply",
         )
+
+    def test_live_ack_beside_tools_is_room_speech(self):
+        # Captured from grok2 session 060f33b4 on 2026-08-19. Peek showed this
+        # sentence; the room never did, because the record also had tool_calls.
+        record = {
+            "type": "assistant",
+            "content": (
+                "@greg-at-work I’ll check why the others look stuck on the line "
+                "and whether `https://partyline.home.arpa` is actually up."
+            ),
+            "tool_calls": [{"id": "a"}, {"id": "b"}, {"id": "c"}],
+        }
+        self.assertEqual(PartylineAdapter._assistant_text(record), record["content"])
 
     def test_pinned_uuid_requires_one_exact_transcript(self):
         adapter = make_adapter()
@@ -1163,8 +1183,8 @@ class LifecycleTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(posted, ["survived"])
 
-    async def test_narration_occupies_an_ordinal_even_when_not_relayed(self):
-        """Resume position follows durable records, not relay policy."""
+    async def test_speech_beside_tool_calls_is_relayed_and_counted(self):
+        """A tool-using record with text is speech; an empty one still counts."""
         posted = []
         running = True
         adapter = make_adapter()
@@ -1182,15 +1202,19 @@ class LifecycleTest(unittest.IsolatedAsyncioTestCase):
             path = Path(directory) / "chat_history.jsonl"
             path.write_text(
                 json.dumps({
-                    "type": "assistant", "content": "working note", "tool_calls": [{"id": "x"}],
+                    "type": "assistant", "content": "working note",
+                    "tool_calls": [{"id": "x"}],
+                }) + "\n" + json.dumps({
+                    "type": "assistant", "content": "",
+                    "tool_calls": [{"id": "y"}],
                 }) + "\n" + json.dumps({"type": "assistant", "content": "first reply"}) + "\n"
                 + json.dumps({"type": "assistant", "content": "second reply"}) + "\n",
                 encoding="utf-8",
             )
             await adapter._tail_grok_transcript(path, handle)
 
-        self.assertEqual(posted, ["first reply", "second reply"])
-        self.assertEqual(adapter._accounted, 3)
+        self.assertEqual(posted, ["working note", "first reply", "second reply"])
+        self.assertEqual(adapter._accounted, 4)
 
     async def test_tail_leaves_a_half_written_record_unposted(self):
         running = True
