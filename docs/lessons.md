@@ -261,3 +261,10 @@ enforce it. A prose warning that has no executable guard is not a completed less
   dialect. Grok also fires `StopFailure` / `StopCancelled` *instead of* `Stop` when a
   turn errors or is interrupted — those must be endings too, or a cancelled turn
   never clears.
+- **A quiet timer is not a turn signal.** The badge labelled a receipt adapter
+  `stalled?` after ten minutes of silence (`STALLED_SECONDS`). Grok's thinking
+  turns are legitimately silent for longer than that; peek showed it still
+  working. An open receipt turn is the server's word — age may not contradict
+  it. The control is a 700-second-old `completion: "receipt"` entry that must
+  still render `working…`, not `stalled?`. `none` adapters still decay look
+  without dropping the working label.

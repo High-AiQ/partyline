@@ -18,8 +18,6 @@ export interface BadgeTreatment {
 
 /** A `none` adapter shows today's confident look for this long before decaying. */
 const CONFIDENT_SECONDS = 240;
-/** A receipt adapter that reports promptly has gone quiet for this long. */
-const STALLED_SECONDS = 600;
 
 function confident(speaking: boolean): BadgeTreatment {
   return {
@@ -56,15 +54,9 @@ export function badgeTreatment(entry: PresenceEntry | undefined, now: number): B
   const age = Math.max(0, now - entry.since);
 
   if (entry.completion === "receipt") {
-    if (age >= STALLED_SECONDS) {
-      return {
-        label: "stalled?",
-        tone: "copper",
-        dot: "hollow",
-        pulse: "slow",
-        tooltip: `no turn signal for ${describe(age)} — may be a long run`,
-      };
-    }
+    // An open receipt turn is the server's word. Age is not evidence the
+    // process stalled: grok's thinking turns are silent for tens of minutes,
+    // and the old 10-minute guess labelled them `stalled?` while they worked.
     return confident(entry.phase === "speaking");
   }
 
