@@ -5,6 +5,7 @@
    */
   import Gate from "./components/Gate.svelte";
   import WireBanner from "./components/WireBanner.svelte";
+  import InstanceBanner from "./components/InstanceBanner.svelte";
   import Rail from "./components/rail/Rail.svelte";
   import TopBar from "./components/chat/TopBar.svelte";
   import Feed from "./components/chat/Feed.svelte";
@@ -98,6 +99,9 @@
     <Rail />
 
     <main id="main">
+      {#if session.instanceName}
+        <InstanceBanner name={session.instanceName} />
+      {/if}
       <TopBar />
       <Feed />
       {#if room.conversation}
