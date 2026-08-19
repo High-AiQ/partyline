@@ -4,8 +4,9 @@ Partyline can improve and restart the cockpit instance it is using to coordinate
 **recursive self-improvement**: agents use their own judgment to deploy a reviewed change, recover
 the planned line, and continue without a required button, browser refresh, or human in the loop.
 
-This is an operational procedure for contributors. Read [AGENTS.md](../AGENTS.md) before using it;
-that file is the authoritative safety contract and records the failure modes that shaped this one.
+This is an operational procedure for contributors. Read [AGENTS.md](../AGENTS.md) before using it —
+that file is the authoritative safety contract; the failure modes that shaped this procedure are
+recorded in [lessons.md](lessons.md).
 
 > **Platform requirement:** Partyline itself supports Linux and macOS, but the automated
 > `scripts.cockpit arm` procedure requires Linux with a working systemd **user** session. It uses a
