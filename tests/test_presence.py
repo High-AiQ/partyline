@@ -62,7 +62,15 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(self.runtime.working_events(), [("att", True)])
 
-    async def test_speech_ends_the_turn(self):
+    async def test_an_ack_does_not_end_the_turn(self):
+        """The bug @greg reported: agents answer, then keep working.
+
+        This test used to assert the opposite — that the first thing a
+        process said ended its turn. An ack is speech, so the badge died
+        while the work being acknowledged had not started. The assertion
+        that matters is the *absence* of a clearing event: the bug was a
+        broadcast that should never have been sent.
+        """
         posted = []
 
         async def post(sender, sender_type, body):
@@ -71,30 +79,174 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
         adapter = self.presence.watch(RecordingAdapter(), "line", "att")
         speak = self.presence.posting("line", "att", post)
         await adapter.deliver([{"id": 1}])
-        await speak("grok", "agent", "here is the answer")
+        await speak("grok", "agent", "ack — starting on it now")
 
-        self.assertEqual(posted, ["here is the answer"])
+        self.assertEqual(posted, ["ack — starting on it now"])
+        self.assertTrue(self.presence.is_working("att"))
+        self.assertNotIn(("att", False), self.runtime.working_events())
+        self.assertEqual(self.presence.phase("att"), "speaking")
+
+    async def test_only_the_harness_receipt_ends_the_turn(self):
+        adapter = self.presence.watch(RecordingAdapter(), "line", "att")
+        speak = self.presence.posting("line", "att", lambda *_: asyncio.sleep(0))
+        await adapter.deliver([{"id": 1}])
+        await self.presence.began("line", "att")
+        await speak("grok", "agent", "ack")
+        await speak("grok", "agent", "and here is the actual result")
+
+        self.assertTrue(self.presence.is_working("att"))
+        await self.presence.ended("line", "att")
+
         self.assertFalse(self.presence.is_working("att"))
-        self.assertEqual(self.runtime.working_events(), [("att", True), ("att", False)])
+        self.assertEqual(
+            self.runtime.working_events(),
+            [("att", True), ("att", True), ("att", False)],
+        )
 
-    async def test_a_system_notice_does_not_end_the_process_turn(self):
+    async def test_two_wakes_folded_into_one_harness_turn_do_not_wedge(self):
+        """Raised by @sol: our deliveries do not map one-to-one onto CLI turns.
+
+        A steering CLI can read two pasted digests in a single turn and
+        report a single completion. Counting deliveries would leave the badge
+        lit forever; counting the harness's own paired boundaries does not.
+        """
+        adapter = self.presence.watch(RecordingAdapter(), "line", "att")
+        await adapter.deliver([{"id": 1}])
+        await adapter.deliver([{"id": 2}])
+        await self.presence.began("line", "att")
+        await self.presence.ended("line", "att")
+
+        self.assertFalse(self.presence.is_working("att"))
+
+    async def test_two_wakes_taken_as_two_turns_stay_lit_throughout(self):
+        adapter = self.presence.watch(RecordingAdapter(), "line", "att")
+        await adapter.deliver([{"id": 1}])
+        await self.presence.began("line", "att")
+        await adapter.deliver([{"id": 2}])
+        await self.presence.began("line", "att")
+        await self.presence.ended("line", "att")
+
+        self.assertTrue(self.presence.is_working("att"))  # no idle flicker between turns
+        await self.presence.ended("line", "att")
+        self.assertFalse(self.presence.is_working("att"))
+
+    async def test_a_system_notice_is_not_the_process_speaking(self):
         """Found by @sol: an adapter's own notices ride this same callback.
 
         A resume posts a backlog notice through the process's post callback
-        before the speech it describes arrives. Treating that as the turn
-        ending clears the badge while the work is still landing — the server
-        talking *about* a process is not the process finishing.
+        before the speech it describes arrives. That is the server talking
+        *about* a process, so it must not even move the phase.
         """
         adapter = self.presence.watch(RecordingAdapter(), "line", "att")
         speak = self.presence.posting("line", "att", lambda *_: asyncio.sleep(0))
         await adapter.deliver([{"id": 1}])
         await speak("system", "system", "@groky: relaying 3 message(s)…")
 
-        self.assertTrue(self.presence.is_working("att"))
+        self.assertEqual(self.presence.phase("att"), "working")
         self.assertEqual(self.runtime.working_events(), [("att", True)])
 
-        await speak("groky", "agent", "here is the backlog")
+    async def test_a_late_receipt_cannot_resurrect_a_dead_turn(self):
+        """Exit is terminal; the transcript tail is delivery, not work."""
+        adapter = self.presence.watch(RecordingAdapter(), "line", "att")
+        speak = self.presence.posting("line", "att", lambda *_: asyncio.sleep(0))
+        status = self.presence.statusing("line", "att", lambda _: asyncio.sleep(0))
+        await adapter.deliver([{"id": 1}])
+        await self.presence.began("line", "att")
+        await status("exited")
+        before = list(self.runtime.working_events())
+
+        await self.presence.ended("line", "att")
+        await speak("grok", "agent", "a line the tail was still flushing")
+
         self.assertFalse(self.presence.is_working("att"))
+        self.assertEqual(self.runtime.working_events(), before)
+
+    async def test_a_receipt_from_a_previous_owner_is_ignored(self):
+        """Attachments change server generation underneath us (`runtime.py`)."""
+        adapter = RecordingAdapter()
+        adapter.att = {"runtime_owner": "owner-two"}
+        watched = self.presence.watch(adapter, "line", "att")
+        await watched.deliver([{"id": 1}])
+        await self.presence.began("line", "att", owner="owner-two")
+
+        await self.presence.ended("line", "att", owner="owner-one")
+        self.assertTrue(self.presence.is_working("att"))
+
+        await self.presence.ended("line", "att", owner="owner-two")
+        self.assertFalse(self.presence.is_working("att"))
+
+    async def test_a_receipt_for_a_superseded_turn_is_ignored(self):
+        adapter = self.presence.watch(RecordingAdapter(), "line", "att")
+        await adapter.deliver([{"id": 1}])
+        await self.presence.began("line", "att", turn=1)
+        await self.presence.ended("line", "att", turn=1)
+        await adapter.deliver([{"id": 2}])
+        await self.presence.began("line", "att", turn=2)
+
+        await self.presence.ended("line", "att", turn=1)
+        self.assertTrue(self.presence.is_working("att"))
+
+    async def test_no_guess_can_stand_in_for_a_turn_end(self):
+        """@grok's survey: no bundled adapter has trustworthy output timing.
+
+        `quiet` is reserved on the wire for a guessed ending and has no
+        emitter. This pins that: the only phases a server can produce are the
+        ones it observed.
+        """
+        adapter = self.presence.watch(RecordingAdapter(), "line", "att", completion="none")
+        await adapter.deliver([{"id": 1}])
+
+        # There is no verb for it. A server that cannot say "I think it ended"
+        # cannot be wrong about it.
+        self.assertFalse(hasattr(self.presence, "quieted"))
+        self.assertEqual(self.presence.phase("att"), "working")
+        self.assertNotIn("quiet", [event["phase"] for _, event in self.runtime.events])
+
+    async def test_the_snapshot_carries_idle_tombstones_with_their_revision(self):
+        """Raised by @sol: an omitted attachment cannot be ordered against.
+
+        A client buffering events while its snapshot is in flight has to know
+        whether a held `working` is older than the snapshot. Without a
+        tombstone it would replay the stale event and relight a badge that
+        had already gone out.
+        """
+        adapter = self.presence.watch(RecordingAdapter(), "line", "att", completion="receipt")
+        await adapter.deliver([{"id": 1}])
+        await self.presence.began("line", "att")
+
+        open_state = self.presence.snapshot("line")
+        self.assertEqual(len(open_state), 1)
+        self.assertEqual(open_state[0]["id"], "att")
+        self.assertEqual(open_state[0]["phase"], "working")
+        self.assertEqual(open_state[0]["completion"], "receipt")
+        self.assertGreater(open_state[0]["since"], 0)
+
+        await self.presence.ended("line", "att")
+        closed = self.presence.snapshot("line")
+        self.assertEqual(closed[0]["phase"], "idle")
+        self.assertEqual(closed[0]["since"], 0.0)
+        self.assertGreater(closed[0]["revision"], open_state[0]["revision"])
+        self.assertEqual(self.presence.snapshot("other-line"), [])
+
+    async def test_forgetting_an_attachment_drops_its_tombstone_too(self):
+        adapter = self.presence.watch(RecordingAdapter(), "line", "att")
+        await adapter.deliver([{"id": 1}])
+        self.presence.forget("att")
+
+        self.assertEqual(self.presence.snapshot("line"), [])
+
+    async def test_every_announcement_carries_a_rising_revision(self):
+        adapter = self.presence.watch(RecordingAdapter(), "line", "att")
+        speak = self.presence.posting("line", "att", lambda *_: asyncio.sleep(0))
+        await adapter.deliver([{"id": 1}])
+        await self.presence.began("line", "att")
+        await speak("grok", "agent", "ack")
+        await self.presence.ended("line", "att")
+
+        revisions = [event["revision"] for _, event in self.runtime.events]
+        phases = [event["phase"] for _, event in self.runtime.events]
+        self.assertEqual(revisions, [1, 2, 3])
+        self.assertEqual(phases, ["working", "speaking", "idle"])
 
     async def test_speech_from_an_idle_process_announces_nothing(self):
         """Only a real transition is worth a broadcast."""
@@ -235,6 +387,9 @@ class UnforgeableTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event["type"], "working")
         self.assertEqual(event["attachment_id"], "att-uuid")
         self.assertEqual(event["working"], True)
+        self.assertEqual(event["phase"], "working")
+        self.assertEqual(event["turn"], 1)
+        self.assertEqual(event["revision"], 1)
 
 
 if __name__ == "__main__":
