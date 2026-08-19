@@ -20,7 +20,14 @@ const offer = {
 describe("wire events with server-omitted null fields", () => {
   it("accepts the unforgeable working event shape", () => {
     const event = { type: "working" as const, attachment_id: "att-1", working: true };
-    expect(WireEventSchema.parse(event)).toEqual(event);
+    expect(WireEventSchema.parse(event)).toEqual({
+      ...event,
+      phase: "working",
+      completion: "none",
+      since: 0,
+      turn: 0,
+      revision: 0,
+    });
   });
 
   // `broadcast()` serializes with `exclude_none=True`, so a None field is
@@ -89,6 +96,27 @@ describe("conversation detail compatibility", () => {
       attachments: [],
     });
     expect(detail.working).toEqual([]);
+    expect(detail.presence).toBeNull();
+  });
+
+  it("accepts revisioned presence including idle tombstones", () => {
+    const detail = ConversationDetailSchema.parse({
+      conversation: { id: "line", name: "line", topic: "", created_at: 1 },
+      messages: [],
+      attachments: [],
+      working: [],
+      presence: [
+        {
+          id: "att-1",
+          phase: "idle",
+          completion: "receipt",
+          since: 2,
+          turn: 3,
+          revision: 9,
+        },
+      ],
+    });
+    expect(detail.presence?.[0]).toMatchObject({ id: "att-1", phase: "idle", revision: 9 });
   });
 });
 
