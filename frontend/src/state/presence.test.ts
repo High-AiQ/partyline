@@ -71,3 +71,20 @@ describe("presence store", () => {
     expect(presence.entries.get("att")).toMatchObject({ phase: "working", legacy: true });
   });
 });
+
+describe("receipt capability end to end", () => {
+  // The manifest's turn_end never reaches the browser: the server republishes
+  // it as `completion` on the presence wire. This is the chain a
+  // turn_end = "receipt" adapter rides.
+  it("applies a receipt-completion announce and renders its treatment", async () => {
+    presence.apply(event({ phase: "working", completion: "receipt", revision: 3 }));
+    const entry = presence.entries.get("att");
+    expect(entry).toMatchObject({ phase: "working", completion: "receipt" });
+    const { badgeTreatment } = await import("../lib/presence-badge.js");
+    expect(badgeTreatment(entry, entry?.since ?? 0)).toMatchObject({
+      label: "working…",
+      dot: "filled",
+      pulse: "live",
+    });
+  });
+});
