@@ -29,11 +29,24 @@ from .contracts import AttentionEvent, HookEventRequest, OkResponse
 
 ATTENTION_RE = re.compile(r"permission|approv|trust|login|auth", re.IGNORECASE)
 
-# The harness event names that bound a turn. `SubagentStop` is deliberately
-# absent: a subagent finishing is not the parent's turn ending, and treating
-# it as one would clear the badge mid-work — the same shape of mistake as
-# reading an ack as a completion.
-TURN_BOUNDARIES = {"UserPromptSubmit": "began", "Stop": "ended"}
+# Canonical (lowercase, no underscores) harness event names that bound a
+# turn. Config keys are PascalCase (`Stop`); Grok's stdin `hookEventName` is
+# snake_case (`stop`). Matching only the Claude spelling left Grok badges
+# lit after every wake — the POST arrived, then `turn_boundary` returned None.
+# `SubagentStop` is deliberately absent: a child finishing is not the parent
+# turn ending. Grok's `StopFailure` / `StopCancelled` replace `Stop` when a
+# turn errors or is interrupted, so they must clear the badge too.
+TURN_BOUNDARIES = {
+    "userpromptsubmit": "began",
+    "stop": "ended",
+    "stopfailure": "ended",
+    "stopcancelled": "ended",
+}
+
+
+def canonical_hook_event(name: str) -> str:
+    """Fold Claude's PascalCase and Grok's snake_case onto one key."""
+    return name.replace("_", "").lower()
 
 
 def turn_boundary(payload: object) -> str | None:
@@ -46,7 +59,9 @@ def turn_boundary(payload: object) -> str | None:
     if not isinstance(payload, dict):
         return None
     name = payload.get("hookEventName") or payload.get("hook_event_name")
-    return TURN_BOUNDARIES.get(name) if isinstance(name, str) else None
+    if not isinstance(name, str):
+        return None
+    return TURN_BOUNDARIES.get(canonical_hook_event(name))
 
 
 def hook_url(att_id: str, bind: BindConfig, token: str = "") -> str:

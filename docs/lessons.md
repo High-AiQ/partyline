@@ -251,3 +251,13 @@ enforce it. A prose warning that has no executable guard is not a completed less
   got it, and only a later tools-free reply posted. Empty tool-call records stay silent;
   non-empty content is speech. The control is the captured ack plus tools, which must
   round-trip through `assistant_text`.
+- **Matching a hook's config key is not matching the payload it POSTs.** Grok registers
+  `Stop` / `UserPromptSubmit` (Claude-shaped file keys) but stdin `hookEventName` is
+  snake_case (`stop`, `user_prompt_submit` — grok's own docs). The adapter filter
+  canonicalized the name to decide whether to POST, then forwarded the original JSON;
+  the server looked up the raw string in a PascalCase map and returned None. Grok
+  badges therefore stayed `working…` after every wake, including HOLD. The control is
+  `turn_boundary({"hookEventName": "stop"}) == "ended"`; PascalCase remains the other
+  dialect. Grok also fires `StopFailure` / `StopCancelled` *instead of* `Stop` when a
+  turn errors or is interrupted — those must be endings too, or a cancelled turn
+  never clears.

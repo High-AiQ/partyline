@@ -19,9 +19,24 @@ class TurnBoundaryTest(unittest.TestCase):
         self.assertEqual(turn_boundary({"hookEventName": "Stop"}), "ended")
         self.assertEqual(turn_boundary({"hook_event_name": "Stop"}), "ended")
 
+    def test_grok_snake_case_payloads_bound_the_turn(self):
+        """Grok's stdin uses `stop`, not the Claude config key `Stop`.
+
+        The live failure: the adapter POSTed the receipt, then `turn_boundary`
+        returned None, so every Grok jack stayed `working…` after the first
+        wake — including after HOLD. Control: PascalCase still matches.
+        """
+        self.assertEqual(turn_boundary({"hookEventName": "user_prompt_submit"}), "began")
+        self.assertEqual(turn_boundary({"hookEventName": "stop"}), "ended")
+        self.assertEqual(turn_boundary({"hookEventName": "stop_failure"}), "ended")
+        self.assertEqual(turn_boundary({"hookEventName": "stop_cancelled"}), "ended")
+        self.assertEqual(turn_boundary({"hookEventName": "StopFailure"}), "ended")
+        self.assertEqual(turn_boundary({"hookEventName": "StopCancelled"}), "ended")
+
     def test_nothing_else_is_a_boundary(self):
         for payload in (
             {"hookEventName": "SubagentStop"},
+            {"hookEventName": "subagent_stop"},
             {"hookEventName": "Notification"},
             {"hookEventName": ""},
             {"hookEventName": None},

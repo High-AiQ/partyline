@@ -935,6 +935,16 @@ class ServerTest(unittest.TestCase):
         self.assertFalse(server.presence.is_working("hook"))
         server.presence.forget("hook")
 
+    def test_a_grok_snake_case_stop_closes_the_badge(self):
+        """Control: the dialect Grok actually POSTs. PascalCase is not enough."""
+        self.add_attachment("hook", owner="owner-1")
+        server.presence.register("hook", "receipt")
+        self.arun(server.presence.started("line", "hook", owner="owner-1"))
+
+        self.arun(hook_event("hook", "owner-1", JsonRequest({"hookEventName": "stop"})))
+        self.assertFalse(server.presence.is_working("hook"))
+        server.presence.forget("hook")
+
     def test_a_subagent_stop_is_not_the_parent_turn_ending(self):
         """@grok: a subagent finishing would clear the badge mid-work."""
         self.add_attachment("hook", owner="owner-1")
