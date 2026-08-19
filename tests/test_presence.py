@@ -118,6 +118,24 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(self.presence.is_working("att"))
 
+    async def test_a_stale_ending_after_a_new_wake_self_heals_on_began(self):
+        """The transcript-receipt race (#47): a turn's `ended` can be observed
+        one poll *after* a new digest already armed the badge, closing it
+        wrongly. The harness's own `began` — the CLI reading that paste —
+        re-arms it, so the sequence must end lit."""
+        adapter = self.presence.watch(RecordingAdapter(), "line", "att")
+        await adapter.deliver([{"id": 1}])
+        await self.presence.ended("line", "att")
+        self.assertFalse(self.presence.is_working("att"))
+
+        await self.presence.began("line", "att")
+
+        self.assertTrue(self.presence.is_working("att"))
+        self.assertEqual(
+            self.runtime.working_events(),
+            [("att", True), ("att", False), ("att", True)],
+        )
+
     async def test_two_wakes_taken_as_two_turns_stay_lit_throughout(self):
         adapter = self.presence.watch(RecordingAdapter(), "line", "att")
         await adapter.deliver([{"id": 1}])
