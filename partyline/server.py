@@ -290,6 +290,7 @@ async def conversation_detail(conv_id: str):
         "messages": media.attach(runtime.db.list_messages(conv_id)),
         "attachments": runtime.db.list_attachments(conv_id),
         "working": presence.working_ids(conv_id),
+        "presence": presence.snapshot(conv_id),
     }
 
 
