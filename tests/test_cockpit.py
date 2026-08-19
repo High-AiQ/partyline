@@ -397,13 +397,11 @@ class ArmRestartTest(unittest.TestCase):
                 "partyline-restart-test.timer partyline-restart-test.service\n",
             )
         if args[:3] == ["systemctl", "--user", "show"]:
+            python = str(self.cockpit / ".venv/bin/python3")
+            service_argv = self.calls[0][self.calls[0].index(python) :]
             return CommandResult(
                 0,
-                "ExecStart={ path=/python ; argv[]="
-                f"{self.cockpit}/.venv/bin/python3 "
-                f"{self.cockpit}/scripts/restart_server.py 42 1234 "
-                f"{self.cockpit}/.venv/bin/partyline {self.cockpit}/cockpit.log "
-                f"{self.cockpit} --failure-ws ws://127.0.0.1:8642/ws/line-1 "
+                "ExecStart={ path=/python ; argv[]=" + " ".join(service_argv) + " "
                 "; ignore_errors=no ; start_time=[n/a] ; }",
             )
         return CommandResult(0)
@@ -451,6 +449,42 @@ class ArmRestartTest(unittest.TestCase):
             ["systemctl", "--user", "stop", "partyline-restart-test.timer"],
             self.calls,
         )
+
+    def test_explicit_server_config_is_preflighted_and_read_back(self):
+        config = self.cockpit / "cockpit.toml"
+        config.write_text(
+            "[server]\nhost = '0.0.0.0'\nport = 8642\n\n[instance]\nname = 'Cockpit'\n"
+        )
+        result = arm_restart(
+            self.cockpit,
+            42,
+            90,
+            "http://127.0.0.1:8642",
+            unit="partyline-restart-test",
+            server_config=config,
+            run=self.fake_run,
+            inspection=self.inspection,
+            generation=lambda _pid: "1234",
+        )
+        self.assertEqual(result, 0)
+        scheduled = self.calls[0]
+        self.assertEqual(scheduled[scheduled.index("--server-config") + 1], str(config.resolve()))
+
+    def test_invalid_server_config_refuses_before_scheduling(self):
+        config = self.cockpit / "invalid.toml"
+        config.write_text("[server]\nport = 0\n")
+        result = arm_restart(
+            self.cockpit,
+            42,
+            90,
+            "http://127.0.0.1:8642",
+            server_config=config,
+            run=self.fake_run,
+            inspection=self.inspection,
+            generation=lambda _pid: "1234",
+        )
+        self.assertEqual(result, 1)
+        self.assertEqual(self.calls, [])
 
     def test_missing_failure_warning_argument_refuses_to_claim_armed(self):
         def incomplete_readback(args):
@@ -532,6 +566,7 @@ class ArmDispatchTest(unittest.TestCase):
                 "--delay", "90",
                 "--unit", "partyline-restart-test",
                 "--cockpit", "/tmp/cockpit",
+                "--server-config", "/tmp/cockpit.toml",
             ])
         finally:
             (cockpit.check, cockpit.git, cockpit.check_in_sync,
@@ -539,6 +574,7 @@ class ArmDispatchTest(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(calls[0][0][1:3], (42, 90))
         self.assertEqual(calls[0][1]["unit"], "partyline-restart-test")
+        self.assertEqual(calls[0][1]["server_config"], Path("/tmp/cockpit.toml"))
 
 
 class RestartNeededTest(unittest.TestCase):

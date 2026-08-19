@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 import re
-import shlex
 import sqlite3
 import subprocess
 import sys
@@ -20,7 +19,7 @@ from http.client import HTTPResponse
 from pathlib import Path
 from typing import Protocol
 from urllib.error import HTTPError, URLError
-from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
 from pydantic import TypeAdapter
@@ -32,6 +31,7 @@ from partyline.contracts import (
     RestartPlanResponse,
 )
 from scripts.cockpit_venv import cockpit_can_boot, live_version_matches, sync_locked
+from scripts.cockpit_arm import parse_systemd_exec_start, preflight_server_config, websocket_url
 from scripts.restart_server import process_generation
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -532,24 +532,6 @@ def plan(
     return 0
 
 
-def _websocket_url(base_url: str, conversation_id: str) -> str:
-    parsed = urlparse(base_url)
-    scheme = "wss" if parsed.scheme == "https" else "ws"
-    return urlunparse((scheme, parsed.netloc, f"/ws/{conversation_id}", "", "", ""))
-
-
-def parse_systemd_exec_start(value: str) -> list[str] | None:
-    """Extract the ordered argv from ``systemctl show -p ExecStart``."""
-    marker = "argv[]="
-    if marker not in value:
-        return None
-    encoded = value.partition(marker)[2].partition(" ; ignore_errors=")[0]
-    try:
-        return shlex.split(encoded)
-    except ValueError:
-        return None
-
-
 def arm_restart(
     cockpit: Path,
     pid: int,
@@ -557,6 +539,7 @@ def arm_restart(
     base_url: str,
     *,
     unit: str | None = None,
+    server_config: Path | None = None,
     run: Callable[[list[str]], CommandResult] = run_command,
     inspection: PendingPlanInspection | None = None,
     generation: Callable[[int], str | None] = process_generation,
@@ -592,6 +575,13 @@ def arm_restart(
             f"the requested {delay_seconds}s delay is too short to end the arming turn",
             "use at least 10 seconds, normally 90",
         )])
+    try:
+        config_proof = preflight_server_config(server_config) if server_config else None
+    except (RuntimeError, ValueError) as exc:
+        return report([Finding(
+            f"server config preflight failed: {exc}",
+            "fix the explicit config before arming; no restart was scheduled",
+        )])
 
     script = cockpit / RESTART_SCRIPT.relative_to(REPO_ROOT)
     python = cockpit / ".venv" / "bin" / "python3"
@@ -603,7 +593,7 @@ def arm_restart(
                                    "run `scripts.cockpit deploy` again")])
 
     unit = unit or f"partyline-restart-{pid}-{int(time.time())}"
-    failure_ws = _websocket_url(base_url, str(plan["conversation_id"]))
+    failure_ws = websocket_url(base_url, str(plan["conversation_id"]))
     service_argv = [
         str(python),
         str(script),
@@ -615,6 +605,8 @@ def arm_restart(
         "--failure-ws",
         failure_ws,
     ]
+    if config_proof:
+        service_argv.extend(["--server-config", str(config_proof.path)])
     command = [
         "systemd-run",
         "--user",
@@ -666,6 +658,9 @@ def arm_restart(
 
     trigger = timer_listing.stdout.strip()
     print(f"  ✓ armed {service}\n  ✓ {trigger}\n  ✓ exact generation {pid}/{expected_start}")
+    if config_proof:
+        label = f" · {config_proof.instance_name}" if config_proof.instance_name else ""
+        print(f"  ✓ config {config_proof.path} → {config_proof.host}:{config_proof.port}{label}")
     return 0
 
 
@@ -698,6 +693,7 @@ def main(argv=None) -> int:
         parser.add_argument("--pid", required=True, type=int, help="exact current server pid")
         parser.add_argument("--delay", type=int, default=90, help="seconds before signalling")
         parser.add_argument("--unit", help="stable systemd unit name for tests or diagnosis")
+        parser.add_argument("--server-config", type=Path, help="explicit replacement server config")
         parser.add_argument(
             "--url",
             default=f"http://127.0.0.1:{os.environ.get('PARTYLINE_PORT', '8642')}",
@@ -724,6 +720,7 @@ def main(argv=None) -> int:
             args.delay,
             args.url,
             unit=args.unit,
+            server_config=args.server_config,
         )
     print(__doc__)
     return 2

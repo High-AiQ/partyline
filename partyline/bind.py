@@ -24,6 +24,7 @@ def _bind_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="serve partyline")
     parser.add_argument("--host", help="address to bind")
     parser.add_argument("--port", type=int, help="port to bind")
+    parser.add_argument("--instance-name", help="optional label shown by the client")
     parser.add_argument("--config", type=lambda value: Path(value).expanduser(),
                         help="TOML configuration file")
     return parser
@@ -80,6 +81,36 @@ def resolve_bind(
     if args.port is not None:
         port = args.port
     return _valid_host(host, "bind"), _valid_port(port, "bind")
+
+
+def resolve_instance_name(
+    argv: Sequence[str] | argparse.Namespace,
+    env: Mapping[str, str],
+    config_dict: Mapping[str, object],
+) -> str | None:
+    """Resolve an optional, deployment-neutral instance label."""
+    args = argv if isinstance(argv, argparse.Namespace) else parse_bind_args(argv)
+    instance = config_dict.get("instance", {})
+    if not isinstance(instance, Mapping):
+        raise ValueError("[instance] configuration must be a table")
+    name = instance.get("name")
+    if "PARTYLINE_INSTANCE_NAME" in env:
+        name = env["PARTYLINE_INSTANCE_NAME"]
+    if args.instance_name is not None:
+        name = args.instance_name
+    if name is None:
+        return None
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("instance name must be a non-empty string")
+    return name.strip()
+
+
+def apply_server_config(state, args, env, config_dict) -> tuple[str, int]:
+    """Resolve configuration once and attach it to the ASGI application state."""
+    host, port = resolve_bind(args, env, config_dict)
+    state.bind = BindConfig(host, port)
+    state.instance_name = resolve_instance_name(args, env, config_dict)
+    return host, port
 
 
 def load_bind_config(path: Path | None = None) -> dict:

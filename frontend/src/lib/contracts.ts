@@ -126,6 +126,7 @@ export type RunningProcess = z.infer<typeof RunningProcessSchema>;
 export const VersionInfoSchema = z.object({
   version: z.string(),
   build: z.string(),
+  instance_name: z.string().nullable().default(null),
 });
 export type VersionInfo = z.infer<typeof VersionInfoSchema>;
 

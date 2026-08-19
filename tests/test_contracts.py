@@ -78,6 +78,15 @@ class ContractTest(unittest.TestCase):
                 "version": "0.21.4",
             },
         )
+        self.assertEqual(
+            HelloEvent(
+                conversation_id="line",
+                handle="greg",
+                version="0.21.4",
+                instance_name="Cockpit",
+            ).model_dump(exclude_none=True)["instance_name"],
+            "Cockpit",
+        )
 
     def test_hello_requires_release_version(self):
         with self.assertRaises(ValidationError):
