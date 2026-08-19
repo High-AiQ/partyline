@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+"""Run a test command under a memory cap, so a runaway test dies alone.
+
+Twice now a Python test process has taken this machine down rather than
+failing: a `coverage` run reached 19 GB on 2026-08-14, and `unittest` reached
+30.6 GB and then 31.0 GB on 2026-08-19, at which point the OOM killer took
+the cockpit, every attached CLI, and finally systemd's boot. Both times the
+loop was ordinary — a poll whose sleep had been patched in the wrong module,
+plus a writer feeding it — and both times the first symptom a human saw was
+the whole VM going away.
+
+A test that hangs should cost one command, not one machine. The full suite
+peaks around 165 MB, so the default cap here is roughly twelve times what a
+healthy run needs: high enough that no honest test trips it, low enough that
+a runaway dies in seconds.
+
+The cap is applied by the kernel, not by anything the test can talk out of.
+Where a systemd user manager is available the child runs in its own scope
+with `MemoryMax` and swap disabled, which is the stronger guarantee because
+it counts the whole process tree — a test that spawns children cannot escape
+by allocating in one of them. Otherwise the limit is `RLIMIT_AS` on the
+child, which only binds that one process. The chosen mechanism is always
+printed: which guarantee you got is part of the result, and a cap that
+quietly downgraded itself would be the silent fallback `docs/lessons.md`
+keeps warning about.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import resource
+import shutil
+import subprocess
+import sys
+
+DEFAULT_COMMAND = [
+    "uv", "run", "--locked", "coverage", "run", "-m", "unittest", "discover", "-s", "tests",
+]
+DEFAULT_LIMIT = "2G"
+SUFFIXES = {"K": 1024, "M": 1024**2, "G": 1024**3}
+
+
+def parse_size(text: str) -> int:
+    """Bytes from a `2G` / `512M` / plain-bytes string."""
+    text = text.strip().upper()
+    if text and text[-1] in SUFFIXES:
+        return int(float(text[:-1]) * SUFFIXES[text[-1]])
+    return int(text)
+
+
+def systemd_available() -> bool:
+    """Whether a systemd *user* manager can host a scope for us.
+
+    `systemd-run` on PATH is not enough: in a container or a stripped WSL
+    distribution the binary exists while the user manager does not, and the
+    call fails only once the test is already running.
+    """
+    if not shutil.which("systemd-run"):
+        return False
+    if not os.environ.get("XDG_RUNTIME_DIR"):
+        return False
+    probe = subprocess.run(
+        ["systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax=64M", "true"],
+        capture_output=True,
+    )
+    return probe.returncode == 0
+
+
+def run_capped(command: list[str], limit: int) -> int:
+    if systemd_available():
+        print(f"capped-test: cgroup MemoryMax={limit} (whole process tree)", flush=True)
+        return subprocess.run(
+            ["systemd-run", "--user", "--scope", "-q",
+             "-p", f"MemoryMax={limit}", "-p", "MemorySwapMax=0", *command]
+        ).returncode
+
+    print(f"capped-test: RLIMIT_AS={limit} (this process only)", file=sys.stderr, flush=True)
+
+    def apply_limit():  # pragma: no cover - runs in the forked child
+        resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+
+    return subprocess.run(command, preexec_fn=apply_limit).returncode
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--memory", default=DEFAULT_LIMIT, help="cap, e.g. 2G (default: 2G)")
+    parser.add_argument("command", nargs=argparse.REMAINDER,
+                        help="command to run; defaults to the repository test suite")
+    args = parser.parse_args(argv)
+
+    command = [arg for arg in args.command if arg != "--"] or DEFAULT_COMMAND
+    limit = parse_size(args.memory)
+    code = run_capped(command, limit)
+
+    # 137 is the shell's encoding of SIGKILL, which is how both the cgroup and
+    # the OOM killer end a process that would not stop growing. Say so: the
+    # bare exit code reads like an ordinary test failure and sent someone
+    # hunting through test output for an assertion that was never there.
+    if code in (137, -9):
+        print(
+            f"\ncapped-test: killed at {args.memory}. A test allocated without bound — look for a "
+            "poll whose sleep is patched in the wrong module, not for a failing assertion.",
+            file=sys.stderr,
+        )
+        # `subprocess` reports a signal death as a negative number, which the
+        # shell would show as 247 for SIGKILL. Report the conventional 137 so
+        # the exit code means the same thing here as it does in CI logs.
+        return 137
+    return code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

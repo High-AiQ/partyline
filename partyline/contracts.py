@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from .media_contracts import ImageRef
+from .presence_contracts import PresenceState, WorkingEvent
 
 RestartPlanMode = Literal["offer", "automatic"]
 
@@ -127,6 +128,11 @@ class ConversationDetailResponse(BaseModel):
     # during someone's turn would otherwise show nothing until the next
     # transition — the indicator would be blank exactly when it matters.
     working: list[str] = []
+    # None means the server has not adopted structured presence yet; clients
+    # keep consuming the legacy list until the endpoint supplies this field.
+    # This server always supplies it, including idle tombstones: their
+    # revisions stop a buffered pre-snapshot event relighting a cleared badge.
+    presence: list[PresenceState] | None = None
 
 
 class ReattachCandidateResponse(BaseModel):
@@ -204,14 +210,6 @@ class MessageEvent(BaseModel):
 class AttachmentEvent(BaseModel):
     type: Literal["attachment"] = "attachment"
     attachment: AttachmentResponse
-
-
-class WorkingEvent(BaseModel):
-    """A process began or finished a turn. Only the server ever sends this."""
-
-    type: Literal["working"] = "working"
-    attachment_id: str
-    working: bool
 
 
 class AttentionEvent(BaseModel):

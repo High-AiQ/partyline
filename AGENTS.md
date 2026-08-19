@@ -50,8 +50,18 @@ uv run --locked partyline
 PARTYLINE_DB=/tmp/partyline-test.db PARTYLINE_PORT=8643 uv run --locked partyline
 uv run --locked partyline --host 127.0.0.1 --port 8643
 PARTYLINE_HOST=127.0.0.1 PARTYLINE_PORT=8643 uv run --locked partyline
+./scripts/capped-test && uv run --locked coverage report
 uv run --locked coverage run -m unittest discover -s tests && uv run --locked coverage report
 ```
+
+**Run the suite through `./scripts/capped-test` on a developer machine.** It runs the same
+command under a 2 GB kernel memory cap. A hung test that allocates has twice taken this whole
+machine down instead of failing — 19 GB on 2026-08-14, 31 GB on 2026-08-19 — and the second
+one killed the running cockpit, every attached CLI, and systemd's boot with it. A healthy full
+run peaks around 165 MB, so the cap has roughly twelve times the headroom an honest test needs.
+Exit 137 from it means *allocated without bound*, not *assertion failed*. Use
+`--memory` to change the cap and pass any other command after `--`. CI runs the bare command;
+the cap is for the machine a person is sitting at.
 
 The suite must stay above 90% line and branch coverage; `coverage report` fails the build below
 that. Nothing is omitted from measurement — a line that genuinely cannot be covered gets
@@ -60,6 +70,12 @@ uncovered line.
 
 Tests must never touch a real database, a real port, or a real CLI: use a temp `PARTYLINE_DB`,
 FastAPI's `TestClient`, and fake transcript files rather than spawning a real coding CLI.
+When a test stops an async poll by mocking sleep, patch the wait the loop actually
+awaits (for Grok, `adapter._poll`), not `adapter.asyncio.sleep` after the loop has
+moved to another module — that is a hang that can fill RAM. Never run
+`tests.test_grok_adapter` in `partyline-worktrees/kimi-presence-stack` on the
+dogfood machine. On a developer machine run the suite through a memory cap
+(`./scripts/capped-test`) so a runaway dies at 2 GB instead of taking the VM.
 
 **Reach for a plain unit test first.** A browser test earns its place only when the thing under
 test genuinely needs one — layout, hit-testing, a two-sided protocol. Browser tests live in

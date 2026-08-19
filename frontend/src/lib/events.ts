@@ -5,6 +5,8 @@ import {
   AttachmentSchema,
   ChatMessageSchema,
   ConversationSchema,
+  PresenceCompletionSchema,
+  PresencePhaseSchema,
   ReattachCandidateSchema,
 } from "./contracts";
 
@@ -48,6 +50,13 @@ export const WorkingEventSchema = z.object({
   type: z.literal("working"),
   attachment_id: z.string(),
   working: z.boolean(),
+  // Optional at the exported boundary so test fakes and pre-phase servers
+  // remain source-compatible. `WireEventSchema` normalizes real frames below.
+  phase: z.lazy(() => PresencePhaseSchema).optional(),
+  completion: z.lazy(() => PresenceCompletionSchema).optional(),
+  since: z.number().optional(),
+  turn: z.number().int().nonnegative().optional(),
+  revision: z.number().int().nonnegative().optional(),
 });
 export type WorkingEvent = z.infer<typeof WorkingEventSchema>;
 
@@ -98,7 +107,7 @@ export const ReattachDecisionEventSchema = z.object({
 });
 export type ReattachDecisionEvent = z.infer<typeof ReattachDecisionEventSchema>;
 
-export const WireEventSchema = z.discriminatedUnion("type", [
+const CurrentWireEventSchema = z.discriminatedUnion("type", [
   HelloEventSchema,
   MessageEventSchema,
   AttachmentEventSchema,
@@ -112,6 +121,21 @@ export const WireEventSchema = z.discriminatedUnion("type", [
   ReattachOfferEventSchema,
   ReattachDecisionEventSchema,
 ]);
+
+/** Normalize the boolean-only presence frame emitted by older servers. */
+export const WireEventSchema = z.preprocess((input) => {
+  if (typeof input !== "object" || input === null) return input;
+  const candidate = input as Record<string, unknown>;
+  if (candidate.type !== "working" || candidate.phase !== undefined) return input;
+  return {
+    phase: candidate.working === true ? "working" : "idle",
+    completion: "none",
+    since: 0,
+    turn: 0,
+    revision: 0,
+    ...candidate,
+  };
+}, CurrentWireEventSchema);
 export type WireEvent = z.infer<typeof WireEventSchema>;
 
 export const WireHelloCommandSchema = z.object({
