@@ -12,3 +12,4 @@ update_command = ["opencode", "upgrade"]
 
 [adapter.capabilities]
 resume = true
+turn_end = "receipt"

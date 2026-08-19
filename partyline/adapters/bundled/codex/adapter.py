@@ -16,6 +16,7 @@ import json
 import os
 
 from partyline.adapters.base import Adapter as BaseAdapter
+from partyline.adapters.receipts import BEGAN, ENDED, receipt
 
 
 def _item_text(item: dict) -> str:
@@ -140,6 +141,15 @@ class PartylineAdapter(BaseAdapter):
             if obj.get("type") != "event_msg" or not self._fresh(obj.get("timestamp")):
                 return
             payload = obj.get("payload") or {}
+            # The rollout records the harness's own turn boundaries; presence
+            # needs them to clear the working badge, and the freshness filter
+            # above keeps a resume's backlog from replaying old ones.
+            if payload.get("type") == "task_started":
+                await receipt(self.att, BEGAN)
+                return
+            if payload.get("type") == "task_complete":
+                await receipt(self.att, ENDED)
+                return
             user_text = agent_text = None
             if payload.get("type") == "user_message":
                 user_text = payload.get("message") or ""

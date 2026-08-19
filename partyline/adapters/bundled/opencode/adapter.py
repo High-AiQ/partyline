@@ -2,6 +2,14 @@
 
 OpenCode records sessions in its local SQLite store.  The terminal remains the
 input channel, while only completed assistant text parts are relayed to chat.
+
+The same store carries this harness's turn boundaries, which presence needs
+to clear the working badge: a user message appears when the CLI actually
+reads a pasted digest (turn began), and an agentic loop is over when an
+assistant message completes with any finish reason but ``tool-calls`` (turn
+ended). Both are reported as receipts. One gap, documented so nobody
+rediscovers it: a turn aborted with Esc writes no completing row, so its
+badge stays lit until the process exits — the pre-receipt behavior.
 """
 
 from __future__ import annotations
@@ -13,9 +21,23 @@ import sqlite3
 from pathlib import Path
 
 from partyline.adapters import Adapter
+from partyline.adapters.receipts import BEGAN, ENDED, receipt
 
 
 STORE = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
+
+
+def boundary_event(role: str | None, finish: str | None) -> str | None:
+    """The turn boundary one message row represents, if any.
+
+    ``tool-calls`` means the loop continues with another step; anything else
+    on a completed assistant message means the CLI is waiting for input again.
+    """
+    if role == "user":
+        return BEGAN
+    if role == "assistant" and finish != "tool-calls":
+        return ENDED
+    return None
 
 
 class PartylineAdapter(Adapter):
@@ -100,6 +122,7 @@ class PartylineAdapter(Adapter):
         # Do not repeat old parts when reconnecting to an existing session.
         started_ms = int((self.spawned_at - 1) * 1000)
         seen: set[str] = set()
+        seen_boundaries: set[str] = set()
         while self.alive():
             try:
                 with contextlib.closing(self._connect()) as db:
@@ -111,6 +134,16 @@ class PartylineAdapter(Adapter):
                         "AND json_extract(message.data, '$.time.completed') IS NOT NULL "
                         "AND json_extract(part.data, '$.type') = 'text' "
                         "ORDER BY part.time_created, part.id",
+                        (session_id, started_ms),
+                    ).fetchall()
+                    boundaries = db.execute(
+                        "SELECT id, json_extract(data, '$.role'), "
+                        "json_extract(data, '$.finish') FROM message "
+                        "WHERE session_id = ? AND time_created >= ? "
+                        "AND (json_extract(data, '$.role') = 'user' "
+                        "OR (json_extract(data, '$.role') = 'assistant' "
+                        "AND json_extract(data, '$.time.completed') IS NOT NULL)) "
+                        "ORDER BY time_created, id",
                         (session_id, started_ms),
                     ).fetchall()
             except sqlite3.Error:
@@ -126,4 +159,10 @@ class PartylineAdapter(Adapter):
                     continue
                 if isinstance(body, str) and body.strip():
                     await self.post(self.att["name"], "agent", body)
+            for message_id, role, finish in boundaries:
+                if message_id in seen_boundaries:
+                    continue
+                seen_boundaries.add(message_id)
+                if event := boundary_event(role, finish):
+                    await receipt(self.att, event)
             await asyncio.sleep(0.5)

@@ -20,6 +20,8 @@ from unittest.mock import AsyncMock, patch
 from partyline.adapters.bundled.hermes.adapter import PartylineAdapter as HermesAdapter
 from partyline.adapters.bundled.opencode import adapter as opencode_module
 from partyline.adapters.bundled.opencode.adapter import PartylineAdapter as OpenCodeAdapter
+from partyline.adapters.bundled.opencode.adapter import boundary_event
+from partyline.adapters.receipts import BEGAN, ENDED
 from partyline.adapters.bundled.pi import adapter as pi_module
 from partyline.adapters.bundled.pi.adapter import PartylineAdapter as PiAdapter
 from partyline.adapters.bundled.raw import adapter as raw_module
@@ -42,6 +44,7 @@ class RowsConnection:
 
     def __init__(self, rows):
         self.rows = rows
+        self.current = rows
 
     def __enter__(self):
         return self
@@ -49,11 +52,14 @@ class RowsConnection:
     def __exit__(self, *args):
         return False
 
-    def execute(self, *args):
+    def execute(self, sql, *args):
+        # The poll loop issues two queries; the fake rows only ever describe
+        # the parts one, so the boundary query must come back empty.
+        self.current = self.rows if "FROM part" in sql else []
         return self
 
     def fetchall(self):
-        return self.rows
+        return self.current
 
     def close(self):
         pass
@@ -340,7 +346,7 @@ class OpenCodeAdapterTest(RecordingAdapterTest):
         db.executescript(
             """
             CREATE TABLE session(id TEXT PRIMARY KEY, directory TEXT, time_created INTEGER);
-            CREATE TABLE message(id TEXT PRIMARY KEY, data TEXT);
+            CREATE TABLE message(id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT);
             CREATE TABLE part(
               id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT,
               time_created INTEGER, data TEXT
@@ -389,15 +395,70 @@ class OpenCodeAdapterTest(RecordingAdapterTest):
         )
         self.assertEqual(flags.build_command(), ["opencode", "--session", "already", "-s", "also"])
 
+    def test_boundary_event_maps_roles_and_finish_reasons(self):
+        self.assertEqual(boundary_event("user", None), BEGAN)
+        self.assertEqual(boundary_event("assistant", "stop"), ENDED)
+        self.assertEqual(boundary_event("assistant", None), ENDED)
+        self.assertIsNone(boundary_event("assistant", "tool-calls"))
+        self.assertIsNone(boundary_event("system", None))
+
+    async def test_turn_boundaries_become_receipts_once_each(self):
+        """The receipt half of #47: a user row is a turn beginning, and a
+        completed assistant row whose finish is not tool-calls is its end.
+        Loop steps and in-flight rows are not boundaries, and a second poll
+        of the same rows must not re-emit."""
+        created = int(time.time() * 1000)
+        db = self.make_store(created=created)
+        db.executemany(
+            "INSERT INTO message VALUES(?,?,?,?)",
+            [
+                ("u1", "session-1", created + 1, json.dumps({"role": "user"})),
+                ("a1", "session-1", created + 2, json.dumps(
+                    {"role": "assistant", "time": {"completed": 1}, "finish": "tool-calls"})),
+                ("a2", "session-1", created + 3, json.dumps(
+                    {"role": "assistant", "time": {"completed": 1}, "finish": "stop"})),
+                ("a3", "session-1", created + 4, json.dumps({"role": "assistant"})),
+            ],
+        )
+        db.commit()
+        db.close()
+        adapter = self.make(OpenCodeAdapter, hook_url="http://hook/x")
+        adapter.spawned_at = created / 1000
+        adapter.proc = Process()
+        adapter.send_keys = AsyncMock()
+        poll_sleeps = 0
+
+        async def stop_after_two_polls(_seconds):
+            nonlocal poll_sleeps
+            poll_sleeps += 1
+            if poll_sleeps > 2:
+                adapter.proc.stop()
+
+        with (
+            patch(
+                "partyline.adapters.bundled.opencode.adapter.asyncio.sleep",
+                new=stop_after_two_polls,
+            ),
+            patch(
+                "partyline.adapters.bundled.opencode.adapter.receipt", new=AsyncMock()
+            ) as receipt_mock,
+        ):
+            await adapter._run()
+
+        self.assertEqual(
+            [call.args for call in receipt_mock.await_args_list],
+            [(adapter.att, BEGAN), (adapter.att, ENDED)],
+        )
+
     async def test_run_tails_completed_text_parts_and_skips_invalid_parts(self):
         created = int(time.time() * 1000)
         db = self.make_store(created=created)
         db.executemany(
-            "INSERT INTO message VALUES(?,?)",
+            "INSERT INTO message VALUES(?,?,?,?)",
             [
-                ("m1", json.dumps({"role": "assistant", "time": {"completed": 1}})),
-                ("m2", json.dumps({"role": "assistant", "time": {"completed": 1}})),
-                ("m3", json.dumps({"role": "user", "time": {"completed": 1}})),
+                ("m1", "session-1", created, json.dumps({"role": "assistant", "time": {"completed": 1}})),
+                ("m2", "session-1", created, json.dumps({"role": "assistant", "time": {"completed": 1}})),
+                ("m3", "session-1", created, json.dumps({"role": "user", "time": {"completed": 1}})),
             ],
         )
         db.executemany(
