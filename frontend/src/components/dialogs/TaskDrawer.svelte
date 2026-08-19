@@ -253,10 +253,10 @@
   .task-list {
     min-height: 0;
     overflow-y: auto;
-    padding: 14px 20px 24px;
+    padding: 10px 14px 20px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 5px;
   }
   .empty {
     color: var(--color-cream-faint);

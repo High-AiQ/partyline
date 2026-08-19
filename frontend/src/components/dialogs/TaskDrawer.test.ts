@@ -116,4 +116,42 @@ describe("TaskDrawer", () => {
       await unmount(drawer);
     }
   });
+
+  it("surfaces a done-when expectation without expanding the row", async () => {
+    room.conversation = conversation;
+    const convention: Task = {
+      ...task,
+      body: "Cockpit LAN bootstrap: config + arm --server-config\nDone when: restart lands on 0.0.0.0:8642 with the label",
+    };
+    vi.spyOn(coordinationApi, "tasks").mockResolvedValue([convention]);
+
+    const drawer = mount(TaskDrawer, { target: document.body, props: { close: vi.fn() } });
+    try {
+      await vi.waitFor(() => {
+        expect(document.querySelector(".done-when")).not.toBeNull();
+      });
+      const chip = document.querySelector(".done-when");
+      expect(chip?.textContent).toContain("restart lands on 0.0.0.0:8642");
+      expect(chip?.getAttribute("title")).toContain("with the label");
+      // the summary renders apart from the expectation, so both stay scannable
+      expect(document.querySelector(".task-main p")?.textContent).toContain("Cockpit LAN bootstrap");
+    } finally {
+      await unmount(drawer);
+    }
+  });
+
+  it("adds no expectation chip to a body without the convention", async () => {
+    room.conversation = conversation;
+    vi.spyOn(coordinationApi, "tasks").mockResolvedValue([task]);
+
+    const drawer = mount(TaskDrawer, { target: document.body, props: { close: vi.fn() } });
+    try {
+      await vi.waitFor(() => {
+        expect(document.querySelector(".task-row")).not.toBeNull();
+      });
+      expect(document.querySelector(".done-when")).toBeNull();
+    } finally {
+      await unmount(drawer);
+    }
+  });
 });
