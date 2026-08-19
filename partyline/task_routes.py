@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from .contracts import OkResponse
-from .task_contracts import Task, TaskCreateRequest, TaskUpdateRequest
+from .task_contracts import Task, TaskCreateRequest, TaskUpdateRequest, normalize_status
 from .tasks import UNSET, TaskError, TaskStore
 
 
@@ -26,6 +26,9 @@ def task_router(runtime, store: TaskStore) -> APIRouter:
 
     @router.get("/api/conversations/{conv_id}/tasks", response_model=list[Task])
     def list_tasks(conv_id: str, status: str | None = None):
+        # The query filter takes the same synonyms as a write, so `?status=
+        # completed` lists what `PATCH {"status": "completed"}` produced.
+        status = normalize_status(status) if status is not None else None
         require_line(conv_id, writing=False)
         try:
             return store.list(conv_id, status=status)

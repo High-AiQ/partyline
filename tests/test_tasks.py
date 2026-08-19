@@ -187,6 +187,59 @@ class TaskApiTest(unittest.TestCase):
         no_line = self.client.get("/api/conversations/nope/tasks")
         self.assertEqual(no_line.status_code, 404)
 
+    def test_the_words_people_actually_reach_for_close_a_task(self):
+        """The papercut: `status=completed` was a bare 422 naming nothing.
+
+        The digest says "open tasks" and rows carry `"status": "open"`, so
+        "completed" is the obvious opposite and every process adopting the
+        board guessed it. A 422 with no valid values listed reads like a
+        successful write unless the caller checks the response code.
+        """
+        for word in ("completed", "complete", "closed", "finished", "DONE", " done "):
+            created = self.client.post(
+                "/api/conversations/line/tasks", json={"body": f"close via {word}"})
+            task_id = created.json()["id"]
+
+            patched = self.client.patch(f"/api/tasks/{task_id}", json={"status": word})
+            self.assertEqual(patched.status_code, 200, word)
+            self.assertEqual(patched.json()["status"], "done", word)
+
+    def test_a_non_string_status_is_left_for_the_literal_to_refuse(self):
+        """The normalizer only speaks about words; it must not coerce."""
+        created = self.client.post("/api/conversations/line/tasks", json={"body": "typed"})
+        task_id = created.json()["id"]
+
+        for value in (1, True, [], {"status": "done"}):
+            refused = self.client.patch(f"/api/tasks/{task_id}", json={"status": value})
+            self.assertEqual(refused.status_code, 422, value)
+
+    def test_a_synonym_reopens_as_well_as_closes(self):
+        created = self.client.post("/api/conversations/line/tasks", json={"body": "swing"})
+        task_id = created.json()["id"]
+        self.client.patch(f"/api/tasks/{task_id}", json={"status": "completed"})
+
+        reopened = self.client.patch(f"/api/tasks/{task_id}", json={"status": "reopened"})
+        self.assertEqual(reopened.json()["status"], "open")
+
+    def test_the_filter_understands_the_same_words_as_a_write(self):
+        created = self.client.post("/api/conversations/line/tasks", json={"body": "shipped"})
+        self.client.patch(f"/api/tasks/{created.json()['id']}", json={"status": "completed"})
+
+        listed = self.client.get(
+            "/api/conversations/line/tasks", params={"status": "completed"})
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual([t["body"] for t in listed.json()], ["shipped"])
+
+    def test_widening_what_is_understood_is_not_widening_what_is_accepted(self):
+        """A synonym is not a licence for any word at all."""
+        created = self.client.post("/api/conversations/line/tasks", json={"body": "guard"})
+        task_id = created.json()["id"]
+
+        for word in ("doing", "banana", "", "in-progress"):
+            refused = self.client.patch(f"/api/tasks/{task_id}", json={"status": word})
+            self.assertEqual(refused.status_code, 422, word)
+        self.assertEqual(self.store.get(task_id)["status"], "open")
+
     def test_an_archived_line_refuses_writes_but_still_reads(self):
         self.client.post("/api/conversations/line/tasks", json={"body": "frozen"})
         self.db.archive_conversation("line")
