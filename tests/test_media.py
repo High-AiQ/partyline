@@ -19,7 +19,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from partyline import media_images as images
+from partyline import auth_store, auth_tokens, media_images as images
+from partyline.auth_guard import install_auth_guard
 from partyline.db import Db
 from partyline.media import MediaError, MediaStore, media_root
 from partyline.media_routes import media_router
@@ -210,22 +211,34 @@ class ImageApiTest(unittest.TestCase):
         self.root = Path(self.directory.name) / "media"
         self.store = MediaStore(self.db, self.root)
         app = FastAPI()
+        install_auth_guard(app, self.db)
         app.include_router(media_router(self.runtime, self.store))
         self.client = TestClient(app)
         self.db.create_conversation("line", "Line")
         self.socket = CollectingSocket()
         self.runtime.sockets["line"] = {self.socket}
+        user = auth_store.create_user(
+            self.db, "opus@example.com", "opus", auth_tokens.hash_password("hunter2222"))
+        access = auth_tokens.create_access_token(
+            auth_tokens.signing_secret(self.db), user["id"])
+        # Every request is authenticated as the human "opus" unless a test
+        # overrides the header with a machine token or clears it.
+        self.client.headers["Authorization"] = f"Bearer {access}"
 
     def tearDown(self):
         self.db.close()
         self.directory.cleanup()
 
-    def post(self, files=None, **fields):
-        payload = {"sender": "opus", **fields}
+    def machine_headers(self, att_id):
+        token = auth_store.ensure_api_token(self.db, att_id)
+        return {"Authorization": f"Bearer {token}"}
+
+    def post(self, files=None, headers=None, **fields):
         return self.client.post(
             "/api/conversations/line/images",
-            data=payload,
+            data=fields,
             files=files if files is not None else [("file", ("a.png", png(), "image/png"))],
+            headers=headers,
         )
 
     def test_upload_posts_a_message_carrying_the_image(self):
@@ -279,10 +292,12 @@ class ImageApiTest(unittest.TestCase):
         delivered = adapter.deliveries[0][-1]["body"]
         self.assertIn("📷 Trace", delivered)
 
-    def test_a_running_process_posting_an_image_is_recorded_as_an_agent(self):
-        self.db.add_attachment("att", "line", "opus", "fake", ["fake"], "/tmp", "owner")
+    def test_a_machine_credential_posts_as_an_agent_under_its_own_name(self):
+        self.db.add_attachment("att", "line", "kimi", "fake", ["fake"], "/tmp", "owner")
         self.db.set_attachment_status("att", "running", "owner")
-        self.assertEqual(self.post().json()["message"]["sender_type"], "agent")
+        message = self.post(headers=self.machine_headers("att")).json()["message"]
+        self.assertEqual(message["sender_type"], "agent")
+        self.assertEqual(message["sender"], "kimi")
 
     def test_a_large_image_gets_a_thumbnail_of_its_own(self):
         response = self.post(files=[("file", ("big.png", png(2000, 1000), "image/png"))])
@@ -348,9 +363,10 @@ class ImageApiTest(unittest.TestCase):
         huge = b"x" * (images.MAX_IMAGE_BYTES + 1)
         self.assertEqual(self.post(files=[("file", ("big.png", huge, "image/png"))]).status_code, 413)
 
-    def test_an_invalid_handle_cannot_post(self):
-        self.assertEqual(self.post(sender="system").status_code, 400)
-        self.assertEqual(self.post(sender="not a handle").status_code, 400)
+    def test_an_unauthenticated_upload_is_401(self):
+        response = self.post(headers={"Authorization": ""})
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(self.db.list_messages("line"), [])
 
     def test_an_oversized_title_is_refused(self):
         self.assertEqual(self.post(title="t" * 400).status_code, 400)
@@ -358,7 +374,6 @@ class ImageApiTest(unittest.TestCase):
     def test_an_unknown_line_is_a_404(self):
         response = self.client.post(
             "/api/conversations/nope/images",
-            data={"sender": "opus"},
             files=[("file", ("a.png", png(), "image/png"))],
         )
         self.assertEqual(response.status_code, 404)

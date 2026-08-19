@@ -22,6 +22,15 @@ from .adapter_capabilities import adapter_completion
 from .adapter_update import apply_update, requested_update_argv
 from .attachment_commands import validated_attachment_command
 from .attachment_resume import resume_adapter
+from .auth_guard import (
+    WS_FORBIDDEN,
+    UserSocketRegistry,
+    install_auth_guard,
+    request_principal,
+    websocket_principal,
+)
+from .auth_routes import auth_router
+from .auth_store import ensure_api_token, handle_taken
 from .bind import BindConfig, apply_server_config, load_bind_config, load_dotenv, parse_bind_args
 from .adapters import (
     ADAPTERS,
@@ -51,8 +60,6 @@ from .contracts import (
     MessageEvent,
     MessageResponse,
     OkResponse,
-    PresetIn,
-    PresetResponse,
     PurgeResponse,
     RestartPlanRequest,
     RestartPlanResponse,
@@ -72,6 +79,8 @@ from .presence import Presence
 from .media import MediaStore, media_root
 from .claim_routes import claims_router, purge_claims
 from .media_routes import media_router
+from .preset_routes import presets_router
+from .restart_report import restart_report_router
 from .task_routes import wire_tasks
 from .reattach import (
     ReattachCoordinator,
@@ -125,10 +134,15 @@ async def lifespan(app):
 
 app = FastAPI(lifespan=lifespan)
 app.state.bind = BindConfig()
+user_sockets = UserSocketRegistry()
+install_auth_guard(app, runtime.db)
 register_terminal_route(app, runtime)
+app.include_router(auth_router(runtime.db, on_handle_change=user_sockets.close_all))
 app.include_router(media_router(runtime, media))
 app.include_router(claims_router(runtime))
 app.include_router(hooks_router(runtime, presence))
+app.include_router(presets_router(runtime, ADAPTERS))
+app.include_router(restart_report_router(runtime, lambda r: require_loopback(r)))
 tasks = wire_tasks(app, runtime)
 
 # -- REST ------------------------------------------------------------------
@@ -291,7 +305,7 @@ async def conversation_detail(conv_id: str):
 
 
 @app.put("/api/conversations/{conv_id}/topic", response_model=ConversationResponse)
-async def set_topic(conv_id: str, body: TopicIn):
+async def set_topic(request: Request, conv_id: str, body: TopicIn):
     conv = runtime.db.get_conversation(conv_id)
     if not conv:
         raise HTTPException(404)
@@ -301,7 +315,7 @@ async def set_topic(conv_id: str, body: TopicIn):
     if topic == conv["topic"]:
         return conv
     conv = runtime.db.set_topic(conv_id, topic)
-    who = f" by @{body.sender.strip()}" if body.sender.strip() else ""
+    who = f" by @{request_principal(request).name}"
     # A system message never wakes agents, but it rides along in the digest at
     # their next wake — so every agent picks up the new topic lazily, for free.
     notice = f"☏ topic set{who}: {topic}" if topic else f"☏ topic cleared{who}"
@@ -311,7 +325,7 @@ async def set_topic(conv_id: str, body: TopicIn):
 
 
 @app.put("/api/conversations/{conv_id}/name", response_model=ConversationResponse)
-async def rename_conversation(conv_id: str, body: RenameIn):
+async def rename_conversation(request: Request, conv_id: str, body: RenameIn):
     conv = runtime.db.get_conversation(conv_id)
     if not conv:
         raise HTTPException(404)
@@ -324,7 +338,7 @@ async def rename_conversation(conv_id: str, body: RenameIn):
         return conv
     was = conv["name"]
     conv = runtime.db.rename_conversation(conv_id, name)
-    who = f" by @{body.sender.strip()}" if body.sender.strip() else ""
+    who = f" by @{request_principal(request).name}"
     # Like a topic change: never wakes anyone, but rides along in the next
     # digest, so agents learn the line's new name without costing a turn.
     await runtime.post_message(
@@ -399,9 +413,8 @@ async def attach(conv_id: str, body: AttachIn):
         raise HTTPException(400, "name must be alphanumeric ([A-Za-z0-9_.-], max 32)")
     if body.name.lower() in RESERVED_NAMES:
         raise HTTPException(400, f"'{body.name}' is a reserved handle")
-    if body.name.lower() in {
-            name.lower() for name, _ in runtime.human_handles.get(conv_id, {}).values()}:
-        raise HTTPException(409, f"'{body.name}' is already in use by a human on this line")
+    if handle_taken(runtime.db, body.name):
+        raise HTTPException(409, f"'{body.name}' is registered to a human account")
     for existing in runtime.db.list_attachments(conv_id):
         if existing["name"].lower() == body.name.lower() and existing["status"] in ("starting", "running"):
             raise HTTPException(409, f"'{body.name}' is already attached")
@@ -425,6 +438,7 @@ async def attach(conv_id: str, body: AttachIn):
     att = runtime.db.add_attachment(
         att_id, conv_id, body.name, body.adapter, command, cwd, runtime_owner
     )
+    att["api_token"] = ensure_api_token(runtime.db, att_id)
     att["runtime_owner"] = runtime_owner
     att["conv_name"] = conv["name"]
     att["topic"] = conv["topic"]
@@ -550,48 +564,34 @@ async def attachment_key(att_id: str, body: KeyIn):
     return {"ok": True}
 
 
-# -- presets ---------------------------------------------------------------
-@app.get("/api/presets", response_model=list[PresetResponse])
-async def presets():
-    return runtime.db.list_presets()
-
-
-@app.post("/api/presets", response_model=PresetResponse)
-async def create_preset(body: PresetIn):
-    return _save_preset(str(uuid.uuid4()), body)
-
-
-@app.put("/api/presets/{preset_id}", response_model=PresetResponse)
-async def update_preset(preset_id: str, body: PresetIn):
-    if not runtime.db.get_preset(preset_id):
-        raise HTTPException(404)
-    return _save_preset(preset_id, body)
-
-
-@app.delete("/api/presets/{preset_id}", response_model=OkResponse)
-async def delete_preset(preset_id: str):
-    runtime.db.delete_preset(preset_id)
-    return {"ok": True}
-
-
-def _save_preset(preset_id: str, body: PresetIn):
-    if not body.title.strip():
-        raise HTTPException(400, "preset needs a title")
-    if not NAME_RE.match(body.name):
-        raise HTTPException(400, "name must be alphanumeric ([A-Za-z0-9_.-], max 32)")
-    if body.name.lower() in RESERVED_NAMES:
-        raise HTTPException(400, f"'{body.name}' is a reserved handle")
-    if body.adapter not in ADAPTERS:
-        raise HTTPException(400, f"adapter must be one of {sorted(ADAPTERS)}")
-    return runtime.db.save_preset(
-        preset_id, body.title.strip(), body.name, body.adapter, body.command.strip())
-
-
 @app.websocket("/ws/{conv_id}")
 async def ws_endpoint(ws: WebSocket, conv_id: str):
+    principal = await websocket_principal(runtime.db, ws)
+    if principal is None:
+        return
+    if principal.user_id is None:
+        # An attachment has no business on the human chat socket: it speaks
+        # through its harness. Letting it in would relabel agent speech as
+        # human and hand it a seat in human_handles.
+        await ws.accept()
+        await ws.close(code=WS_FORBIDDEN, reason="machine tokens cannot join the chat socket")
+        return
+    # A handle is fixed for the socket's lifetime: when it changes, every one
+    # of the user's sockets is force-closed (below) and each tab reconnects
+    # and re-authenticates under the new name — deterministic for every tab,
+    # with no per-message database lookup.
+    user_sockets.add(principal.user_id, ws)
+    try:
+        await _serve_socket(ws, conv_id, principal.name)
+    finally:
+        user_sockets.discard(principal.user_id, ws)
+
+
+async def _serve_socket(ws: WebSocket, conv_id: str, handle: str):
     await runtime.websocket(
         ws,
         conv_id,
+        handle=handle,
         frontend_build=current_frontend_build(), server_version=__version__,
         instance_name=getattr(app.state, "instance_name", None),
         reattacher=ReattachCoordinator(runtime, _resume_adapter),

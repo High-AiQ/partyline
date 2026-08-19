@@ -213,22 +213,19 @@ class ChatRuntime:
                 )
         return stopped
 
-    def attachment_handle_taken(self, conv_id: str, handle: str) -> bool:
-        """Whether a live process already owns ``handle`` on this line."""
-        return any(
-            att["name"].lower() == handle.lower() and att["status"] in ("starting", "running")
-            for att in self.db.list_attachments(conv_id)
-        )
-
     async def websocket(
         self,
         ws: WebSocket,
         conv_id: str,
+        handle: str,
         frontend_build: str,
         server_version: str,
         instance_name: str | None = None,
         reattacher: ReattachCoordinator | None = None,
     ):
+        """Serve one authenticated socket. ``handle`` comes from the caller's
+        credential, so it is never validated or collision-checked here — two
+        sockets with one handle are the same account in two tabs."""
         await ws.accept()
         self.sockets.setdefault(conv_id, set()).add(ws)
         claimed_handle = None
@@ -245,23 +242,13 @@ class ChatRuntime:
                     )
                     continue
                 if data.get("type") == "hello":
-                    handle = str(data.get("handle", "")).strip()
                     client_id = str(data.get("client_id", "")).strip()
                     conv = self.db.get_conversation(conv_id)
-                    error = handle_error(handle)
                     if conv is None or conv["archived_at"]:
-                        error = "this line is archived — restore it to talk here"
-                    elif not error and self.attachment_handle_taken(conv_id, handle):
-                        error = "that handle is taken by a running process on this line"
-                    elif not error and any(
-                        other is not ws and name.lower() == handle.lower()
-                        and (not client_id or client != client_id)
-                        for other, (name, client) in self.human_handles.get(conv_id, {}).items()
-                    ):
-                        error = "that handle is taken by another human on this line"
-                    if error:
-                        await ws.send_json(
-                            ErrorEvent(conversation_id=conv_id, message=error).model_dump())
+                        await ws.send_json(ErrorEvent(
+                            conversation_id=conv_id,
+                            message="this line is archived — restore it to talk here",
+                        ).model_dump())
                         continue
                     # A reconnect can arrive before a half-open old socket times
                     # out. Its durable client id proves it is the same browser, so
@@ -299,7 +286,7 @@ class ChatRuntime:
                     await ws.send_json(
                         ErrorEvent(
                             conversation_id=conv_id,
-                            message="choose a handle before sending messages",
+                            message="say hello before sending messages",
                         ).model_dump()
                     )
                     continue
@@ -329,19 +316,12 @@ class ChatRuntime:
                             ).model_dump()
                         )
                     continue
-                sender = str(data.get("sender", "")).strip()
-                if sender != claimed_handle:
-                    await ws.send_json(
-                        ErrorEvent(
-                            conversation_id=conv_id,
-                            message="messages must use your claimed handle",
-                        ).model_dump()
-                    )
-                    continue
                 body = str(data.get("body", "")).strip()
                 if not body:
                     continue
-                await self.post_message(conv_id, sender, "human", body)
+                # The sender is the credential's handle; any client-supplied
+                # sender field is ignored, so impersonation cannot happen.
+                await self.post_message(conv_id, claimed_handle, "human", body)
         except WebSocketDisconnect:
             pass
         finally:

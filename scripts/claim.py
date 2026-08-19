@@ -1,8 +1,10 @@
 """Claim, list, and release path-glob write locks on a line.
 
-    uv run python -m scripts.claim take CONV --owner grok partyline/claims.py
+    uv run python -m scripts.claim take CONV partyline/claims.py
     uv run python -m scripts.claim list CONV
-    uv run python -m scripts.claim release CLAIM_ID --owner grok
+    uv run python -m scripts.claim release CLAIM_ID [--force]
+
+You are whoever PARTYLINE_TOKEN says you are; there is no --owner.
 """
 
 from __future__ import annotations
@@ -17,11 +19,19 @@ DEFAULT_URL = f"http://127.0.0.1:{os.environ.get('PARTYLINE_PORT', '8642')}"
 
 def request(method: str, path: str, payload: dict | None = None, base: str = DEFAULT_URL):
     data = None if payload is None else json.dumps(payload).encode()
+    headers = {"Content-Type": "application/json"} if payload is not None else {}
+    # The credential every attached process holds; a human shell exports one.
+    # A missing credential is refused before the network, loudly.
+    token = os.environ.get("PARTYLINE_TOKEN")
+    if not token:
+        raise SystemExit(
+            "PARTYLINE_TOKEN is not set; export your partyline credential first")
+    headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(
         base.rstrip("/") + path,
         data=data,
         method=method,
-        headers={"Content-Type": "application/json"} if payload is not None else {},
+        headers=headers,
     )
     try:
         with urllib.request.urlopen(req, timeout=10) as response:
@@ -40,9 +50,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--url", default=os.environ.get("PARTYLINE_API", DEFAULT_URL))
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    take = sub.add_parser("take", help="claim one or more path globs")
+    # No --owner anywhere: the server derives the owner from PARTYLINE_TOKEN,
+    # so a claim can never be taken or held under someone else's handle.
+    take = sub.add_parser("take", help="claim one or more path globs as yourself")
     take.add_argument("conv")
-    take.add_argument("--owner", required=True)
     take.add_argument("paths", nargs="+")
 
     listed = sub.add_parser("list", help="list live claims on a line")
@@ -50,14 +61,15 @@ def main(argv: list[str] | None = None) -> int:
 
     release = sub.add_parser("release", help="drop a claim by id")
     release.add_argument("claim_id")
-    release.add_argument("--owner")
+    release.add_argument("--force", action="store_true",
+                         help="release a claim that is not yours")
 
     args = parser.parse_args(argv)
     if args.cmd == "take":
         code, body = request(
             "POST",
             f"/api/conversations/{args.conv}/claims",
-            {"owner": args.owner, "paths": args.paths},
+            {"paths": args.paths},
             args.url,
         )
         print(json.dumps(body, indent=2))
@@ -68,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if code == 200 else 1
     code, body = request(
         "DELETE",
-        f"/api/claims/{args.claim_id}" + (f"?owner={args.owner}" if args.owner else ""),
+        f"/api/claims/{args.claim_id}" + ("?force=true" if args.force else ""),
         base=args.url,
     )
     print(json.dumps(body, indent=2))

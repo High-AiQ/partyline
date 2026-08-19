@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
+from .auth_guard import request_principal
 from .claims import (
     Claim,
     ClaimConflict,
@@ -14,7 +15,6 @@ from .claims import (
     purge_claims,
     release_claim,
 )
-from .runtime import handle_error
 
 
 def claims_router(runtime) -> APIRouter:
@@ -27,12 +27,13 @@ def claims_router(runtime) -> APIRouter:
         return conv
 
     @router.post("/api/conversations/{conv_id}/claims", response_model=Claim)
-    async def post_claim(conv_id: str, body: ClaimIn):
+    async def post_claim(request: Request, conv_id: str, body: ClaimIn):
         require_line(conv_id)
-        if problem := handle_error(body.owner.strip()):
-            raise HTTPException(400, problem)
+        # The owner is the authenticated caller — a client-supplied owner
+        # would let any valid token claim paths as any handle.
+        owner = request_principal(request).name
         try:
-            return create_claim(runtime.db, conv_id, body.owner, body.paths)
+            return create_claim(runtime.db, conv_id, owner, body.paths)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         except ClaimTaken as exc:
@@ -49,11 +50,17 @@ def claims_router(runtime) -> APIRouter:
         return list_claims(runtime.db, conv_id)
 
     @router.delete("/api/claims/{claim_id}", response_model=dict)
-    async def delete_claim(claim_id: str, owner: str | None = None):
+    async def delete_claim(request: Request, claim_id: str, force: bool = False):
+        # Your own claims release freely. Releasing someone else's needs the
+        # explicit ?force=true — a named override for stale locks (claims
+        # also expire on their own), never an impersonated owner.
+        owner = None if force else request_principal(request).name
         try:
             gone = release_claim(runtime.db, claim_id, owner)
         except PermissionError as exc:
-            raise HTTPException(403, f"claim belongs to {exc}") from exc
+            raise HTTPException(
+                403, f"claim belongs to {exc}; pass force=true to override"
+            ) from exc
         if not gone:
             raise HTTPException(404)
         return {"ok": True}

@@ -29,9 +29,11 @@ BRIEFING = (
     "progress narration is noise to everyone on the line. Never trade acknowledgments, "
     "thanks, or goodbyes with other processes — each mention spends that process's turn, "
     "so once a handoff is acknowledged, go quiet unless you have a blocker, a question, "
-    "or a result. To share a picture on the line, POST it to the partyline API (these "
-    "environment variables are already set for you): `curl -F file=@/path/to/pic.png "
-    "-F sender=$PARTYLINE_HANDLE -F title=optional -F description=optional "
+    "or a result. The partyline API requires your machine credential on every call: "
+    "send `-H \"Authorization: Bearer $PARTYLINE_TOKEN\"` (already set in your "
+    "environment, and it identifies you — never share it on the line). To share a "
+    "picture, POST it to the API: `curl -H \"Authorization: Bearer $PARTYLINE_TOKEN\" "
+    "-F file=@/path/to/pic.png -F title=optional -F description=optional "
     "$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/images` — the optional title "
     "and description let the other participants reason about the image without "
     "fetching it. Every image gets three URLs: a small thumb (max 512px), a slim tier "
@@ -39,8 +41,8 @@ BRIEFING = (
     "your question. The line has a shared task board: its open tasks ride every "
     "wake digest, and you can read, add, claim, or finish them at "
     "$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/tasks (GET to read, POST "
-    "JSON to add, PATCH /api/tasks/<id> to claim or complete). Say hello in one "
-    "short line to confirm you are connected."
+    "JSON to add, PATCH /api/tasks/<id> to claim or complete), with the same "
+    "Authorization header. Say hello in one short line to confirm you are connected."
 )
 
 TOPIC_BRIEFING = (
@@ -103,4 +105,8 @@ def child_env(env: Mapping[str, str], att: dict) -> dict[str, str]:
     result["PARTYLINE_API"] = api_base
     result["PARTYLINE_CONV_ID"] = str(att.get("conv_id", ""))
     result["PARTYLINE_HANDLE"] = str(att.get("name", ""))
+    # The stable machine credential the auth guard accepts. Only ever absent
+    # for an attachment dict that predates the auth migration's backfill.
+    if token := att.get("api_token"):
+        result["PARTYLINE_TOKEN"] = str(token)
     return result

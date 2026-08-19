@@ -19,6 +19,8 @@ from partyline.claims import (
     overlaps,
     purge_claims,
 )
+from partyline.auth_guard import install_auth_guard
+from partyline.auth_store import ensure_api_token
 from partyline.claim_routes import claims_router
 from partyline.db import Db
 from partyline.runtime import ChatRuntime
@@ -88,8 +90,16 @@ class ClaimApiTest(unittest.TestCase):
         self.runtime = ChatRuntime(Db(f"{self.directory.name}/t.db"))
         self.runtime.db.create_conversation("line", "Line")
         app = FastAPI()
+        install_auth_guard(app, self.runtime.db)
         app.include_router(claims_router(self.runtime))
         self.client = TestClient(app)
+        # Two machine identities; the server derives claim owners from them.
+        self.headers = {}
+        for ident, name in (("a-grok", "grok"), ("a-opus", "opus")):
+            self.runtime.db.add_attachment(ident, "line", name, "fake", ["fake"], "/tmp")
+            token = ensure_api_token(self.runtime.db, ident)
+            self.headers[name] = {"Authorization": f"Bearer {token}"}
+        self.client.headers.update(self.headers["grok"])
 
     def tearDown(self):
         self.runtime.db.close()
@@ -98,23 +108,24 @@ class ClaimApiTest(unittest.TestCase):
     def test_post_get_and_delete(self):
         created = self.client.post(
             "/api/conversations/line/claims",
-            json={"owner": "grok", "paths": ["partyline/claims.py"]},
+            json={"paths": ["partyline/claims.py"]},
         )
         self.assertEqual(created.status_code, 200)
+        self.assertEqual(created.json()["owner"], "grok")
         ident = created.json()["id"]
         listed = self.client.get("/api/conversations/line/claims")
         self.assertEqual([row["id"] for row in listed.json()], [ident])
-        gone = self.client.delete(f"/api/claims/{ident}?owner=grok")
+        gone = self.client.delete(f"/api/claims/{ident}")
         self.assertEqual(gone.json(), {"ok": True})
 
     def test_overlap_is_http_409_with_the_holder(self):
         self.client.post(
             "/api/conversations/line/claims",
-            json={"owner": "opus", "paths": ["partyline/*.py"]},
+            json={"paths": ["partyline/*.py"]}, headers=self.headers["opus"],
         )
         clash = self.client.post(
             "/api/conversations/line/claims",
-            json={"owner": "grok", "paths": ["partyline/server.py"]},
+            json={"paths": ["partyline/server.py"]},
         )
         self.assertEqual(clash.status_code, 409)
         self.assertEqual(clash.json()["detail"]["conflict"]["owner"], "opus")
@@ -123,13 +134,13 @@ class ClaimApiTest(unittest.TestCase):
         self.runtime.db.create_conversation("elsewhere", "Elsewhere")
         self.client.post(
             "/api/conversations/line/claims",
-            json={"owner": "opus", "paths": ["partyline/*.py"]},
+            json={"paths": ["partyline/*.py"]}, headers=self.headers["opus"],
         )
         listed = self.client.get("/api/conversations/elsewhere/claims")
         self.assertEqual(listed.json(), [])
         taken = self.client.post(
             "/api/conversations/elsewhere/claims",
-            json={"owner": "grok", "paths": ["partyline/server.py"]},
+            json={"paths": ["partyline/server.py"]},
         )
         self.assertEqual(taken.status_code, 200)
 
@@ -140,17 +151,20 @@ class ClaimApiTest(unittest.TestCase):
     def test_an_unsafe_path_is_400(self):
         bad = self.client.post(
             "/api/conversations/line/claims",
-            json={"owner": "grok", "paths": ["../secrets"]},
+            json={"paths": ["../secrets"]},
         )
         self.assertEqual(bad.status_code, 400)
 
-    def test_the_wrong_owner_cannot_release(self):
+    def test_the_wrong_owner_cannot_release_without_force(self):
         created = self.client.post(
             "/api/conversations/line/claims",
-            json={"owner": "opus", "paths": ["partyline/claims.py"]},
+            json={"paths": ["partyline/claims.py"]}, headers=self.headers["opus"],
         )
         ident = created.json()["id"]
-        refused = self.client.delete(f"/api/claims/{ident}?owner=grok")
+        refused = self.client.delete(f"/api/claims/{ident}")
         self.assertEqual(refused.status_code, 403)
-        missing = self.client.delete("/api/claims/does-not-exist?owner=grok")
+        self.assertIn("force=true", refused.json()["detail"])
+        forced = self.client.delete(f"/api/claims/{ident}?force=true")
+        self.assertEqual(forced.json(), {"ok": True})
+        missing = self.client.delete("/api/claims/does-not-exist")
         self.assertEqual(missing.status_code, 404)

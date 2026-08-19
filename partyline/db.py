@@ -5,89 +5,14 @@ from contextlib import asynccontextmanager, contextmanager
 import fcntl
 import json
 import os
+import secrets
 import sqlite3
 import threading
 import time
 import uuid
 from typing import Literal, TypedDict
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS conversations(
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  created_at REAL NOT NULL
-);
-CREATE TABLE IF NOT EXISTS messages(
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  conv_id TEXT NOT NULL,
-  sender TEXT NOT NULL,
-  sender_type TEXT NOT NULL,          -- human | agent | system
-  body TEXT NOT NULL,
-  created_at REAL NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conv_id, id);
-CREATE TABLE IF NOT EXISTS attachments(
-  id TEXT PRIMARY KEY,                -- also used as the agent session UUID
-  conv_id TEXT NOT NULL,
-  name TEXT NOT NULL,
-  adapter TEXT NOT NULL,              -- adapter identifier
-  command TEXT NOT NULL,              -- JSON argv list
-  cwd TEXT NOT NULL,
-  status TEXT NOT NULL,               -- starting | running | exited | detached
-  runtime_owner TEXT,                 -- one adapter activation; rejects stale callbacks
-  last_seen INTEGER NOT NULL DEFAULT 0,  -- id of last message delivered to this agent
-  created_at REAL NOT NULL
-);
-CREATE TABLE IF NOT EXISTS presets(
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL,
-  name TEXT NOT NULL,                 -- default @handle
-  adapter TEXT NOT NULL,
-  command TEXT NOT NULL,              -- shell-style string (no cwd: that's per-attach)
-  created_at REAL NOT NULL
-);
-"""
-
-MIGRATIONS = [
-    # cli_session: optional process session id, for adapters that support resume
-    "ALTER TABLE attachments ADD COLUMN cli_session TEXT",
-    # topic: free-text line topic, relayed to agents in briefings and digests
-    "ALTER TABLE conversations ADD COLUMN topic TEXT NOT NULL DEFAULT ''",
-    # archived_at: when a line was archived, NULL while it is live. Archiving
-    # hides a line and stops its processes; the history stays until a purge.
-    "ALTER TABLE conversations ADD COLUMN archived_at REAL",
-    # A deliberately singleton restart intent. It is saved before shutdown and
-    # only consumed after the requesting line accepts reattachment on startup.
-    """CREATE TABLE IF NOT EXISTS restart_plan(
-        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-        conversation_id TEXT NOT NULL,
-        token TEXT NOT NULL,
-        mode TEXT NOT NULL DEFAULT 'offer',
-        claim_owner TEXT,
-        claim_until REAL,
-        attempt_count INTEGER NOT NULL DEFAULT 0,
-        attachment_ids TEXT NOT NULL,
-        debrief TEXT NOT NULL,
-        created_at REAL NOT NULL
-    )""",
-    # A plan token binds a browser's accept click to the exact offer it saw.
-    # Pre-token plans were never offered by a server route, so discard them.
-    "ALTER TABLE restart_plan ADD COLUMN token TEXT",
-    "DELETE FROM restart_plan WHERE token IS NULL",
-    # Cockpit plans are trusted, hands-off recovery; ordinary UI plans remain
-    # manual offers. Existing plans must keep the safe manual behaviour.
-    "ALTER TABLE restart_plan ADD COLUMN mode TEXT NOT NULL DEFAULT 'offer'",
-    # A lease prevents two server lifespans from resuming the same automatic
-    # plan. Nullable values mean no owner currently holds the plan.
-    "ALTER TABLE restart_plan ADD COLUMN claim_owner TEXT",
-    "ALTER TABLE restart_plan ADD COLUMN claim_until REAL",
-    # A failed continuation may be retried once, but never replayed forever.
-    "ALTER TABLE restart_plan ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0",
-    # A retiring server can finish adapter shutdown after its replacement has
-    # already resumed the same attachment. Lifecycle writes are conditional on
-    # this per-activation owner so the old generation cannot clobber the new.
-    "ALTER TABLE attachments ADD COLUMN runtime_owner TEXT",
-]
+from .db_schema import MIGRATIONS, SCHEMA
 
 
 RestartPlanMode = Literal["offer", "automatic"]
@@ -107,6 +32,10 @@ class RestartPlan(TypedDict):
 
     conversation_id: str
     token: str
+    # The failure-report capability. Only the planner (reading its own
+    # database) and the restart trigger ever see it; it is deliberately not
+    # part of any API response or browser offer event.
+    report_token: str | None
     mode: RestartPlanMode
     claim_owner: str | None
     claim_until: float | None
@@ -126,6 +55,7 @@ def _restart_plan_row(row) -> RestartPlan:
     return RestartPlan(
         conversation_id=row["conversation_id"],
         token=row["token"],
+        report_token=row["report_token"],
         mode=row["mode"],
         claim_owner=row["claim_owner"],
         claim_until=row["claim_until"],
@@ -497,12 +427,14 @@ class Db:
         """Replace the sole pending restart intent, preserving attachment order."""
         created_at = time.time()
         token = str(uuid.uuid4())
+        report_token = secrets.token_urlsafe(32)
         self._exec(
             "INSERT INTO restart_plan("
-            "singleton,conversation_id,token,mode,claim_owner,claim_until,attempt_count,attachment_ids,debrief,created_at)"
-            " VALUES(1,?,?,?,?,?,?,?,?,?) ON CONFLICT(singleton) DO UPDATE SET"
+            "singleton,conversation_id,token,report_token,mode,claim_owner,claim_until,attempt_count,attachment_ids,debrief,created_at)"
+            " VALUES(1,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(singleton) DO UPDATE SET"
             " conversation_id=excluded.conversation_id,"
             " token=excluded.token,"
+            " report_token=excluded.report_token,"
             " mode=excluded.mode,"
             " claim_owner=NULL,"
             " claim_until=NULL,"
@@ -510,7 +442,8 @@ class Db:
             " attachment_ids=excluded.attachment_ids,"
             " debrief=excluded.debrief,"
             " created_at=excluded.created_at",
-            (conversation_id, token, mode, None, None, 0, json.dumps(attachment_ids), debrief, created_at),
+            (conversation_id, token, report_token, mode, None, None, 0,
+             json.dumps(attachment_ids), debrief, created_at),
         )
         plan = self.get_restart_plan()
         if plan is None:  # pragma: no cover - a committed INSERT is immediately readable
