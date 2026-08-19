@@ -167,10 +167,13 @@ rather than reconstructing the procedure from memory. The rules that make it saf
   broadcasts belong in a thin outer layer; the logic that decides *what* to do should be a
   function you can call in a test with a dict and assert on the return value. When a function is
   hard to test, that is the design telling you the effect is too deep inside it.
-- **Production source files are capped at 300 lines.** Run `./check-code-lines` before every
-  commit and before cockpit preflight. It covers tracked `.py`, `.ts`, and `.svelte` files only;
-  tests and third-party code are excluded. The temporary entries in
-  `line-length-exceptions.txt` are existing debt: they must never grow, no new exception may be
+- **Production source files are capped at 300 lines.** The cap is a context budget: oversized
+  files overwhelm an agent's working context and hide the seams where behavior should split. When
+  a file approaches the cap, do not request a larger exception — decompose it along functional
+  boundaries into small pure functions and well-placed modules, keeping shared logic DRY. Run
+  `./check-code-lines` before every commit and before cockpit preflight. It covers tracked `.py`,
+  `.ts`, and `.svelte` files only; tests and third-party code are excluded. The temporary entries
+  in `line-length-exceptions.txt` are existing debt: they must never grow, no new exception may be
   added, and each entry should be removed when its file is split below the cap.
 - **`main` is protected.** Work on a branch and open a pull request; do not push directly to
   `main`. GitHub requires the `backend`, `frontend`, `code-line-limits`,
