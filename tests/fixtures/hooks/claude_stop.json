@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "Stop",
+  "session_id": "sess-claude-1",
+  "cwd": "/home/gmccarthy/code/partyline",
+  "stop_hook_active": false,
+  "last_assistant_message": "ack — on it"
+}
