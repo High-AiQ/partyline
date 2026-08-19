@@ -70,6 +70,12 @@ uncovered line.
 
 Tests must never touch a real database, a real port, or a real CLI: use a temp `PARTYLINE_DB`,
 FastAPI's `TestClient`, and fake transcript files rather than spawning a real coding CLI.
+When a test stops an async poll by mocking sleep, patch the wait the loop actually
+awaits (for Grok, `adapter._poll`), not `adapter.asyncio.sleep` after the loop has
+moved to another module — that is a hang that can fill RAM. Never run
+`tests.test_grok_adapter` in `partyline-worktrees/kimi-presence-stack` on the
+dogfood machine. On a developer machine run the suite through a memory cap
+(`./scripts/capped-test`) so a runaway dies at 2 GB instead of taking the VM.
 
 **Reach for a plain unit test first.** A browser test earns its place only when the thing under
 test genuinely needs one — layout, hit-testing, a two-sided protocol. Browser tests live in
