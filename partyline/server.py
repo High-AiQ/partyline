@@ -25,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
 from . import __version__
+from .adapter_capabilities import adapter_completion
 from .attachment_commands import validated_attachment_command
 from .attachment_resume import resume_adapter
 from .bind import BindConfig, load_bind_config, load_dotenv, parse_bind_args, resolve_bind
@@ -72,7 +73,7 @@ from .contracts import (
 )
 from .db import Db
 from .frontend_build import current_frontend_build
-from .hook_routes import handle_hook, hook_url, hooks_router
+from .hook_routes import hook_url, hooks_router
 from .presence import Presence
 from .media import MediaStore, media_root
 from .claim_routes import claims_router, purge_claims
@@ -133,7 +134,7 @@ app.state.bind = BindConfig()
 register_terminal_route(app, runtime)
 app.include_router(media_router(runtime, media))
 app.include_router(claims_router(runtime))
-app.include_router(hooks_router(runtime))
+app.include_router(hooks_router(runtime, presence))
 tasks = wire_tasks(app, runtime)
 
 # -- REST ------------------------------------------------------------------
@@ -446,7 +447,7 @@ async def attach(conv_id: str, body: AttachIn):
             att_id, "exited", runtime_owner
         )
         raise HTTPException(500, f"failed to spawn: {exc}") from exc
-    runtime.live[att_id] = presence.watch(adapter, conv_id, att_id)
+    runtime.live[att_id] = presence.watch(adapter, conv_id, att_id, adapter_completion(body.adapter))
 
     await runtime.post_message(
         conv_id, "system", "system",
@@ -527,10 +528,6 @@ async def detach(att_id: str):
 def _hook_url(att_id: str, bind: BindConfig | None = None, token: str = "") -> str:
     return hook_url(att_id, bind or app.state.bind, token)
 
-
-async def hook_event(att_id: str, token: str, request: Request):
-    """The route's handler, reachable without an HTTP client for tests."""
-    return await handle_hook(runtime, att_id, token, request)
 
 
 @app.get("/api/attachments/{att_id}/screen", response_model=ScreenResponse)
