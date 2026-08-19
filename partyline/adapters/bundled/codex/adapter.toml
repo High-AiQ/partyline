@@ -7,5 +7,5 @@ class = "PartylineAdapter"
 command = ["codex"]
 requires = ["codex"]
 env_unset = []
-capabilities = { resume = true }
+capabilities = { resume = true, turn_end = "receipt" }
 update_command = ["codex", "update"]

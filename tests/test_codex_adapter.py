@@ -237,6 +237,65 @@ class CodexCommandTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(posted2, [("terra", "agent", "hello from agent")])
 
+    async def test_rollout_turn_boundaries_become_receipts(self):
+        """task_started/task_complete are the harness's own turn boundaries —
+        the receipt that lets the working badge self-clear (#47)."""
+        from partyline.adapters.receipts import BEGAN, ENDED
+
+        for payload_type, event in (("task_started", BEGAN), ("task_complete", ENDED)):
+            with patch(
+                "partyline.adapters.bundled.codex.adapter.receipt", new=AsyncMock()
+            ) as receipt_mock:
+                adapter, posted = await self.run_tail_with(
+                    {
+                        "type": "event_msg",
+                        "timestamp": "2026-08-09T00:00:00Z",
+                        "payload": {"type": payload_type},
+                    }
+                )
+            receipt_mock.assert_awaited_once_with(adapter.att, event)
+            self.assertEqual(posted, [])
+
+    async def test_a_stale_boundary_record_sends_no_receipt(self):
+        """A resume replays the rollout's backlog through the tail handler;
+        old turn boundaries must not emit, or they would clear a badge a
+        live turn owns."""
+
+        async def post(sender, sender_type, body):
+            return None
+
+        async def on_status(status):
+            return None
+
+        adapter = PartylineAdapter(
+            {"command": ["codex"], "cli_session": "session-1", "name": "terra", "resume": True},
+            post,
+            on_status,
+        )
+        adapter._fresh = lambda timestamp: False
+        adapter.alive = lambda: True
+        adapter._find_rollout = lambda: "rollout.jsonl"
+
+        async def tail(path, handle):
+            await handle(
+                {
+                    "type": "event_msg",
+                    "timestamp": "old",
+                    "payload": {"type": "task_complete"},
+                }
+            )
+
+        adapter._tail_jsonl = tail
+        with (
+            patch("partyline.adapters.bundled.codex.adapter.asyncio.sleep", new=AsyncMock()),
+            patch("builtins.open", side_effect=OSError),
+            patch(
+                "partyline.adapters.bundled.codex.adapter.receipt", new=AsyncMock()
+            ) as receipt_mock,
+        ):
+            await adapter._run()
+        receipt_mock.assert_not_called()
+
     async def test_non_event_and_stale_records_are_ignored(self):
         # Non-event type and stale timestamp should not post
         _, posted = await self.run_tail_with(
