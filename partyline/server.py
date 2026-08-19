@@ -28,7 +28,7 @@ from starlette.background import BackgroundTask
 from . import __version__
 from .attachment_commands import validated_attachment_command
 from .attachment_resume import resume_adapter
-from .bind import BindConfig, load_bind_config, load_dotenv, parse_bind_args, resolve_bind
+from .bind import BindConfig, apply_server_config, load_bind_config, load_dotenv, parse_bind_args
 from .adapters import (
     ADAPTERS,
     ADAPTER_METADATA,
@@ -160,7 +160,8 @@ app.mount("/assets", StaticFiles(directory=ASSETS_DIR), name="assets")
 
 @app.get("/api/version", response_model=VersionResponse)
 async def version():
-    return {"version": __version__, "build": current_frontend_build()}
+    return {"version": __version__, "build": current_frontend_build(),
+            "instance_name": getattr(app.state, "instance_name", None)}
 
 
 LOOPBACK = {"127.0.0.1", "::1", "localhost"}
@@ -618,8 +619,8 @@ async def ws_endpoint(ws: WebSocket, conv_id: str):
     await runtime.websocket(
         ws,
         conv_id,
-        frontend_build=current_frontend_build(),
-        server_version=__version__,
+        frontend_build=current_frontend_build(), server_version=__version__,
+        instance_name=getattr(app.state, "instance_name", None),
         reattacher=ReattachCoordinator(runtime, _resume_adapter),
     )
 
@@ -628,8 +629,7 @@ def main(argv: Sequence[str] | None = None):
     arguments = list(sys.argv[1:] if argv is None else argv)
     parsed = parse_bind_args(arguments)
     config = load_bind_config(parsed.config)
-    host, port = resolve_bind(parsed, os.environ, config)
-    app.state.bind = BindConfig(host, port)
+    host, port = apply_server_config(app.state, parsed, os.environ, config)
     global _uvicorn_server
     # Hold the server object so /api/shutdown can ask it to stop rather than
     # signalling blindly.

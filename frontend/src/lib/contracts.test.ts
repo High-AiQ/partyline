@@ -5,6 +5,7 @@ import {
   ConversationDetailSchema,
   ImageRefSchema,
   TaskSchema,
+  VersionInfoSchema,
   WireEventSchema,
   WireReattachCommandSchema,
 } from "./contracts";
@@ -18,6 +19,18 @@ const offer = {
 };
 
 describe("wire events with server-omitted null fields", () => {
+  it("defaults an omitted instance label and keeps a configured one", () => {
+    expect(VersionInfoSchema.parse({ version: "0.39.0", build: "abc" }).instance_name).toBeNull();
+    const hello = WireEventSchema.parse({
+      type: "hello",
+      conversation_id: "line",
+      handle: "greg",
+      version: "0.39.0",
+      instance_name: "Cockpit",
+    });
+    expect(hello.type === "hello" && hello.instance_name).toBe("Cockpit");
+  });
+
   it("accepts the unforgeable working event shape", () => {
     const event = { type: "working" as const, attachment_id: "att-1", working: true };
     expect(WireEventSchema.parse(event)).toEqual(event);

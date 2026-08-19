@@ -119,7 +119,7 @@ class Room {
         void this.resync().catch(ignoreBackgroundFailure);
       },
       (hello) => {
-        session.acceptHandshake(hello.version);
+        session.acceptHandshake(hello.version, hello.instance_name);
       },
     );
 
