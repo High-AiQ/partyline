@@ -1142,7 +1142,7 @@ class LifecycleTest(unittest.IsolatedAsyncioTestCase):
         adapter.alive = lambda: running
         adapter._accounted = 0
 
-        async def stop_sleep(_):
+        async def stop_sleep():
             nonlocal running
             running = False
 
@@ -1157,7 +1157,7 @@ class LifecycleTest(unittest.IsolatedAsyncioTestCase):
         adapter = make_adapter()
         adapter.alive = lambda: running
 
-        async def stop_sleep(_):
+        async def stop_sleep():
             nonlocal running
             running = False
 
