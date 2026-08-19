@@ -1,0 +1,11 @@
+{
+  "hookEventName": "stop",
+  "sessionId": "c5a6b00a-b2c2-43d5-a359-4e68e1fd9519",
+  "cwd": "/home/gmccarthy/code/partyline",
+  "workspaceRoot": "/home/gmccarthy/code/partyline",
+  "permissionMode": "bypassPermissions",
+  "promptId": "prompt-1",
+  "timestamp": "2026-08-19T21:00:10Z",
+  "stopHookActive": false,
+  "lastAssistantMessage": "Holding. No work until further instruction."
+}

@@ -23,45 +23,13 @@ import re
 import secrets
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import ValidationError
 
 from .bind import BindConfig
-from .contracts import AttentionEvent, HookEventRequest, OkResponse
+from .contracts import AttentionEvent, OkResponse
+from .hook_contracts import hook_validation_detail, parse_hook_payload
 
 ATTENTION_RE = re.compile(r"permission|approv|trust|login|auth", re.IGNORECASE)
-
-# Canonical (lowercase, no underscores) harness event names that bound a
-# turn. Config keys are PascalCase (`Stop`); Grok's stdin `hookEventName` is
-# snake_case (`stop`). Matching only the Claude spelling left Grok badges
-# lit after every wake — the POST arrived, then `turn_boundary` returned None.
-# `SubagentStop` is deliberately absent: a child finishing is not the parent
-# turn ending. Grok's `StopFailure` / `StopCancelled` replace `Stop` when a
-# turn errors or is interrupted, so they must clear the badge too.
-TURN_BOUNDARIES = {
-    "userpromptsubmit": "began",
-    "stop": "ended",
-    "stopfailure": "ended",
-    "stopcancelled": "ended",
-}
-
-
-def canonical_hook_event(name: str) -> str:
-    """Fold Claude's PascalCase and Grok's snake_case onto one key."""
-    return name.replace("_", "").lower()
-
-
-def turn_boundary(payload: object) -> str | None:
-    """Which end of a turn this hook payload reports, if either.
-
-    Only the harness's own event name counts. Nothing an agent can write into
-    a message reaches this function, and an unrecognised name is ignored
-    rather than guessed at.
-    """
-    if not isinstance(payload, dict):
-        return None
-    name = payload.get("hookEventName") or payload.get("hook_event_name")
-    if not isinstance(name, str):
-        return None
-    return TURN_BOUNDARIES.get(canonical_hook_event(name))
 
 
 def hook_url(att_id: str, bind: BindConfig, token: str = "") -> str:
@@ -97,16 +65,16 @@ async def handle_hook(runtime, presence, att_id: str, token: str, request: Reque
     try:
         body = await request.json()
     except Exception:
-        body = None
-    boundary = turn_boundary(body)
+        raise HTTPException(422, "hook payload is not JSON") from None
+    try:
+        payload = parse_hook_payload(body)
+    except ValidationError as exc:
+        raise HTTPException(422, hook_validation_detail(exc)) from exc
+    boundary = payload.turn_boundary()
     if boundary == "began":
         await presence.began(att["conv_id"], att_id, owner=token)
     elif boundary == "ended":
         await presence.ended(att["conv_id"], att_id, owner=token)
-    try:
-        payload = HookEventRequest.model_validate(body)
-    except Exception:
-        payload = HookEventRequest()
     message = (payload.message or payload.title or "").strip()
     # Only surface events that mean "a human must look at me" — idle chatter
     # from an agent waiting between mentions would spam the line.

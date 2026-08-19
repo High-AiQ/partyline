@@ -1,0 +1,6 @@
+{
+  "hook_event_name": "UserPromptSubmit",
+  "session_id": "sess-claude-1",
+  "cwd": "/home/gmccarthy/code/partyline",
+  "permission_mode": "bypassPermissions"
+}

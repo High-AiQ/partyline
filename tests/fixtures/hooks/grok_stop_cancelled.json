@@ -1,0 +1,11 @@
+{
+  "hookEventName": "stop_cancelled",
+  "sessionId": "c5a6b00a-b2c2-43d5-a359-4e68e1fd9519",
+  "cwd": "/home/gmccarthy/code/partyline",
+  "workspaceRoot": "/home/gmccarthy/code/partyline",
+  "permissionMode": "bypassPermissions",
+  "promptId": "prompt-2",
+  "timestamp": "2026-08-19T21:01:00Z",
+  "reason": "user_interrupt",
+  "cancelledBy": "user"
+}

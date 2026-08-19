@@ -948,12 +948,18 @@ class ServerTest(unittest.TestCase):
 
         self.add_attachment("hook", owner="owner-1")
         self.arun(
-            hook_event("hook", "owner-1", JsonRequest({"message": "Permission needed"}))
+            hook_event(
+                "hook", "owner-1",
+                JsonRequest({"hookEventName": "Notification", "message": "Permission needed"}),
+            )
         )
         self.assertIn("needs attention", server.runtime.db.list_messages("line")[-1]["body"])
         count = len(server.runtime.db.list_messages("line"))
-        self.arun(hook_event("hook", "owner-1", JsonRequest({"title": "idle"})))
-        self.arun(hook_event("hook", "owner-1", JsonRequest(fails=True)))
+        self.arun(hook_event(
+            "hook", "owner-1",
+            JsonRequest({"hookEventName": "Notification", "title": "idle"}),
+        ))
+        self.assert_http(422, hook_event("hook", "owner-1", JsonRequest(fails=True)))
         self.assertEqual(len(server.runtime.db.list_messages("line")), count)
 
     def test_a_hook_without_the_current_activation_token_is_refused(self):
@@ -964,7 +970,9 @@ class ServerTest(unittest.TestCase):
         404 either way, so this also does not confirm which ids exist.
         """
         self.add_attachment("hook", owner="owner-1")
-        payload = JsonRequest({"message": "Permission needed"})
+        payload = JsonRequest(
+            {"hookEventName": "Notification", "message": "Permission needed"}
+        )
         count = len(server.runtime.db.list_messages("line"))
 
         self.assert_http(404, hook_event("hook", "owner-0", payload))
@@ -997,8 +1005,13 @@ class ServerTest(unittest.TestCase):
         self.add_attachment("hook", owner="owner-1")
         self.arun(server.presence.started("line", "hook", owner="owner-1"))
 
-        for name in ("SubagentStop", "Notification", "PreToolUse", "", None):
+        for name in ("SubagentStop", "Notification"):
             self.arun(hook_event("hook", "owner-1", JsonRequest({"hookEventName": name})))
+        self.assertTrue(server.presence.is_working("hook"))
+        for name in ("PreToolUse", "", None):
+            self.assert_http(
+                422, hook_event("hook", "owner-1", JsonRequest({"hookEventName": name}))
+            )
         self.assertTrue(server.presence.is_working("hook"))
         server.presence.forget("hook")
 
@@ -1013,11 +1026,21 @@ class ServerTest(unittest.TestCase):
         self.assertTrue(server.presence.is_working("hook"))
         server.presence.forget("hook")
 
-    def test_a_hook_body_that_is_not_json_ends_nothing(self):
+    def test_a_hook_body_that_is_not_json_is_422(self):
         self.add_attachment("hook", owner="owner-1")
         self.arun(server.presence.started("line", "hook", owner="owner-1"))
 
-        self.arun(hook_event("hook", "owner-1", JsonRequest(fails=True)))
+        self.assert_http(422, hook_event("hook", "owner-1", JsonRequest(fails=True)))
+        self.assertTrue(server.presence.is_working("hook"))
+        server.presence.forget("hook")
+
+    def test_an_unknown_hook_event_is_422_not_a_dropped_receipt(self):
+        self.add_attachment("hook", owner="owner-1")
+        self.arun(server.presence.started("line", "hook", owner="owner-1"))
+        self.assert_http(
+            422,
+            hook_event("hook", "owner-1", JsonRequest({"hookEventName": "PreToolUse"})),
+        )
         self.assertTrue(server.presence.is_working("hook"))
         server.presence.forget("hook")
 
@@ -1025,7 +1048,9 @@ class ServerTest(unittest.TestCase):
         """A resumed attachment gets a new owner; the old harness keeps firing."""
         self.add_attachment("hook", owner="owner-1", status="exited")
         self.assertTrue(server.runtime.db.claim_attachment("hook", "owner-2"))
-        payload = JsonRequest({"message": "Permission needed"})
+        payload = JsonRequest(
+            {"hookEventName": "Notification", "message": "Permission needed"}
+        )
 
         self.assert_http(404, hook_event("hook", "owner-1", payload))
         self.arun(hook_event("hook", "owner-2", payload))
@@ -1033,7 +1058,9 @@ class ServerTest(unittest.TestCase):
 
     def test_an_attachment_with_no_activation_has_no_reachable_hook(self):
         self.add_attachment("hook")
-        payload = JsonRequest({"message": "Permission needed"})
+        payload = JsonRequest(
+            {"hookEventName": "Notification", "message": "Permission needed"}
+        )
 
         self.assert_http(404, hook_event("hook", "", payload))
 

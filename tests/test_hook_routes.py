@@ -1,53 +1,81 @@
-"""The hook intake, as a pure function of the payload.
+"""The hook intake, as a named contract of the payload.
 
-Turn boundaries are read from the *harness's* event name. Nothing an agent
-can write into a chat message reaches this decision — which is the whole
-point, and the reason it is a function that can be enumerated in a test.
+Turn boundaries are read from the harness event name after folding dialects.
+An unseen name is a 422, not a dropped receipt — that silence is how Grok's
+`stop` left every jack `working…`.
 """
 
+import json
 import unittest
+from pathlib import Path
+
+from pydantic import ValidationError
 
 from partyline.adapter_capabilities import adapter_completion
 from partyline.adapters import ADAPTER_METADATA
 from partyline.bind import BindConfig
-from partyline.hook_routes import hook_url, turn_boundary
+from partyline.hook_contracts import parse_hook_payload
+from partyline.hook_routes import hook_url
+
+
+FIXTURES = Path(__file__).parent / "fixtures" / "hooks"
+
+# Captured-shape fixtures: one per dialect we have seen. A new harness that
+# does not fold onto began/ended fails this table rather than a stuck badge.
+DIALECT_FIXTURES = (
+    ("claude_userpromptsubmit.json", "began"),
+    ("claude_stop.json", "ended"),
+    ("grok_user_prompt_submit.json", "began"),
+    ("grok_stop.json", "ended"),
+    ("grok_stop_cancelled.json", "ended"),
+)
+
+
+def boundary(body: object) -> str | None:
+    return parse_hook_payload(body).turn_boundary()
 
 
 class TurnBoundaryTest(unittest.TestCase):
     def test_the_paired_harness_events_are_the_only_boundaries(self):
-        self.assertEqual(turn_boundary({"hookEventName": "UserPromptSubmit"}), "began")
-        self.assertEqual(turn_boundary({"hookEventName": "Stop"}), "ended")
-        self.assertEqual(turn_boundary({"hook_event_name": "Stop"}), "ended")
+        self.assertEqual(boundary({"hookEventName": "UserPromptSubmit"}), "began")
+        self.assertEqual(boundary({"hookEventName": "Stop"}), "ended")
+        self.assertEqual(boundary({"hook_event_name": "Stop"}), "ended")
 
     def test_grok_snake_case_payloads_bound_the_turn(self):
-        """Grok's stdin uses `stop`, not the Claude config key `Stop`.
+        """Grok's stdin uses `stop`, not the Claude config key `Stop`."""
+        self.assertEqual(boundary({"hookEventName": "user_prompt_submit"}), "began")
+        self.assertEqual(boundary({"hookEventName": "stop"}), "ended")
+        self.assertEqual(boundary({"hookEventName": "stop_failure"}), "ended")
+        self.assertEqual(boundary({"hookEventName": "stop_cancelled"}), "ended")
+        self.assertEqual(boundary({"hookEventName": "StopFailure"}), "ended")
+        self.assertEqual(boundary({"hookEventName": "StopCancelled"}), "ended")
 
-        The live failure: the adapter POSTed the receipt, then `turn_boundary`
-        returned None, so every Grok jack stayed `working…` after the first
-        wake — including after HOLD. Control: PascalCase still matches.
-        """
-        self.assertEqual(turn_boundary({"hookEventName": "user_prompt_submit"}), "began")
-        self.assertEqual(turn_boundary({"hookEventName": "stop"}), "ended")
-        self.assertEqual(turn_boundary({"hookEventName": "stop_failure"}), "ended")
-        self.assertEqual(turn_boundary({"hookEventName": "stop_cancelled"}), "ended")
-        self.assertEqual(turn_boundary({"hookEventName": "StopFailure"}), "ended")
-        self.assertEqual(turn_boundary({"hookEventName": "StopCancelled"}), "ended")
-
-    def test_nothing_else_is_a_boundary(self):
+    def test_known_non_boundaries_parse_and_do_not_end_a_turn(self):
         for payload in (
             {"hookEventName": "SubagentStop"},
             {"hookEventName": "subagent_stop"},
             {"hookEventName": "Notification"},
-            {"hookEventName": ""},
-            {"hookEventName": None},
-            {"hookEventName": {"nested": "Stop"}},
-            {"message": "Stop"},
-            {},
-            None,
-            "Stop",
-            ["Stop"],
         ):
-            self.assertIsNone(turn_boundary(payload), payload)
+            self.assertIsNone(boundary(payload), payload)
+
+    def test_an_unknown_event_is_a_validation_error_not_silence(self):
+        with self.assertRaises(ValidationError) as caught:
+            parse_hook_payload({"hookEventName": "PreToolUse"})
+        self.assertIn("unrecognized hook event", str(caught.exception))
+        self.assertIn("PreToolUse", str(caught.exception))
+
+    def test_a_missing_event_name_is_a_validation_error(self):
+        with self.assertRaises(ValidationError) as caught:
+            parse_hook_payload({"message": "Permission needed"})
+        self.assertIn("hookEventName", str(caught.exception))
+
+
+class DialectFixtureTest(unittest.TestCase):
+    def test_each_captured_harness_shape_maps_to_a_turn_boundary(self):
+        for name, expected in DIALECT_FIXTURES:
+            with self.subTest(name):
+                body = json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+                self.assertEqual(boundary(body), expected, name)
 
 
 class CapabilityTest(unittest.TestCase):
