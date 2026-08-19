@@ -30,11 +30,14 @@ command = ["example-process"]
 requires = ["example-process"]
 env_unset = []
 capabilities = { resume = false }
+update_command = ["example-process", "update"]
 ```
 
 Use an argv array for `command`, not a shell string. `requires` lists executables that must be on
 `PATH`. `capabilities` is a table; set `resume = true` only if re-attaching genuinely reopens the
-process's previous session. `entrypoint` must name a file inside the package directory, and the
+process's previous session. `update_command` is an optional argv the host runs before a
+fresh attach when the operator ticks “update CLI first”; omit it when the process has no
+updater. Do not guess an update command for another vendor. `entrypoint` must name a file inside the package directory, and the
 class it exports defaults to `PartylineAdapter` — override with `class = "..."` if you need a
 different name. Keep secrets and machine-specific paths out of the manifest. Use `env_unset` only
 for inherited variables that would interfere with a child process; an entry ending in `*` clears

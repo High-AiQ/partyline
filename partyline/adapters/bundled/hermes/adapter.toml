@@ -8,5 +8,7 @@ requires = ["hermes"]
 env_unset = []
 output = "read-only SQLite session transcript"
 
+update_command = ["hermes", "update"]
+
 [adapter.capabilities]
 resume = true

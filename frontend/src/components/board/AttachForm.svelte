@@ -14,9 +14,17 @@
   let adapter = $state("");
   let command = $state("");
   let cwd = $state("");
+  let updateCli = $state(false);
   let attaching = $state(false);
 
   const selectedAdapter = $derived(session.adapters.find((option) => option.id === adapter));
+  const updateCommand = $derived(selectedAdapter?.update_command ?? null);
+  const canUpdate = $derived(Boolean(updateCommand && updateCommand.length > 0));
+  const updateTitle = $derived(
+    updateCommand && updateCommand.length > 0
+      ? updateCommand.join(" ")
+      : "this adapter has no update command",
+  );
 
   // The picker's default follows the registry: an adapter imported from a repo
   // is selectable the moment it registers, without this file knowing its name.
@@ -25,12 +33,22 @@
     if (!adapter && firstAdapter) adapter = firstAdapter.id;
   });
 
+  function adapterCanUpdate(adapterId: string): boolean {
+    const cmd = session.adapters.find((option) => option.id === adapterId)?.update_command;
+    return Boolean(cmd && cmd.length > 0);
+  }
+
   function applyPreset(): void {
     const preset = session.presets.find((p) => p.id === presetId);
     if (!preset) return;
     name = preset.name;
     adapter = preset.adapter;
     command = preset.command;
+    if (!adapterCanUpdate(adapter)) updateCli = false;
+  }
+
+  function onAdapterChosen(): void {
+    if (!adapterCanUpdate(adapter)) updateCli = false;
   }
 
   async function attach(event: SubmitEvent): Promise<void> {
@@ -51,6 +69,7 @@
         adapter,
         command: command.trim(),
         cwd: cwd.trim(),
+        ...(updateCli ? { update: true } : {}),
       });
       // The socket normally announces this too, and `upsertAttachment` is keyed
       // by id so the two cannot double up. Recording it here matters for the
@@ -59,6 +78,7 @@
       room.upsertAttachment(attached);
       name = "";
       command = "";
+      updateCli = false;
     } catch (error) {
       room.showNotice(error instanceof ApiError ? error.message : "attach failed", "error");
     } finally {
@@ -108,7 +128,7 @@
     >
   </div>
   <div class="adapter-picker">
-    <select id="aAdapter" bind:value={adapter}>
+    <select id="aAdapter" bind:value={adapter} onchange={onAdapterChosen}>
       {#each session.adapters as option (option.id)}
         <option value={option.id}
           >{adapterLabel(option.id)}{option.overrides_bundled ? " (imported)" : ""}</option
@@ -129,6 +149,11 @@
 
   <label for="aCwd">working directory</label>
   <input id="aCwd" bind:value={cwd} placeholder="~/code/myproject" autocomplete="off" />
+
+  <label class="update-row" for="aUpdate" title={updateTitle}>
+    update CLI first
+    <input id="aUpdate" type="checkbox" bind:checked={updateCli} disabled={!canUpdate} title={updateTitle} />
+  </label>
 
   <button class="primary" type="submit" disabled={attaching}>{attaching ? "attaching…" : "attach"}</button>
   <div class="note">the real interactive process is spawned in a pty</div>
@@ -181,5 +206,24 @@
   .adapter-picker select {
     flex: 1;
     min-width: 0;
+  }
+
+  .update-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    margin-bottom: 0;
+    cursor: pointer;
+  }
+  .update-row:has(input:disabled) {
+    cursor: default;
+  }
+  .update-row input[type="checkbox"] {
+    width: 15px;
+    height: 15px;
+    padding: 0;
+    flex: none;
+    accent-color: var(--color-copper);
   }
 </style>

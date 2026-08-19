@@ -8,5 +8,7 @@ requires = ["opencode"]
 env_unset = []
 output = "local session transcript"
 
+update_command = ["opencode", "upgrade"]
+
 [adapter.capabilities]
 resume = true

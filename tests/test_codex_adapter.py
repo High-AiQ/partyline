@@ -15,6 +15,7 @@ class CodexCommandTest(unittest.IsolatedAsyncioTestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn('version = "1.0.3"', manifest)
+        self.assertIn('update_command = ["codex", "update"]', manifest)
 
     def make_adapter(
         self,

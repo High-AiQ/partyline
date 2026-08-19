@@ -182,6 +182,16 @@ class ManifestValidationTest(unittest.TestCase):
     def test_a_command_that_is_not_an_argv_array_is_rejected(self):
         self.assertIn("argv array", self._load_expecting_failure(command="probe --flag"))
 
+    def test_an_update_command_that_is_not_an_argv_array_is_rejected(self):
+        self.assertIn(
+            "argv array", self._load_expecting_failure(update_command="grok update")
+        )
+
+    def test_a_missing_update_command_is_none(self):
+        with tempfile.TemporaryDirectory() as directory, isolated_registry():
+            loader.load_adapter(write_package(Path(directory) / "probe"))
+            self.assertIsNone(registry.ADAPTER_METADATA["probe"]["update_command"])
+
     def test_capabilities_must_be_a_table(self):
         with tempfile.TemporaryDirectory() as directory, isolated_registry():
             path = Path(directory) / "probe"
