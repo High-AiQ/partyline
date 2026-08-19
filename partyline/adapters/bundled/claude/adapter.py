@@ -20,13 +20,25 @@ class PartylineAdapter(BaseAdapter):
             cmd += ["--session-id", self.att["id"]]
         hook_url = self.att.get("hook_url")
         if hook_url and "--settings" not in cmd:
-            curl = (f"curl -s -m 5 -X POST {shlex.quote(hook_url)}"
-                    " -H 'Content-Type: application/json' --data-binary @-")
-            settings = {"hooks": {"Notification": [{"hooks": [
-                {"type": "command", "command": curl}
-            ]}]}}
-            cmd += ["--settings", json.dumps(settings)]
+            cmd += ["--settings", json.dumps(self._hook_settings(hook_url))]
         return cmd
+
+    @staticmethod
+    def _hook_settings(hook_url: str) -> dict:
+        """Process-scoped harness receipts plus the existing attention hook.
+
+        ``UserPromptSubmit`` / ``Stop`` are the paired turn boundaries. The
+        same curl posts the event JSON; ``SubagentStop`` is omitted so a child
+        finishing cannot clear the parent jack.
+        """
+        curl = (f"curl -s -m 5 -X POST {shlex.quote(hook_url)}"
+                " -H 'Content-Type: application/json' --data-binary @-")
+        handler = [{"hooks": [{"type": "command", "command": curl}]}]
+        return {"hooks": {
+            "Notification": handler,
+            "UserPromptSubmit": handler,
+            "Stop": handler,
+        }}
 
     def transcript_glob(self) -> str:
         return os.path.expanduser(f"~/.claude/projects/*/{self.att['id']}.jsonl")

@@ -30,6 +30,7 @@ from partyline.adapters.bundled.grok.transcript import (
     fingerprint,
     is_assistant_record,
 )
+from partyline.adapters.bundled.grok import turn_hooks
 
 
 class PartylineAdapter(Adapter):
@@ -98,7 +99,17 @@ class PartylineAdapter(Adapter):
                     self._assistant_fingerprints = scanned
                     self._accounted = len(scanned)
                     self._resume_swap_pending = True
-        await super().start()
+        if self.att.get("hook_url"):
+            turn_hooks.install(str(self.att["hook_url"]), self._session_id, self.att)
+        try:
+            await super().start()
+        except Exception:
+            turn_hooks.uninstall(self._session_id, self.att)
+            raise
+
+    async def stop(self):
+        turn_hooks.uninstall(self._session_id, self.att)
+        await super().stop()
 
     def build_command(self) -> list[str]:
         cmd = list(self.att["command"]) or [
