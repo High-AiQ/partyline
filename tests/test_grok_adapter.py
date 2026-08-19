@@ -2,10 +2,49 @@
 
 import asyncio
 import json
+import os
+import resource
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+
+
+def _memory_bounded() -> bool:
+    """Whether the kernel would kill this process before it kills the machine.
+
+    Checks the actual bound, not a flag someone remembered to export: either
+    a finite RLIMIT_AS, or a cgroup ancestor with a real ``memory.max`` (what
+    ``./scripts/capped-test`` sets up).
+    """
+    soft, _ = resource.getrlimit(resource.RLIMIT_AS)
+    if soft != resource.RLIM_INFINITY:
+        return True
+    try:
+        entry = Path("/proc/self/cgroup").read_text().strip().splitlines()[-1]
+        node = Path("/sys/fs/cgroup") / entry.split(":", 2)[2].lstrip("/")
+        while str(node).startswith("/sys/fs/cgroup"):
+            limit = node / "memory.max"
+            if limit.is_file() and limit.read_text().strip() != "max":
+                return True
+            node = node.parent
+    except (OSError, IndexError):
+        pass
+    return False
+
+
+def setUpModule():
+    # This module has twice OOM-killed the whole dogfood machine (19 GB and
+    # 31 GB incidents in docs/lessons.md) when a patched sleep left a poll
+    # spinning. A prose warning was not a completed lesson: the file itself
+    # now refuses to be the weapon. CI runners are ephemeral and run the bare
+    # command on purpose.
+    if not (_memory_bounded() or os.environ.get("CI")):
+        raise unittest.SkipTest(
+            "refusing to run unbounded: this module has twice OOM-killed the "
+            "machine — run it through ./scripts/capped-test (CI is exempt)"
+        )
+
 
 from partyline.adapters import Adapter
 from partyline.adapters.bundled.grok.adapter import PartylineAdapter
