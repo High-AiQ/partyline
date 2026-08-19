@@ -62,11 +62,14 @@ async def resume_adapter(
         raise HTTPException(409, "restore the line before resuming its processes")
     att["conv_name"] = conv["name"]
     att["resume"] = True
-    att["hook_url"] = hook_url(att_id)
-    att["digest_rider"] = lambda: tasks.rider(att["conv_id"])
-    att["delivered_bodies"] = delivered_bodies(runtime.db, att)
+    # The activation is minted before the hook URL because the URL carries it
+    # as a capability: a resumed process must get this generation's token, not
+    # the one the previous activation's harness was configured with.
     runtime_owner = str(uuid.uuid4())
     att["runtime_owner"] = runtime_owner
+    att["hook_url"] = hook_url(att_id, runtime_owner)
+    att["digest_rider"] = lambda: tasks.rider(att["conv_id"])
+    att["delivered_bodies"] = delivered_bodies(runtime.db, att)
 
     adapter = make_adapter(
         att["adapter"],

@@ -10,7 +10,6 @@ Routing model (MVP):
 import asyncio
 import logging
 import os
-import re
 import signal
 import subprocess
 import sys
@@ -46,14 +45,12 @@ from .contracts import (
     AttachmentCommandRequest,
     AttachmentEvent,
     AttachmentResponse,
-    AttentionEvent,
     ConvIn,
     ConversationDetailResponse,
     ConversationArchivedEvent,
     ConversationDeletedEvent,
     ConversationEvent,
     ConversationResponse,
-    HookEventRequest,
     KeyIn,
     LoadedResponse,
     MessageEvent,
@@ -75,6 +72,7 @@ from .contracts import (
 )
 from .db import Db
 from .frontend_build import current_frontend_build
+from .hook_routes import handle_hook, hook_url, hooks_router
 from .presence import Presence
 from .media import MediaStore, media_root
 from .claim_routes import claims_router, purge_claims
@@ -135,6 +133,7 @@ app.state.bind = BindConfig()
 register_terminal_route(app, runtime)
 app.include_router(media_router(runtime, media))
 app.include_router(claims_router(runtime))
+app.include_router(hooks_router(runtime))
 tasks = wire_tasks(app, runtime)
 
 # -- REST ------------------------------------------------------------------
@@ -429,7 +428,7 @@ async def attach(conv_id: str, body: AttachIn):
     att["runtime_owner"] = runtime_owner
     att["conv_name"] = conv["name"]
     att["topic"] = conv["topic"]
-    att["hook_url"] = _hook_url(att_id, app.state.bind)
+    att["hook_url"] = _hook_url(att_id, app.state.bind, runtime_owner)
     att["digest_rider"] = lambda: tasks.rider(conv_id)
 
     adapter = make_adapter(
@@ -468,7 +467,7 @@ async def _resume_adapter(
         att_id, startup_messages, runtime=runtime,
         adapter_metadata=ADAPTER_METADATA, make_adapter=make_adapter,
         presence=presence, tasks=tasks,
-        hook_url=lambda ident: _hook_url(ident, app.state.bind),
+        hook_url=lambda ident, token: _hook_url(ident, app.state.bind, token),
     )
 
 
@@ -524,36 +523,13 @@ async def detach(att_id: str):
 
 
 # -- attachment introspection ----------------------------------------------
-def _hook_url(att_id: str, bind: BindConfig | None = None) -> str:
-    bind = bind or app.state.bind
-    host = f"[{bind.host}]" if ":" in bind.host else bind.host
-    return f"http://{host}:{bind.port}/api/hooks/{att_id}"
+def _hook_url(att_id: str, bind: BindConfig | None = None, token: str = "") -> str:
+    return hook_url(att_id, bind or app.state.bind, token)
 
 
-ATTENTION_RE = re.compile(r"permission|approv|trust|login|auth", re.IGNORECASE)
-
-
-@app.post("/api/hooks/{att_id}", response_model=OkResponse)
-async def hook_event(att_id: str, request: Request):
-    """Receiver for optional process-side attention hooks."""
-    att = runtime.db.get_attachment(att_id)
-    if not att:
-        raise HTTPException(404)
-    try:
-        payload = HookEventRequest.model_validate(await request.json())
-    except Exception:
-        payload = HookEventRequest()
-    message = (payload.message or payload.title or "").strip()
-    # Only surface events that mean "a human must look at me" — idle chatter
-    # from an agent waiting between mentions would spam the conversation.
-    if message and ATTENTION_RE.search(message):
-        await runtime.post_message(
-            att["conv_id"], "system", "system",
-            f"⏸ @{att['name']} needs attention: {message} — use peek to view/answer the dialog",
-        )
-        await runtime.broadcast(
-            att["conv_id"], AttentionEvent(attachment_id=att_id))
-    return {"ok": True}
+async def hook_event(att_id: str, token: str, request: Request):
+    """The route's handler, reachable without an HTTP client for tests."""
+    return await handle_hook(runtime, att_id, token, request)
 
 
 @app.get("/api/attachments/{att_id}/screen", response_model=ScreenResponse)
