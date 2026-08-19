@@ -242,4 +242,15 @@ describe("adapter override metadata", () => {
   it("preserves an imported adapter's bundled override marker", () => {
     expect(AdapterSchema.parse({ ...adapter, overrides_bundled: true }).overrides_bundled).toBe(true);
   });
+
+  it("defaults a missing update command to null", () => {
+    expect(AdapterSchema.parse(adapter).update_command).toBeNull();
+  });
+
+  it("keeps a declared update command", () => {
+    expect(AdapterSchema.parse({ ...adapter, update_command: ["codex", "update"] }).update_command).toEqual([
+      "codex",
+      "update",
+    ]);
+  });
 });

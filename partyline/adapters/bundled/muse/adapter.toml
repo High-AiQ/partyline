@@ -8,3 +8,4 @@ command = ["muse", "--yolo"]
 requires = ["muse"]
 env_unset = []
 capabilities = { resume = true }
+update_command = ["bash", "-lc", "curl -fsSL https://dev.meta.ai/install.sh | bash"]

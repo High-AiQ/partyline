@@ -8,3 +8,4 @@ command = ["codex"]
 requires = ["codex"]
 env_unset = []
 capabilities = { resume = true }
+update_command = ["codex", "update"]

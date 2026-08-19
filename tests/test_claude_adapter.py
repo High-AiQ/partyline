@@ -14,6 +14,7 @@ class ClaudeManifestTest(unittest.TestCase):
         manifest = (root / "adapter.toml").read_text(encoding="utf-8")
         self.assertIn("resume = true", manifest)
         self.assertIn('turn_end = "receipt"', manifest)
+        self.assertIn('update_command = ["claude", "update"]', manifest)
 
 
 class ClaudeCommandTest(unittest.TestCase):

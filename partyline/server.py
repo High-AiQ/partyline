@@ -1,11 +1,4 @@
-"""partyline server: conversations over REST + WebSocket, adapters as members.
-
-Routing model (MVP):
-  * Every message is broadcast to all humans watching the conversation.
-  * Agents are woken ONLY by an explicit @mention of their attachment name.
-  * A wake delivers every message the agent hasn't seen yet (its cursor),
-    excluding its own, formatted as `[sender]: text` lines.
-"""
+"""partyline server: REST, WebSocket, and adapters as members of the line."""
 
 import asyncio
 import logging
@@ -26,6 +19,7 @@ from starlette.background import BackgroundTask
 
 from . import __version__
 from .adapter_capabilities import adapter_completion
+from .adapter_update import apply_update, requested_update_argv
 from .attachment_commands import validated_attachment_command
 from .attachment_resume import resume_adapter
 from .bind import BindConfig, apply_server_config, load_bind_config, load_dotenv, parse_bind_args
@@ -416,6 +410,9 @@ async def attach(conv_id: str, body: AttachIn):
         command = validated_attachment_command(
             body.adapter, body.command, ADAPTERS, ADAPTER_METADATA
         )
+        update_argv = requested_update_argv(
+            ADAPTER_METADATA, body.adapter, body.update
+        )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -433,6 +430,8 @@ async def attach(conv_id: str, body: AttachIn):
     att["topic"] = conv["topic"]
     att["hook_url"] = _hook_url(att_id, app.state.bind, runtime_owner)
     att["digest_rider"] = lambda: tasks.rider(conv_id)
+    if update_argv:
+        await apply_update(runtime.post_message, conv_id, body.name, update_argv)
 
     adapter = make_adapter(
         body.adapter,

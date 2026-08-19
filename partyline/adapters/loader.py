@@ -13,6 +13,7 @@ import sys
 import tomllib
 from pathlib import Path
 
+from ..adapter_update import normalize_update_command
 from .base import Adapter
 from .registry import register_adapter, unregister_adapter
 
@@ -46,6 +47,7 @@ def _manifest(path: Path) -> dict:
         raise ValueError("adapter command must be an argv array")
     if not isinstance(manifest["capabilities"], dict):
         raise ValueError("adapter capabilities must be a table, e.g. capabilities = { resume = true }")
+    manifest["update_command"] = normalize_update_command(manifest.get("update_command"))
     return manifest
 
 

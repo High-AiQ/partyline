@@ -19,6 +19,7 @@ class AttachIn(BaseModel):
     adapter: str = "opencode"
     command: str = ""
     cwd: str = ""
+    update: bool = False
 
 
 class TopicIn(BaseModel):
@@ -70,6 +71,7 @@ class AdapterMetadataResponse(BaseModel):
     id: str
     source: str = "bundled"
     overrides_bundled: bool = False
+    update_command: list[str] | None = None
 
 
 class ConversationResponse(BaseModel):
