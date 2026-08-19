@@ -425,20 +425,31 @@ class ResumeWatermarkTest(unittest.IsolatedAsyncioTestCase):
             adapter.alive = lambda: True
             writing = True
 
+            # 2026-08-19: this writer was unbounded and `_run()` had no
+            # timeout. A regression that made `_run()` not return turned the
+            # pair into the 31 GB climb that OOM-killed the cockpit twice
+            # (crash_report.md). The cap bounds the bomb; the assertion below
+            # proves the cap was never the reason the writer stopped.
+            writer_cap = 50_000
+
             async def keep_growing():
                 index = 0
-                while writing:
+                while writing and index < writer_cap:
                     with transcript.open("a", encoding="utf-8") as file:
                         file.write(f'{{"type":"assistant","content":"{index}"}}\n')
                     index += 1
                     await asyncio.sleep(0)
+                return index
 
             writer = asyncio.create_task(keep_growing())
-            with patch.object(adapter, "_transcript", return_value=transcript):
-                await adapter._run()
-            writing = False
-            await writer
+            try:
+                with patch.object(adapter, "_transcript", return_value=transcript):
+                    await asyncio.wait_for(adapter._run(), timeout=5)
+            finally:
+                writing = False
+                written = await asyncio.wait_for(writer, timeout=2)
 
+        self.assertLess(written, writer_cap)
         self.assertIn("could not be counted", posted[0])
         self.assertFalse(await adapter.wait_ready())
 
