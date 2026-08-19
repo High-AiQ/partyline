@@ -129,11 +129,30 @@ export const VersionInfoSchema = z.object({
 });
 export type VersionInfo = z.infer<typeof VersionInfoSchema>;
 
+export const PresencePhaseSchema = z.enum(["idle", "working", "speaking", "quiet"]);
+export type PresencePhase = z.infer<typeof PresencePhaseSchema>;
+
+export const PresenceCompletionSchema = z.enum(["receipt", "none"]);
+export type PresenceCompletion = z.infer<typeof PresenceCompletionSchema>;
+
+export const PresenceStateSchema = z.object({
+  id: z.string(),
+  phase: PresencePhaseSchema,
+  completion: PresenceCompletionSchema,
+  since: z.number(),
+  turn: z.number().int().nonnegative(),
+  revision: z.number().int().nonnegative(),
+});
+export type PresenceState = z.infer<typeof PresenceStateSchema>;
+
 export const ConversationDetailSchema = z.object({
   conversation: ConversationSchema,
   messages: z.array(ChatMessageSchema),
   attachments: z.array(AttachmentSchema),
   working: z.array(z.string()).default([]),
+  // Null/absent means a legacy server: replay buffered boolean events without
+  // revision filtering until the backend starts supplying structured state.
+  presence: z.array(PresenceStateSchema).nullable().default(null),
 });
 export type ConversationDetail = z.infer<typeof ConversationDetailSchema>;
 
