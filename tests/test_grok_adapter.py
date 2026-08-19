@@ -1187,14 +1187,14 @@ class LifecycleTest(unittest.IsolatedAsyncioTestCase):
         adapter.alive = lambda: running
         adapter._accounted = 0
 
-        async def stop_sleep(_):
+        async def stop_sleep():
             nonlocal running
             running = False
 
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "chat_history.jsonl"
             path.write_text('{"type":"assistant"', encoding="utf-8")
-            with patch("partyline.adapters.bundled.grok.adapter.asyncio.sleep", stop_sleep):
+            with patch.object(adapter, "_poll", stop_sleep):
                 await adapter._tail_grok_transcript(path, AsyncMock())
 
     async def test_tail_retries_after_an_open_error(self):
@@ -1202,12 +1202,12 @@ class LifecycleTest(unittest.IsolatedAsyncioTestCase):
         adapter = make_adapter()
         adapter.alive = lambda: running
 
-        async def stop_sleep(_):
+        async def stop_sleep():
             nonlocal running
             running = False
 
         with patch.object(Path, "open", side_effect=OSError), \
-                patch("partyline.adapters.bundled.grok.adapter.asyncio.sleep", stop_sleep):
+                patch.object(adapter, "_poll", stop_sleep):
             await adapter._tail_grok_transcript(Path("/unreadable"), AsyncMock())
 
     def test_replaced_treats_a_stat_error_as_replacement(self):
