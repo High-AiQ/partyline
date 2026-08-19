@@ -13,6 +13,7 @@ import uuid
 
 from fastapi import HTTPException
 
+from .adapter_capabilities import adapter_completion
 from .reattach import ResumedAttachment, adapter_can_resume
 
 
@@ -96,7 +97,9 @@ async def resume_adapter(
     except Exception as exc:
         await runtime.db.set_attachment_status_async(att_id, "exited", runtime_owner)
         raise HTTPException(500, f"failed to resume: {exc}") from exc
-    runtime.live[att_id] = presence.watch(adapter, att["conv_id"], att_id)
+    runtime.live[att_id] = presence.watch(
+        adapter, att["conv_id"], att_id, adapter_completion(att["adapter"])
+    )
 
     await runtime.post_message(
         att["conv_id"],
