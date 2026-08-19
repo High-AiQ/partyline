@@ -94,12 +94,17 @@ class TurnHookTest(unittest.TestCase):
     def test_payload_is_a_session_filtered_pair_without_subagent_stop(self):
         url = "http://127.0.0.1:9/api/hooks/a/tok"
         doc = turn_hooks.payload(url, SESSION_ID)
-        self.assertEqual(set(doc["hooks"]), {"UserPromptSubmit", "Stop"})
+        self.assertEqual(
+            set(doc["hooks"]),
+            {"UserPromptSubmit", "Stop", "StopFailure", "StopCancelled"},
+        )
         command = doc["hooks"]["Stop"][0]["hooks"][0]["command"]
         self.assertEqual(command, doc["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"])
         self.assertIn(SESSION_ID, command)
         self.assertIn(url, command)
         self.assertNotIn("SubagentStop", doc["hooks"])
+        for name in ("stop", "userpromptsubmit", "stopfailure", "stopcancelled"):
+            self.assertIn(repr(name), command)
 
     def test_install_lives_under_partyline_and_registers_hooks_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
