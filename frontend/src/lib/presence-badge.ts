@@ -1,0 +1,82 @@
+/** Pure derivation of the working-badge treatment from a presence entry. */
+
+import type { PresenceEntry } from "../state/presence.svelte.js";
+
+/**
+ * A guess must look like a guess: uncertainty rides three redundant channels
+ * (label suffix, hollow dot, no pulse) so it survives colour-blindness and
+ * monochrome. Timers may only reduce confidence here — never clear a badge
+ * and never assert an end the server did not report.
+ */
+export interface BadgeTreatment {
+  label: string;
+  tone: "green" | "copper";
+  dot: "filled" | "hollow";
+  pulse: "live" | "slow" | "none";
+  tooltip: string;
+}
+
+/** A `none` adapter shows today's confident look for this long before decaying. */
+const CONFIDENT_SECONDS = 240;
+/** A receipt adapter that reports promptly has gone quiet for this long. */
+const STALLED_SECONDS = 600;
+
+function confident(speaking: boolean): BadgeTreatment {
+  return {
+    label: "working…",
+    tone: "green",
+    dot: "filled",
+    // speaking is display-only: the dot goes solid, the label stays "working…"
+    pulse: speaking ? "none" : "live",
+    tooltip: "",
+  };
+}
+
+function describe(seconds: number): string {
+  return seconds < 90 ? `${String(Math.round(seconds))}s` : `${String(Math.round(seconds / 60))}m`;
+}
+
+export function badgeTreatment(entry: PresenceEntry | undefined, now: number): BadgeTreatment | null {
+  if (!entry || entry.phase === "idle") return null;
+
+  if (entry.phase === "quiet") {
+    return {
+      label: "done?",
+      tone: "green",
+      dot: "hollow",
+      pulse: "none",
+      tooltip: "guessed idle from inactivity — this CLI sends no turn-end signal",
+    };
+  }
+
+  // Legacy boolean presence carries no phases or revisions; it must render
+  // exactly what it always rendered, and decay would be a claim we cannot make.
+  if (entry.legacy) return confident(entry.phase === "speaking");
+
+  const age = Math.max(0, now - entry.since);
+
+  if (entry.completion === "receipt") {
+    if (age >= STALLED_SECONDS) {
+      return {
+        label: "stalled?",
+        tone: "copper",
+        dot: "hollow",
+        pulse: "slow",
+        tooltip: `no turn signal for ${describe(age)} — may be a long run`,
+      };
+    }
+    return confident(entry.phase === "speaking");
+  }
+
+  if (age >= CONFIDENT_SECONDS) {
+    return {
+      // The label never stops saying working; only the confident channels dim.
+      label: "working…",
+      tone: "green",
+      dot: "hollow",
+      pulse: "none",
+      tooltip: `no turn-end signal from this CLI · active for ${describe(age)}`,
+    };
+  }
+  return confident(entry.phase === "speaking");
+}
