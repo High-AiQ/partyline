@@ -11,6 +11,7 @@ class Session {
   handle = $state(readHandle());
   clientId = readOrMintClientId();
   version = $state<string | null>(null);
+  instanceName = $state<string | null>(null);
 
   adapters = $state<Adapter[]>([]);
   presets = $state<Preset[]>([]);
@@ -45,7 +46,9 @@ class Session {
 
   async loadVersion(): Promise<void> {
     try {
-      this.version = (await api.version()).version;
+      const identity = await api.version();
+      this.version = identity.version;
+      this.instanceName = identity.instance_name;
     } catch {
       /* the badge is decoration; a server too sick to answer will say so elsewhere */
     }
@@ -65,8 +68,9 @@ class Session {
    *  state would otherwise be the only state a document ever has. A picker
    *  omitting an adapter the server had offered for an hour was this
    *  staleness, observed live. */
-  acceptHandshake(version: string): void {
+  acceptHandshake(version: string, instanceName: string | null): void {
     this.acceptServerVersion(version);
+    this.instanceName = instanceName;
     void this.loadAdapters();
   }
 

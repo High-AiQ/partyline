@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from fastapi import HTTPException, WebSocketDisconnect
 
-from partyline import frontend_build, server
+from partyline import bind, frontend_build, server
 from partyline.db import Db
 from partyline.hook_routes import handle_hook
 from partyline.runtime import ChatRuntime
@@ -138,20 +138,20 @@ class StreamWebSocket:
 
 class BindConfigTest(unittest.TestCase):
     def test_resolve_bind_precedence_is_cli_then_env_then_config_then_default(self):
-        self.assertEqual(server.resolve_bind([], {}, {}), ("127.0.0.1", 8642))
+        self.assertEqual(bind.resolve_bind([], {}, {}), ("127.0.0.1", 8642))
         self.assertEqual(
-            server.resolve_bind([], {}, {"server": {"host": "config.test", "port": 7000}}),
+            bind.resolve_bind([], {}, {"server": {"host": "config.test", "port": 7000}}),
             ("config.test", 7000),
         )
         self.assertEqual(
-            server.resolve_bind(
+            bind.resolve_bind(
                 [], {"PARTYLINE_HOST": "env.test", "PARTYLINE_PORT": "8000"},
                 {"server": {"host": "config.test", "port": 7000}},
             ),
             ("env.test", 8000),
         )
         self.assertEqual(
-            server.resolve_bind(
+            bind.resolve_bind(
                 ["--host", "cli.test", "--port", "9000"],
                 {"PARTYLINE_HOST": "env.test", "PARTYLINE_PORT": "8000"},
                 {"server": {"host": "config.test", "port": 7000}},
@@ -159,7 +159,7 @@ class BindConfigTest(unittest.TestCase):
             ("cli.test", 9000),
         )
         self.assertEqual(
-            server.resolve_bind(
+            bind.resolve_bind(
                 ["--host", "cli.test"],
                 {"PARTYLINE_PORT": "8000"},
                 {"server": {"host": "config.test", "port": 7000}},
@@ -169,17 +169,40 @@ class BindConfigTest(unittest.TestCase):
 
     def test_resolve_bind_normalizes_host_whitespace_and_brackets(self):
         self.assertEqual(
-            server.resolve_bind([], {}, {"server": {"host": "  [::1]  "}}),
+            bind.resolve_bind([], {}, {"server": {"host": "  [::1]  "}}),
             ("::1", 8642),
         )
         with self.assertRaisesRegex(ValueError, "valid address"):
-            server.resolve_bind([], {}, {"server": {"host": "[::1"}})
+            bind.resolve_bind([], {}, {"server": {"host": "[::1"}})
 
     def test_resolve_bind_validates_config(self):
         with self.assertRaisesRegex(ValueError, "port"):
-            server.resolve_bind([], {}, {"server": {"port": 0}})
+            bind.resolve_bind([], {}, {"server": {"port": 0}})
         with self.assertRaisesRegex(ValueError, "table"):
-            server.resolve_bind([], {}, {"server": "wrong"})
+            bind.resolve_bind([], {}, {"server": "wrong"})
+
+    def test_instance_name_precedence_is_cli_then_env_then_config_then_unset(self):
+        self.assertIsNone(bind.resolve_instance_name([], {}, {}))
+        config = {"instance": {"name": "Configured"}}
+        self.assertEqual(bind.resolve_instance_name([], {}, config), "Configured")
+        self.assertEqual(
+            bind.resolve_instance_name([], {"PARTYLINE_INSTANCE_NAME": "Environment"}, config),
+            "Environment",
+        )
+        self.assertEqual(
+            bind.resolve_instance_name(
+                ["--instance-name", "Command line"],
+                {"PARTYLINE_INSTANCE_NAME": "Environment"},
+                config,
+            ),
+            "Command line",
+        )
+
+    def test_instance_name_rejects_empty_values_and_a_non_table(self):
+        with self.assertRaisesRegex(ValueError, "non-empty"):
+            bind.resolve_instance_name([], {}, {"instance": {"name": " "}})
+        with self.assertRaisesRegex(ValueError, "table"):
+            bind.resolve_instance_name([], {}, {"instance": "Cockpit"})
 
     def test_load_bind_config_reads_toml(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -261,20 +284,26 @@ class BindConfigTest(unittest.TestCase):
                 captured["ran"] = True
 
         old_bind = server.app.state.bind
+        old_name = getattr(server.app.state, "instance_name", None)
         try:
             with patch.object(server, "load_dotenv"), patch.object(
                 server.uvicorn, "Server", FakeServer
             ):
-                server.main(["--host", "example.test", "--port", "9000"])
+                server.main([
+                    "--host", "example.test", "--port", "9000",
+                    "--instance-name", "Test instance",
+                ])
             self.assertEqual(captured["config"].host, "example.test")
             self.assertEqual(captured["config"].port, 9000)
             self.assertEqual(
                 server._hook_url("attachment", server.app.state.bind, "token-9"),
                 "http://example.test:9000/api/hooks/attachment/token-9",
             )
+            self.assertEqual(server.app.state.instance_name, "Test instance")
             self.assertTrue(captured["ran"])
         finally:
             server.app.state.bind = old_bind
+            server.app.state.instance_name = old_name
 
     def test_loopback_guard_handles_missing_and_ipv4_mapped_peers(self):
         with self.assertRaisesRegex(HTTPException, "process control"):
@@ -611,10 +640,16 @@ class ServerTest(unittest.TestCase):
             {"sender": "luna", "body": "not mine"},
             {"sender": "terra", "body": "hello"},
         )
-        self.arun(server.ws_endpoint(socket, "line"))
+        old_name = getattr(server.app.state, "instance_name", None)
+        server.app.state.instance_name = "Cockpit"
+        try:
+            self.arun(server.ws_endpoint(socket, "line"))
+        finally:
+            server.app.state.instance_name = old_name
         self.assertEqual([event["type"] for event in socket.sent], ["error", "hello", "error", "message"])
         self.assertEqual(socket.sent[1]["build"], frontend_build.FRONTEND_BUILD)
         self.assertEqual(socket.sent[1]["version"], server.__version__)
+        self.assertEqual(socket.sent[1]["instance_name"], "Cockpit")
         self.assertEqual(server.runtime.db.list_messages("line")[-1]["body"], "hello")
         self.assertEqual(server.runtime.human_handles, {})
 
