@@ -268,3 +268,8 @@ enforce it. A prose warning that has no executable guard is not a completed less
   it. The control is a 700-second-old `completion: "receipt"` entry that must
   still render `working…`, not `stalled?`. `none` adapters still decay look
   without dropping the working label.
+- **An unrecognized hook event is not "not a turn boundary".** Grok's `stop`
+  POSTed, `turn_boundary` returned None, and the badge stayed lit. Folding
+  dialects inside a Pydantic model, and 422ing anything that does not fold,
+  is the guard: the next unseen name is a loud failure plus a fixture row,
+  not a silent `working…`.
