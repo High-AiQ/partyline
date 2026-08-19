@@ -5,25 +5,14 @@ from __future__ import annotations
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 
+from .auth_guard import request_principal
 from .contracts import ImageRef, ImageUploadResponse, MessageEvent, MessageResponse
 from .media import MediaError, MediaStore, prepared_images, validated_metadata
 from .media_rows import VARIANTS
-from .runtime import handle_error
 
 
 def _http(exc: MediaError) -> HTTPException:
     return HTTPException(exc.status_code, exc.detail)
-
-
-def _sender_type(runtime, conv_id: str, sender: str) -> str:
-    needle = sender.lower()
-    for attachment in runtime.db.list_attachments(conv_id):
-        if attachment["name"].lower() == needle and attachment["status"] in (
-            "starting",
-            "running",
-        ):
-            return "agent"
-    return "human"
 
 
 def _digest_line(ref: ImageRef, base: str) -> str:
@@ -70,22 +59,20 @@ def media_router(runtime, store: MediaStore) -> APIRouter:
         # FastAPI declares multipart fields as call-valued defaults; that is
         # the framework's binding syntax, not an accidental mutable default.
         file: list[UploadFile] | None = File(None),  # noqa: B008
-        sender: str | None = Form(None),
         title: str | None = Form(None),
         description: str | None = Form(None),
         body: str | None = Form(None),
     ):
         require_line(conv_id, writing=True)
-        who = (sender or "").strip()
-        problem = handle_error(who)
-        if problem:
-            raise HTTPException(400, problem)
+        # Sender identity comes from the credential, never a form field.
+        principal = request_principal(request)
+        who = principal.name
         try:
             prepared = prepared_images([await uploaded.read() for uploaded in file or []])
             title, description = validated_metadata(title, description)
         except MediaError as exc:
             raise _http(exc) from exc
-        kind = _sender_type(runtime, conv_id, who)
+        kind = "agent" if principal.kind == "machine" else "human"
         placeholder = runtime.db.add_message(conv_id, who, kind, "")
         try:
             store.store(conv_id, placeholder["id"], prepared, title, description)
@@ -123,10 +110,12 @@ def media_router(runtime, store: MediaStore) -> APIRouter:
         if located is None:
             raise HTTPException(404)
         path, mime = located
+        # Private: media URLs may carry a ?token= (an <img> tag cannot send a
+        # header), and a shared cache must never store a tokened response.
         return FileResponse(
             path,
             media_type=mime,
-            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+            headers={"Cache-Control": "private, max-age=31536000, immutable"},
         )
 
     return router

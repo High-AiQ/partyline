@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from .adapters import Adapter
+from .auth_guard import websocket_principal
 from .contracts import TerminalGeometry
 from .terminal_viewers import TerminalViewer
 
@@ -28,6 +29,10 @@ async def _receive_terminal(ws: WebSocket, adapter: Adapter) -> None:
 
 def terminal_endpoint(runtime: "ChatRuntime"):
     async def stream(ws: WebSocket, att_id: str) -> None:
+        # A terminal socket can type into a real pty, so it is gated exactly
+        # like the chat socket: a valid credential or a 4401 close.
+        if await websocket_principal(runtime.db, ws) is None:
+            return
         adapter = runtime.live.get(att_id)
         await ws.accept()
         if adapter is None:

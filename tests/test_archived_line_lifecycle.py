@@ -9,18 +9,23 @@ os.environ.setdefault("PARTYLINE_DB", "/tmp/partyline-test-import.db")
 
 from fastapi import WebSocketDisconnect
 
-from partyline import server
+from partyline import auth_store, auth_tokens, server
 from partyline.db import Db
 from partyline.runtime import ChatRuntime
 
 
 class FakeWebSocket:
-    def __init__(self, payload):
+    def __init__(self, payload, token=""):
         self.payload = payload
         self.sent = []
+        self.headers = {}
+        self.query_params = {"token": token} if token else {}
 
     async def accept(self):
         pass
+
+    async def close(self, code, reason=""):
+        self.closed = (code, reason)
 
     async def receive_json(self):
         if self.payload is None:
@@ -40,7 +45,12 @@ class ArchivedLineLifecycleTest(unittest.TestCase):
                 server.runtime = ChatRuntime(Db(database.name))
                 conversation = server.runtime.db.create_conversation("archived", "Old line")
                 server.runtime.db.archive_conversation(conversation["id"])
-                socket = FakeWebSocket({"sender": "terra", "body": "should not persist"})
+                user = auth_store.create_user(
+                    server.runtime.db, "terra@example.com", "terra",
+                    auth_tokens.hash_password("hunter2222"))
+                token = auth_tokens.create_access_token(
+                    auth_tokens.signing_secret(server.runtime.db), user["id"])
+                socket = FakeWebSocket({"body": "should not persist"}, token=token)
 
                 asyncio.run(server.ws_endpoint(socket, conversation["id"]))
 

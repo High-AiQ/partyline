@@ -7,11 +7,17 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from fastapi import HTTPException, WebSocketDisconnect
+from types import SimpleNamespace
 
-from partyline import bind, frontend_build, server
+from fastapi import FastAPI, HTTPException, WebSocketDisconnect
+from fastapi.testclient import TestClient
+
+from partyline import auth_store, auth_tokens, bind, frontend_build, server
+from partyline.auth_guard import Principal
 from partyline.db import Db
 from partyline.hook_routes import handle_hook
+from partyline.preset_routes import presets_router
+from partyline.restart_report import restart_report_router
 from partyline.runtime import ChatRuntime
 from partyline.tasks import TaskError
 
@@ -120,12 +126,18 @@ class JsonRequest:
 
 
 class StreamWebSocket:
-    def __init__(self, *payloads):
+    def __init__(self, *payloads, token=""):
         self.payloads = list(payloads)
         self.sent = []
+        self.closed = None
+        self.headers = {}
+        self.query_params = {"token": token} if token else {}
 
     async def accept(self):
         pass
+
+    async def close(self, code, reason=""):
+        self.closed = (code, reason)
 
     async def receive_json(self):
         if not self.payloads:
@@ -360,6 +372,19 @@ class ServerTest(unittest.TestCase):
         server.runtime.db.add_attachment(
             ident, "line", name, "fake", ["fake"], self.directory.name, owner)
         server.runtime.db.set_attachment_status(ident, status, owner)
+
+    def user_token(self, handle="greg"):
+        """Register a human account and return a live access token for it."""
+        user = auth_store.create_user(
+            server.runtime.db, f"{handle}@example.com", handle,
+            auth_tokens.hash_password("hunter2222"))
+        secret = auth_tokens.signing_secret(server.runtime.db)
+        return auth_tokens.create_access_token(secret, user["id"])
+
+    def principal_request(self, name="greg", kind="user"):
+        """A request already past the guard, as every protected route sees."""
+        return SimpleNamespace(state=SimpleNamespace(
+            principal=Principal(kind=kind, name=name)))
 
     def test_route_mentions_all_punctuation_self_and_unreachable(self):
         self.add_attachment("one", "terra")
@@ -633,12 +658,12 @@ class ServerTest(unittest.TestCase):
             server.runtime.db.list_messages("line")[-1]["body"], "@opus detached"
         )
 
-    def test_websocket_claims_handle_before_messages_and_blocks_impersonation(self):
+    def test_websocket_stamps_the_credential_handle_and_ignores_client_senders(self):
         socket = StreamWebSocket(
-            {"sender": "terra", "body": "too early"},
-            {"type": "hello", "handle": "terra"},
-            {"sender": "luna", "body": "not mine"},
-            {"sender": "terra", "body": "hello"},
+            {"body": "too early"},
+            {"type": "hello", "handle": "somebody-else"},
+            {"sender": "luna", "body": "hello"},
+            token=self.user_token("greg"),
         )
         old_name = getattr(server.app.state, "instance_name", None)
         server.app.state.instance_name = "Cockpit"
@@ -646,11 +671,14 @@ class ServerTest(unittest.TestCase):
             self.arun(server.ws_endpoint(socket, "line"))
         finally:
             server.app.state.instance_name = old_name
-        self.assertEqual([event["type"] for event in socket.sent], ["error", "hello", "error", "message"])
+        self.assertEqual([event["type"] for event in socket.sent], ["error", "hello", "message"])
         self.assertEqual(socket.sent[1]["build"], frontend_build.FRONTEND_BUILD)
         self.assertEqual(socket.sent[1]["version"], server.__version__)
         self.assertEqual(socket.sent[1]["instance_name"], "Cockpit")
-        self.assertEqual(server.runtime.db.list_messages("line")[-1]["body"], "hello")
+        # The handle comes from the account, never the hello or message fields.
+        self.assertEqual(socket.sent[1]["handle"], "greg")
+        posted = server.runtime.db.list_messages("line")[-1]
+        self.assertEqual((posted["sender"], posted["body"]), ("greg", "hello"))
         self.assertEqual(server.runtime.human_handles, {})
 
     def test_frontend_build_manifest_is_validated(self):
@@ -685,18 +713,34 @@ class ServerTest(unittest.TestCase):
             manifest.unlink()
             self.assertEqual(frontend_build.current_frontend_build(), "fedcba9876543210")
 
-    def test_websocket_claim_rejects_invalid_duplicate_and_process_handles(self):
+    def test_websocket_without_a_credential_is_closed_4401(self):
+        socket = StreamWebSocket({"type": "hello"})
+        self.arun(server.ws_endpoint(socket, "line"))
+        self.assertEqual(socket.closed, (4401, "authentication required"))
+        self.assertEqual(socket.sent, [])
+
+    def test_machine_token_is_refused_on_the_chat_socket(self):
+        """An attachment speaks through its harness, never as a chat human.
+
+        Before this guard a machine token entered ``human_handles`` and its
+        speech was stamped ``sender_type="human"`` — silent relabeling of an
+        authenticated agent.
+        """
         self.add_attachment("process", "opus")
-        server.runtime.human_handles["line"] = {object(): ("terra", "other-browser")}
-        for handle, expected in (("bad name", "alphanumeric"), ("all", "reserved"),
-                                 ("TERRA", "another human"), ("opus", "running process")):
-            socket = StreamWebSocket({"type": "hello", "handle": handle})
-            self.arun(server.ws_endpoint(socket, "line"))
-            self.assertEqual(socket.sent[0]["type"], "error")
-            self.assertIn(expected, socket.sent[0]["message"])
+        token = auth_store.ensure_api_token(server.runtime.db, "process")
+        socket = StreamWebSocket(
+            {"type": "hello"}, {"body": "beep"}, token=token)
+        self.arun(server.ws_endpoint(socket, "line"))
+        self.assertEqual(
+            socket.closed,
+            (4403, "machine tokens cannot join the chat socket"),
+        )
+        self.assertEqual(socket.sent, [])
+        self.assertEqual(server.runtime.human_handles, {})
+        self.assertEqual(server.runtime.db.list_messages("line"), [])
 
     def test_attach_rejects_handle_claimed_by_a_human(self):
-        server.runtime.human_handles["line"] = {object(): ("terra", "other-browser")}
+        self.user_token("terra")
         self.assert_http(409, server.attach("line", server.AttachIn(
             name="TERRA", adapter="fake", cwd=self.directory.name)))
 
@@ -705,24 +749,63 @@ class ServerTest(unittest.TestCase):
         server.runtime.sockets["line"] = {stale_socket}
         server.runtime.human_handles["line"] = {stale_socket: ("terra", "browser-id")}
         socket = StreamWebSocket(
-            {"type": "hello", "handle": "terra", "client_id": "browser-id"},
-            {"sender": "terra", "body": "back online"},
+            {"type": "hello", "client_id": "browser-id"},
+            {"body": "back online"},
+            token=self.user_token("terra"),
         )
         self.arun(server.ws_endpoint(socket, "line"))
         self.assertNotIn(stale_socket, server.runtime.sockets["line"])
         self.assertEqual(server.runtime.db.list_messages("line")[-1]["body"], "back online")
 
+    def test_restart_failure_report_needs_the_plan_capability(self):
+        """The watchdog's only credential is the plan's own report token."""
+        gate_closed = []
+
+        def loopback_gate(request):
+            if gate_closed:
+                raise HTTPException(403)
+
+        app = FastAPI()
+        app.include_router(restart_report_router(server.runtime, loopback_gate))
+        client = TestClient(app)
+
+        # No plan at all: nothing to authenticate against.
+        self.assertEqual(404, client.post(
+            "/api/restart-plan/failure",
+            json={"token": "x", "message": "boom"}).status_code)
+
+        plan = server.runtime.db.save_restart_plan("line", ["a1"], "Continue.")
+        wrong = client.post(
+            "/api/restart-plan/failure", json={"token": "nope", "message": "boom"})
+        self.assertEqual(404, wrong.status_code)
+
+        posted = client.post(
+            "/api/restart-plan/failure",
+            json={"token": plan["report_token"], "message": "trigger refused"})
+        self.assertEqual(200, posted.status_code)
+        last = server.runtime.db.list_messages("line")[-1]
+        self.assertEqual("system", last["sender_type"])
+        self.assertEqual("⚠ trigger refused", last["body"])
+
+        # Loopback is belt-and-braces on top of the token, never instead.
+        gate_closed.append(True)
+        refused = client.post(
+            "/api/restart-plan/failure",
+            json={"token": plan["report_token"], "message": "boom"})
+        self.assertEqual(403, refused.status_code)
+
     def test_topic_and_rename_validation_and_notices(self):
-        self.assert_http(404, server.set_topic("missing", server.TopicIn(topic="x")))
-        self.assert_http(400, server.set_topic("line", server.TopicIn(topic="x" * 3001)))
-        changed = self.arun(server.set_topic("line", server.TopicIn(topic=" New ", sender=" greg ")))
+        request = self.principal_request("greg")
+        self.assert_http(404, server.set_topic(request, "missing", server.TopicIn(topic="x")))
+        self.assert_http(400, server.set_topic(request, "line", server.TopicIn(topic="x" * 3001)))
+        changed = self.arun(server.set_topic(request, "line", server.TopicIn(topic=" New ")))
         self.assertEqual(changed["topic"], "New")
         self.assertIn(
             "topic set by @greg", server.runtime.db.list_messages("line")[-1]["body"])
-        self.assert_http(400, server.rename_conversation("line", server.RenameIn(name=" ")))
-        self.assert_http(400, server.rename_conversation("line", server.RenameIn(name="x" * 121)))
+        self.assert_http(400, server.rename_conversation(request, "line", server.RenameIn(name=" ")))
+        self.assert_http(400, server.rename_conversation(request, "line", server.RenameIn(name="x" * 121)))
         renamed = self.arun(
-            server.rename_conversation("line", server.RenameIn(name="Renamed", sender="greg"))
+            server.rename_conversation(request, "line", server.RenameIn(name="Renamed"))
         )
         self.assertEqual(renamed["name"], "Renamed")
         self.assertIn("Line → Renamed", server.runtime.db.list_messages("line")[-1]["body"])
@@ -930,21 +1013,29 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(server.runtime.db.list_messages("line"), messages_before)
 
     def test_presets_and_attention_hook(self):
-        self.assert_http(400, server.create_preset(server.PresetIn(title="", name="x", adapter="fake")))
-        preset = self.arun(
-            server.create_preset(
-                server.PresetIn(title=" My preset ", name="x", adapter="fake", command=" run ")
-            )
-        )
+        app = FastAPI()
+        app.include_router(presets_router(server.runtime, server.ADAPTERS))
+        client = TestClient(app)
+        for invalid in (
+            {"title": "", "name": "x", "adapter": "fake"},
+            {"title": "t", "name": "bad name", "adapter": "fake"},
+            {"title": "t", "name": "all", "adapter": "fake"},
+            {"title": "t", "name": "x", "adapter": "unknown"},
+        ):
+            self.assertEqual(400, client.post("/api/presets", json=invalid).status_code)
+        preset = client.post("/api/presets", json={
+            "title": " My preset ", "name": "x", "adapter": "fake", "command": " run "
+        }).json()
         self.assertEqual(preset["title"], "My preset")
-        self.assert_http(
-            404, server.update_preset("missing", server.PresetIn(title="x", name="x", adapter="fake"))
-        )
-        updated = self.arun(
-            server.update_preset(preset["id"], server.PresetIn(title="New", name="x", adapter="fake"))
-        )
+        self.assertEqual(1, len(client.get("/api/presets").json()))
+        missing = client.put("/api/presets/missing", json={
+            "title": "x", "name": "x", "adapter": "fake"})
+        self.assertEqual(404, missing.status_code)
+        updated = client.put(f"/api/presets/{preset['id']}", json={
+            "title": "New", "name": "x", "adapter": "fake"}).json()
         self.assertEqual(updated["title"], "New")
-        self.assertEqual(self.arun(server.delete_preset(preset["id"])), {"ok": True})
+        self.assertEqual(
+            {"ok": True}, client.delete(f"/api/presets/{preset['id']}").json())
 
         self.add_attachment("hook", owner="owner-1")
         self.arun(
@@ -1197,8 +1288,9 @@ class ShutdownTest(ServerTest):
         server.runtime.live.clear()
         server.runtime.db.mark_stale_attachments()
         socket = StreamWebSocket(
-            {"type": "hello", "handle": "greg", "client_id": "browser"},
+            {"type": "hello", "client_id": "browser"},
             {"type": "reattach", "token": planned.token, "action": "accept"},
+            token=self.user_token("greg"),
         )
 
         self.arun(server.ws_endpoint(socket, "line"))
@@ -1221,8 +1313,9 @@ class ShutdownTest(ServerTest):
         )
         server.runtime.db.create_conversation("other", "Other")
         socket = StreamWebSocket(
-            {"type": "hello", "handle": "greg", "client_id": "browser"},
+            {"type": "hello", "client_id": "browser"},
             {"type": "reattach", "token": planned.token, "action": "accept"},
+            token=self.user_token("greg"),
         )
 
         self.arun(server.ws_endpoint(socket, "other"))

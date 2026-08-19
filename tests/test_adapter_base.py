@@ -494,11 +494,13 @@ class BriefingTest(unittest.TestCase):
         adapter.att.pop("conv_name")
         self.assertIn('conversation "?"', adapter.briefing())
 
-    def test_briefing_teaches_the_image_upload_one_liner(self):
+    def test_briefing_teaches_the_authenticated_image_upload_one_liner(self):
         text = Recorder(["cat"]).briefing()
-        self.assertIn("curl -F file=@", text)
+        self.assertIn(
+            'curl -H "Authorization: Bearer $PARTYLINE_TOKEN" -F file=@', text)
         self.assertIn("$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/images", text)
         self.assertIn("smallest tier", text)
+        self.assertIn("never share it on the line", text)
 
     def test_briefing_bans_ack_loops_between_processes(self):
         self.assertIn("Never trade acknowledgments", Recorder(["cat"]).briefing())

@@ -369,17 +369,47 @@ class FailureReportingTest(unittest.TestCase):
             restart.run_restart = lambda *_args, **_kwargs: (_ for _ in ()).throw(
                 RestartRefused("generation mismatch", EXIT_WRONG_GENERATION)
             )
-            restart.post_failure = lambda url, message: reports.append((url, message))
+            restart.post_failure = lambda url, token, message: reports.append(
+                (url, token, message))
             result = restart.main([
                 "42", "1234", "/bin/true", "/tmp/log", "/tmp",
-                "--failure-ws", "ws://127.0.0.1:8642/ws/line",
+                "--failure-url", "http://127.0.0.1:8642",
+                "--report-token", "plan-cap-1",
             ])
         finally:
             restart.run_restart, restart.post_failure = original_run, original_post
         self.assertEqual(result, EXIT_WRONG_GENERATION)
-        self.assertEqual(reports[0][0], "ws://127.0.0.1:8642/ws/line")
-        self.assertIn("generation mismatch", reports[0][1])
-        self.assertIn("remains unclaimed", reports[0][1])
+        self.assertEqual(reports[0][0], "http://127.0.0.1:8642")
+        self.assertEqual(reports[0][1], "plan-cap-1")
+        self.assertIn("generation mismatch", reports[0][2])
+        self.assertIn("remains unclaimed", reports[0][2])
+
+    def test_post_failure_refuses_without_the_report_token(self):
+        from scripts.restart_server import post_failure
+
+        with self.assertRaisesRegex(RuntimeError, "report token"):
+            post_failure("http://127.0.0.1:8642", "", "boom")
+
+    def test_post_failure_posts_the_plan_capability_over_http(self):
+        import io
+        import json
+        from unittest import mock
+
+        from scripts.restart_server import post_failure
+
+        dialed = {}
+
+        def fake_urlopen(request, timeout=None):
+            dialed["url"] = request.full_url
+            dialed["body"] = json.loads(request.data)
+            return io.BytesIO(b'{"ok": true}')
+
+        with mock.patch("urllib.request.urlopen", fake_urlopen):
+            post_failure("http://127.0.0.1:8642/", "plan-cap-1", "boom")
+        self.assertEqual(
+            dialed["url"], "http://127.0.0.1:8642/api/restart-plan/failure")
+        self.assertEqual(
+            dialed["body"], {"token": "plan-cap-1", "message": "boom"})
 
 
 if __name__ == "__main__":
