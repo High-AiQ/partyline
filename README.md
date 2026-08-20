@@ -71,13 +71,13 @@ The default bind is `127.0.0.1:8642`. To choose another address or port, use com
 options:
 
 ```bash
-uv run --locked partyline --host 192.168.1.20 --port 9000
+uv run --locked partyline --host 0.0.0.0 --port 9000
 ```
 
 You can set the same values with `PARTYLINE_HOST` and `PARTYLINE_PORT`:
 
 ```bash
-PARTYLINE_HOST=192.168.1.20 PARTYLINE_PORT=9000 uv run --locked partyline
+PARTYLINE_HOST=0.0.0.0 PARTYLINE_PORT=9000 uv run --locked partyline
 ```
 
 For a persistent setting, create `partyline.toml` in the current directory, or
@@ -85,7 +85,7 @@ For a persistent setting, create `partyline.toml` in the current directory, or
 
 ```toml
 [server]
-host = "192.168.1.20"
+host = "0.0.0.0"
 port = 9000
 ```
 
@@ -95,7 +95,8 @@ Values loaded from the local `.env` file are part of the environment layer, so t
 over the TOML config (an explicitly exported environment variable still wins over `.env`).
 Binding to a non-loopback address exposes the chat and its ability to start processes to that
 network; keep the server on a trusted network. Process-control endpoints such as shutdown remain
-restricted to loopback callers.
+restricted to loopback callers. Partyline itself speaks HTTP; put TLS on a reverse proxy if you
+need it.
 
 When several Partyline servers are reachable from the same browser, give each one a visible,
 deployment-neutral label with `--instance-name`, `PARTYLINE_INSTANCE_NAME`, or an `[instance]`
@@ -109,26 +110,9 @@ name = "Development"
 The label appears in a compact banner above the line. It does not change storage, networking, or
 authentication, and an unset label leaves the existing interface unchanged.
 
-### Two servers, two databases
-
-Partyline is HTTP. TLS belongs on a reverse proxy in front of it, not in this process.
-Each running server owns one SQLite file (`PARTYLINE_DB`, default `~/.partyline.db`). **Two
-servers must not open the same file.** If they do, humans on one instance see a process speak
-in peek while the other instance's chat never gets the post — WebSocket broadcasts are
-per-process; the database is not a bus.
-
-A second instance needs its own port, database, media directory, and instance name:
-
-```bash
-PARTYLINE_DB=$HOME/.partyline-lan.db \
-PARTYLINE_MEDIA_DIR=$HOME/.partyline-lan-media \
-uv run --locked partyline --host 0.0.0.0 --port 8643 --instance-name Partyline \
-  --config ~/.config/partyline/lan.toml
-```
-
-`uv run partyline` with no `PARTYLINE_DB` still opens `~/.partyline.db`. A durable unit or
-wrapper that exports the lan path is safer than remembering the flags. Put homelab bind and
-database paths in `~/.config/partyline/`, not in this public repository.
+Each running server owns one SQLite file (`PARTYLINE_DB`, default `~/.partyline.db`). Do not
+point two processes at the same file: live posts only broadcast inside the process that wrote
+them.
 
 Then, in the browser:
 
@@ -461,7 +445,7 @@ after a restart.
 | `PARTYLINE_PORT` | `8642` | bind setting; see [precedence](#serving-on-a-specific-ip-or-port) |
 | `PARTYLINE_HOST` | `127.0.0.1` | bind setting; see [precedence](#serving-on-a-specific-ip-or-port) and the security note |
 | `PARTYLINE_INSTANCE_NAME` | unset | optional label shown above every line; CLI/config precedence matches bind settings |
-| `PARTYLINE_DB` | `~/.partyline.db` | conversations, messages, attachments, presets. One file per running server; see [Two servers, two databases](#two-servers-two-databases) |
+| `PARTYLINE_DB` | `~/.partyline.db` | conversations, messages, attachments, presets. One file per running server — do not share it across processes |
 | `PARTYLINE_MEDIA_DIR` | `<PARTYLINE_DB stem>/media` | uploaded images, one subdirectory per line; see [Pictures on the line](#pictures-on-the-line) |
 | `PARTYLINE_ADAPTERS_DIR` | `~/.partyline/adapters` | where imported adapter repos are checked out |
 
@@ -469,9 +453,8 @@ The optional server config file uses `[server] host` and `port`, plus optional `
 [Serving on a specific IP or port](#serving-on-a-specific-ip-or-port) for its search paths and
 precedence.
 
-The working-directory `partyline.toml` is relative to the server's current directory. A cockpit
-restart runs from its cockpit clone, so use `--config` or `~/.config/partyline/config.toml` for a
-setting that must survive that restart.
+The working-directory `partyline.toml` is relative to the server's current directory. Use
+`--config` or `~/.config/partyline/config.toml` for a setting that should not depend on cwd.
 
 When partyline is served by an external ASGI runner instead of `uv run partyline`, that runner
 does not call `main()` and therefore does not apply `PARTYLINE_HOST`, `PARTYLINE_PORT`, or the TOML
@@ -495,12 +478,6 @@ stopped through the normal lifespan teardown, so nothing is orphaned — and `GE
 lists what would be stopped. Both are also in the UI, as **stop** next to the operator name in
 the sidebar footer. Shutdown is refused unless the request comes from this machine, since the
 bind address is configurable and localhost-only is not something to assume.
-
-### Recursive self-improvement
-
-Partyline can deploy and recover the cockpit it is using to build itself without a required human
-button or browser refresh. The contributor procedure, safety boundaries, and evidence required after
-a dogfood restart live in [Dogfooding Partyline](docs/dogfooding.md).
 
 ### Credentials for attached processes
 
