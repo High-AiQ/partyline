@@ -44,6 +44,14 @@ misleading evidence:
 These are durable false assumptions from dogfooding, paired with the evidence and guard that
 replaced them:
 
+- **A squash merge preserved a PR's commit types.** Twice in one night (#81, then #83) a
+  mixed-type branch — a real `fix` commit riding with `docs` commits — was squashed under a
+  `docs:` title, so `version-policy` saw a version transition owned by no `feat`/`fix` commit
+  and correctly turned `main` red; a `chore:` *downgrade* attempted as a repair (#82) is equally
+  illegal, and there is no legal way to re-own a version once its transition commit is gone —
+  the skipped number simply stays untagged. The guard is structural: squash merging is disabled
+  on the repository, so a mixed-type PR must land as a merge commit (the policy ignores merge
+  subjects and reads the real commits) and the same accident cannot recur by memory alone.
 - **A 90-second readiness timeout proved a resume failed.** Codex documents that a resumed rollout
   may appear many minutes later; timed-out but live adapters now remain attached and are reported as
   *settling*, while an explicit `False` readiness result remains a failure.
