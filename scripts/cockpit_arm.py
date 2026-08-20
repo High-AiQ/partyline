@@ -55,3 +55,52 @@ def preflight_server_config(path: Path) -> ServerConfigProof:
     """Resolve the explicit config without any higher-precedence overrides."""
     resolved = path.expanduser().resolve()
     return resolve_server_config(resolved, ["--config", str(resolved)], {})
+
+
+BIND_FLAGS = ("--host", "--port", "--instance-name")
+
+
+def _without_bind_flags(arguments: list[str]) -> list[str]:
+    """Drop preserved bind/identity flags an explicit config supersedes."""
+    kept: list[str] = []
+    skip_value = False
+    for value in arguments:
+        if skip_value:
+            skip_value = False
+            continue
+        if value in BIND_FLAGS:
+            skip_value = True
+            continue
+        if value.startswith(tuple(f"{flag}=" for flag in BIND_FLAGS)):
+            continue
+        kept.append(value)
+    return kept
+
+
+def with_server_config(arguments: list[str], config: Path) -> list[str]:
+    """Rewrite the preserved argv so the explicit config owns the bind.
+
+    An explicit ``--server-config`` is the operator's declared address: the
+    outgoing server's ``--host``/``--port``/``--instance-name`` flags are
+    dropped, not preserved — a cockpit stuck on loopback could otherwise
+    never be moved, because the preserved CLI flags outrank any config. The
+    ``effective == expected`` guard downstream still refuses environment
+    overrides the config cannot beat.
+    """
+    rewritten = _without_bind_flags(list(arguments))
+    positions = [
+        index for index, value in enumerate(rewritten)
+        if value == "--config" or value.startswith("--config=")
+    ]
+    if len(positions) > 1:
+        raise ValueError("server command has several --config arguments")
+    if not positions:
+        return [*rewritten, "--config", str(config)]
+    index = positions[0]
+    if rewritten[index] == "--config":
+        if index + 1 >= len(rewritten) or rewritten[index + 1].startswith("--"):
+            raise ValueError("server command has --config without a path")
+        rewritten[index + 1] = str(config)
+    else:
+        rewritten[index] = f"--config={config}"
+    return rewritten
