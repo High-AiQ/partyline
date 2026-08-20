@@ -82,30 +82,39 @@ class EnvironmentParserTest(unittest.TestCase):
 
 
 class ServerConfigArgumentsTest(unittest.TestCase):
-    def test_it_adds_or_replaces_only_the_config_argument(self):
+    def test_an_explicit_config_supersedes_preserved_bind_flags(self):
+        """The 2026-08-20 loopback trap: pid argv `--host 127.0.0.1` outranks
+        any config, so preserving it made a loopback cockpit unmovable — the
+        trigger refused its own migration. Explicit config now owns the bind."""
         config = Path("/tmp/cockpit.toml")
         self.assertEqual(
             with_server_config(["--host", "127.0.0.1", "--port", "9000"], config),
-            ["--host", "127.0.0.1", "--port", "9000", "--config", str(config)],
+            ["--config", str(config)],
+        )
+        self.assertEqual(
+            with_server_config(
+                ["--host=127.0.0.1", "--instance-name", "Old", "--flag"], config),
+            ["--flag", "--config", str(config)],
         )
         self.assertEqual(
             with_server_config(["--config", "old.toml", "--port", "9000"], config),
-            ["--config", str(config), "--port", "9000"],
+            ["--config", str(config)],
         )
         self.assertEqual(
             with_server_config(["--config=old.toml", "--port", "9000"], config),
-            [f"--config={config}", "--port", "9000"],
+            [f"--config={config}"],
         )
 
     def test_ambiguous_or_missing_config_arguments_are_refused(self):
+        # ValueError here; run_restart maps it to a RestartRefused with the
+        # bad-arguments exit code, which the RestartTest suite pins.
         for arguments in (
             ["--config"],
             ["--config", "--port", "9000"],
             ["--config", "one", "--config=two"],
         ):
-            with self.subTest(arguments=arguments), self.assertRaises(RestartRefused) as raised:
+            with self.subTest(arguments=arguments), self.assertRaises(ValueError):
                 with_server_config(arguments, Path("replacement.toml"))
-            self.assertEqual(raised.exception.exit_code, 22)
 
 
 class RestartTest(unittest.TestCase):
@@ -212,11 +221,9 @@ class RestartTest(unittest.TestCase):
             probe=lambda _cwd, _server: None,
         )
         self.assertEqual(executions[0][-2], {"PATH": "/old/server/path", "TOKEN": "kept"})
-        self.assertEqual(
-            executions[0][-1], [
-                "--config", str(config), "--host", "0.0.0.0", "--port", "8642"
-            ]
-        )
+        # The preserved bind flags are gone: the explicit config owns the bind,
+        # which is what lets a loopback-bound cockpit migrate at all.
+        self.assertEqual(executions[0][-1], ["--config", str(config)])
 
     def test_a_higher_precedence_bind_override_refuses_before_signalling(self):
         config = self.root / "cockpit.toml"
