@@ -59,9 +59,11 @@ uv run python -m scripts.cockpit arm --pid NNNNN \
 ```
 
 The arm preflight resolves that file and records its absolute path in the verified service argv.
-The trigger resolves it again against the outgoing process's exact argv and environment before it
-signals anything; if preserved bind/instance argv or environment values would change the explicit
-config's result, the restart refuses instead of returning on an unexpected address.
+An explicit config owns the bind: the outgoing process's `--host`/`--port`/`--instance-name`
+flags are dropped rather than preserved (preserving them once made a loopback cockpit unable to
+migrate — the CLI flags outrank any config). The trigger still resolves the config against the
+outgoing environment before it signals anything, and refuses if environment overrides would
+change the config's result rather than returning on an unexpected address.
 
 The replacement receives an environment snapshot from the verified outgoing process. This is
 load-bearing: a transient systemd unit does not inherit the interactive user's `PATH`, and attached
