@@ -71,13 +71,13 @@ The default bind is `127.0.0.1:8642`. To choose another address or port, use com
 options:
 
 ```bash
-uv run --locked partyline --host 0.0.0.0 --port 9000
+uv run --locked partyline --host 192.168.1.20 --port 9000
 ```
 
 You can set the same values with `PARTYLINE_HOST` and `PARTYLINE_PORT`:
 
 ```bash
-PARTYLINE_HOST=0.0.0.0 PARTYLINE_PORT=9000 uv run --locked partyline
+PARTYLINE_HOST=192.168.1.20 PARTYLINE_PORT=9000 uv run --locked partyline
 ```
 
 For a persistent setting, create `partyline.toml` in the current directory, or
@@ -85,7 +85,7 @@ For a persistent setting, create `partyline.toml` in the current directory, or
 
 ```toml
 [server]
-host = "0.0.0.0"
+host = "192.168.1.20"
 port = 9000
 ```
 
