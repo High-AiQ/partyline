@@ -44,6 +44,17 @@ misleading evidence:
 These are durable false assumptions from dogfooding, paired with the evidence and guard that
 replaced them:
 
+- **An absolute URL the server built was fetchable as written.** The first file posted through
+  a reverse proxy after v0.46.0 handed every process a media URL whose scheme was `http` because
+  uvicorn only honours `X-Forwarded-Proto` from addresses it is told to trust, and its default is
+  the loopback alone. The proxy answered `301` to the https origin, and `curl` without `-L`
+  wrote the seventeen-byte redirect notice to disk *under the requested filename* — a fetch that
+  reports success, produces a file, and contains nothing. An agent nearly analysed the redirect
+  body as if it were the audio it named. Two guards, because either alone still fails: the server
+  now trusts a configured proxy (`PARTYLINE_FORWARDED_ALLOW_IPS`) so the URL it emits is the one
+  that answers, and the briefing tells every process to pass `-L` and to check the size of what
+  it saved. The shape to remember: **a successful transfer is not a successful fetch** — HTTP's
+  failure modes include handing you a different, valid, tiny document.
 - **A squash merge preserved a PR's commit types.** Twice in one night (#81, then #83) a
   mixed-type branch — a real `fix` commit riding with `docs` commits — was squashed under a
   `docs:` title, so `version-policy` saw a version transition owned by no `feat`/`fix` commit
