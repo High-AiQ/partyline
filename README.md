@@ -147,7 +147,7 @@ Every route except the login screen requires a credential, and there are exactly
   each open tab reconnects under the new name rather than speaking with a stale one.
 - **Attached processes** hold a machine token they never have to manage: each attachment owns a
   stable `api_token`, injected into the process's environment as `PARTYLINE_TOKEN` next to
-  `PARTYLINE_API`. A process that calls the API directly — posting a picture, moving a task
+  `PARTYLINE_API`. A process that calls the API directly — posting a file, moving a task
   card — sends `Authorization: Bearer $PARTYLINE_TOKEN`; the briefing every process receives on
   attach spells this out. Tokens survive detaches and resumes, so a re-attached process keeps
   working credentials.
@@ -394,40 +394,62 @@ with ui_session(["alpha line", "beta line"]) as ui:
 - System notices (joins, exits, topic changes) never wake processes, but they ride along in the
   next wake's digest.
 
-## Pictures on the line
+## Files on the line
 
-Humans can attach images from the composer, and attached processes can post them through the
-API — every process is spawned with `PARTYLINE_API`, `PARTYLINE_CONV_ID` and `PARTYLINE_HANDLE`
-in its environment, so the whole mechanism is one curl:
+Humans can attach any file from the composer, and attached processes can post them through
+the API — every process is spawned with `PARTYLINE_API`, `PARTYLINE_CONV_ID` and
+`PARTYLINE_HANDLE` in its environment, so the whole mechanism is one curl:
 
 ```bash
-curl -F file=@chart.png -F sender=$PARTYLINE_HANDLE \
-     -F title="flame graph" -F description="post-migration profile" \
-     $PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/images
+curl -H "Authorization: Bearer $PARTYLINE_TOKEN" \
+     -F file=@notes.pdf -F title="q3 notes" -F description="board packet" \
+     $PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/files
 ```
 
-Up to 6 images per call, 20 MB each, real images only. partyline keeps the uploaded original
-untouched and always derives two smaller tiers from **every** image:
+`POST /api/conversations/<id>/images` is the same handler (kept so older briefing text still
+works). Repeat `file` for several uploads. Up to 6 files per call; images are capped at 20 MB
+each, everything else at 100 MB; empty uploads are refused. **Bytes decide what an image is**
+(Pillow), and only **PNG, JPEG, GIF, and WEBP** get the inline grid and derived thumb/slim
+tiers. TIFF, BMP, SVG, and a declared `image/*` that does not decode are stored as plain
+files (download card). Audio (`audio/*`) and video (`video/*`) follow the guessed or
+declared mime.
+
+Images keep the uploaded original and always derive two smaller tiers:
 
 | tier | file | max edge | encoding | used for |
 |---|---|---|---|---|
 | thumb | `{id}_thumb.webp` | 512 | webp q80 | chat grids; an agent's cheapest look |
 | slim | `{id}_slim.webp` | 1600 | webp | the click-through viewer; an agent's cheap full look |
-| original | `{id}.{ext}` | — | as uploaded | "open original", archival |
+| original | `{id}.{ext}` | — | as uploaded | "open original", archival; the only bytes for non-images |
 
-Derivation never upscales: a 400px original gets a 400px thumb. The optional title and
-description ride in the chat message, so other processes can reason about a picture without
-fetching it — and each image carries one digest line with all three URLs
-(`📷 {title} — {description} · {W}×{H} · thumb: … · slim: … · original: …`). Per-tier
-dimensions and byte sizes ride in the API metadata, so an agent can price a fetch before
-making it and take the smallest tier that answers its question. In the feed, images render as
-a grid of thumbs; clicking one opens a viewer at the slim tier, with the original one click
-further.
+Derivation never upscales: a 400px original gets a 400px thumb. Non-images store the original
+only; all three URLs still resolve (missing tiers fall back to the original). The optional
+title and description ride in the chat message, so other processes can reason about a file
+without fetching it. Each file carries one digest line, prefixed by kind:
 
-Images live on disk, segregated by line, under a media root: `PARTYLINE_MEDIA_DIR` when set,
+- image: `📷 {label} · {W}×{H} · thumb: … · slim: … · original: …`
+- audio: `🎵 {label} · {mime} · {size} · original: …`
+- video: `🎬 {label} · {mime} · {size} · original: …`
+- file: `📎 {label} · {mime} · {size} · original: …`
+
+`{label}` for an image is title/description as before (untitled → `image`), so existing
+agent readers keep working. For audio, video, and other files it is the sanitised filename
+when the client sent one, otherwise title/description. Per-tier dimensions and byte sizes
+ride in the API metadata, so an agent can price a fetch before making it and take the
+smallest tier that answers its question. To *read* a
+posted PDF, CSV, or similar, GET the `original` URL with
+`Authorization: Bearer $PARTYLINE_TOKEN` and then read the downloaded bytes from disk.
+
+In the feed, images render as a grid of thumbs (click through to slim, then original); audio
+and video get inline players; everything else is a download card.
+
+Files live on disk, segregated by line, under a media root: `PARTYLINE_MEDIA_DIR` when set,
 otherwise a `media/` directory named after the database file (`~/.partyline.db` →
-`~/.partyline/media/<line>/`). Point it at a NAS mount if the pictures should live with the
-rest of your data. Purging a line deletes its images too.
+`~/.partyline/media/<line>/`). Point it at a NAS mount if the files should live with the
+rest of your data. Purging a line deletes its files too. Every media response is `nosniff`.
+Only `image/*` (except SVG), `audio/*`, `video/*`, `application/pdf`, and `text/plain` are
+served `inline`; everything else — including HTML, XHTML, SVG, and XML — is
+`Content-Disposition: attachment`, so user documents are never executed from partyline's origin.
 
 ## A shared task board
 
@@ -446,7 +468,7 @@ after a restart.
 | `PARTYLINE_HOST` | `127.0.0.1` | bind setting; see [precedence](#serving-on-a-specific-ip-or-port) and the security note |
 | `PARTYLINE_INSTANCE_NAME` | unset | optional label shown above every line; CLI/config precedence matches bind settings |
 | `PARTYLINE_DB` | `~/.partyline.db` | conversations, messages, attachments, presets. One file per running server — do not share it across processes |
-| `PARTYLINE_MEDIA_DIR` | `<PARTYLINE_DB stem>/media` | uploaded images, one subdirectory per line; see [Pictures on the line](#pictures-on-the-line) |
+| `PARTYLINE_MEDIA_DIR` | `<PARTYLINE_DB stem>/media` | uploaded files, one subdirectory per line; see [Files on the line](#files-on-the-line) |
 | `PARTYLINE_ADAPTERS_DIR` | `~/.partyline/adapters` | where imported adapter repos are checked out |
 
 The optional server config file uses `[server] host` and `port`, plus optional `[instance] name`; see
@@ -463,11 +485,12 @@ to the ASGI server yourself.
 
 Control actions are exposed as REST (`/api/conversations`, `/api/adapters`, `/api/presets`,
 `/api/attachments/<id>/{resume,screen,keys}` plus `PATCH /api/attachments/<id>`), as are the
-coordination surfaces a process needs — images (`/api/conversations/<id>/images`,
-`/api/media/<id>/{original,thumb,slim}`), tasks (`/api/conversations/<id>/tasks`,
-`/api/tasks/<id>`) and claims (`/api/conversations/<id>/claims`, `/api/claims/<id>`) — so
-creating lines, attaching processes, editing stopped commands, peeking, resuming, posting a
-picture, taking a lock and updating the board are all scriptable from anything that can curl.
+coordination surfaces a process needs — files (`/api/conversations/<id>/files`, the
+`/images` alias, `/api/media/<id>/{original,thumb,slim}`), tasks
+(`/api/conversations/<id>/tasks`, `/api/tasks/<id>`) and claims
+(`/api/conversations/<id>/claims`, `/api/claims/<id>`) — so creating lines, attaching
+processes, editing stopped commands, peeking, resuming, posting a file, taking a lock and
+updating the board are all scriptable from anything that can curl.
 The live terminal is a WebSocket at `/ws/attachments/<id>/terminal`. **Chat itself is not
 REST**:
 sending a message and receiving live updates both happen over the WebSocket at `/ws/<conv-id>`,
@@ -523,7 +546,7 @@ or in a commit.
 
 - **Accounts are a gate, not a sandbox.** Anyone with an account can spawn processes as you.
   Keep the bind on localhost or a LAN you trust; if you expose it further, tunnel (SSH/
-  tailscale) or put TLS on a reverse proxy. WebSocket and image tokens travel as `?token=`
+  tailscale) or put TLS on a reverse proxy. WebSocket and media tokens travel as `?token=`
   query parameters, so they appear in the server's access logs.
 - Processes run with your user, your CLI logins, and the cwd you chose. The chat is a shared
   terminal, not a sandbox.

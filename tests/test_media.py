@@ -19,7 +19,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from partyline import auth_store, auth_tokens, media_images as images
+from partyline import auth_store, auth_tokens, media_files as files, media_images as images
 from partyline.auth_guard import install_auth_guard
 from partyline.db import Db
 from partyline.media import MediaError, MediaStore, media_root
@@ -167,11 +167,13 @@ class PreparationTest(unittest.TestCase):
 
     def test_an_empty_post_is_refused(self):
         with self.assertRaises(MediaError):
-            images.prepared_images([])
+            files.prepared_files([])
 
-    def test_more_images_than_the_cap_are_refused(self):
+    def test_more_files_than_the_cap_are_refused(self):
         with self.assertRaises(MediaError) as raised:
-            images.prepared_images([png()] * (images.MAX_IMAGES_PER_POST + 1))
+            files.prepared_files(
+                [(png(), "image.png", "image/png")] * (files.MAX_FILES_PER_POST + 1)
+            )
         self.assertEqual(raised.exception.status_code, 400)
 
 
@@ -245,7 +247,7 @@ class ImageApiTest(unittest.TestCase):
         response = self.post(title="A chart", description="revenue by quarter", body="look")
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        image = payload["images"][0]
+        image = payload["files"][0]
         self.assertEqual(image["title"], "A chart")
         self.assertEqual(image["mime"], "image/png")
         self.assertEqual(image["thumb"]["mime"], "image/webp")
@@ -253,7 +255,7 @@ class ImageApiTest(unittest.TestCase):
         self.assertGreater(image["thumb"]["bytes"], 0)
         self.assertTrue(image["urls"]["original"].startswith("http://"))
         self.assertEqual(payload["message"]["sender_type"], "human")
-        self.assertEqual(payload["message"]["images"][0]["id"], image["id"])
+        self.assertEqual(payload["message"]["files"][0]["id"], image["id"])
 
     def test_the_stored_body_tells_an_agent_what_the_picture_is(self):
         self.post(title="A chart", description="revenue by quarter", body="look")
@@ -278,10 +280,10 @@ class ImageApiTest(unittest.TestCase):
 
     def test_the_broadcast_event_carries_relative_urls(self):
         response = self.post()
-        image = self.socket.events[-1]["message"]["images"][0]
+        image = self.socket.events[-1]["message"]["files"][0]
         self.assertEqual(image["urls"]["original"], f"/api/media/{image['id']}/original")
         self.assertEqual(self.socket.events[-1]["type"], "message")
-        self.assertEqual(response.json()["images"][0]["id"], image["id"])
+        self.assertEqual(response.json()["files"][0]["id"], image["id"])
 
     def test_a_mention_wakes_a_process_with_the_image_metadata(self):
         self.db.add_attachment("att", "line", "kimi", "fake", ["fake"], "/tmp", "owner")
@@ -301,7 +303,7 @@ class ImageApiTest(unittest.TestCase):
 
     def test_a_large_image_gets_a_thumbnail_of_its_own(self):
         response = self.post(files=[("file", ("big.png", png(2000, 1000), "image/png"))])
-        image = response.json()["images"][0]
+        image = response.json()["files"][0]
         self.assertEqual(image["thumb"]["mime"], "image/webp")
         self.assertEqual(image["thumb"]["width"], images.THUMB_MAX_EDGE)
         served = self.client.get(f"/api/media/{image['id']}/thumb")
@@ -309,7 +311,7 @@ class ImageApiTest(unittest.TestCase):
         self.assertEqual(Image.open(BytesIO(served.content)).width, images.THUMB_MAX_EDGE)
 
     def test_every_tier_is_served_as_its_own_file(self):
-        image = self.post().json()["images"][0]
+        image = self.post().json()["files"][0]
         served = {
             tier: self.client.get(f"/api/media/{image['id']}/{tier}")
             for tier in ("original", "thumb", "slim")
@@ -321,7 +323,7 @@ class ImageApiTest(unittest.TestCase):
             self.assertIn("immutable", served[tier].headers["cache-control"])
 
     def test_the_derived_files_are_named_for_their_tier(self):
-        image = self.post().json()["images"][0]
+        image = self.post().json()["files"][0]
         names = sorted(path.name for path in (self.root / "line").iterdir())
         self.assertEqual(names, sorted([
             f"{image['id']}.png", f"{image['id']}_slim.webp", f"{image['id']}_thumb.webp",
@@ -341,27 +343,28 @@ class ImageApiTest(unittest.TestCase):
 
     def test_six_images_are_allowed_and_seven_are_not(self):
         six = [("file", (f"{n}.png", png(), "image/png")) for n in range(6)]
-        self.assertEqual(len(self.post(files=six).json()["images"]), 6)
+        self.assertEqual(len(self.post(files=six).json()["files"]), 6)
         self.assertEqual(self.post(files=six + six[:1]).status_code, 400)
 
     def test_a_refused_upload_leaves_no_message_behind(self):
         before = len(self.db.list_messages("line"))
-        self.assertEqual(self.post(files=[("file", ("x.sh", b"nope", "image/png"))]).status_code, 400)
+        self.assertEqual(self.post(files=[("file", ("empty", b"", None))]).status_code, 400)
         self.assertEqual(len(self.db.list_messages("line")), before)
 
-    def test_one_bad_image_refuses_the_whole_post(self):
+    def test_one_empty_file_refuses_the_whole_post(self):
         self.assertEqual(
             self.post(files=[
                 ("file", ("a.png", png(), "image/png")),
-                ("file", ("b.png", b"not an image", "image/png")),
+                ("file", ("b.png", b"", "image/png")),
             ]).status_code,
             400,
         )
         self.assertEqual(self.db.list_messages("line"), [])
 
     def test_an_oversized_upload_is_refused_with_413(self):
-        huge = b"x" * (images.MAX_IMAGE_BYTES + 1)
-        self.assertEqual(self.post(files=[("file", ("big.png", huge, "image/png"))]).status_code, 413)
+        with mock.patch.object(files, "MAX_FILE_BYTES", 2):
+            response = self.post(files=[("file", ("big.txt", b"xxx", "text/plain"))])
+        self.assertEqual(response.status_code, 413)
 
     def test_an_unauthenticated_upload_is_401(self):
         response = self.post(headers={"Authorization": ""})
@@ -393,12 +396,12 @@ class ImageApiTest(unittest.TestCase):
         self.assertEqual(self.client.get("/api/conversations/nope/images").status_code, 404)
 
     def test_an_unknown_image_or_variant_is_a_404(self):
-        image = self.post().json()["images"][0]
+        image = self.post().json()["files"][0]
         self.assertEqual(self.client.get("/api/media/missing/original").status_code, 404)
         self.assertEqual(self.client.get(f"/api/media/{image['id']}/raw").status_code, 404)
 
     def test_a_row_whose_file_has_vanished_is_a_404_not_a_traceback(self):
-        image = self.post().json()["images"][0]
+        image = self.post().json()["files"][0]
         for path in (self.root / "line").iterdir():
             path.unlink()
         self.assertEqual(self.client.get(f"/api/media/{image['id']}/original").status_code, 404)
@@ -410,7 +413,7 @@ class ImageApiTest(unittest.TestCase):
         self.assertFalse((self.root / "other").exists())
 
     def test_stored_paths_are_relative_so_the_root_can_move(self):
-        image = self.post().json()["images"][0]
+        image = self.post().json()["files"][0]
         stored = self.db.conn.execute(
             "SELECT path FROM images WHERE id=?", (image["id"],)
         ).fetchone()["path"]
@@ -425,7 +428,7 @@ class ImageApiTest(unittest.TestCase):
             self.store.delete_conversation("../../etc")
 
     def test_purging_a_line_destroys_its_pictures(self):
-        image = self.post().json()["images"][0]
+        image = self.post().json()["files"][0]
         self.store.delete_conversation("line")
         self.assertFalse((self.root / "line").exists())
         self.assertIsNone(self.store.file_for(image["id"], "original"))
@@ -434,13 +437,13 @@ class ImageApiTest(unittest.TestCase):
         self.post(title="one")
         self.db.add_message("line", "greg", "human", "no picture here")
         attached = self.store.attach(self.db.list_messages("line"))
-        self.assertEqual(attached[0]["images"][0].title, "one")
-        self.assertEqual(attached[-1]["images"], [])
+        self.assertEqual(attached[0]["files"][0].title, "one")
+        self.assertEqual(attached[-1]["files"], [])
 
     def test_a_failed_write_leaves_no_orphan_bytes_on_disk(self):
         # Files with no row pointing at them are invisible to every query here,
         # so nothing would ever clean them up. Prove the rollback, don't assume it.
-        prepared = [images.prepared_image(png())]
+        prepared = files.prepared_files([(png(), "image.png", "image/png")])
         with mock.patch("partyline.media.INSERT", "INSERT INTO no_such_table VALUES(1)"):
             with self.assertRaises(sqlite3.OperationalError):
                 self.store.store("line", 1, prepared, None, None)
@@ -460,7 +463,7 @@ class ImageApiTest(unittest.TestCase):
         Zero reads as "free to fetch", which is the one question the field
         exists to answer — a false price is worse than a missing one.
         """
-        image = self.post().json()["images"][0]
+        image = self.post().json()["files"][0]
         with self.db.lock:
             self.db.conn.execute(
                 "UPDATE images SET thumb_bytes=NULL WHERE id=?", (image["id"],)
@@ -530,7 +533,7 @@ class ServerWiringTest(unittest.TestCase):
         # wiring bug for a while.
         paths = set(server.app.openapi()["paths"])
         self.assertIn("/api/conversations/{conv_id}/images", paths)
-        self.assertIn("/api/media/{image_id}/{variant}", paths)
+        self.assertIn("/api/media/{file_id}/{variant}", paths)
 
     def test_conversation_detail_carries_images(self):
         import asyncio
@@ -545,9 +548,15 @@ class ServerWiringTest(unittest.TestCase):
             try:
                 db.create_conversation("line", "Line")
                 message = db.add_message("line", "opus", "agent", "look")
-                store.store("line", message["id"], [images.prepared_image(png())], "T", None)
+                store.store(
+                    "line",
+                    message["id"],
+                    files.prepared_files([(png(), "image.png", "image/png")]),
+                    "T",
+                    None,
+                )
                 detail = asyncio.run(server.conversation_detail("line"))
-                self.assertEqual(detail["messages"][0]["images"][0].title, "T")
+                self.assertEqual(detail["messages"][0]["files"][0].title, "T")
                 with self.assertRaises(HTTPException):
                     asyncio.run(server.conversation_detail("missing"))
             finally:

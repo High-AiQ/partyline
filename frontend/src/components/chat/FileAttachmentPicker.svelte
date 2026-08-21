@@ -1,25 +1,25 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
-  import { MAX_IMAGES_PER_MESSAGE } from "../../lib/images";
-  import type { ImageIntake, PendingImages } from "../../lib/images";
+  import { MAX_FILES_PER_MESSAGE } from "../../lib/files";
+  import type { FileIntake, PendingFiles } from "../../lib/files";
 
   interface Props {
     openPicker: number;
-    intake: ImageIntake;
-    onselection: (selection: PendingImages) => void;
+    intake: FileIntake;
+    onselection: (selection: PendingFiles) => void;
     onlimit: () => void;
   }
 
-  interface SelectedImage {
+  interface SelectedFile {
     file: File;
-    preview: string;
+    preview: string | null;
   }
 
   let { openPicker, intake, onselection, onlimit }: Props = $props();
   let picker = $state<HTMLInputElement | null>(null);
-  const selectedImages = $state<SelectedImage[]>([]);
-  let imageTitle = $state("");
-  let imageDescription = $state("");
+  const selectedFiles = $state<SelectedFile[]>([]);
+  let fileTitle = $state("");
+  let fileDescription = $state("");
   let openedAt = 0;
   let intakeGeneration = 0;
 
@@ -33,65 +33,68 @@
   $effect(() => {
     if (intake.generation === intakeGeneration) return;
     intakeGeneration = intake.generation;
-    addImages(intake.files);
+    addFiles(intake.files);
   });
 
   $effect(() => {
     onselection({
-      files: selectedImages.map(({ file }) => file),
-      title: imageTitle,
-      description: imageDescription,
+      files: selectedFiles.map(({ file }) => file),
+      title: fileTitle,
+      description: fileDescription,
     });
   });
 
   onDestroy(() => {
-    for (const selectedImage of selectedImages) URL.revokeObjectURL(selectedImage.preview);
+    for (const selected of selectedFiles) {
+      if (selected.preview) URL.revokeObjectURL(selected.preview);
+    }
   });
 
-  function chooseImages(event: Event): void {
+  function chooseFiles(event: Event): void {
     const input = event.currentTarget;
     if (!(input instanceof HTMLInputElement) || !input.files?.length) return;
     const files = Array.from(input.files);
     input.value = "";
-    addImages(files);
+    addFiles(files);
   }
 
-  function addImages(files: File[]): void {
-    if (selectedImages.length + files.length > MAX_IMAGES_PER_MESSAGE) {
+  function addFiles(files: File[]): void {
+    if (selectedFiles.length + files.length > MAX_FILES_PER_MESSAGE) {
       onlimit();
       return;
     }
-    selectedImages.push(...files.map((file) => ({ file, preview: URL.createObjectURL(file) })));
+    selectedFiles.push(
+      ...files.map((file) => ({
+        file,
+        preview: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
+      })),
+    );
   }
 
-  function removeImage(index: number): void {
-    const removed = selectedImages[index];
-    if (removed) URL.revokeObjectURL(removed.preview);
-    selectedImages.splice(index, 1);
+  function removeFile(index: number): void {
+    const removed = selectedFiles[index];
+    if (removed?.preview) URL.revokeObjectURL(removed.preview);
+    selectedFiles.splice(index, 1);
   }
 </script>
 
-<input
-  class="file-input"
-  bind:this={picker}
-  type="file"
-  accept="image/*"
-  multiple
-  onchange={chooseImages}
-  tabindex="-1"
-/>
+<input class="file-input" bind:this={picker} type="file" multiple onchange={chooseFiles} tabindex="-1" />
 
-{#if selectedImages.length}
-  <div class="previews" aria-label="images ready to attach">
-    {#each selectedImages as selectedImage, index (selectedImage.preview)}
+{#if selectedFiles.length}
+  <div class="previews" aria-label="files ready to attach">
+    {#each selectedFiles as selected, index (selected.preview ?? selected.file.name + String(index))}
       <div class="preview">
-        <img src={selectedImage.preview} alt="" />
-        <span title={selectedImage.file.name}>{selectedImage.file.name}</span>
+        {#if selected.preview}
+          <img src={selected.preview} alt="" />
+        {:else}
+          <span class="file-icon" aria-hidden="true">📎</span>
+        {/if}
+        <span title={selected.file.name}>{selected.file.name}</span>
         <button
           type="button"
-          aria-label={`remove ${selectedImage.file.name}`}
+          aria-label={`remove ${selected.file.name}`}
           onclick={() => {
-            removeImage(index);
+            removeFile(index);
           }}
         >
           ×
@@ -102,11 +105,11 @@
   <div class="metadata">
     <label>
       title <span>(optional, shared by this batch)</span>
-      <input bind:value={imageTitle} maxlength="200" placeholder="what is shown?" />
+      <input bind:value={fileTitle} maxlength="200" placeholder="what is shared?" />
     </label>
     <label>
       description <span>(optional)</span>
-      <input bind:value={imageDescription} maxlength="2000" placeholder="context for people and agents" />
+      <input bind:value={fileDescription} maxlength="2000" placeholder="context for people and agents" />
     </label>
   </div>
 {/if}
@@ -149,6 +152,14 @@
     font-size: 10px;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .preview .file-icon {
+    display: grid;
+    width: 38px;
+    height: 38px;
+    place-items: center;
+    padding: 0;
+    font-size: 15px;
   }
   .preview button {
     width: 38px;

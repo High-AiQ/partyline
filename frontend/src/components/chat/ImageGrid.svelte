@@ -1,12 +1,12 @@
 <script lang="ts">
   import ImageViewer from "./ImageViewer.svelte";
-  import { imageLabel } from "../../lib/images";
+  import { fileLabel } from "../../lib/files";
   import { authenticatedResourceUrl } from "../../lib/socket-auth";
   import { dialogs } from "../../state/dialogs.svelte.js";
-  import type { ImageRef } from "../../lib/contracts";
+  import type { FileRef } from "../../lib/contracts";
 
   interface Props {
-    images: ImageRef[];
+    images: FileRef[];
   }
 
   let { images }: Props = $props();
@@ -27,14 +27,14 @@
     <button
       type="button"
       class="tile"
-      aria-label={`view ${imageLabel(image, index)}`}
+      aria-label={`view ${fileLabel(image, index)}`}
       onclick={() => {
         view(index);
       }}
     >
       <img
         src={authenticatedResourceUrl(image.urls.thumb)}
-        alt={imageLabel(image, index)}
+        alt={fileLabel(image, index)}
         width={image.thumb?.width ?? image.width}
         height={image.thumb?.height ?? image.height}
         loading="lazy"

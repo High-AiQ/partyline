@@ -39,19 +39,25 @@ export const ImageUrlsSchema = z.object({
 });
 export type ImageUrls = z.infer<typeof ImageUrlsSchema>;
 
-export const ImageRefSchema = z.object({
+export const FileKindSchema = z.enum(["image", "audio", "video", "file"]);
+export type FileKind = z.infer<typeof FileKindSchema>;
+
+export const FileRefSchema = z.object({
   id: z.string(),
+  kind: FileKindSchema,
+  filename: z.string().nullable().default(null),
   title: z.string().max(200).nullable().default(null),
   description: z.string().max(2000).nullable().default(null),
   mime: z.string(),
-  width: z.number().int().positive(),
-  height: z.number().int().positive(),
   bytes: z.number().int().nonnegative(),
+  // Images only; the server maps a non-image's stored 0 to None on the wire.
+  width: z.number().int().positive().nullable().default(null),
+  height: z.number().int().positive().nullable().default(null),
   thumb: ImageVariantSchema.nullable().default(null),
   slim: ImageVariantSchema.nullable().default(null),
   urls: ImageUrlsSchema,
 });
-export type ImageRef = z.infer<typeof ImageRefSchema>;
+export type FileRef = z.infer<typeof FileRefSchema>;
 
 export const ChatMessageSchema = z.object({
   id: z.number().int(),
@@ -60,15 +66,15 @@ export const ChatMessageSchema = z.object({
   sender_type: SenderTypeSchema,
   body: z.string(),
   created_at: z.number(),
-  images: z.array(ImageRefSchema).default([]),
+  files: z.array(FileRefSchema).default([]),
 });
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 
-export const ImageUploadResponseSchema = z.object({
+export const FileUploadResponseSchema = z.object({
   message: ChatMessageSchema,
-  images: z.array(ImageRefSchema),
+  files: z.array(FileRefSchema),
 });
-export type ImageUploadResponse = z.infer<typeof ImageUploadResponseSchema>;
+export type FileUploadResponse = z.infer<typeof FileUploadResponseSchema>;
 
 export const AttachmentSchema = z.object({
   id: z.string(),

@@ -1,4 +1,4 @@
-"""The images table: its schema, its migrations, and the row → wire mapping.
+"""The legacy-named images table: schema, migrations, and wire mapping.
 
 Split out of ``media.py`` when the third variant tier arrived and that file
 reached its line cap. The DDL lives here rather than in ``db.py`` for the same
@@ -9,7 +9,7 @@ reason it always has: that file is frozen at its own cap, and
 
 from __future__ import annotations
 
-from .media_contracts import ImageRef, ImageUrls, ImageVariant
+from .media_contracts import FileRef, ImageUrls, ImageVariant
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS images(
@@ -45,12 +45,14 @@ MIGRATIONS = [
     "ALTER TABLE images ADD COLUMN slim_width INTEGER",
     "ALTER TABLE images ADD COLUMN slim_height INTEGER",
     "ALTER TABLE images ADD COLUMN slim_bytes INTEGER",
+    "ALTER TABLE images ADD COLUMN kind TEXT",
+    "ALTER TABLE images ADD COLUMN filename TEXT",
 ]
 
 COLUMNS = (
     "id,conv_id,message_id,position,title,description,mime,width,height,bytes,path,"
     "thumb_path,thumb_mime,thumb_width,thumb_height,thumb_bytes,"
-    "slim_path,slim_mime,slim_width,slim_height,slim_bytes,created_at"
+    "slim_path,slim_mime,slim_width,slim_height,slim_bytes,created_at,kind,filename"
 )
 INSERT = f"INSERT INTO images({COLUMNS}) VALUES({','.join('?' * len(COLUMNS.split(',')))})"
 
@@ -69,23 +71,27 @@ def _variant(row, prefix: str) -> ImageVariant | None:
     )
 
 
-def ref_from_row(row, base: str = "") -> ImageRef:
-    """Build the wire contract for one stored image row.
+def ref_from_row(row, base: str = "") -> FileRef:
+    """Build the wire contract for one stored file row.
 
     All three URLs are always present. A reader picking a tier should never
     have to ask whether that tier exists — only whether it wants the cheap one,
     the readable one, or the bytes exactly as uploaded.
     """
-    return ImageRef(
+    kind = row["kind"] or ("image" if row["width"] else "file")
+    is_image = kind == "image"
+    return FileRef(
         id=row["id"],
+        kind=kind,
+        filename=row["filename"],
         title=row["title"],
         description=row["description"],
         mime=row["mime"],
-        width=row["width"],
-        height=row["height"],
+        width=row["width"] if is_image else None,
+        height=row["height"] if is_image else None,
         bytes=row["bytes"],
-        thumb=_variant(row, "thumb"),
-        slim=_variant(row, "slim"),
+        thumb=_variant(row, "thumb") if is_image else None,
+        slim=_variant(row, "slim") if is_image else None,
         urls=ImageUrls(
             original=f"{base}/api/media/{row['id']}/original",
             thumb=f"{base}/api/media/{row['id']}/thumb",

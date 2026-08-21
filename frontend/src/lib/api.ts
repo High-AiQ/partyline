@@ -7,7 +7,7 @@ import {
   AttachmentSchema,
   ConversationDetailSchema,
   ConversationSchema,
-  ImageUploadResponseSchema,
+  FileUploadResponseSchema,
   OkResultSchema,
   PresetSchema,
   PurgeResultSchema,
@@ -31,7 +31,7 @@ import type {
   Attachment,
   Conversation,
   ConversationDetail,
-  ImageUploadResponse,
+  FileUploadResponse,
   OkResult,
   Preset,
   PurgeResult,
@@ -70,7 +70,7 @@ export interface PresetDraft {
   command: string;
 }
 
-export interface ImageUpload {
+export interface FileUpload {
   files: readonly File[];
   body: string;
   title: string | null;
@@ -96,7 +96,7 @@ export interface PartylineApi {
   archiveConversation(id: string): Promise<ArchiveResult>;
   restoreConversation(id: string): Promise<Conversation>;
   purgeConversation(id: string): Promise<PurgeResult>;
-  uploadImages(conversationId: string, upload: ImageUpload): Promise<ImageUploadResponse>;
+  uploadFiles(conversationId: string, upload: FileUpload): Promise<FileUploadResponse>;
   attach(conversationId: string, payload: AttachPayload): Promise<Attachment>;
   editAttachmentCommand(attachmentId: string, payload: AttachmentCommandPayload): Promise<Attachment>;
   detach(attachmentId: string): Promise<OkResult>;
@@ -198,17 +198,17 @@ export const api: PartylineApi = {
       method: "DELETE",
       fallback: "could not delete forever",
     }),
-  uploadImages: (conversationId, upload) => {
+  uploadFiles: (conversationId, upload) => {
     const form = new FormData();
     for (const file of upload.files) form.append("file", file);
     if (upload.body) form.append("body", upload.body);
     if (upload.title) form.append("title", upload.title);
     if (upload.description) form.append("description", upload.description);
-    return request(`/api/conversations/${conversationId}/images`, {
-      schema: ImageUploadResponseSchema,
+    return request(`/api/conversations/${conversationId}/files`, {
+      schema: FileUploadResponseSchema,
       method: "POST",
       form,
-      fallback: "image upload failed",
+      fallback: "file upload failed",
     });
   },
 
