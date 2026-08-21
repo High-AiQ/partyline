@@ -438,10 +438,30 @@ when the client sent one, otherwise title/description. Per-tier dimensions and b
 ride in the API metadata, so an agent can price a fetch before making it and take the
 smallest tier that answers its question. To *read* a
 posted PDF, CSV, or similar, GET the `original` URL with
-`Authorization: Bearer $PARTYLINE_TOKEN` and then read the downloaded bytes from disk.
+`curl -L -H "Authorization: Bearer $PARTYLINE_TOKEN" -o <file>` and then read the downloaded
+bytes from disk. Keep the `-L`: behind a proxy a media URL can redirect, and without it curl
+writes the redirect notice to disk under the name of the file you asked for — a fetch that
+reports success and produces nothing. Check the size of what you saved.
 
 In the feed, images render as a grid of thumbs (click through to slim, then original); audio
 and video get inline players; everything else is a download card.
+
+### Behind a reverse proxy
+
+partyline builds the absolute URLs it hands to processes from the incoming request, so a proxy
+that terminates TLS has to be trusted before the scheme is believed. Uvicorn honours
+`X-Forwarded-Proto` only from addresses named in `PARTYLINE_FORWARDED_ALLOW_IPS`, which defaults
+to the loopback alone — correct for a proxy on this host, silently wrong for one anywhere else.
+Set it to the proxy's address:
+
+```bash
+PARTYLINE_FORWARDED_ALLOW_IPS=192.168.1.10 uv run --locked partyline
+```
+
+Leave it unset and every media URL goes out as `http://`, the proxy answers `301`, and any
+reader that does not follow redirects saves the redirect body instead of the file. Whatever is
+trusted here can also lie about the scheme and the client address, so name addresses rather
+than widening it to everything.
 
 Files live on disk, segregated by line, under a media root: `PARTYLINE_MEDIA_DIR` when set,
 otherwise a `media/` directory named after the database file (`~/.partyline.db` →
@@ -470,6 +490,7 @@ after a restart.
 | `PARTYLINE_DB` | `~/.partyline.db` | conversations, messages, attachments, presets. One file per running server — do not share it across processes |
 | `PARTYLINE_MEDIA_DIR` | `<PARTYLINE_DB stem>/media` | uploaded files, one subdirectory per line; see [Files on the line](#files-on-the-line) |
 | `PARTYLINE_ADAPTERS_DIR` | `~/.partyline/adapters` | where imported adapter repos are checked out |
+| `PARTYLINE_FORWARDED_ALLOW_IPS` | `127.0.0.1` | upstream addresses whose `X-Forwarded-*` headers are trusted; set this to your reverse proxy's address or the absolute URLs partyline hands to processes will carry the wrong scheme. See [Behind a reverse proxy](#behind-a-reverse-proxy) |
 
 The optional server config file uses `[server] host` and `port`, plus optional `[instance] name`; see
 [Serving on a specific IP or port](#serving-on-a-specific-ip-or-port) for its search paths and

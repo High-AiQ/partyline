@@ -31,7 +31,8 @@ from .auth_guard import (
 )
 from .auth_routes import auth_router
 from .auth_store import ensure_api_token, handle_taken
-from .bind import BindConfig, apply_server_config, load_bind_config, load_dotenv, parse_bind_args
+from .bind import (BindConfig, apply_server_config, load_bind_config, load_dotenv,
+                   parse_bind_args, uvicorn_config)
 from .adapters import (
     ADAPTERS,
     ADAPTER_METADATA,
@@ -606,7 +607,7 @@ def main(argv: Sequence[str] | None = None):
     global _uvicorn_server
     # Hold the server object so /api/shutdown can ask it to stop rather than
     # signalling blindly.
-    _uvicorn_server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="info"))
+    _uvicorn_server = uvicorn.Server(uvicorn_config(app, host, port, os.environ))
     _uvicorn_server.run()
 
 
