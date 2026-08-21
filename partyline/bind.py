@@ -8,6 +8,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+import uvicorn
+
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8642
@@ -162,3 +164,33 @@ def load_dotenv(path: str = ".env"):
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
             value = value[1:-1]
         os.environ.setdefault(key, value)
+
+
+def forwarded_allow_ips(env: Mapping[str, str]) -> str:
+    """Which upstream addresses are allowed to speak for the real client.
+
+    A reverse proxy terminates TLS and forwards plain HTTP, so unless uvicorn
+    trusts that proxy's `X-Forwarded-Proto` the server builds every absolute
+    URL with the wrong scheme. That is not cosmetic: a media URL handed to a
+    process as `http://…` answers `301` to the https origin, and a plain curl
+    saves the seventeen-byte redirect body under the name of the file it was
+    asked to fetch. Uvicorn's default trusts the loopback alone — right for a
+    proxy on this host, silently wrong for one anywhere else.
+
+    Naming an address here is a deliberate grant: whatever is trusted can lie
+    about the scheme and about who the client is. That is why the default stays
+    narrow and widening it is a thing someone has to write down.
+    """
+    return (env.get("PARTYLINE_FORWARDED_ALLOW_IPS") or "").strip() or DEFAULT_HOST
+
+
+def uvicorn_config(app, host: str, port: int, env: Mapping[str, str] | None = None):
+    """The server's uvicorn settings, proxy trust included."""
+    return uvicorn.Config(
+        app,
+        host=host,
+        port=port,
+        log_level="info",
+        proxy_headers=True,
+        forwarded_allow_ips=forwarded_allow_ips(os.environ if env is None else env),
+    )
