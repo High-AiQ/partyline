@@ -19,7 +19,6 @@ from io import BytesIO
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-MAX_IMAGES_PER_POST = 6
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 # A modest pixel ceiling refuses a decompression bomb before Pillow ever
 # allocates the full raster for it.
@@ -156,15 +155,3 @@ def prepared_image(data: bytes) -> PreparedImage:
         slim=derived(image, SLIM_MAX_EDGE, SLIM_SUFFIX),
     )
 
-
-def prepared_images(uploads: list[bytes]) -> list[PreparedImage]:
-    """Decode a whole post's worth of uploads, all or nothing.
-
-    Every image is validated before any message row is written, so a refusal
-    never leaves an empty message behind on the line.
-    """
-    if not uploads:
-        raise MediaError(400, "no image was uploaded")
-    if len(uploads) > MAX_IMAGES_PER_POST:
-        raise MediaError(400, f"at most {MAX_IMAGES_PER_POST} images per post")
-    return [prepared_image(data) for data in uploads]

@@ -5,8 +5,13 @@ import unittest
 from scripts.uishot import ui_session
 
 
+# A seeded fixture, not an upload: `kind` is what the feed branches on, and the
+# svg data URLs are here so the modal has real pixels without a network fetch.
+# A real svg upload would arrive as kind "file" — Pillow decides what an image is.
 IMAGE = {
     "id": "image-1",
+    "kind": "image",
+    "filename": "signal-map.svg",
     "title": "Signal map",
     "description": "A test image",
     "mime": "image/svg+xml",
@@ -47,7 +52,7 @@ class ImageViewerLayoutTest(unittest.TestCase):
                 "sender_type": "human",
                 "body": "A caption\n📷 Signal map · 800×560 · thumb: test",
                 "created_at": 1_700_000_000,
-                "images": [IMAGE],
+                "files": [IMAGE],
             }
             page.evaluate("(value) => { window.partyline.room.messages = [value]; }", message)
             self.assertEqual(page.locator(".grid .tile img").get_attribute("src"), IMAGE["urls"]["thumb"])
