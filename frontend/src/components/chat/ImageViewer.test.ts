@@ -1,17 +1,19 @@
 import { mount, tick, unmount } from "svelte";
 import { describe, expect, it, vi } from "vitest";
 import ImageViewer from "./ImageViewer.svelte";
-import type { ImageRef } from "../../lib/contracts";
+import type { FileRef } from "../../lib/contracts";
 
-function image(position: number): ImageRef {
+function image(position: number): FileRef {
   return {
     id: `image-${String(position)}`,
+    kind: "image",
+    filename: `signal-${String(position)}.png`,
     title: `Signal ${String(position)}`,
     description: `View ${String(position)}`,
     mime: "image/png",
+    bytes: 100,
     width: 800,
     height: 560,
-    bytes: 100,
     thumb: null,
     slim: { mime: "image/webp", width: 800, height: 560, bytes: 80 },
     urls: {

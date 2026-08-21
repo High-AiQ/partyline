@@ -1,12 +1,11 @@
 <script lang="ts">
   import Modal from "../Modal.svelte";
-  import { imageLabel } from "../../lib/images";
-  import { requestBlob } from "../../lib/http";
+  import { downloadFile, fileLabel } from "../../lib/files";
   import { authenticatedResourceUrl } from "../../lib/socket-auth";
-  import type { ImageRef } from "../../lib/contracts";
+  import type { FileRef } from "../../lib/contracts";
 
   interface Props {
-    images: ImageRef[];
+    images: FileRef[];
     initialIndex: number;
     close: () => void;
   }
@@ -39,17 +38,7 @@
     downloading = true;
     downloadError = "";
     try {
-      const blob = await requestBlob(selected.urls.original);
-      const objectUrl = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      const extension = selected.mime.split("/")[1]?.split("+")[0] ?? "bin";
-      const stem = (selected.title ?? selected.id).replace(/[^A-Za-z0-9_.-]+/g, "-");
-      link.href = objectUrl;
-      link.download = `${stem}.${extension}`;
-      link.click();
-      setTimeout(() => {
-        URL.revokeObjectURL(objectUrl);
-      }, 60_000);
+      await downloadFile(selected);
     } catch {
       downloadError = "could not download the original image";
     } finally {
@@ -66,7 +55,7 @@
       <div class="stage">
         <img
           src={authenticatedResourceUrl(image.urls.slim ?? image.urls.original)}
-          alt={imageLabel(image, index)}
+          alt={fileLabel(image, index)}
           width={image.slim?.width ?? image.width}
           height={image.slim?.height ?? image.height}
           decoding="async"
