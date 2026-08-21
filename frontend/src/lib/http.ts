@@ -169,7 +169,7 @@ export async function requestBlob(path: string, allowRetry = true): Promise<Blob
     if (refreshed) return requestBlob(path, false);
   }
   if (response.status === 401) clearSessionIfCurrent(startedWith);
-  if (!response.ok) throw await responseError(response, "could not download the original image");
+  if (!response.ok) throw await responseError(response, "could not download the file");
   return response.blob();
 }
 

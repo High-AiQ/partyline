@@ -5,7 +5,7 @@ import {
   AdapterSchema,
   ClaimSchema,
   ConversationDetailSchema,
-  ImageRefSchema,
+  FileRefSchema,
   TaskSchema,
   VersionInfoSchema,
   WireEventSchema,
@@ -178,8 +178,8 @@ describe("coordination contracts", () => {
   });
 });
 
-describe("image message contracts", () => {
-  it("defaults images for messages from servers predating the image field", () => {
+describe("file message contracts", () => {
+  it("defaults files for messages from servers predating the file field", () => {
     const event = WireEventSchema.parse({
       type: "message",
       message: {
@@ -192,14 +192,13 @@ describe("image message contracts", () => {
       },
     });
     if (event.type !== "message") throw new Error("expected message event");
-    expect(event.message.images).toEqual([]);
+    expect(event.message.files).toEqual([]);
   });
 
   it("defaults absent slim metadata for stored events from v0.32", () => {
-    const parsed = ImageRefSchema.parse({
+    const parsed = FileRefSchema.parse({
       id: "image-1",
-      title: null,
-      description: null,
+      kind: "image",
       mime: "image/png",
       width: 600,
       height: 600,
@@ -208,9 +207,39 @@ describe("image message contracts", () => {
       urls: { original: "/original", thumb: "/thumb" },
     });
 
+    expect(parsed.filename).toBeNull();
     expect(parsed.slim).toBeNull();
     expect(parsed.urls.slim).toBeNull();
     expect(parsed.thumb?.bytes).toBeNull();
+  });
+
+  it("reads a non-image file with the wire's omitted null fields", () => {
+    // `broadcast()` serializes with exclude_none=True, so filename,
+    // width/height, and the derived tiers are absent rather than null.
+    const parsed = FileRefSchema.parse({
+      id: "file-1",
+      kind: "file",
+      mime: "application/pdf",
+      bytes: 2048,
+      urls: { original: "/original", thumb: "/original" },
+    });
+
+    expect(parsed.filename).toBeNull();
+    expect(parsed.width).toBeNull();
+    expect(parsed.height).toBeNull();
+    expect(parsed.thumb).toBeNull();
+  });
+
+  it("rejects a kind outside the server's vocabulary", () => {
+    const parsed = FileRefSchema.safeParse({
+      id: "file-1",
+      kind: "archive",
+      mime: "application/zip",
+      bytes: 10,
+      urls: { original: "/original", thumb: "/original" },
+    });
+
+    expect(parsed.success).toBe(false);
   });
 });
 

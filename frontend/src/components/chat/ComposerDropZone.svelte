@@ -5,21 +5,14 @@
     children: Snippet;
     disabled: boolean;
     onfiles: (files: File[]) => void;
-    oninvalid: () => void;
   }
 
-  let { children, disabled, onfiles, oninvalid }: Props = $props();
+  let { children, disabled, onfiles }: Props = $props();
   let dragDepth = $state(0);
   const dragging = $derived(dragDepth > 0);
 
   function hasFiles(event: DragEvent): boolean {
     return Array.from(event.dataTransfer?.types ?? []).includes("Files");
-  }
-
-  function queue(files: File[]): void {
-    const images = files.filter((file) => file.type.startsWith("image/"));
-    if (images.length !== files.length) oninvalid();
-    if (images.length) onfiles(images);
   }
 
   function onDragEnter(event: DragEvent): void {
@@ -43,18 +36,19 @@
     if (disabled || !hasFiles(event)) return;
     event.preventDefault();
     dragDepth = 0;
-    queue(Array.from(event.dataTransfer?.files ?? []));
+    const files = Array.from(event.dataTransfer?.files ?? []);
+    if (files.length) onfiles(files);
   }
 
   function onPaste(event: ClipboardEvent): void {
     if (disabled) return;
     const files = Array.from(event.clipboardData?.items ?? [])
-      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .filter((item) => item.kind === "file")
       .map((item) => item.getAsFile())
       .filter((file): file is File => file !== null);
     if (!files.length) return;
     event.preventDefault();
-    queue(files);
+    onfiles(files);
   }
 </script>
 
@@ -75,7 +69,7 @@
       <svg viewBox="0 0 24 24">
         <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v5h14v-5" />
       </svg>
-      <span>drop images here</span>
+      <span>drop files here</span>
     </div>
   {/if}
 </div>

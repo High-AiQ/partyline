@@ -1,12 +1,16 @@
-"""Named contracts for images shared on a line.
+"""Named contracts for uploaded files shared on a line.
 
 These live apart from ``contracts.py`` on purpose: that file is within a
 handful of lines of the 300-line production cap, and the image models would
 have consumed nearly all of its remaining headroom. ``contracts.py`` imports
-``ImageRef`` from here so the message contract stays in one place.
+``FileRef`` from here so the message contract stays in one place.
 """
 
+from typing import Literal
+
 from pydantic import BaseModel
+
+FileKind = Literal["image", "audio", "video", "file"]
 
 
 class ImageVariant(BaseModel):
@@ -37,22 +41,22 @@ class ImageUrls(BaseModel):
     slim: str
 
 
-class ImageRef(BaseModel):
-    """One stored image, as it rides along with the message that posted it.
+class FileRef(BaseModel):
+    """One stored file, as it rides along with the message that posted it.
 
-    Every upload derives both ``thumb`` (max edge 512) and ``slim`` (max edge
-    1600). They are nullable only to describe rows written before those tiers
-    existed; their URLs resolve either way, serving the original where no
-    derivation was ever made.
+    Images derive ``thumb`` and ``slim`` tiers. Other kinds have only an
+    original, but all three URLs still resolve so readers see one shape.
     """
 
     id: str
+    kind: FileKind
+    filename: str | None = None
     title: str | None = None
     description: str | None = None
     mime: str
-    width: int
-    height: int
     bytes: int
+    width: int | None = None
+    height: int | None = None
     thumb: ImageVariant | None = None
     slim: ImageVariant | None = None
     urls: ImageUrls

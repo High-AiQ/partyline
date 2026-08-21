@@ -9,27 +9,27 @@
    */
   import { untrack } from "svelte";
   import MentionPopover from "./MentionPopover.svelte";
-  import ImageAttachmentPicker from "./ImageAttachmentPicker.svelte";
+  import FileAttachmentPicker from "./FileAttachmentPicker.svelte";
   import ComposerDropZone from "./ComposerDropZone.svelte";
   import { room } from "../../state/room.svelte.js";
   import { draft } from "../../state/draft.svelte.js";
   import { layout } from "../../state/layout.svelte.js";
   import { insertNewline } from "../../lib/composer";
   import { api } from "../../lib/api";
-  import type { ImageIntake, PendingImages } from "../../lib/images";
+  import type { FileIntake, PendingFiles } from "../../lib/files";
   import { applyMention, mentionCandidates, mentionToken } from "../../lib/mentions";
   import type { MentionToken, MentionCandidate } from "../../lib/mentions";
 
   let box = $state<HTMLTextAreaElement | null>(null);
   let token = $state<MentionToken | null>(null);
   let selected = $state(0);
-  let pendingImages = $state<PendingImages>({ files: [], title: "", description: "" });
+  let pendingFiles = $state<PendingFiles>({ files: [], title: "", description: "" });
   let pickerGeneration = $state(0);
   let openPicker = $state(0);
-  let imageIntake = $state<ImageIntake>({ generation: 0, files: [] });
+  let fileIntake = $state<FileIntake>({ generation: 0, files: [] });
   let uploading = $state(false);
-  function queueImages(files: File[]): void {
-    imageIntake = { generation: imageIntake.generation + 1, files };
+  function queueFiles(files: File[]): void {
+    fileIntake = { generation: fileIntake.generation + 1, files };
   }
 
   // A handle dropped in from the board should leave the caret at the end. The
@@ -85,7 +85,7 @@
 
   async function send(): Promise<void> {
     if (uploading) return;
-    if (!pendingImages.files.length) {
+    if (!pendingFiles.files.length) {
       if (!room.say(draft.text)) return;
       draft.clear();
       closeToken();
@@ -96,14 +96,14 @@
     if (!conversation) return;
     uploading = true;
     try {
-      await api.uploadImages(conversation.id, {
-        files: pendingImages.files,
+      await api.uploadFiles(conversation.id, {
+        files: pendingFiles.files,
         body: draft.text.trim(),
-        title: pendingImages.title.trim() || null,
-        description: pendingImages.description.trim() || null,
+        title: pendingFiles.title.trim() || null,
+        description: pendingFiles.description.trim() || null,
       });
-      pendingImages = { files: [], title: "", description: "" };
-      imageIntake = { generation: 0, files: [] };
+      pendingFiles = { files: [], title: "", description: "" };
+      fileIntake = { generation: 0, files: [] };
       openPicker = 0;
       pickerGeneration++;
       draft.clear();
@@ -111,7 +111,7 @@
       await room.resync();
       requestAnimationFrame(resize);
     } catch (error) {
-      room.showNotice(error instanceof Error ? error.message : "image upload failed", "error");
+      room.showNotice(error instanceof Error ? error.message : "file upload failed", "error");
     } finally {
       uploading = false;
     }
@@ -160,26 +160,20 @@
   }
 </script>
 
-<ComposerDropZone
-  disabled={!room.conversation || uploading}
-  onfiles={queueImages}
-  oninvalid={() => {
-    room.showNotice("drop or paste image files only", "error");
-  }}
->
+<ComposerDropZone disabled={!room.conversation || uploading} onfiles={queueFiles}>
   {#if popoverOpen}
     <MentionPopover {candidates} {selected} onpick={pick} />
   {/if}
 
   {#key pickerGeneration}
-    <ImageAttachmentPicker
+    <FileAttachmentPicker
       {openPicker}
-      intake={imageIntake}
-      onselection={(selection: PendingImages) => {
-        pendingImages = selection;
+      intake={fileIntake}
+      onselection={(selection: PendingFiles) => {
+        pendingFiles = selection;
       }}
       onlimit={() => {
-        room.showNotice("attach at most 6 images at once", "error");
+        room.showNotice("attach at most 6 files at once", "error");
       }}
     />
   {/key}
@@ -188,8 +182,8 @@
     <button
       class="attach"
       type="button"
-      aria-label="attach images"
-      title="attach up to 6 images"
+      aria-label="attach files"
+      title="attach up to 6 files"
       disabled={!room.conversation || uploading}
       onclick={() => {
         openPicker++;
@@ -219,7 +213,7 @@
       id="send"
       class="primary"
       type="button"
-      disabled={uploading || (!draft.text.trim() && !pendingImages.files.length)}
+      disabled={uploading || (!draft.text.trim() && !pendingFiles.files.length)}
       onclick={() => void send()}>{uploading ? "uploading…" : "send"}</button
     >
   </div>

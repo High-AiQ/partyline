@@ -66,20 +66,22 @@ afterEach(() => {
 });
 
 describe("api", () => {
-  it("uploads image files and optional metadata as multipart form data", async () => {
-    const image = {
-      id: "image-1",
+  it("uploads files and optional metadata as multipart form data", async () => {
+    const file = {
+      id: "file-1",
+      kind: "image",
+      filename: "signal.png",
       title: "Signal map",
       description: "The partyline process topology",
       mime: "image/png",
+      bytes: 256,
       width: 1200,
       height: 800,
-      bytes: 256,
       thumb: null,
       slim: null,
       urls: {
-        original: "http://localhost/api/media/image-1/original",
-        thumb: "http://localhost/api/media/image-1/thumb",
+        original: "http://localhost/api/media/file-1/original",
+        thumb: "http://localhost/api/media/file-1/thumb",
         slim: null,
       },
     };
@@ -91,29 +93,31 @@ describe("api", () => {
         sender_type: "human" as const,
         body: "Topology\n📷 Signal map · 1200×800 · thumb: http://localhost/thumb",
         created_at: 1,
-        images: [image],
+        files: [file],
       },
-      images: [image],
+      files: [file],
     };
     const fetch = vi
       .fn<(path: string, init: RequestInit) => Promise<MockResponse>>()
       .mockResolvedValue(response(uploaded));
     vi.stubGlobal("fetch", fetch);
-    const file = new File(["image bytes"], "signal.png", { type: "image/png" });
+    const upload = new File(["image bytes"], "signal.png", { type: "image/png" });
 
     await expect(
-      api.uploadImages("conv-1", {
-        files: [file],
+      api.uploadFiles("conv-1", {
+        files: [upload],
         body: "Topology",
         title: "Signal map",
         description: "The partyline process topology",
       }),
     ).resolves.toEqual(uploaded);
 
-    const init = fetch.mock.calls[0]?.[1];
+    const call = fetch.mock.calls[0];
+    expect(call?.[0]).toBe("/api/conversations/conv-1/files");
+    const init = call?.[1];
     expect(init?.headers).toBeUndefined();
     if (!(init?.body instanceof FormData)) throw new Error("expected multipart body");
-    expect(init.body.get("file")).toBe(file);
+    expect(init.body.get("file")).toBe(upload);
     expect(init.body.has("sender")).toBe(false);
     expect(init.body.get("body")).toBe("Topology");
     expect(init.body.get("title")).toBe("Signal map");

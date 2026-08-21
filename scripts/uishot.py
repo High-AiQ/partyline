@@ -317,7 +317,7 @@ def seed_room(page):
     }
     message = lambda mid, sender, kind, body: {      # noqa: E731
         "id": mid, "sender": sender, "sender_type": kind,
-        "body": body, "created_at": FIXED_SENT_AT, "images": [],
+        "body": body, "created_at": FIXED_SENT_AT, "files": [],
     }
     page.evaluate(SEED_ROOM, {
         "attachments": [jack("sol", "running", 1), jack("terra", "exited", 2)],
