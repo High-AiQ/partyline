@@ -57,9 +57,8 @@ class Turn:
     since: float
     turn: int
     phase: str
-    # Harness turn-start receipts awaiting their matching end: a CLI folding
-    # two wakes into one turn emits one pair, so this counts the harness's
-    # own boundaries rather than our deliveries.
+    # Only ever 0 or 1: a began while a turn is open replaces it — aborted
+    # turns never report their own end, and no harness interleaves two.
     open: int = 0
     # The server generation that owned the attachment when the turn opened;
     # a receipt from a previous owner must not end the current turn.
@@ -188,24 +187,25 @@ class Presence:
     ) -> None:
         """The harness reports the CLI has begun a turn.
 
-        Arms the badge if a delivery has not, and records the open boundary
-        so the matching end knows whether anything is still running.
+        Arms the badge if a delivery has not. A began while a turn is open
+        replaces it: no harness interleaves two live turns, so the open one
+        was aborted and will never report its own end.
         """
         open_turn = self._current(att_id, owner, turn)
         if open_turn is None:
             if turn is not None or att_id in self.turns:
                 return  # a receipt for a turn that is not the open one
             await self.started(conv_id, att_id, owner)
-            open_turn = self.turns[att_id]
-        open_turn.open += 1
+            return
+        open_turn.open = 1
 
     async def ended(
         self, conv_id: str, att_id: str, owner: str | None = None, turn: int | None = None
     ) -> None:
         """The harness reports the CLI has finished a turn.
 
-        Only closes the turn once every observed start has its end, so a CLI
-        that took two wakes as two turns stays lit through both.
+        Closes the open turn; an end with nothing open is a no-op, so a
+        supersession end plus the harness's own cannot wedge the badge.
         """
         open_turn = self._current(att_id, owner, turn)
         if open_turn is None:

@@ -339,3 +339,18 @@ enforce it. A prose warning that has no executable guard is not a completed less
   resend on a bounded schedule, then post a system notice instead of failing
   silently. The control: paste a digest, feed no USER_INPUT, and the test must
   see the resends and the loud give-up.
+- **Two begins are not two live turns.** An opencode jack showed `working…`
+  while the CLI sat idle: a turn aborted with Esc writes an assistant row that
+  never completes, the `ENDED` receipt (which required `completed IS NOT NULL`)
+  never fired, and presence's open-turn count — incremented per `BEGAN` — never
+  returned to zero, wedging every clean turn after the aborted one. The false
+  assumption was that stacked begins mean stacked live turns; no harness
+  interleaves two, because a prompt cannot be submitted while a turn runs. A
+  `BEGAN` arriving while a turn is open *proves* the open turn was aborted, so
+  presence now replaces rather than stacks it — one invariant covering every
+  receipt source, hook-based (claude, grok) and transcript-based (codex,
+  opencode, antigravity) alike. Transcript adapters additionally end an
+  unterminated record when a later one supersedes it, clearing the badge
+  without waiting for the next wake. The control: `began, began, ended` must
+  end idle (it used to stay working), and an un-completed opencode row
+  followed by any later row must emit exactly one supersession `ENDED`.
