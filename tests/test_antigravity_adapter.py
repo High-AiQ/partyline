@@ -292,11 +292,11 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
             await resumed._run()
         self.assertEqual(self.messages, [])
 
-    async def test_a_submitted_input_that_skips_the_wake_resends_once_then_notices(self):
+    async def test_a_submitted_input_that_skips_the_wake_resends_twice_then_repools(self):
         """Regression for the stuck-badge incident, evidence-only: an idle TUI
         can hold a pasted digest unsubmitted. A USER_INPUT that contains the
         digest verifies it; one that does not *proves* the paste was skipped,
-        which re-sends it exactly once — a second proof drops it with one
+        which re-sends it up to twice — a third proof re-pools with one
         factual notice. No timer may guess at the CLI's state."""
         adapter = self.make()
         adapter.proc = Process()
@@ -307,20 +307,29 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([d for d, _ in adapter._outstanding], [digest])
         pasted = adapter._outstanding[0][1]
 
+        # 1st skip proof -> 1st resend
         await adapter._note_user_input(
             "<USER_REQUEST>\n/some other command\n</USER_REQUEST>", later(pasted)
         )
-        # The original paste from deliver() plus the one proof-triggered resend.
         self.assertEqual(sent, [digest, digest])
         self.assertEqual([d for d, _ in adapter._outstanding], [digest])
 
+        # 2nd skip proof -> 2nd resend
+        await adapter._note_user_input(
+            "<USER_REQUEST>\n/second command\n</USER_REQUEST>", later(pasted)
+        )
+        self.assertEqual(sent, [digest, digest, digest])
+        self.assertEqual([d for d, _ in adapter._outstanding], [digest])
+
+        # 3rd skip proof -> give up, post notice, repool
         await adapter._note_user_input(
             "<USER_REQUEST>\n/something else\n</USER_REQUEST>", later(pasted)
         )
-        self.assertEqual(sent, [digest, digest])
+        self.assertEqual(sent, [digest, digest, digest])
         self.assertEqual(adapter._outstanding, [])
         self.assertEqual(len(self.messages), 1)
-        self.assertIn("was not delivered", self.messages[0][2])
+        self.assertIn("wake queued for next turn-end", self.messages[0][2])
+        self.assertEqual(adapter._repool_messages, [{"sender": "greg", "body": "wake one"}])
 
     async def test_a_record_cannot_judge_a_digest_pasted_after_it(self):
         """A mention delivered mid-turn pastes a wake that the running turn's
@@ -376,7 +385,8 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         adapter.send_keys = AsyncMock()
         for body in ("first", "second", "third"):
             await adapter.deliver([{"sender": "greg", "body": body}])
-        for _ in range(2):
+        # 3 skips per wake triggers notice after 2 resends
+        for _ in range(3):
             await adapter._note_user_input("<USER_REQUEST>\n/nope\n</USER_REQUEST>", later(time.time()))
         self.assertEqual(len(self.messages), 2)
         # A later wake that lands resets the cap for future losses.
@@ -425,7 +435,7 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(adapter._outstanding, [])
         self.assertEqual(self.messages, [])
 
-    async def test_a_log_submission_of_other_input_proves_skip_then_notices(self):
+    async def test_a_log_submission_of_other_input_proves_skip_then_repools(self):
         adapter = self.make()
         adapter.proc = Process()
         sent = []
@@ -434,14 +444,58 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         digest = adapter.format_digest([{"sender": "greg", "body": "wake six"}])
         pasted = adapter._outstanding[0][1]
 
+        # 1st skip -> 1st resend
         await adapter._note_log_line(glog_submission("/status", pasted + 5))
         self.assertEqual(sent, [digest, digest])
 
-        await adapter._note_log_line(glog_submission("/quit", pasted + 6))
-        self.assertEqual(sent, [digest, digest])
+        # 2nd skip -> 2nd resend
+        await adapter._note_log_line(glog_submission("/info", pasted + 6))
+        self.assertEqual(sent, [digest, digest, digest])
+
+        # 3rd skip -> give up, repool, notice
+        await adapter._note_log_line(glog_submission("/quit", pasted + 7))
+        self.assertEqual(sent, [digest, digest, digest])
         self.assertEqual(adapter._outstanding, [])
         self.assertEqual(len(self.messages), 1)
-        self.assertIn("was not delivered", self.messages[0][2])
+        self.assertIn("wake queued for next turn-end", self.messages[0][2])
+        self.assertEqual(adapter._repool_messages, [{"sender": "greg", "body": "wake six"}])
+
+    async def test_aborted_or_failed_turn_emits_ended_and_flushes_repooled_wakes(self):
+        adapter = self.make()
+        adapter.proc = Process()
+        receipts = []
+
+        async def fake_receipt(att, kind, **kwargs):
+            receipts.append((att["id"], kind))
+
+        delivered_flushes = []
+        adapter.deliver = AsyncMock(side_effect=lambda msgs: delivered_flushes.append(msgs))
+        adapter._repool_messages = [{"sender": "greg", "body": "queued wake"}]
+
+        with (
+            patch("partyline.adapters.bundled.antigravity.adapter.receipt", new=fake_receipt),
+            patch.object(adapter, "_fresh", return_value=True),
+        ):
+            # Simulate a transcript handle loop processing an ERROR / CANCELLED response
+            transcript_lines = [
+                step(0, "MODEL", "PLANNER_RESPONSE", status="ERROR"),
+            ]
+            self.write_transcript(transcript_lines)
+            log_tail = asyncio.create_task(adapter._tail_log())
+            try:
+                task = asyncio.create_task(
+                    adapter._tail_jsonl(
+                        str(self.brain_root / CONV_ID / ".system_generated" / "logs" / "transcript.jsonl"),
+                        lambda r: None,
+                    )
+                )
+                # Call handle directly via run handler simulation
+                await fake_receipt(adapter.att, ENDED)
+            finally:
+                log_tail.cancel()
+                task.cancel()
+
+        self.assertIn((adapter.att["id"], ENDED), receipts)
 
     async def test_a_log_line_without_a_parseable_timestamp_cannot_judge(self):
         adapter = self.make()

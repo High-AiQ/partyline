@@ -88,6 +88,7 @@ async def resume_adapter(
             conv["id"],
             att_id,
             runtime.status_callback(att_id, conv["id"], runtime_owner),
+            name=att.get("name", ""),
         ),
         on_cli_session=lambda session: runtime.db.set_cli_session(
             att_id, session, runtime_owner
