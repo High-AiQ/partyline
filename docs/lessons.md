@@ -352,7 +352,18 @@ enforce it. A prose warning that has no executable guard is not a completed less
   with a single factual notice. Second, because a notice's text carries the
   handle, the mention router delivers it as a fresh wake to the very adapter
   that posted it — notices are globally capped, and a verified wake resets
-  the cap, so a pathological CLI cannot farm them.
+  the cap, so a pathological CLI cannot farm them. Third, two structural
+  channels shrink the residue the evidence rule cannot see (an eaten paste
+  with no later transcript activity): the pinned `--log-file` records every
+  accepted submission at *submit* time (`HandleUserInput called with text:`,
+  Go-quoted — unescape before containment judges), so it judges minutes
+  before the transcript can; and the pty screen model already knows what the
+  composer shows, so the paste→Enter race is removed by gating the Enter on
+  the digest's tail echoing, and a stuck wake is flushed by a bare Enter on
+  the next delivery — only when the screen proves the stuck text is ours.
+  What remains undetectable without a clock — an eaten paste followed by
+  total silence — is a wedged process, not a skipped one, and hang detection
+  is exactly what the no-timer rule refuses. Silence asserts nothing.
 - **Two begins are not two live turns.** An opencode jack showed `working…`
   while the CLI sat idle: a turn aborted with Esc writes an assistant row that
   never completes, the `ENDED` receipt (which required `completed IS NOT NULL`)
