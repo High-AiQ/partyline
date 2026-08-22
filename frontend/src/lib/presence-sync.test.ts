@@ -9,7 +9,7 @@ import {
 } from "./presence-sync";
 
 function state(id: string, phase: PresenceState["phase"], revision: number): PresenceState {
-  return { id, phase, completion: "receipt", since: 1, turn: 1, revision };
+  return { id, phase, completion: "receipt", since: 1, turn: 1, revision, held: 0 };
 }
 
 function event(attachment_id: string, phase: WorkingEvent["phase"], revision: number): WorkingEvent {

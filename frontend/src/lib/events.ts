@@ -58,6 +58,7 @@ export const WorkingEventSchema = z.object({
   since: z.number().optional(),
   turn: z.number().int().nonnegative().optional(),
   revision: z.number().int().nonnegative().optional(),
+  held: z.number().int().nonnegative().optional(),
 });
 export type WorkingEvent = z.infer<typeof WorkingEventSchema>;
 

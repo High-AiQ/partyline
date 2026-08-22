@@ -14,6 +14,8 @@ export interface PresenceEntry {
   revision: number;
   /** Boolean-only presence from a pre-phase server: render today's look, never decay. */
   legacy: boolean;
+  /** Number of mention wakes queued mid-turn. */
+  held: number;
 }
 
 const LEGACY_ENTRY: Omit<PresenceEntry, "phase"> = {
@@ -22,6 +24,7 @@ const LEGACY_ENTRY: Omit<PresenceEntry, "phase"> = {
   turn: 0,
   revision: 0,
   legacy: true,
+  held: 0,
 };
 
 function entryFromEvent(event: WorkingEvent): PresenceEntry {
@@ -38,6 +41,7 @@ function entryFromEvent(event: WorkingEvent): PresenceEntry {
     turn: event.turn ?? 0,
     revision: event.revision ?? 0,
     legacy,
+    held: event.held ?? 0,
   };
 }
 

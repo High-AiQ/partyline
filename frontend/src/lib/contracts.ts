@@ -184,6 +184,7 @@ export const PresenceStateSchema = z.object({
   since: z.number(),
   turn: z.number().int().nonnegative(),
   revision: z.number().int().nonnegative(),
+  held: z.number().int().nonnegative().default(0),
 });
 export type PresenceState = z.infer<typeof PresenceStateSchema>;
 

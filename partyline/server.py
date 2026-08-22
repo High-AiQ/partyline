@@ -452,15 +452,15 @@ async def attach(conv_id: str, body: AttachIn):
         body.adapter,
         att,
         presence.posting(conv_id, att_id, runtime.post_callback(att_id, conv_id, runtime_owner)),
-        presence.statusing(conv_id, att_id, runtime.status_callback(att_id, conv_id, runtime_owner)),
+        presence.statusing(
+            conv_id, att_id, runtime.status_callback(att_id, conv_id, runtime_owner), att.get("name", "")
+        ),
         on_cli_session=lambda s: runtime.db.set_cli_session(att_id, s, runtime_owner),
     )
     try:
         await adapter.start()
     except Exception as exc:
-        await runtime.db.set_attachment_status_async(
-            att_id, "exited", runtime_owner
-        )
+        await runtime.db.set_attachment_status_async(att_id, "exited", runtime_owner)
         raise HTTPException(500, f"failed to spawn: {exc}") from exc
     runtime.live[att_id] = presence.watch(adapter, conv_id, att_id, adapter_completion(body.adapter))
 

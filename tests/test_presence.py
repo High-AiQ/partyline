@@ -8,6 +8,7 @@ dead. Every assertion here is about *who* produced the signal as much as when.
 import asyncio
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 from partyline.presence import Presence
 
@@ -452,6 +453,83 @@ class UnforgeableTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event["phase"], "working")
         self.assertEqual(event["turn"], 1)
         self.assertEqual(event["revision"], 1)
+
+
+class TurnIdleQueueTest(unittest.IsolatedAsyncioTestCase):
+    async def test_receipt_adapter_delivery_queued_while_working_and_flushed_on_ended(self):
+        runtime = FakeRuntime()
+        presence = Presence(runtime)
+        raw_adapter = RecordingAdapter()
+        adapter = presence.watch(raw_adapter, "line", "att", completion="receipt")
+
+        # 1. Attach starts idle: first deliver passes through
+        await adapter.deliver([{"id": 1, "body": "first"}])
+        self.assertEqual(raw_adapter.delivered, [[{"id": 1, "body": "first"}]])
+
+        # 2. CLI begins turn
+        await presence.began("line", "att")
+        self.assertTrue(presence.is_working("att"))
+
+        # 3. Mention arriving mid-turn is queued on the server, not delivered
+        await adapter.deliver([{"id": 2, "body": "second"}])
+        await adapter.deliver([{"id": 3, "body": "third"}])
+        self.assertEqual(raw_adapter.delivered, [[{"id": 1, "body": "first"}]])
+        self.assertEqual(presence.queue.held_count("att"), 2)
+
+        # Snapshots report held count
+        snapshot = presence.snapshot("line")
+        self.assertEqual(len(snapshot), 1)
+        self.assertEqual(snapshot[0]["held"], 2)
+
+        # 4. Turn ends: queue flushes coalesced in order
+        await presence.ended("line", "att")
+        self.assertFalse(presence.is_working("att"))
+        self.assertEqual(presence.queue.held_count("att"), 0)
+        self.assertEqual(
+            raw_adapter.delivered,
+            [[{"id": 1, "body": "first"}], [{"id": 2, "body": "second"}, {"id": 3, "body": "third"}]],
+        )
+
+    async def test_second_began_repairs_state_without_pasting_from_queue(self):
+        runtime = FakeRuntime()
+        presence = Presence(runtime)
+        raw_adapter = RecordingAdapter()
+        adapter = presence.watch(raw_adapter, "line", "att", completion="receipt")
+
+        await presence.began("line", "att")
+        await adapter.deliver([{"id": 2, "body": "second"}])
+        self.assertEqual(presence.queue.held_count("att"), 1)
+
+        # Second began repairs open state only — no delivery from queue
+        await presence.began("line", "att")
+        self.assertTrue(presence.is_working("att"))
+        self.assertEqual(raw_adapter.delivered, [])
+        self.assertEqual(presence.queue.held_count("att"), 1)
+
+    async def test_process_exit_discards_queue_and_posts_notice(self):
+        runtime = FakeRuntime()
+        presence = Presence(runtime)
+        raw_adapter = RecordingAdapter()
+        posted = []
+
+        async def post(sender, sender_type, body):
+            posted.append((sender, sender_type, body))
+
+        raw_adapter.post = post
+        adapter = presence.watch(raw_adapter, "line", "att", completion="receipt")
+
+        await presence.began("line", "att")
+        await adapter.deliver([{"id": 2, "body": "second"}])
+        await adapter.deliver([{"id": 3, "body": "third"}])
+
+        on_status = AsyncMock()
+        status_cb = presence.statusing("line", "att", on_status, name="composer")
+        await status_cb("exited")
+
+        self.assertFalse(presence.is_working("att"))
+        self.assertEqual(presence.queue.held_count("att"), 0)
+        self.assertEqual(len(posted), 1)
+        self.assertIn("⚠ @composer exited with 2 held mentions undelivered", posted[0][2])
 
 
 if __name__ == "__main__":
