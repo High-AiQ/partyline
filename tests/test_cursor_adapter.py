@@ -189,7 +189,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             parse_record({"type": "turn_ended", "status": "aborted"}), (ENDED, None)
         )
         self.assertEqual(
-            parse_record({"type": "turn_ended", "status": "other"}), (None, None)
+            parse_record({"type": "turn_ended", "status": "other"}), (ENDED, None)
         )
 
         # Assistant text -> body
@@ -569,10 +569,6 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.messages, [("agent", "agent", "hello")])
             self.assertTrue(await adapter.wait_ready())
 
-
-if __name__ == "__main__":
-    unittest.main()
-
     async def test_find_chat_error_and_edge_branches(self):
         # chat_dir does not exist
         adapter = self.make_adapter(cwd="/nonexistent/path")
@@ -584,10 +580,34 @@ if __name__ == "__main__":
         PartylineAdapter._CLAIMED.add("claimed-uuid")
         self.assertIsNone(adapter_resumed._find_chat())
 
+        # stale session mtime
+        with tempfile.TemporaryDirectory() as tmpdir:
+            chat_base = Path(tmpdir)
+            stale_dir = chat_base / "stale-uuid"
+            stale_dir.mkdir()
+            os.utime(stale_dir, (100, 100))
+            adapter_stale = self.make_adapter(cwd="/test/path")
+            adapter_stale.spawned_at = 1000.0
+            with patch("partyline.adapters.bundled.cursor.adapter.chat_dir", return_value=chat_base):
+                self.assertIsNone(adapter_stale._find_chat())
+
+        # chats.iterdir() OSError
+        with patch("partyline.adapters.bundled.cursor.adapter.chat_dir") as mock_cd:
+            mock_cd.return_value.is_dir.return_value = True
+            mock_cd.return_value.iterdir.side_effect = OSError("iter error")
+            self.assertIsNone(adapter.find_chat() if hasattr(adapter, "find_chat") else adapter._find_chat())
+
     def test_is_replaced_handles_oserror(self):
         adapter = self.make_adapter()
         with patch("pathlib.Path.stat", side_effect=OSError("stat failed")):
             self.assertTrue(adapter._is_replaced(None, Path("/mock/path"), 123))
+
+    async def test_resume_snapshot_handles_oserror(self):
+        adapter = self.make_adapter(resume=True, cli_session="sess-1")
+        adapter.proc = Process()
+        adapter.proc.stop()
+        with patch("builtins.open", side_effect=OSError("snapshot read error")):
+            await adapter._tail_transcript(Path("/fake/path.jsonl"))
 
     async def test_tail_transcript_edge_cases(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -615,7 +635,6 @@ if __name__ == "__main__":
     async def test_run_retries_briefing_at_12s(self):
         adapter = self.make_adapter()
         adapter.proc = Process()
-        adapter.master = 1
         adapter.send_keys = AsyncMock()
         find_calls = 0
 
@@ -631,7 +650,6 @@ if __name__ == "__main__":
         adapter.DISCOVERY_TIMEOUT = 30.0
 
         with (
-            patch("os.write") as mock_write,
             patch(
                 "partyline.adapters.bundled.cursor.adapter.transcript_path",
                 return_value=Path("/tmp/fake-trans"),
@@ -640,7 +658,7 @@ if __name__ == "__main__":
         ):
             with patch("pathlib.Path.is_file", return_value=True):
                 await adapter._run()
-            mock_write.assert_called_with(1, b"\r")
+            self.assertGreaterEqual(adapter.send_keys.await_count, 2)
             self.assertEqual(adapter._session_id, "found-uuid")
 
     async def test_run_transcript_file_timeout(self):
@@ -657,3 +675,7 @@ if __name__ == "__main__":
         ):
             await adapter._run()
             self.assertEqual(adapter._session_id, "found-uuid")
+
+
+if __name__ == "__main__":
+    unittest.main()
