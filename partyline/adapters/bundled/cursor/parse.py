@@ -53,10 +53,7 @@ def parse_record(record: dict) -> tuple[str | None, str | None]:
     - ``text`` is assistant reply string or ``None``
     """
     if record.get("type") == "turn_ended":
-        status = record.get("status")
-        if status in ("success", "error", "aborted"):
-            return ENDED, None
-        return None, None
+        return ENDED, None
 
     msg = record.get("message")
     role = record.get("role")

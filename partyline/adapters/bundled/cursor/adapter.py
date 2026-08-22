@@ -155,11 +155,8 @@ class PartylineAdapter(Adapter):
                     break
                 await asyncio.sleep(self.POLL_SECONDS)
                 waited += self.POLL_SECONDS
-                if waited in (12.0, 24.0) and not self.resume:
-                    if self.master is not None:
-                        os.write(self.master, b"\r")
-                        await asyncio.sleep(1.0)
-                        await self.send_keys(self.briefing())
+                if (11.9 <= waited <= 12.1 or 23.9 <= waited <= 24.1) and not self.resume:
+                    await self.send_keys(self.briefing())
                 elif waited > self.DISCOVERY_TIMEOUT:
                     await self.post(
                         "system",
