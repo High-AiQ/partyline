@@ -336,9 +336,23 @@ enforce it. A prose warning that has no executable guard is not a completed less
   the adapter, which is the layer that can see both sides: after every
   `deliver()`, watch the claimed transcript for the digest as a real
   `USER_INPUT` (whitespace-normalized — the TUI may reflow a long paste),
-  resend on a bounded schedule, then post a system notice instead of failing
-  silently. The control: paste a digest, feed no USER_INPUT, and the test must
-  see the resends and the loud give-up.
+  nudge, re-paste, then post a system notice instead of failing silently.
+  The control: paste a digest, feed no USER_INPUT, and the test must
+  see the resends and the loud give-up. Two refinements earned in production.
+  First, the watchdog's clock measures paste→transcript-record, and the record
+  lags the paste by 30-70s on a long conversation even when the TUI took it
+  at once — a give-up threshold inside that latency fires on healthy turns
+  and sends humans to peek at a CLI that is provably fine; retuning the
+  numbers only moves the failure. The durable answer is the operator's own
+  rule, now enforced in code: **no timer may guess another process's state.**
+  Verification acts only on transcript evidence — a `USER_INPUT` containing
+  the digest proves delivery, and a `USER_INPUT` that does not contain it
+  *proves* the paste was skipped (the CLI submitted different input after
+  ours), which triggers exactly one re-send; a second proof drops the wake
+  with a single factual notice. Second, because a notice's text carries the
+  handle, the mention router delivers it as a fresh wake to the very adapter
+  that posted it — notices are globally capped, and a verified wake resets
+  the cap, so a pathological CLI cannot farm them.
 - **Two begins are not two live turns.** An opencode jack showed `working…`
   while the CLI sat idle: a turn aborted with Esc writes an assistant row that
   never completes, the `ENDED` receipt (which required `completed IS NOT NULL`)
