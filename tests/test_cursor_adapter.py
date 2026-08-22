@@ -1038,18 +1038,61 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(self.messages, [])
                 self.assertEqual(receipts_seen, [])
 
-                # Cursor rewrites with inserted header + past records + new turn
+                # Cursor rewrites with shifted wrappers/prefixes across all records
+                # (no suffix match) + new turn
                 rewritten = [
                     json.dumps(
                         {"type": "wrapper_header", "meta": "session_init"}
                     )
                     + "\n",
-                    old_turns[0],
-                    old_turns[1],
-                    old_turns[2],
-                    old_turns[3],
-                    old_turns[4],
-                    old_turns[5],
+                    json.dumps(
+                        {
+                            "role": "user",
+                            "context": "shifted",
+                            "message": {
+                                "content": [{"type": "text", "text": "shifted init"}]
+                            },
+                        }
+                    )
+                    + "\n",
+                    json.dumps(
+                        {
+                            "role": "assistant",
+                            "extra": 1,
+                            "message": {
+                                "content": [{"type": "text", "text": "Connected"}]
+                            },
+                        }
+                    )
+                    + "\n",
+                    json.dumps(
+                        {"type": "turn_ended", "status": "success", "extra": 1}
+                    )
+                    + "\n",
+                    json.dumps(
+                        {
+                            "role": "user",
+                            "context": "shifted",
+                            "message": {
+                                "content": [{"type": "text", "text": "shifted wake"}]
+                            },
+                        }
+                    )
+                    + "\n",
+                    json.dumps(
+                        {
+                            "role": "assistant",
+                            "extra": 2,
+                            "message": {
+                                "content": [{"type": "text", "text": "filter-ok"}]
+                            },
+                        }
+                    )
+                    + "\n",
+                    json.dumps(
+                        {"type": "turn_ended", "status": "success", "extra": 2}
+                    )
+                    + "\n",
                     # New turn appended
                     json.dumps(
                         {
@@ -1079,7 +1122,105 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 adapter.proc.stop()
                 await task
 
-                # Old speech must not replay; new turn must post and emit receipts
+                # Old speech must not replay; positional escape hatch notice + new turn must post
+                self.assertEqual(
+                    self.messages,
+                    [
+                        (
+                            "system",
+                            "system",
+                            "@agent: transcript rewritten beyond recognition — re-anchoring positionally",
+                        ),
+                        ("agent", "agent", "new reply"),
+                    ],
+                )
+                self.assertEqual(receipts_seen, [ENDED, BEGAN, ENDED])
+
+    async def test_resume_snapshot_with_front_header_and_new_turn_emits_cleanly(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "live.jsonl"
+            old_turns = [
+                json.dumps(
+                    {
+                        "role": "user",
+                        "message": {
+                            "content": [{"type": "text", "text": "init briefing"}]
+                        },
+                    }
+                )
+                + "\n",
+                json.dumps(
+                    {
+                        "role": "assistant",
+                        "message": {
+                            "content": [{"type": "text", "text": "Connected"}]
+                        },
+                    }
+                )
+                + "\n",
+                json.dumps({"type": "turn_ended", "status": "success"}) + "\n",
+            ]
+            path.write_text("".join(old_turns), encoding="utf-8")
+
+            adapter = self.make_adapter(resume=True, cli_session="sess-1")
+            adapter.proc = Process()
+            adapter._silent_until_wake = False
+
+            receipts_seen: list[str] = []
+
+            async def mock_receipt(att, event):
+                receipts_seen.append(event)
+
+            with patch(
+                "partyline.adapters.bundled.cursor.adapter.receipt",
+                side_effect=mock_receipt,
+            ):
+                task = asyncio.create_task(adapter._tail_transcript(path))
+                await asyncio.sleep(0.05)
+
+                self.assertEqual(self.messages, [])
+                self.assertEqual(receipts_seen, [])
+
+                # Cursor rewrites with inserted header + past records + new turn
+                rewritten = [
+                    json.dumps(
+                        {"type": "wrapper_header", "meta": "session_init"}
+                    )
+                    + "\n",
+                    old_turns[0],
+                    old_turns[1],
+                    old_turns[2],
+                    json.dumps(
+                        {
+                            "role": "user",
+                            "message": {
+                                "content": [
+                                    {"type": "text", "text": "real new prompt"}
+                                ]
+                            },
+                        }
+                    )
+                    + "\n",
+                    json.dumps(
+                        {
+                            "role": "assistant",
+                            "message": {
+                                "content": [{"type": "text", "text": "new reply"}]
+                            },
+                        }
+                    )
+                    + "\n",
+                    json.dumps({"type": "turn_ended", "status": "success"}) + "\n",
+                ]
+                path.write_text("".join(rewritten), encoding="utf-8")
+                await asyncio.sleep(0.05)
+
+                adapter.proc.stop()
+                await task
+
+                # Old speech must not replay; new turn posts directly via semantic re-anchoring
                 self.assertEqual(
                     self.messages, [("agent", "agent", "new reply")]
                 )
