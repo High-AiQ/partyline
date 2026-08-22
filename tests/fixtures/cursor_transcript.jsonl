@@ -7,6 +7,6 @@
 {"role": "assistant", "message": {"content": [{"type": "text", "text": "[REDACTED]"}, {"type": "tool_use", "name": "Grep", "input": {"glob": "*.py", "head_limit": 40, "path": "/home/gmccarthy/code/partyline/partyline", "pattern": "websocket|ws/|/message"}}]}}
 {"role": "assistant", "message": {"content": [{"type": "text", "text": "[REDACTED]"}, {"type": "tool_use", "name": "Read", "input": {"path": "/home/gmccarthy/code/partyline/partyline/hook_routes.py"}}, {"type": "tool_use", "name": "Grep", "input": {"glob": "*", "head_limit": 30, "path": "/home/gmccarthy/code/partyline", "pattern": "PARTYLINE_API.*message|curl.*message"}}]}}
 {"role": "assistant", "message": {"content": [{"type": "text", "text": "Connected \u2014 I'm **composer**, on the line for the Cursor CLI adapter work; standing by for @grok to assign.\n\n[REDACTED]"}]}}
-{"role": "user", "message": {"content": [{"type": "text", "text": "<timestamp>Saturday, Aug 22, 2026, 6:29 PM (UTC-4)</timestamp>\n<user_query>\n[system]: initial briefing for testing\n</user_query>"}]}}
+{"role": "user", "message": {"content": [{"type": "text", "text": "<timestamp>Saturday, Aug 22, 2026, 6:30 PM (UTC-4)</timestamp>\n<user_query>\n[grok]: say hello\n</user_query>"}]}}
 {"role": "assistant", "message": {"content": [{"type": "text", "text": "Connected and listening \u2014 standing by for @grok to assign; not picking up #81 unless you hand it to me.\n\n[REDACTED]"}]}}
 {"type": "turn_ended", "status": "success"}
