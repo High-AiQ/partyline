@@ -25,11 +25,18 @@ import time
 from pathlib import Path
 
 from partyline.adapters import Adapter
+from partyline.adapters.bundled.antigravity import logparse
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
 
 LOG_ROOT = os.path.expanduser("~/.partyline/sessions/antigravity")
 BRAIN_ROOT = Path.home() / ".gemini" / "antigravity-cli" / "brain"
 CREATED = re.compile(r"Created conversation ([0-9a-fA-F-]{36})")
+# How much of a digest's tail must be visible to prove it sits in the
+# composer: a long paste scrolls, so only its end stays on the 40-line screen.
+ECHO_PROBE = 40
+# Flow control between writing a paste and its Enter, not a judgment: when
+# the composer's echo never comes, the Enter goes anyway, as it always has.
+PASTE_PACE = 5.0
 
 
 class PartylineAdapter(Adapter):
@@ -43,7 +50,9 @@ class PartylineAdapter(Adapter):
     # CLI submitted different input after ours), and only that proof triggers
     # a single re-send. A re-sent wake that is skipped again is dropped with
     # one factual notice; the notice's @handle delivers a fresh wake, so the
-    # cap keeps a pathological CLI from farming notices.
+    # cap keeps a pathological CLI from farming notices. The pinned log's
+    # HandleUserInput lines judge the same way at submit time, minutes
+    # before the transcript can; either channel settles a wake.
     MAX_NOTICES = 2
 
     def __init__(self, att, post, on_status, on_cli_session=None):
@@ -51,8 +60,46 @@ class PartylineAdapter(Adapter):
         self._outstanding: list[tuple[str, float]] = []
         self._resent: set[str] = set()
         self._notices = 0
+        self._output_event = asyncio.Event()
+
+    async def on_output(self, data: bytes):
+        # The screen model is already fed; wake an Enter gated on the echo.
+        self._output_event.set()
+
+    def _composer_shows(self, text: str) -> bool:
+        """The CLI's own redraw proves the paste sits in the composer. The
+        probe is whitespace-free and tailed: the TUI wraps and scrolls."""
+        probe = "".join(text.split())[-ECHO_PROBE:]
+        return bool(probe) and probe in "".join(self.screen_text().split())
+
+    async def send_keys(self, text: str):
+        assert self.master is not None
+        os.write(self.master, b"\x1b[200~" + text.encode() + b"\x1b[201~")
+        # Enter only once the composer proves the paste landed — the fixed
+        # paste→Enter delay lost that race and left a wake unsubmitted
+        # (docs/lessons.md). The bound is pacing between two writes, never
+        # a verdict about the CLI's state.
+        deadline = time.time() + PASTE_PACE
+        while self.alive() and not self._composer_shows(text):
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            self._output_event.clear()
+            try:
+                await asyncio.wait_for(self._output_event.wait(), remaining)
+            except TimeoutError:
+                break
+        os.write(self.master, b"\r")
 
     async def deliver(self, messages: list[dict]):
+        # A wake the TUI never submitted can still sit in the composer; a
+        # bare Enter flushes it — the fix the original incident got by hand.
+        # Only when the screen proves the stuck text is one of our wakes:
+        # anything else in the composer is not ours to submit.
+        if self.master is not None and any(
+            self._composer_shows(digest) for digest, _ in self._outstanding
+        ):
+            os.write(self.master, b"\r")
         digest = self.format_digest(messages)
         await super().deliver(messages)
         if digest.strip() and self.alive():
@@ -107,6 +154,34 @@ class PartylineAdapter(Adapter):
             kept.append((digest, pasted_at))
             await self.send_keys(digest)
         self._outstanding = kept
+
+    async def _note_log_line(self, line: str) -> None:
+        """Settle outstanding wakes against a logged submission.
+
+        The pinned log's HandleUserInput line is written at submit time, so
+        it judges minutes before the transcript can. A line without a
+        parseable timestamp cannot judge — degraded evidence is not a
+        verdict. The transcript judge remains as the fallback channel.
+        """
+        if parsed := logparse.submission(line):
+            await self._note_user_input(*parsed)
+
+    async def _tail_log(self):
+        """Follow the pinned `--log-file`, judging wakes by its submissions."""
+        while not os.path.exists(self.log_path()) and self.alive():
+            await asyncio.sleep(0.5)
+        try:
+            file = open(self.log_path(), encoding="utf-8", errors="replace")
+        except OSError:
+            return
+        with file:
+            file.seek(0, os.SEEK_END)  # only fresh lines may judge a wake
+            while self.alive():
+                line = file.readline()
+                if not line:
+                    await asyncio.sleep(0.5)
+                    continue
+                await self._note_log_line(line)
 
     def log_path(self) -> str:
         """One log file per attachment — the conversation id cannot be ambiguous."""
@@ -218,4 +293,8 @@ class PartylineAdapter(Adapter):
                 if isinstance(content, str) and content.strip():
                     await self.post(self.att["name"], "agent", content)
 
-        await self._tail_jsonl(str(transcript), handle)
+        log_tail = asyncio.create_task(self._tail_log())
+        try:
+            await self._tail_jsonl(str(transcript), handle)
+        finally:
+            log_tail.cancel()
