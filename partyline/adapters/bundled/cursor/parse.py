@@ -106,14 +106,26 @@ def parse_record(record: dict) -> tuple[str | None, str | None]:
     return None, None
 
 
-def resync_fingerprints(path: Path, seen_fps: set[str] | list[str]) -> set[str]:
+def resync_fingerprints(path: Path, seen_fps: list[str]) -> list[str]:
     """Re-anchor watermark after file truncation, rewrite, or compaction."""
-    res = set(seen_fps)
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                if line.endswith("\n"):
-                    res.add(fingerprint(line))
+            incoming = [fingerprint(line) for line in fh if line.endswith("\n")]
     except OSError:
-        pass
-    return res
+        return seen_fps
+    if not seen_fps:
+        return []
+    high = min(len(seen_fps), len(incoming))
+    for k in range(high, 0, -1):
+        if seen_fps[-k:] == incoming[:k]:
+            return incoming[:k]
+    # Suffix of incoming matching suffix of seen (e.g. prefix was edited)
+    for k in range(min(len(seen_fps), len(incoming)), 0, -1):
+        if seen_fps[-k:] == incoming[-k:]:
+            return incoming
+    # Last seen item in incoming
+    for target in reversed(seen_fps):
+        if target in incoming:
+            idx = len(incoming) - 1 - incoming[::-1].index(target)
+            return incoming[: idx + 1]
+    return []
