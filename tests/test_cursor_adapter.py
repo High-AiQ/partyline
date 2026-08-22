@@ -693,6 +693,46 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(receipts_seen, [BEGAN, ENDED])
             self.assertEqual(self.messages, [("agent", "agent", "composer here — connected.")])
 
+    async def test_tail_transcript_sanitized_fixture(self):
+        fixture_path = Path(__file__).parent / "fixtures" / "cursor_transcript.jsonl"
+        self.assertTrue(fixture_path.is_file())
+
+        adapter = self.make_adapter()
+        adapter.proc = Process()
+
+        receipts_seen: list[str] = []
+
+        async def mock_receipt(att, event):
+            receipts_seen.append(event)
+
+        with patch(
+            "partyline.adapters.bundled.cursor.adapter.receipt",
+            side_effect=mock_receipt,
+        ):
+            task = asyncio.create_task(adapter._tail_transcript(fixture_path))
+            await asyncio.sleep(0.05)
+            adapter.proc.stop()
+            await task
+
+        self.assertEqual(receipts_seen, [BEGAN, BEGAN, ENDED])
+        self.assertEqual(
+            self.messages,
+            [
+                (
+                    "agent",
+                    "agent",
+                    "Connected — I'm **composer**, on the line for the Cursor CLI adapter work; "
+                    "standing by for @grok to assign.",
+                ),
+                (
+                    "agent",
+                    "agent",
+                    "Connected and listening — standing by for @grok to assign; "
+                    "not picking up #81 unless you hand it to me.",
+                ),
+            ],
+        )
+
     async def test_resume_snapshot_handles_oserror(self):
         adapter = self.make_adapter(resume=True, cli_session="sess-1")
         adapter.proc = Process()
