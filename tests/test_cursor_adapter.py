@@ -576,12 +576,12 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             mod_fps = [fingerprint(line) for line in mod_lines]
             self.assertEqual(resync_fingerprints(mod_path, fps), mod_fps)
 
-            # Mid-file re-anchor (seen item in incoming)
-            mid_lines = ["line 2\n", "line X\n"]
-            mid_path = Path(tmpdir) / "mid.jsonl"
-            mid_path.write_text("".join(mid_lines), encoding="utf-8")
-            mid_fps = [fingerprint(line) for line in mid_lines]
-            self.assertEqual(resync_fingerprints(mid_path, fps), mid_fps[:1])
+            # Subsegment match with front insertion
+            sub_lines = ["meta\n", "line 2\n", "line 3\n", "line 4\n"]
+            sub_path = Path(tmpdir) / "sub.jsonl"
+            sub_path.write_text("".join(sub_lines), encoding="utf-8")
+            sub_fps = [fingerprint(line) for line in sub_lines]
+            self.assertEqual(resync_fingerprints(sub_path, fps), sub_fps[:3])
 
             # Disjoint file returns empty
             dis_lines = ["other 1\n", "other 2\n"]
@@ -891,6 +891,79 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 ]
                 with open(path, "a", encoding="utf-8") as f:
                     f.write("".join(turn2))
+                await asyncio.sleep(0.05)
+
+                adapter.proc.stop()
+                await task
+
+                self.assertEqual(
+                    self.messages, [("agent", "agent", "ok"), ("agent", "agent", "ok")]
+                )
+                self.assertEqual(receipts_seen, [BEGAN, ENDED, BEGAN, ENDED])
+
+    async def test_rewrite_with_front_edit_and_new_turn_emits_cleanly(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "live.jsonl"
+            turn1 = [
+                json.dumps(
+                    {
+                        "role": "user",
+                        "message": {"content": [{"type": "text", "text": "q1"}]},
+                    }
+                )
+                + "\n",
+                json.dumps(
+                    {
+                        "role": "assistant",
+                        "message": {"content": [{"type": "text", "text": "ok"}]},
+                    }
+                )
+                + "\n",
+                json.dumps({"type": "turn_ended", "status": "success"}) + "\n",
+            ]
+            path.write_text("".join(turn1), encoding="utf-8")
+
+            adapter = self.make_adapter()
+            adapter.proc = Process()
+
+            receipts_seen: list[str] = []
+
+            async def mock_receipt(att, event):
+                receipts_seen.append(event)
+
+            with patch(
+                "partyline.adapters.bundled.cursor.adapter.receipt",
+                side_effect=mock_receipt,
+            ):
+                task = asyncio.create_task(adapter._tail_transcript(path))
+                await asyncio.sleep(0.05)
+
+                self.assertEqual(self.messages, [("agent", "agent", "ok")])
+                self.assertEqual(receipts_seen, [BEGAN, ENDED])
+
+                # Front edit (inserted meta) + new completed turn in the rewrite
+                rewritten = [
+                    json.dumps({"type": "session_meta", "session_id": "sess-1"}) + "\n",
+                    turn1[0],
+                    turn1[1],
+                    turn1[2],
+                    json.dumps(
+                        {
+                            "role": "user",
+                            "message": {"content": [{"type": "text", "text": "q2"}]},
+                        }
+                    )
+                    + "\n",
+                    json.dumps(
+                        {
+                            "role": "assistant",
+                            "message": {"content": [{"type": "text", "text": "ok"}]},
+                        }
+                    )
+                    + "\n",
+                    json.dumps({"type": "turn_ended", "status": "success"}) + "\n",
+                ]
+                path.write_text("".join(rewritten), encoding="utf-8")
                 await asyncio.sleep(0.05)
 
                 adapter.proc.stop()
