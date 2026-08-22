@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
+from collections import Counter
 from pathlib import Path
 
 from partyline.adapters.receipts import BEGAN, ENDED
@@ -40,9 +42,20 @@ def transcript_path(cwd: str, session_id: str) -> Path:
     )
 
 
-def fingerprint(line: str) -> str:
-    """Compute deterministic SHA-256 fingerprint for a transcript line."""
-    return hashlib.sha256(line.encode("utf-8")).hexdigest()
+def fingerprint(record: dict | str) -> str:
+    """Compute deterministic SHA-256 fingerprint for a transcript record or line."""
+    if isinstance(record, dict):
+        canonical = json.dumps(record, sort_keys=True, ensure_ascii=False)
+    else:
+        try:
+            parsed = json.loads(record)
+            if isinstance(parsed, dict):
+                canonical = json.dumps(parsed, sort_keys=True, ensure_ascii=False)
+            else:
+                canonical = record.strip()
+        except Exception:
+            canonical = record.strip()
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def parse_record(record: dict) -> tuple[str | None, str | None]:
@@ -95,16 +108,50 @@ def parse_record(record: dict) -> tuple[str | None, str | None]:
 
 
 def resync_fingerprints(path: Path, seen_fps: list[str]) -> list[str]:
-    """Re-anchor watermark after file truncation, rewrite, or compaction."""
+    """Re-anchor watermark after file truncation, rewrite, or compaction.
+
+    Invariant: The returned watermark may only ever cover records this process
+    actually delivered. Candidate watermarks are validated against the seen
+    multiset (per-fingerprint counts) and never extend past records that would
+    exceed those counts.
+
+    Known trade-off: A rewritten file containing a byte-identical duplicate turn
+    is genuinely ambiguous for any positional scheme. On ambiguity, we bias
+    toward emitting (receipts must fire; badge safety beats speech dedup).
+    """
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
             incoming = [fingerprint(line) for line in fh if line.endswith("\n")]
     except OSError:
         return seen_fps
-    if not seen_fps:
+    if not seen_fps or not incoming:
         return []
+
+    seen_counts = Counter(seen_fps)
+
+    def is_valid(cand: list[str]) -> bool:
+        cand_counts = Counter(cand)
+        for fp, count in cand_counts.items():
+            if fp in seen_counts and count > seen_counts[fp]:
+                return False
+        return True
+
+    # 1. Exact prefix match
     high = min(len(seen_fps), len(incoming))
     for k in range(high, 0, -1):
         if seen_fps[-k:] == incoming[:k]:
-            return incoming[:k]
+            cand = incoming[:k]
+            if is_valid(cand):
+                return cand
+
+    # 2. Subsegment match: find longest suffix of seen_fps in incoming
+    for k in range(len(seen_fps), 0, -1):
+        target = seen_fps[-k:]
+        target_len = len(target)
+        for i in range(len(incoming) - target_len + 1):
+            if incoming[i : i + target_len] == target:
+                cand = incoming[: i + target_len]
+                if is_valid(cand):
+                    return cand
+
     return []

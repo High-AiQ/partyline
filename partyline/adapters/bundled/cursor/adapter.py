@@ -72,7 +72,7 @@ class PartylineAdapter(Adapter):
             st = path.stat()
             if st.st_ino != os.fstat(fh.fileno()).st_ino or st.st_size < fh.tell():
                 return True
-            if st.st_mtime_ns != open_mtime_ns and st.st_size <= fh.tell():
+            if st.st_mtime_ns != open_mtime_ns:
                 return True
             return False
         except OSError:
@@ -97,12 +97,12 @@ class PartylineAdapter(Adapter):
                     open_mtime_ns = path.stat().st_mtime_ns
                     matched = 0
                     while self.alive():
+                        if self._is_replaced(fh, path, open_mtime_ns):
+                            seen_fps = resync_fingerprints(path, seen_fps)
+                            break
                         pos = fh.tell()
                         line = fh.readline()
                         if not line:
-                            if self._is_replaced(fh, path, open_mtime_ns):
-                                seen_fps = resync_fingerprints(path, seen_fps)
-                                break
                             await asyncio.sleep(self.POLL_SECONDS)
                             continue
                         if not line.endswith("\n"):
