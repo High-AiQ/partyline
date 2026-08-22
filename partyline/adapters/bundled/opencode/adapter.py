@@ -7,9 +7,11 @@ The same store carries this harness's turn boundaries, which presence needs
 to clear the working badge: a user message appears when the CLI actually
 reads a pasted digest (turn began), and an agentic loop is over when an
 assistant message completes with any finish reason but ``tool-calls`` (turn
-ended). Both are reported as receipts. One gap, documented so nobody
-rediscovers it: a turn aborted with Esc writes no completing row, so its
-badge stays lit until the process exits — the pre-receipt behavior.
+ended). Both are reported as receipts. A turn aborted with Esc writes no
+completing row, so its end is reported when a later row supersedes the
+un-completed one — the only deterministic death signal the store offers,
+and without it one aborted turn wedges the badge for every clean turn after
+it (the open count never returns to zero).
 """
 
 from __future__ import annotations
@@ -123,6 +125,10 @@ class PartylineAdapter(Adapter):
         started_ms = int((self.spawned_at - 1) * 1000)
         seen: set[str] = set()
         seen_boundaries: set[str] = set()
+        # Assistant rows that never completed: in flight, or an aborted turn.
+        # The next row in the session proves which — an abort writes no
+        # completing row, so supersession is its only deterministic end.
+        abandoned: dict[str, int] = {}
         while self.alive():
             try:
                 with contextlib.closing(self._connect()) as db:
@@ -137,12 +143,11 @@ class PartylineAdapter(Adapter):
                         (session_id, started_ms),
                     ).fetchall()
                     boundaries = db.execute(
-                        "SELECT id, json_extract(data, '$.role'), "
-                        "json_extract(data, '$.finish') FROM message "
+                        "SELECT id, time_created, json_extract(data, '$.role'), "
+                        "json_extract(data, '$.finish'), "
+                        "json_extract(data, '$.time.completed') IS NOT NULL FROM message "
                         "WHERE session_id = ? AND time_created >= ? "
-                        "AND (json_extract(data, '$.role') = 'user' "
-                        "OR (json_extract(data, '$.role') = 'assistant' "
-                        "AND json_extract(data, '$.time.completed') IS NOT NULL)) "
+                        "AND json_extract(data, '$.role') IN ('user', 'assistant') "
                         "ORDER BY time_created, id",
                         (session_id, started_ms),
                     ).fetchall()
@@ -159,7 +164,20 @@ class PartylineAdapter(Adapter):
                     continue
                 if isinstance(body, str) and body.strip():
                     await self.post(self.att["name"], "agent", body)
-            for message_id, role, finish in boundaries:
+            for message_id, created_ms, role, finish, completed in boundaries:
+                if role == "assistant" and not completed:
+                    abandoned[message_id] = created_ms
+                    continue
+                # Supersession is ordered by time, not by poll: a row only
+                # ends an abandoned turn when the store wrote it afterwards.
+                for dead, dead_ms in list(abandoned.items()):
+                    if dead_ms >= created_ms:
+                        continue
+                    del abandoned[dead]
+                    if dead in seen_boundaries:
+                        continue
+                    seen_boundaries.add(dead)
+                    await receipt(self.att, ENDED)
                 if message_id in seen_boundaries:
                     continue
                 seen_boundaries.add(message_id)

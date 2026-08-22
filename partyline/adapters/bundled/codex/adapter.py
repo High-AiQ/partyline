@@ -145,9 +145,16 @@ class PartylineAdapter(BaseAdapter):
             # needs them to clear the working badge, and the freshness filter
             # above keeps a resume's backlog from replaying old ones.
             if payload.get("type") == "task_started":
+                # A new task while one is open means the old one was aborted:
+                # the rollout writes no terminator for it, so the superseding
+                # start is its only deterministic end.
+                if getattr(self, "_task_open", False):
+                    await receipt(self.att, ENDED)
+                self._task_open = True
                 await receipt(self.att, BEGAN)
                 return
             if payload.get("type") == "task_complete":
+                self._task_open = False
                 await receipt(self.att, ENDED)
                 return
             user_text = agent_text = None

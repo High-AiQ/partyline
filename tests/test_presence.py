@@ -136,17 +136,32 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
             [("att", True), ("att", False), ("att", True)],
         )
 
-    async def test_two_wakes_taken_as_two_turns_stay_lit_throughout(self):
+    async def test_a_began_while_a_turn_is_open_replaces_the_aborted_turn(self):
+        """An Esc-aborted turn never reports its own end; the harness's next
+        began is the only deterministic proof the old turn is dead. Stacking
+        the two begins instead is how the badge wedged on forever-working."""
+        self.presence.watch(RecordingAdapter(), "line", "att", completion="receipt")
+        await self.presence.began("line", "att", owner="t")
+        await self.presence.began("line", "att", owner="t")
+        self.assertTrue(self.presence.is_working("att"))
+        await self.presence.ended("line", "att", owner="t")
+        self.assertFalse(self.presence.is_working("att"))
+
+    async def test_two_turns_back_to_back_clear_between_and_after(self):
+        """Sequential turns each end before the next begins; the badge may
+        idle between them and must not stay lit after the second."""
         adapter = self.presence.watch(RecordingAdapter(), "line", "att")
         await adapter.deliver([{"id": 1}])
         await self.presence.began("line", "att")
+        await self.presence.ended("line", "att")
         await adapter.deliver([{"id": 2}])
         await self.presence.began("line", "att")
         await self.presence.ended("line", "att")
-
-        self.assertTrue(self.presence.is_working("att"))  # no idle flicker between turns
-        await self.presence.ended("line", "att")
         self.assertFalse(self.presence.is_working("att"))
+        self.assertEqual(
+            self.runtime.working_events(),
+            [("att", True), ("att", False), ("att", True), ("att", False)],
+        )
 
     async def test_a_system_notice_is_not_the_process_speaking(self):
         """Found by @sol: an adapter's own notices ride this same callback.
