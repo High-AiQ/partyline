@@ -1,0 +1,659 @@
+"""Unit tests for the bundled Cursor adapter (`agent`).
+
+Deterministic coverage without spawning the `agent` executable or touching
+real network/CLI endpoints.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import tempfile
+import time
+import unittest
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
+from partyline.adapters.bundled.cursor.adapter import PartylineAdapter
+from partyline.adapters.bundled.cursor.parse import (
+    chat_dir,
+    cwd_md5,
+    cwd_slug,
+    fingerprint,
+    parse_record,
+    resync_fingerprints,
+    transcript_path,
+)
+from partyline.adapters.receipts import BEGAN, ENDED
+
+
+class Process:
+    def __init__(self):
+        self.returncode = None
+
+    def poll(self):
+        return self.returncode
+
+    def stop(self):
+        self.returncode = 0
+
+
+def attachment(name="agent", *, cwd="/test/project", command=None, **extra):
+    return {
+        "id": name + "-id",
+        "name": name,
+        "cwd": cwd,
+        "command": command,
+        "adapter_metadata": {"command": ["agent", "--yolo", "--trust"]},
+        **extra,
+    }
+
+
+class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.messages: list[tuple[str, str, str]] = []
+        self.statuses: list[str] = []
+        self.sessions: list[str] = []
+        PartylineAdapter._CLAIMED.clear()
+        self.addCleanup(PartylineAdapter._CLAIMED.clear)
+
+    async def post(self, sender: str, sender_type: str, body: str) -> None:
+        self.messages.append((sender, sender_type, body))
+
+    async def status(self, value: str) -> None:
+        self.statuses.append(value)
+
+    def on_cli_session(self, session_id: str) -> None:
+        self.sessions.append(session_id)
+
+    def make_adapter(self, **att_extra) -> PartylineAdapter:
+        adapter = PartylineAdapter(
+            attachment(**att_extra),
+            self.post,
+            self.status,
+            on_cli_session=self.on_cli_session,
+        )
+        adapter.INITIAL_DELAY = 0
+        adapter.POLL_SECONDS = 0.01
+        return adapter
+
+    def test_manifest(self):
+        import tomllib
+
+        manifest_path = (
+            Path(__file__).parent.parent
+            / "partyline"
+            / "adapters"
+            / "bundled"
+            / "cursor"
+            / "adapter.toml"
+        )
+        with open(manifest_path, "rb") as fh:
+            data = tomllib.load(fh)["adapter"]
+
+        self.assertEqual(data["name"], "Cursor")
+        self.assertEqual(data["version"], "1.0.0")
+        self.assertEqual(data["entrypoint"], "adapter.py")
+        self.assertEqual(data["command"], ["agent", "--yolo", "--trust"])
+        self.assertEqual(data["requires"], ["agent"])
+        self.assertEqual(data["update_command"], ["agent", "update"])
+        self.assertTrue(data["capabilities"]["resume"])
+        self.assertEqual(data["capabilities"]["turn_end"], "receipt")
+
+    def test_build_command(self):
+        # Default fresh command
+        fresh = self.make_adapter()
+        self.assertEqual(fresh.build_command(), ["agent", "--yolo", "--trust"])
+
+        # Custom fresh command
+        custom = self.make_adapter(command=["agent", "--model", "composer-2.5"])
+        self.assertEqual(custom.build_command(), ["agent", "--model", "composer-2.5"])
+
+        # Resume command
+        resumed = self.make_adapter(resume=True, cli_session="3ebd57db-5810-460b")
+        self.assertEqual(
+            resumed.build_command(),
+            ["agent", "--yolo", "--trust", "--resume", "3ebd57db-5810-460b"],
+        )
+
+        # Resume when --resume already in command
+        already = self.make_adapter(
+            command=["agent", "--resume", "3ebd57db-5810-460b"],
+            resume=True,
+            cli_session="3ebd57db-5810-460b",
+        )
+        self.assertEqual(
+            already.build_command(), ["agent", "--resume", "3ebd57db-5810-460b"]
+        )
+
+        # Resume when -r in command
+        short_r = self.make_adapter(
+            command=["agent", "-r", "3ebd57db-5810-460b"],
+            resume=True,
+            cli_session="3ebd57db-5810-460b",
+        )
+        self.assertEqual(short_r.build_command(), ["agent", "-r", "3ebd57db-5810-460b"])
+
+    def test_parsing_helpers(self):
+        cwd = "/tmp/opencode/cursor-probe"
+        self.assertEqual(cwd_slug(cwd), "tmp-opencode-cursor-probe")
+        self.assertEqual(cwd_slug("/home/gmccarthy"), "home-gmccarthy")
+        self.assertEqual(cwd_slug("///abc///def///"), "abc-def")
+
+        import hashlib
+
+        expected_md5 = hashlib.md5(os.path.realpath(cwd).encode("utf-8")).hexdigest()
+        self.assertEqual(cwd_md5(cwd), expected_md5)
+
+        trans_path = transcript_path(cwd, "test-uuid")
+        self.assertEqual(
+            trans_path,
+            Path.home()
+            / ".cursor"
+            / "projects"
+            / "tmp-opencode-cursor-probe"
+            / "agent-transcripts"
+            / "test-uuid"
+            / "test-uuid.jsonl",
+        )
+
+        self.assertEqual(
+            chat_dir(cwd), Path.home() / ".cursor" / "chats" / expected_md5
+        )
+
+    def test_parse_record(self):
+        # User message -> BEGAN
+        self.assertEqual(
+            parse_record(
+                {
+                    "role": "user",
+                    "message": {"content": [{"type": "text", "text": "hello"}]},
+                }
+            ),
+            (BEGAN, None),
+        )
+        self.assertEqual(
+            parse_record({"message": {"role": "user", "content": "hi"}}),
+            (BEGAN, None),
+        )
+
+        # Turn ended status -> ENDED
+        self.assertEqual(
+            parse_record({"type": "turn_ended", "status": "success"}), (ENDED, None)
+        )
+        self.assertEqual(
+            parse_record({"type": "turn_ended", "status": "error"}), (ENDED, None)
+        )
+        self.assertEqual(
+            parse_record({"type": "turn_ended", "status": "aborted"}), (ENDED, None)
+        )
+        self.assertEqual(
+            parse_record({"type": "turn_ended", "status": "other"}), (None, None)
+        )
+
+        # Assistant text -> body
+        self.assertEqual(
+            parse_record(
+                {
+                    "role": "assistant",
+                    "message": {
+                        "content": [
+                            {"type": "text", "text": "first block"},
+                            {"type": "text", "text": "second block"},
+                        ]
+                    },
+                }
+            ),
+            (None, "first block\n\nsecond block"),
+        )
+        self.assertEqual(
+            parse_record({"role": "assistant", "content": "string content"}),
+            (None, "string content"),
+        )
+        self.assertEqual(
+            parse_record(
+                {"role": "assistant", "type": "text", "text": "direct text"}
+            ),
+            (None, "direct text"),
+        )
+
+        # Assistant tool-only -> skipped
+        self.assertEqual(
+            parse_record(
+                {
+                    "role": "assistant",
+                    "message": {
+                        "content": [
+                            {"type": "tool_call", "name": "read_file"},
+                            {"type": "tool_call", "name": "run_command"},
+                        ]
+                    },
+                }
+            ),
+            (None, None),
+        )
+
+        # Top-level text record
+        self.assertEqual(
+            parse_record({"type": "text", "text": "isolated text"}),
+            (None, "isolated text"),
+        )
+
+        # Unrelated record
+        self.assertEqual(
+            parse_record({"type": "progress", "percent": 50}), (None, None)
+        )
+
+    def test_discovery_and_claims(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            now = time.time()
+            chat_base = Path(tmpdir) / "chats" / "mock-md5"
+            chat_base.mkdir(parents=True)
+
+            sess1 = chat_base / "uuid-1"
+            sess1.mkdir()
+            os.utime(sess1, (now - 1, now - 1))
+
+            sess2 = chat_base / "uuid-2"
+            sess2.mkdir()
+            os.utime(sess2, (now, now))
+
+            adapter1 = self.make_adapter(cwd="/mock/cwd")
+            adapter1.spawned_at = now
+            adapter2 = self.make_adapter(cwd="/mock/cwd")
+            adapter2.spawned_at = now
+
+            with patch(
+                "partyline.adapters.bundled.cursor.adapter.chat_dir",
+                return_value=chat_base,
+            ):
+                # adapter1 discovers newest first
+                found1 = adapter1._find_chat()
+                self.assertEqual(found1, "uuid-2")
+                PartylineAdapter._CLAIMED.add("uuid-2")
+
+                # adapter2 skips claimed uuid-2 and claims uuid-1
+                found2 = adapter2._find_chat()
+                self.assertEqual(found2, "uuid-1")
+                PartylineAdapter._CLAIMED.add("uuid-1")
+
+                # No more available sessions
+                self.assertIsNone(adapter1._find_chat())
+
+    async def test_stop_releases_claim(self):
+        adapter = self.make_adapter()
+        adapter._session_id = "test-uuid-claimed"
+        PartylineAdapter._CLAIMED.add("test-uuid-claimed")
+
+        await adapter.stop()
+        self.assertNotIn("test-uuid-claimed", PartylineAdapter._CLAIMED)
+
+    async def test_tail_and_receipts(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "agent.jsonl"
+            lines = [
+                json.dumps(
+                    {
+                        "role": "user",
+                        "message": {"content": [{"type": "text", "text": "start"}]},
+                    }
+                )
+                + "\n",
+                json.dumps(
+                    {
+                        "role": "assistant",
+                        "message": {
+                            "content": [{"type": "tool_call", "name": "exec"}]
+                        },
+                    }
+                )
+                + "\n",
+                json.dumps(
+                    {
+                        "role": "assistant",
+                        "message": {
+                            "content": [{"type": "text", "text": "Done with task"}]
+                        },
+                    }
+                )
+                + "\n",
+                json.dumps({"type": "turn_ended", "status": "success"}) + "\n",
+            ]
+            path.write_text("".join(lines), encoding="utf-8")
+
+            adapter = self.make_adapter(hook_url="http://hook.local")
+            adapter.proc = Process()
+
+            receipts_seen: list[tuple[dict, str]] = []
+
+            async def mock_receipt(att, event):
+                receipts_seen.append((att, event))
+
+            with patch(
+                "partyline.adapters.bundled.cursor.adapter.receipt",
+                side_effect=mock_receipt,
+            ):
+                task = asyncio.create_task(adapter._tail_transcript(path))
+                await asyncio.sleep(0.05)
+                adapter.proc.stop()
+                await task
+
+            self.assertEqual(self.messages, [("agent", "agent", "Done with task")])
+            self.assertEqual(
+                [event for _, event in receipts_seen], [BEGAN, ENDED]
+            )
+
+    async def test_resume_no_replay(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "agent.jsonl"
+            old_lines = [
+                json.dumps(
+                    {
+                        "role": "user",
+                        "message": {"content": [{"type": "text", "text": "old query"}]},
+                    }
+                )
+                + "\n",
+                json.dumps(
+                    {
+                        "role": "assistant",
+                        "message": {"content": [{"type": "text", "text": "old reply"}]},
+                    }
+                )
+                + "\n",
+                json.dumps({"type": "turn_ended", "status": "success"}) + "\n",
+            ]
+            path.write_text("".join(old_lines), encoding="utf-8")
+
+            adapter = self.make_adapter(resume=True, cli_session="sess-1")
+            adapter.proc = Process()
+            # Resumed adapter is woken by delivery
+            adapter._silent_until_wake = False
+
+            receipts_seen: list[str] = []
+
+            async def mock_receipt(att, event):
+                receipts_seen.append(event)
+
+            with patch(
+                "partyline.adapters.bundled.cursor.adapter.receipt",
+                side_effect=mock_receipt,
+            ):
+                task = asyncio.create_task(adapter._tail_transcript(path))
+                await asyncio.sleep(0.05)
+
+                # Append new turn
+                new_lines = [
+                    json.dumps(
+                        {
+                            "role": "user",
+                            "message": {
+                                "content": [{"type": "text", "text": "new query"}]
+                            },
+                        }
+                    )
+                    + "\n",
+                    json.dumps(
+                        {
+                            "role": "assistant",
+                            "message": {
+                                "content": [{"type": "text", "text": "new reply"}]
+                            },
+                        }
+                    )
+                    + "\n",
+                    json.dumps({"type": "turn_ended", "status": "success"}) + "\n",
+                ]
+                with open(path, "a", encoding="utf-8") as fh:
+                    fh.write("".join(new_lines))
+
+                await asyncio.sleep(0.05)
+                adapter.proc.stop()
+                await task
+
+            # Only new turn should be emitted
+            self.assertEqual(self.messages, [("agent", "agent", "new reply")])
+            self.assertEqual(receipts_seen, [BEGAN, ENDED])
+
+    async def test_rewrite_and_compaction_survival(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "agent.jsonl"
+            initial_lines = [
+                json.dumps(
+                    {
+                        "role": "assistant",
+                        "message": {"content": [{"type": "text", "text": "msg 1"}]},
+                    }
+                )
+                + "\n",
+                json.dumps(
+                    {
+                        "role": "assistant",
+                        "message": {"content": [{"type": "text", "text": "msg 2"}]},
+                    }
+                )
+                + "\n",
+            ]
+            path.write_text("".join(initial_lines), encoding="utf-8")
+
+            adapter = self.make_adapter()
+            adapter.proc = Process()
+
+            task = asyncio.create_task(adapter._tail_transcript(path))
+            await asyncio.sleep(0.05)
+            self.assertEqual(
+                self.messages,
+                [("agent", "agent", "msg 1"), ("agent", "agent", "msg 2")],
+            )
+
+            # Full file rewrite with same content plus msg 3
+            rewritten_lines = initial_lines + [
+                json.dumps(
+                    {
+                        "role": "assistant",
+                        "message": {"content": [{"type": "text", "text": "msg 3"}]},
+                    }
+                )
+                + "\n"
+            ]
+            path.write_text("".join(rewritten_lines), encoding="utf-8")
+            await asyncio.sleep(0.05)
+
+            # msg 1 and msg 2 should not be repeated
+            self.assertEqual(
+                self.messages,
+                [
+                    ("agent", "agent", "msg 1"),
+                    ("agent", "agent", "msg 2"),
+                    ("agent", "agent", "msg 3"),
+                ],
+            )
+
+            # Compaction: msg 1 dropped, file starts with msg 2, msg 3, msg 4
+            compacted_lines = rewritten_lines[1:] + [
+                json.dumps(
+                    {
+                        "role": "assistant",
+                        "message": {"content": [{"type": "text", "text": "msg 4"}]},
+                    }
+                )
+                + "\n"
+            ]
+            path.write_text("".join(compacted_lines), encoding="utf-8")
+            await asyncio.sleep(0.05)
+
+            adapter.proc.stop()
+            await task
+
+            self.assertEqual(
+                self.messages,
+                [
+                    ("agent", "agent", "msg 1"),
+                    ("agent", "agent", "msg 2"),
+                    ("agent", "agent", "msg 3"),
+                    ("agent", "agent", "msg 4"),
+                ],
+            )
+
+    def test_resync_fingerprints_helper(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "f.jsonl"
+            lines = ["line 1\n", "line 2\n", "line 3\n"]
+            path.write_text("".join(lines), encoding="utf-8")
+            fps = [fingerprint(line) for line in lines]
+
+            # Matching prefix
+            self.assertEqual(resync_fingerprints(path, fps[:2]), fps[:2])
+
+            # Compaction (seen had 0, 1, 2; file has 1, 2, 3)
+            comp_path = Path(tmpdir) / "comp.jsonl"
+            comp_lines = ["line 2\n", "line 3\n", "line 4\n"]
+            comp_path.write_text("".join(comp_lines), encoding="utf-8")
+            comp_fps = [fingerprint(line) for line in comp_lines]
+            self.assertEqual(resync_fingerprints(comp_path, fps), comp_fps[:2])
+
+            # Non-existent file
+            missing = Path(tmpdir) / "missing.jsonl"
+            self.assertEqual(resync_fingerprints(missing, fps), fps)
+
+            # Empty seen
+            self.assertEqual(resync_fingerprints(path, []), [])
+
+    async def test_run_discovery_timeout_and_retries(self):
+        adapter = self.make_adapter()
+        adapter.proc = Process()
+        adapter.send_keys = AsyncMock()
+        adapter._find_chat = lambda: None
+        adapter.DISCOVERY_TIMEOUT = 0.05
+        adapter.POLL_SECONDS = 0.01
+
+        await adapter._run()
+        self.assertIn("no Cursor session appeared", self.messages[-1][2])
+
+        # Process death before discovery
+        dead_adapter = self.make_adapter()
+        dead_adapter.proc = Process()
+        dead_adapter.proc.stop()
+        await dead_adapter._run()
+
+    async def test_run_success_fresh_flow(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            transcript = Path(tmpdir) / "test-sess.jsonl"
+            transcript.write_text(
+                json.dumps(
+                    {
+                        "role": "assistant",
+                        "message": {"content": [{"type": "text", "text": "hello"}]},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            adapter = self.make_adapter()
+            adapter.proc = Process()
+            adapter.send_keys = AsyncMock()
+            adapter._find_chat = lambda: "test-sess"
+
+            with patch(
+                "partyline.adapters.bundled.cursor.adapter.transcript_path",
+                return_value=transcript,
+            ):
+                task = asyncio.create_task(adapter._run())
+                await asyncio.sleep(0.05)
+                adapter.proc.stop()
+                await task
+
+            self.assertEqual(self.sessions, ["test-sess"])
+            self.assertEqual(self.messages, [("agent", "agent", "hello")])
+            self.assertTrue(await adapter.wait_ready())
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+    async def test_find_chat_error_and_edge_branches(self):
+        # chat_dir does not exist
+        adapter = self.make_adapter(cwd="/nonexistent/path")
+        with patch("partyline.adapters.bundled.cursor.adapter.chat_dir", return_value=Path("/nonexistent")):
+            self.assertIsNone(adapter._find_chat())
+
+        # resume with claimed session
+        adapter_resumed = self.make_adapter(resume=True, cli_session="claimed-uuid")
+        PartylineAdapter._CLAIMED.add("claimed-uuid")
+        self.assertIsNone(adapter_resumed._find_chat())
+
+    def test_is_replaced_handles_oserror(self):
+        adapter = self.make_adapter()
+        with patch("pathlib.Path.stat", side_effect=OSError("stat failed")):
+            self.assertTrue(adapter._is_replaced(None, Path("/mock/path"), 123))
+
+    async def test_tail_transcript_edge_cases(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "corrupt.jsonl"
+            # half-written line + non-dict + bad json
+            record = {"role": "assistant", "message": {"content": [{"type": "text", "text": "ok"}]}}
+            lines = [
+                "not json\n",
+                "[1, 2, 3]\n",
+                json.dumps(record) + "\n",
+                "half-line",
+            ]
+            path.write_text("".join(lines), encoding="utf-8")
+
+            adapter = self.make_adapter()
+            adapter.proc = Process()
+
+            task = asyncio.create_task(adapter._tail_transcript(path))
+            await asyncio.sleep(0.05)
+            adapter.proc.stop()
+            await task
+
+            self.assertEqual(self.messages, [("agent", "agent", "ok")])
+
+    async def test_run_retries_briefing_at_12s(self):
+        adapter = self.make_adapter()
+        adapter.proc = Process()
+        adapter.master = 1
+        adapter.send_keys = AsyncMock()
+        find_calls = 0
+
+        def fake_find():
+            nonlocal find_calls
+            find_calls += 1
+            if find_calls >= 3:
+                return "found-uuid"
+            return None
+
+        adapter._find_chat = fake_find
+        adapter.POLL_SECONDS = 6.0
+        adapter.DISCOVERY_TIMEOUT = 30.0
+
+        with (
+            patch("os.write") as mock_write,
+            patch(
+                "partyline.adapters.bundled.cursor.adapter.transcript_path",
+                return_value=Path("/tmp/fake-trans"),
+            ),
+            patch.object(adapter, "_tail_transcript", AsyncMock()),
+        ):
+            with patch("pathlib.Path.is_file", return_value=True):
+                await adapter._run()
+            mock_write.assert_called_with(1, b"\r")
+            self.assertEqual(adapter._session_id, "found-uuid")
+
+    async def test_run_transcript_file_timeout(self):
+        adapter = self.make_adapter()
+        adapter.proc = Process()
+        adapter.send_keys = AsyncMock()
+        adapter._find_chat = lambda: "found-uuid"
+        adapter.DISCOVERY_TIMEOUT = 0.05
+        adapter.POLL_SECONDS = 0.01
+
+        with patch(
+            "partyline.adapters.bundled.cursor.adapter.transcript_path",
+            return_value=Path("/tmp/missing-file"),
+        ):
+            await adapter._run()
+            self.assertEqual(adapter._session_id, "found-uuid")

@@ -1,0 +1,11 @@
+[adapter]
+name = "Cursor"
+version = "1.0.0"
+description = "Interactive Cursor Agent CLI (`agent`) with JSONL transcript tailing."
+entrypoint = "adapter.py"
+class = "PartylineAdapter"
+command = ["agent", "--yolo", "--trust"]
+requires = ["agent"]
+env_unset = []
+capabilities = { resume = true, turn_end = "receipt" }
+update_command = ["agent", "update"]
