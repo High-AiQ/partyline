@@ -1,0 +1,16 @@
+[adapter]
+name = "Antigravity"
+version = "1.0.0"
+description = "Google Antigravity CLI (`agy`). Pins --log-file to learn its conversation id, then tails the transcript JSONL."
+entrypoint = "adapter.py"
+command = ["agy"]
+requires = ["agy"]
+env_unset = []
+output = "session transcript"
+
+update_command = ["agy", "update"]
+
+[adapter.capabilities]
+# Re-attaching passes --conversation with the recorded id, reopening the session.
+resume = true
+turn_end = "receipt"
