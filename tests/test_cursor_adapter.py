@@ -218,15 +218,15 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             (None, "direct text"),
         )
 
-        # Assistant tool-only -> skipped
+        # Assistant tool_use alongside text -> skipped
         self.assertEqual(
             parse_record(
                 {
                     "role": "assistant",
                     "message": {
                         "content": [
-                            {"type": "tool_call", "name": "read_file"},
-                            {"type": "tool_call", "name": "run_command"},
+                            {"type": "text", "text": "Checking how to post...\n\n[REDACTED]"},
+                            {"type": "tool_use", "name": "Shell", "input": {"command": "ls"}},
                         ]
                     },
                 }
@@ -234,10 +234,54 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             (None, None),
         )
 
-        # Top-level text record
+        # Assistant text with [REDACTED] stripped
         self.assertEqual(
-            parse_record({"type": "text", "text": "isolated text"}),
-            (None, "isolated text"),
+            parse_record(
+                {
+                    "role": "assistant",
+                    "message": {
+                        "content": [
+                            {"type": "text", "text": "hello from composer\n\n[REDACTED]"}
+                        ]
+                    },
+                }
+            ),
+            (None, "hello from composer"),
+        )
+
+        # Assistant text with ONLY [REDACTED] -> skipped
+        self.assertEqual(
+            parse_record(
+                {
+                    "role": "assistant",
+                    "message": {
+                        "content": [
+                            {"type": "text", "text": "[REDACTED]"}
+                        ]
+                    },
+                }
+            ),
+            (None, None),
+        )
+
+        # String content with [REDACTED]
+        self.assertEqual(
+            parse_record({"role": "assistant", "content": "hello\n\n[REDACTED]"}),
+            (None, "hello"),
+        )
+        self.assertEqual(
+            parse_record({"role": "assistant", "content": "[REDACTED]"}),
+            (None, None),
+        )
+
+        # Top-level text record with [REDACTED]
+        self.assertEqual(
+            parse_record({"type": "text", "text": "[REDACTED]"}),
+            (None, None),
+        )
+        self.assertEqual(
+            parse_record({"type": "text", "text": "isolated [REDACTED] text"}),
+            (None, "isolated  text"),
         )
 
         # Unrelated record
@@ -602,12 +646,100 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
         with patch("pathlib.Path.stat", side_effect=OSError("stat failed")):
             self.assertTrue(adapter._is_replaced(None, Path("/mock/path"), 123))
 
+    async def test_tail_transcript_filters_tool_use_and_redacted(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "composer.jsonl"
+            records = [
+                {"role": "user", "message": {"content": [{"type": "text", "text": "say hello"}]}},
+                {
+                    "role": "assistant",
+                    "message": {
+                        "content": [
+                            {"type": "text", "text": "Checking tools...\n\n[REDACTED]"},
+                            {"type": "tool_use", "name": "Shell", "input": {"command": "ls"}},
+                        ]
+                    },
+                },
+                {"role": "assistant", "message": {"content": [{"type": "text", "text": "[REDACTED]"}]}},
+                {
+                    "role": "assistant",
+                    "message": {
+                        "content": [
+                            {"type": "text", "text": "composer here — connected.\n\n[REDACTED]"}
+                        ]
+                    },
+                },
+                {"type": "turn_ended", "status": "success"},
+            ]
+            path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+
+            adapter = self.make_adapter()
+            adapter.proc = Process()
+
+            receipts_seen: list[str] = []
+
+            async def mock_receipt(att, event):
+                receipts_seen.append(event)
+
+            with patch(
+                "partyline.adapters.bundled.cursor.adapter.receipt",
+                side_effect=mock_receipt,
+            ):
+                task = asyncio.create_task(adapter._tail_transcript(path))
+                await asyncio.sleep(0.05)
+                adapter.proc.stop()
+                await task
+
+            self.assertEqual(receipts_seen, [BEGAN, ENDED])
+            self.assertEqual(self.messages, [("agent", "agent", "composer here — connected.")])
+
+    async def test_tail_transcript_sanitized_fixture(self):
+        fixture_path = Path(__file__).parent / "fixtures" / "cursor_transcript.jsonl"
+        self.assertTrue(fixture_path.is_file())
+
+        adapter = self.make_adapter()
+        adapter.proc = Process()
+
+        receipts_seen: list[str] = []
+
+        async def mock_receipt(att, event):
+            receipts_seen.append(event)
+
+        with patch(
+            "partyline.adapters.bundled.cursor.adapter.receipt",
+            side_effect=mock_receipt,
+        ):
+            task = asyncio.create_task(adapter._tail_transcript(fixture_path))
+            await asyncio.sleep(0.05)
+            adapter.proc.stop()
+            await task
+
+        self.assertEqual(receipts_seen, [BEGAN, BEGAN, ENDED])
+        self.assertEqual(
+            self.messages,
+            [
+                (
+                    "agent",
+                    "agent",
+                    "Connected — I'm **composer**, on the line for the Cursor CLI adapter work; "
+                    "standing by for @grok to assign.",
+                ),
+                (
+                    "agent",
+                    "agent",
+                    "Connected and listening — standing by for @grok to assign; "
+                    "not picking up #81 unless you hand it to me.",
+                ),
+            ],
+        )
+
     async def test_resume_snapshot_handles_oserror(self):
         adapter = self.make_adapter(resume=True, cli_session="sess-1")
         adapter.proc = Process()
         adapter.proc.stop()
-        with patch("builtins.open", side_effect=OSError("snapshot read error")):
-            await adapter._tail_transcript(Path("/fake/path.jsonl"))
+        with patch("pathlib.Path.is_file", return_value=True):
+            with patch("builtins.open", side_effect=OSError("snapshot read error")):
+                await adapter._tail_transcript(Path("/fake/path.jsonl"))
 
     async def test_tail_transcript_edge_cases(self):
         with tempfile.TemporaryDirectory() as tmpdir:

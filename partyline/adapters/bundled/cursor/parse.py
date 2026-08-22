@@ -66,24 +66,30 @@ def parse_record(record: dict) -> tuple[str | None, str | None]:
     if role == "assistant":
         content = (msg.get("content") if isinstance(msg, dict) else None) or record.get("content")
         if isinstance(content, list):
+            # Do not post assistant text if the record also contains tool_use
+            if any(isinstance(b, dict) and b.get("type") == "tool_use" for b in content):
+                return None, None
             texts = [
-                block.get("text", "")
+                block.get("text", "").replace("[REDACTED]", "").strip()
                 for block in content
                 if isinstance(block, dict) and block.get("type") == "text"
             ]
-            body = "\n\n".join(t for t in texts if t.strip())
+            body = "\n\n".join(t for t in texts if t)
             return None, body.strip() if body.strip() else None
-        if isinstance(content, str) and content.strip():
-            return None, content.strip()
+        if isinstance(content, str):
+            cleaned = content.replace("[REDACTED]", "").strip()
+            return None, cleaned if cleaned else None
         if record.get("type") == "text" and isinstance(record.get("text"), str):
-            text = record["text"].strip()
-            return None, text if text else None
+            cleaned = record["text"].replace("[REDACTED]", "").strip()
+            return None, cleaned if cleaned else None
         return None, None
 
     if record.get("type") == "text" and not role:
         text = record.get("text")
-        if isinstance(text, str) and text.strip():
-            return None, text.strip()
+        if isinstance(text, str):
+            cleaned = text.replace("[REDACTED]", "").strip()
+            if cleaned:
+                return None, cleaned
 
     return None, None
 
