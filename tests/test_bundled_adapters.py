@@ -450,6 +450,57 @@ class OpenCodeAdapterTest(RecordingAdapterTest):
             [(adapter.att, BEGAN), (adapter.att, ENDED)],
         )
 
+    async def test_an_aborted_turn_ends_when_superseded(self):
+        """Esc-aborted turns write no completing row; the badge would wedge.
+
+        The deterministic death signal is supersession: any later row in the
+        session proves the un-completed assistant row's turn is over, so it
+        reports ENDED before the newer turn's BEGAN — keeping the open-turn
+        count balanced for every clean turn that follows the abort.
+        """
+        created = int(time.time() * 1000)
+        db = self.make_store(created=created)
+        db.executemany(
+            "INSERT INTO message VALUES(?,?,?,?)",
+            [
+                ("u1", "session-1", created + 1, json.dumps({"role": "user"})),
+                ("a1", "session-1", created + 2, json.dumps({"role": "assistant"})),
+                ("u2", "session-1", created + 3, json.dumps({"role": "user"})),
+                ("a2", "session-1", created + 4, json.dumps(
+                    {"role": "assistant", "time": {"completed": 1}, "finish": "stop"})),
+            ],
+        )
+        db.commit()
+        db.close()
+        adapter = self.make(OpenCodeAdapter, hook_url="http://hook/x")
+        adapter.spawned_at = created / 1000
+        adapter.proc = Process()
+        adapter.send_keys = AsyncMock()
+        poll_sleeps = 0
+
+        async def stop_after_three_polls(_seconds):
+            nonlocal poll_sleeps
+            poll_sleeps += 1
+            if poll_sleeps > 3:
+                adapter.proc.stop()
+
+        with (
+            patch(
+                "partyline.adapters.bundled.opencode.adapter.asyncio.sleep",
+                new=stop_after_three_polls,
+            ),
+            patch(
+                "partyline.adapters.bundled.opencode.adapter.receipt", new=AsyncMock()
+            ) as receipt_mock,
+        ):
+            await adapter._run()
+
+        self.assertEqual(
+            [call.args for call in receipt_mock.await_args_list],
+            [(adapter.att, BEGAN), (adapter.att, ENDED),
+             (adapter.att, BEGAN), (adapter.att, ENDED)],
+        )
+
     async def test_run_tails_completed_text_parts_and_skips_invalid_parts(self):
         created = int(time.time() * 1000)
         db = self.make_store(created=created)
