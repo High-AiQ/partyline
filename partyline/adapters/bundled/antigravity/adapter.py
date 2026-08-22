@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import time
 from pathlib import Path
 
 from partyline.adapters import Adapter
@@ -35,31 +36,28 @@ class PartylineAdapter(Adapter):
     kind = "antigravity"
 
     # A wake written into the pty is not a wake the TUI accepted: an idle
-    # antigravity TUI can hold a pasted digest unsubmitted — the server's
-    # cursor has advanced, presence is armed, and no turn ever starts
-    # (docs/lessons.md). Verify each wake against the transcript: resend on a
-    # pi-style schedule, then give up loudly rather than silently.
-    RETRY_AT = (12.0, 24.0)
-    GIVE_UP_AT = 45.0
+    # antigravity TUI can hold a pasted digest unsubmitted (docs/lessons.md).
+    # Verification is evidence-only — no timer may guess another process's
+    # state. A USER_INPUT record containing the digest proves it landed; a
+    # USER_INPUT that does not contain it proves the paste was skipped (the
+    # CLI submitted different input after ours), and only that proof triggers
+    # a single re-send. A re-sent wake that is skipped again is dropped with
+    # one factual notice; the notice's @handle delivers a fresh wake, so the
+    # cap keeps a pathological CLI from farming notices.
+    MAX_NOTICES = 2
 
     def __init__(self, att, post, on_status, on_cli_session=None):
         super().__init__(att, post, on_status, on_cli_session)
-        self._outstanding: list[str] = []
-        self._watchdog: asyncio.Task | None = None
-
-    async def stop(self):
-        if self._watchdog is not None:
-            self._watchdog.cancel()
-        await super().stop()
+        self._outstanding: list[tuple[str, float]] = []
+        self._resent: set[str] = set()
+        self._notices = 0
 
     async def deliver(self, messages: list[dict]):
         digest = self.format_digest(messages)
         await super().deliver(messages)
-        if not digest.strip() or not self.alive():
-            return
-        self._outstanding.append(digest)
-        if self._watchdog is None or self._watchdog.done():
-            self._watchdog = asyncio.create_task(self._verify_delivery())
+        if digest.strip() and self.alive():
+            # When the paste happened, so a later record can prove it skipped.
+            self._outstanding.append((digest, time.time()))
 
     @staticmethod
     def _contains(content: str, probe: str) -> bool:
@@ -67,30 +65,48 @@ class PartylineAdapter(Adapter):
         so a digest matches the submitted input up to whitespace runs."""
         return bool(probe) and " ".join(probe.split()) in " ".join(content.split())
 
-    def _note_user_input(self, content: str):
-        """A transcript input proves the TUI accepted any digest it contains."""
-        self._outstanding = [d for d in self._outstanding if not self._contains(content, d)]
+    async def _note_user_input(self, content: str, created_at) -> None:
+        """Settle outstanding wakes against a real transcript input.
 
-    async def _verify_delivery(self):
-        waited = 0.0
-        retries = list(self.RETRY_AT)
-        while self._outstanding and self.alive():
-            await asyncio.sleep(1.0)
-            waited += 1.0
-            if not self._outstanding:
-                break
-            if retries and waited >= retries[0]:
-                retries.pop(0)
-                for digest in list(self._outstanding):
-                    await self.send_keys(digest)
-            elif waited >= self.GIVE_UP_AT:
-                self._outstanding.clear()
-                await self.post(
-                    "system", "system",
-                    f"@{self.att['name']}: a wake was pasted but the TUI never took it "
-                    "(no matching input in the transcript after 45s) — peek at its "
-                    "terminal and press Enter, or @mention it again.",
-                )
+        A record may only judge digests pasted before it was written: a
+        mention delivered mid-turn pastes a wake that an already-written
+        record cannot contain, and judging it anyway would call a healthy
+        paste skipped. Contained digests are verified. A digest the record
+        predates-but-does-not contain was skipped — proven, not guessed —
+        so it is re-sent exactly once; a skip after that drops it with one
+        factual notice.
+        """
+        created = None
+        if created_at:
+            try:
+                from datetime import datetime
+                created = datetime.fromisoformat(
+                    str(created_at).replace("Z", "+00:00")
+                ).timestamp()
+            except ValueError:
+                created = None
+        kept: list[tuple[str, float]] = []
+        for digest, pasted_at in self._outstanding:
+            if created is not None and pasted_at >= created:
+                kept.append((digest, pasted_at))  # this record cannot judge it
+                continue
+            if self._contains(content, digest):
+                self._notices = 0
+                continue
+            if digest in self._resent:
+                if self._notices < self.MAX_NOTICES:
+                    self._notices += 1
+                    await self.post(
+                        "system", "system",
+                        f"@{self.att['name']}: the CLI submitted other input after "
+                        "this wake was pasted, twice without taking it — the wake "
+                        "was not delivered. Re-mention it if a reply is expected.",
+                    )
+                continue
+            self._resent.add(digest)
+            kept.append((digest, pasted_at))
+            await self.send_keys(digest)
+        self._outstanding = kept
 
     def log_path(self) -> str:
         """One log file per attachment — the conversation id cannot be ambiguous."""
@@ -187,7 +203,7 @@ class PartylineAdapter(Adapter):
             seen.add(key)
             content = record.get("content") or ""
             if record.get("source") == "USER_EXPLICIT" and record.get("type") == "USER_INPUT":
-                self._note_user_input(content)
+                await self._note_user_input(content, record.get("created_at"))
                 prompt = getattr(self, "_startup_prompt", "")
                 if prompt and self._contains(content, prompt):
                     self.mark_startup_delivery_received()
