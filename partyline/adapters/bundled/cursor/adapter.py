@@ -13,10 +13,9 @@ from partyline.adapters.bundled.cursor.parse import (
     chat_dir,
     fingerprint,
     parse_record,
-    resync_fingerprints,
     transcript_path,
 )
-from partyline.adapters.receipts import receipt
+from partyline.adapters.receipts import BEGAN, ENDED, receipt
 
 
 class PartylineAdapter(Adapter):
@@ -79,13 +78,13 @@ class PartylineAdapter(Adapter):
             return True
 
     async def _tail_transcript(self, path: Path) -> None:
-        seen_fps: list[str] = []
+        seen_fps: set[str] = set()
         if self.resume and path.is_file():
             try:
                 with open(path, encoding="utf-8", errors="replace") as f:
                     for line in f:
                         if line.endswith("\n"):
-                            seen_fps.append(fingerprint(line))
+                            seen_fps.add(fingerprint(line))
             except OSError:
                 pass
 
@@ -95,13 +94,12 @@ class PartylineAdapter(Adapter):
             try:
                 with open(path, encoding="utf-8", errors="replace") as fh:
                     open_mtime_ns = path.stat().st_mtime_ns
-                    matched = 0
+                    in_new_turn = False
                     while self.alive():
                         pos = fh.tell()
                         line = fh.readline()
                         if not line:
                             if self._is_replaced(fh, path, open_mtime_ns):
-                                seen_fps = resync_fingerprints(path, seen_fps)
                                 break
                             await asyncio.sleep(self.POLL_SECONDS)
                             continue
@@ -111,22 +109,26 @@ class PartylineAdapter(Adapter):
                             fh.seek(pos)
                             await asyncio.sleep(0.3)
                             continue
-                        fp = fingerprint(line)
-                        if matched < len(seen_fps):
-                            if seen_fps[matched] == fp:
-                                matched += 1
-                                continue
-                            seen_fps = resync_fingerprints(path, seen_fps)
-                            break
-                        seen_fps.append(fp)
-                        matched += 1
                         try:
                             record = json.loads(line)
                         except json.JSONDecodeError:
                             continue
                         if not isinstance(record, dict):
                             continue
+                        fp = fingerprint(line)
                         event, text = parse_record(record)
+                        if event == ENDED:
+                            if fp in seen_fps and not in_new_turn:
+                                continue
+                            seen_fps.add(fp)
+                            in_new_turn = False
+                            await receipt(self.att, event)
+                            continue
+                        if fp in seen_fps:
+                            continue
+                        seen_fps.add(fp)
+                        if event == BEGAN or text:
+                            in_new_turn = True
                         if event:
                             await receipt(self.att, event)
                         if text:

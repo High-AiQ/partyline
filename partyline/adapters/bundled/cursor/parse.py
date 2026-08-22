@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 from pathlib import Path
@@ -40,9 +41,20 @@ def transcript_path(cwd: str, session_id: str) -> Path:
     )
 
 
-def fingerprint(line: str) -> str:
-    """Compute deterministic SHA-256 fingerprint for a transcript line."""
-    return hashlib.sha256(line.encode("utf-8")).hexdigest()
+def fingerprint(record: dict | str) -> str:
+    """Compute deterministic SHA-256 fingerprint for a transcript record or line."""
+    if isinstance(record, dict):
+        canonical = json.dumps(record, sort_keys=True, ensure_ascii=False)
+    else:
+        try:
+            parsed = json.loads(record)
+            if isinstance(parsed, dict):
+                canonical = json.dumps(parsed, sort_keys=True, ensure_ascii=False)
+            else:
+                canonical = record.strip()
+        except Exception:
+            canonical = record.strip()
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def parse_record(record: dict) -> tuple[str | None, str | None]:
@@ -94,17 +106,14 @@ def parse_record(record: dict) -> tuple[str | None, str | None]:
     return None, None
 
 
-def resync_fingerprints(path: Path, seen_fps: list[str]) -> list[str]:
+def resync_fingerprints(path: Path, seen_fps: set[str] | list[str]) -> set[str]:
     """Re-anchor watermark after file truncation, rewrite, or compaction."""
+    res = set(seen_fps)
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
-            incoming = [fingerprint(line) for line in fh if line.endswith("\n")]
+            for line in fh:
+                if line.endswith("\n"):
+                    res.add(fingerprint(line))
     except OSError:
-        return seen_fps
-    if not seen_fps:
-        return []
-    high = min(len(seen_fps), len(incoming))
-    for k in range(high, 0, -1):
-        if seen_fps[-k:] == incoming[:k]:
-            return incoming[:k]
-    return []
+        pass
+    return res
