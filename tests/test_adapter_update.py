@@ -130,6 +130,7 @@ class BundledManifestTest(unittest.TestCase):
         "grok": ["grok", "update"],
         "claude": ["claude", "update"],
         "codex": ["codex", "update"],
+        "cursor": ["agent", "update"],
         "opencode": ["opencode", "upgrade"],
         "hermes": ["hermes", "update"],
         "pi": ["pi", "update", "--self"],
