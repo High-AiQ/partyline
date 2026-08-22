@@ -540,6 +540,18 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 ],
             )
 
+    def test_fingerprint_canonicalization(self):
+        # Different escaping / unicode representations should produce identical fingerprints
+        line1 = '{"role": "assistant", "text": "hello \\u2014 world"}\n'
+        line2 = '{"role": "assistant", "text": "hello — world"}\n'
+        self.assertEqual(fingerprint(line1), fingerprint(line2))
+
+        # Differing key orders / whitespace
+        dict1 = {"b": 2, "a": 1}
+        dict2 = {"a": 1, "b": 2}
+        self.assertEqual(fingerprint(dict1), fingerprint(dict2))
+        self.assertEqual(fingerprint(json.dumps(dict1)), fingerprint(json.dumps(dict2)))
+
     def test_resync_fingerprints_helper(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "f.jsonl"
@@ -547,22 +559,15 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             path.write_text("".join(lines), encoding="utf-8")
             fps = [fingerprint(line) for line in lines]
 
-            # Matching prefix
-            self.assertEqual(resync_fingerprints(path, fps[:2]), fps[:2])
+            # Matching prefix / seen set
+            self.assertEqual(resync_fingerprints(path, set(fps[:2])), set(fps))
 
-            # Compaction (seen had 0, 1, 2; file has 1, 2, 3)
-            comp_path = Path(tmpdir) / "comp.jsonl"
-            comp_lines = ["line 2\n", "line 3\n", "line 4\n"]
-            comp_path.write_text("".join(comp_lines), encoding="utf-8")
-            comp_fps = [fingerprint(line) for line in comp_lines]
-            self.assertEqual(resync_fingerprints(comp_path, fps), comp_fps[:2])
-
-            # Non-existent file
+            # Non-existent file returns input set
             missing = Path(tmpdir) / "missing.jsonl"
-            self.assertEqual(resync_fingerprints(missing, fps), fps)
+            self.assertEqual(resync_fingerprints(missing, set(fps)), set(fps))
 
             # Empty seen
-            self.assertEqual(resync_fingerprints(path, []), [])
+            self.assertEqual(resync_fingerprints(path, set()), set(fps))
 
     async def test_run_discovery_timeout_and_retries(self):
         adapter = self.make_adapter()
@@ -732,6 +737,73 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 ),
             ],
         )
+
+    async def test_tail_transcript_rewrite_with_changed_user_line_and_new_reply(self):
+        fixture_path = Path(__file__).parent / "fixtures" / "cursor_transcript.jsonl"
+        fixture_content = fixture_path.read_text(encoding="utf-8")
+        fixture_lines = [line_text for line_text in fixture_content.splitlines() if line_text.strip()]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "live.jsonl"
+            path.write_text("\n".join(fixture_lines) + "\n", encoding="utf-8")
+
+            adapter = self.make_adapter(resume=True, cli_session="sess-1")
+            adapter.proc = Process()
+            adapter._silent_until_wake = False
+
+            receipts_seen: list[str] = []
+
+            async def mock_receipt(att, event):
+                receipts_seen.append(event)
+
+            with patch(
+                "partyline.adapters.bundled.cursor.adapter.receipt",
+                side_effect=mock_receipt,
+            ):
+                task = asyncio.create_task(adapter._tail_transcript(path))
+                await asyncio.sleep(0.05)
+
+                self.assertEqual(self.messages, [])
+                self.assertEqual(receipts_seen, [])
+
+                rewritten_lines = list(fixture_lines)
+                # Re-serialize user line 0 with escaped unicode and alternative key ordering
+                user0 = json.loads(rewritten_lines[0])
+                rewritten_lines[0] = json.dumps(
+                    {"message": user0["message"], "role": "user"}
+                ).replace("PM", "\\u0050\\u004d")
+
+                # Re-serialize assistant line 8 with unicode escape \u2014
+                rewritten_lines[8] = rewritten_lines[8].replace("—", "\\u2014")
+
+                new_user = {
+                    "role": "user",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "<timestamp>Sunday</timestamp>\n<user_query>test</user_query>",
+                            }
+                        ]
+                    },
+                }
+                new_reply = {
+                    "role": "assistant",
+                    "message": {"content": [{"type": "text", "text": "4"}]},
+                }
+                new_turn_end = {"type": "turn_ended", "status": "success"}
+                rewritten_lines.extend(
+                    [json.dumps(new_user), json.dumps(new_reply), json.dumps(new_turn_end)]
+                )
+
+                path.write_text("\n".join(rewritten_lines) + "\n", encoding="utf-8")
+                await asyncio.sleep(0.05)
+
+                adapter.proc.stop()
+                await task
+
+                self.assertEqual(self.messages, [("agent", "agent", "4")])
+                self.assertEqual(receipts_seen, [BEGAN, ENDED])
 
     async def test_resume_snapshot_handles_oserror(self):
         adapter = self.make_adapter(resume=True, cli_session="sess-1")
