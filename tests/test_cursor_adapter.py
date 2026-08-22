@@ -876,7 +876,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                     json.dumps(
                         {
                             "role": "user",
-                            "message": {"content": [{"type": "text", "text": "q2"}]},
+                            "message": {"content": [{"type": "text", "text": "q1"}]},
                         }
                     )
                     + "\n",
