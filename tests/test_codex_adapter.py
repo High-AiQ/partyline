@@ -256,6 +256,60 @@ class CodexCommandTest(unittest.IsolatedAsyncioTestCase):
             receipt_mock.assert_awaited_once_with(adapter.att, event)
             self.assertEqual(posted, [])
 
+    async def test_a_task_started_while_a_task_is_open_ends_the_aborted_one(self):
+        """An interrupted task writes no task_complete; the badge would wedge
+        until the process exits. The superseding task_started is the aborted
+        turn's only deterministic end, so it reports ENDED first."""
+        from partyline.adapters.receipts import BEGAN, ENDED
+
+        posted: list[tuple] = []
+
+        async def post(sender: str, sender_type: str, body: str) -> None:
+            posted.append((sender, sender_type, body))
+
+        async def on_status(status: str) -> None:
+            return None
+
+        adapter = PartylineAdapter(
+            {"command": ["codex"], "cli_session": "session-1", "name": "terra", "resume": True},
+            post,
+            on_status,
+        )
+        adapter.alive = lambda: True
+        adapter._fresh = lambda timestamp: True
+        adapter._find_rollout = lambda: "rollout.jsonl"
+        records = [
+            {
+                "type": "event_msg",
+                "timestamp": "2026-08-09T00:00:00Z",
+                "payload": {"type": "task_started"},
+            },
+            {
+                "type": "event_msg",
+                "timestamp": "2026-08-09T00:00:01Z",
+                "payload": {"type": "task_started"},
+            },
+        ]
+
+        async def tail(path, handle):
+            for record in records:
+                await handle(record)
+
+        adapter._tail_jsonl = tail
+        with (
+            patch("partyline.adapters.bundled.codex.adapter.asyncio.sleep", AsyncMock()),
+            patch("builtins.open", side_effect=OSError),
+            patch("partyline.adapters.bundled.codex.adapter.receipt", new=AsyncMock())
+            as receipt_mock,
+        ):
+            await adapter._run()
+        self.assertTrue(adapter._task_open)
+        self.assertEqual(posted, [])
+        self.assertEqual(
+            [call.args[1] for call in receipt_mock.await_args_list],
+            [BEGAN, ENDED, BEGAN],
+        )
+
     async def test_a_stale_boundary_record_sends_no_receipt(self):
         """A resume replays the rollout's backlog through the tail handler;
         old turn boundaries must not emit, or they would clear a badge a
