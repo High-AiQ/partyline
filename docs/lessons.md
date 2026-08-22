@@ -325,3 +325,17 @@ enforce it. A prose warning that has no executable guard is not a completed less
   dialects inside a Pydantic model, and 422ing anything that does not fold,
   is the guard: the next unseen name is a loud failure plus a fixture row,
   not a silent `working…`.
+- **Bytes written into the pty are not input the TUI accepted.** Presence arms
+  `working…` when a wake digest is pasted, and receipt adapters clear it only
+  when the harness reports the turn ended — so when an idle antigravity TUI
+  held a pasted wake unsubmitted (six minutes, until a stray Enter through the
+  peek panel), there was no turn and no receipt: the badge stayed lit while the
+  model sat idle, and the delivered messages were gone as far as the server's
+  cursor was concerned. The docs already warned that *resumed* TUIs eat pastes
+  during startup; this proved an idle one can eat one too. The guard lives in
+  the adapter, which is the layer that can see both sides: after every
+  `deliver()`, watch the claimed transcript for the digest as a real
+  `USER_INPUT` (whitespace-normalized — the TUI may reflow a long paste),
+  resend on a bounded schedule, then post a system notice instead of failing
+  silently. The control: paste a digest, feed no USER_INPUT, and the test must
+  see the resends and the loud give-up.
