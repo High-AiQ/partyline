@@ -1,6 +1,7 @@
 import { mount } from "svelte";
 import App from "./App.svelte";
 import "./app.css";
+import { installResourceAuthRecovery } from "./lib/resource-auth";
 import { room } from "./state/room.svelte.js";
 import { session } from "./state/session.svelte.js";
 import { wire } from "./state/wire.svelte.js";
@@ -8,6 +9,10 @@ import { presence } from "./state/presence.svelte.js";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("partyline requires a #root mount element");
+// Images and media elements load tokened URLs inside the browser, where a
+// 401 is invisible to application code. One capture-phase listener heals
+// every such resource by refreshing and re-deriving its source once.
+installResourceAuthRecovery();
 const app = mount(App, { target: root });
 
 /**
