@@ -183,6 +183,8 @@ Out of the box:
 - **grok** — runs xAI's Grok Build TUI, pins a session UUID, and tails its JSONL transcript.
   User-facing text on an assistant record is posted even when that record also has
   `tool_calls`; empty tool-call records stay silent. Peek is the pty; chat is the transcript.
+- **antigravity** — runs Google's Antigravity CLI (`agy`), pins `--log-file` to learn the
+  conversation id from its own log, and tails the conversation's JSONL transcript.
 - **pi** — pins `--session-id`/`--session-dir` and tails the JSONL session transcript.
 - **opencode** — tails opencode's own session store.
 - **hermes** — tails hermes's own session store.

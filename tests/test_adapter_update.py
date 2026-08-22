@@ -126,6 +126,7 @@ class DefaultRunnerTest(unittest.TestCase):
 
 class BundledManifestTest(unittest.TestCase):
     EXPECTED = {
+        "antigravity": ["agy", "update"],
         "grok": ["grok", "update"],
         "claude": ["claude", "update"],
         "codex": ["codex", "update"],
