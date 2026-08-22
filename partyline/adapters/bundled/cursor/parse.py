@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+from collections import Counter
 from pathlib import Path
 
 from partyline.adapters.receipts import BEGAN, ENDED
@@ -107,25 +108,50 @@ def parse_record(record: dict) -> tuple[str | None, str | None]:
 
 
 def resync_fingerprints(path: Path, seen_fps: list[str]) -> list[str]:
-    """Re-anchor watermark after file truncation, rewrite, or compaction."""
+    """Re-anchor watermark after file truncation, rewrite, or compaction.
+
+    Invariant: The returned watermark may only ever cover records this process
+    actually delivered. Candidate watermarks are validated against the seen
+    multiset (per-fingerprint counts) and never extend past records that would
+    exceed those counts.
+
+    Known trade-off: A rewritten file containing a byte-identical duplicate turn
+    is genuinely ambiguous for any positional scheme. On ambiguity, we bias
+    toward emitting (receipts must fire; badge safety beats speech dedup).
+    """
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
             incoming = [fingerprint(line) for line in fh if line.endswith("\n")]
     except OSError:
         return seen_fps
-    if not seen_fps:
+    if not seen_fps or not incoming:
         return []
+
+    seen_counts = Counter(seen_fps)
+
+    def is_valid(cand: list[str]) -> bool:
+        cand_counts = Counter(cand)
+        for fp, count in cand_counts.items():
+            if fp in seen_counts and count > seen_counts[fp]:
+                return False
+        return True
+
+    # 1. Exact prefix match
     high = min(len(seen_fps), len(incoming))
     for k in range(high, 0, -1):
         if seen_fps[-k:] == incoming[:k]:
-            return incoming[:k]
-    # Suffix of incoming matching suffix of seen (e.g. prefix was edited)
-    for k in range(min(len(seen_fps), len(incoming)), 0, -1):
-        if seen_fps[-k:] == incoming[-k:]:
-            return incoming
-    # Last seen item in incoming
-    for target in reversed(seen_fps):
-        if target in incoming:
-            idx = len(incoming) - 1 - incoming[::-1].index(target)
-            return incoming[: idx + 1]
+            cand = incoming[:k]
+            if is_valid(cand):
+                return cand
+
+    # 2. Subsegment match: find longest suffix of seen_fps in incoming
+    for k in range(len(seen_fps), 0, -1):
+        target = seen_fps[-k:]
+        target_len = len(target)
+        for i in range(len(incoming) - target_len + 1):
+            if incoming[i : i + target_len] == target:
+                cand = incoming[: i + target_len]
+                if is_valid(cand):
+                    return cand
+
     return []
