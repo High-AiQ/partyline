@@ -559,15 +559,42 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             path.write_text("".join(lines), encoding="utf-8")
             fps = [fingerprint(line) for line in lines]
 
-            # Matching prefix / seen set
-            self.assertEqual(resync_fingerprints(path, set(fps[:2])), set(fps))
+            # Matching prefix
+            self.assertEqual(resync_fingerprints(path, fps[:2]), fps[:2])
 
-            # Non-existent file returns input set
+            # Compaction / front truncation
+            comp_path = Path(tmpdir) / "comp.jsonl"
+            comp_lines = ["line 2\n", "line 3\n", "line 4\n"]
+            comp_path.write_text("".join(comp_lines), encoding="utf-8")
+            comp_fps = [fingerprint(line) for line in comp_lines]
+            self.assertEqual(resync_fingerprints(comp_path, fps), comp_fps[:2])
+
+            # Suffix match on edited prefix
+            mod_lines = ["line 0\n", "line 2\n", "line 3\n"]
+            mod_path = Path(tmpdir) / "mod.jsonl"
+            mod_path.write_text("".join(mod_lines), encoding="utf-8")
+            mod_fps = [fingerprint(line) for line in mod_lines]
+            self.assertEqual(resync_fingerprints(mod_path, fps), mod_fps)
+
+            # Mid-file re-anchor (seen item in incoming)
+            mid_lines = ["line 2\n", "line X\n"]
+            mid_path = Path(tmpdir) / "mid.jsonl"
+            mid_path.write_text("".join(mid_lines), encoding="utf-8")
+            mid_fps = [fingerprint(line) for line in mid_lines]
+            self.assertEqual(resync_fingerprints(mid_path, fps), mid_fps[:1])
+
+            # Disjoint file returns empty
+            dis_lines = ["other 1\n", "other 2\n"]
+            dis_path = Path(tmpdir) / "dis.jsonl"
+            dis_path.write_text("".join(dis_lines), encoding="utf-8")
+            self.assertEqual(resync_fingerprints(dis_path, fps), [])
+
+            # Non-existent file returns input
             missing = Path(tmpdir) / "missing.jsonl"
-            self.assertEqual(resync_fingerprints(missing, set(fps)), set(fps))
+            self.assertEqual(resync_fingerprints(missing, fps), fps)
 
             # Empty seen
-            self.assertEqual(resync_fingerprints(path, set()), set(fps))
+            self.assertEqual(resync_fingerprints(path, []), [])
 
     async def test_run_discovery_timeout_and_retries(self):
         adapter = self.make_adapter()
@@ -804,6 +831,75 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
 
                 self.assertEqual(self.messages, [("agent", "agent", "4")])
                 self.assertEqual(receipts_seen, [BEGAN, ENDED])
+
+    async def test_consecutive_turns_with_identical_replies_and_ended(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "live.jsonl"
+            turn1 = [
+                json.dumps(
+                    {
+                        "role": "user",
+                        "message": {"content": [{"type": "text", "text": "q1"}]},
+                    }
+                )
+                + "\n",
+                json.dumps(
+                    {
+                        "role": "assistant",
+                        "message": {"content": [{"type": "text", "text": "ok"}]},
+                    }
+                )
+                + "\n",
+                json.dumps({"type": "turn_ended", "status": "success"}) + "\n",
+            ]
+            path.write_text("".join(turn1), encoding="utf-8")
+
+            adapter = self.make_adapter()
+            adapter.proc = Process()
+
+            receipts_seen: list[str] = []
+
+            async def mock_receipt(att, event):
+                receipts_seen.append(event)
+
+            with patch(
+                "partyline.adapters.bundled.cursor.adapter.receipt",
+                side_effect=mock_receipt,
+            ):
+                task = asyncio.create_task(adapter._tail_transcript(path))
+                await asyncio.sleep(0.05)
+
+                self.assertEqual(self.messages, [("agent", "agent", "ok")])
+                self.assertEqual(receipts_seen, [BEGAN, ENDED])
+
+                turn2 = [
+                    json.dumps(
+                        {
+                            "role": "user",
+                            "message": {"content": [{"type": "text", "text": "q2"}]},
+                        }
+                    )
+                    + "\n",
+                    json.dumps(
+                        {
+                            "role": "assistant",
+                            "message": {"content": [{"type": "text", "text": "ok"}]},
+                        }
+                    )
+                    + "\n",
+                    json.dumps({"type": "turn_ended", "status": "success"}) + "\n",
+                ]
+                with open(path, "a", encoding="utf-8") as f:
+                    f.write("".join(turn2))
+                await asyncio.sleep(0.05)
+
+                adapter.proc.stop()
+                await task
+
+                self.assertEqual(
+                    self.messages, [("agent", "agent", "ok"), ("agent", "agent", "ok")]
+                )
+                self.assertEqual(receipts_seen, [BEGAN, ENDED, BEGAN, ENDED])
 
     async def test_resume_snapshot_handles_oserror(self):
         adapter = self.make_adapter(resume=True, cli_session="sess-1")
