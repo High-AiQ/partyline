@@ -8,7 +8,6 @@ transcript in a temporary brain directory.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import tempfile
@@ -57,6 +56,11 @@ def step(index, source, stype, content="", created="2026-08-21T23:57:14Z", **ext
     }
     record.update(extra)
     return json.dumps(record) + "\n"
+
+
+def later(stamp: float) -> str:
+    """A transcript timestamp written after `stamp` (ISO, Z-suffixed)."""
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(stamp + 5))
 
 
 class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
@@ -276,65 +280,100 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
             await resumed._run()
         self.assertEqual(self.messages, [])
 
-    async def test_deliver_resends_an_unaccepted_wake_then_gives_up_loudly(self):
-        """Regression for the stuck-badge incident: an idle TUI can hold a
-        pasted digest unsubmitted — no USER_INPUT, no turn, no ENDED receipt,
-        presence lit forever. The adapter must resend on a bounded schedule
-        and then say out loud that the wake never landed."""
+    async def test_a_submitted_input_that_skips_the_wake_resends_once_then_notices(self):
+        """Regression for the stuck-badge incident, evidence-only: an idle TUI
+        can hold a pasted digest unsubmitted. A USER_INPUT that contains the
+        digest verifies it; one that does not *proves* the paste was skipped,
+        which re-sends it exactly once — a second proof drops it with one
+        factual notice. No timer may guess at the CLI's state."""
         adapter = self.make()
         adapter.proc = Process()
         sent = []
         adapter.send_keys = AsyncMock(side_effect=lambda text: sent.append(text))
-        with patch("partyline.adapters.bundled.antigravity.adapter.asyncio.sleep", new=AsyncMock()):
-            await adapter.deliver([{"sender": "greg", "body": "wake one"}])
-            await adapter._watchdog
+        await adapter.deliver([{"sender": "greg", "body": "wake one"}])
         digest = adapter.format_digest([{"sender": "greg", "body": "wake one"}])
-        # The original paste plus both scheduled retries.
-        self.assertEqual(sent, [digest, digest, digest])
-        self.assertEqual(len(self.messages), 1)
-        self.assertIn("never took it", self.messages[0][2])
+        self.assertEqual([d for d, _ in adapter._outstanding], [digest])
+        pasted = adapter._outstanding[0][1]
 
-    async def test_a_transcript_input_clears_the_outstanding_wake(self):
+        await adapter._note_user_input(
+            "<USER_REQUEST>\n/some other command\n</USER_REQUEST>", later(pasted)
+        )
+        # The original paste from deliver() plus the one proof-triggered resend.
+        self.assertEqual(sent, [digest, digest])
+        self.assertEqual([d for d, _ in adapter._outstanding], [digest])
+
+        await adapter._note_user_input(
+            "<USER_REQUEST>\n/something else\n</USER_REQUEST>", later(pasted)
+        )
+        self.assertEqual(sent, [digest, digest])
+        self.assertEqual(adapter._outstanding, [])
+        self.assertEqual(len(self.messages), 1)
+        self.assertIn("was not delivered", self.messages[0][2])
+
+    async def test_a_record_cannot_judge_a_digest_pasted_after_it(self):
+        """A mention delivered mid-turn pastes a wake that the running turn's
+        already-written USER_INPUT cannot contain; judging it would call a
+        healthy paste skipped and re-send it. Ordering is evidence, not
+        guessing: the record settles only earlier pastes."""
         adapter = self.make()
         adapter.proc = Process()
         sent = []
         adapter.send_keys = AsyncMock(side_effect=lambda text: sent.append(text))
-        sleeps = 0
-
-        async def sleep(_seconds):
-            nonlocal sleeps
-            sleeps += 1
-            if sleeps == 3:
-                # The TUI took the paste, possibly reflowed: whitespace
-                # differences must still clear the outstanding digest.
-                adapter._note_user_input("<USER_REQUEST>\n  " + sent[0].replace("\n", " \n "))
-
-        with patch("partyline.adapters.bundled.antigravity.adapter.asyncio.sleep", new=sleep):
-            await adapter.deliver([{"sender": "greg", "body": "wake two"}])
-            await adapter._watchdog
-        self.assertEqual(sent, [adapter.format_digest([{"sender": "greg", "body": "wake two"}])])
+        await adapter.deliver([{"sender": "greg", "body": "mid-turn wake"}])
+        digest = adapter.format_digest([{"sender": "greg", "body": "mid-turn wake"}])
+        # The record was written before the paste: no verdict either way.
+        await adapter._note_user_input(
+            "<USER_REQUEST>\n/unrelated earlier turn\n</USER_REQUEST>",
+            time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 10)),
+        )
+        self.assertEqual(sent, [digest])
+        self.assertEqual([d for d, _ in adapter._outstanding], [digest])
         self.assertEqual(self.messages, [])
-        self.assertEqual(adapter._outstanding, [])
 
-    async def test_deliver_does_not_arm_the_watchdog_for_a_dead_process(self):
+    async def test_a_transcript_input_containing_the_digest_verifies_it(self):
+        adapter = self.make()
+        adapter.proc = Process()
+        sent = []
+        adapter.send_keys = AsyncMock(side_effect=lambda text: sent.append(text))
+        await adapter.deliver([{"sender": "greg", "body": "wake two"}])
+        digest = adapter.format_digest([{"sender": "greg", "body": "wake two"}])
+        # The TUI took the paste, possibly reflowed: whitespace differences
+        # must still verify the digest, with no resend and no notice.
+        await adapter._note_user_input(
+            "<USER_REQUEST>\n  " + digest.replace("\n", " \n ") + "\n</USER_REQUEST>",
+            later(adapter._outstanding[0][1]),
+        )
+        # Only deliver()'s original paste: verification sends nothing.
+        self.assertEqual(sent, [digest])
+        self.assertEqual(adapter._outstanding, [])
+        self.assertEqual(self.messages, [])
+
+    async def test_deliver_does_not_track_a_wake_for_a_dead_process(self):
         adapter = self.make()
         adapter.proc = Process()
         adapter.proc.stop()
         adapter.send_keys = AsyncMock()
         await adapter.deliver([{"sender": "greg", "body": "wake three"}])
         self.assertEqual(adapter._outstanding, [])
-        self.assertIsNone(adapter._watchdog)
 
-    async def test_stop_cancels_a_pending_watchdog(self):
+    async def test_loss_notices_are_capped_across_distinct_wakes(self):
+        """The notice's @handle delivers a fresh wake; the global cap keeps a
+        pathological CLI from farming notices, and a verified wake resets it."""
         adapter = self.make()
         adapter.proc = Process()
         adapter.send_keys = AsyncMock()
-        await adapter.deliver([{"sender": "greg", "body": "wake four"}])
-        self.assertFalse(adapter._watchdog.done())
-        adapter.proc = None  # never really spawned: keep stop() off killpg
-        await adapter.stop()
-        await asyncio.sleep(0.01)  # let the cancelled task finish unwinding
-        self.assertTrue(adapter._watchdog.cancelled())
+        for body in ("first", "second", "third"):
+            await adapter.deliver([{"sender": "greg", "body": body}])
+        for _ in range(2):
+            await adapter._note_user_input("<USER_REQUEST>\n/nope\n</USER_REQUEST>", later(time.time()))
+        self.assertEqual(len(self.messages), 2)
+        # A later wake that lands resets the cap for future losses.
+        await adapter.deliver([{"sender": "greg", "body": "fourth"}])
+        digest = adapter.format_digest([{"sender": "greg", "body": "fourth"}])
+        await adapter._note_user_input(
+            "<USER_REQUEST>\n" + digest + "\n</USER_REQUEST>", later(time.time())
+        )
+        self.assertEqual(adapter._notices, 0)
 
     async def test_run_waits_for_transcript_after_conversation_appears(self):
         adapter = self.make(resume=True, cli_session=CONV_ID)
