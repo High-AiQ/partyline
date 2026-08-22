@@ -115,6 +115,10 @@ def resync_fingerprints(path: Path, seen_fps: list[str]) -> list[str]:
     multiset (per-fingerprint counts) and never extend past records that would
     exceed those counts.
 
+    If no candidate validates, we hold the watermark by position
+    (incoming[:len(seen_fps)]) rather than returning empty, preventing resume
+    rewrites from replaying history.
+
     Known trade-off: A rewritten file containing a byte-identical duplicate turn
     is genuinely ambiguous for any positional scheme. On ambiguity, we bias
     toward emitting (receipts must fire; badge safety beats speech dedup).
@@ -125,11 +129,13 @@ def resync_fingerprints(path: Path, seen_fps: list[str]) -> list[str]:
     except OSError:
         return seen_fps
     if not seen_fps or not incoming:
-        return []
+        return seen_fps if seen_fps else []
 
     seen_counts = Counter(seen_fps)
 
     def is_valid(cand: list[str]) -> bool:
+        if len(cand) > len(seen_fps) + 1:
+            return False
         cand_counts = Counter(cand)
         for fp, count in cand_counts.items():
             if fp in seen_counts and count > seen_counts[fp]:
@@ -154,4 +160,5 @@ def resync_fingerprints(path: Path, seen_fps: list[str]) -> list[str]:
                 if is_valid(cand):
                     return cand
 
-    return []
+    # 3. Fallback: preserve seen_fps unchanged rather than dropping history
+    return seen_fps

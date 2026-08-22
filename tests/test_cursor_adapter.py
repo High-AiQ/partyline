@@ -583,11 +583,11 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             sub_fps = [fingerprint(line) for line in sub_lines]
             self.assertEqual(resync_fingerprints(sub_path, fps), sub_fps[:3])
 
-            # Disjoint file returns empty
+            # Disjoint file preserves seen_fps unchanged
             dis_lines = ["other 1\n", "other 2\n"]
             dis_path = Path(tmpdir) / "dis.jsonl"
             dis_path.write_text("".join(dis_lines), encoding="utf-8")
-            self.assertEqual(resync_fingerprints(dis_path, fps), [])
+            self.assertEqual(resync_fingerprints(dis_path, fps), fps)
 
             # Non-existent file returns input
             missing = Path(tmpdir) / "missing.jsonl"
@@ -973,6 +973,117 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                     self.messages, [("agent", "agent", "ok"), ("agent", "agent", "ok")]
                 )
                 self.assertEqual(receipts_seen, [BEGAN, ENDED, BEGAN, ENDED])
+
+    async def test_resume_snapshot_with_shifted_wrappers_and_new_turn_does_not_replay_old_speech(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "live.jsonl"
+            old_turns = [
+                json.dumps(
+                    {
+                        "role": "user",
+                        "message": {
+                            "content": [{"type": "text", "text": "init briefing"}]
+                        },
+                    }
+                )
+                + "\n",
+                json.dumps(
+                    {
+                        "role": "assistant",
+                        "message": {
+                            "content": [{"type": "text", "text": "Connected"}]
+                        },
+                    }
+                )
+                + "\n",
+                json.dumps({"type": "turn_ended", "status": "success"}) + "\n",
+                json.dumps(
+                    {
+                        "role": "user",
+                        "message": {"content": [{"type": "text", "text": "wake 1"}]},
+                    }
+                )
+                + "\n",
+                json.dumps(
+                    {
+                        "role": "assistant",
+                        "message": {
+                            "content": [{"type": "text", "text": "filter-ok"}]
+                        },
+                    }
+                )
+                + "\n",
+                json.dumps({"type": "turn_ended", "status": "success"}) + "\n",
+            ]
+            path.write_text("".join(old_turns), encoding="utf-8")
+
+            adapter = self.make_adapter(resume=True, cli_session="sess-1")
+            adapter.proc = Process()
+            adapter._silent_until_wake = False
+
+            receipts_seen: list[str] = []
+
+            async def mock_receipt(att, event):
+                receipts_seen.append(event)
+
+            with patch(
+                "partyline.adapters.bundled.cursor.adapter.receipt",
+                side_effect=mock_receipt,
+            ):
+                task = asyncio.create_task(adapter._tail_transcript(path))
+                await asyncio.sleep(0.05)
+
+                self.assertEqual(self.messages, [])
+                self.assertEqual(receipts_seen, [])
+
+                # Cursor rewrites with inserted header + past records + new turn
+                rewritten = [
+                    json.dumps(
+                        {"type": "wrapper_header", "meta": "session_init"}
+                    )
+                    + "\n",
+                    old_turns[0],
+                    old_turns[1],
+                    old_turns[2],
+                    old_turns[3],
+                    old_turns[4],
+                    old_turns[5],
+                    # New turn appended
+                    json.dumps(
+                        {
+                            "role": "user",
+                            "message": {
+                                "content": [
+                                    {"type": "text", "text": "real new prompt"}
+                                ]
+                            },
+                        }
+                    )
+                    + "\n",
+                    json.dumps(
+                        {
+                            "role": "assistant",
+                            "message": {
+                                "content": [{"type": "text", "text": "new reply"}]
+                            },
+                        }
+                    )
+                    + "\n",
+                    json.dumps({"type": "turn_ended", "status": "success"}) + "\n",
+                ]
+                path.write_text("".join(rewritten), encoding="utf-8")
+                await asyncio.sleep(0.05)
+
+                adapter.proc.stop()
+                await task
+
+                # Old speech must not replay; new turn must post and emit receipts
+                self.assertEqual(
+                    self.messages, [("agent", "agent", "new reply")]
+                )
+                self.assertEqual(receipts_seen, [BEGAN, ENDED])
 
     async def test_resume_snapshot_handles_oserror(self):
         adapter = self.make_adapter(resume=True, cli_session="sess-1")

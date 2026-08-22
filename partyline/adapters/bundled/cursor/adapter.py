@@ -99,6 +99,7 @@ class PartylineAdapter(Adapter):
                     while self.alive():
                         if self._is_replaced(fh, path, open_mtime_ns):
                             seen_fps = resync_fingerprints(path, seen_fps)
+                            await asyncio.sleep(self.POLL_SECONDS)
                             break
                         pos = fh.tell()
                         line = fh.readline()
@@ -117,6 +118,7 @@ class PartylineAdapter(Adapter):
                                 matched += 1
                                 continue
                             seen_fps = resync_fingerprints(path, seen_fps)
+                            await asyncio.sleep(self.POLL_SECONDS)
                             break
                         seen_fps.append(fp)
                         matched += 1
