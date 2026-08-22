@@ -1,30 +1,29 @@
 """Who is working right now, told by the server rather than by the process.
 
 A mentioned process is working from the moment it is woken, but nothing it
-writes reaches the line until its turn ends. For most of an evening's worst
-failures — a lead reassigning work from a process mid-build, two agents
-writing the same files — the room could not tell thinking from dead.
+writes reaches the line until its turn ends. For an evening's worst
+failures — a lead reassigning work mid-build, two agents writing the same
+files — the room could not tell thinking from dead.
 
 **A process can never post its own liveness**, which is the whole point: a
 signal the subject can forge is not evidence (`docs/lessons.md`).
 
-The subtler version of that mistake is what this module used to do. Speech
-was treated as the end of a turn, so the first thing a process said — "ack,
-on it" — cleared the badge while the work being acknowledged had not started.
-Nothing was forged; the server simply read the wrong event as an ending.
-**Speech never ends a turn.** A turn ends when the harness running the CLI
-says it ended, or when the process dies.
+The subtler version of that mistake is what this module used to do: speech
+was treated as the end of a turn, so "ack, on it" cleared the badge while
+the work had not started. **Speech never ends a turn.** A turn ends when
+the harness says it ended, or when the process dies.
 
 Those receipts come in pairs: ``began`` when the CLI starts a turn, ``ended``
-when it finishes. Pairing is what makes them robust to a CLI that folds two
-delivered digests into one turn — one pair, not two — so the badge neither
-wedges on nor flickers between turns. A digest written into the pty still
-*arms* the badge, because seconds pass before the CLI picks it up, and a
-blank indicator in that window is the original complaint again.
+when it finishes. Pairing makes them robust to a CLI that folds two digests
+into one turn — one pair, not two — so the badge neither wedges on nor
+flickers between turns. A harness that reports them arms only on ``began``:
+a swallowed paste never started a turn, and arming on the write is the
+stuck "working…" a silent paste produces.
 
-A harness with no such receipt never self-clears. A guess about when a turn
-ended is a new way to be wrong; the client can lower its own confidence from
-``since`` without the server asserting an ending it never observed.
+A harness with no such receipt still arms on the pasted wake — the only
+signal it will ever observe — and never self-clears. A guess about when a
+turn ended is a new way to be wrong; the client can lower its confidence
+from ``since`` without the server asserting an ending it never observed.
 
 Nothing here reaches into ``ChatRuntime``: presence wraps the callbacks and
 the adapter the server already builds.
@@ -42,10 +41,10 @@ WORKING = "working"
 SPEAKING = "speaking"
 IDLE = "idle"
 
-# Per @grok's survey only claude and grok report a process-scoped turn end;
-# everything else is ``none`` and never self-clears. The wire also reserves a
-# ``quiet`` phase for a guessed ending, which deliberately has no emitter
-# here: silence after an ack is the very bug this module exists to remove.
+# Adapters whose harness reports turn ends from its own transcript; everything
+# else is ``none`` and arms on delivery, never self-clearing. ``quiet`` is
+# reserved on the wire for a guessed ending and deliberately has no emitter:
+# silence after an ack is the very bug this module exists to remove.
 RECEIPT = "receipt"
 NONE = "none"
 
@@ -245,10 +244,9 @@ class Presence:
     def watch(self, adapter, conv_id: str, att_id: str, completion: str = NONE):
         """Return the adapter, with its wake delivery reporting presence.
 
-        Wrapping ``deliver`` rather than editing the runtime keeps the report
-        exactly where the fact is: the receipt is emitted only once the digest
-        has actually been written into the pty, so a delivery that raises
-        never claims a turn started.
+        Wrapping ``deliver`` keeps the report where the fact is: the receipt
+        fires only once the digest has actually been written into the pty,
+        so a delivery that raises never claims a turn started.
         """
         deliver = adapter.deliver
         att = getattr(adapter, "att", None) or {}
@@ -257,7 +255,9 @@ class Presence:
 
         async def delivering(messages):
             await deliver(messages)
-            await self.started(conv_id, att_id, owner)
+            # A receipt harness arms on its own began, never on the paste.
+            if self.completions.get(att_id) != RECEIPT:
+                await self.started(conv_id, att_id, owner)
 
         adapter.deliver = delivering
         return adapter
