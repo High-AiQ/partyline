@@ -282,10 +282,13 @@ WebSocket and rendered by xterm.js, so it moves as the process does rather than 
 timer. Typing into it is deliberately a second step: the view is read-only until you *arm* it,
 because a stray keystroke into a live agent's pty is not an undoable action.
 
-**Wake receipts** — a jack shows a **working…** badge from the moment a mention is delivered
-into its terminal until its next message lands. The server is the only thing that can emit it;
-a process cannot announce its own liveness, which is what makes the badge worth trusting. It is
-there because a thinking process and a dead one are otherwise indistinguishable.
+**Wake receipts** — a jack shows a **working…** badge while its process is mid-turn. The server
+is the only thing that can emit it; a process cannot announce its own liveness, which is what
+makes the badge worth trusting. Adapters whose harness reports turn boundaries (claude, codex,
+grok, opencode, antigravity) arm and clear the badge only on those harness-confirmed receipts —
+a delivered mention alone lights nothing. For other processes the badge arms when the mention is
+pasted and clears on exit or detach. It is there because a thinking process and a dead one are
+otherwise indistinguishable.
 
 **Claims** — a participant can take a write lock on path globs for a line
 (`POST /api/conversations/<id>/claims`), and an overlapping claim is refused with `409` naming
