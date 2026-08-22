@@ -193,6 +193,35 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
         await self.presence.ended("line", "att", owner="owner-two")
         self.assertFalse(self.presence.is_working("att"))
 
+    async def test_a_receipt_harness_does_not_arm_on_a_paste(self):
+        """The stuck "working…" badge: the paste is not the turn.
+
+        A TUI that silently swallowed a delivered digest never began a
+        turn, so nothing may light the badge — arming on the write is
+        the guess this regression removes for receipt harnesses.
+        """
+        adapter = self.presence.watch(RecordingAdapter(), "line", "att", completion="receipt")
+        await adapter.deliver([{"id": 1}])
+
+        self.assertFalse(self.presence.is_working("att"))
+        self.assertEqual(self.runtime.working_events(), [])
+
+    async def test_a_receipt_harness_arms_on_began_and_clears_on_ended(self):
+        self.presence.watch(RecordingAdapter(), "line", "att", completion="receipt")
+        await self.presence.began("line", "att", owner="t")
+        self.assertTrue(self.presence.is_working("att"))
+
+        await self.presence.ended("line", "att", owner="t")
+        self.assertFalse(self.presence.is_working("att"))
+        self.assertEqual(self.runtime.working_events(), [("att", True), ("att", False)])
+
+    async def test_a_harness_without_receipts_still_arms_on_delivery(self):
+        """The paste remains the only observable for a none-completion harness."""
+        adapter = self.presence.watch(RecordingAdapter(), "line", "att", completion="none")
+        await adapter.deliver([{"id": 1}])
+
+        self.assertTrue(self.presence.is_working("att"))
+
     async def test_a_receipt_for_a_superseded_turn_is_ignored(self):
         adapter = self.presence.watch(RecordingAdapter(), "line", "att")
         await adapter.deliver([{"id": 1}])

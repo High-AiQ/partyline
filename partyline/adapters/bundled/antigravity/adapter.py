@@ -34,6 +34,64 @@ CREATED = re.compile(r"Created conversation ([0-9a-fA-F-]{36})")
 class PartylineAdapter(Adapter):
     kind = "antigravity"
 
+    # A wake written into the pty is not a wake the TUI accepted: an idle
+    # antigravity TUI can hold a pasted digest unsubmitted — the server's
+    # cursor has advanced, presence is armed, and no turn ever starts
+    # (docs/lessons.md). Verify each wake against the transcript: resend on a
+    # pi-style schedule, then give up loudly rather than silently.
+    RETRY_AT = (12.0, 24.0)
+    GIVE_UP_AT = 45.0
+
+    def __init__(self, att, post, on_status, on_cli_session=None):
+        super().__init__(att, post, on_status, on_cli_session)
+        self._outstanding: list[str] = []
+        self._watchdog: asyncio.Task | None = None
+
+    async def stop(self):
+        if self._watchdog is not None:
+            self._watchdog.cancel()
+        await super().stop()
+
+    async def deliver(self, messages: list[dict]):
+        digest = self.format_digest(messages)
+        await super().deliver(messages)
+        if not digest.strip() or not self.alive():
+            return
+        self._outstanding.append(digest)
+        if self._watchdog is None or self._watchdog.done():
+            self._watchdog = asyncio.create_task(self._verify_delivery())
+
+    @staticmethod
+    def _contains(content: str, probe: str) -> bool:
+        """Whitespace-normalized containment: the TUI may reflow a long paste,
+        so a digest matches the submitted input up to whitespace runs."""
+        return bool(probe) and " ".join(probe.split()) in " ".join(content.split())
+
+    def _note_user_input(self, content: str):
+        """A transcript input proves the TUI accepted any digest it contains."""
+        self._outstanding = [d for d in self._outstanding if not self._contains(content, d)]
+
+    async def _verify_delivery(self):
+        waited = 0.0
+        retries = list(self.RETRY_AT)
+        while self._outstanding and self.alive():
+            await asyncio.sleep(1.0)
+            waited += 1.0
+            if not self._outstanding:
+                break
+            if retries and waited >= retries[0]:
+                retries.pop(0)
+                for digest in list(self._outstanding):
+                    await self.send_keys(digest)
+            elif waited >= self.GIVE_UP_AT:
+                self._outstanding.clear()
+                await self.post(
+                    "system", "system",
+                    f"@{self.att['name']}: a wake was pasted but the TUI never took it "
+                    "(no matching input in the transcript after 45s) — peek at its "
+                    "terminal and press Enter, or @mention it again.",
+                )
+
     def log_path(self) -> str:
         """One log file per attachment — the conversation id cannot be ambiguous."""
         return os.path.join(LOG_ROOT, self.att["id"] + ".log")
@@ -129,8 +187,9 @@ class PartylineAdapter(Adapter):
             seen.add(key)
             content = record.get("content") or ""
             if record.get("source") == "USER_EXPLICIT" and record.get("type") == "USER_INPUT":
+                self._note_user_input(content)
                 prompt = getattr(self, "_startup_prompt", "")
-                if prompt and prompt in content:
+                if prompt and self._contains(content, prompt):
                     self.mark_startup_delivery_received()
                 await receipt(self.att, BEGAN)
             elif (
