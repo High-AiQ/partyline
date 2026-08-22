@@ -162,3 +162,13 @@ def resync_fingerprints(path: Path, seen_fps: list[str]) -> list[str]:
 
     # 3. Fallback: preserve seen_fps unchanged rather than dropping history
     return seen_fps
+
+
+def resync_positional(path: Path, seen_fps: list[str]) -> list[str]:
+    """Positional fallback when semantic re-anchoring fails."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            incoming = [fingerprint(line) for line in fh if line.endswith("\n")]
+    except OSError:
+        return seen_fps
+    return incoming[: len(seen_fps)]

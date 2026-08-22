@@ -14,6 +14,7 @@ from partyline.adapters.bundled.cursor.parse import (
     fingerprint,
     parse_record,
     resync_fingerprints,
+    resync_positional,
     transcript_path,
 )
 from partyline.adapters.receipts import receipt
@@ -78,6 +79,23 @@ class PartylineAdapter(Adapter):
         except OSError:
             return True
 
+    async def _handle_resync(
+        self, path: Path, seen_fps: list[str], failures: int
+    ) -> tuple[list[str], int]:
+        resynced = resync_fingerprints(path, seen_fps)
+        if resynced == seen_fps and seen_fps:
+            failures += 1
+            if failures >= 3:
+                await self.post(
+                    "system",
+                    "system",
+                    f"@{self.att['name']}: transcript rewritten beyond recognition — "
+                    "re-anchoring positionally",
+                )
+                return resync_positional(path, seen_fps), 0
+            return seen_fps, failures
+        return resynced, 0
+
     async def _tail_transcript(self, path: Path) -> None:
         seen_fps: list[str] = []
         if self.resume and path.is_file():
@@ -90,6 +108,7 @@ class PartylineAdapter(Adapter):
                 pass
 
         self.mark_ready()
+        resync_failures = 0
 
         while self.alive():
             try:
@@ -98,7 +117,9 @@ class PartylineAdapter(Adapter):
                     matched = 0
                     while self.alive():
                         if self._is_replaced(fh, path, open_mtime_ns):
-                            seen_fps = resync_fingerprints(path, seen_fps)
+                            seen_fps, resync_failures = await self._handle_resync(
+                                path, seen_fps, resync_failures
+                            )
                             await asyncio.sleep(self.POLL_SECONDS)
                             break
                         pos = fh.tell()
@@ -117,7 +138,9 @@ class PartylineAdapter(Adapter):
                             if seen_fps[matched] == fp:
                                 matched += 1
                                 continue
-                            seen_fps = resync_fingerprints(path, seen_fps)
+                            seen_fps, resync_failures = await self._handle_resync(
+                                path, seen_fps, resync_failures
+                            )
                             await asyncio.sleep(self.POLL_SECONDS)
                             break
                         seen_fps.append(fp)
