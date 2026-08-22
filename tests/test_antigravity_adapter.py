@@ -8,6 +8,7 @@ transcript in a temporary brain directory.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import tempfile
@@ -17,6 +18,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from partyline.adapters.bundled.antigravity import adapter as antigravity_module
+from partyline.adapters.bundled.antigravity import logparse
 from partyline.adapters.bundled.antigravity.adapter import PartylineAdapter
 from partyline.adapters.receipts import BEGAN, ENDED
 
@@ -61,6 +63,16 @@ def step(index, source, stype, content="", created="2026-08-21T23:57:14Z", **ext
 def later(stamp: float) -> str:
     """A transcript timestamp written after `stamp` (ISO, Z-suffixed)."""
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(stamp + 5))
+
+
+def glog_submission(text: str, stamp: float) -> str:
+    """A verbatim-shaped HandleUserInput line: Go-quoted payload, glog ts."""
+    ts = time.strftime("I%m%d %H:%M:%S.000000", time.localtime(stamp))
+    escaped = text.replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
+    return (
+        f"ERROR: logging before google.Init: {ts}   21217 input_loop.go:36] "
+        f'HandleUserInput called with text: "{escaped}"\n'
+    )
 
 
 class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
@@ -397,6 +409,200 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         ):
             await adapter._run()
         self.assertEqual(self.messages, [("agent", "agent", "late transcript")])
+
+    async def test_a_log_submission_containing_the_digest_verifies_it(self):
+        """The pinned log judges at submit time, minutes before the transcript.
+        The payload is Go-quoted — the digest's real newlines arrive as literal
+        \\n sequences — so both sides are unescaped before containment judges."""
+        adapter = self.make()
+        adapter.proc = Process()
+        sent = []
+        adapter.send_keys = AsyncMock(side_effect=lambda text: sent.append(text))
+        await adapter.deliver([{"sender": "greg", "body": 'wake "quoted" five'}])
+        digest = adapter.format_digest([{"sender": "greg", "body": 'wake "quoted" five'}])
+        await adapter._note_log_line(glog_submission(digest, adapter._outstanding[0][1] + 5))
+        self.assertEqual(sent, [digest])
+        self.assertEqual(adapter._outstanding, [])
+        self.assertEqual(self.messages, [])
+
+    async def test_a_log_submission_of_other_input_proves_skip_then_notices(self):
+        adapter = self.make()
+        adapter.proc = Process()
+        sent = []
+        adapter.send_keys = AsyncMock(side_effect=lambda text: sent.append(text))
+        await adapter.deliver([{"sender": "greg", "body": "wake six"}])
+        digest = adapter.format_digest([{"sender": "greg", "body": "wake six"}])
+        pasted = adapter._outstanding[0][1]
+
+        await adapter._note_log_line(glog_submission("/status", pasted + 5))
+        self.assertEqual(sent, [digest, digest])
+
+        await adapter._note_log_line(glog_submission("/quit", pasted + 6))
+        self.assertEqual(sent, [digest, digest])
+        self.assertEqual(adapter._outstanding, [])
+        self.assertEqual(len(self.messages), 1)
+        self.assertIn("was not delivered", self.messages[0][2])
+
+    async def test_a_log_line_without_a_parseable_timestamp_cannot_judge(self):
+        adapter = self.make()
+        adapter.proc = Process()
+        sent = []
+        adapter.send_keys = AsyncMock(side_effect=lambda text: sent.append(text))
+        await adapter.deliver([{"sender": "greg", "body": "wake seven"}])
+        digest = adapter.format_digest([{"sender": "greg", "body": "wake seven"}])
+        # A submission line with no glog prefix carries no ordering evidence.
+        await adapter._note_log_line('HandleUserInput called with text: "/status"\n')
+        # And a line that is not a submission says nothing at all.
+        await adapter._note_log_line(glog_submission("", time.time()).replace(
+            'HandleUserInput called with text: ""', "Streaming conversation abc"))
+        self.assertEqual(sent, [digest])
+        self.assertEqual([d for d, _ in adapter._outstanding], [digest])
+        self.assertEqual(self.messages, [])
+
+    def test_logparse_rolls_back_a_future_yearless_stamp(self):
+        future = time.strftime("I%m%d %H:%M:%S", time.localtime(time.time() + 3 * 86400))
+        stamp = logparse._glog_timestamp(f"{future}.000000 1 x.go:1] hi")
+        self.assertLess(stamp, time.time())
+        self.assertIsNone(logparse._glog_timestamp("no timestamp here"))
+        self.assertIsNone(logparse.submission("no timestamp here"))
+        self.assertIsNone(logparse.submission('HandleUserInput called with text: "x"'))
+
+    async def test_tail_log_returns_when_the_log_cannot_be_opened(self):
+        adapter = self.make()
+        adapter.proc = Process()
+        os.makedirs(adapter.log_path())  # a directory cannot be opened for reading
+        await adapter._tail_log()
+
+    async def test_tail_log_judges_lines_appended_after_it_opens(self):
+        adapter = self.make()
+        adapter.proc = Process()
+        adapter.send_keys = AsyncMock()
+        os.makedirs(self.log_root, exist_ok=True)
+        Path(adapter.log_path()).write_text("", encoding="utf-8")
+        await adapter.deliver([{"sender": "greg", "body": "via log"}])
+        digest = adapter.format_digest([{"sender": "greg", "body": "via log"}])
+        tail = asyncio.create_task(adapter._tail_log())
+        await asyncio.sleep(0.1)  # let the tail open the file and seek to EOF
+        with open(adapter.log_path(), "a", encoding="utf-8") as file:
+            file.write(glog_submission(digest, time.time() + 5))
+        for _ in range(30):
+            if not adapter._outstanding:
+                break
+            await asyncio.sleep(0.1)
+        adapter.proc.stop()
+        await asyncio.wait_for(tail, 5)
+        self.assertEqual(adapter._outstanding, [])
+
+    async def test_send_keys_holds_enter_until_the_composer_echoes(self):
+        """The fixed paste→Enter delay lost the race on a slow TUI; the Enter
+        now waits for the CLI's own redraw to prove the paste landed."""
+        adapter = self.make()
+        adapter.proc = Process()
+        adapter.master = 7
+        adapter.screen_text = lambda: "input box is empty"
+        writes = []
+        with (
+            patch("partyline.adapters.bundled.antigravity.adapter.os.write",
+                  side_effect=lambda fd, data: writes.append(data)),
+            patch.object(antigravity_module, "PASTE_PACE", 30.0),
+        ):
+            sending = asyncio.create_task(adapter.send_keys("wake eight"))
+            await asyncio.sleep(0.05)
+            self.assertEqual(len(writes), 1)  # paste written, Enter held
+            adapter.screen_text = lambda: "> wake eight"
+            await adapter.on_output(b"redraw")
+            await asyncio.wait_for(sending, 5)
+        self.assertEqual(
+            writes,
+            [b"\x1b[200~wake eight\x1b[201~", b"\r"],
+        )
+
+    async def test_send_keys_paces_the_enter_when_no_echo_comes(self):
+        """The bound is flow control between two writes, not a verdict: the
+        Enter still goes when the echo never arrives, as it always has."""
+        adapter = self.make()
+        adapter.proc = Process()
+        adapter.master = 7
+        adapter.screen_text = lambda: "nothing"
+        writes = []
+        with (
+            patch("partyline.adapters.bundled.antigravity.adapter.os.write",
+                  side_effect=lambda fd, data: writes.append(data)),
+            patch.object(antigravity_module, "PASTE_PACE", 0.05),
+        ):
+            await adapter.send_keys("wake nine")
+        self.assertEqual(writes[-1], b"\r")
+        # A deadline already past still sends the Enter — pacing, not a verdict.
+        with (
+            patch("partyline.adapters.bundled.antigravity.adapter.os.write",
+                  side_effect=lambda fd, data: writes.append(data)),
+            patch.object(antigravity_module, "PASTE_PACE", -1.0),
+        ):
+            await adapter.send_keys("wake ten")
+        self.assertEqual(writes[-1], b"\r")
+
+    async def test_an_input_with_a_malformed_timestamp_still_judges(self):
+        adapter = self.make()
+        adapter.proc = Process()
+        sent = []
+        adapter.send_keys = AsyncMock(side_effect=lambda text: sent.append(text))
+        await adapter.deliver([{"sender": "greg", "body": "wake eleven"}])
+        digest = adapter.format_digest([{"sender": "greg", "body": "wake eleven"}])
+        await adapter._note_user_input(digest, "not-a-date")
+        self.assertEqual(adapter._outstanding, [])
+        # A record carrying no timestamp at all still settles a wake.
+        await adapter.deliver([{"sender": "greg", "body": "wake twelve"}])
+        digest = adapter.format_digest([{"sender": "greg", "body": "wake twelve"}])
+        await adapter._note_user_input(digest, None)
+        self.assertEqual(adapter._outstanding, [])
+
+    async def test_stage_startup_delivery_rejects_a_blank_digest(self):
+        resumed = self.make(resume=True, cli_session=CONV_ID)
+        resumed.format_digest = lambda messages: "   "
+        self.assertFalse(resumed.stage_startup_delivery([{"sender": "greg", "body": "x"}]))
+
+    async def test_tail_log_waits_for_the_log_to_appear(self):
+        adapter = self.make()
+        adapter.proc = Process()
+        sleeps = 0
+
+        async def sleep(_seconds):
+            nonlocal sleeps
+            sleeps += 1
+            if sleeps > 2:
+                adapter.proc.stop()
+
+        with patch("partyline.adapters.bundled.antigravity.adapter.asyncio.sleep", new=sleep):
+            await adapter._tail_log()
+        self.assertGreater(sleeps, 2)
+
+    async def test_deliver_flushes_a_stuck_composer_only_when_screen_proves_it(self):
+        """A wake the TUI held unsubmitted still sits in the composer: the
+        next deliver sends a bare Enter first — the fix the original incident
+        got by hand — but only when the screen proves the stuck text is ours."""
+        adapter = self.make()
+        adapter.proc = Process()
+        adapter.master = 7
+        adapter.send_keys = AsyncMock()
+        await adapter.deliver([{"sender": "greg", "body": "stuck wake"}])
+        stuck = adapter.format_digest([{"sender": "greg", "body": "stuck wake"}])
+
+        writes = []
+        adapter.send_keys = PartylineAdapter.send_keys.__get__(adapter)
+        with (
+            patch("partyline.adapters.bundled.antigravity.adapter.os.write",
+                  side_effect=lambda fd, data: writes.append(data)),
+            patch.object(antigravity_module, "PASTE_PACE", 0.05),
+        ):
+            adapter.screen_text = lambda: "nothing of ours here"
+            await adapter.deliver([{"sender": "greg", "body": "second wake"}])
+            self.assertTrue(writes[0].startswith(b"\x1b[200~"))  # no flush
+
+            writes.clear()
+            adapter.screen_text = lambda: "> " + stuck[-60:]
+            await adapter.deliver([{"sender": "greg", "body": "third wake"}])
+        self.assertEqual(writes[0], b"\r")  # the stuck wake is flushed first
+        self.assertTrue(writes[1].startswith(b"\x1b[200~"))
 
 
 if __name__ == "__main__":
