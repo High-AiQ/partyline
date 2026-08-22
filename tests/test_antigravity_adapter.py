@@ -8,6 +8,7 @@ transcript in a temporary brain directory.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import tempfile
@@ -274,6 +275,66 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         ):
             await resumed._run()
         self.assertEqual(self.messages, [])
+
+    async def test_deliver_resends_an_unaccepted_wake_then_gives_up_loudly(self):
+        """Regression for the stuck-badge incident: an idle TUI can hold a
+        pasted digest unsubmitted — no USER_INPUT, no turn, no ENDED receipt,
+        presence lit forever. The adapter must resend on a bounded schedule
+        and then say out loud that the wake never landed."""
+        adapter = self.make()
+        adapter.proc = Process()
+        sent = []
+        adapter.send_keys = AsyncMock(side_effect=lambda text: sent.append(text))
+        with patch("partyline.adapters.bundled.antigravity.adapter.asyncio.sleep", new=AsyncMock()):
+            await adapter.deliver([{"sender": "greg", "body": "wake one"}])
+            await adapter._watchdog
+        digest = adapter.format_digest([{"sender": "greg", "body": "wake one"}])
+        # The original paste plus both scheduled retries.
+        self.assertEqual(sent, [digest, digest, digest])
+        self.assertEqual(len(self.messages), 1)
+        self.assertIn("never took it", self.messages[0][2])
+
+    async def test_a_transcript_input_clears_the_outstanding_wake(self):
+        adapter = self.make()
+        adapter.proc = Process()
+        sent = []
+        adapter.send_keys = AsyncMock(side_effect=lambda text: sent.append(text))
+        sleeps = 0
+
+        async def sleep(_seconds):
+            nonlocal sleeps
+            sleeps += 1
+            if sleeps == 3:
+                # The TUI took the paste, possibly reflowed: whitespace
+                # differences must still clear the outstanding digest.
+                adapter._note_user_input("<USER_REQUEST>\n  " + sent[0].replace("\n", " \n "))
+
+        with patch("partyline.adapters.bundled.antigravity.adapter.asyncio.sleep", new=sleep):
+            await adapter.deliver([{"sender": "greg", "body": "wake two"}])
+            await adapter._watchdog
+        self.assertEqual(sent, [adapter.format_digest([{"sender": "greg", "body": "wake two"}])])
+        self.assertEqual(self.messages, [])
+        self.assertEqual(adapter._outstanding, [])
+
+    async def test_deliver_does_not_arm_the_watchdog_for_a_dead_process(self):
+        adapter = self.make()
+        adapter.proc = Process()
+        adapter.proc.stop()
+        adapter.send_keys = AsyncMock()
+        await adapter.deliver([{"sender": "greg", "body": "wake three"}])
+        self.assertEqual(adapter._outstanding, [])
+        self.assertIsNone(adapter._watchdog)
+
+    async def test_stop_cancels_a_pending_watchdog(self):
+        adapter = self.make()
+        adapter.proc = Process()
+        adapter.send_keys = AsyncMock()
+        await adapter.deliver([{"sender": "greg", "body": "wake four"}])
+        self.assertFalse(adapter._watchdog.done())
+        adapter.proc = None  # never really spawned: keep stop() off killpg
+        await adapter.stop()
+        await asyncio.sleep(0.01)  # let the cancelled task finish unwinding
+        self.assertTrue(adapter._watchdog.cancelled())
 
     async def test_run_waits_for_transcript_after_conversation_appears(self):
         adapter = self.make(resume=True, cli_session=CONV_ID)
