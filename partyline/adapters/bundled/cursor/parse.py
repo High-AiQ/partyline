@@ -160,5 +160,5 @@ def resync_fingerprints(path: Path, seen_fps: list[str]) -> list[str]:
                 if is_valid(cand):
                     return cand
 
-    # 3. Fallback: hold watermark by position to prevent history replay
-    return incoming[: len(seen_fps)]
+    # 3. Fallback: preserve seen_fps unchanged rather than dropping history
+    return seen_fps

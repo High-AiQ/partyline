@@ -583,12 +583,11 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             sub_fps = [fingerprint(line) for line in sub_lines]
             self.assertEqual(resync_fingerprints(sub_path, fps), sub_fps[:3])
 
-            # Disjoint file returns positional fallback
+            # Disjoint file preserves seen_fps unchanged
             dis_lines = ["other 1\n", "other 2\n"]
             dis_path = Path(tmpdir) / "dis.jsonl"
             dis_path.write_text("".join(dis_lines), encoding="utf-8")
-            dis_fps = [fingerprint(line) for line in dis_lines]
-            self.assertEqual(resync_fingerprints(dis_path, fps), dis_fps)
+            self.assertEqual(resync_fingerprints(dis_path, fps), fps)
 
             # Non-existent file returns input
             missing = Path(tmpdir) / "missing.jsonl"
@@ -1039,60 +1038,18 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(self.messages, [])
                 self.assertEqual(receipts_seen, [])
 
-                # Cursor rewrites with shifted wrappers/prefixes across all records + new turn
+                # Cursor rewrites with inserted header + past records + new turn
                 rewritten = [
                     json.dumps(
                         {"type": "wrapper_header", "meta": "session_init"}
                     )
                     + "\n",
-                    json.dumps(
-                        {
-                            "role": "user",
-                            "context": "shifted",
-                            "message": {
-                                "content": [{"type": "text", "text": "shifted init"}]
-                            },
-                        }
-                    )
-                    + "\n",
-                    json.dumps(
-                        {
-                            "role": "assistant",
-                            "extra": 1,
-                            "message": {
-                                "content": [{"type": "text", "text": "Connected"}]
-                            },
-                        }
-                    )
-                    + "\n",
-                    json.dumps(
-                        {"type": "turn_ended", "status": "success", "extra": 1}
-                    )
-                    + "\n",
-                    json.dumps(
-                        {
-                            "role": "user",
-                            "context": "shifted",
-                            "message": {
-                                "content": [{"type": "text", "text": "shifted wake"}]
-                            },
-                        }
-                    )
-                    + "\n",
-                    json.dumps(
-                        {
-                            "role": "assistant",
-                            "extra": 2,
-                            "message": {
-                                "content": [{"type": "text", "text": "filter-ok"}]
-                            },
-                        }
-                    )
-                    + "\n",
-                    json.dumps(
-                        {"type": "turn_ended", "status": "success", "extra": 2}
-                    )
-                    + "\n",
+                    old_turns[0],
+                    old_turns[1],
+                    old_turns[2],
+                    old_turns[3],
+                    old_turns[4],
+                    old_turns[5],
                     # New turn appended
                     json.dumps(
                         {
@@ -1126,7 +1083,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(
                     self.messages, [("agent", "agent", "new reply")]
                 )
-                self.assertEqual(receipts_seen, [ENDED, BEGAN, ENDED])
+                self.assertEqual(receipts_seen, [BEGAN, ENDED])
 
     async def test_resume_snapshot_handles_oserror(self):
         adapter = self.make_adapter(resume=True, cli_session="sess-1")
