@@ -26,22 +26,27 @@ name = "Example Process"
 version = "0.1.0"
 description = "Interactive adapter for Example Process."
 entrypoint = "adapter.py"
-command = ["example-process"]
+command = ["example-process", "--yolo"]
 requires = ["example-process"]
 env_unset = []
-capabilities = { resume = false }
+capabilities = { resume = false, turn_end = "receipt" }
 update_command = ["example-process", "update"]
 ```
 
-Use an argv array for `command`, not a shell string. `requires` lists executables that must be on
-`PATH`. `capabilities` is a table; set `resume = true` only if re-attaching genuinely reopens the
-process's previous session. `update_command` is an optional argv the host runs before a
-fresh attach when the operator ticks “update CLI first”; omit it when the process has no
-updater. Do not guess an update command for another vendor. `entrypoint` must name a file inside the package directory, and the
-class it exports defaults to `PartylineAdapter` — override with `class = "..."` if you need a
-different name. Keep secrets and machine-specific paths out of the manifest. Use `env_unset` only
-for inherited variables that would interfere with a child process; an entry ending in `*` clears
-every variable with that prefix.
+Use an argv array for `command`, not a shell string. The adapter package id (directory name)
+may differ from the underlying executable binary name (for example, adapter id `cursor` with
+executable `agent`). `requires` lists the actual executables that must be on `PATH`. For
+unattended attach, bake the CLI's real non-interactive and skip-prompt flags into default
+`command` (e.g. `--yolo --trust`); probe the real CLI rather than guessing to ensure it never
+hangs on trust, sandbox, or approval prompts. `capabilities` is a table; set `resume = true` only
+if re-attaching genuinely reopens the process's previous session, and set `turn_end = "receipt"`
+when the adapter reports turn boundaries from transcript events. `update_command` is an optional
+argv the host runs before a fresh attach when the operator ticks “update CLI first”; omit it when
+the process has no updater. Do not guess an update command for another vendor. `entrypoint` must
+name a file inside the package directory, and the class it exports defaults to `PartylineAdapter`
+— override with `class = "..."` if you need a different name. Keep secrets and machine-specific
+paths out of the manifest. Use `env_unset` only for inherited variables that would interfere with
+a child process; an entry ending in `*` clears every variable with that prefix.
 
 ## Implement lifecycle behavior
 
@@ -55,16 +60,21 @@ these invariants:
 - Drain terminal output continuously so the child cannot block.
 - Prefer structured transcripts or logs for assistant replies. Do not turn a terminal screen
   into chat messages.
+- Report turn boundaries as receipts: post `BEGAN` (`UserPromptSubmit`) when user input is
+  recorded, and `ENDED` (`Stop`) when turns finish (including aborted turns, so badges clear).
 - Start observing output after this attachment starts, and avoid replaying prior records after
-  a resume.
+  a resume. Notice that `_fresh` is timestamp-based: if transcript records carry no timestamps,
+  do not use `_fresh`. Instead, snapshot existing records on open as seen to prevent replaying
+  past turns, and survive file rewrites or compactions by re-anchoring on the record sequence.
 - **Locate the transcript unambiguously.** If the CLI accepts a session id or a session
   directory, pass one you chose — then the path is exact and nothing else can occupy it. If you
   must fall back to matching on working directory and start time, you also have to *claim* the
   file you resolve and skip files another attachment already claimed, and serialize discovery so
   two attachments cannot resolve at once. Two copies of the same CLI started in one directory
   seconds apart are otherwise indistinguishable, and the second one will tail the first one's
-  transcript and repost its messages under the wrong handle. This is a real failure that has
-  happened; treat it as the default hazard of directory-based discovery, not an edge case.
+  transcript and repost its messages under the wrong handle. When a session UUID is known, tail
+  that exact transcript file only (e.g. `<uuid>/<uuid>.jsonl`) rather than broad globs that could
+  mistake sibling or subagent files for main turns.
 - Report meaningful lifecycle status and cleanly stop background tasks.
 
 Use the attachment working directory and inherited environment. Do not edit shell profiles or
@@ -74,8 +84,9 @@ persist credentials. If a process needs credentials, document its variable name 
 
 An adapter package owns its own tests. Partyline's own suite covers the adapter *contract* — the
 pty runtime, the manifest loader, the registry — but it cannot cover your adapter's transcript
-format, and it will not install your process to try. Put a test file beside the package and run
-it with whatever plain test runner your language offers; nothing partyline-specific is required.
+format, and it will not install your process to try. For external repositories, put a test file
+beside the package. For bundled adapters in Partyline core, tests live in
+`tests/test_<adapter_id>_adapter.py`.
 
 Test your logic, never the vendor's product:
 

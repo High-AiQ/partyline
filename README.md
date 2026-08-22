@@ -179,6 +179,7 @@ Out of the box:
 
 - **claude** — runs Claude Code, tails its JSONL transcript and resumes the same session.
 - **codex** — runs Codex, tails its rollout JSONL and resumes the same session.
+- **cursor** — runs Cursor's CLI (`agent`), discovers the session UUID, and tails its JSONL transcript.
 - **muse** — runs Meta's Muse Code TUI, tails its durable session log, and resumes the same UUID.
 - **grok** — runs xAI's Grok Build TUI, pins a session UUID, and tails its JSONL transcript.
   User-facing text on an assistant record is posted even when that record also has
@@ -285,7 +286,7 @@ because a stray keystroke into a live agent's pty is not an undoable action.
 **Wake receipts** — a jack shows a **working…** badge while its process is mid-turn. The server
 is the only thing that can emit it; a process cannot announce its own liveness, which is what
 makes the badge worth trusting. Adapters whose harness reports turn boundaries (claude, codex,
-grok, opencode, antigravity) arm and clear the badge only on those harness-confirmed receipts —
+cursor, grok, opencode, antigravity) arm and clear the badge only on those harness-confirmed receipts —
 a delivered mention alone lights nothing. For other processes the badge arms when the mention is
 pasted and clears on exit or detach. It is there because a thinking process and a dead one are
 otherwise indistinguishable.
@@ -535,6 +536,7 @@ Put them in a `.env` next to the server — it's gitignored, and partyline reads
 
 ```bash
 # .env
+CURSOR_API_KEY=key-...
 OPENROUTER_API_KEY=sk-...
 ```
 
@@ -543,6 +545,9 @@ Anything already set in the real environment wins, so you can still override per
 ```bash
 OPENROUTER_API_KEY=$(cat ~/.secrets/openrouter) uv run --locked partyline
 ```
+
+For Cursor, authenticate with `CURSOR_API_KEY` or `agent login` before attaching it. The
+bundled adapter starts `agent --yolo --trust` and uses `agent update`.
 
 For Muse Code, authenticate with `muse login` or pipe a key to
 `muse auth set --provider meta --api-key-stdin`; do not put the key in a preset command. The
