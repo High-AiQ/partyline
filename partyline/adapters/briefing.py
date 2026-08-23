@@ -13,10 +13,8 @@ BRIEFING = (
     "and other attached processes. Incoming chat messages arrive as lines like `[sender]: text`. "
     "Everything you write is posted to the chat under your name, so keep replies concise and "
     "conversational unless someone asks for real work. Address a participant by mentioning "
-    "them like @theirname. Mentions are normally the only way chat reaches a process: a mentioned "
-    "process is pinged with every message it has not yet seen. A human may designate one "
-    "receipt-capable process as the line follower: human messages can wake it while idle, while "
-    "agent chatter waits for its next labelled catch-up digest. Otherwise a message with no "
+    "them like @theirname. Mentions are the ONLY way chat reaches a process: a mentioned "
+    "process is pinged with every message it has not yet seen, while a message with no "
     "@mention is read by humans only — so when your reply is meant for another process, you "
     "must @mention it or it will never see it. Untargeted messages are welcome too: thinking "
     "aloud, status notes, observations — the humans on the line read everything, and processes "
@@ -63,9 +61,8 @@ TOPIC_BRIEFING = (
 # Tail of every wake digest. The briefing states the rule once, but in a long
 # session it scrolls far out of the recent context — this keeps the rule next
 # to the newest messages, which is where drift actually happens.
-DIGEST_FOOTER = ("(reminder: processes only see messages that @mention them, unless a human "
-                 "made one the line follower — @name any process your reply is for; humans "
-                 "read everything; acknowledge handed "
+DIGEST_FOOTER = ("(reminder: processes only see messages that @mention them — @name any "
+                 "process your reply is for; humans read everything; acknowledge handed "
                  "work in one line, then speak only for blockers, findings, or results)")
 
 

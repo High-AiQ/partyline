@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from .attachment_contracts import AttachmentResponse
 from .media_contracts import FileRef
@@ -22,7 +22,6 @@ class AttachIn(BaseModel):
     command: str = ""
     cwd: str = ""
     update: bool = False
-    follow: bool = False
 
 
 # Neither carries a sender: who changed a topic or name is derived from the
@@ -81,7 +80,6 @@ class AdapterMetadataResponse(BaseModel):
     overrides_bundled: bool = False
     update_command: list[str] | None = None
     compact_paste: str | None = None
-    completion: Literal["receipt", "none"] = "none"
 
 
 class ConversationResponse(BaseModel):
@@ -109,14 +107,7 @@ class FileUploadResponse(BaseModel):
 
 
 class AttachmentPatchRequest(BaseModel):
-    command: str | None = None
-    follow: bool | None = None
-
-    @model_validator(mode="after")
-    def exactly_one_change(self):
-        if (self.command is None) == (self.follow is None):
-            raise ValueError("set exactly one of command or follow")
-        return self
+    command: str
 
 
 class PresetResponse(BaseModel):

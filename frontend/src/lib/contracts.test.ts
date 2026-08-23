@@ -132,7 +132,6 @@ describe("wire events with server-omitted null fields", () => {
     if (event.type !== "attachment") throw new Error("expected attachment event");
     expect(event.attachment.cli_session).toBeNull();
     expect(event.attachment.cwd_git).toEqual({ sha: "d87b3ae", dirty: true });
-    expect(event.attachment.follow).toBe(false);
   });
 });
 
@@ -342,10 +341,5 @@ describe("adapter override metadata", () => {
     expect(AdapterSchema.parse({ ...adapter, compact_paste: "/summarize\n" }).compact_paste).toBe(
       "/summarize\n",
     );
-  });
-
-  it("defaults and keeps normalized completion for human follow controls", () => {
-    expect(AdapterSchema.parse(adapter).completion).toBe("none");
-    expect(AdapterSchema.parse({ ...adapter, completion: "receipt" }).completion).toBe("receipt");
   });
 });

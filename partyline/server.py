@@ -49,6 +49,7 @@ from .contracts import (
     AdapterRemoveResponse,
     ArchiveResponse,
     AttachIn,
+    AttachmentEvent,
     AttachmentPatchRequest,
     AttachmentResponse,
     ConvIn,
@@ -73,7 +74,6 @@ from .contracts import (
 )
 from .db import Db
 from .frontend_build import current_frontend_build
-from .follow import add_attachment_with_follow, patch_attachment, require_follow_allowed
 from .hook_routes import hook_url, hooks_router
 from .line_process_routes import detach_attachment, register_line_process_routes
 from .message_routes import conversation_detail_response, message_router
@@ -255,10 +255,7 @@ async def shutdown(request: Request, body: ShutdownRequest | None = None):
 
 @app.get("/api/adapters", response_model=list[AdapterMetadataResponse])
 async def adapters():
-    return [
-        {**ADAPTER_METADATA[name], "completion": adapter_completion(name)}
-        for name in sorted(ADAPTERS)
-    ]
+    return [ADAPTER_METADATA[name] for name in sorted(ADAPTERS)]
 
 
 @app.post("/api/adapters/import", response_model=AdapterImportResponse)
@@ -403,7 +400,7 @@ async def purge_conversation(conv_id: str):
 
 
 @app.post("/api/conversations/{conv_id}/attachments", response_model=AttachmentResponse)
-async def attach(request: Request, conv_id: str, body: AttachIn):
+async def attach(conv_id: str, body: AttachIn):
     conv = runtime.db.get_conversation(conv_id)
     if not conv:
         raise HTTPException(404)
@@ -427,18 +424,14 @@ async def attach(request: Request, conv_id: str, body: AttachIn):
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    if "follow" in body.model_fields_set:
-        require_follow_allowed(request, body.adapter, body.follow)
-
     cwd = os.path.abspath(os.path.expanduser(body.cwd.strip() or os.getcwd()))
     if not os.path.isdir(cwd):
         raise HTTPException(400, f"cwd does not exist: {cwd}")
 
     att_id = str(uuid.uuid4())
     runtime_owner = str(uuid.uuid4())
-    att = add_attachment_with_follow(
-        runtime.db, att_id, conv_id, body.name, body.adapter, command, cwd,
-        runtime_owner, body.follow,
+    att = runtime.db.add_attachment(
+        att_id, conv_id, body.name, body.adapter, command, cwd, runtime_owner
     )
     att["api_token"] = ensure_api_token(runtime.db, att_id)
     att["runtime_owner"] = runtime_owner
@@ -493,10 +486,24 @@ async def _resume_adapter(
 async def edit_attachment(
     request: Request, att_id: str, body: AttachmentPatchRequest
 ):
-    return await patch_attachment(
-        request, att_id, body, runtime=runtime, adapters=ADAPTERS,
-        metadata=ADAPTER_METADATA, require_loopback=require_loopback,
-    )
+    att = runtime.db.get_attachment(att_id)
+    if not att:
+        raise HTTPException(404)
+    require_loopback(request)
+    if att_id in runtime.live or att["status"] not in ("exited", "detached"):
+        raise HTTPException(409, f"'{att['name']}' must be stopped before editing its command")
+    try:
+        command = validated_attachment_command(
+            att["adapter"], body.command, ADAPTERS, ADAPTER_METADATA
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    updated = await runtime.db.update_inactive_attachment_command(att_id, command)
+    if updated is None:
+        raise HTTPException(409, f"'{att['name']}' became live; refresh and try again")
+    response = await attachment_response(updated)
+    await runtime.broadcast(att["conv_id"], AttachmentEvent(attachment=response))
+    return response
 
 
 @app.delete("/api/attachments/{att_id}", response_model=OkResponse)
