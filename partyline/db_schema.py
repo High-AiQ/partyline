@@ -122,4 +122,14 @@ MIGRATIONS = [
     "ALTER TABLE attachments ADD COLUMN follow INTEGER NOT NULL DEFAULT 0",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_attachments_follow_lead "
     "ON attachments(conv_id) WHERE follow=1",
+    # Transcript speech recovered by a resume may be posted long after its
+    # position in the vendor file. Tie that exact chat message to the record
+    # fingerprint so a later resume does not mistake delivery order for
+    # transcript order and relay it again.
+    """CREATE TABLE IF NOT EXISTS transcript_delivery_records(
+        attachment_id TEXT NOT NULL,
+        message_id INTEGER NOT NULL,
+        fingerprint BLOB NOT NULL,
+        PRIMARY KEY (attachment_id, message_id)
+    )""",
 ]
