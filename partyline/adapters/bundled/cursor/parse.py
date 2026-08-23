@@ -107,7 +107,9 @@ def parse_record(record: dict) -> tuple[str | None, str | None]:
     return None, None
 
 
-def resync_fingerprints(path: Path, seen_fps: list[str]) -> list[str]:
+def resync_fingerprints(
+    path: Path, seen_fps: list[str], incoming_fps: list[str] | None = None
+) -> list[str]:
     """Re-anchor watermark after file truncation, rewrite, or compaction.
 
     Invariant: The returned watermark may only ever cover records this process
@@ -125,11 +127,14 @@ def resync_fingerprints(path: Path, seen_fps: list[str]) -> list[str]:
     Any boundary ENDED emitted by positional hold cleanly flushes server-held
     wakes on turn-end, which is safe and badge-conservative.
     """
-    try:
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            incoming = [fingerprint(line) for line in fh if line.endswith("\n")]
-    except OSError:
-        return seen_fps
+    if incoming_fps is None:
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                incoming = [fingerprint(line) for line in fh if line.endswith("\n")]
+        except OSError:
+            return seen_fps
+    else:
+        incoming = incoming_fps
     if not seen_fps or not incoming:
         return seen_fps if seen_fps else []
 
@@ -165,11 +170,16 @@ def resync_fingerprints(path: Path, seen_fps: list[str]) -> list[str]:
     return seen_fps
 
 
-def resync_positional(path: Path, seen_fps: list[str]) -> list[str]:
+def resync_positional(
+    path: Path, seen_fps: list[str], incoming_fps: list[str] | None = None
+) -> list[str]:
     """Positional fallback when semantic re-anchoring fails."""
-    try:
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            incoming = [fingerprint(line) for line in fh if line.endswith("\n")]
-    except OSError:
-        return seen_fps
+    if incoming_fps is None:
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                incoming = [fingerprint(line) for line in fh if line.endswith("\n")]
+        except OSError:
+            return seen_fps
+    else:
+        incoming = incoming_fps
     return incoming[: len(seen_fps)]
