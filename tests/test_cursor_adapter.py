@@ -1287,6 +1287,52 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("re-anchoring positionally", self.messages[-2][2])
                 self.assertEqual(receipts_seen, [ENDED, BEGAN, ENDED])
 
+    async def test_live_captured_rewrite_escapes_the_hatch_instead_of_muting(self):
+        """#115: the real grok46 rewrite, captured from disk, must not mute.
+
+        Cursor rewrote the tail in place (the trailing ``turn_ended`` position
+        became the next turn's user record), so the inline walk matched a long
+        stable prefix and then mismatched every cycle. The per-line counter
+        reset made the escape hatch unreachable: a permanent, noticeless mute.
+        The fix resets the fruitless counter only when the FULL watermark has
+        been re-matched, so a sustained mismatch reaches the hatch in bounded
+        polls and the appended turn relays.
+        """
+        fixtures = Path(__file__).parent / "fixtures" / "cursor_mute_115"
+        before = (fixtures / "before.jsonl").read_text(encoding="utf-8")
+        after = (fixtures / "after.jsonl").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "live.jsonl"
+            path.write_text(before, encoding="utf-8")
+
+            adapter = self.make_adapter(resume=True, cli_session="sess-115")
+            adapter.proc = Process()
+            adapter._silent_until_wake = False
+
+            receipts_seen: list[str] = []
+
+            async def mock_receipt(att, event):
+                receipts_seen.append(event)
+
+            with patch(
+                "partyline.adapters.bundled.cursor.adapter.receipt",
+                side_effect=mock_receipt,
+            ):
+                task = asyncio.create_task(adapter._tail_transcript(path))
+                await asyncio.sleep(0.05)
+                self.assertEqual(self.messages, [])
+
+                path.write_text(after, encoding="utf-8")
+                await asyncio.sleep(0.3)
+
+                adapter.proc.stop()
+                await task
+
+            hatched = [m for m in self.messages if "re-anchoring positionally" in m[2]]
+            self.assertEqual(len(hatched), 1)
+            self.assertEqual(self.messages[-1], ("agent", "agent", "mute-probe-1"))
+            self.assertIn(ENDED, receipts_seen)
+
     async def test_resume_snapshot_handles_oserror(self):
         adapter = self.make_adapter(resume=True, cli_session="sess-1")
         adapter.proc = Process()

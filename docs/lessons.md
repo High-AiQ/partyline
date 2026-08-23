@@ -430,3 +430,14 @@ enforce it. A prose warning that has no executable guard is not a completed less
   are a superset; disjoint batches still cannot jump the cursor. The owner-gated callback rejects
   stale activations, and missing ordinals refuse to guess rather than converting terminal echo,
   hooks, or time into evidence.
+- **A per-line "still on track" reset made the escape hatch unreachable.** Cursor rewrote its
+  transcript tail in place (the trailing `turn_ended` position became the next turn's user
+  record), so every poll cycle re-matched a long stable prefix and then mismatched. The inline
+  counter reset fired on each matched prefix line — added to stop spurious hatch notices — so the
+  fruitless-resync counter oscillated between 0 and 1 forever: a permanent mute with no notice,
+  no receipts, and an idle badge (the grok46 incident). Partial progress is not proof of health;
+  only re-matching the FULL delivered watermark resets the counter now, so a sustained mismatch
+  reaches the positional hatch in bounded polls. The regression fixture is the live capture from
+  the incident, not a synthetic shape. Found via an await-chain dump of the wedged task; the same
+  hunt exposed that adapter tasks held in `_tasks` die silently (strong refs suppress the
+  unretrieved-exception warning) — they now log their own deaths.

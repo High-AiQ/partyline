@@ -155,9 +155,14 @@ class PartylineAdapter(Adapter):
                         if matched < len(seen_fps):
                             if seen_fps[matched] == fp:
                                 matched += 1
-                                # This is proof the current file still
-                                # follows the delivered watermark.
-                                resync_failures = 0
+                                # Only the FULL watermark re-matching proves the
+                                # file still follows delivered history. A partial
+                                # prefix match before a mismatch is the rewrite
+                                # cycle itself; resetting there kept the counter
+                                # oscillating 0↔1 and made the escape hatch
+                                # unreachable — the grok46 permanent mute.
+                                if matched == len(seen_fps):
+                                    resync_failures = 0
                                 continue
                             seen_fps, resync_failures = await self._handle_resync(
                                 path, seen_fps, resync_failures
