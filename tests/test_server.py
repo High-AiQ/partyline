@@ -16,6 +16,7 @@ from partyline import auth_store, auth_tokens, bind, frontend_build, server
 from partyline.auth_guard import Principal
 from partyline.attachment_resume import TranscriptDeliveryRecord, delivered_history
 from partyline.db import Db
+from partyline.follow_routing import CATCH_UP_HEADER
 from partyline.hook_routes import handle_hook
 from partyline.presence import Presence
 from partyline.preset_routes import presets_router
@@ -428,7 +429,7 @@ class ServerTest(unittest.TestCase):
                 self.assertEqual(adapter.deliveries[-1][-1], message)
                 self.assertEqual(message["body"], body)
 
-    def test_follow_wakes_idle_then_coalesces_until_real_turn_end(self):
+    def test_follow_wakes_for_idle_human_and_bundles_agent_chatter(self):
         self.add_attachment("lead", "grok", owner="owner", follow=True)
         adapter = FakeAdapter(att={"runtime_owner": "owner"})
         presence = Presence(server.runtime)
@@ -437,21 +438,38 @@ class ServerTest(unittest.TestCase):
             *server.runtime.held_wake_hooks("line", "lead", "grok"),
         )
 
+        skipped = server.runtime.db.add_message("line", "sol", "agent", "standing by")
+        self.arun(server.runtime.route_mentions("line", skipped))
+        self.assertEqual(adapter.deliveries, [])
+        self.assertEqual(server.runtime.db.get_attachment("lead")["last_seen"], 0)
+        self.assertEqual(presence.queue.held_count("lead"), 0)
+
         first = server.runtime.db.add_message("line", "greg", "human", "status update?")
         self.arun(server.runtime.route_mentions("line", first))
-        self.assertEqual(adapter.deliveries, [[first]])
+        header = {"sender": "partyline", "sender_type": "system", "body": CATCH_UP_HEADER}
+        self.assertEqual(adapter.deliveries, [[header, skipped, first]])
+        self.assertNotIn(
+            CATCH_UP_HEADER,
+            [message["body"] for message in server.runtime.db.list_messages("line")],
+        )
         self.arun(presence.began("line", "lead", owner="owner"))
 
         own = server.runtime.db.add_message("line", "grok", "agent", "on it")
         self.arun(server.runtime.route_mentions("line", own))
         second = server.runtime.db.add_message("line", "sol", "agent", "finding")
         self.arun(server.runtime.route_mentions("line", second))
-        self.assertEqual(adapter.deliveries, [[first]])
-        self.assertEqual(presence.queue.held_ids("lead"), [second["id"]])
+        third = server.runtime.db.add_message("line", "greg", "human", "anything else?")
+        self.arun(server.runtime.route_mentions("line", third))
+        self.assertEqual(adapter.deliveries, [[header, skipped, first]])
+        self.assertEqual(presence.queue.held_ids("lead"), [second["id"], third["id"]])
 
         self.arun(presence.ended("line", "lead", owner="owner"))
-        self.assertEqual(adapter.deliveries, [[first], [second]])
-        self.assertEqual(server.runtime.db.get_attachment("lead")["last_seen"], second["id"])
+        self.assertEqual(
+            adapter.deliveries,
+            [[header, skipped, first], [header, second, third]],
+        )
+        self.assertEqual(server.runtime.db.get_attachment("lead")["last_seen"], third["id"])
+        self.assertFalse(presence.is_working("lead"))
 
     def test_a_direct_mention_pastes_while_a_follow_lead_is_working(self):
         self.add_attachment("lead", "grok", owner="owner", follow=True)
@@ -463,13 +481,15 @@ class ServerTest(unittest.TestCase):
         )
         first = server.runtime.db.add_message("line", "greg", "human", "status")
         self.arun(server.runtime.route_mentions("line", first))
+        header = {"sender": "partyline", "sender_type": "system", "body": CATCH_UP_HEADER}
+        self.assertEqual(adapter.deliveries, [[header, first]])
         self.arun(presence.began("line", "lead", owner="owner"))
         chatter = server.runtime.db.add_message("line", "sol", "agent", "finding")
         self.arun(server.runtime.route_mentions("line", chatter))
-        self.assertEqual(adapter.deliveries, [[first]])
-        stop = server.runtime.db.add_message("line", "greg", "human", "@grok stop")
+        self.assertEqual(adapter.deliveries, [[header, first]])
+        stop = server.runtime.db.add_message("line", "sol", "agent", "@grok stop")
         self.arun(server.runtime.route_mentions("line", stop))
-        self.assertEqual(adapter.deliveries[-1][-1], stop)
+        self.assertEqual(adapter.deliveries[-1], [header, chatter, stop])
         self.assertEqual(server.runtime.db.get_attachment("lead")["last_seen"], stop["id"])
         self.assertEqual(presence.queue.held_ids("lead"), [])
 
