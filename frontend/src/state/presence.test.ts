@@ -12,6 +12,7 @@ function event(overrides: Partial<WorkingEvent> = {}): WorkingEvent {
     since: 1_000_000,
     turn: 1,
     revision: 1,
+    held: 0,
     ...overrides,
   };
 }
@@ -24,6 +25,7 @@ function state(overrides: Partial<PresenceState> = {}): PresenceState {
     since: 1_000_000,
     turn: 1,
     revision: 1,
+    held: 0,
     ...overrides,
   };
 }

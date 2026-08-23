@@ -291,6 +291,12 @@ a delivered mention alone lights nothing. For other processes the badge arms whe
 pasted and clears on exit or detach. It is there because a thinking process and a dead one are
 otherwise indistinguishable.
 
+Receipt adapters also idle-gate steering: a mention that arrives during an open turn is held,
+shown in the badge, and its normal full digest is pasted only after a real turn-ending receipt.
+Unmentioned chatter alone never triggers that flush. If an adapter can prove the CLI skipped a
+digest it had already pasted, partyline durably queues that batch's exact message ids; a restart
+cannot lose it, later chatter cannot join it, and `last_seen` is never rewound to recover it.
+
 **Claims** — a participant can take a write lock on path globs for a line
 (`POST /api/conversations/<id>/claims`), and an overlapping claim is refused with `409` naming
 the current holder. Ownership stated in chat is a convention; this is enforcement.

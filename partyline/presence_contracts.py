@@ -36,6 +36,7 @@ class PresenceState(BaseModel):
     since: float
     turn: int
     revision: int
+    held: int = 0
 
 
 class WorkingEvent(BaseModel):
@@ -57,3 +58,4 @@ class WorkingEvent(BaseModel):
     since: float = 0
     turn: int = 0
     revision: int = 0
+    held: int = 0

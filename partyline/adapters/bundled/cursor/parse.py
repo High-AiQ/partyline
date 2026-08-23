@@ -122,6 +122,8 @@ def resync_fingerprints(path: Path, seen_fps: list[str]) -> list[str]:
     Known trade-off: A rewritten file containing a byte-identical duplicate turn
     is genuinely ambiguous for any positional scheme. On ambiguity, we bias
     toward emitting (receipts must fire; badge safety beats speech dedup).
+    Any boundary ENDED emitted by positional hold cleanly flushes server-held
+    wakes on turn-end, which is safe and badge-conservative.
     """
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:

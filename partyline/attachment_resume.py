@@ -88,6 +88,7 @@ async def resume_adapter(
             conv["id"],
             att_id,
             runtime.status_callback(att_id, conv["id"], runtime_owner),
+            name=att.get("name", ""),
         ),
         on_cli_session=lambda session: runtime.db.set_cli_session(
             att_id, session, runtime_owner
@@ -102,7 +103,8 @@ async def resume_adapter(
         await runtime.db.set_attachment_status_async(att_id, "exited", runtime_owner)
         raise HTTPException(500, f"failed to resume: {exc}") from exc
     runtime.live[att_id] = presence.watch(
-        adapter, att["conv_id"], att_id, adapter_completion(att["adapter"])
+        adapter, att["conv_id"], att_id, adapter_completion(att["adapter"]),
+        *runtime.held_wake_hooks(att["conv_id"], att_id, att["name"]),
     )
 
     await runtime.post_message(

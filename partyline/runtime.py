@@ -90,6 +90,46 @@ class ChatRuntime:
         await self.route_mentions(conv_id, msg)
         return msg
 
+    async def deliver_pending(self, conv_id: str, att: dict, adapter: Adapter) -> bool:
+        """Deliver from the durable cursor, advancing it only after a paste."""
+        pending = self.db.messages_after(conv_id, att["last_seen"], exclude_sender=att["name"])
+        if not pending:
+            return True
+        runtime_owner = adapter.att.get("runtime_owner")
+        async with self.db.reserve_attachment_delivery(att["id"], runtime_owner) as reserved:
+            if not reserved:
+                return False
+            pasted = await adapter.deliver(pending)
+            if pasted is False:
+                return False
+            if not self.db.set_last_seen(att["id"], pending[-1]["id"], runtime_owner):
+                raise RuntimeError("attachment ownership changed during mention delivery")
+        return True
+
+    def held_wake_hooks(self, conv_id: str, att_id: str, name: str):
+        """Persist and flush exact held batches without re-running mention routing."""
+        attachment = self.db.get_attachment(att_id) or {}
+        runtime_owner = attachment.get("runtime_owner")
+
+        async def flush_held(message_ids: list[int]) -> bool:
+            live = self.live.get(att_id)
+            if live is None:
+                return False
+            async with self.db.reserve_attachment_delivery(att_id, runtime_owner) as reserved:
+                if not reserved:
+                    return False
+                messages = self.db.messages_by_ids(conv_id, message_ids)
+                if messages and await live.deliver(messages) is False:
+                    return False
+                if messages and not self.db.set_last_seen(att_id, messages[-1]["id"], runtime_owner):
+                    raise RuntimeError("attachment ownership changed during held delivery")
+                self.db.clear_queued_delivery_ids(att_id, message_ids)
+            return True
+        async def persist_ids(message_ids: list[int]) -> bool:
+            return await self.db.queue_delivery_ids(att_id, message_ids, runtime_owner)
+
+        return flush_held, lambda: self.db.queued_delivery_ids(att_id), persist_ids
+
     async def route_mentions(self, conv_id: str, msg: dict):
         if msg["sender_type"] == "system":
             return  # join/exit notices mention names but must never wake agents
@@ -126,26 +166,10 @@ class ChatRuntime:
                 if not ring_all and att["name"] not in unreachable:
                     unreachable.append(att["name"])
                 continue
-            pending = self.db.messages_after(conv_id, att["last_seen"], exclude_sender=att["name"])
-            if pending:
-                runtime_owner = adapter.att.get("runtime_owner")
-                async with self.db.reserve_attachment_delivery(
-                    att["id"], runtime_owner
-                ) as reserved:
-                    if not reserved:
-                        # Ownership changed after the attachment snapshot was
-                        # read. The current generation will route from the
-                        # durable cursor; never paste into this stale pty.
-                        queued.add(att["name"].lower())
-                        continue
-                    delivered.add(att["name"].lower())
-                    await adapter.deliver(pending)
-                    if not self.db.set_last_seen(
-                        att["id"], pending[-1]["id"], runtime_owner
-                    ):
-                        raise RuntimeError(
-                            "attachment ownership changed during mention delivery"
-                        )
+            if await self.deliver_pending(conv_id, att, adapter):
+                delivered.add(att["name"].lower())
+            else:
+                queued.add(att["name"].lower())
 
         # A handle can have several rows — old detached ones alongside a live one.
         # Only warn about handles that got no delivery at all.

@@ -109,4 +109,11 @@ MIGRATIONS = [
     # allowed act — posting a failure notice to the planned line — with a
     # credential minted for exactly that, the same shape as the hooks token.
     "ALTER TABLE restart_plan ADD COLUMN report_token TEXT",
+    # Digests a CLI proved it skipped have already advanced last_seen. Keep
+    # their exact message ids until a later real turn boundary can replay them.
+    """CREATE TABLE IF NOT EXISTS queued_delivery_messages(
+        attachment_id TEXT NOT NULL,
+        message_id INTEGER NOT NULL,
+        PRIMARY KEY (attachment_id, message_id)
+    )""",
 ]

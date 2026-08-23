@@ -138,6 +138,28 @@ class DbTest(unittest.TestCase):
         finally:
             replacement.close()
 
+    def test_new_activation_rejects_an_old_skipped_batch(self):
+        self.db.create_conversation("line", "Line")
+        message = self.db.add_message("line", "greg", "human", "@opus A")
+        self.db.add_attachment(
+            "att", "line", "opus", "fake", ["fake"], "/tmp", "old-generation"
+        )
+        self.db.set_attachment_status("att", "running", "old-generation")
+        replacement = Db(self.db_path)
+        try:
+            replacement.mark_stale_attachments()
+            self.assertTrue(replacement.claim_attachment("att", "new-generation"))
+            self.assertFalse(
+                asyncio.run(
+                    self.db.queue_delivery_ids(
+                        "att", [message["id"]], "old-generation"
+                    )
+                )
+            )
+            self.assertEqual(replacement.queued_delivery_ids("att"), [])
+        finally:
+            replacement.close()
+
     def test_delivery_reservation_releases_after_an_exception(self):
         self.db.create_conversation("line", "Line")
         self.db.add_attachment(
