@@ -20,6 +20,7 @@ from collections.abc import Awaitable, Callable
 
 import pyte
 
+from partyline.adapters.task_logging import log_task_deaths
 from partyline.adapters.briefing import (
     BRIEFING,
     TOPIC_BRIEFING,
@@ -115,11 +116,10 @@ class Adapter:
         os.close(slave)
         os.set_blocking(master, False)
         self.master = master
-        self._tasks = [
-            asyncio.create_task(self._drain()),
-            asyncio.create_task(self._watch_exit()),
-            asyncio.create_task(self._run()),
-        ]
+        self._tasks = log_task_deaths(
+            [asyncio.create_task(c) for c in (self._drain(), self._watch_exit(), self._run())],
+            self.att,
+        )
         await self.on_status("running")
 
     def mark_ready(self) -> None:
