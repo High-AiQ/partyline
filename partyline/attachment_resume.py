@@ -102,8 +102,23 @@ async def resume_adapter(
     except Exception as exc:
         await runtime.db.set_attachment_status_async(att_id, "exited", runtime_owner)
         raise HTTPException(500, f"failed to resume: {exc}") from exc
+    async def flush_held() -> bool:
+        current = runtime.db.get_attachment(att_id)
+        live = runtime.live.get(att_id)
+        return bool(current and live and await runtime.deliver_pending(att["conv_id"], current, live))
+
+    def pending_count() -> int:
+        current = runtime.db.get_attachment(att_id)
+        if current is None:
+            return 0
+        return len(
+            runtime.db.messages_after(
+                att["conv_id"], current["last_seen"], exclude_sender=att["name"]
+            )
+        )
+
     runtime.live[att_id] = presence.watch(
-        adapter, att["conv_id"], att_id, adapter_completion(att["adapter"])
+        adapter, att["conv_id"], att_id, adapter_completion(att["adapter"]), flush_held, pending_count
     )
 
     await runtime.post_message(

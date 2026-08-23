@@ -9,56 +9,58 @@ class DeliveryQueue:
     """Manages held mention deliveries while an attachment's turn is open."""
 
     def __init__(self) -> None:
-        self._held: dict[str, list[dict]] = {}
-        self._deliver_fns: dict[str, Callable[[list[dict]], Awaitable[None]]] = {}
+        self._held: dict[str, int] = {}
+        self._count_fns: dict[str, Callable[[], int]] = {}
+        self._flush_fns: dict[str, Callable[[], Awaitable[bool]]] = {}
         self._post_fns: dict[str, Callable[..., Awaitable[None]]] = {}
 
     def register_deliver(
         self,
         att_id: str,
-        deliver_fn: Callable[[list[dict]], Awaitable[None]],
+        flush_fn: Callable[[], Awaitable[bool]] | None = None,
         post_fn: Callable[..., Awaitable[None]] | None = None,
+        count_fn: Callable[[], int] | None = None,
     ) -> None:
-        self._deliver_fns[att_id] = deliver_fn
+        if flush_fn is not None:
+            self._flush_fns[att_id] = flush_fn
+        if count_fn is not None:
+            self._count_fns[att_id] = count_fn
         if post_fn is not None:
             self._post_fns[att_id] = post_fn
 
     def unregister(self, att_id: str) -> None:
         self._held.pop(att_id, None)
-        self._deliver_fns.pop(att_id, None)
+        self._flush_fns.pop(att_id, None)
+        self._count_fns.pop(att_id, None)
         self._post_fns.pop(att_id, None)
 
     def held_count(self, att_id: str) -> int:
-        return len(self._held.get(att_id, []))
+        count_fn = self._count_fns.get(att_id)
+        return count_fn() if count_fn is not None else self._held.get(att_id, 0)
 
-    def enqueue(self, att_id: str, messages: list[dict]) -> int:
-        """Enqueue messages for an attachment mid-turn, deduplicating by id."""
-        current = self._held.setdefault(att_id, [])
-        existing_ids = {m.get("id") for m in current if m.get("id") is not None}
-        for msg in messages:
-            msg_id = msg.get("id")
-            if msg_id is None or msg_id not in existing_ids:
-                current.append(msg)
-                if msg_id is not None:
-                    existing_ids.add(msg_id)
-        return len(current)
+    def hold(self, att_id: str, count: int) -> int:
+        """Record the durable-cursor backlog size; never copy message bodies."""
+        self._held[att_id] = max(self._held.get(att_id, 0), count)
+        return self._held[att_id]
 
-    async def flush(self, att_id: str) -> list[dict]:
-        """Drain and deliver all held messages for an attachment on turn end."""
-        messages = self._held.pop(att_id, [])
-        if messages and att_id in self._deliver_fns:
-            await self._deliver_fns[att_id](messages)
-        return messages
+    async def flush(self, att_id: str) -> bool:
+        """Regenerate and deliver the held digest from its durable cursor."""
+        flush = self._flush_fns.get(att_id)
+        if flush is None:
+            return False
+        delivered = await flush()
+        if delivered:
+            self._held.pop(att_id, None)
+        return delivered
 
     async def discard_on_exit(self, att_id: str, name: str, status: str) -> list[dict]:
         """Discard held messages on process exit/detach and emit notice if any."""
-        messages = self._held.pop(att_id, [])
-        if messages and att_id in self._post_fns:
-            count = len(messages)
+        count = self._held.pop(att_id, 0)
+        if count and att_id in self._post_fns:
             plural = "mention" if count == 1 else "mentions"
             await self._post_fns[att_id](
                 "system",
                 "system",
                 f"⚠ @{name} {status} with {count} held {plural} undelivered",
             )
-        return messages
+        return count

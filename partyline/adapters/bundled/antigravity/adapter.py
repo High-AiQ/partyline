@@ -48,8 +48,6 @@ class PartylineAdapter(Adapter):
         super().__init__(att, post, on_status, on_cli_session)
         self._outstanding: list[tuple[str, float]] = []
         self._resend_counts: dict[str, int] = {}
-        self._digest_messages: dict[str, list[dict]] = {}
-        self._repool_messages: list[dict] = []
         self._notices = 0
         self._output_event = asyncio.Event()
 
@@ -85,7 +83,6 @@ class PartylineAdapter(Adapter):
         await super().deliver(messages)
         if digest.strip() and self.alive():
             self._outstanding.append((digest, time.time()))
-            self._digest_messages[digest] = list(messages)
 
     @staticmethod
     def _contains(content: str, probe: str) -> bool:
@@ -120,7 +117,6 @@ class PartylineAdapter(Adapter):
                 continue
             if self._contains(content, digest):
                 self._notices = 0
-                self._digest_messages.pop(digest, None)
                 continue
             count = self._resend_counts.get(digest, 0) + 1
             self._resend_counts[digest] = count
@@ -135,9 +131,6 @@ class PartylineAdapter(Adapter):
                         f"@{self.att['name']}: the CLI submitted other input after "
                         "this wake was pasted — wake queued for next turn-end",
                     )
-                msgs = self._digest_messages.pop(digest, [])
-                if msgs:
-                    self._repool_messages.extend(msgs)
         self._outstanding = kept
 
     async def _note_log_line(self, line: str) -> None:
@@ -273,20 +266,13 @@ class PartylineAdapter(Adapter):
                 and record.get("type") == "PLANNER_RESPONSE"
             ):
                 status = record.get("status")
-                ended = False
                 if status in ("ERROR", "CANCELLED", "ABORTED", "FAILED"):
                     await receipt(self.att, ENDED)
-                    ended = True
                 elif status == "DONE":
                     if not record.get("tool_calls"):
                         await receipt(self.att, ENDED)
-                        ended = True
                     if isinstance(content, str) and content.strip():
                         await self.post(self.att["name"], "agent", content)
-                if ended and self._repool_messages:
-                    to_flush = self._repool_messages[:]
-                    self._repool_messages.clear()
-                    await self.deliver(to_flush)
 
         log_tail = asyncio.create_task(self._tail_log())
         try:

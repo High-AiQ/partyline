@@ -462,7 +462,20 @@ async def attach(conv_id: str, body: AttachIn):
     except Exception as exc:
         await runtime.db.set_attachment_status_async(att_id, "exited", runtime_owner)
         raise HTTPException(500, f"failed to spawn: {exc}") from exc
-    runtime.live[att_id] = presence.watch(adapter, conv_id, att_id, adapter_completion(body.adapter))
+    async def flush_held() -> bool:
+        current = runtime.db.get_attachment(att_id)
+        live = runtime.live.get(att_id)
+        return bool(current and live and await runtime.deliver_pending(conv_id, current, live))
+
+    def pending_count() -> int:
+        current = runtime.db.get_attachment(att_id)
+        if current is None:
+            return 0
+        return len(runtime.db.messages_after(conv_id, current["last_seen"], exclude_sender=body.name))
+
+    runtime.live[att_id] = presence.watch(
+        adapter, conv_id, att_id, adapter_completion(body.adapter), flush_held, pending_count
+    )
 
     await runtime.post_message(
         conv_id, "system", "system",

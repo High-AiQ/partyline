@@ -239,7 +239,11 @@ class Presence:
         self.counts.pop(att_id, None)
         self.queue.unregister(att_id)
 
-    def watch(self, adapter, conv_id: str, att_id: str, completion: str = NONE):
+    def watch(
+        self, adapter, conv_id: str, att_id: str, completion: str = NONE,
+        flush_held: Callable[[], Awaitable[bool]] | None = None,
+        pending_count: Callable[[], int] | None = None,
+    ):
         """Return the adapter, with its wake delivery reporting presence.
 
         Wrapping ``deliver`` keeps the report where the fact is: the receipt
@@ -250,17 +254,22 @@ class Presence:
         att = getattr(adapter, "att", None) or {}
         owner = att.get("runtime_owner")
         self.register(att_id, completion)
-        self.queue.register_deliver(att_id, deliver, getattr(adapter, "post", None))
+        self.queue.register_deliver(
+            att_id, flush_held, getattr(adapter, "post", None), pending_count
+        )
 
         async def delivering(messages):
             if self.completions.get(att_id) == RECEIPT and self.is_working(att_id):
-                self.queue.enqueue(att_id, messages)
+                # ``last_seen`` stays behind this batch.  The queue keeps
+                # only its count; ENDED regenerates the digest from SQLite.
+                self.queue.hold(att_id, len(messages))
                 await self._announce(conv_id, att_id, self.phase(att_id))
-                return
+                return False
             await deliver(messages)
             # A receipt harness arms on its own began, never on the paste.
             if self.completions.get(att_id) != RECEIPT:
                 await self.started(conv_id, att_id, owner)
+            return True
 
         adapter.deliver = delivering
         return adapter
