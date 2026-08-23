@@ -105,6 +105,15 @@ Adapters without an argv prompt keep the default `False` result. The coordinator
 their normal `wait_ready()` signal before calling `deliver()`, and advances the cursor only
 after that call returns successfully.
 
+The same evidence boundary applies after startup. A CLI may accept bracketed-paste bytes while
+an open turn is still running but defer ingesting them until that turn ends. Such an adapter must
+return an uncredited delivery result, suppress duplicate writes of the same outstanding ids, and
+confirm those ids through the host callback only after a newer structured user-input record
+contains the exact digest. Automatic reattachment waits for that receipt outside the pty ownership
+lock. A later cumulative digest may cover swallowed predecessors only when it contains every one
+of their message ids; a disjoint batch cannot jump the cursor. Never infer acceptance from a hook,
+terminal echo, or elapsed time.
+
 ### Locate the transcript unambiguously
 
 This is the one that bites. If the CLI accepts a session id or a session directory, **pass one

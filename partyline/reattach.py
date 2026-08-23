@@ -18,6 +18,7 @@ from .contracts import (
     RestartPlanResponse,
 )
 from .db import Db, RestartPlan
+from .continuation_delivery import deliver_continuation
 from .restart_lease import run_automatic_restart_plan
 
 READY_TIMEOUT_SECONDS = 90.0
@@ -297,23 +298,9 @@ class ReattachCoordinator:
                         raise RuntimeError("the process exited before claiming its session")
 
                     if pending and not resumed.startup_delivery_staged:
-                        runtime_owner = adapter.att.get("runtime_owner")
-                        async with self.runtime.db.reserve_attachment_delivery(
-                            attachment_id, runtime_owner
-                        ) as reserved:
-                            if not reserved:
-                                raise RuntimeError(
-                                    "attachment ownership changed before continuation delivery"
-                                )
-                            await adapter.deliver(pending)
-                            if not self.runtime.db.set_last_seen(
-                                attachment_id,
-                                pending[-1]["id"],
-                                runtime_owner,
-                            ):
-                                raise RuntimeError(
-                                    "attachment ownership changed during continuation delivery"
-                                )
+                        await deliver_continuation(
+                            self.runtime, adapter, attachment_id, pending, self.ready_timeout
+                        )
                         continuation_confirmed = True
                     self.runtime.reattaching.discard(attachment_id)
                 except TimeoutError:

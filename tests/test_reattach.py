@@ -169,6 +169,34 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.db.get_attachment("one")["last_seen"], 0)
         self.assertNotIn("one", self.runtime.live)
 
+    async def test_unstaged_delivery_waits_for_evidence_outside_the_owner_lock(self):
+        plan = {**self.plan, "attachment_ids": ["one"]}
+        adapter = ReadyAdapter(self.order, "sol")
+
+        async def deliver(messages):
+            adapter.deliveries.append(messages)
+            return False
+
+        async def wait_delivery_received(message_ids):
+            async with self.db.reserve_attachment_delivery("one", None) as reserved:
+                self.assertTrue(reserved)
+                self.assertTrue(self.db.set_last_seen("one", max(message_ids), None))
+            return True
+
+        adapter.deliver = deliver
+        adapter.wait_delivery_received = wait_delivery_received
+
+        async def resume(attachment_id, _pending):
+            self.runtime.live[attachment_id] = adapter
+            return ResumedAttachment(adapter, False)
+
+        result = await ReattachCoordinator(self.runtime, resume).run(plan, "greg")
+
+        self.assertEqual(result.ready, ("sol",))
+        self.assertEqual(
+            self.db.get_attachment("one")["last_seen"], adapter.deliveries[0][-1]["id"]
+        )
+
     async def test_delivery_failure_leaves_cursor_for_recovery(self):
         adapters = {}
 
