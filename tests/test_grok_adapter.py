@@ -56,7 +56,14 @@ from partyline.adapters.bundled.grok.resume import (
     align_delivered_sequence,
     delivery_plan_matches,
 )
-from partyline.adapters.bundled.grok.transcript import AssistantRecord
+from partyline.adapters.bundled.grok.transcript import (
+    AssistantRecord,
+    latest_user_prompt,
+    user_input,
+)
+from partyline.db import Db
+from partyline.presence import Presence
+from partyline.runtime import ChatRuntime
 from partyline.transcript_delivery import TranscriptDeliveryRecord
 
 
@@ -145,6 +152,209 @@ class CommandTest(unittest.TestCase):
             make_adapter(command=["grok", f"--session-id={SESSION_ID}"]).build_command()
 
 
+class WakeCreditTest(unittest.IsolatedAsyncioTestCase):
+    async def test_cursor_waits_for_a_new_matching_transcript_user_record(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Db(Path(directory) / "partyline.db")
+            try:
+                db.create_conversation("line", "Line")
+                db.add_attachment(
+                    SESSION_ID, "line", "groky", "grok", ["grok"], directory, "owner"
+                )
+                db.set_attachment_status(SESSION_ID, "running", "owner")
+                runtime = ChatRuntime(db)
+                presence = Presence(runtime)
+                adapter = make_adapter()
+                adapter.att["runtime_owner"] = "owner"
+                adapter.format_digest = lambda _messages: "the exact wake digest"
+                adapter.send_keys = AsyncMock()
+                watched = presence.watch(
+                    adapter,
+                    "line",
+                    SESSION_ID,
+                    "receipt",
+                    *runtime.held_wake_hooks("line", SESSION_ID, "groky"),
+                )
+                runtime.live[SESSION_ID] = watched
+                message = db.add_message("line", "greg", "human", "@groky approved")
+
+                self.assertFalse(
+                    await runtime.deliver_pending(
+                        "line", db.get_attachment(SESSION_ID), watched
+                    )
+                )
+                self.assertEqual(db.get_attachment(SESSION_ID)["last_seen"], 0)
+                adapter.send_keys.assert_awaited_once_with("the exact wake digest")
+
+                # Routing again while the cursor correctly stays behind must
+                # not paste the identical outstanding batch twice.
+                self.assertFalse(
+                    await runtime.deliver_pending(
+                        "line", db.get_attachment(SESSION_ID), watched
+                    )
+                )
+                adapter.send_keys.assert_awaited_once()
+
+                adapter._wake_receipts.seed(466)
+                await adapter._note_user_record({
+                    "type": "user",
+                    "prompt_index": 466,
+                    "content": [{"type": "text", "text": "the exact wake digest"}],
+                })
+                self.assertEqual(db.get_attachment(SESSION_ID)["last_seen"], 0)
+
+                await adapter._note_user_record({
+                    "type": "user",
+                    "prompt_index": 467,
+                    "content": [{
+                        "type": "text",
+                        "text": "<user_query>\nthe exact wake digest\n</user_query>",
+                    }],
+                })
+                self.assertEqual(
+                    db.get_attachment(SESSION_ID)["last_seen"], message["id"]
+                )
+
+                later = db.add_message("line", "greg", "human", "@groky one more")
+                self.assertFalse(
+                    await runtime.deliver_pending(
+                        "line", db.get_attachment(SESSION_ID), watched
+                    )
+                )
+                self.assertTrue(db.set_attachment_status(SESSION_ID, "exited", "owner"))
+                self.assertTrue(db.claim_attachment(SESSION_ID, "replacement"))
+                self.assertTrue(
+                    db.set_attachment_status(SESSION_ID, "running", "replacement")
+                )
+                await adapter._note_user_record({
+                    "type": "user",
+                    "prompt_index": 468,
+                    "content": [{"type": "text", "text": "the exact wake digest"}],
+                })
+                self.assertEqual(
+                    db.get_attachment(SESSION_ID)["last_seen"], message["id"]
+                )
+                self.assertGreater(later["id"], message["id"])
+            finally:
+                db.close()
+
+    async def test_failed_pty_write_does_not_suppress_a_retry(self):
+        adapter = make_adapter()
+        adapter.att["confirm_delivery_ids"] = AsyncMock(return_value=True)
+        adapter.format_digest = lambda _messages: "retry this wake"
+        adapter.send_keys = AsyncMock(side_effect=RuntimeError("pty closed"))
+
+        with self.assertRaisesRegex(RuntimeError, "pty closed"):
+            await adapter.deliver([{"id": 41}])
+
+        adapter.send_keys = AsyncMock()
+        self.assertFalse(await adapter.deliver([{"id": 41}]))
+        adapter.send_keys.assert_awaited_once_with("retry this wake")
+
+    async def test_confirmed_superset_covers_a_swallowed_earlier_wake(self):
+        adapter = make_adapter()
+        credited = AsyncMock(return_value=True)
+        adapter.att["confirm_delivery_ids"] = credited
+        adapter.send_keys = AsyncMock()
+        adapter.format_digest = lambda messages: "wake " + ",".join(
+            str(message["id"]) for message in messages
+        )
+
+        self.assertFalse(await adapter.deliver([{"id": 41}]))
+        self.assertFalse(await adapter.deliver([{"id": 41}, {"id": 42}]))
+        await adapter._note_user_record({
+            "type": "user",
+            "prompt_index": 1,
+            "content": [{
+                "type": "text",
+                "text": "<user_query>\nwake 41,42\n</user_query>",
+            }],
+        })
+
+        credited.assert_awaited_once_with([41, 42])
+        self.assertEqual(adapter._wake_receipts.pending, [])
+        self.assertEqual(adapter.send_keys.await_count, 2)
+
+    async def test_confirmed_disjoint_batch_cannot_jump_an_unconfirmed_wake(self):
+        adapter = make_adapter()
+        credited = AsyncMock(return_value=True)
+        adapter.att["confirm_delivery_ids"] = credited
+        adapter.send_keys = AsyncMock()
+        adapter.format_digest = lambda messages: "wake " + ",".join(
+            str(message["id"]) for message in messages
+        )
+
+        self.assertFalse(await adapter.deliver([{"id": 41}]))
+        self.assertFalse(await adapter.deliver([{"id": 42}]))
+        await adapter._note_user_record({
+            "type": "user",
+            "prompt_index": 1,
+            "content": [{"type": "text", "text": "wake 42"}],
+        })
+        credited.assert_not_awaited()
+
+        await adapter._note_user_record({
+            "type": "user",
+            "prompt_index": 2,
+            "content": [{"type": "text", "text": "wake 41"}],
+        })
+        credited.assert_awaited_once_with([41, 42])
+
+    async def test_one_user_record_credits_one_occurrence_of_an_identical_digest(self):
+        adapter = make_adapter()
+        credited = AsyncMock(return_value=True)
+        adapter.att["confirm_delivery_ids"] = credited
+        adapter.send_keys = AsyncMock()
+        adapter.format_digest = lambda _messages: "same digest"
+
+        self.assertFalse(await adapter.deliver([{"id": 41}]))
+        self.assertFalse(await adapter.deliver([{"id": 42}]))
+        await adapter._note_user_record({
+            "type": "user",
+            "prompt_index": 1,
+            "content": [{"type": "text", "text": "same digest"}],
+        })
+        credited.assert_awaited_once_with([41])
+
+        await adapter._note_user_record({
+            "type": "user",
+            "prompt_index": 2,
+            "content": [{"type": "text", "text": "same digest"}],
+        })
+        self.assertEqual(credited.await_args_list[-1].args[0], [42])
+
+    async def test_transcript_tail_is_the_component_that_confirms_the_wake(self):
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "chat_history.jsonl"
+            adapter = make_adapter()
+            adapter._accounted = 0
+            adapter.format_digest = lambda _messages: "tail-confirmed digest"
+            adapter.send_keys = AsyncMock()
+            running = True
+            confirmed = asyncio.Event()
+
+            async def credit(message_ids):
+                nonlocal running
+                self.assertEqual(message_ids, [51])
+                running = False
+                confirmed.set()
+                return True
+
+            adapter.att["confirm_delivery_ids"] = credit
+            adapter.alive = lambda: running
+            self.assertFalse(await adapter.deliver([{"id": 51}]))
+            transcript.write_text(
+                '{"type":"user","prompt_index":1,"content":['
+                '{"type":"text","text":"tail-confirmed digest"}]}\n',
+                encoding="utf-8",
+            )
+
+            await asyncio.wait_for(
+                adapter._tail_grok_transcript(transcript, AsyncMock()), timeout=1
+            )
+            self.assertTrue(confirmed.is_set())
+
+
 class TurnHookTest(unittest.TestCase):
     def test_payload_is_a_session_filtered_pair_without_subagent_stop(self):
         url = "http://127.0.0.1:9/api/hooks/a/tok"
@@ -177,6 +387,28 @@ class TurnHookTest(unittest.TestCase):
 
 
 class TranscriptTest(unittest.TestCase):
+    def test_user_input_requires_a_real_prompt_ordinal(self):
+        fixture = Path(__file__).parent / "fixtures" / "grok_user_delivery.jsonl"
+        record = json.loads(fixture.read_text().splitlines()[0])
+
+        self.assertEqual(user_input(record), (466, "historical input"))
+        self.assertEqual(latest_user_prompt(fixture), 466)
+        self.assertEqual(
+            user_input({
+                "type": "user",
+                "prompt_index": 467,
+                "content": "prefix <user_query>historical input</user_query>",
+            }),
+            (467, "prefix <user_query>historical input</user_query>"),
+        )
+        self.assertIsNone(user_input({"type": "user", "content": "no ordinal"}))
+        self.assertIsNone(user_input({
+            "type": "user",
+            "prompt_index": 467,
+            "synthetic_reason": "compaction_meta",
+            "content": "summary",
+        }))
+
     def test_only_assistant_speech_is_relayed(self):
         self.assertEqual(PartylineAdapter._assistant_text({"type": "assistant", "content": "hi"}), "hi")
         self.assertEqual(
