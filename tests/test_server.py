@@ -452,6 +452,26 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(adapter.deliveries, [[first], [second]])
         self.assertEqual(server.runtime.db.get_attachment("lead")["last_seen"], second["id"])
 
+    def test_a_direct_mention_pastes_while_a_follow_lead_is_working(self):
+        self.add_attachment("lead", "grok", owner="owner", follow=True)
+        adapter = FakeAdapter(att={"runtime_owner": "owner", "name": "grok"})
+        presence = Presence(server.runtime)
+        server.runtime.live["lead"] = presence.watch(
+            adapter, "line", "lead", "receipt",
+            *server.runtime.held_wake_hooks("line", "lead", "grok"),
+        )
+        first = server.runtime.db.add_message("line", "greg", "human", "status")
+        self.arun(server.runtime.route_mentions("line", first))
+        self.arun(presence.began("line", "lead", owner="owner"))
+        chatter = server.runtime.db.add_message("line", "sol", "agent", "finding")
+        self.arun(server.runtime.route_mentions("line", chatter))
+        self.assertEqual(adapter.deliveries, [[first]])
+        stop = server.runtime.db.add_message("line", "greg", "human", "@grok stop")
+        self.arun(server.runtime.route_mentions("line", stop))
+        self.assertEqual(adapter.deliveries[-1][-1], stop)
+        self.assertEqual(server.runtime.db.get_attachment("lead")["last_seen"], stop["id"])
+        self.assertEqual(presence.queue.held_ids("lead"), [])
+
     def test_inactive_follow_does_not_turn_chatter_into_a_failed_mention(self):
         self.add_attachment("lead", "grok", status="detached", follow=True)
         message = server.runtime.db.add_message("line", "greg", "human", "plain chatter")
