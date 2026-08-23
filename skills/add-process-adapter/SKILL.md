@@ -31,6 +31,7 @@ requires = ["example-process"]
 env_unset = []
 capabilities = { resume = false, turn_end = "receipt" }
 update_command = ["example-process", "update"]
+compact_paste = "/compact"
 ```
 
 Use an argv array for `command`, not a shell string. The adapter package id (directory name)
@@ -42,11 +43,18 @@ hangs on trust, sandbox, or approval prompts. `capabilities` is a table; set `re
 if re-attaching genuinely reopens the process's previous session, and set `turn_end = "receipt"`
 when the adapter reports turn boundaries from transcript events. `update_command` is an optional
 argv the host runs before a fresh attach when the operator ticks “update CLI first”; omit it when
-the process has no updater. Do not guess an update command for another vendor. `entrypoint` must
-name a file inside the package directory, and the class it exports defaults to `PartylineAdapter`
-— override with `class = "..."` if you need a different name. Keep secrets and machine-specific
-paths out of the manifest. Use `env_unset` only for inherited variables that would interfere with
-a child process; an entry ending in `*` clears every variable with that prefix.
+the process has no updater. `compact_paste` is an optional exact string sent through the normal
+bracketed-paste-plus-Enter path, not an argv array. Live-probe it in the real TUI, record the
+probed CLI version beside the field, and re-probe after `update_command`: unknown slash commands
+can fuzzy-match a different action (OpenCode 1.18.21 turned `/compact` into `/review`) instead of
+failing closed. Omit the field when the TUI exposes no verified command. Some slash menus require
+an embedded newline to select the item before the sender's final Enter executes it; include that
+byte only when a live probe proves it. Do not guess an update command for another vendor.
+`entrypoint` must name a file inside the package directory, and the class it exports defaults to
+`PartylineAdapter` — override with `class = "..."` if you need a different name. Keep secrets and
+machine-specific paths out of the manifest. Use `env_unset` only for inherited variables that
+would interfere with a child process; an entry ending in `*` clears every variable with that
+prefix.
 
 ## Implement lifecycle behavior
 
@@ -69,6 +77,11 @@ these invariants:
   `await repool(message_ids)`. The host persists the exact batch across a restart and replays it
   ordered and deduplicated; never rewind `last_seen`, rescan mentions, or copy message bodies into
   adapter-owned retry state.
+- A manifest `compact_paste` uses that same idle gate: idle requests paste immediately; mid-turn
+  requests occupy one latest-wins slot and fire only on a real `ENDED`. Do not intercept a chat
+  mention or add a second queue. Identify the vendor's structured compaction record or transcript
+  rewrite, filter summaries from assistant speech, and follow any session-id rotation without
+  replaying the replacement snapshot.
 - Start observing output after this attachment starts, and avoid replaying prior records after
   a resume. Notice that `_fresh` is timestamp-based: if transcript records carry no timestamps,
   do not use `_fresh`. Instead, snapshot existing records on open as seen to prevent replaying
@@ -103,6 +116,9 @@ Test your logic, never the vendor's product:
 - **Do** assert the claiming rule: construct two attachments in one working directory and check
   the second refuses the first one's transcript.
 - **Do** assert that terminal-screen contents never become chat messages.
+- **Do** add a fixture for the vendor's compaction shape and prove its generated summary never
+  posts as agent speech. Also test transcript rewrites or session rotation when the command does
+  either.
 - **Do not** invoke the real executable, reach the network, or assert that the vendor's CLI
   writes a particular file. Those tests fail on a machine without the tool installed, and break
   on someone else's release schedule.

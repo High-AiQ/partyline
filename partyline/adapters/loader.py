@@ -42,11 +42,17 @@ def _manifest(path: Path) -> dict:
     manifest.setdefault("requires", [])
     manifest.setdefault("capabilities", {})
     manifest.setdefault("env_unset", [])
+    manifest.setdefault("compact_paste", None)
     command = manifest["command"]
     if not isinstance(command, list) or not all(isinstance(arg, str) for arg in command):
         raise ValueError("adapter command must be an argv array")
     if not isinstance(manifest["capabilities"], dict):
         raise ValueError("adapter capabilities must be a table, e.g. capabilities = { resume = true }")
+    compact_paste = manifest["compact_paste"]
+    if compact_paste is not None and (
+        not isinstance(compact_paste, str) or not compact_paste.strip()
+    ):
+        raise ValueError("adapter compact_paste must be a non-empty paste string")
     manifest["update_command"] = normalize_update_command(manifest.get("update_command"))
     return manifest
 

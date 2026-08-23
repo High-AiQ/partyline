@@ -192,6 +192,22 @@ class ManifestValidationTest(unittest.TestCase):
             loader.load_adapter(write_package(Path(directory) / "probe"))
             self.assertIsNone(registry.ADAPTER_METADATA["probe"]["update_command"])
 
+    def test_compact_paste_is_an_optional_exact_string(self):
+        with tempfile.TemporaryDirectory() as directory, isolated_registry():
+            loader.load_adapter(
+                write_package(Path(directory) / "probe", compact_paste="/compact")
+            )
+            self.assertEqual(registry.ADAPTER_METADATA["probe"]["compact_paste"], "/compact")
+        self.assertIn(
+            "paste string", self._load_expecting_failure(compact_paste=["/compact"])
+        )
+        self.assertIn("paste string", self._load_expecting_failure(compact_paste=""))
+
+    def test_a_missing_compact_paste_is_none(self):
+        with tempfile.TemporaryDirectory() as directory, isolated_registry():
+            loader.load_adapter(write_package(Path(directory) / "probe"))
+            self.assertIsNone(registry.ADAPTER_METADATA["probe"]["compact_paste"])
+
     def test_capabilities_must_be_a_table(self):
         with tempfile.TemporaryDirectory() as directory, isolated_registry():
             path = Path(directory) / "probe"

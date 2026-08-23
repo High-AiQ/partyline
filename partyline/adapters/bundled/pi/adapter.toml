@@ -6,6 +6,8 @@ entrypoint = "adapter.py"
 class = "PartylineAdapter"
 command = ["pi"]
 requires = ["pi"]
+# Probed with pi 0.83.0 on 2026-08-23; re-probe after CLI updates.
+compact_paste = "/compact"
 env_unset = []
 output = "session transcript"
 

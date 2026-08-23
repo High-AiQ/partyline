@@ -5,6 +5,8 @@ description = "SQLite transcript adapter for the Hermes interactive terminal app
 entrypoint = "adapter.py"
 command = ["hermes", "--cli", "--pass-session-id"]
 requires = ["hermes"]
+# Probed with Hermes 0.20.0 on 2026-08-23; re-probe after CLI updates.
+compact_paste = "/compress"
 env_unset = []
 output = "read-only SQLite session transcript"
 

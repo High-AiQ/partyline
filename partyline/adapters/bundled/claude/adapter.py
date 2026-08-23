@@ -7,6 +7,7 @@ import os
 import shlex
 
 from partyline.adapters.base import Adapter as BaseAdapter
+from partyline.adapters.compaction import is_compaction_record
 
 
 class PartylineAdapter(BaseAdapter):
@@ -76,6 +77,8 @@ class PartylineAdapter(BaseAdapter):
         seen: set[str] = set()
 
         async def handle(obj):
+            if is_compaction_record("claude", obj):
+                return
             if obj.get("isSidechain") or obj.get("type") != "assistant":
                 return
             if not self._fresh(obj.get("timestamp")):
