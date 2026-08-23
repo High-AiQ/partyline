@@ -73,6 +73,8 @@ def format_digest(messages: list[dict], rider: str = "", cwd: str = "") -> str:
     waking process sees them next to the messages rather than never.
     """
     lines = "\n".join(f"[{m['sender']}]: {m['body']}" for m in messages)
+    # This low-frequency delivery probe stays beside digest construction; all
+    # HTTP/WebSocket presentation probes are offloaded from the event loop.
     git = cwd_git_digest(cwd) if cwd else ""
     return "\n".join(part for part in (lines, git, rider, DIGEST_FOOTER) if part)
 

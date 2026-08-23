@@ -477,22 +477,15 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(stale_adapter.deliveries, [])
         self.assertEqual(server.runtime.db.list_messages("line"), [mention])
 
-    def test_agent_post_refreshes_the_jack_cwd_git_identity(self):
+    def test_agent_speech_does_not_probe_cwd_git(self):
         self.add_attachment("one", "terra", owner="owner")
-        events = []
-
-        async def capture(_conv_id, event):
-            events.append(event.model_dump())
-
-        with patch.object(server.runtime, "broadcast", side_effect=capture):
+        with patch("partyline.attachment_view.subprocess.run") as git:
             self.arun(
                 server.runtime.post_callback("one", "line", "owner")(
                     "terra", "agent", "done"
                 )
             )
-
-        self.assertEqual([event["type"] for event in events], ["message", "attachment"])
-        self.assertIn("cwd_git", events[-1]["attachment"])
+        git.assert_not_called()
 
     def test_replacement_cannot_cross_owner_validation_before_pty_delivery(self):
         server.runtime.db.add_attachment(
