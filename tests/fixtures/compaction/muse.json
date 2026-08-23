@@ -1,0 +1,1 @@
+{"payload_type":"runtime.session","payload":{"kind":"run","event":{"kind":"context_compaction_installed","replacement":{"kind":"summary_text","text":"private context summary"}}}}

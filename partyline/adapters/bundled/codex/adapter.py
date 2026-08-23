@@ -16,6 +16,7 @@ import json
 import os
 
 from partyline.adapters.base import Adapter as BaseAdapter
+from partyline.adapters.compaction import is_compaction_record
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
 
 
@@ -138,6 +139,8 @@ class PartylineAdapter(BaseAdapter):
             pass
 
         async def handle(obj):
+            if is_compaction_record("codex", obj):
+                return
             if obj.get("type") != "event_msg" or not self._fresh(obj.get("timestamp")):
                 return
             payload = obj.get("payload") or {}

@@ -54,6 +54,11 @@ class ContractTest(unittest.TestCase):
         )
         self.assertTrue(imported.overrides_bundled)
 
+    def test_adapter_metadata_exposes_compact_paste(self):
+        adapter = AdapterMetadataResponse(id="cursor", compact_paste="/summarize\n")
+
+        self.assertEqual(adapter.model_dump()["compact_paste"], "/summarize\n")
+
     def test_wire_events_match_existing_payloads(self):
         message = MessageResponse(
             id=1,

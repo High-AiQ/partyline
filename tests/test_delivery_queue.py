@@ -12,12 +12,90 @@ class RecordingAdapter:
     def __init__(self, owner: str):
         self.att = {"runtime_owner": owner}
         self.deliveries: list[list[dict]] = []
+        self.pastes: list[str] = []
 
     async def deliver(self, messages: list[dict]):
         self.deliveries.append(messages)
 
+    async def send_keys(self, text: str):
+        self.pastes.append(text)
+
 
 class DurableDeliveryQueueTest(unittest.IsolatedAsyncioTestCase):
+    async def test_compact_pastes_now_while_idle(self):
+        presence = Presence(type("Runtime", (), {"broadcast": lambda *args: None})())
+        sent = []
+
+        async def send():
+            sent.append("/compact")
+
+        self.assertFalse(await presence.queue.compact("att", send, working=False))
+        self.assertEqual(sent, ["/compact"])
+
+    async def test_compact_mid_turn_is_latest_wins_and_fires_on_ended(self):
+        class Runtime:
+            async def broadcast(self, *args):
+                pass
+
+        presence = Presence(Runtime())
+        sent = []
+
+        async def first():
+            sent.append("first")
+
+        async def latest():
+            sent.append("latest")
+
+        await presence.began("line", "att")
+        self.assertTrue(await presence.queue.compact("att", first, working=True))
+        self.assertTrue(await presence.queue.compact("att", latest, working=True))
+        self.assertEqual(sent, [])
+        self.assertFalse(await presence.queue.flush("att"))
+        self.assertEqual(sent, [])
+
+        await presence.ended("line", "att")
+
+        self.assertEqual(sent, ["latest"])
+
+    async def test_held_wake_runs_before_compact_at_turn_end(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Db(f"{directory}/partyline.db")
+            try:
+                db.create_conversation("line", "Line")
+                db.add_attachment(
+                    "att", "line", "composer", "fake", ["fake"], directory, "owner"
+                )
+                db.set_attachment_status("att", "running", "owner")
+                runtime = ChatRuntime(db)
+                presence = Presence(runtime)
+                adapter = RecordingAdapter("owner")
+                watched = presence.watch(
+                    adapter,
+                    "line",
+                    "att",
+                    "receipt",
+                    *runtime.held_wake_hooks("line", "att", "composer"),
+                )
+                runtime.live["att"] = watched
+                message = db.add_message("line", "greg", "human", "@composer wake")
+                await presence.began("line", "att", owner="owner")
+                self.assertFalse(await watched.deliver([message]))
+                await presence.queue.compact(
+                    "att", lambda: adapter.send_keys("/compact"), working=True
+                )
+
+                await presence.ended("line", "att", owner="owner")
+                self.assertEqual(adapter.pastes, [])
+                self.assertEqual(adapter.deliveries, [[message]])
+                self.assertEqual(presence.queue.held_count("att"), 0)
+
+                await presence.began("line", "att", owner="owner")
+                await presence.ended("line", "att", owner="owner")
+                self.assertEqual(adapter.pastes, ["/compact"])
+                self.assertEqual(adapter.deliveries, [[message]])
+            finally:
+                db.close()
+
     async def test_unmentioned_chatter_does_not_paste_on_ended(self):
         with tempfile.TemporaryDirectory() as directory:
             db = Db(f"{directory}/partyline.db")

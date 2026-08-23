@@ -22,6 +22,7 @@ import threading
 from pathlib import Path
 
 from partyline.adapters import Adapter
+from partyline.adapters.compaction import is_compaction_record
 
 
 CURSOR_QUERY = b"\x1b[6n"
@@ -156,6 +157,8 @@ class PartylineAdapter(Adapter):
 
     @staticmethod
     def _assistant_message(record: dict) -> tuple[str | None, str] | None:
+        if is_compaction_record("muse", record):
+            return None
         if record.get("payload_type") != "runtime.session":
             return None
         payload = record.get("payload") or {}

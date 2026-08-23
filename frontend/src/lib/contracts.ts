@@ -4,7 +4,6 @@ import { z } from "zod";
 
 export const SenderTypeSchema = z.enum(["human", "agent", "system"]);
 export type SenderType = z.infer<typeof SenderTypeSchema>;
-
 export const AttachmentStatusSchema = z.enum(["starting", "running", "exited", "detached"]);
 export type AttachmentStatus = z.infer<typeof AttachmentStatusSchema>;
 
@@ -110,6 +109,7 @@ export const AdapterSchema = z.object({
   source: z.string().optional(),
   overrides_bundled: z.boolean().optional().default(false),
   update_command: z.array(z.string()).nullable().optional().default(null),
+  compact_paste: z.string().nullable().optional().default(null),
 });
 export type Adapter = z.infer<typeof AdapterSchema>;
 
@@ -257,6 +257,11 @@ export const OkResultSchema = z.object({
 });
 export type OkResult = z.infer<typeof OkResultSchema>;
 
+export const CompactResultSchema = z.object({
+  ok: z.literal(true),
+  queued: z.boolean(),
+});
+export type CompactResult = z.infer<typeof CompactResultSchema>;
 export const ScreenResultSchema = z.object({
   screen: z.string(),
 });

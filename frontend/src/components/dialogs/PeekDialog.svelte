@@ -12,6 +12,7 @@
   import { onDestroy, tick, untrack } from "svelte";
   import type { IDisposable } from "@xterm/xterm";
   import Modal from "../Modal.svelte";
+  import CompactButton from "./CompactButton.svelte";
   import { api } from "../../lib/api";
   import { loadXterm } from "../../lib/xterm";
   import type { XtermCtor, XtermTerminal } from "../../lib/xterm";
@@ -29,10 +30,11 @@
 
   interface Props {
     attachment: Attachment;
+    compactable: boolean;
     close: () => void;
   }
 
-  let { attachment, close }: Props = $props();
+  let { attachment, compactable, close }: Props = $props();
 
   const KEYS = ["enter", "esc", "up", "down", "tab", "y", "n", "1", "2", "3"];
 
@@ -199,6 +201,9 @@
       <button type="button" onclick={takeControl} disabled={!ready || stream.unavailable}
         >drive this terminal</button
       >
+    {/if}
+    {#if compactable}
+      <CompactButton attachmentId={attachment.id} />
     {/if}
   </div>
   <div class="keypad">

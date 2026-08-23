@@ -12,6 +12,8 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from partyline.adapters.compaction import is_compaction_record
+
 
 @dataclass(frozen=True)
 class AssistantRecord:
@@ -23,6 +25,8 @@ class AssistantRecord:
 
 def assistant_text(record: object) -> str | None:
     if not isinstance(record, dict):
+        return None
+    if is_compaction_record("grok", record):
         return None
     if record.get("type") != "assistant":
         return None
@@ -48,7 +52,11 @@ def assistant_text(record: object) -> str | None:
 
 
 def is_assistant_record(record: object) -> bool:
-    return isinstance(record, dict) and record.get("type") == "assistant"
+    return (
+        isinstance(record, dict)
+        and not is_compaction_record("grok", record)
+        and record.get("type") == "assistant"
+    )
 
 
 def fingerprint(line: str) -> bytes:

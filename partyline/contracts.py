@@ -43,6 +43,11 @@ class KeyIn(BaseModel):
     key: str
 
 
+class CompactResponse(BaseModel):
+    ok: Literal[True] = True
+    queued: bool
+
+
 class TerminalGeometry(BaseModel):
     cols: int
     rows: int
@@ -72,6 +77,7 @@ class AdapterMetadataResponse(BaseModel):
     source: str = "bundled"
     overrides_bundled: bool = False
     update_command: list[str] | None = None
+    compact_paste: str | None = None
 
 
 class ConversationResponse(BaseModel):

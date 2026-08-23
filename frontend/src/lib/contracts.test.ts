@@ -302,4 +302,11 @@ describe("adapter override metadata", () => {
       "update",
     ]);
   });
+
+  it("defaults compact support and keeps an exact paste string", () => {
+    expect(AdapterSchema.parse(adapter).compact_paste).toBeNull();
+    expect(AdapterSchema.parse({ ...adapter, compact_paste: "/summarize\n" }).compact_paste).toBe(
+      "/summarize\n",
+    );
+  });
 });

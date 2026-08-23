@@ -6,6 +6,9 @@ entrypoint = "adapter.py"
 class = "PartylineAdapter"
 command = ["agent", "--yolo", "--trust"]
 requires = ["agent"]
+# Probed with Cursor Agent v2026.08.11-e8db854 on 2026-08-23; re-probe after updates.
+# The embedded newline selects the slash-menu item; the base paste adds submit.
+compact_paste = "/summarize\n"
 env_unset = []
 capabilities = { resume = true, turn_end = "receipt" }
 update_command = ["agent", "update"]

@@ -107,10 +107,13 @@ class HermesAdapterTest(RecordingAdapterTest):
         db = sqlite3.connect(path)
         db.executescript(
             """
-            CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY, cwd TEXT, started_at REAL);
+            CREATE TABLE IF NOT EXISTS sessions(
+              id TEXT PRIMARY KEY, cwd TEXT, started_at REAL, parent_session_id TEXT
+            );
             CREATE TABLE IF NOT EXISTS messages(
               id INTEGER PRIMARY KEY, session_id TEXT, role TEXT,
-              content TEXT, active INTEGER DEFAULT 1
+              content TEXT, active INTEGER DEFAULT 1,
+              compacted INTEGER DEFAULT 0, display_kind TEXT
             );
             """
         )
@@ -147,7 +150,7 @@ class HermesAdapterTest(RecordingAdapterTest):
         db = self.make_store()
         now = time.time()
         db.executemany(
-            "INSERT INTO sessions VALUES(?,?,?)",
+            "INSERT INTO sessions(id,cwd,started_at) VALUES(?,?,?)",
             [
                 ("first", "/project", now - 1),
                 ("other", "/elsewhere", now - 0.5),
@@ -208,6 +211,59 @@ class HermesAdapterTest(RecordingAdapterTest):
         await adapter._tail("s", 0)
         self.assertEqual(self.messages, [("agent", "agent", "answer")])
         adapter._db.close()
+
+    async def test_tail_follows_compression_child_without_replaying_snapshot(self):
+        db = self.make_store()
+        now = time.time()
+        db.executemany(
+            "INSERT INTO sessions(id,cwd,started_at,parent_session_id) VALUES(?,?,?,?)",
+            [
+                ("parent", "/project", now - 1, None),
+                ("child", "/project", now, "parent"),
+            ],
+        )
+        db.executemany(
+            "INSERT INTO messages(id,session_id,role,content,active,compacted,display_kind) "
+            "VALUES(?,?,?,?,?,?,?)",
+            [
+                (1, "parent", "assistant", "old reply", 1, 0, None),
+                (2, "child", "assistant", "private summary", 1, 1, "compression_summary"),
+            ],
+        )
+        db.commit()
+        adapter = self.make(HermesAdapter)
+        adapter._db = adapter._open_db()
+        adapter.proc = Process()
+        sessions = []
+        inserted = False
+        adapter.on_cli_session = sessions.append
+
+        async def append_new_speech(_seconds):
+            nonlocal inserted
+            if inserted:
+                return
+            inserted = True
+            db.execute(
+                "INSERT INTO messages(id,session_id,role,content,active) VALUES(?,?,?,?,?)",
+                (3, "child", "assistant", "new reply", 1),
+            )
+            db.commit()
+
+        async def stop_after_post(*args):
+            self.messages.append(args)
+            adapter.proc.stop()
+
+        adapter.post = stop_after_post
+        with patch(
+            "partyline.adapters.bundled.hermes.adapter.asyncio.sleep",
+            new=append_new_speech,
+        ):
+            await adapter._tail("parent", 1)
+
+        self.assertEqual(sessions, ["child"])
+        self.assertEqual(self.messages, [("agent", "agent", "new reply")])
+        adapter._db.close()
+        db.close()
 
     async def test_run_handles_missing_store_and_process_exit(self):
         adapter = self.make(HermesAdapter)
@@ -281,7 +337,10 @@ class HermesAdapterTest(RecordingAdapterTest):
 
     async def test_run_resume_uses_cursor_without_briefing(self):
         db = self.make_store()
-        db.execute("INSERT INTO messages VALUES(?,?,?,?,?)", (9, "resume-s", "assistant", "old", 1))
+        db.execute(
+            "INSERT INTO messages(id,session_id,role,content,active) VALUES(?,?,?,?,?)",
+            (9, "resume-s", "assistant", "old", 1),
+        )
         db.commit()
         db.close()
         adapter = self.make(HermesAdapter, resume=True, cli_session="resume-s")
@@ -302,7 +361,10 @@ class HermesAdapterTest(RecordingAdapterTest):
     async def test_run_fresh_discovers_session_and_sends_briefing(self):
         db = self.make_store()
         now = time.time()
-        db.execute("INSERT INTO sessions VALUES(?,?,?)", ("fresh-s", "/project", now))
+        db.execute(
+            "INSERT INTO sessions(id,cwd,started_at) VALUES(?,?,?)",
+            ("fresh-s", "/project", now),
+        )
         db.commit()
         db.close()
         adapter = self.make(HermesAdapter)
