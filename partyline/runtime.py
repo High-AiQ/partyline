@@ -15,10 +15,10 @@ from .contracts import (
 )
 from .handshake import hello_payload
 from .db import Db
+from .mentions import mentioned_names
 from .reattach import ReattachCoordinator
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
-MENTION_RE = re.compile(r"@([A-Za-z0-9][A-Za-z0-9_.-]*)")
 RESERVED_NAMES = {"all", "system"}  # @all rings everyone; system is the notice sender
 
 
@@ -133,12 +133,7 @@ class ChatRuntime:
     async def route_mentions(self, conv_id: str, msg: dict):
         if msg["sender_type"] == "system":
             return  # join/exit notices mention names but must never wake agents
-        # Accept both a punctuation-bearing handle and its sentence-ending reading.
-        names = set()
-        for found in MENTION_RE.findall(msg["body"]):
-            names.add(found.lower())
-            names.add(found.rstrip(".-_").lower())
-        names.discard("")
+        names = mentioned_names(msg["body"])
         if not names:
             return
         ring_all = "all" in names  # reserved handle: rings every running agent
