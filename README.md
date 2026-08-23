@@ -421,7 +421,8 @@ with ui_session(["alpha line", "beta line"]) as ui:
 - Every message is stored (SQLite) and broadcast to all humans on the line.
 - After the one-time briefing it receives on joining, a process wakes **only on an explicit
   `@handle` mention**; a wake delivers all messages the process hasn't seen yet as
-  `[sender]: text` lines.
+  `[sender]: text` lines. Invisible Unicode format characters immediately after `@` are ignored,
+  so copied mentions such as `@<zero-width-space>handle` still reach the intended process.
 - `@all` rings **every running process** on the line at once. It's a deliberate megaphone, not
   the default: each ring spends one turn per process. `all` and `system` are reserved handles.
 - System notices (joins, exits, topic changes) never wake processes, but they ride along in the
