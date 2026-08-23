@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .attachment_contracts import AttachmentResponse
 from .media_contracts import FileRef
+from .line_process_contracts import LineLiveEvent
 from .presence_contracts import PresenceState, WorkingEvent
 
 RestartPlanMode = Literal["offer", "automatic"]
@@ -89,6 +90,7 @@ class ConversationResponse(BaseModel):
     created_at: float
     topic: str = ""
     archived_at: float | None = None
+    live_count: int = Field(default=0, ge=0)
 
 
 class MessageResponse(BaseModel):
@@ -278,6 +280,7 @@ Event = (
     ShutdownEvent
     | MessageEvent
     | AttachmentEvent
+    | LineLiveEvent
     | AttentionEvent
     | WorkingEvent
     | ConversationEvent

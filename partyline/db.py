@@ -13,6 +13,7 @@ import uuid
 from typing import Literal, TypedDict
 
 from .db_schema import MIGRATIONS, SCHEMA
+from .conversation_queries import ACTIVE_CONVERSATIONS, ARCHIVED_CONVERSATIONS, CONVERSATION_BY_ID
 
 
 RestartPlanMode = Literal["offer", "automatic"]
@@ -155,16 +156,12 @@ class Db:
         return self.get_conversation(conv_id)
 
     def list_conversations(self, archived=False):
-        if archived:
-            cur = self._exec(
-                "SELECT * FROM conversations WHERE archived_at IS NOT NULL ORDER BY archived_at DESC")
-        else:
-            cur = self._exec(
-                "SELECT * FROM conversations WHERE archived_at IS NULL ORDER BY created_at DESC")
+        query = ARCHIVED_CONVERSATIONS if archived else ACTIVE_CONVERSATIONS
+        cur = self._exec(query)
         return [dict(r) for r in cur.fetchall()]
 
     def get_conversation(self, conv_id):
-        cur = self._exec("SELECT * FROM conversations WHERE id=?", (conv_id,))
+        cur = self._exec(CONVERSATION_BY_ID, (conv_id,))
         row = cur.fetchone()
         return dict(row) if row else None
 

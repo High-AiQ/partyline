@@ -5,9 +5,8 @@ import re
 from fastapi import WebSocket, WebSocketDisconnect
 
 from .adapters import Adapter
-from .attachment_view import attachment_response
+from .attachment_broadcast import broadcast_attachment_state
 from .contracts import (
-    AttachmentEvent,
     Event,
     ErrorEvent,
     MessageEvent,
@@ -92,10 +91,7 @@ class ChatRuntime:
 
     async def broadcast_attachment(self, conv_id: str, att_id: str) -> None:
         """Broadcast live attachment presentation without blocking the event loop."""
-        attachment = self.db.get_attachment(att_id)
-        if attachment is not None:
-            response = await attachment_response(attachment)
-            await self.broadcast(conv_id, AttachmentEvent(attachment=response))
+        await broadcast_attachment_state(self, conv_id, att_id)
 
     async def deliver_pending(self, conv_id: str, att: dict, adapter: Adapter) -> bool:
         """Deliver from the durable cursor, advancing it only after a paste."""

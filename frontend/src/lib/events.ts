@@ -41,6 +41,13 @@ export const AttachmentEventSchema = z.object({
 });
 export type AttachmentEvent = z.infer<typeof AttachmentEventSchema>;
 
+export const LineLiveEventSchema = z.object({
+  type: z.literal("line_live"),
+  conversation_id: z.string(),
+  live_count: z.number().int().nonnegative(),
+});
+export type LineLiveEvent = z.infer<typeof LineLiveEventSchema>;
+
 export const AttentionEventSchema = z.object({
   type: z.literal("attention"),
   attachment_id: z.string(),
@@ -113,6 +120,7 @@ const CurrentWireEventSchema = z.discriminatedUnion("type", [
   HelloEventSchema,
   MessageEventSchema,
   AttachmentEventSchema,
+  LineLiveEventSchema,
   AttentionEventSchema,
   WorkingEventSchema,
   ConversationEventSchema,

@@ -26,6 +26,17 @@ class LineMenuTest(unittest.TestCase):
             modal.wait_for(state="visible")
             self.assertIn(f"rename line · {selected_name}", modal.text_content())
 
+    def test_close_processes_item_opens_the_bulk_detach_modal(self):
+        with ui_session(["alpha line"]) as ui:
+            menu = ui.open_row_menu()
+            menu.get_by_text("close processes", exact=True).click()
+
+            modal = ui.page.locator(".modal")
+            modal.wait_for(state="visible")
+            modal.get_by_text("A follow slot, if any, stays", exact=False).wait_for()
+            self.assertIn("close processes · alpha line", modal.text_content())
+            self.assertIn("A follow slot, if any, stays", modal.text_content())
+
     def test_menu_closes_on_an_outside_click(self):
         """`hidden` alone is not enough: an author `display` rule outranks the
         UA stylesheet's `[hidden]{display:none}`, so the menu stayed on screen
