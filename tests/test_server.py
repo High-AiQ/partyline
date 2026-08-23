@@ -409,6 +409,21 @@ class ServerTest(unittest.TestCase):
         self.assertIn(
             "nothing was delivered", server.runtime.db.list_messages("line")[-1]["body"])
 
+    def test_route_mentions_accepts_normal_and_format_interrupted_grok(self):
+        self.add_attachment("one", "grok")
+        adapter = FakeAdapter()
+        server.runtime.live["one"] = adapter
+
+        for format_char in ("", "\u200b", "\u200d", "\u2060", "\ufeff"):
+            with self.subTest(format_char=ascii(format_char)):
+                body = f"hello @{format_char}grok"
+                message = server.runtime.db.add_message(
+                    "line", "greg", "human", body
+                )
+                self.arun(server.runtime.route_mentions("line", message))
+                self.assertEqual(adapter.deliveries[-1][-1], message)
+                self.assertEqual(message["body"], body)
+
     def test_failed_mention_delivery_does_not_advance_cursor(self):
         self.add_attachment("one", "terra")
         server.runtime.live["one"] = FakeAdapter(fail_delivery=True)
