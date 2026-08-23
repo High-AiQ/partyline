@@ -19,15 +19,18 @@ export interface BadgeTreatment {
 /** A `none` adapter shows today's confident look for this long before decaying. */
 const CONFIDENT_SECONDS = 240;
 
+function heldTooltip(held: number): string {
+  return held > 0 ? `${String(held)} wake${held === 1 ? "" : "s"} held while working` : "";
+}
+
 function confident(speaking: boolean, held = 0): BadgeTreatment {
-  const heldSuffix = held > 0 ? ` (${String(held)} wake${held === 1 ? "" : "s"} held)` : "";
   return {
-    label: `working…${heldSuffix}`,
+    label: "working…",
     tone: "green",
     dot: "filled",
     // speaking is display-only: the dot goes solid, the label stays "working…"
     pulse: speaking ? "none" : "live",
-    tooltip: held > 0 ? `${String(held)} wake${held === 1 ? "" : "s"} held while working` : "",
+    tooltip: heldTooltip(held),
   };
 }
 
@@ -61,15 +64,17 @@ export function badgeTreatment(entry: PresenceEntry | undefined, now: number): B
     return confident(entry.phase === "speaking", entry.held);
   }
 
-  const heldSuffix = entry.held > 0 ? ` (${String(entry.held)} wake${entry.held === 1 ? "" : "s"} held)` : "";
   if (age >= CONFIDENT_SECONDS) {
+    const held = heldTooltip(entry.held);
     return {
       // The label never stops saying working; only the confident channels dim.
-      label: `working…${heldSuffix}`,
+      label: "working…",
       tone: "green",
       dot: "hollow",
       pulse: "none",
-      tooltip: `no turn-end signal from this CLI · active for ${describe(age)}`,
+      tooltip: [`no turn-end signal from this CLI · active for ${describe(age)}`, held]
+        .filter(Boolean)
+        .join(" · "),
     };
   }
   return confident(entry.phase === "speaking", entry.held);
