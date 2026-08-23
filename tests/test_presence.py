@@ -465,6 +465,7 @@ class TurnIdleQueueTest(unittest.IsolatedAsyncioTestCase):
         runtime = FakeRuntime()
         presence = Presence(runtime)
         raw_adapter = RecordingAdapter()
+        raw_adapter.att = {"name": "att"}
 
         async def flush_held(message_ids):
             self.assertEqual(message_ids, [2, 3])
@@ -483,12 +484,16 @@ class TurnIdleQueueTest(unittest.IsolatedAsyncioTestCase):
         await presence.began("line", "att")
         self.assertTrue(presence.is_working("att"))
 
-        # 3. Mention arriving mid-turn is queued on the server, not delivered
+        # 3. Unmentioned chatter mid-turn is queued; a direct @mention pastes now.
         await adapter.deliver([{"id": 2, "body": "second"}])
-        # The durable cursor supplies the whole undispatched backlog again.
         await adapter.deliver([{"id": 2, "body": "second"}, {"id": 3, "body": "third"}])
         self.assertEqual(raw_adapter.delivered, [[{"id": 1, "body": "first"}]])
         self.assertEqual(presence.queue.held_count("att"), 2)
+        await adapter.deliver([{"id": 4, "body": "@att stop"}])
+        self.assertEqual(
+            raw_adapter.delivered,
+            [[{"id": 1, "body": "first"}], [{"id": 4, "body": "@att stop"}]],
+        )
 
         # Snapshots report held count
         snapshot = presence.snapshot("line")
@@ -501,7 +506,11 @@ class TurnIdleQueueTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(presence.queue.held_count("att"), 0)
         self.assertEqual(
             raw_adapter.delivered,
-            [[{"id": 1, "body": "first"}], [{"id": 2, "body": "second"}, {"id": 3, "body": "third"}]],
+            [
+                [{"id": 1, "body": "first"}],
+                [{"id": 4, "body": "@att stop"}],
+                [{"id": 2, "body": "second"}, {"id": 3, "body": "third"}],
+            ],
         )
 
     async def test_ended_does_not_flush_unheld_chatter(self):

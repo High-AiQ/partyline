@@ -56,6 +56,17 @@ class DeliveryQueue:
         held.update(message["id"] for message in messages if isinstance(message.get("id"), int))
         return self.held_count(att_id)
 
+    def release(self, att_id: str, messages: list[dict]) -> None:
+        """Drop ids already pasted by an interrupting mention."""
+        held = self._held.get(att_id)
+        if not held:
+            return
+        held.difference_update(
+            message["id"] for message in messages if isinstance(message.get("id"), int)
+        )
+        if not held:
+            self._held.pop(att_id, None)
+
     async def repool(
         self,
         att_id: str,

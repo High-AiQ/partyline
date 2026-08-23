@@ -111,6 +111,7 @@ class ChatRuntime:
                 return False
             if not self.db.set_last_seen(att["id"], pending[-1]["id"], runtime_owner):
                 raise RuntimeError("attachment ownership changed during mention delivery")
+            self.db.clear_queued_delivery_ids(att["id"], [m["id"] for m in pending])
         return True
 
     def held_wake_hooks(self, conv_id: str, att_id: str, name: str):
