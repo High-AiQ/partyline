@@ -52,7 +52,6 @@ from .contracts import (
     AttachmentPatchRequest,
     AttachmentResponse,
     ConvIn,
-    ConversationDetailResponse,
     ConversationArchivedEvent,
     ConversationDeletedEvent,
     ConversationEvent,
@@ -77,6 +76,8 @@ from .frontend_build import current_frontend_build
 from .follow import add_attachment_with_follow, patch_attachment, require_follow_allowed
 from .hook_routes import hook_url, hooks_router
 from .line_process_routes import detach_attachment, register_line_process_routes
+from .message_routes import conversation_detail_response, message_router
+from .message_contracts import ConversationDetailResponse
 from .presence import Presence
 from .media import MediaStore, media_root
 from .claim_routes import claims_router, purge_claims
@@ -143,6 +144,7 @@ register_compact_route(app, runtime, presence)
 register_line_process_routes(app, runtime)
 app.include_router(auth_router(runtime.db, on_handle_change=user_sockets.close_all))
 app.include_router(media_router(runtime, media))
+app.include_router(message_router(runtime, media))
 app.include_router(claims_router(runtime))
 app.include_router(hooks_router(runtime, presence))
 app.include_router(presets_router(runtime, ADAPTERS))
@@ -299,18 +301,7 @@ async def create_conversation(body: ConvIn):
 
 @app.get("/api/conversations/{conv_id}", response_model=ConversationDetailResponse)
 async def conversation_detail(conv_id: str):
-    conv = runtime.db.get_conversation(conv_id)
-    if not conv:
-        raise HTTPException(404)
-    return {
-        "conversation": conv,
-        "messages": media.attach(runtime.db.list_messages(conv_id)),
-        "attachments": await asyncio.gather(
-            *(attachment_response(att) for att in runtime.db.list_attachments(conv_id))
-        ),
-        "working": presence.working_ids(conv_id),
-        "presence": presence.snapshot(conv_id),
-    }
+    return await conversation_detail_response(runtime, presence, media, conv_id)
 
 
 @app.put("/api/conversations/{conv_id}/topic", response_model=ConversationResponse)

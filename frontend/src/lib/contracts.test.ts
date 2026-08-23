@@ -11,6 +11,7 @@ import {
   WireEventSchema,
   WireReattachCommandSchema,
 } from "./contracts";
+import { MessagePageSchema } from "./message-page";
 
 const offer = {
   type: "reattach_offer",
@@ -144,6 +145,25 @@ describe("conversation detail compatibility", () => {
     });
     expect(detail.working).toEqual([]);
     expect(detail.presence).toBeNull();
+    expect(detail.has_more_messages).toBe(false);
+  });
+
+  it("validates a bounded page of human history", () => {
+    const page = MessagePageSchema.parse({
+      messages: [
+        {
+          id: 4,
+          conv_id: "line",
+          sender: "greg",
+          sender_type: "human",
+          body: "older",
+          created_at: 1,
+        },
+      ],
+      has_more: true,
+    });
+    expect(page.messages[0]?.files).toEqual([]);
+    expect(page.has_more).toBe(true);
   });
 
   it("accepts revisioned presence including idle tombstones", () => {

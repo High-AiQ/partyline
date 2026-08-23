@@ -14,6 +14,7 @@ from typing import Literal, TypedDict
 
 from .db_schema import MIGRATIONS, SCHEMA
 from .conversation_queries import ACTIVE_CONVERSATIONS, ARCHIVED_CONVERSATIONS, CONVERSATION_BY_ID
+from .message_queries import select_message_page
 
 
 RestartPlanMode = Literal["offer", "automatic"]
@@ -254,11 +255,10 @@ class Db:
             )
 
     def list_messages(self, conv_id, limit=500):
-        cur = self._exec(
-            "SELECT * FROM (SELECT * FROM messages WHERE conv_id=? ORDER BY id DESC LIMIT ?) ORDER BY id",
-            (conv_id, limit),
-        )
-        return [dict(r) for r in cur.fetchall()]
+        return self.message_page(conv_id, limit=limit)[0]
+
+    def message_page(self, conv_id, *, before_id=None, after_id=None, limit=20):
+        return select_message_page(self._exec, conv_id, before_id, after_id, limit)
 
     def messages_after(self, conv_id, after_id, exclude_sender=None):
         q = "SELECT * FROM messages WHERE conv_id=? AND id>?"

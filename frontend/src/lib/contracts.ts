@@ -181,6 +181,7 @@ export type PresenceState = z.infer<typeof PresenceStateSchema>;
 export const ConversationDetailSchema = z.object({
   conversation: ConversationSchema,
   messages: z.array(ChatMessageSchema),
+  has_more_messages: z.boolean().default(false),
   attachments: z.array(AttachmentSchema),
   working: z.array(z.string()).default([]),
   // Null/absent means a legacy server: replay buffered boolean events without
