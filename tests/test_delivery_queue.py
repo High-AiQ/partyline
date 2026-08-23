@@ -57,7 +57,7 @@ class DurableDeliveryQueueTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(sent, ["latest"])
 
-    async def test_compact_runs_before_a_held_wake(self):
+    async def test_held_wake_runs_before_compact_at_turn_end(self):
         with tempfile.TemporaryDirectory() as directory:
             db = Db(f"{directory}/partyline.db")
             try:
@@ -85,12 +85,13 @@ class DurableDeliveryQueueTest(unittest.IsolatedAsyncioTestCase):
                 )
 
                 await presence.ended("line", "att", owner="owner")
-                self.assertEqual(adapter.pastes, ["/compact"])
-                self.assertEqual(adapter.deliveries, [])
-                self.assertEqual(presence.queue.held_count("att"), 1)
+                self.assertEqual(adapter.pastes, [])
+                self.assertEqual(adapter.deliveries, [[message]])
+                self.assertEqual(presence.queue.held_count("att"), 0)
 
                 await presence.began("line", "att", owner="owner")
                 await presence.ended("line", "att", owner="owner")
+                self.assertEqual(adapter.pastes, ["/compact"])
                 self.assertEqual(adapter.deliveries, [[message]])
             finally:
                 db.close()

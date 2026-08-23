@@ -75,11 +75,11 @@ class DeliveryQueue:
 
     async def flush(self, att_id: str, *, turn_ended: bool = False) -> bool:
         """Deliver only the ordered union that caused or survived deferral."""
-        if turn_ended and (compact := self._compact_fns.get(att_id)):
+        message_ids = self.held_ids(att_id)
+        if turn_ended and not message_ids and (compact := self._compact_fns.get(att_id)):
             await compact()
             self._compact_fns.pop(att_id, None)
             return True
-        message_ids = self.held_ids(att_id)
         if not message_ids:
             return False
         flush = self._flush_fns.get(att_id)
