@@ -136,7 +136,7 @@ class AdapterLifecycleTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("exited", adapter.statuses)
         self.assertEqual(adapter.posts[0][:2], ("system", "system"))
-        self.assertIn("@dummy exited (code 3)", adapter.posts[0][2])
+        self.assertEqual(adapter.posts[0][2], "dummy exited (code 3)")
         await adapter.stop()
 
     async def test_stopping_suppresses_the_exit_notice(self):
@@ -446,6 +446,7 @@ class ResumeSilenceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(adapter.posts), 1)
         sender, kind, body = adapter.posts[0]
         self.assertEqual((sender, kind), ("system", "system"))
+        self.assertTrue(body.startswith("dummy resumed mid-turn"))
         self.assertIn("resumed mid-turn", body)
         self.assertNotIn("as I was saying", body)
 
@@ -480,7 +481,7 @@ class ResumeSilenceTest(unittest.IsolatedAsyncioTestCase):
         adapter = Recorder(["sh", "-c", "exit 4"], resume=True)
         await adapter.start()
         await until(lambda: adapter.posts, what="the exit notice")
-        self.assertIn("@dummy exited (code 4)", adapter.posts[0][2])
+        self.assertEqual(adapter.posts[0][2], "dummy exited (code 4)")
         await adapter.stop()
 
 

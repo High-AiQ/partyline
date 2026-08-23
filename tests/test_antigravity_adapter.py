@@ -248,6 +248,7 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         ):
             await adapter._run()
         self.assertIn("no conversation after 45s", self.messages[-1][2])
+        self.assertTrue(self.messages[-1][2].startswith("agent: no conversation"))
         self.assertEqual(write.call_count, 2)
         self.assertEqual(adapter.send_keys.await_count, 3)
 
@@ -330,6 +331,7 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(adapter._outstanding, [])
         adapter.att["repool_message_ids"].assert_awaited_once_with([41])
         self.assertEqual(len(self.messages), 1)
+        self.assertTrue(self.messages[0][2].startswith("agent: the CLI submitted other input"))
         self.assertIn("wake queued for next turn-end", self.messages[0][2])
         self.assertFalse(hasattr(adapter, "_repool_messages"))
 
@@ -380,8 +382,8 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(adapter._outstanding, [])
 
     async def test_loss_notices_are_capped_across_distinct_wakes(self):
-        """The notice's @handle delivers a fresh wake; the global cap keeps a
-        pathological CLI from farming notices, and a verified wake resets it."""
+        """The global cap prevents a pathological CLI from farming notices,
+        and a verified wake resets it."""
         adapter = self.make()
         adapter.proc = Process()
         adapter.send_keys = AsyncMock()
@@ -461,6 +463,7 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(adapter._outstanding, [])
         adapter.att["repool_message_ids"].assert_awaited_once_with([42])
         self.assertEqual(len(self.messages), 1)
+        self.assertTrue(self.messages[0][2].startswith("agent: the CLI submitted other input"))
         self.assertIn("wake queued for next turn-end", self.messages[0][2])
         self.assertFalse(hasattr(adapter, "_repool_messages"))
 

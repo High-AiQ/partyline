@@ -257,7 +257,7 @@ class PartylineAdapter(Adapter):
                 if self.alive():
                     await self.post(
                         "system", "system",
-                        f"@{self.att['name']}: no Muse session log appeared after "
+                        f"{self.att['name']}: no Muse session log appeared after "
                         f"{int(self.DISCOVERY_TIMEOUT)}s; transcript tailing stopped",
                     )
                 return
