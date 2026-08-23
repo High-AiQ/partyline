@@ -369,6 +369,7 @@ class RunTest(StoreFixture, unittest.IsolatedAsyncioTestCase):
         await adapter._run()
 
         self.assertIn("no Muse session log appeared", posts[0][2])
+        self.assertTrue(posts[0][2].startswith("musey: no Muse session log"))
 
     async def test_run_claims_reports_and_tails_the_session(self):
         sessions = []

@@ -80,7 +80,7 @@ class Adapter:
                 self._explained_silence = True
                 await self._post_to_chat(
                     "system", "system",
-                    f"@{self.att['name']} resumed mid-turn — leftover output from the "
+                    f"{self.att['name']} resumed mid-turn — leftover output from the "
                     "interrupted turn was not posted; @mention it to pick up where it left off",
                 )
             return
@@ -210,7 +210,7 @@ class Adapter:
         self._mark_not_ready()
         if not self._stopping:
             await self.on_status("exited")
-            await self.post("system", "system", f"@{self.att['name']} exited (code {rc})")
+            await self.post("system", "system", f"{self.att['name']} exited (code {rc})")
 
     async def _run(self):
         """Adapter-specific background task."""

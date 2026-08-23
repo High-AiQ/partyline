@@ -124,6 +124,6 @@ class DeliveryQueue:
             await self._post_fns[att_id](
                 "system",
                 "system",
-                f"⚠ @{name} {status} with {count} held {plural} undelivered",
+                f"⚠ {name} {status} with {count} held {plural} undelivered",
             )
         return count

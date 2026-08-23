@@ -119,6 +119,38 @@ class CodexCommandTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await received.wait_startup_delivery_received())
         self.assertIsNone(ignored._startup_delivery_result)
 
+    async def test_timeout_notice_names_codex_without_addressing_it(self):
+        posted: list[tuple[str, str, str]] = []
+
+        async def post(sender: str, sender_type: str, body: str) -> None:
+            posted.append((sender, sender_type, body))
+
+        async def on_status(status: str) -> None:
+            return None
+
+        adapter = PartylineAdapter(
+            {
+                "command": ["codex"],
+                "cwd": "/work",
+                "id": "att-1",
+                "name": "codex",
+                "resume": False,
+            },
+            post,
+            on_status,
+        )
+        adapter.alive = lambda: True
+        adapter.master = 1
+        adapter._find_rollout = lambda: None
+        with (
+            patch("partyline.adapters.bundled.codex.adapter.asyncio.sleep", AsyncMock()),
+            patch("partyline.adapters.bundled.codex.adapter.os.write"),
+            patch.object(adapter, "send_keys", AsyncMock()),
+        ):
+            await adapter._run()
+
+        self.assertTrue(posted[0][2].startswith("codex: no rollout file after 90s"))
+
     async def run_tail_with(self, record: dict) -> tuple[PartylineAdapter, list[tuple]]:
         """Feed one rollout record through a resumed adapter's tail handler."""
         posted: list[tuple] = []
