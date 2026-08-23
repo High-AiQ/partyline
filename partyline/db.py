@@ -319,12 +319,14 @@ class Db:
         )
 
     # -- attachments -------------------------------------------------------
-    def add_attachment(self, att_id, conv_id, name, adapter, command, cwd, runtime_owner=None):
+    def add_attachment(
+        self, att_id, conv_id, name, adapter, command, cwd, runtime_owner=None, follow=False
+    ):
         ts = time.time()
         self._exec(
             "INSERT INTO attachments("
-            "id,conv_id,name,adapter,command,cwd,status,runtime_owner,created_at)"
-            " VALUES(?,?,?,?,?,?,?,?,?)",
+            "id,conv_id,name,adapter,command,cwd,status,runtime_owner,follow,created_at)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?)",
             (
                 att_id,
                 conv_id,
@@ -334,6 +336,7 @@ class Db:
                 cwd,
                 "starting",
                 runtime_owner,
+                int(follow),
                 ts,
             ),
         )
@@ -347,6 +350,18 @@ class Db:
     def list_attachments(self, conv_id):
         cur = self._exec("SELECT * FROM attachments WHERE conv_id=? ORDER BY created_at", (conv_id,))
         return [_att_row(r) for r in cur.fetchall()]
+
+    def follow_holder(self, conv_id: str) -> str | None:
+        row = self._exec(
+            "SELECT name FROM attachments WHERE conv_id=? AND follow=1", (conv_id,)
+        ).fetchone()
+        return row["name"] if row else None
+
+    def set_attachment_follow(self, att_id: str, follow: bool):
+        changed = self._exec(
+            "UPDATE attachments SET follow=? WHERE id=?", (int(follow), att_id)
+        )
+        return self.get_attachment(att_id) if changed.rowcount == 1 else None
 
     async def update_inactive_attachment_command(self, att_id, command):
         async with self._runtime_serialized_async():
