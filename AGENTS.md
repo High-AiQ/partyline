@@ -17,7 +17,8 @@ replace an interactive process with a headless invocation or screen scraping.**
 - `frontend/` — TypeScript web client: Vite + Svelte 5 + Tailwind (`docs/frontend.md`)
 - `partyline/static/` — **build output, committed.** Never edit by hand
 - `docs/` — depth: `frontend.md`, `dogfooding.md`, `adapters.md`, `lessons.md`, `releases.md`
-- `skills/` — procedures: `add-process-adapter/`, `verify-visual-change/`
+- `skills/` — procedures: `add-process-adapter/`, `adversarial-review/`,
+  `verify-visual-change/`
 
 ## Gates — all must pass before every commit
 
@@ -108,5 +109,8 @@ own tests, which never run the vendor's CLI.
   minor, fix → patch, breaking → major. Docs/test/refactor/chore don't bump.
 - **`main` is protected.** Branch, open a PR, and pass the required checks (`backend`,
   `frontend`, `code-line-limits`, `conventional-commits`, `version-policy`).
+- Adversarial reviews run in a throwaway worktree pinned to the exact commit SHA, never a shared
+  workbench or mutable branch. Verdicts cite that SHA and the commands actually run; see
+  `skills/adversarial-review/SKILL.md`.
 - Tags are the release record; CI creates them. Never hand-create a GitHub Release
   (`docs/releases.md`).

@@ -627,6 +627,10 @@ throwaway DB and port, never a live one:
 PARTYLINE_DB=/tmp/partyline-test.db PARTYLINE_PORT=8643 uv run --locked partyline
 ```
 
+Adversarial reviews follow the [pinned-SHA review skill](skills/adversarial-review/SKILL.md): use
+a disposable worktree at the exact commit under review, and cite that SHA plus every command run
+in the verdict. Approval of one SHA never transfers silently to a later PR head.
+
 Pull requests targeting `main` must pass the same checks as CI:
 
 ```bash

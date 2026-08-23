@@ -174,6 +174,12 @@ enforce it. A prose warning that has no executable guard is not a completed less
   own CI. Branches do not partition a working tree: one checkout has one HEAD, one index, one
   set of files. An agent entering a checkout it does not currently own must do its own work in
   a `git worktree`, stage by explicit path rather than `-A`, and leave HEAD where it found it.
+- **A verdict on a PR described whichever head the reviewer happened to fetch.** Reviewers twice
+  reached opposite conclusions because a mutable branch advanced while their drives were in
+  progress; neither verdict identified an immutable artifact, so the coordinator could not tell
+  which code was actually clear. Every adversarial review now uses its own throwaway worktree
+  pinned to the assigned commit SHA. The verdict cites that SHA and every command actually run;
+  a replacement SHA requires an explicit delta or full re-drive rather than inheriting approval.
 - **An unknown slash command would fail closed.** OpenCode 1.18.21 fuzzy-matched `/compact` to
   `/review`; an unverified or stale context-management string can execute a different action
   rather than no-op. Adapter `compact_paste` values are therefore exact live-probed bytes with
