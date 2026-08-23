@@ -134,11 +134,10 @@ def resync_fingerprints(path: Path, seen_fps: list[str]) -> list[str]:
     seen_counts = Counter(seen_fps)
 
     def is_valid(cand: list[str]) -> bool:
-        if len(cand) > len(seen_fps) + 1:
-            return False
         cand_counts = Counter(cand)
         for fp, count in cand_counts.items():
-            if fp in seen_counts and count > seen_counts[fp]:
+            # A shared stop sentinel is not enough to cover new speech.
+            if fp not in seen_counts or count > seen_counts[fp]:
                 return False
         return True
 

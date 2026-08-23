@@ -84,6 +84,14 @@ class PartylineAdapter(Adapter):
     ) -> tuple[list[str], int]:
         resynced = resync_fingerprints(path, seen_fps)
         if resynced == seen_fps and seen_fps:
+            # An unchanged prefix is a successful sequential re-read, not a
+            # failed re-anchor.  During Cursor's atomic rewrites this is the
+            # usual case, so it must clear any earlier fruitless attempts.
+            sequential = resync_positional(path, seen_fps)
+            if not self._has_complete_jsonl_tail(path):
+                return seen_fps, failures
+            if sequential == seen_fps:
+                return seen_fps, 0
             failures += 1
             if failures >= 3:
                 await self.post(
@@ -95,6 +103,16 @@ class PartylineAdapter(Adapter):
                 return resync_positional(path, seen_fps), 0
             return seen_fps, failures
         return resynced, 0
+
+    @staticmethod
+    def _has_complete_jsonl_tail(path: Path) -> bool:
+        """Whether a nonempty rewrite ends at a complete JSONL boundary."""
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                lines = fh.readlines()
+        except OSError:
+            return False
+        return bool(lines) and lines[-1].endswith("\n")
 
     async def _tail_transcript(self, path: Path) -> None:
         seen_fps: list[str] = []
@@ -137,6 +155,9 @@ class PartylineAdapter(Adapter):
                         if matched < len(seen_fps):
                             if seen_fps[matched] == fp:
                                 matched += 1
+                                # This is proof the current file still
+                                # follows the delivered watermark.
+                                resync_failures = 0
                                 continue
                             seen_fps, resync_failures = await self._handle_resync(
                                 path, seen_fps, resync_failures
