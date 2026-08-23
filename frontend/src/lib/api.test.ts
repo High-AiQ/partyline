@@ -19,6 +19,7 @@ const conversation: Conversation = {
   topic: "",
   created_at: 1,
   archived_at: null,
+  live_count: 0,
 };
 
 const attachPayload: AttachPayload = {
@@ -136,6 +137,19 @@ describe("api", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: "work room" }),
+    });
+  });
+
+  it("closes every live process through the line-scoped endpoint", async () => {
+    const fetch = vi.fn().mockResolvedValue(response({ ok: true, stopped: ["sol", "fable"] }));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(api.closeProcesses("conv-1")).resolves.toEqual({
+      ok: true,
+      stopped: ["sol", "fable"],
+    });
+    expect(fetch).toHaveBeenCalledWith("/api/conversations/conv-1/attachments/close", {
+      method: "POST",
     });
   });
 

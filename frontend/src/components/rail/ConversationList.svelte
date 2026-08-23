@@ -14,6 +14,7 @@
   interface Props {
     onrename: (conversation: Conversation) => void;
     onclaims: (conversation: Conversation) => void;
+    oncloseprocesses: (conversation: Conversation) => void;
     ondelete: (conversation: Conversation) => void;
   }
 
@@ -22,7 +23,7 @@
     conversation: Conversation;
   }
 
-  let { onrename, onclaims, ondelete }: Props = $props();
+  let { onrename, onclaims, oncloseprocesses, ondelete }: Props = $props();
 
   /** `{anchor, conversation}` while a menu is open, else null. */
   let menu = $state<MenuState | null>(null);
@@ -49,7 +50,15 @@
         title={conversation.topic || undefined}
         onclick={() => room.open(conversation)}
       >
-        {conversation.name}
+        <span class="conv-name">{conversation.name}</span>
+        {#if conversation.live_count > 0}
+          <span
+            class="line-live"
+            title="{conversation.live_count} live"
+            aria-label="{conversation.live_count} live"
+            ><span class="led running" aria-hidden="true"></span></span
+          >
+        {/if}
       </button>
       <div class="conv-actions">
         <button
@@ -74,6 +83,7 @@
     close={() => (menu = null)}
     {onrename}
     {onclaims}
+    {oncloseprocesses}
     {ondelete}
   />
 {/if}
@@ -92,7 +102,8 @@
     align-items: stretch;
   }
   .conv {
-    display: block;
+    display: flex;
+    align-items: center;
     flex: 1;
     min-width: 0;
     width: 100%;
@@ -104,9 +115,17 @@
     color: var(--color-cream-dim);
     padding: 9px 54px 9px 20px;
     position: relative;
-    white-space: nowrap;
+    gap: 8px;
+  }
+  .conv-name {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .line-live {
+    display: inline-flex;
+    flex: none;
   }
   .conv:hover,
   .conv-row:focus-within .conv,
