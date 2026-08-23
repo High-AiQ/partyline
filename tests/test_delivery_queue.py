@@ -37,6 +37,9 @@ class DurableDeliveryQueueTest(unittest.IsolatedAsyncioTestCase):
             async def broadcast(self, *args):
                 pass
 
+            async def broadcast_attachment(self, *args):
+                pass
+
         presence = Presence(Runtime())
         sent = []
 

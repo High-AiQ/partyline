@@ -22,6 +22,7 @@ from .adapter_capabilities import adapter_completion
 from .adapter_update import apply_update, requested_update_argv
 from .attachment_commands import validated_attachment_command
 from .attachment_resume import resume_adapter
+from .attachment_view import attachment_response
 from .auth_guard import (
     WS_FORBIDDEN,
     UserSocketRegistry,
@@ -301,7 +302,9 @@ async def conversation_detail(conv_id: str):
     return {
         "conversation": conv,
         "messages": media.attach(runtime.db.list_messages(conv_id)),
-        "attachments": runtime.db.list_attachments(conv_id),
+        "attachments": await asyncio.gather(
+            *(attachment_response(att) for att in runtime.db.list_attachments(conv_id))
+        ),
         "working": presence.working_ids(conv_id),
         "presence": presence.snapshot(conv_id),
     }
@@ -421,7 +424,6 @@ async def attach(conv_id: str, body: AttachIn):
     for existing in runtime.db.list_attachments(conv_id):
         if existing["name"].lower() == body.name.lower() and existing["status"] in ("starting", "running"):
             raise HTTPException(409, f"'{body.name}' is already attached")
-
     try:
         command = validated_attachment_command(
             body.adapter, body.command, ADAPTERS, ADAPTER_METADATA
@@ -470,13 +472,13 @@ async def attach(conv_id: str, body: AttachIn):
         conv_id, "system", "system",
         f"@{body.name} joined · `{ ' '.join(command) }` · {cwd} · session {att_id}",
     )
-    return runtime.db.get_attachment(att_id)
+    return await attachment_response(runtime.db.get_attachment(att_id))
 
 
 @app.post("/api/attachments/{att_id}/resume", response_model=AttachmentResponse)
 async def resume_attachment(att_id: str):
     await _resume_adapter(att_id)
-    return runtime.db.get_attachment(att_id)
+    return await attachment_response(runtime.db.get_attachment(att_id))
 
 
 async def _resume_adapter(
@@ -509,11 +511,9 @@ async def edit_attachment_command(
     updated = await runtime.db.update_inactive_attachment_command(att_id, command)
     if updated is None:
         raise HTTPException(409, f"'{att['name']}' became live; refresh and try again")
-    await runtime.broadcast(
-        att["conv_id"],
-        AttachmentEvent(attachment=AttachmentResponse.model_validate(updated)),
-    )
-    return updated
+    response = await attachment_response(updated)
+    await runtime.broadcast(att["conv_id"], AttachmentEvent(attachment=response))
+    return response
 
 
 @app.delete("/api/attachments/{att_id}", response_model=OkResponse)

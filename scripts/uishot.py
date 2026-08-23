@@ -314,6 +314,7 @@ def seed_room(page):
     jack = lambda name, status, created: {           # noqa: E731 - a fixture, not logic
         "id": f"att-{name}", "name": name, "adapter": "raw", "command": ["fake", "--headless"],
         "cwd": "/tmp/project", "status": status, "created_at": created,
+        "cwd_git": {"sha": "d87b3ae", "dirty": name == "sol"},
     }
     message = lambda mid, sender, kind, body: {      # noqa: E731
         "id": mid, "sender": sender, "sender_type": kind,
@@ -339,7 +340,6 @@ def capture_all(out_dir="/tmp/partyline-ui", *, freeze_animations=False) -> list
     with ui_session(LINES, out_dir=out_dir, freeze_animations=freeze_animations) as ui:
         page = ui.page
         ui.shot("01-sidebar-idle")
-
         first = page.locator(".conv-row").first
         first.hover()
         ui.shot("02-row-hovered")

@@ -249,10 +249,10 @@ class Adapter:
         await self._startup_delivery.wait()
         return self._startup_delivery_result is True
 
-    # The digest's shape lives in briefing.py as pure functions; the rider is
-    # live line state (open tasks), consulted at delivery time, never staged.
+    # The digest's shape lives in briefing.py; cwd git and the task rider are
+    # live delivery-time state, never staged.
     def format_digest(self, messages: list[dict]) -> str:
-        return format_digest(messages, safe_rider(self.att))
+        return format_digest(messages, safe_rider(self.att), str(self.att.get("cwd", "")))
 
     async def send_keys(self, text: str):
         assert self.master is not None

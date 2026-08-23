@@ -15,6 +15,7 @@ const attachment: Attachment = {
   last_seen: 1,
   created_at: 1,
   cli_session: null,
+  cwd_git: null,
 };
 
 afterEach(() => {
@@ -169,6 +170,43 @@ describe("JackCard badge treatments", () => {
       presence.apply({ type: "working", attachment_id: attachment.id, working: true });
       await tick();
       expect(document.querySelectorAll(".working")).toHaveLength(0);
+    } finally {
+      await unmount(card);
+    }
+  });
+});
+
+describe("JackCard cwd git identity", () => {
+  function mountCard(dirty: boolean) {
+    return mount(JackCard, {
+      target: document.body,
+      props: {
+        attachment: { ...attachment, cwd_git: { sha: "d87b3ae", dirty } },
+        resumable: false,
+        overridesBundled: false,
+        onmention: vi.fn(),
+      },
+    });
+  }
+
+  it("shows the short SHA and whether the attached cwd is dirty", async () => {
+    const card = mountCard(true);
+    try {
+      const state = document.querySelector(".git-state");
+      expect(state?.textContent).toContain("git d87b3ae · dirty");
+      expect(state?.classList.contains("dirty")).toBe(true);
+      expect(state?.getAttribute("title")).toContain("/tmp/work");
+    } finally {
+      await unmount(card);
+    }
+  });
+
+  it("labels a clean cwd without dirty treatment", async () => {
+    const card = mountCard(false);
+    try {
+      const state = document.querySelector(".git-state");
+      expect(state?.textContent).toContain("git d87b3ae · clean");
+      expect(state?.classList.contains("dirty")).toBe(false);
     } finally {
       await unmount(card);
     }

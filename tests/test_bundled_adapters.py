@@ -945,14 +945,20 @@ class RawAdapterTest(RecordingAdapterTest):
 
     async def test_digest_filters_system_and_own_mention_and_send_keys(self):
         adapter = self.make(RawAdapter, name="Raw-Agent")
-        digest = adapter.format_digest(
-            [
-                {"sender_type": "system", "body": "@Raw-Agent joined"},
-                {"sender_type": "human", "body": "@raw-agent: please check this"},
-                {"sender_type": "human", "body": "plain follow-up"},
-            ]
+        with patch(
+            "partyline.adapters.bundled.raw.adapter.cwd_git_digest",
+            return_value="(cwd git: d87b3ae clean)",
+        ):
+            digest = adapter.format_digest(
+                [
+                    {"sender_type": "system", "body": "@Raw-Agent joined"},
+                    {"sender_type": "human", "body": "@raw-agent: please check this"},
+                    {"sender_type": "human", "body": "plain follow-up"},
+                ]
+            )
+        self.assertEqual(
+            digest, "please check this\nplain follow-up\n(cwd git: d87b3ae clean)"
         )
-        self.assertEqual(digest, "please check this\nplain follow-up")
         adapter.master = 7
         with patch("partyline.adapters.bundled.raw.adapter.os.write") as write:
             await adapter.send_keys("hello")

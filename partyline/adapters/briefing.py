@@ -4,6 +4,7 @@ import logging
 from collections.abc import Mapping
 
 from partyline.bind import DEFAULT_HOST, DEFAULT_PORT
+from partyline.attachment_view import cwd_git_digest
 
 logger = logging.getLogger(__name__)
 
@@ -65,14 +66,17 @@ DIGEST_FOOTER = ("(reminder: processes only see messages that @mention them — 
                  "work in one line, then speak only for blockers, findings, or results)")
 
 
-def format_digest(messages: list[dict], rider: str = "") -> str:
+def format_digest(messages: list[dict], rider: str = "", cwd: str = "") -> str:
     """The wake digest: sender-prefixed lines, then live state, then the reminder.
 
     The rider is where a line's current facts (its open task board) go, so a
     waking process sees them next to the messages rather than never.
     """
     lines = "\n".join(f"[{m['sender']}]: {m['body']}" for m in messages)
-    return "\n".join(part for part in (lines, rider, DIGEST_FOOTER) if part)
+    # This low-frequency delivery probe stays beside digest construction; all
+    # HTTP/WebSocket presentation probes are offloaded from the event loop.
+    git = cwd_git_digest(cwd) if cwd else ""
+    return "\n".join(part for part in (lines, git, rider, DIGEST_FOOTER) if part)
 
 
 def safe_rider(att: dict) -> str:
