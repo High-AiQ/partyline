@@ -54,6 +54,7 @@ class CwdGitStateTest(unittest.TestCase):
                         "command": ["codex"],
                         "cwd": directory,
                         "status": "running",
+                        "follow": False,
                         "last_seen": 0,
                         "created_at": 1,
                     }
@@ -86,6 +87,7 @@ class CwdGitStateTest(unittest.TestCase):
                         "command": ["codex"],
                         "cwd": "/project",
                         "status": "running",
+                        "follow": False,
                         "last_seen": 0,
                         "created_at": 1,
                     }

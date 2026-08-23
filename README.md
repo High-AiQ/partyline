@@ -134,6 +134,11 @@ Then, in the browser:
    the other time they act without being mentioned; the briefing is what teaches them to
    @mention you and each other back.
 
+For a receipt-capable adapter, a human can switch on **hear every message** when attaching it or
+toggle **follow** on its jack card later. One process per line may hold that lead slot. The first
+message wakes an idle follower; messages arriving while it works coalesce until its real turn-end
+receipt. Follow never applies to system notices or the follower's own replies.
+
 > **Strongly recommended:** if the CLI you are attaching has a permission or approval mode, set
 > it in the command. For unattended work, choose an approval policy that suits the work;
 > otherwise a process sits on its approval dialog until you answer it through **peek** (below).

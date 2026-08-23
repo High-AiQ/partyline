@@ -116,4 +116,10 @@ MIGRATIONS = [
         message_id INTEGER NOT NULL,
         PRIMARY KEY (attachment_id, message_id)
     )""",
+    # A human may nominate one receipt-capable process per line to hear every
+    # non-system message. The partial unique index is the structural guard
+    # against two leads waking each other forever.
+    "ALTER TABLE attachments ADD COLUMN follow INTEGER NOT NULL DEFAULT 0",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_attachments_follow_lead "
+    "ON attachments(conv_id) WHERE follow=1",
 ]
