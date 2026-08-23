@@ -12,7 +12,6 @@ const attachment: Attachment = {
   command: ["codex"],
   cwd: "/tmp/work",
   status: "running",
-  follow: false,
   last_seen: 1,
   created_at: 1,
   cli_session: null,

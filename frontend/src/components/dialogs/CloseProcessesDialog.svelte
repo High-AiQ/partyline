@@ -50,7 +50,6 @@
     <p class="line-status error" role="alert">Could not load this line. Try again.</p>
   {:else}
     <p class="dialog-text">Detaches every live process on this line. The line and its history stay.</p>
-    <p class="dialog-note">A follow slot, if any, stays until a human clears it.</p>
 
     <div class="live-list">
       {#if live.length}

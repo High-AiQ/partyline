@@ -53,8 +53,8 @@ import type {
 import { request } from "./http";
 import { messagePage, type MessagePageRequest } from "./message-api";
 import type { MessagePage } from "./message-page";
-import { AttachmentCreateRequestSchema, AttachmentFollowRequestSchema } from "./attachment-contracts";
-import type { AttachmentCreateRequest, AttachmentFollowRequest } from "./attachment-contracts";
+import { AttachmentCreateRequestSchema } from "./attachment-contracts";
+import type { AttachmentCreateRequest } from "./attachment-contracts";
 export { ApiContractError, ApiError, request } from "./http";
 
 export type AttachPayload = AttachmentCreateRequest;
@@ -102,7 +102,6 @@ export interface PartylineApi {
   uploadFiles(conversationId: string, upload: FileUpload): Promise<FileUploadResponse>;
   attach(conversationId: string, payload: AttachPayload): Promise<Attachment>;
   editAttachmentCommand(attachmentId: string, payload: AttachmentCommandPayload): Promise<Attachment>;
-  setAttachmentFollow(attachmentId: string, payload: AttachmentFollowRequest): Promise<Attachment>;
   detach(attachmentId: string): Promise<OkResult>;
   resume(attachmentId: string): Promise<Attachment>;
   screen(attachmentId: string): Promise<ScreenResult>;
@@ -237,13 +236,6 @@ export const api: PartylineApi = {
       method: "PATCH",
       body: payload,
       fallback: "could not save command",
-    }),
-  setAttachmentFollow: (attachmentId, payload) =>
-    request(`/api/attachments/${attachmentId}`, {
-      schema: AttachmentSchema,
-      method: "PATCH",
-      body: AttachmentFollowRequestSchema.parse(payload),
-      fallback: "could not change follow mode",
     }),
   detach: (attachmentId) =>
     request(`/api/attachments/${attachmentId}`, {

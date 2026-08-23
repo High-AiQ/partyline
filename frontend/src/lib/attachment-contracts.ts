@@ -16,13 +16,9 @@ export const AttachmentCreateRequestSchema = z.object({
   adapter: z.string(),
   command: z.string(),
   cwd: z.string(),
-  follow: z.boolean(),
   update: z.boolean().optional(),
 });
 export type AttachmentCreateRequest = z.infer<typeof AttachmentCreateRequestSchema>;
-
-export const AttachmentFollowRequestSchema = z.object({ follow: z.boolean() });
-export type AttachmentFollowRequest = z.infer<typeof AttachmentFollowRequestSchema>;
 
 export const AttachmentSchema = z.object({
   id: z.string(),
@@ -32,7 +28,6 @@ export const AttachmentSchema = z.object({
   command: z.array(z.string()),
   cwd: z.string(),
   status: AttachmentStatusSchema,
-  follow: z.boolean().default(false),
   last_seen: z.number().int(),
   created_at: z.number(),
   cli_session: z.string().nullable().default(null),

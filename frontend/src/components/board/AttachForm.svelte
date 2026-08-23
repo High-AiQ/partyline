@@ -15,13 +15,11 @@
   let command = $state("");
   let cwd = $state("");
   let updateCli = $state(false);
-  let follow = $state(false);
   let attaching = $state(false);
 
   const selectedAdapter = $derived(session.adapters.find((option) => option.id === adapter));
   const updateCommand = $derived(selectedAdapter?.update_command ?? null);
   const canUpdate = $derived(Boolean(updateCommand && updateCommand.length > 0));
-  const canFollow = $derived(selectedAdapter?.completion === "receipt");
   const updateTitle = $derived(
     updateCommand && updateCommand.length > 0
       ? updateCommand.join(" ")
@@ -47,16 +45,10 @@
     adapter = preset.adapter;
     command = preset.command;
     if (!adapterCanUpdate(adapter)) updateCli = false;
-    if (!adapterCanFollow(adapter)) follow = false;
   }
 
   function onAdapterChosen(): void {
     if (!adapterCanUpdate(adapter)) updateCli = false;
-    if (!adapterCanFollow(adapter)) follow = false;
-  }
-
-  function adapterCanFollow(adapterId: string): boolean {
-    return session.adapters.find((option) => option.id === adapterId)?.completion === "receipt";
   }
 
   async function attach(event: SubmitEvent): Promise<void> {
@@ -77,7 +69,6 @@
         adapter,
         command: command.trim(),
         cwd: cwd.trim(),
-        follow,
         ...(updateCli ? { update: true } : {}),
       });
       // The socket normally announces this too, and `upsertAttachment` is keyed
@@ -88,7 +79,6 @@
       name = "";
       command = "";
       updateCli = false;
-      follow = false;
     } catch (error) {
       room.showNotice(error instanceof ApiError ? error.message : "attach failed", "error");
     } finally {
@@ -163,15 +153,6 @@
   <label class="update-row" for="aUpdate" title={updateTitle}>
     update CLI first
     <input id="aUpdate" type="checkbox" bind:checked={updateCli} disabled={!canUpdate} title={updateTitle} />
-  </label>
-
-  <label
-    class="update-row"
-    for="aFollow"
-    title={canFollow ? "wake this lead for every non-system message" : "requires turn-end receipts"}
-  >
-    hear every message
-    <input id="aFollow" type="checkbox" bind:checked={follow} disabled={!canFollow} />
   </label>
 
   <button class="primary" type="submit" disabled={attaching}>{attaching ? "attaching…" : "attach"}</button>

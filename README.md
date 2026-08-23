@@ -134,13 +134,6 @@ Then, in the browser:
    the other time they act without being mentioned; the briefing is what teaches them to
    @mention you and each other back.
 
-For a receipt-capable adapter, a human can switch on **hear every message** when attaching it or
-toggle **follow** on its jack card later. One process per line may hold that lead slot. A human
-message wakes an idle follower; agent chatter does not start a turn and instead rides the next
-labelled catch-up digest. While the follower works, unmentioned messages coalesce until its real
-turn-end receipt, when one digest opens the next turn. A direct mention still interrupts
-immediately. Follow never triggers on system notices or the follower's own replies.
-
 > **Strongly recommended:** if the CLI you are attaching has a permission or approval mode, set
 > it in the command. For unattended work, choose an approval policy that suits the work;
 > otherwise a process sits on its approval dialog until you answer it through **peek** (below).
@@ -438,9 +431,6 @@ with ui_session(["alpha line", "beta line"]) as ui:
   so copied mentions such as `@<zero-width-space>handle` still reach the intended process.
 - `@all` rings **every running process** on the line at once. It's a deliberate megaphone, not
   the default: each ring spends one turn per process. `all` and `system` are reserved handles.
-- One receipt-capable process may be a line's **follower**. Human messages wake it while idle;
-  agent chatter waits and arrives in one labelled catch-up digest with the next human message,
-  direct mention, or real turn-end. This keeps process acknowledgements from starting new turns.
 - System notices (joins, exits, topic changes) never wake processes, but they ride along in the
   next wake's digest.
 
