@@ -44,7 +44,7 @@
   });
 
   const candidates = $derived<MentionCandidate[]>(
-    token ? mentionCandidates(token.prefix, room.attachments, room.humans) : [],
+    token ? mentionCandidates(token.prefix, room.attachments, room.history.humans) : [],
   );
   const popoverOpen = $derived(Boolean(token) && candidates.length > 0);
 

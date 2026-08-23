@@ -1,11 +1,9 @@
 /**
  * The room: the list of lines, the line you are on, and everything on it.
  *
- * This turns server events into screen state and owns two ordering guards:
+ * This turns server events into screen state and owns one ordering guard:
  *   - **`#epoch`** rises on line changes, discarding late awaits so a slower
  *     fetch cannot overwrite the line chosen after it.
- *   - **`#seen`** holds message ids, because a reconnect replays history and
- *     the same message will arrive twice.
  */
 
 import { SvelteSet } from "svelte/reactivity";
@@ -27,6 +25,7 @@ import type { WireContext } from "./wire.svelte.js";
 import { clearConversationRoute, routedConversationId, setConversationRoute } from "../lib/routing";
 import { isLive } from "../lib/attachments";
 import { applyLineLive } from "../lib/line-live";
+import { MessageHistory } from "./message-history.svelte";
 import { presenceSync } from "./presence-coordinator.svelte.js";
 
 export interface RoomNotice {
@@ -52,25 +51,30 @@ class Room {
   archiveOpen = $state(false);
 
   conversation = $state<Conversation | null>(null);
-  messages = $state<ChatMessage[]>([]);
   attachments = $state<Attachment[]>([]);
   reattachOffer = $state<ReattachOfferEvent | null>(null);
 
-  /** Speakers for @ autocomplete. `SvelteSet` makes `.add()` reactive. */
-  humans = new SvelteSet<string>();
+  history = new MessageHistory(() => session.handle);
   /** Attachments blocked on a dialog, which the board rings until someone peeks. */
   attention = new SvelteSet<string>();
 
   /** A transient toast, distinct from the wire banner: this one goes away. */
   notice = $state<RoomNotice | null>(null);
 
-  #seen = new Set<number>();
   #epoch = 0;
   #noticeTimer: ReturnType<typeof setTimeout> | null = null;
 
   get identity(): WireIdentity {
     if (!session.handle) throw new Error("authentication is required before joining a line");
     return { clientId: session.clientId };
+  }
+
+  get messages(): ChatMessage[] {
+    return this.history.messages;
+  }
+
+  set messages(messages: ChatMessage[]) {
+    this.history.replace(messages);
   }
 
   // ── the list ───────────────────────────────────────────────────────────
@@ -104,10 +108,8 @@ class Room {
     if (!fromRoute) setConversationRoute(conversation.id);
 
     this.conversation = conversation;
-    this.messages = [];
+    this.history.reset();
     this.attachments = [];
-    this.#seen = new Set<number>();
-    this.humans.clear();
     this.attention.clear();
     this.reattachOffer = null;
 
@@ -138,7 +140,7 @@ class Room {
     this.conversation = detail.conversation;
     this.attachments = detail.attachments;
     presenceSync.finish(presenceFetch, detail.presence, detail.working);
-    for (const message of detail.messages) this.#absorb(message);
+    this.history.seed(detail.messages, detail.has_more_messages);
     void this.loadConversations().catch(ignoreBackgroundFailure);
   }
 
@@ -160,13 +162,20 @@ class Room {
     const conversation = this.conversation;
     if (!conversation) return;
     const epoch = this.#epoch;
+    const afterId = this.history.newestId;
     const [detail, presenceFetch] = await presenceSync.fetch(api.conversation(conversation.id));
     if (epoch !== this.#epoch) return; // the line changed under the fetch
 
     this.conversation = detail.conversation;
     this.attachments = detail.attachments;
     presenceSync.finish(presenceFetch, detail.presence, detail.working);
-    for (const message of detail.messages) this.#absorb(message);
+    this.history.merge(detail.messages);
+    await this.history.catchUp(conversation.id, afterId);
+  }
+
+  loadOlderMessages(): Promise<number> {
+    const conversation = this.conversation;
+    return conversation ? this.history.loadOlder(conversation.id) : Promise.resolve(0);
   }
 
   /** Step off the current line without choosing another. */
@@ -175,10 +184,8 @@ class Room {
     presenceSync.reset();
     wire.disconnect();
     this.conversation = null;
-    this.messages = [];
+    this.history.reset();
     this.attachments = [];
-    this.#seen = new Set<number>();
-    this.humans.clear();
     this.attention.clear();
     this.reattachOffer = null;
     if (clearRoute && routedConversationId()) clearConversationRoute();
@@ -314,15 +321,7 @@ class Room {
 
   /** Add a message once and remember its human sender for autocomplete. */
   #absorb(message: ChatMessage): void {
-    if (this.#seen.has(message.id)) return;
-    this.#seen.add(message.id);
-    if (
-      message.sender_type === "human" &&
-      message.sender.toLowerCase() !== (session.handle?.toLowerCase() ?? "")
-    ) {
-      this.humans.add(message.sender);
-    }
-    this.messages.push(message);
+    this.history.merge([message]);
   }
 }
 

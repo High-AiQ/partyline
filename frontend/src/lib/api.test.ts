@@ -153,6 +153,24 @@ describe("api", () => {
     });
   });
 
+  it("requests older and reconnect message pages with bounded cursors", async () => {
+    const fetch = vi.fn().mockResolvedValue(response({ messages: [], has_more: false }));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(api.messagePage("conv-1", { beforeId: 42, limit: 20 })).resolves.toEqual({
+      messages: [],
+      has_more: false,
+    });
+    await api.messagePage("conv-1", { afterId: 61, limit: 20 });
+
+    expect(fetch).toHaveBeenNthCalledWith(1, "/api/conversations/conv-1/messages?before_id=42&limit=20", {
+      method: "GET",
+    });
+    expect(fetch).toHaveBeenNthCalledWith(2, "/api/conversations/conv-1/messages?after_id=61&limit=20", {
+      method: "GET",
+    });
+  });
+
   it("rejects a successful response that violates its named contract", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ id: "conv-1" })));
 

@@ -1,5 +1,4 @@
 /** The REST surface, decoded once against the shared Zod contracts. */
-
 import {
   AdapterImportResultSchema,
   AdapterSchema,
@@ -52,6 +51,8 @@ import type {
   HandleUpdateRequest,
 } from "./contracts";
 import { request } from "./http";
+import { messagePage, type MessagePageRequest } from "./message-api";
+import type { MessagePage } from "./message-page";
 import { AttachmentCreateRequestSchema, AttachmentFollowRequestSchema } from "./attachment-contracts";
 import type { AttachmentCreateRequest, AttachmentFollowRequest } from "./attachment-contracts";
 export { ApiContractError, ApiError, request } from "./http";
@@ -90,6 +91,7 @@ export interface PartylineApi {
   importAdapters(repository: string, ref: string): Promise<AdapterImportResult>;
   conversations(archived?: boolean): Promise<Conversation[]>;
   conversation(id: string): Promise<ConversationDetail>;
+  messagePage(id: string, page?: MessagePageRequest): Promise<MessagePage>;
   createConversation(name: string): Promise<Conversation>;
   renameConversation(id: string, name: string): Promise<Conversation>;
   setTopic(id: string, topic: string): Promise<Conversation>;
@@ -167,6 +169,7 @@ export const api: PartylineApi = {
       schema: ConversationSchema.array(),
     }),
   conversation: (id) => request(`/api/conversations/${id}`, { schema: ConversationDetailSchema }),
+  messagePage,
   createConversation: (name) =>
     request("/api/conversations", { schema: ConversationSchema, method: "POST", body: { name } }),
   renameConversation: (id, name) =>

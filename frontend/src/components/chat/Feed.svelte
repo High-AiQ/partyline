@@ -6,13 +6,40 @@
    * when you are already at the bottom. Someone reading back through history
    * must not be yanked to the end because a process said something.
    */
+  import { tick } from "svelte";
   import Message from "./Message.svelte";
   import { room } from "../../state/room.svelte.js";
 
   let feed = $state<HTMLDivElement | null>(null);
   /** Within this much of the bottom counts as "following". */
   const STICK_PX = 140;
+  const HISTORY_PX = 120;
   let wasFollowing = true;
+  let fetchingHistory = false;
+
+  async function loadOlder(): Promise<void> {
+    const element = feed;
+    const conversationId = room.conversation?.id;
+    if (!element || !conversationId || fetchingHistory || !room.history.hasOlder) return;
+    fetchingHistory = true;
+    const height = element.scrollHeight;
+    const top = element.scrollTop;
+    try {
+      const added = await room.loadOlderMessages();
+      await tick();
+      if (added && feed === element && room.conversation?.id === conversationId) {
+        element.scrollTop = top + element.scrollHeight - height;
+      }
+    } catch {
+      // The inline retry stays at the top of the feed.
+    } finally {
+      fetchingHistory = false;
+    }
+  }
+
+  function onscroll(): void {
+    if (feed && feed.scrollTop <= HISTORY_PX) void loadOlder();
+  }
 
   /**
    * `$effect.pre` runs *before* Svelte writes the new message to the DOM, which
@@ -39,9 +66,17 @@
     wasFollowing = true;
     if (feed) feed.scrollTop = feed.scrollHeight;
   });
+
+  // A short first page may not create a scrollbar. Keep paging until the
+  // viewport fills, then ordinary upward scrolling takes over.
+  $effect(() => {
+    void room.messages.length;
+    void room.history.hasOlder;
+    if (feed && feed.scrollHeight <= feed.clientHeight) queueMicrotask(() => void loadOlder());
+  });
 </script>
 
-<div id="feed" bind:this={feed}>
+<div id="feed" bind:this={feed} {onscroll}>
   {#if !room.conversation}
     <div class="empty">
       <div class="art">no line selected</div>
@@ -53,6 +88,13 @@
       patch in a process on the right, or just start talking
     </div>
   {:else}
+    {#if room.history.loadingOlder}
+      <div class="history-status" aria-live="polite">loading earlier messages…</div>
+    {:else if room.history.olderError}
+      <button class="history-status retry" type="button" onclick={() => void loadOlder()}
+        >earlier messages could not load · retry</button
+      >
+    {/if}
     {#each room.messages as message (message.id)}
       <Message {message} />
     {/each}
@@ -71,6 +113,20 @@
     text-align: center;
     margin-top: 12vh;
     font-size: 12.5px;
+  }
+  .history-status {
+    display: block;
+    width: fit-content;
+    margin: 0 auto 14px;
+    color: var(--color-cream-faint);
+    font: 11px var(--font-mono);
+  }
+  .retry {
+    border: 0;
+    border-bottom: 1px solid var(--color-copper);
+    background: transparent;
+    padding: 5px 2px;
+    cursor: pointer;
   }
   @media (max-width: 899px) {
     /* Desktop gutters are a luxury at 390px; the message column needs them
