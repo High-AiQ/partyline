@@ -16,6 +16,7 @@ from partyline import auth_store, auth_tokens, bind, frontend_build, server
 from partyline.auth_guard import Principal
 from partyline.db import Db
 from partyline.hook_routes import handle_hook
+from partyline.presence import Presence
 from partyline.preset_routes import presets_router
 from partyline.restart_report import restart_report_router
 from partyline.runtime import ChatRuntime
@@ -368,9 +369,11 @@ class ServerTest(unittest.TestCase):
             self.arun(coroutine)
         self.assertEqual(raised.exception.status_code, status)
 
-    def add_attachment(self, ident, name="terra", status="running", owner=None):
+    def add_attachment(
+        self, ident, name="terra", status="running", owner=None, follow=False
+    ):
         server.runtime.db.add_attachment(
-            ident, "line", name, "fake", ["fake"], self.directory.name, owner)
+            ident, "line", name, "fake", ["fake"], self.directory.name, owner, follow)
         server.runtime.db.set_attachment_status(ident, status, owner)
 
     def user_token(self, handle="greg"):
@@ -423,6 +426,37 @@ class ServerTest(unittest.TestCase):
                 self.arun(server.runtime.route_mentions("line", message))
                 self.assertEqual(adapter.deliveries[-1][-1], message)
                 self.assertEqual(message["body"], body)
+
+    def test_follow_wakes_idle_then_coalesces_until_real_turn_end(self):
+        self.add_attachment("lead", "grok", owner="owner", follow=True)
+        adapter = FakeAdapter(att={"runtime_owner": "owner"})
+        presence = Presence(server.runtime)
+        server.runtime.live["lead"] = presence.watch(
+            adapter, "line", "lead", "receipt",
+            *server.runtime.held_wake_hooks("line", "lead", "grok"),
+        )
+
+        first = server.runtime.db.add_message("line", "greg", "human", "status update?")
+        self.arun(server.runtime.route_mentions("line", first))
+        self.assertEqual(adapter.deliveries, [[first]])
+        self.arun(presence.began("line", "lead", owner="owner"))
+
+        own = server.runtime.db.add_message("line", "grok", "agent", "on it")
+        self.arun(server.runtime.route_mentions("line", own))
+        second = server.runtime.db.add_message("line", "sol", "agent", "finding")
+        self.arun(server.runtime.route_mentions("line", second))
+        self.assertEqual(adapter.deliveries, [[first]])
+        self.assertEqual(presence.queue.held_ids("lead"), [second["id"]])
+
+        self.arun(presence.ended("line", "lead", owner="owner"))
+        self.assertEqual(adapter.deliveries, [[first], [second]])
+        self.assertEqual(server.runtime.db.get_attachment("lead")["last_seen"], second["id"])
+
+    def test_inactive_follow_does_not_turn_chatter_into_a_failed_mention(self):
+        self.add_attachment("lead", "grok", status="detached", follow=True)
+        message = server.runtime.db.add_message("line", "greg", "human", "plain chatter")
+        self.arun(server.runtime.route_mentions("line", message))
+        self.assertEqual(server.runtime.db.list_messages("line"), [message])
 
     def test_failed_mention_delivery_does_not_advance_cursor(self):
         self.add_attachment("one", "terra")
@@ -766,7 +800,7 @@ class ServerTest(unittest.TestCase):
 
     def test_attach_rejects_handle_claimed_by_a_human(self):
         self.user_token("terra")
-        self.assert_http(409, server.attach("line", server.AttachIn(
+        self.assert_http(409, server.attach(self.principal_request(), "line", server.AttachIn(
             name="TERRA", adapter="fake", cwd=self.directory.name)))
 
     def test_matching_client_id_reclaims_a_stale_handle(self):
@@ -855,30 +889,116 @@ class ServerTest(unittest.TestCase):
             server.tasks.get(leftover["id"])
 
     def test_attach_validation_and_success(self):
-        self.assert_http(400, server.attach("line", server.AttachIn(name="bad name", adapter="fake")))
-        self.assert_http(400, server.attach("line", server.AttachIn(name="all", adapter="fake")))
-        self.assert_http(400, server.attach("line", server.AttachIn(name="x", adapter="unknown")))
+        request = self.principal_request()
+        self.assert_http(400, server.attach(
+            request, "line", server.AttachIn(name="bad name", adapter="fake")
+        ))
+        self.assert_http(400, server.attach(
+            request, "line", server.AttachIn(name="all", adapter="fake")
+        ))
+        self.assert_http(400, server.attach(
+            request, "line", server.AttachIn(name="x", adapter="unknown")
+        ))
         server.ADAPTER_METADATA["fake"]["requires"] = ["definitely-not-a-command"]
-        self.assert_http(400, server.attach("line", server.AttachIn(name="x", adapter="fake")))
+        self.assert_http(400, server.attach(
+            request, "line", server.AttachIn(name="x", adapter="fake")
+        ))
         server.ADAPTER_METADATA["fake"]["requires"] = []
         self.assert_http(
-            400, server.attach("line", server.AttachIn(name="x", adapter="fake", cwd="/no/such/cwd"))
+            400, server.attach(
+                request, "line",
+                server.AttachIn(name="x", adapter="fake", cwd="/no/such/cwd"),
+            )
         )
         attached = self.arun(
-            server.attach("line", server.AttachIn(name="terra", adapter="fake", cwd=self.directory.name))
+            server.attach(
+                request, "line",
+                server.AttachIn(name="terra", adapter="fake", cwd=self.directory.name),
+            )
         )
         self.assertEqual(attached["name"], "terra")
         self.assertIn(attached["id"], server.runtime.live)
         self.assert_http(
-            409, server.attach("line", server.AttachIn(name="TERRA", adapter="fake", cwd=self.directory.name))
+            409, server.attach(
+                request, "line",
+                server.AttachIn(name="TERRA", adapter="fake", cwd=self.directory.name),
+            )
         )
+
+    def test_follow_attach_is_human_receipt_only_and_names_the_lead(self):
+        human = self.principal_request()
+        machine = self.principal_request("worker", "machine")
+        self.assert_http(403, server.attach(
+            machine, "line", server.AttachIn(
+                name="worker", adapter="fake", cwd=self.directory.name, follow=False
+            ),
+        ))
+        self.assert_http(400, server.attach(
+            human, "line", server.AttachIn(
+                name="lead", adapter="fake", cwd=self.directory.name, follow=True
+            ),
+        ))
+
+        server.ADAPTER_METADATA["fake"]["capabilities"]["turn_end"] = "receipt"
+        self.assertEqual(self.arun(server.adapters())[0]["completion"], "receipt")
+        lead = self.arun(server.attach(
+            human, "line", server.AttachIn(
+                name="lead", adapter="fake", cwd=self.directory.name, follow=True
+            ),
+        ))
+        self.assertTrue(lead["follow"])
+        with self.assertRaises(HTTPException) as raised:
+            self.arun(server.attach(
+                human, "line", server.AttachIn(
+                    name="other", adapter="fake", cwd=self.directory.name, follow=True
+                ),
+            ))
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertIn("@lead", raised.exception.detail)
+
+    def test_follow_patch_is_live_human_owned_and_broadcast(self):
+        server.ADAPTER_METADATA["fake"]["capabilities"]["turn_end"] = "receipt"
+        self.add_attachment("lead", "grok", follow=True)
+        self.add_attachment("other", "sol")
+        socket = StreamWebSocket()
+        server.runtime.sockets["line"] = {socket}
+        human = self.principal_request()
+
+        with self.assertRaises(HTTPException) as raised:
+            self.arun(server.edit_attachment(
+                human, "other", server.AttachmentPatchRequest(follow=True)
+            ))
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertIn("@grok", raised.exception.detail)
+        self.assert_http(403, server.edit_attachment(
+            self.principal_request("sol", "machine"), "lead",
+            server.AttachmentPatchRequest(follow=False),
+        ))
+
+        cleared = self.arun(server.edit_attachment(
+            human, "lead", server.AttachmentPatchRequest(follow=False)
+        ))
+        enabled = self.arun(server.edit_attachment(
+            human, "other", server.AttachmentPatchRequest(follow=True)
+        ))
+        self.assertFalse(cleared["follow"])
+        self.assertTrue(enabled["follow"])
+        self.assertEqual(socket.sent[-1]["attachment"]["name"], "sol")
+
+        del server.ADAPTER_METADATA["fake"]["capabilities"]["turn_end"]
+        self.arun(server.edit_attachment(
+            human, "other", server.AttachmentPatchRequest(follow=False)
+        ))
+        self.assert_http(400, server.edit_attachment(
+            human, "lead", server.AttachmentPatchRequest(follow=True)
+        ))
 
     def test_update_true_without_a_command_is_400_before_a_row_exists(self):
         before = server.runtime.db.list_attachments("line")
         self.assert_http(
             400,
             server.attach(
-                "line",
+                self.principal_request(), "line",
                 server.AttachIn(
                     name="probe", adapter="fake", cwd=self.directory.name, update=True
                 ),
@@ -901,7 +1021,7 @@ class ServerTest(unittest.TestCase):
         with patch("partyline.server.apply_update", side_effect=fake_apply):
             attached = self.arun(
                 server.attach(
-                    "line",
+                    self.principal_request(), "line",
                     server.AttachIn(
                         name="probe", adapter="fake",
                         cwd=self.directory.name, update=True,
@@ -926,10 +1046,10 @@ class ServerTest(unittest.TestCase):
         socket = StreamWebSocket()
         server.runtime.sockets["line"] = {socket}
 
-        updated = self.arun(server.edit_attachment_command(
+        updated = self.arun(server.edit_attachment(
             FakeRequest("127.0.0.1"),
             "old",
-            server.AttachmentCommandRequest(command='fake --label "two words"'),
+            server.AttachmentPatchRequest(command='fake --label "two words"'),
         ))
 
         self.assertEqual(updated["command"], ["fake", "--label", "two words"])
@@ -939,34 +1059,34 @@ class ServerTest(unittest.TestCase):
 
     def test_edit_attachment_command_is_local_and_inactive_only(self):
         self.add_attachment("old", status="detached")
-        body = server.AttachmentCommandRequest(command="fake --changed")
+        body = server.AttachmentPatchRequest(command="fake --changed")
 
         self.assert_http(
-            403, server.edit_attachment_command(FakeRequest("10.0.0.7"), "old", body)
+            403, server.edit_attachment(FakeRequest("10.0.0.7"), "old", body)
         )
         server.runtime.live["old"] = FakeAdapter()
         self.assert_http(
-            409, server.edit_attachment_command(FakeRequest("127.0.0.1"), "old", body)
+            409, server.edit_attachment(FakeRequest("127.0.0.1"), "old", body)
         )
         server.runtime.live.clear()
         server.runtime.db.set_attachment_status("old", "running", None)
         self.assert_http(
-            409, server.edit_attachment_command(FakeRequest("127.0.0.1"), "old", body)
+            409, server.edit_attachment(FakeRequest("127.0.0.1"), "old", body)
         )
         self.assert_http(
-            404, server.edit_attachment_command(FakeRequest("127.0.0.1"), "missing", body)
+            404, server.edit_attachment(FakeRequest("127.0.0.1"), "missing", body)
         )
 
     def test_edit_attachment_command_shares_attach_validation(self):
         self.add_attachment("old", status="exited")
         request = FakeRequest("127.0.0.1")
         server.ADAPTER_METADATA["fake"]["requires"] = ["definitely-not-a-command"]
-        self.assert_http(400, server.edit_attachment_command(
-            request, "old", server.AttachmentCommandRequest(command="fake")
+        self.assert_http(400, server.edit_attachment(
+            request, "old", server.AttachmentPatchRequest(command="fake")
         ))
         server.ADAPTER_METADATA["fake"]["requires"] = []
-        self.assert_http(400, server.edit_attachment_command(
-            request, "old", server.AttachmentCommandRequest(command="fake 'unfinished")
+        self.assert_http(400, server.edit_attachment(
+            request, "old", server.AttachmentPatchRequest(command="fake 'unfinished")
         ))
 
     def test_resume_screen_keys_and_detach(self):

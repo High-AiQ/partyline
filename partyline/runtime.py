@@ -141,14 +141,13 @@ class ChatRuntime:
         if msg["sender_type"] == "system":
             return  # join/exit notices mention names but must never wake agents
         names = mentioned_names(msg["body"])
-        if not names:
-            return
         ring_all = "all" in names  # reserved handle: rings every running agent
         unreachable: list[str] = []
         delivered: set[str] = set()
         queued: set[str] = set()
         for att in self.db.list_attachments(conv_id):
-            addressed = ring_all or att["name"].lower() in names
+            directly_addressed = ring_all or att["name"].lower() in names
+            addressed = directly_addressed or att["follow"]
             if not addressed or att["name"].lower() == msg["sender"].lower():
                 continue  # not for them, or no self-pings
             adapter = self.live.get(att["id"]) if att["status"] == "running" else None
@@ -165,7 +164,7 @@ class ChatRuntime:
                 # The process is gone but the mention looked like it landed. Say so:
                 # a silently dropped mention is indistinguishable from an agent that
                 # simply chose not to answer, and can go unnoticed for hours.
-                if not ring_all and att["name"] not in unreachable:
+                if directly_addressed and not ring_all and att["name"] not in unreachable:
                     unreachable.append(att["name"])
                 continue
             if await self.deliver_pending(conv_id, att, adapter):
