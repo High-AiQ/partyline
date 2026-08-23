@@ -27,8 +27,9 @@ re-drive the changed delta plus any affected invariants.
 
 Read the complete diff from its intended base, then inspect the surrounding production paths and
 tests needed to challenge the change's claims. Run the repository gates relevant to the review;
-do not claim a command that was not actually run. Keep the review worktree read-only unless the
-coordinator explicitly assigns a fix.
+do not claim a command that was not actually run. Mutations for evidence inside the disposable
+worktree are encouraged — for example, swap in an old file to prove a regression test fails on
+prior code. Do not fix the change under review unless the coordinator explicitly assigns it.
 
 Separate merge blockers from scoped, non-blocking observations. A clear verdict means the exact
 reviewed SHA satisfies the stated bar; it never transfers implicitly to a later commit.
