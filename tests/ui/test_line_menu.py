@@ -33,9 +33,9 @@ class LineMenuTest(unittest.TestCase):
 
             modal = ui.page.locator(".modal")
             modal.wait_for(state="visible")
-            modal.get_by_text("A follow slot, if any, stays", exact=False).wait_for()
+            modal.get_by_text("The line and its history stay", exact=False).wait_for()
             self.assertIn("close processes · alpha line", modal.text_content())
-            self.assertIn("A follow slot, if any, stays", modal.text_content())
+            self.assertIn("The line and its history stay", modal.text_content())
 
     def test_menu_closes_on_an_outside_click(self):
         """`hidden` alone is not enough: an author `display` rule outranks the

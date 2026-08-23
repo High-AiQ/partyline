@@ -313,7 +313,7 @@ def seed_room(page):
     """
     jack = lambda name, status, created: {           # noqa: E731 - a fixture, not logic
         "id": f"att-{name}", "name": name, "adapter": "codex", "command": ["codex"],
-        "cwd": "/tmp/project", "status": status, "created_at": created, "follow": name == "sol",
+        "cwd": "/tmp/project", "status": status, "created_at": created,
         "cwd_git": {"sha": "d87b3ae", "dirty": name == "sol"},
     }
     message = lambda mid, sender, kind, body: {      # noqa: E731

@@ -39,6 +39,7 @@ class DbTest(unittest.TestCase):
         self.db.create_conversation("line", "Line")
         attachment = self.db.add_attachment("att", "line", "terra", "fake", ["fake"], "/tmp")
         self.assertEqual(attachment["command"], ["fake"])
+        self.assertNotIn("follow", attachment)
         self.db.set_attachment_status("att", "running", None)
         self.assertTrue(self.db.set_last_seen("att", 9, None))
         self.assertTrue(self.db.set_last_seen("att", 3, None))
@@ -48,29 +49,6 @@ class DbTest(unittest.TestCase):
         self.assertEqual(attachment["status"], "exited")
         self.assertEqual(attachment["last_seen"], 9)
         self.assertEqual(attachment["cli_session"], "session")
-
-    def test_one_follow_lead_per_line_survives_reopen(self):
-        self.db.create_conversation("line", "Line")
-        first = self.db.add_attachment(
-            "lead", "line", "grok", "fake", ["fake"], "/tmp", follow=True
-        )
-        self.assertEqual(first["follow"], 1)
-        with self.assertRaises(sqlite3.IntegrityError):
-            self.db.add_attachment(
-                "other", "line", "sol", "fake", ["fake"], "/tmp", follow=True
-            )
-        self.assertEqual(self.db.follow_holder("line"), "grok")
-        self.assertFalse(self.db.set_attachment_follow("lead", False)["follow"])
-        self.db.add_attachment(
-            "other", "line", "sol", "fake", ["fake"], "/tmp", follow=True
-        )
-
-        reopened = Db(self.db_path)
-        try:
-            self.assertEqual(reopened.follow_holder("line"), "sol")
-            self.assertTrue(reopened.get_attachment("other")["follow"])
-        finally:
-            reopened.close()
 
     def test_command_changes_only_while_the_attachment_is_inactive(self):
         self.db.create_conversation("line", "Line")

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from .follow_routing import catch_up_messages
-
 
 def delivery_hooks(runtime, conv_id: str, att_id: str):
     """Build one activation's held-wake and evidence-credit callbacks."""
@@ -18,8 +16,7 @@ def delivery_hooks(runtime, conv_id: str, att_id: str):
             if not reserved:
                 return False
             messages = runtime.db.messages_by_ids(conv_id, message_ids)
-            delivery = catch_up_messages(attachment, messages)
-            if messages and await live.deliver(delivery) is False:
+            if messages and await live.deliver(messages) is False:
                 return False
             if messages and not runtime.db.set_last_seen(
                 att_id, messages[-1]["id"], runtime_owner
