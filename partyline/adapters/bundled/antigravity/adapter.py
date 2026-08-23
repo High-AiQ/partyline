@@ -134,7 +134,7 @@ class PartylineAdapter(Adapter):
                     self._notices += 1
                     await self.post(
                         "system", "system",
-                        f"@{self.att['name']}: the CLI submitted other input after "
+                        f"{self.att['name']}: the CLI submitted other input after "
                         "this wake was pasted — wake queued for next turn-end",
                     )
         self._outstanding = kept
@@ -234,7 +234,7 @@ class PartylineAdapter(Adapter):
             elif waited > 45.0:
                 await self.post(
                     "system", "system",
-                    f"@{self.att['name']}: no conversation after 45s — the CLI is probably "
+                    f"{self.att['name']}: no conversation after 45s — the CLI is probably "
                     f"showing a first-run or trust prompt. Run `agy` manually once in "
                     f"{self.att['cwd']}, then re-attach.",
                 )

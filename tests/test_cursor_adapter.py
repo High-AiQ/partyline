@@ -632,6 +632,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
 
         await adapter._run()
         self.assertIn("no Cursor session appeared", self.messages[-1][2])
+        self.assertTrue(self.messages[-1][2].startswith("agent: no Cursor session"))
 
         # Process death before discovery
         dead_adapter = self.make_adapter()
@@ -1189,7 +1190,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                         (
                             "system",
                             "system",
-                            "@agent: transcript rewritten beyond recognition — re-anchoring positionally",
+                            "agent: transcript rewritten beyond recognition — re-anchoring positionally",
                         ),
                         ("agent", "agent", "new reply"),
                     ],

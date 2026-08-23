@@ -182,6 +182,23 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
             await adapter._run()
         self.assertEqual(posts, [])
 
+    async def test_timeout_notice_names_claude_without_addressing_it(self):
+        posts: list[tuple[str, str, str]] = []
+        adapter = self.make_adapter(posts)
+        adapter.resume = False
+        adapter.alive = lambda: True
+        adapter.master = 1
+
+        with (
+            patch("partyline.adapters.bundled.claude.adapter.asyncio.sleep", AsyncMock()),
+            patch("partyline.adapters.bundled.claude.adapter.glob.glob", return_value=[]),
+            patch("partyline.adapters.bundled.claude.adapter.os.write"),
+            patch.object(adapter, "send_keys", AsyncMock()),
+        ):
+            await adapter._run()
+
+        self.assertTrue(posts[0][2].startswith("claude: no transcript after 45s"))
+
     async def test_run_retries_briefing_at_12_and_24_seconds(self):
         posts: list[tuple[str, str, str]] = []
         adapter = self.make_adapter(posts)

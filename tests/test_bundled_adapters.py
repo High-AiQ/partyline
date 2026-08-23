@@ -271,14 +271,14 @@ class HermesAdapterTest(RecordingAdapterTest):
         adapter.screen_text = lambda: "Welcome to Hermes Agent"
         await adapter._run()
         self.assertEqual(
-            self.messages, [("system", "system", "@agent could not open the Hermes session store read-only")]
+            self.messages, [("system", "system", "agent could not open the Hermes session store read-only")]
         )
 
         exited = self.make(HermesAdapter)
         exited.proc = Process()
         exited.proc.stop()
         await exited._run()
-        self.assertEqual(self.messages[-1][2], "@agent could not open the Hermes session store read-only")
+        self.assertEqual(self.messages[-1][2], "agent could not open the Hermes session store read-only")
 
     async def test_run_timeout_and_missing_resume_session(self):
         db = self.make_store()
@@ -302,6 +302,7 @@ class HermesAdapterTest(RecordingAdapterTest):
         with patch("partyline.adapters.bundled.hermes.adapter.asyncio.sleep", new=stop_after_discovery):
             await timeout_adapter._run()
         self.assertIn("no Hermes session appeared", self.messages[-1][2])
+        self.assertTrue(self.messages[-1][2].startswith("agent: no Hermes session"))
 
         no_callback = self.make(HermesAdapter)
         no_callback.proc = Process()
@@ -687,6 +688,7 @@ class OpenCodeAdapterTest(RecordingAdapterTest):
         with patch("partyline.adapters.bundled.opencode.adapter.asyncio.sleep", new=AsyncMock()):
             await timeout_adapter._run()
         self.assertIn("no session appeared after 45s", self.messages[-1][2])
+        self.assertTrue(self.messages[-1][2].startswith("agent: no session appeared"))
 
     async def test_stop_releases_claimed_session(self):
         adapter = self.make(OpenCodeAdapter)
@@ -917,6 +919,7 @@ class PiAdapterTest(RecordingAdapterTest):
             ):
                 await adapter._run()
             self.assertIn("no transcript after 45s", self.messages[-1][2])
+            self.assertTrue(self.messages[-1][2].startswith("agent: no transcript"))
 
     async def test_fresh_timestamp_and_transcript_alias(self):
         adapter = self.make(PiAdapter, resume=True)

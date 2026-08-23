@@ -109,7 +109,7 @@ class PartylineAdapter(Adapter):
                 if waited > 45.0:
                     await self.post(
                         "system", "system",
-                        f"@{self.att['name']}: no session appeared after 45s — run the CLI "
+                        f"{self.att['name']}: no session appeared after 45s — run the CLI "
                         f"once in {self.att['cwd']}, then re-attach.",
                     )
                     return

@@ -122,7 +122,7 @@ class PartylineAdapter(BaseAdapter):
                 elif waited > 90.0:
                     await self.post(
                         "system", "system",
-                        f"@{self.att['name']}: no rollout file after 90s — the CLI is probably "
+                        f"{self.att['name']}: no rollout file after 90s — the CLI is probably "
                         f"on a login/trust/update screen. Run it manually once in "
                         f"{self.att['cwd']}, then re-attach.",
                     )
