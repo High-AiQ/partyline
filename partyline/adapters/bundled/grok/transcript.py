@@ -59,6 +59,60 @@ def is_assistant_record(record: object) -> bool:
     )
 
 
+def _unwrap_user_query(body: str) -> str:
+    """Extract only Grok's full outer query envelope, never an inner substring."""
+    stripped = body.strip()
+    opening = "<user_query>"
+    closing = "</user_query>"
+    if stripped.startswith(opening) and stripped.endswith(closing):
+        return stripped[len(opening):-len(closing)].strip()
+    return body
+
+
+def user_input(record: object) -> tuple[int, str] | None:
+    """Return Grok's durable prompt evidence, refusing shapes without its ordinal."""
+    if (
+        not isinstance(record, dict)
+        or record.get("type") != "user"
+        or is_compaction_record("grok", record)
+        or not isinstance(record.get("prompt_index"), int)
+    ):
+        return None
+    content = record.get("content")
+    if isinstance(content, str):
+        body = content
+    elif isinstance(content, list):
+        body = "\n\n".join(
+            block["text"]
+            for block in content
+            if isinstance(block, dict)
+            and block.get("type") == "text"
+            and isinstance(block.get("text"), str)
+            and block["text"].strip()
+        )
+    else:
+        return None
+    body = _unwrap_user_query(body)
+    return (record["prompt_index"], body) if body.strip() else None
+
+
+def latest_user_prompt(path: Path) -> int:
+    """Snapshot committed prompt ordinals before accepting new delivery evidence."""
+    latest = -1
+    try:
+        with path.open(encoding="utf-8", errors="replace") as file:
+            for line in file:
+                try:
+                    parsed = user_input(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+                if parsed is not None:
+                    latest = max(latest, parsed[0])
+    except OSError:
+        pass
+    return latest
+
+
 def fingerprint(line: str) -> bytes:
     return hashlib.sha256(line.encode("utf-8")).digest()
 

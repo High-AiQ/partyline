@@ -14,6 +14,7 @@ from .contracts import (
 )
 from .handshake import hello_payload
 from .db import Db
+from .delivery_hooks import delivery_hooks
 from .follow_routing import catch_up_messages, route_message
 from .reattach import ReattachCoordinator
 
@@ -113,28 +114,7 @@ class ChatRuntime:
 
     def held_wake_hooks(self, conv_id: str, att_id: str, name: str):
         """Persist and flush exact held batches without re-running mention routing."""
-        attachment = self.db.get_attachment(att_id) or {}
-        runtime_owner = attachment.get("runtime_owner")
-
-        async def flush_held(message_ids: list[int]) -> bool:
-            live = self.live.get(att_id)
-            if live is None:
-                return False
-            async with self.db.reserve_attachment_delivery(att_id, runtime_owner) as reserved:
-                if not reserved:
-                    return False
-                messages = self.db.messages_by_ids(conv_id, message_ids)
-                delivery = catch_up_messages(attachment, messages)
-                if messages and await live.deliver(delivery) is False:
-                    return False
-                if messages and not self.db.set_last_seen(att_id, messages[-1]["id"], runtime_owner):
-                    raise RuntimeError("attachment ownership changed during held delivery")
-                self.db.clear_queued_delivery_ids(att_id, message_ids)
-            return True
-        async def persist_ids(message_ids: list[int]) -> bool:
-            return await self.db.queue_delivery_ids(att_id, message_ids, runtime_owner)
-
-        return flush_held, lambda: self.db.queued_delivery_ids(att_id), persist_ids
+        return delivery_hooks(self, conv_id, att_id)
 
     async def route_mentions(self, conv_id: str, msg: dict):
         await route_message(self, conv_id, msg)

@@ -241,6 +241,7 @@ class Presence:
         flush_held: Callable[[list[int]], Awaitable[bool]] | None = None,
         persisted_ids: Callable[[], list[int]] | None = None,
         persist_ids: Callable[[list[int]], Awaitable[bool]] | None = None,
+        confirm_ids: Callable[[list[int]], Awaitable[bool]] | None = None,
     ):
         """Wrap deliver so a receipt fires only after the digest reaches the pty."""
         deliver = adapter.deliver
@@ -254,6 +255,7 @@ class Presence:
             att_id, ids, lambda: self.is_working(att_id),
             lambda: self._announce(conv_id, att_id, self.phase(att_id)),
         )
+        att["confirm_delivery_ids"] = confirm_ids
 
         async def delivering(messages):
             holding = self.completions.get(att_id) == RECEIPT and self.is_working(att_id)
@@ -261,11 +263,11 @@ class Presence:
                 self.queue.hold(att_id, messages)
                 await self._announce(conv_id, att_id, self.phase(att_id))
                 return False
-            await deliver(messages)
+            delivered = await deliver(messages)
             self.queue.release(att_id, messages)
             if self.completions.get(att_id) != RECEIPT:
                 await self.started(conv_id, att_id, owner)
-            return True
+            return delivered is not False
 
         adapter.deliver = delivering
         return adapter
