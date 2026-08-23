@@ -132,4 +132,8 @@ MIGRATIONS = [
         fingerprint BLOB NOT NULL,
         PRIMARY KEY (attachment_id, message_id)
     )""",
+    # Retire the line-follower feature. The index must go first because SQLite
+    # refuses to drop a column referenced by an index.
+    "DROP INDEX IF EXISTS idx_attachments_follow_lead",
+    "ALTER TABLE attachments DROP COLUMN follow",
 ]

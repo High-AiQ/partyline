@@ -15,7 +15,7 @@ from .contracts import (
 from .handshake import hello_payload
 from .db import Db
 from .delivery_hooks import delivery_hooks
-from .follow_routing import catch_up_messages, route_message
+from .message_routing import route_message
 from .reattach import ReattachCoordinator
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
@@ -41,7 +41,6 @@ class ChatRuntime:
         self.live: dict[str, Adapter] = {}
         # A planned process is queued behind its durable cursor, not unreachable.
         self.reattaching: set[str] = set()
-        self.is_attachment_working = lambda _att_id: False
 
     @staticmethod
     def activation_matches(adapter: Adapter, attachment: dict) -> bool:
@@ -104,7 +103,7 @@ class ChatRuntime:
         async with self.db.reserve_attachment_delivery(att["id"], runtime_owner) as reserved:
             if not reserved:
                 return False
-            pasted = await adapter.deliver(catch_up_messages(att, pending))
+            pasted = await adapter.deliver(pending)
             if pasted is False:
                 return False
             if not self.db.set_last_seen(att["id"], pending[-1]["id"], runtime_owner):

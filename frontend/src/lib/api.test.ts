@@ -27,7 +27,6 @@ const attachPayload: AttachPayload = {
   adapter: "codex",
   command: "codex",
   cwd: "/tmp/work",
-  follow: false,
 };
 
 const attachment: Attachment = {
@@ -38,7 +37,6 @@ const attachment: Attachment = {
   command: ["codex"],
   cwd: "/tmp/work",
   status: "detached",
-  follow: false,
   last_seen: 0,
   created_at: 1,
   cli_session: "session-1",
@@ -236,19 +234,6 @@ describe("api", () => {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ command: "codex --model new" }),
-    });
-  });
-
-  it("sets follow through the named boolean request contract", async () => {
-    const updated = { ...attachment, follow: true };
-    const fetch = vi.fn().mockResolvedValue(response(updated));
-    vi.stubGlobal("fetch", fetch);
-
-    await expect(api.setAttachmentFollow("att-1", { follow: true })).resolves.toEqual(updated);
-    expect(fetch).toHaveBeenCalledWith("/api/attachments/att-1", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ follow: true }),
     });
   });
 
