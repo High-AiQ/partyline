@@ -99,6 +99,16 @@ describe("wire events with server-omitted null fields", () => {
     });
     if (event.type !== "conversation") throw new Error("expected conversation event");
     expect(event.conversation.archived_at).toBeNull();
+    expect(event.conversation.live_count).toBe(0);
+  });
+
+  it("accepts the global line live-count event", () => {
+    const event = WireEventSchema.parse({
+      type: "line_live",
+      conversation_id: "line",
+      live_count: 3,
+    });
+    expect(event).toEqual({ type: "line_live", conversation_id: "line", live_count: 3 });
   });
 
   it("still accepts the REST spelling, where the empty field is null", () => {

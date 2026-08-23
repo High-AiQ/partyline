@@ -59,8 +59,6 @@ from .contracts import (
     ConversationResponse,
     KeyIn,
     LoadedResponse,
-    MessageEvent,
-    MessageResponse,
     OkResponse,
     PurgeResponse,
     RestartPlanRequest,
@@ -78,6 +76,7 @@ from .db import Db
 from .frontend_build import current_frontend_build
 from .follow import add_attachment_with_follow, patch_attachment, require_follow_allowed
 from .hook_routes import hook_url, hooks_router
+from .line_process_routes import detach_attachment, register_line_process_routes
 from .presence import Presence
 from .media import MediaStore, media_root
 from .claim_routes import claims_router, purge_claims
@@ -141,6 +140,7 @@ user_sockets = UserSocketRegistry()
 install_auth_guard(app, runtime.db)
 register_terminal_route(app, runtime)
 register_compact_route(app, runtime, presence)
+register_line_process_routes(app, runtime)
 app.include_router(auth_router(runtime.db, on_handle_change=user_sockets.close_all))
 app.include_router(media_router(runtime, media))
 app.include_router(claims_router(runtime))
@@ -510,27 +510,7 @@ async def edit_attachment(
 
 @app.delete("/api/attachments/{att_id}", response_model=OkResponse)
 async def detach(att_id: str):
-    att = runtime.db.get_attachment(att_id)
-    if not att:
-        raise HTTPException(404)
-    adapter = runtime.live.pop(att_id, None)
-    if adapter:
-        await adapter.stop()
-        runtime_owner = adapter.att.get("runtime_owner")
-    else:
-        runtime_owner = att.get("runtime_owner")
-    message = await runtime.db.detach_attachment_with_message_async(
-        att_id, runtime_owner, f"@{att['name']} detached"
-    )
-    if message is None:
-        raise HTTPException(
-            409,
-            "the attachment became live in another server generation; refresh and try again",
-        )
-    await runtime.broadcast(
-        att["conv_id"], MessageEvent(message=MessageResponse.model_validate(message))
-    )
-    return {"ok": True}
+    return await detach_attachment(runtime, att_id)
 
 
 # -- attachment introspection ----------------------------------------------

@@ -26,6 +26,7 @@ import { wire } from "./wire.svelte.js";
 import type { WireContext } from "./wire.svelte.js";
 import { clearConversationRoute, routedConversationId, setConversationRoute } from "../lib/routing";
 import { isLive } from "../lib/attachments";
+import { applyLineLive } from "../lib/line-live";
 import { presenceSync } from "./presence-coordinator.svelte.js";
 
 export interface RoomNotice {
@@ -53,7 +54,6 @@ class Room {
   conversation = $state<Conversation | null>(null);
   messages = $state<ChatMessage[]>([]);
   attachments = $state<Attachment[]>([]);
-  /** A persisted restart offer is visible only on the line that created it. */
   reattachOffer = $state<ReattachOfferEvent | null>(null);
 
   /** Speakers for @ autocomplete. `SvelteSet` makes `.add()` reactive. */
@@ -221,15 +221,15 @@ class Room {
       case "message":
         this.#absorb(event.message);
         break;
-
       case "attachment":
         this.upsertAttachment(event.attachment);
         break;
-
+      case "line_live":
+        this.conversations = applyLineLive(this.conversations, event);
+        break;
       case "attention":
         this.attention.add(event.attachment_id);
         break;
-
       case "working":
         presenceSync.apply(event);
         break;

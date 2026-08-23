@@ -4,6 +4,7 @@ import {
   AdapterImportResultSchema,
   AdapterSchema,
   ArchiveResultSchema,
+  CloseProcessesResultSchema,
   AttachmentSchema,
   ConversationDetailSchema,
   ConversationSchema,
@@ -29,6 +30,7 @@ import type {
   Adapter,
   AdapterImportResult,
   ArchiveResult,
+  CloseProcessesResult,
   Attachment,
   Conversation,
   ConversationDetail,
@@ -92,6 +94,7 @@ export interface PartylineApi {
   renameConversation(id: string, name: string): Promise<Conversation>;
   setTopic(id: string, topic: string): Promise<Conversation>;
   archiveConversation(id: string): Promise<ArchiveResult>;
+  closeProcesses(id: string): Promise<CloseProcessesResult>;
   restoreConversation(id: string): Promise<Conversation>;
   purgeConversation(id: string): Promise<PurgeResult>;
   uploadFiles(conversationId: string, upload: FileUpload): Promise<FileUploadResponse>;
@@ -185,6 +188,12 @@ export const api: PartylineApi = {
       schema: ArchiveResultSchema,
       method: "DELETE",
       fallback: "could not delete line",
+    }),
+  closeProcesses: (id) =>
+    request(`/api/conversations/${id}/attachments/close`, {
+      schema: CloseProcessesResultSchema,
+      method: "POST",
+      fallback: "could not close processes",
     }),
   restoreConversation: (id) =>
     request(`/api/conversations/${id}/restore`, {
