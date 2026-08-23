@@ -13,6 +13,7 @@
   import { room } from "../../state/room.svelte.js";
   import { dialogs } from "../../state/dialogs.svelte.js";
   import { presence } from "../../state/presence.svelte.js";
+  import { session } from "../../state/session.svelte.js";
   import WorkingBadge from "./WorkingBadge.svelte";
   import PeekDialog from "../dialogs/PeekDialog.svelte";
   import EditJackDialog from "../dialogs/EditJackDialog.svelte";
@@ -31,6 +32,9 @@
   const live = $derived(isLive(attachment));
   const needsYou = $derived(live && room.attention.has(attachment.id));
   const entry = $derived(live ? presence.entries.get(attachment.id) : undefined);
+  const compactable = $derived(
+    Boolean(session.adapters.find((adapter) => adapter.id === attachment.adapter)?.compact_paste),
+  );
 
   async function detach(): Promise<void> {
     try {
@@ -42,7 +46,7 @@
 
   function peek(): void {
     room.attention.delete(attachment.id);
-    dialogs.open(PeekDialog, { attachment });
+    dialogs.open(PeekDialog, { attachment, compactable });
   }
 
   function edit(): void {

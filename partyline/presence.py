@@ -209,7 +209,7 @@ class Presence:
         open_turn.open = max(0, open_turn.open - 1)
         if open_turn.open == 0:
             await self.finished(conv_id, att_id)
-            await self.queue.flush(att_id)
+            await self.queue.flush(att_id, turn_ended=True)
 
     async def spoke(self, conv_id: str, att_id: str) -> None:
         """The process said something. It is still working, just audible.

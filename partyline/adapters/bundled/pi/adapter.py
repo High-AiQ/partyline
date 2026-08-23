@@ -13,6 +13,7 @@ import glob
 import os
 
 from partyline.adapters import Adapter
+from partyline.adapters.compaction import is_compaction_record
 
 SESSION_ROOT = os.path.expanduser("~/.partyline/sessions/pi")
 
@@ -71,6 +72,8 @@ class PartylineAdapter(Adapter):
         seen: set[str] = set()
 
         async def handle(record):
+            if is_compaction_record("pi", record):
+                return
             if record.get("type") != "message":
                 return
             if not self._fresh(record.get("timestamp")):

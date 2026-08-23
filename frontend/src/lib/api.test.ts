@@ -204,6 +204,16 @@ describe("api", () => {
     });
   });
 
+  it("requests adapter compaction without sending the paste from the browser", async () => {
+    const fetch = vi.fn().mockResolvedValue(response({ ok: true, queued: true }));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(api.compact("att-1")).resolves.toEqual({ ok: true, queued: true });
+    expect(fetch).toHaveBeenCalledWith("/api/attachments/att-1/compact", {
+      method: "POST",
+    });
+  });
+
   it("optionally persists reattachment in the shutdown request", async () => {
     const result = { ok: true as const, stopping: ["sol"], reattach: restartPlan };
     const fetch = vi.fn().mockResolvedValue(response(result));
