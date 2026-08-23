@@ -61,6 +61,13 @@ class PartylineAdapter(Adapter):
         self._accounted: int | None = None if self.resume else 0
         history = self.att.get("delivered_bodies")
         self._delivered_bodies = list(history) if history is not None else None
+        self._delivered_transcript_records = list(
+            self.att.get("delivered_transcript_records") or []
+        )
+        self._legacy_relayed_bodies = list(self.att.get("legacy_relayed_bodies") or [])
+        self._mark_transcript_delivery = self.att.get("mark_transcript_delivery")
+        self._post_resume_record = self.att.get("post_resume_record")
+        self._backlog_to_record = 0
         self._delivery_skip: set[int] = set()
         self._pending_backlog = 0
         self._delivery_plan = None
@@ -143,7 +150,7 @@ class PartylineAdapter(Adapter):
             if self.alive():
                 await self.post(
                     "system", "system",
-                    f"@{self.att['name']}: no Grok transcript appeared after "
+                    f"{self.att['name']}: no Grok transcript appeared after "
                     f"{int(self.TRANSCRIPT_TIMEOUT)}s; transcript tailing stopped",
                 )
             return
@@ -162,7 +169,7 @@ class PartylineAdapter(Adapter):
         if self._accounted is None:
             await self.post(
                 "system", "system",
-                f"@{self.att['name']}: Grok transcript history could not be counted; "
+                f"{self.att['name']}: Grok transcript history could not be counted; "
                 "reply tailing stopped to avoid replaying prior speech",
             )
             self._mark_not_ready()
@@ -172,8 +179,6 @@ class PartylineAdapter(Adapter):
             body = self._assistant_text(record)
             if body is not None:
                 await self.post(self.att["name"], "agent", body)
-                if self._delivered_bodies is not None:
-                    self._delivered_bodies.append(body)
 
         await self._tail_grok_transcript(path, handle)
 
