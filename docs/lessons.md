@@ -407,3 +407,16 @@ enforce it. A prose warning that has no executable guard is not a completed less
   without waiting for the next wake. The control: `began, began, ended` must
   end idle (it used to stay working), and an un-completed opencode row
   followed by any later row must emit exactly one supersession `ENDED`.
+- **“Follow every message” did not mean “start a turn for every speaker.”** On a busy LAN line,
+  short process acknowledgements repeatedly found the follower idle, so each `standing by` or
+  one-line finding opened a fresh model turn. Mid-turn coalescing was correct and never had a
+  chance to help; the false assumption was that the same trigger policy was appropriate for
+  human requests and agent chatter. Hybrid follow now consults the same presence instance as the
+  jack badge: an unmentioned human message wakes an idle follower, while unmentioned agent speech
+  only joins an already-open cycle and otherwise stays behind the durable cursor. The next human
+  wake, direct mention, or real `ENDED` flushes one digest with a synthetic “here's what you
+  missed” label; the label exists only in pty delivery, never as rewritten room history. The
+  control proves three distinct states: idle agent chatter neither pastes nor advances
+  `last_seen`; an idle human wake carries that gap once; working agent and human chatter hold and
+  flush together at `ENDED`. The flush deliberately opens the next CLI turn — one turn per cycle,
+  not one turn per line message — and no timer invents a boundary.

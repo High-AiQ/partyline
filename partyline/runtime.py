@@ -14,7 +14,7 @@ from .contracts import (
 )
 from .handshake import hello_payload
 from .db import Db
-from .mentions import mentioned_names
+from .follow_routing import catch_up_messages, route_message
 from .reattach import ReattachCoordinator
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
@@ -40,6 +40,7 @@ class ChatRuntime:
         self.live: dict[str, Adapter] = {}
         # A planned process is queued behind its durable cursor, not unreachable.
         self.reattaching: set[str] = set()
+        self.is_attachment_working = lambda _att_id: False
 
     @staticmethod
     def activation_matches(adapter: Adapter, attachment: dict) -> bool:
@@ -102,7 +103,7 @@ class ChatRuntime:
         async with self.db.reserve_attachment_delivery(att["id"], runtime_owner) as reserved:
             if not reserved:
                 return False
-            pasted = await adapter.deliver(pending)
+            pasted = await adapter.deliver(catch_up_messages(att, pending))
             if pasted is False:
                 return False
             if not self.db.set_last_seen(att["id"], pending[-1]["id"], runtime_owner):
@@ -123,7 +124,8 @@ class ChatRuntime:
                 if not reserved:
                     return False
                 messages = self.db.messages_by_ids(conv_id, message_ids)
-                if messages and await live.deliver(messages) is False:
+                delivery = catch_up_messages(attachment, messages)
+                if messages and await live.deliver(delivery) is False:
                     return False
                 if messages and not self.db.set_last_seen(att_id, messages[-1]["id"], runtime_owner):
                     raise RuntimeError("attachment ownership changed during held delivery")
@@ -135,52 +137,7 @@ class ChatRuntime:
         return flush_held, lambda: self.db.queued_delivery_ids(att_id), persist_ids
 
     async def route_mentions(self, conv_id: str, msg: dict):
-        if msg["sender_type"] == "system":
-            return  # join/exit notices mention names but must never wake agents
-        names = mentioned_names(msg["body"])
-        ring_all = "all" in names  # reserved handle: rings every running agent
-        unreachable: list[str] = []
-        delivered: set[str] = set()
-        queued: set[str] = set()
-        for att in self.db.list_attachments(conv_id):
-            directly_addressed = ring_all or att["name"].lower() in names
-            addressed = directly_addressed or att["follow"]
-            if not addressed or att["name"].lower() == msg["sender"].lower():
-                continue  # not for them, or no self-pings
-            adapter = self.live.get(att["id"]) if att["status"] == "running" else None
-            if adapter is not None and not self.activation_matches(adapter, att):
-                # Another server generation owns the running row. This runtime
-                # must neither wake its obsolete local process nor report the
-                # handle as unavailable; the current owner is authoritative.
-                queued.add(att["name"].lower())
-                continue
-            if adapter is None:
-                if att["id"] in self.reattaching:
-                    queued.add(att["name"].lower())
-                    continue
-                # The process is gone but the mention looked like it landed. Say so:
-                # a silently dropped mention is indistinguishable from an agent that
-                # simply chose not to answer, and can go unnoticed for hours.
-                if directly_addressed and not ring_all and att["name"] not in unreachable:
-                    unreachable.append(att["name"])
-                continue
-            if await self.deliver_pending(conv_id, att, adapter):
-                delivered.add(att["name"].lower())
-            else:
-                queued.add(att["name"].lower())
-
-        # A handle can have several rows — old detached ones alongside a live one.
-        # Only warn about handles that got no delivery at all.
-        unavailable = [name for name in unreachable
-                       if name.lower() not in delivered and name.lower() not in queued]
-        for name in unavailable:
-            # A system notice never wakes anyone, so this cannot loop.
-            await self.post_message(
-                conv_id,
-                "system",
-                "system",
-                f"⚠ @{name} was mentioned but is not attached — nothing was delivered",
-            )
+        await route_message(self, conv_id, msg)
 
     def status_callback(self, att_id: str, conv_id: str, runtime_owner: str):
         async def on_status(status: str):
