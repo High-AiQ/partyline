@@ -21,15 +21,15 @@ describe("badge treatment", () => {
     expect(badgeTreatment(undefined, 1_000_060)).toBeNull();
   });
 
-  it("renders N wakes held next to working when wakes are queued", () => {
+  it("keeps held wakes in the tooltip instead of the badge label", () => {
     const single = badgeTreatment(entry({ completion: "receipt", held: 1 }), 1_000_060);
     expect(single).toMatchObject({
-      label: "working… (1 wake held)",
+      label: "working…",
       tooltip: "1 wake held while working",
     });
     const multiple = badgeTreatment(entry({ completion: "receipt", held: 3 }), 1_000_060);
     expect(multiple).toMatchObject({
-      label: "working… (3 wakes held)",
+      label: "working…",
       tooltip: "3 wakes held while working",
     });
   });
@@ -68,6 +68,14 @@ describe("badge treatment", () => {
     const treatment = badgeTreatment(entry({ completion: "none" }), 1_000_000 + 300);
     expect(treatment).toMatchObject({ label: "working…", dot: "hollow", pulse: "none" });
     expect(treatment?.tooltip).toContain("no turn-end signal");
+  });
+
+  it("appends held wakes to the decay tooltip without replacing its evidence", () => {
+    const treatment = badgeTreatment(entry({ completion: "none", held: 2 }), 1_000_000 + 300);
+    expect(treatment).toMatchObject({ label: "working…", dot: "hollow", pulse: "none" });
+    expect(treatment?.tooltip).toBe(
+      "no turn-end signal from this CLI · active for 5m · 2 wakes held while working",
+    );
   });
 
   it("renders the reserved quiet guess as done, never as confident work", () => {
