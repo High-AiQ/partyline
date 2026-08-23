@@ -69,6 +69,7 @@ class Presence:
 
     def __init__(self, runtime):
         self.runtime = runtime
+        runtime.is_attachment_working = self.is_working
         # attachment id -> its open turn. The line is part of the state
         # because presence is asked per-conversation: a tab on one line must
         # never light a jack belonging to another.
