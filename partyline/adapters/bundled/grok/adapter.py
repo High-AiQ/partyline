@@ -29,7 +29,9 @@ from partyline.adapters.bundled.grok.transcript import (
     assistant_text,
     fingerprint,
     is_assistant_record,
+    latest_user_prompt,
 )
+from partyline.adapters.bundled.grok.wake_receipts import WakeReceipts
 from partyline.adapters.bundled.grok import turn_hooks
 
 
@@ -82,6 +84,7 @@ class PartylineAdapter(Adapter):
         self._resume_swap_pending = False
         self._restoring_to: int | None = None  # refill target to count restored
         self._refused_resync = False  # told the room about a refused re-anchor?
+        self._wake_receipts = WakeReceipts()
 
     def _transcript(self) -> Path | None:
         """Return the one transcript whose caller-pinned UUID matches."""
@@ -116,6 +119,7 @@ class PartylineAdapter(Adapter):
 
     async def stop(self):
         turn_hooks.uninstall(self._session_id, self.att)
+        self._wake_receipts.stop()
         await super().stop()
 
     def build_command(self) -> list[str]:
@@ -138,6 +142,21 @@ class PartylineAdapter(Adapter):
 
     async def _align_delivery_history(self, path: Path) -> bool:
         return await align_delivery_history(self, path)
+
+    async def deliver(self, messages: list[dict]):
+        """Paste now, but let a newer structured user record credit the ids."""
+        if self.att.get("confirm_delivery_ids") is None:
+            return await super().deliver(messages)
+        return await self._wake_receipts.deliver(self, messages)
+
+    async def _note_user_record(self, record: object) -> None:
+        await self._wake_receipts.observe(self, record)
+
+    async def wait_delivery_received(self, message_ids: list[int]) -> bool:
+        return await self._wake_receipts.wait(message_ids)
+
+    def prepare_delivery_receipt(self, message_ids: list[int]) -> None:
+        self._wake_receipts.expect_wait(message_ids)
 
     async def _run(self):
         waited = 0.0
@@ -174,6 +193,7 @@ class PartylineAdapter(Adapter):
             )
             self._mark_not_ready()
             return
+        self._wake_receipts.seed(latest_user_prompt(path))
 
         async def handle(record):
             body = self._assistant_text(record)

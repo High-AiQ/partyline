@@ -420,3 +420,13 @@ enforce it. A prose warning that has no executable guard is not a completed less
   `last_seen`; an idle human wake carries that gap once; working agent and human chatter hold and
   flush together at `ENDED`. The flush deliberately opens the next CLI turn — one turn per cycle,
   not one turn per line message — and no timer invents a boundary.
+- **A successful pty write is not a successful CLI submission.** On the LAN, Grok accepted the
+  bracketed-paste bytes for `@grok approved!` while an earlier turn was open, so partyline advanced
+  `last_seen`; the text was absent from `chat_history.jsonl` and from the CLI queue until the old
+  turn ended. The false assumption was that `send_keys` returning meant the TUI had ingested the
+  wake. Grok now leaves the cursor behind, suppresses an identical re-paste, and credits only a
+  matching `type=user` transcript record with a newer `prompt_index`. Multiple writes may be
+  pending. A later cumulative receipt proves a swallowed predecessor was covered only when its ids
+  are a superset; disjoint batches still cannot jump the cursor. The owner-gated callback rejects
+  stale activations, and missing ordinals refuse to guess rather than converting terminal echo,
+  hooks, or time into evidence.
