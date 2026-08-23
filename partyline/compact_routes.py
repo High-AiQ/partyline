@@ -3,6 +3,7 @@
 from fastapi import FastAPI, HTTPException
 
 from .contracts import CompactResponse
+from .presence import RECEIPT
 
 
 async def request_compact(runtime, presence, att_id: str) -> dict:
@@ -17,7 +18,8 @@ async def request_compact(runtime, presence, att_id: str) -> dict:
     async def send() -> None:
         await adapter.send_keys(paste)
 
-    queued = await presence.queue.compact(att_id, send, presence.is_working(att_id))
+    working = presence.completion(att_id) == RECEIPT and presence.is_working(att_id)
+    queued = await presence.queue.compact(att_id, send, working)
     return {"ok": True, "queued": queued}
 
 

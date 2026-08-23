@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from partyline.compact_routes import register_compact_route, request_compact
-from partyline.presence import Presence
+from partyline.presence import NONE, RECEIPT, Presence
 
 
 class CompactRouteTest(unittest.IsolatedAsyncioTestCase):
@@ -42,6 +42,7 @@ class CompactRouteTest(unittest.IsolatedAsyncioTestCase):
         adapter.send_keys.assert_awaited_once_with("/summarize\n")
 
         adapter.send_keys.reset_mock()
+        self.presence.register("cursor", RECEIPT)
         await self.presence.began("line", "cursor")
         self.assertEqual(
             await request_compact(self.runtime, self.presence, "cursor"),
@@ -65,6 +66,21 @@ class CompactRouteTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"ok": True, "queued": False})
+        adapter.send_keys.assert_awaited_once_with("/compact")
+
+    async def test_non_receipt_adapter_pastes_immediately_while_working(self):
+        adapter = SimpleNamespace(
+            att={"adapter_metadata": {"compact_paste": "/compact"}},
+            send_keys=AsyncMock(),
+        )
+        self.runtime.live["muse"] = adapter
+        self.presence.register("muse", NONE)
+        await self.presence.started("line", "muse")
+
+        self.assertEqual(
+            await request_compact(self.runtime, self.presence, "muse"),
+            {"ok": True, "queued": False},
+        )
         adapter.send_keys.assert_awaited_once_with("/compact")
 
 
