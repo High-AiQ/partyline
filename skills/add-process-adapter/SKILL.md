@@ -62,6 +62,13 @@ these invariants:
   into chat messages.
 - Report turn boundaries as receipts: post `BEGAN` (`UserPromptSubmit`) when user input is
   recorded, and `ENDED` (`Stop`) when turns finish (including aborted turns, so badges clear).
+- Receipt adapters are idle-gated by the host: a mention arriving during an open turn is held and
+  flushed only on a real `ENDED`. Plain chatter does not trigger a paste. If the vendor provides
+  positive evidence that a previously pasted digest was skipped, retain that delivery's integer
+  message ids and, when `repool = self.att.get("repool_message_ids")` is present, call
+  `await repool(message_ids)`. The host persists the exact batch across a restart and replays it
+  ordered and deduplicated; never rewind `last_seen`, rescan mentions, or copy message bodies into
+  adapter-owned retry state.
 - Start observing output after this attachment starts, and avoid replaying prior records after
   a resume. Notice that `_fresh` is timestamp-based: if transcript records carry no timestamps,
   do not use `_fresh`. Instead, snapshot existing records on open as seen to prevent replaying

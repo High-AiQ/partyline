@@ -461,7 +461,8 @@ class TurnIdleQueueTest(unittest.IsolatedAsyncioTestCase):
         presence = Presence(runtime)
         raw_adapter = RecordingAdapter()
 
-        async def flush_held():
+        async def flush_held(message_ids):
+            self.assertEqual(message_ids, [2, 3])
             await raw_adapter.deliver([{"id": 2, "body": "second"}, {"id": 3, "body": "third"}])
             return True
 
@@ -497,6 +498,64 @@ class TurnIdleQueueTest(unittest.IsolatedAsyncioTestCase):
             raw_adapter.delivered,
             [[{"id": 1, "body": "first"}], [{"id": 2, "body": "second"}, {"id": 3, "body": "third"}]],
         )
+
+    async def test_ended_does_not_flush_unheld_chatter(self):
+        runtime = FakeRuntime()
+        presence = Presence(runtime)
+        flush_held = AsyncMock(return_value=True)
+        presence.watch(
+            RecordingAdapter(), "line", "att", completion="receipt", flush_held=flush_held
+        )
+
+        await presence.began("line", "att")
+        await presence.ended("line", "att")
+
+        flush_held.assert_not_awaited()
+
+    async def test_a_proven_skip_flushes_immediately_when_idle(self):
+        runtime = FakeRuntime()
+        presence = Presence(runtime)
+        raw_adapter = RecordingAdapter()
+        raw_adapter.att = {"runtime_owner": "owner"}
+        persisted = []
+        flushed = []
+
+        async def persist_ids(message_ids):
+            persisted.extend(message_ids)
+            return True
+
+        async def flush_ids(message_ids):
+            flushed.append(message_ids)
+            persisted.clear()
+            return True
+
+        adapter = presence.watch(
+            raw_adapter, "line", "att", "receipt",
+            flush_ids, lambda: list(persisted), persist_ids,
+        )
+        self.assertTrue(await adapter.att["repool_message_ids"]([7]))
+        self.assertEqual(flushed, [[7]])
+        self.assertEqual(presence.queue.held_count("att"), 0)
+
+    async def test_badge_and_flush_deduplicate_transient_and_persisted_ids(self):
+        runtime = FakeRuntime()
+        presence = Presence(runtime)
+        raw_adapter = RecordingAdapter()
+        persisted = [2, 3]
+
+        async def flush_ids(message_ids):
+            self.assertEqual(message_ids, [1, 2, 3])
+            persisted.clear()
+            return True
+
+        adapter = presence.watch(
+            raw_adapter, "line", "att", "receipt", flush_ids, lambda: persisted
+        )
+        await presence.began("line", "att")
+        await adapter.deliver([{"id": 1}, {"id": 2}])
+        self.assertEqual(presence.snapshot("line")[0]["held"], 3)
+        await presence.ended("line", "att")
+        self.assertEqual(presence.queue.held_count("att"), 0)
 
     async def test_second_began_repairs_state_without_pasting_from_queue(self):
         runtime = FakeRuntime()

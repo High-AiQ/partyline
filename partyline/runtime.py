@@ -107,23 +107,28 @@ class ChatRuntime:
         return True
 
     def held_wake_hooks(self, conv_id: str, att_id: str, name: str):
-        """Flush and count held wakes from the durable message cursor."""
+        """Persist and flush exact held batches without re-running mention routing."""
+        attachment = self.db.get_attachment(att_id) or {}
+        runtime_owner = attachment.get("runtime_owner")
 
-        async def flush_held() -> bool:
-            current = self.db.get_attachment(att_id)
+        async def flush_held(message_ids: list[int]) -> bool:
             live = self.live.get(att_id)
-            return bool(
-                current and live and await self.deliver_pending(conv_id, current, live)
-            )
+            if live is None:
+                return False
+            async with self.db.reserve_attachment_delivery(att_id, runtime_owner) as reserved:
+                if not reserved:
+                    return False
+                messages = self.db.messages_by_ids(conv_id, message_ids)
+                if messages and await live.deliver(messages) is False:
+                    return False
+                if messages and not self.db.set_last_seen(att_id, messages[-1]["id"], runtime_owner):
+                    raise RuntimeError("attachment ownership changed during held delivery")
+                self.db.clear_queued_delivery_ids(att_id, message_ids)
+            return True
+        async def persist_ids(message_ids: list[int]) -> bool:
+            return await self.db.queue_delivery_ids(att_id, message_ids, runtime_owner)
 
-        def pending_count() -> int:
-            current = self.db.get_attachment(att_id)
-            if current is None:
-                return 0
-            return len(self.db.messages_after(
-                conv_id, current["last_seen"], exclude_sender=name))
-
-        return flush_held, pending_count
+        return flush_held, lambda: self.db.queued_delivery_ids(att_id), persist_ids
 
     async def route_mentions(self, conv_id: str, msg: dict):
         if msg["sender_type"] == "system":

@@ -241,8 +241,9 @@ class Presence:
 
     def watch(
         self, adapter, conv_id: str, att_id: str, completion: str = NONE,
-        flush_held: Callable[[], Awaitable[bool]] | None = None,
-        pending_count: Callable[[], int] | None = None,
+        flush_held: Callable[[list[int]], Awaitable[bool]] | None = None,
+        persisted_ids: Callable[[], list[int]] | None = None,
+        persist_ids: Callable[[list[int]], Awaitable[bool]] | None = None,
     ):
         """Wrap deliver so a receipt fires only after the digest reaches the pty."""
         deliver = adapter.deliver
@@ -250,13 +251,16 @@ class Presence:
         owner = att.get("runtime_owner")
         self.register(att_id, completion)
         self.queue.register_deliver(
-            att_id, flush_held, getattr(adapter, "post", None), pending_count
+            att_id, flush_held, getattr(adapter, "post", None), persisted_ids, persist_ids
+        )
+        att["repool_message_ids"] = lambda ids: self.queue.repool(
+            att_id, ids, lambda: self.is_working(att_id),
+            lambda: self._announce(conv_id, att_id, self.phase(att_id)),
         )
 
         async def delivering(messages):
             if self.completions.get(att_id) == RECEIPT and self.is_working(att_id):
-                # last_seen stays put; ENDED regenerates the digest from SQLite.
-                self.queue.hold(att_id, len(messages))
+                self.queue.hold(att_id, messages)
                 await self._announce(conv_id, att_id, self.phase(att_id))
                 return False
             await deliver(messages)

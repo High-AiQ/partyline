@@ -300,11 +300,12 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         factual notice. No timer may guess at the CLI's state."""
         adapter = self.make()
         adapter.proc = Process()
+        adapter.att["repool_message_ids"] = AsyncMock(return_value=True)
         sent = []
         adapter.send_keys = AsyncMock(side_effect=lambda text: sent.append(text))
-        await adapter.deliver([{"sender": "greg", "body": "wake one"}])
+        await adapter.deliver([{"id": 41, "sender": "greg", "body": "wake one"}])
         digest = adapter.format_digest([{"sender": "greg", "body": "wake one"}])
-        self.assertEqual([d for d, _ in adapter._outstanding], [digest])
+        self.assertEqual([wake[0] for wake in adapter._outstanding], [digest])
         pasted = adapter._outstanding[0][1]
 
         # 1st skip proof -> 1st resend
@@ -312,14 +313,14 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
             "<USER_REQUEST>\n/some other command\n</USER_REQUEST>", later(pasted)
         )
         self.assertEqual(sent, [digest, digest])
-        self.assertEqual([d for d, _ in adapter._outstanding], [digest])
+        self.assertEqual([wake[0] for wake in adapter._outstanding], [digest])
 
         # 2nd skip proof -> 2nd resend
         await adapter._note_user_input(
             "<USER_REQUEST>\n/second command\n</USER_REQUEST>", later(pasted)
         )
         self.assertEqual(sent, [digest, digest, digest])
-        self.assertEqual([d for d, _ in adapter._outstanding], [digest])
+        self.assertEqual([wake[0] for wake in adapter._outstanding], [digest])
 
         # 3rd skip proof -> give up, post notice, repool
         await adapter._note_user_input(
@@ -327,6 +328,7 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(sent, [digest, digest, digest])
         self.assertEqual(adapter._outstanding, [])
+        adapter.att["repool_message_ids"].assert_awaited_once_with([41])
         self.assertEqual(len(self.messages), 1)
         self.assertIn("wake queued for next turn-end", self.messages[0][2])
         self.assertFalse(hasattr(adapter, "_repool_messages"))
@@ -348,7 +350,7 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
             time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 10)),
         )
         self.assertEqual(sent, [digest])
-        self.assertEqual([d for d, _ in adapter._outstanding], [digest])
+        self.assertEqual([wake[0] for wake in adapter._outstanding], [digest])
         self.assertEqual(self.messages, [])
 
     async def test_a_transcript_input_containing_the_digest_verifies_it(self):
@@ -438,9 +440,10 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
     async def test_a_log_submission_of_other_input_proves_skip_then_repools(self):
         adapter = self.make()
         adapter.proc = Process()
+        adapter.att["repool_message_ids"] = AsyncMock(return_value=True)
         sent = []
         adapter.send_keys = AsyncMock(side_effect=lambda text: sent.append(text))
-        await adapter.deliver([{"sender": "greg", "body": "wake six"}])
+        await adapter.deliver([{"id": 42, "sender": "greg", "body": "wake six"}])
         digest = adapter.format_digest([{"sender": "greg", "body": "wake six"}])
         pasted = adapter._outstanding[0][1]
 
@@ -456,6 +459,7 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         await adapter._note_log_line(glog_submission("/quit", pasted + 7))
         self.assertEqual(sent, [digest, digest, digest])
         self.assertEqual(adapter._outstanding, [])
+        adapter.att["repool_message_ids"].assert_awaited_once_with([42])
         self.assertEqual(len(self.messages), 1)
         self.assertIn("wake queued for next turn-end", self.messages[0][2])
         self.assertFalse(hasattr(adapter, "_repool_messages"))
@@ -501,7 +505,7 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         await adapter._note_log_line(glog_submission("", time.time()).replace(
             'HandleUserInput called with text: ""', "Streaming conversation abc"))
         self.assertEqual(sent, [digest])
-        self.assertEqual([d for d, _ in adapter._outstanding], [digest])
+        self.assertEqual([wake[0] for wake in adapter._outstanding], [digest])
         self.assertEqual(self.messages, [])
 
     def test_logparse_rolls_back_a_future_yearless_stamp(self):
