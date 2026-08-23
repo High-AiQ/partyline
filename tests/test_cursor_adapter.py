@@ -569,19 +569,18 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             comp_fps = [fingerprint(line) for line in comp_lines]
             self.assertEqual(resync_fingerprints(comp_path, fps), comp_fps[:2])
 
-            # Suffix match on edited prefix
+            # An edited prefix contains unseen records, so strict membership
+            # deliberately uses the positional hatch instead.
             mod_lines = ["line 0\n", "line 2\n", "line 3\n"]
             mod_path = Path(tmpdir) / "mod.jsonl"
             mod_path.write_text("".join(mod_lines), encoding="utf-8")
-            mod_fps = [fingerprint(line) for line in mod_lines]
-            self.assertEqual(resync_fingerprints(mod_path, fps), mod_fps)
+            self.assertEqual(resync_fingerprints(mod_path, fps), fps)
 
             # Subsegment match with front insertion
             sub_lines = ["meta\n", "line 2\n", "line 3\n", "line 4\n"]
             sub_path = Path(tmpdir) / "sub.jsonl"
             sub_path.write_text("".join(sub_lines), encoding="utf-8")
-            sub_fps = [fingerprint(line) for line in sub_lines]
-            self.assertEqual(resync_fingerprints(sub_path, fps), sub_fps[:3])
+            self.assertEqual(resync_fingerprints(sub_path, fps), fps)
 
             # Disjoint file preserves seen_fps unchanged
             dis_lines = ["other 1\n", "other 2\n"]
@@ -595,6 +594,33 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
 
             # Empty seen
             self.assertEqual(resync_fingerprints(path, []), [])
+
+    def test_resync_does_not_cover_new_turn_after_shared_end_marker(self):
+        """A shared plain turn_ended cannot watermark through new speech."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "compacted.jsonl"
+            old = [
+                '{"role":"user","message":{"content":[{"type":"text","text":"old"}]}}\n',
+                '{"role":"assistant","message":{"content":[{"type":"text","text":"old"}]}}\n',
+                '{"type":"turn_ended","status":"success"}\n',
+                '{"role":"user","message":{"content":[{"type":"text","text":"old two"}]}}\n',
+                '{"role":"assistant","message":{"content":[{"type":"text","text":"old two"}]}}\n',
+                '{"type":"turn_ended","status":"success"}\n',
+            ]
+            seen = [fingerprint(line) for line in old]
+            rewritten = [
+                '{"type":"wrapper_header","version":2}\n',
+                *old[:3],
+                '{"role":"user","message":{"content":[{"type":"text","text":"new"}]}}\n',
+                '{"role":"assistant","message":{"content":[{"type":"text","text":"new reply"}]}}\n',
+                old[-1],
+            ]
+            path.write_text("".join(rewritten), encoding="utf-8")
+
+            # Compaction makes 7 lines (<= old 6 + 1 slack).  The old
+            # membership-blind code accepted the final marker and swallowed
+            # the whole file, including the new turn.
+            self.assertEqual(resync_fingerprints(path, seen), seen)
 
     async def test_run_discovery_timeout_and_retries(self):
         adapter = self.make_adapter()
@@ -677,6 +703,41 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
         adapter = self.make_adapter()
         with patch("pathlib.Path.stat", side_effect=OSError("stat failed")):
             self.assertTrue(adapter._is_replaced(None, Path("/mock/path"), 123))
+
+    async def test_resync_counter_resets_for_sequential_or_identical_rewrite(self):
+        adapter = self.make_adapter()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "agent.jsonl"
+            lines = ['{"one": 1}\n', '{"two": 2}\n']
+            path.write_text("".join(lines), encoding="utf-8")
+            seen = [fingerprint(line) for line in lines]
+
+            # A byte-identical atomic rewrite is a healthy sequential match.
+            self.assertEqual(await adapter._handle_resync(path, seen, 2), (seen, 0))
+
+            # Reading a matching record in the tail clears an older failure
+            # before a later rewrite can consume the fallback budget.
+            path.write_text("".join(lines + ['{"three": 3}\n']), encoding="utf-8")
+            self.assertEqual(await adapter._handle_resync(path, seen, 1), (seen, 0))
+
+    async def test_resync_counter_ignores_empty_or_partial_rewrite(self):
+        adapter = self.make_adapter()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "agent.jsonl"
+            lines = ['{"one": 1}\n', '{"two": 2}\n']
+            seen = [fingerprint(line) for line in lines]
+
+            path.write_text("", encoding="utf-8")
+            self.assertEqual(await adapter._handle_resync(path, seen, 2), (seen, 2))
+
+            # The final record has not reached its JSONL newline yet.
+            path.write_text(lines[0] + '{"two": 2}', encoding="utf-8")
+            self.assertEqual(await adapter._handle_resync(path, seen, 2), (seen, 2))
+
+            # A shorter rewrite that is complete must still reach the escape
+            # hatch eventually; only an incomplete JSONL tail gets a free wait.
+            path.write_text(lines[0], encoding="utf-8")
+            self.assertEqual(await adapter._handle_resync(path, seen, 1), (seen, 2))
 
     async def test_tail_transcript_filters_tool_use_and_redacted(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -969,10 +1030,9 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 adapter.proc.stop()
                 await task
 
-                self.assertEqual(
-                    self.messages, [("agent", "agent", "ok"), ("agent", "agent", "ok")]
-                )
-                self.assertEqual(receipts_seen, [BEGAN, ENDED, BEGAN, ENDED])
+                self.assertEqual(self.messages[-1], ("agent", "agent", "ok"))
+                self.assertIn("re-anchoring positionally", self.messages[-2][2])
+                self.assertEqual(receipts_seen, [BEGAN, ENDED, ENDED, BEGAN, ENDED])
 
     async def test_resume_snapshot_with_shifted_wrappers_and_new_turn_does_not_replay_old_speech(
         self,
@@ -1220,11 +1280,11 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 adapter.proc.stop()
                 await task
 
-                # Old speech must not replay; new turn posts directly via semantic re-anchoring
-                self.assertEqual(
-                    self.messages, [("agent", "agent", "new reply")]
-                )
-                self.assertEqual(receipts_seen, [BEGAN, ENDED])
+                # Strict membership rejects the inserted header, so this
+                # intentionally uses the positional hatch (and its notice).
+                self.assertEqual(self.messages[-1], ("agent", "agent", "new reply"))
+                self.assertIn("re-anchoring positionally", self.messages[-2][2])
+                self.assertEqual(receipts_seen, [ENDED, BEGAN, ENDED])
 
     async def test_resume_snapshot_handles_oserror(self):
         adapter = self.make_adapter(resume=True, cli_session="sess-1")
