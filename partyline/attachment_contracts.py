@@ -20,6 +20,7 @@ class AttachmentResponse(BaseModel):
     command: list[str]
     cwd: str
     status: Literal["starting", "running", "exited", "detached"]
+    follow: bool
     last_seen: int
     created_at: float
     cli_session: str | None = None

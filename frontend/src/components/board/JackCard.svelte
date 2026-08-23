@@ -1,11 +1,5 @@
 <script lang="ts">
-  /**
-   * One process on the line.
-   *
-   * The ringing state is the point of this component: a process stopped on a
-   * dialog is blocked until a person answers it, and nothing else on screen
-   * would say so. It rings until someone peeks.
-   */
+  /** One process on the line; a process stopped on a dialog rings until someone peeks. */
   import { hue } from "../../lib/markdown";
   import { isLive, overrideExplanation } from "../../lib/attachments";
   import { ApiError, api } from "../../lib/api";
@@ -17,6 +11,7 @@
   import WorkingBadge from "./WorkingBadge.svelte";
   import PeekDialog from "../dialogs/PeekDialog.svelte";
   import EditJackDialog from "../dialogs/EditJackDialog.svelte";
+  import FollowToggle from "./FollowToggle.svelte";
 
   interface Props {
     attachment: Attachment;
@@ -34,6 +29,10 @@
   const entry = $derived(live ? presence.entries.get(attachment.id) : undefined);
   const compactable = $derived(
     Boolean(session.adapters.find((adapter) => adapter.id === attachment.adapter)?.compact_paste),
+  );
+  const followable = $derived(
+    attachment.follow ||
+      session.adapters.find((adapter) => adapter.id === attachment.adapter)?.completion === "receipt",
   );
 
   async function detach(): Promise<void> {
@@ -109,6 +108,8 @@
     </div>
   {/if}
   <div class="cmd" title={attachment.cwd}>{attachment.command.join(" ")} · {attachment.status}</div>
+
+  {#if followable}<FollowToggle {attachment} />{/if}
 
   {#if live}
     <button class="resume peek-btn" type="button" title="live view of this agent's terminal" onclick={peek}>

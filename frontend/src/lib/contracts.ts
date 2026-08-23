@@ -77,6 +77,9 @@ export const FileUploadResponseSchema = z.object({
 });
 export type FileUploadResponse = z.infer<typeof FileUploadResponseSchema>;
 
+export const PresenceCompletionSchema = z.enum(["receipt", "none"]);
+export type PresenceCompletion = z.infer<typeof PresenceCompletionSchema>;
+
 export const AdapterCapabilitiesSchema = z.object({
   resume: z.boolean().optional(),
 });
@@ -98,6 +101,7 @@ export const AdapterSchema = z.object({
   overrides_bundled: z.boolean().optional().default(false),
   update_command: z.array(z.string()).nullable().optional().default(null),
   compact_paste: z.string().nullable().optional().default(null),
+  completion: PresenceCompletionSchema.default("none"),
 });
 export type Adapter = z.infer<typeof AdapterSchema>;
 
@@ -161,9 +165,6 @@ export type HandleUpdateRequest = z.infer<typeof HandleUpdateRequestSchema>;
 
 export const PresencePhaseSchema = z.enum(["idle", "working", "speaking", "quiet"]);
 export type PresencePhase = z.infer<typeof PresencePhaseSchema>;
-
-export const PresenceCompletionSchema = z.enum(["receipt", "none"]);
-export type PresenceCompletion = z.infer<typeof PresenceCompletionSchema>;
 
 export const PresenceStateSchema = z.object({
   id: z.string(),
