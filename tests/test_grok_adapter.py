@@ -57,6 +57,7 @@ from partyline.adapters.bundled.grok.resume import (
     delivery_plan_matches,
 )
 from partyline.adapters.bundled.grok.transcript import AssistantRecord
+from partyline.transcript_delivery import TranscriptDeliveryRecord
 
 
 SESSION_ID = "12345678-1234-4234-8234-123456789abc"
@@ -72,7 +73,8 @@ async def status(value):
 
 def make_adapter(
     *, command=None, resume=False, session_id=None, collector=post,
-    delivered_bodies=None,
+    delivered_bodies=None, delivered_records=None, legacy_relayed_bodies=None,
+    mark_transcript_delivery=None,
 ):
     adapter = PartylineAdapter(
         {
@@ -85,6 +87,9 @@ def make_adapter(
             "name": "groky",
             "resume": resume,
             "delivered_bodies": delivered_bodies,
+            "delivered_transcript_records": delivered_records,
+            "legacy_relayed_bodies": legacy_relayed_bodies,
+            "mark_transcript_delivery": mark_transcript_delivery,
         },
         collector,
         status,
@@ -102,6 +107,16 @@ class ManifestTest(unittest.TestCase):
         self.assertIn("resume = true", manifest)
         self.assertIn('turn_end = "receipt"', manifest)
         self.assertIn('update_command = ["grok", "update"]', manifest)
+
+    def test_grok_diagnostics_name_the_jack_without_self_mentions(self):
+        root = Path(__file__).parents[1] / "partyline" / "adapters" / "bundled" / "grok"
+        notices = "".join(
+            (root / name).read_text(encoding="utf-8")
+            for name in ("adapter.py", "resume.py", "tail.py")
+        )
+
+        self.assertNotIn('f"@{adapter.att[', notices)
+        self.assertNotIn('f"@{self.att[', notices)
 
 
 class CommandTest(unittest.TestCase):
@@ -579,6 +594,177 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
             for n in range(first, first + count)
         )
 
+    async def test_a_relayed_backlog_record_is_not_replayed_on_the_next_resume(self):
+        """The chat-order append placed old transcript speech at the wrong boundary.
+
+        A resume hatch relays the first transcript record after the normally
+        delivered tail, so an ordered body alignment cannot match it later.
+        The marker must survive Grok re-serializing the retained record, and
+        its body fallback must remain hatch-only so identical new speech posts.
+        """
+        stale = "Standing by after compact."
+        marked = []
+        first_posted = []
+        first_running = True
+
+        async def first_collect(sender, sender_type, body):
+            first_posted.append((sender_type, body))
+
+        def mark(fingerprint, body):
+            marked.append((fingerprint, body))
+            return True
+
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "chat_history.jsonl"
+            transcript.write_text(
+                json.dumps({"type": "assistant", "content": stale}) + "\n"
+                + self.history(0, 2),
+                encoding="utf-8",
+            )
+            adapter = make_adapter(
+                resume=True,
+                session_id=SESSION_ID,
+                collector=first_collect,
+                delivered_bodies=["old reply 0", "old reply 1"],
+                mark_transcript_delivery=mark,
+            )
+            adapter.POLL_SECONDS = 0.005
+            adapter.SETTLE_SECONDS = 0.02
+            adapter.alive = lambda: first_running
+
+            with patch.object(adapter, "_transcript", return_value=transcript):
+                task = asyncio.create_task(adapter._run())
+                for _ in range(300):
+                    if marked:
+                        break
+                    await asyncio.sleep(0.01)
+                first_running = False
+                await asyncio.wait_for(task, timeout=3)
+
+            self.assertEqual([body for kind, body in first_posted if kind == "agent"], [stale])
+            self.assertEqual(len(marked), 1)
+            self.assertEqual(marked[0][1], stale)
+            self.assertEqual(adapter._delivered_bodies, ["old reply 0", "old reply 1"])
+
+            # Compaction retained the semantic record but rewrote its JSON
+            # bytes. Raw fingerprint matching alone replays it on this resume.
+            transcript.write_text(
+                json.dumps({"content": stale, "type": "assistant"}) + "\n"
+                + self.history(0, 2),
+                encoding="utf-8",
+            )
+
+            second_posted = []
+            second_running = True
+
+            async def second_collect(sender, sender_type, body):
+                second_posted.append((sender_type, body))
+
+            resumed = make_adapter(
+                resume=True,
+                session_id=SESSION_ID,
+                collector=second_collect,
+                delivered_bodies=["old reply 0", "old reply 1"],
+                delivered_records=[TranscriptDeliveryRecord(marked[0][0], stale)],
+            )
+            resumed.POLL_SECONDS = 0.005
+            resumed.SETTLE_SECONDS = 0.02
+            resumed.alive = lambda: second_running
+
+            with patch.object(resumed, "_transcript", return_value=transcript):
+                task = asyncio.create_task(resumed._run())
+                await asyncio.sleep(0.1)
+                self.assertEqual(second_posted, [])
+                with transcript.open("a", encoding="utf-8") as file:
+                    file.write(json.dumps({"type": "assistant", "content": stale}) + "\n")
+                for _ in range(300):
+                    if second_posted:
+                        break
+                    await asyncio.sleep(0.01)
+                second_running = False
+                await asyncio.wait_for(task, timeout=3)
+
+        self.assertEqual(second_posted, [("agent", stale)])
+
+    async def test_a_large_resume_backlog_is_refused_without_muting_new_speech(self):
+        posted = []
+        running = True
+
+        async def collect(sender, sender_type, body):
+            posted.append((sender_type, body))
+
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "chat_history.jsonl"
+            backlog = "".join(
+                json.dumps({"type": "assistant", "content": f"stale {index}"}) + "\n"
+                for index in range(171)
+            )
+            transcript.write_text(backlog + self.history(0, 2), encoding="utf-8")
+            adapter = make_adapter(
+                resume=True,
+                session_id=SESSION_ID,
+                collector=collect,
+                delivered_bodies=["old reply 0", "old reply 1"],
+            )
+            adapter.POLL_SECONDS = 0.005
+            adapter.SETTLE_SECONDS = 0.02
+            adapter.alive = lambda: running
+
+            with patch.object(adapter, "_transcript", return_value=transcript):
+                task = asyncio.create_task(adapter._run())
+                for _ in range(300):
+                    if posted:
+                        break
+                    await asyncio.sleep(0.01)
+                self.assertEqual(len(posted), 1)
+                self.assertEqual(posted[0], (
+                    "system",
+                    "groky: resume backlog of 171 looks like misaligned history — "
+                    "skipped; new speech will relay",
+                ))
+                with transcript.open("a", encoding="utf-8") as file:
+                    file.write(json.dumps({"type": "assistant", "content": "new speech"}) + "\n")
+                for _ in range(300):
+                    if len(posted) == 2:
+                        break
+                    await asyncio.sleep(0.01)
+                running = False
+                await asyncio.wait_for(task, timeout=3)
+
+        self.assertEqual(posted[-1], ("agent", "new speech"))
+
+    async def test_legacy_replay_notices_heal_an_already_looping_record(self):
+        posted = []
+        running = True
+
+        async def collect(sender, sender_type, body):
+            posted.append((sender_type, body))
+
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "chat_history.jsonl"
+            transcript.write_text(
+                '{"type":"assistant","content":"stale"}\n' + self.history(0, 2),
+                encoding="utf-8",
+            )
+            adapter = make_adapter(
+                resume=True,
+                session_id=SESSION_ID,
+                collector=collect,
+                delivered_bodies=["old reply 0", "old reply 1"],
+                legacy_relayed_bodies=["stale", "stale", "stale"],
+            )
+            adapter.POLL_SECONDS = 0.005
+            adapter.SETTLE_SECONDS = 0.02
+            adapter.alive = lambda: running
+
+            with patch.object(adapter, "_transcript", return_value=transcript):
+                task = asyncio.create_task(adapter._run())
+                await asyncio.sleep(0.1)
+                running = False
+                await asyncio.wait_for(task, timeout=3)
+
+        self.assertEqual(posted, [])
+
     async def test_a_restored_sequence_suppresses_replays_not_missing_speech(self):
         """Captured v0.38.2 failure: a restored file is not a positional superset.
 
@@ -637,7 +823,7 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
 
         # The notice rides in front of the flush it describes; the speech
         # itself is unchanged — suppression and ordering still hold.
-        self.assertTrue(posted[0].startswith("@groky: relaying 1 message(s)"))
+        self.assertTrue(posted[0].startswith("groky: relaying 1 message(s)"))
         self.assertEqual(posted[1:], ["missed while muted", "old reply 1"])
 
     async def test_a_resume_says_how_much_of_its_flush_is_history(self):
@@ -659,6 +845,7 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(posted), 1)
         sender_type, body = posted[0]
         self.assertEqual(sender_type, "system")
+        self.assertFalse(body.startswith("@"))
         self.assertIn("39 message(s) that never reached this line", body)
         self.assertIn("older state", body)
 

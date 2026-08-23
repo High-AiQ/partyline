@@ -265,6 +265,20 @@ enforce it. A prose warning that has no executable guard is not a completed less
   while later speech still flows — refusal cannot become another permanent mute. The old settling
   guards remain as narrower protections, but the structural lesson is sharper: **persist and align
   the fact the product needs; do not repeatedly infer it from a mutable proxy.**
+- **Chat delivery order is not transcript order when a resume flushes backlog.** Grok first relayed
+  one old post-compact record on three consecutive restarts, then a later restore classified 171
+  historical records as new and flooded the line. Those old agent bodies contained live mentions,
+  so the replay also assigned obsolete work and woke other jacks. The false assumption was that
+  appending a late relay to Partyline's ordered body history marked its early transcript occurrence
+  as delivered; sequence alignment correctly could not move that body backwards across hundreds of
+  later replies. Resume relays now bind the posted message to the raw transcript fingerprint outside
+  normal speech order. If compaction re-serializes the record, an occurrence-aware body fallback
+  heals the unmatched marker; that fallback is hatch-only because identical content is not a general
+  speech identity. A hatch also refuses more than 10 records, or more than 25% of a transcript with
+  at least 20 assistant records, and tails only later appends. Allowed hatch speech is posted through
+  a route-inert path so historical mentions remain visible without becoming current instructions.
+  Upgrade recovery recognizes the old structured notices. Persist identity and order separately,
+  bound recovery volume, and never route recovered history as live intent.
 - **A guard is only as good as the question its control asks.** One night produced four
   distinct instances of the same shape, each caught by a different pair of eyes and none by
   the author. A probe test that mocked the subprocess's exit code verified the parsing of an
