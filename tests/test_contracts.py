@@ -6,6 +6,7 @@ from partyline.contracts import (
     AdapterMetadataResponse,
     ConversationResponse,
     HelloEvent,
+    LineLiveEvent,
     MessageEvent,
     MessageResponse,
     ReattachCandidateResponse,
@@ -35,6 +36,7 @@ class ContractTest(unittest.TestCase):
                 "created_at": 12.5,
                 "topic": "standing brief",
                 "archived_at": None,
+                "live_count": 0,
             },
         )
 
@@ -82,6 +84,10 @@ class ContractTest(unittest.TestCase):
                 "handle": "greg",
                 "version": "0.21.4",
             },
+        )
+        self.assertEqual(
+            LineLiveEvent(conversation_id="line", live_count=2).model_dump(),
+            {"type": "line_live", "conversation_id": "line", "live_count": 2},
         )
         self.assertEqual(
             HelloEvent(

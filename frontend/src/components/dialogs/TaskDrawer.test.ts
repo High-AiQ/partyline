@@ -11,6 +11,7 @@ const conversation: Conversation = {
   topic: "",
   created_at: 1,
   archived_at: null,
+  live_count: 0,
 };
 const task: Task = {
   id: 1,

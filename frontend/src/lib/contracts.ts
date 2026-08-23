@@ -22,6 +22,7 @@ export const ConversationSchema = z.object({
   topic: z.string(),
   created_at: z.number(),
   archived_at: z.number().nullable().default(null),
+  live_count: z.number().int().nonnegative().default(0),
 });
 export type Conversation = z.infer<typeof ConversationSchema>;
 
@@ -234,6 +235,12 @@ export const ArchiveResultSchema = z.object({
   conversation: ConversationSchema,
 });
 export type ArchiveResult = z.infer<typeof ArchiveResultSchema>;
+
+export const CloseProcessesResultSchema = z.object({
+  ok: z.literal(true),
+  stopped: z.array(z.string()),
+});
+export type CloseProcessesResult = z.infer<typeof CloseProcessesResultSchema>;
 
 export const PurgeResultSchema = z.object({
   ok: z.literal(true),
