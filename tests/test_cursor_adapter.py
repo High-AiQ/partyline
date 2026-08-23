@@ -135,6 +135,23 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(short_r.build_command(), ["agent", "-r", "3ebd57db-5810-460b"])
 
+    async def test_delivery_arms_presence_only_for_a_nonempty_digest(self):
+        adapter = self.make_adapter(hook_url="http://hook.local")
+        adapter.send_keys = AsyncMock()
+
+        with patch(
+            "partyline.adapters.bundled.cursor.adapter.receipt", new=AsyncMock()
+        ) as receipt_mock:
+            messages = [{"sender": "greg", "sender_type": "human", "body": "go"}]
+            await adapter.deliver(messages)
+            receipt_mock.assert_awaited_once_with(adapter.att, BEGAN)
+            adapter.send_keys.assert_awaited_once()
+
+            adapter.format_digest = lambda _messages: "   "
+            await adapter.deliver([])
+            self.assertEqual(receipt_mock.await_count, 1)
+            self.assertEqual(adapter.send_keys.await_count, 1)
+
     def test_parsing_helpers(self):
         cwd = "/tmp/opencode/cursor-probe"
         self.assertEqual(cwd_slug(cwd), "tmp-opencode-cursor-probe")
@@ -740,6 +757,78 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             path.write_text(lines[0], encoding="utf-8")
             self.assertEqual(await adapter._handle_resync(path, seen, 1), (seen, 2))
 
+    async def test_tail_rerender_inserts_before_sentinel_without_notice_or_replay(self):
+        fixtures = Path(__file__).parent / "fixtures" / "cursor_sentinel_117"
+        before = (fixtures / "before.jsonl").read_text(encoding="utf-8")
+        after = (fixtures / "after.jsonl").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "live.jsonl"
+            path.write_text(before, encoding="utf-8")
+            adapter = self.make_adapter(resume=True, cli_session="sess-117")
+            adapter.proc = Process()
+            adapter._silent_until_wake = False
+            receipts_seen: list[str] = []
+
+            async def mock_receipt(_att, event):
+                receipts_seen.append(event)
+
+            with patch(
+                "partyline.adapters.bundled.cursor.adapter.receipt",
+                side_effect=mock_receipt,
+            ):
+                task = asyncio.create_task(adapter._tail_transcript(path))
+                await asyncio.sleep(0.05)
+                path.write_text(after, encoding="utf-8")
+                await asyncio.sleep(0.1)
+                adapter.proc.stop()
+                await task
+
+            self.assertEqual(self.messages, [("agent", "agent", "new reply")])
+            self.assertEqual(receipts_seen, [BEGAN, ENDED])
+
+    async def test_tail_rerender_requires_a_semantic_sentinel(self):
+        adapter = self.make_adapter()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "live.jsonl"
+            before = [
+                '{"role":"assistant","content":"old"}\n',
+                '{"type":"checkpoint"}\n',
+            ]
+            rewritten = [
+                before[0],
+                '{"role":"user","content":"new"}\n',
+                '{"role":"assistant","content":"reply"}\n',
+                before[-1],
+            ]
+            path.write_text("".join(rewritten), encoding="utf-8")
+            seen = [fingerprint(line) for line in before]
+
+            self.assertEqual(await adapter._handle_resync(path, seen, 0), (seen, 1))
+
+    async def test_unrecognized_rewrite_still_escapes_after_three_strikes(self):
+        adapter = self.make_adapter()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "live.jsonl"
+            old = ['{"old":1}\n', '{"old":2}\n']
+            rewritten = ['{"new":1}\n', '{"new":2}\n', '{"new":3}\n']
+            seen = [fingerprint(line) for line in old]
+            path.write_text("".join(rewritten), encoding="utf-8")
+
+            current, failures = seen, 0
+            for expected in (1, 2):
+                current, failures = await adapter._handle_resync(
+                    path, current, failures
+                )
+                self.assertEqual((current, failures), (seen, expected))
+            current, failures = await adapter._handle_resync(path, current, failures)
+
+            self.assertEqual(
+                current, [fingerprint(line) for line in rewritten[: len(seen)]]
+            )
+            self.assertEqual(failures, 0)
+            self.assertEqual(len(self.messages), 1)
+            self.assertIn("re-anchoring positionally", self.messages[0][2])
+
     async def test_tail_transcript_filters_tool_use_and_redacted(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "composer.jsonl"
@@ -1287,16 +1376,13 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("re-anchoring positionally", self.messages[-2][2])
                 self.assertEqual(receipts_seen, [ENDED, BEGAN, ENDED])
 
-    async def test_live_captured_rewrite_escapes_the_hatch_instead_of_muting(self):
+    async def test_live_captured_rewrite_reanchors_without_notice_or_muting(self):
         """#115: the real grok46 rewrite, captured from disk, must not mute.
 
         Cursor rewrote the tail in place (the trailing ``turn_ended`` position
-        became the next turn's user record), so the inline walk matched a long
-        stable prefix and then mismatched every cycle. The per-line counter
-        reset made the escape hatch unreachable: a permanent, noticeless mute.
-        The fix resets the fruitless counter only when the FULL watermark has
-        been re-matched, so a sustained mismatch reaches the hatch in bounded
-        polls and the appended turn relays.
+        became the next turn's user record) while preserving that sentinel at
+        the new tail. The elastic anchor drops only the already-seen sentinel,
+        so the inserted turn relays without spending the positional hatch.
         """
         fixtures = Path(__file__).parent / "fixtures" / "cursor_mute_115"
         before = (fixtures / "before.jsonl").read_text(encoding="utf-8")
@@ -1329,7 +1415,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 await task
 
             hatched = [m for m in self.messages if "re-anchoring positionally" in m[2]]
-            self.assertEqual(len(hatched), 1)
+            self.assertEqual(hatched, [])
             self.assertEqual(self.messages[-1], ("agent", "agent", "mute-probe-1"))
             self.assertIn(ENDED, receipts_seen)
 

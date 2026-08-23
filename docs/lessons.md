@@ -441,3 +441,13 @@ enforce it. A prose warning that has no executable guard is not a completed less
   the incident, not a synthetic shape. Found via an await-chain dump of the wedged task; the same
   hunt exposed that adapter tasks held in `_tasks` die silently (strong refs suppress the
   unretrieved-exception warning) — they now log their own deaths.
+- **A transcript sentinel was not a stable final position, and a user record was not a live-start
+  signal.** Cursor now stores canonical state in SQLite and re-renders its JSONL by inserting the
+  completed turn before one byte-identical trailing `turn_ended`; it writes the user, assistant,
+  and sentinel records together only when the turn ends. Treating the delivered sentinel as an
+  immutable prefix caused a positional-hatch notice on every reply, while waiting for the user
+  record left the badge idle for the whole turn. Cursor's tailer now recognizes the exact
+  prefix-minus-sentinel plus semantic-sentinel shape and shrinks only that delivered boundary;
+  delivery emits the conservative BEGAN receipt, and the transcript still owns ENDED. Fixture
+  controls require the semantic tail, prove speech exactly once, and keep genuinely unknown
+  rewrites on the bounded three-strike hatch.

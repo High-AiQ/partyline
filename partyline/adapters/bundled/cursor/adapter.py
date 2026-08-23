@@ -17,7 +17,7 @@ from partyline.adapters.bundled.cursor.parse import (
     resync_positional,
     transcript_path,
 )
-from partyline.adapters.receipts import receipt
+from partyline.adapters.receipts import BEGAN, receipt
 
 
 class PartylineAdapter(Adapter):
@@ -82,16 +82,34 @@ class PartylineAdapter(Adapter):
     async def _handle_resync(
         self, path: Path, seen_fps: list[str], failures: int
     ) -> tuple[list[str], int]:
-        resynced = resync_fingerprints(path, seen_fps)
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                lines = fh.readlines()
+        except OSError:
+            return seen_fps, failures
+        incoming_fps = [fingerprint(line) for line in lines if line.endswith("\n")]
+        resynced = resync_fingerprints(path, seen_fps, incoming_fps)
         if resynced == seen_fps and seen_fps:
             # An unchanged prefix is a successful sequential re-read, not a
             # failed re-anchor.  During Cursor's atomic rewrites this is the
             # usual case, so it must clear any earlier fruitless attempts.
-            sequential = resync_positional(path, seen_fps)
-            if not self._has_complete_jsonl_tail(path):
+            sequential = resync_positional(path, seen_fps, incoming_fps)
+            if not self._has_complete_jsonl_tail(lines):
                 return seen_fps, failures
             if sequential == seen_fps:
                 return seen_fps, 0
+            if (
+                incoming_fps[: len(seen_fps) - 1] == seen_fps[:-1]
+                and incoming_fps[-1:] == seen_fps[-1:]
+                and self._tail_is_turn_ended(lines)
+            ):
+                # Current Cursor inserts one completed turn before the single
+                # trailing sentinel when it re-renders the file. Shrinking the
+                # watermark by that sentinel lets the normal tail loop consume
+                # the inserted records without replaying delivered speech.
+                # A rewrite spanning multiple prior turns may not have this
+                # shape and deliberately falls through to the bounded hatch.
+                return seen_fps[:-1], 0
             failures += 1
             if failures >= 3:
                 await self.post(
@@ -100,19 +118,30 @@ class PartylineAdapter(Adapter):
                     f"{self.att['name']}: transcript rewritten beyond recognition — "
                     "re-anchoring positionally",
                 )
-                return resync_positional(path, seen_fps), 0
+                return resync_positional(path, seen_fps, incoming_fps), 0
             return seen_fps, failures
         return resynced, 0
 
     @staticmethod
-    def _has_complete_jsonl_tail(path: Path) -> bool:
+    def _has_complete_jsonl_tail(lines: list[str]) -> bool:
         """Whether a nonempty rewrite ends at a complete JSONL boundary."""
-        try:
-            with open(path, encoding="utf-8", errors="replace") as fh:
-                lines = fh.readlines()
-        except OSError:
-            return False
         return bool(lines) and lines[-1].endswith("\n")
+
+    @staticmethod
+    def _tail_is_turn_ended(lines: list[str]) -> bool:
+        """Whether the complete tail record is Cursor's turn sentinel."""
+        try:
+            record = json.loads(lines[-1])
+        except (IndexError, json.JSONDecodeError):
+            return False
+        return isinstance(record, dict) and record.get("type") == "turn_ended"
+
+    async def deliver(self, messages: list[dict]):
+        """Arm presence when input reaches a CLI that writes only at turn end."""
+        text = self.format_digest(messages)
+        await super().deliver(messages)
+        if text.strip():
+            await receipt(self.att, BEGAN)
 
     async def _tail_transcript(self, path: Path) -> None:
         seen_fps: list[str] = []
