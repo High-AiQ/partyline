@@ -8,6 +8,7 @@ import re
 import time
 
 from partyline.adapters.base import Adapter
+from partyline.attachment_view import cwd_git_digest
 
 ANSI_RE = re.compile(
     r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|"
@@ -44,10 +45,11 @@ class RawAdapter(Adapter):
 
     def format_digest(self, messages: list[dict]) -> str:
         mention = re.compile(rf"@{re.escape(self.att['name'])}\b[,:]?\s*", re.IGNORECASE)
-        return "\n".join(
+        lines = "\n".join(
             mention.sub("", message["body"]).strip()
             for message in messages if message["sender_type"] != "system"
         )
+        return "\n".join(part for part in (lines, cwd_git_digest(self.att["cwd"])) if part)
 
     async def send_keys(self, text: str):
         assert self.master is not None

@@ -1,11 +1,13 @@
 /** Runtime-validated contracts shared by the REST and WebSocket boundaries. */
 
 import { z } from "zod";
+import { AttachmentSchema } from "./attachment-contracts";
+
+export { AttachmentSchema, AttachmentStatusSchema, CwdGitStateSchema } from "./attachment-contracts";
+export type { Attachment, AttachmentStatus, CwdGitState } from "./attachment-contracts";
 
 export const SenderTypeSchema = z.enum(["human", "agent", "system"]);
 export type SenderType = z.infer<typeof SenderTypeSchema>;
-export const AttachmentStatusSchema = z.enum(["starting", "running", "exited", "detached"]);
-export type AttachmentStatus = z.infer<typeof AttachmentStatusSchema>;
 
 // These schemas validate two dialects of the same models: REST spells an
 // empty field `null`; the wire omits it, because `broadcast()` serializes
@@ -74,20 +76,6 @@ export const FileUploadResponseSchema = z.object({
   files: z.array(FileRefSchema),
 });
 export type FileUploadResponse = z.infer<typeof FileUploadResponseSchema>;
-
-export const AttachmentSchema = z.object({
-  id: z.string(),
-  conv_id: z.string(),
-  name: z.string(),
-  adapter: z.string(),
-  command: z.array(z.string()),
-  cwd: z.string(),
-  status: AttachmentStatusSchema,
-  last_seen: z.number().int(),
-  created_at: z.number(),
-  cli_session: z.string().nullable().default(null),
-});
-export type Attachment = z.infer<typeof AttachmentSchema>;
 
 export const AdapterCapabilitiesSchema = z.object({
   resume: z.boolean().optional(),
