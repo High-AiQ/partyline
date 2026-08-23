@@ -120,6 +120,15 @@ class FileRoutesTest(unittest.TestCase):
         self.assertIn("GET the `original`", BRIEFING)
         self.assertIn('Authorization: Bearer $PARTYLINE_TOKEN', BRIEFING)
 
+    def test_briefing_formats_cleanly_despite_table_syntax(self):
+        """The attach-time .format() must never trip on a stray brace."""
+        from partyline.adapters.briefing import TOPIC_BRIEFING
+
+        text = BRIEFING.format(name="probe", conv="line")
+        self.assertIn('"probe"', text)
+        self.assertIn('"line"', text)
+        self.assertIn("station", TOPIC_BRIEFING.format(topic="station"))
+
     def test_the_canonical_and_alias_upload_paths_are_mounted(self):
         spec = server_app.openapi()
         paths = set(spec["paths"])
