@@ -272,6 +272,9 @@ class PartylineAdapter(Adapter):
                 and record.get("type") == "PLANNER_RESPONSE"
             ):
                 status = record.get("status")
+                # 2026-08-22: 2,386 DONE / 48 RUNNING across 15 sessions; no abort status ever
+                # observed — names are defensive guesses, real aborts leave no record;
+                # exit/detach flush is the guarantee.
                 if status in ("ERROR", "CANCELLED", "ABORTED", "FAILED"):
                     await receipt(self.att, ENDED)
                 elif status == "DONE":
