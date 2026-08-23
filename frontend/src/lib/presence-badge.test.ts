@@ -10,6 +10,7 @@ function entry(overrides: Partial<PresenceEntry> = {}): PresenceEntry {
     turn: 1,
     revision: 1,
     legacy: false,
+    held: 0,
     ...overrides,
   };
 }
@@ -18,6 +19,19 @@ describe("badge treatment", () => {
   it("renders nothing for idle tombstones and absent attachments", () => {
     expect(badgeTreatment(entry({ phase: "idle" }), 1_000_060)).toBeNull();
     expect(badgeTreatment(undefined, 1_000_060)).toBeNull();
+  });
+
+  it("renders N wakes held next to working when wakes are queued", () => {
+    const single = badgeTreatment(entry({ completion: "receipt", held: 1 }), 1_000_060);
+    expect(single).toMatchObject({
+      label: "working… (1 wake held)",
+      tooltip: "1 wake held while working",
+    });
+    const multiple = badgeTreatment(entry({ completion: "receipt", held: 3 }), 1_000_060);
+    expect(multiple).toMatchObject({
+      label: "working… (3 wakes held)",
+      tooltip: "3 wakes held while working",
+    });
   });
 
   it("keeps the confident look while a turn is fresh, whatever the completion", () => {

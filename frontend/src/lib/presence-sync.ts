@@ -106,6 +106,7 @@ export function eventFromPresenceState(state: PresenceState): WorkingEvent {
     since: state.since,
     turn: state.turn,
     revision: state.revision,
+    held: state.held,
   };
 }
 

@@ -19,14 +19,15 @@ export interface BadgeTreatment {
 /** A `none` adapter shows today's confident look for this long before decaying. */
 const CONFIDENT_SECONDS = 240;
 
-function confident(speaking: boolean): BadgeTreatment {
+function confident(speaking: boolean, held = 0): BadgeTreatment {
+  const heldSuffix = held > 0 ? ` (${String(held)} wake${held === 1 ? "" : "s"} held)` : "";
   return {
-    label: "working…",
+    label: `working…${heldSuffix}`,
     tone: "green",
     dot: "filled",
     // speaking is display-only: the dot goes solid, the label stays "working…"
     pulse: speaking ? "none" : "live",
-    tooltip: "",
+    tooltip: held > 0 ? `${String(held)} wake${held === 1 ? "" : "s"} held while working` : "",
   };
 }
 
@@ -49,7 +50,7 @@ export function badgeTreatment(entry: PresenceEntry | undefined, now: number): B
 
   // Legacy boolean presence carries no phases or revisions; it must render
   // exactly what it always rendered, and decay would be a claim we cannot make.
-  if (entry.legacy) return confident(entry.phase === "speaking");
+  if (entry.legacy) return confident(entry.phase === "speaking", entry.held);
 
   const age = Math.max(0, now - entry.since);
 
@@ -57,18 +58,19 @@ export function badgeTreatment(entry: PresenceEntry | undefined, now: number): B
     // An open receipt turn is the server's word. Age is not evidence the
     // process stalled: grok's thinking turns are silent for tens of minutes,
     // and the old 10-minute guess labelled them `stalled?` while they worked.
-    return confident(entry.phase === "speaking");
+    return confident(entry.phase === "speaking", entry.held);
   }
 
+  const heldSuffix = entry.held > 0 ? ` (${String(entry.held)} wake${entry.held === 1 ? "" : "s"} held)` : "";
   if (age >= CONFIDENT_SECONDS) {
     return {
       // The label never stops saying working; only the confident channels dim.
-      label: "working…",
+      label: `working…${heldSuffix}`,
       tone: "green",
       dot: "hollow",
       pulse: "none",
       tooltip: `no turn-end signal from this CLI · active for ${describe(age)}`,
     };
   }
-  return confident(entry.phase === "speaking");
+  return confident(entry.phase === "speaking", entry.held);
 }

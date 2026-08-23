@@ -191,6 +191,8 @@ class Db:
         orphaned pty whose attachment row is gone can never be detached again.
         """
         with self.lock:
+            self.conn.execute("DELETE FROM queued_delivery_messages WHERE attachment_id IN "
+                              "(SELECT id FROM attachments WHERE conv_id=?)", (conv_id,))
             self.conn.execute("DELETE FROM messages WHERE conv_id=?", (conv_id,))
             self.conn.execute("DELETE FROM attachments WHERE conv_id=?", (conv_id,))
             self.conn.execute("DELETE FROM conversations WHERE id=?", (conv_id,))
@@ -268,6 +270,53 @@ class Db:
             args.append(exclude_sender)
         cur = self._exec(q + " ORDER BY id", args)
         return [dict(r) for r in cur.fetchall()]
+
+    def messages_by_ids(self, conv_id: str, message_ids: list[int]) -> list[dict]:
+        """Resolve an exact queued batch in transcript order, without re-routing."""
+        if not message_ids:
+            return []
+        placeholders = ",".join("?" for _ in message_ids)
+        cur = self._exec(
+            f"SELECT * FROM messages WHERE conv_id=? AND id IN ({placeholders}) ORDER BY id",
+            [conv_id, *message_ids],
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+    def queued_delivery_ids(self, att_id: str) -> list[int]:
+        cur = self._exec(
+            "SELECT message_id FROM queued_delivery_messages "
+            "WHERE attachment_id=? ORDER BY message_id",
+            (att_id,),
+        )
+        return [row["message_id"] for row in cur.fetchall()]
+
+    async def queue_delivery_ids(
+        self, att_id: str, message_ids: list[int], runtime_owner: str | None
+    ) -> bool:
+        """Persist a skipped batch only while its adapter activation owns it."""
+        async with self._runtime_serialized_async():
+            with self.lock:
+                owned = self.conn.execute(
+                    "SELECT 1 FROM attachments WHERE id=? AND runtime_owner IS ?",
+                    (att_id, runtime_owner),
+                ).fetchone()
+                if owned is None:
+                    return False
+                self.conn.executemany(
+                    "INSERT OR IGNORE INTO queued_delivery_messages VALUES(?,?)",
+                    ((att_id, message_id) for message_id in set(message_ids)),
+                )
+                self.conn.commit()
+        return True
+
+    def clear_queued_delivery_ids(self, att_id: str, message_ids: list[int]) -> None:
+        if not message_ids:
+            return
+        self._exec(
+            "DELETE FROM queued_delivery_messages WHERE attachment_id=? AND message_id IN "
+            f"({','.join('?' for _ in message_ids)})",
+            [att_id, *message_ids],
+        )
 
     # -- attachments -------------------------------------------------------
     def add_attachment(self, att_id, conv_id, name, adapter, command, cwd, runtime_owner=None):

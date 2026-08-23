@@ -42,43 +42,26 @@ PASTE_PACE = 5.0
 class PartylineAdapter(Adapter):
     kind = "antigravity"
 
-    # A wake written into the pty is not a wake the TUI accepted: an idle
-    # antigravity TUI can hold a pasted digest unsubmitted (docs/lessons.md).
-    # Verification is evidence-only — no timer may guess another process's
-    # state. A USER_INPUT record containing the digest proves it landed; a
-    # USER_INPUT that does not contain it proves the paste was skipped (the
-    # CLI submitted different input after ours), and only that proof triggers
-    # a single re-send. A re-sent wake that is skipped again is dropped with
-    # one factual notice; the notice's @handle delivers a fresh wake, so the
-    # cap keeps a pathological CLI from farming notices. The pinned log's
-    # HandleUserInput lines judge the same way at submit time, minutes
-    # before the transcript can; either channel settles a wake.
     MAX_NOTICES = 2
 
     def __init__(self, att, post, on_status, on_cli_session=None):
         super().__init__(att, post, on_status, on_cli_session)
-        self._outstanding: list[tuple[str, float]] = []
-        self._resent: set[str] = set()
+        self._outstanding: list[tuple[str, float, tuple[int, ...]]] = []
+        self._resend_counts: dict[str, int] = {}
         self._notices = 0
         self._output_event = asyncio.Event()
 
     async def on_output(self, data: bytes):
-        # The screen model is already fed; wake an Enter gated on the echo.
         self._output_event.set()
 
     def _composer_shows(self, text: str) -> bool:
-        """The CLI's own redraw proves the paste sits in the composer. The
-        probe is whitespace-free and tailed: the TUI wraps and scrolls."""
+        """The CLI's redraw proves the paste sits in the composer."""
         probe = "".join(text.split())[-ECHO_PROBE:]
         return bool(probe) and probe in "".join(self.screen_text().split())
 
     async def send_keys(self, text: str):
         assert self.master is not None
         os.write(self.master, b"\x1b[200~" + text.encode() + b"\x1b[201~")
-        # Enter only once the composer proves the paste landed — the fixed
-        # paste→Enter delay lost that race and left a wake unsubmitted
-        # (docs/lessons.md). The bound is pacing between two writes, never
-        # a verdict about the CLI's state.
         deadline = time.time() + PASTE_PACE
         while self.alive() and not self._composer_shows(text):
             remaining = deadline - time.time()
@@ -92,19 +75,15 @@ class PartylineAdapter(Adapter):
         os.write(self.master, b"\r")
 
     async def deliver(self, messages: list[dict]):
-        # A wake the TUI never submitted can still sit in the composer; a
-        # bare Enter flushes it — the fix the original incident got by hand.
-        # Only when the screen proves the stuck text is one of our wakes:
-        # anything else in the composer is not ours to submit.
         if self.master is not None and any(
-            self._composer_shows(digest) for digest, _ in self._outstanding
+            self._composer_shows(wake[0]) for wake in self._outstanding
         ):
             os.write(self.master, b"\r")
         digest = self.format_digest(messages)
         await super().deliver(messages)
         if digest.strip() and self.alive():
-            # When the paste happened, so a later record can prove it skipped.
-            self._outstanding.append((digest, time.time()))
+            ids = tuple(message["id"] for message in messages if isinstance(message.get("id"), int))
+            self._outstanding.append((digest, time.time(), ids))
 
     @staticmethod
     def _contains(content: str, probe: str) -> bool:
@@ -120,8 +99,8 @@ class PartylineAdapter(Adapter):
         record cannot contain, and judging it anyway would call a healthy
         paste skipped. Contained digests are verified. A digest the record
         predates-but-does-not contain was skipped — proven, not guessed —
-        so it is re-sent exactly once; a skip after that drops it with one
-        factual notice.
+        so it is re-sent up to 2 times; a skip after that re-pools for the
+        next turn-end with one factual notice.
         """
         created = None
         if created_at:
@@ -132,27 +111,32 @@ class PartylineAdapter(Adapter):
                 ).timestamp()
             except ValueError:
                 created = None
-        kept: list[tuple[str, float]] = []
-        for digest, pasted_at in self._outstanding:
+        kept: list[tuple[str, float, tuple[int, ...]]] = []
+        for digest, pasted_at, message_ids in self._outstanding:
             if created is not None and pasted_at >= created:
-                kept.append((digest, pasted_at))  # this record cannot judge it
+                kept.append((digest, pasted_at, message_ids))
                 continue
             if self._contains(content, digest):
                 self._notices = 0
+                self._resend_counts.pop(digest, None)
                 continue
-            if digest in self._resent:
+            count = self._resend_counts.get(digest, 0) + 1
+            self._resend_counts[digest] = count
+            if count <= 2:
+                kept.append((digest, pasted_at, message_ids))
+                await self.send_keys(digest)
+            else:
+                self._resend_counts.pop(digest, None)
+                repool = self.att.get("repool_message_ids")
+                if repool is not None and message_ids:
+                    await repool(list(message_ids))
                 if self._notices < self.MAX_NOTICES:
                     self._notices += 1
                     await self.post(
                         "system", "system",
                         f"@{self.att['name']}: the CLI submitted other input after "
-                        "this wake was pasted, twice without taking it — the wake "
-                        "was not delivered. Re-mention it if a reply is expected.",
+                        "this wake was pasted — wake queued for next turn-end",
                     )
-                continue
-            self._resent.add(digest)
-            kept.append((digest, pasted_at))
-            await self.send_keys(digest)
         self._outstanding = kept
 
     async def _note_log_line(self, line: str) -> None:
@@ -286,12 +270,18 @@ class PartylineAdapter(Adapter):
             elif (
                 record.get("source") == "MODEL"
                 and record.get("type") == "PLANNER_RESPONSE"
-                and record.get("status") == "DONE"
             ):
-                if not record.get("tool_calls"):
+                status = record.get("status")
+                # 2026-08-22: 2,386 DONE / 48 RUNNING across 15 sessions; no abort status ever
+                # observed — names are defensive guesses, real aborts leave no record;
+                # exit/detach flush is the guarantee.
+                if status in ("ERROR", "CANCELLED", "ABORTED", "FAILED"):
                     await receipt(self.att, ENDED)
-                if isinstance(content, str) and content.strip():
-                    await self.post(self.att["name"], "agent", content)
+                elif status == "DONE":
+                    if not record.get("tool_calls"):
+                        await receipt(self.att, ENDED)
+                    if isinstance(content, str) and content.strip():
+                        await self.post(self.att["name"], "agent", content)
 
         log_tail = asyncio.create_task(self._tail_log())
         try:
