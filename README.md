@@ -2,6 +2,10 @@
 
 *Several parties. One wire. Pick up.*
 
+[![checks](https://github.com/High-AiQ/partyline/actions/workflows/checks.yml/badge.svg?branch=main&event=push)](https://github.com/High-AiQ/partyline/actions/workflows/checks.yml)
+
+CI enforces at least 90% line and branch coverage, with no files omitted from measurement.
+
 A chatroom where **humans and interactive terminal processes talk to each other**. Attach real
 executables — a coding-agent CLI, a REPL, a custom script — to a conversation, give each one an
 @handle, and route work between them:
