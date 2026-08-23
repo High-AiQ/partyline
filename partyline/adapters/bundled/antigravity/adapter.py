@@ -46,7 +46,7 @@ class PartylineAdapter(Adapter):
 
     def __init__(self, att, post, on_status, on_cli_session=None):
         super().__init__(att, post, on_status, on_cli_session)
-        self._outstanding: list[tuple[str, float]] = []
+        self._outstanding: list[tuple[str, float, tuple[int, ...]]] = []
         self._resend_counts: dict[str, int] = {}
         self._notices = 0
         self._output_event = asyncio.Event()
@@ -76,13 +76,14 @@ class PartylineAdapter(Adapter):
 
     async def deliver(self, messages: list[dict]):
         if self.master is not None and any(
-            self._composer_shows(digest) for digest, _ in self._outstanding
+            self._composer_shows(wake[0]) for wake in self._outstanding
         ):
             os.write(self.master, b"\r")
         digest = self.format_digest(messages)
         await super().deliver(messages)
         if digest.strip() and self.alive():
-            self._outstanding.append((digest, time.time()))
+            ids = tuple(message["id"] for message in messages if isinstance(message.get("id"), int))
+            self._outstanding.append((digest, time.time(), ids))
 
     @staticmethod
     def _contains(content: str, probe: str) -> bool:
@@ -110,20 +111,25 @@ class PartylineAdapter(Adapter):
                 ).timestamp()
             except ValueError:
                 created = None
-        kept: list[tuple[str, float]] = []
-        for digest, pasted_at in self._outstanding:
+        kept: list[tuple[str, float, tuple[int, ...]]] = []
+        for digest, pasted_at, message_ids in self._outstanding:
             if created is not None and pasted_at >= created:
-                kept.append((digest, pasted_at))  # this record cannot judge it
+                kept.append((digest, pasted_at, message_ids))
                 continue
             if self._contains(content, digest):
                 self._notices = 0
+                self._resend_counts.pop(digest, None)
                 continue
             count = self._resend_counts.get(digest, 0) + 1
             self._resend_counts[digest] = count
             if count <= 2:
-                kept.append((digest, pasted_at))
+                kept.append((digest, pasted_at, message_ids))
                 await self.send_keys(digest)
             else:
+                self._resend_counts.pop(digest, None)
+                repool = self.att.get("repool_message_ids")
+                if repool is not None and message_ids:
+                    await repool(list(message_ids))
                 if self._notices < self.MAX_NOTICES:
                     self._notices += 1
                     await self.post(

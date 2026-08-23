@@ -348,11 +348,13 @@ enforce it. A prose warning that has no executable guard is not a completed less
   Verification acts only on transcript evidence — a `USER_INPUT` containing
   the digest proves delivery, and a `USER_INPUT` that does not contain it
   *proves* the paste was skipped (the CLI submitted different input after
-  ours), which triggers exactly one re-send; a second proof drops the wake
-  with a single factual notice. Second, because a notice's text carries the
-  handle, the mention router delivers it as a fresh wake to the very adapter
-  that posted it — notices are globally capped, and a verified wake resets
-  the cap, so a pathological CLI cannot farm them. Third, two structural
+  ours), which triggers an evidence-driven re-send. After two such re-sends,
+  a third proof persists that exact batch's message ids for the next real
+  turn end instead of dropping it or rewinding `last_seen`. The persisted ids
+  survive restart; an ordered, deduplicated replay cannot accidentally pull in
+  later unmentioned chatter. Second, notices are globally capped, and a
+  verified wake resets the cap, so a pathological CLI cannot farm them.
+  Third, two structural
   channels shrink the residue the evidence rule cannot see (an eaten paste
   with no later transcript activity): the pinned `--log-file` records every
   accepted submission at *submit* time (`HandleUserInput called with text:`,
