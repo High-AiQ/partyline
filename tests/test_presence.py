@@ -16,9 +16,13 @@ from partyline.presence import Presence
 class FakeRuntime:
     def __init__(self):
         self.events = []
+        self.refreshed = []
 
     async def broadcast(self, conv_id, event):
         self.events.append((conv_id, event.model_dump()))
+
+    async def broadcast_attachment(self, conv_id, att_id):
+        self.refreshed.append((conv_id, att_id))
 
     def working_events(self):
         return [(event["attachment_id"], event["working"]) for _, event in self.events]
@@ -99,6 +103,7 @@ class PresenceTest(unittest.IsolatedAsyncioTestCase):
         await self.presence.ended("line", "att")
 
         self.assertFalse(self.presence.is_working("att"))
+        self.assertEqual(self.runtime.refreshed, [("line", "att")])
         self.assertEqual(
             self.runtime.working_events(),
             [("att", True), ("att", True), ("att", False)],

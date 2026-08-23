@@ -1,7 +1,9 @@
 """Cwd git identity at the attachment and wake-digest boundaries."""
 
+import asyncio
 import subprocess
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -42,18 +44,20 @@ class CwdGitStateTest(unittest.TestCase):
 
             sha = self.command(repo, "rev-parse", "--short", "HEAD")
             self.assertEqual(cwd_git_state(directory).model_dump(), {"sha": sha, "dirty": False})
-            response = attachment_response(
-                {
-                    "id": "att-1",
-                    "conv_id": "line",
-                    "name": "sol",
-                    "adapter": "codex",
-                    "command": ["codex"],
-                    "cwd": directory,
-                    "status": "running",
-                    "last_seen": 0,
-                    "created_at": 1,
-                }
+            response = asyncio.run(
+                attachment_response(
+                    {
+                        "id": "att-1",
+                        "conv_id": "line",
+                        "name": "sol",
+                        "adapter": "codex",
+                        "command": ["codex"],
+                        "cwd": directory,
+                        "status": "running",
+                        "last_seen": 0,
+                        "created_at": 1,
+                    }
+                )
             )
             self.assertEqual(response["cwd_git"], {"sha": sha, "dirty": False})
             self.assertEqual(cwd_git_digest(directory), f"(cwd git: {sha} clean)")
@@ -61,6 +65,35 @@ class CwdGitStateTest(unittest.TestCase):
             (repo / "untracked.txt").write_text("dirty\n", encoding="utf-8")
             self.assertTrue(cwd_git_state(directory).dirty)
             self.assertEqual(cwd_git_digest(directory), f"(cwd git: {sha} dirty)")
+
+    def test_attachment_response_offloads_git_from_the_event_loop(self):
+        event_loop_thread = threading.get_ident()
+        worker_threads = []
+
+        def run(command, **_kwargs):
+            worker_threads.append(threading.get_ident())
+            stdout = "d87b3ae\n" if "rev-parse" in command else ""
+            return subprocess.CompletedProcess(command, 0, stdout, "")
+
+        with patch("partyline.attachment_view.subprocess.run", side_effect=run):
+            asyncio.run(
+                attachment_response(
+                    {
+                        "id": "att-1",
+                        "conv_id": "line",
+                        "name": "sol",
+                        "adapter": "codex",
+                        "command": ["codex"],
+                        "cwd": "/project",
+                        "status": "running",
+                        "last_seen": 0,
+                        "created_at": 1,
+                    }
+                )
+            )
+
+        self.assertEqual(len(worker_threads), 2)
+        self.assertTrue(all(thread != event_loop_thread for thread in worker_threads))
 
 
 if __name__ == "__main__":

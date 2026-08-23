@@ -1,5 +1,6 @@
 """Live presentation facts derived from an attachment's exact cwd."""
 
+import asyncio
 import os
 import subprocess
 from collections.abc import Mapping
@@ -40,10 +41,12 @@ def cwd_git_state(cwd: str) -> CwdGitState | None:
     return CwdGitState(sha=sha, dirty=bool(status.stdout))
 
 
-def attachment_response(attachment: Mapping[str, object]) -> dict[str, object]:
+async def attachment_response(attachment: Mapping[str, object]) -> dict[str, object]:
     """Add live cwd identity at the HTTP/WebSocket presentation boundary."""
     payload = dict(attachment)
-    payload["cwd_git"] = cwd_git_state(str(attachment.get("cwd", "")))
+    payload["cwd_git"] = await asyncio.to_thread(
+        cwd_git_state, str(attachment.get("cwd", ""))
+    )
     return AttachmentResponse.model_validate(payload).model_dump()
 
 

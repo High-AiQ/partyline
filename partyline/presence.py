@@ -199,16 +199,14 @@ class Presence:
     async def ended(
         self, conv_id: str, att_id: str, owner: str | None = None, turn: int | None = None
     ) -> None:
-        """The harness reports the CLI has finished a turn.
-
-        Closes the open turn and flushes queued mid-turn deliveries.
-        """
+        """Close a harness turn, refresh cwd identity, and flush queued deliveries."""
         open_turn = self._current(att_id, owner, turn)
         if open_turn is None:
             return
         open_turn.open = max(0, open_turn.open - 1)
         if open_turn.open == 0:
             await self.finished(conv_id, att_id)
+            await self.runtime.broadcast_attachment(conv_id, att_id)
             await self.queue.flush(att_id, turn_ended=True)
 
     async def spoke(self, conv_id: str, att_id: str) -> None:
