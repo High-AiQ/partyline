@@ -510,11 +510,11 @@ class BriefingTest(unittest.TestCase):
         self.assertIn(
             'curl -H "Authorization: Bearer $PARTYLINE_TOKEN" -F file=@', text)
         self.assertIn("$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/images", text)
-        self.assertIn("smallest tier", text)
-        self.assertIn("never share it on the line", text)
+        self.assertIn("smallest image tier", text)
+        self.assertIn("Share the token on the line", text)
 
     def test_briefing_bans_ack_loops_between_processes(self):
-        self.assertIn("Never trade acknowledgments", Recorder(["cat"]).briefing())
+        self.assertIn("Trade acknowledgments, thanks, or goodbyes", Recorder(["cat"]).briefing())
 
     def test_briefing_points_at_the_shared_task_board(self):
         text = Recorder(["cat"]).briefing()
