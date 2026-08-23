@@ -460,7 +460,14 @@ class TurnIdleQueueTest(unittest.IsolatedAsyncioTestCase):
         runtime = FakeRuntime()
         presence = Presence(runtime)
         raw_adapter = RecordingAdapter()
-        adapter = presence.watch(raw_adapter, "line", "att", completion="receipt")
+
+        async def flush_held():
+            await raw_adapter.deliver([{"id": 2, "body": "second"}, {"id": 3, "body": "third"}])
+            return True
+
+        adapter = presence.watch(
+            raw_adapter, "line", "att", completion="receipt", flush_held=flush_held
+        )
 
         # 1. Attach starts idle: first deliver passes through
         await adapter.deliver([{"id": 1, "body": "first"}])
@@ -472,7 +479,8 @@ class TurnIdleQueueTest(unittest.IsolatedAsyncioTestCase):
 
         # 3. Mention arriving mid-turn is queued on the server, not delivered
         await adapter.deliver([{"id": 2, "body": "second"}])
-        await adapter.deliver([{"id": 3, "body": "third"}])
+        # The durable cursor supplies the whole undispatched backlog again.
+        await adapter.deliver([{"id": 2, "body": "second"}, {"id": 3, "body": "third"}])
         self.assertEqual(raw_adapter.delivered, [[{"id": 1, "body": "first"}]])
         self.assertEqual(presence.queue.held_count("att"), 2)
 
@@ -520,7 +528,7 @@ class TurnIdleQueueTest(unittest.IsolatedAsyncioTestCase):
 
         await presence.began("line", "att")
         await adapter.deliver([{"id": 2, "body": "second"}])
-        await adapter.deliver([{"id": 3, "body": "third"}])
+        await adapter.deliver([{"id": 2, "body": "second"}, {"id": 3, "body": "third"}])
 
         on_status = AsyncMock()
         status_cb = presence.statusing("line", "att", on_status, name="composer")

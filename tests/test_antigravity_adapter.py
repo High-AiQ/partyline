@@ -154,7 +154,7 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(resumed._silent_until_wake)
 
     async def test_conversation_from_log_parses_created_line(self):
-        adapter = self.make()
+        adapter = self.make(resume=True, cli_session=CONV_ID)
         self.assertIsNone(adapter._conversation_from_log())
         self.write_log(adapter, conversation="")
         Path(adapter.log_path()).write_text("no conversation here\n", encoding="utf-8")
@@ -329,7 +329,7 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(adapter._outstanding, [])
         self.assertEqual(len(self.messages), 1)
         self.assertIn("wake queued for next turn-end", self.messages[0][2])
-        self.assertEqual(adapter._repool_messages, [{"sender": "greg", "body": "wake one"}])
+        self.assertFalse(hasattr(adapter, "_repool_messages"))
 
     async def test_a_record_cannot_judge_a_digest_pasted_after_it(self):
         """A mention delivered mid-turn pastes a wake that the running turn's
@@ -458,42 +458,33 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(adapter._outstanding, [])
         self.assertEqual(len(self.messages), 1)
         self.assertIn("wake queued for next turn-end", self.messages[0][2])
-        self.assertEqual(adapter._repool_messages, [{"sender": "greg", "body": "wake six"}])
+        self.assertFalse(hasattr(adapter, "_repool_messages"))
 
-    async def test_aborted_or_failed_turn_emits_ended_and_flushes_repooled_wakes(self):
-        adapter = self.make()
+    async def test_error_planner_record_emits_ended_through_run_handler(self):
+        adapter = self.make(resume=True, cli_session=CONV_ID)
         adapter.proc = Process()
         receipts = []
 
         async def fake_receipt(att, kind, **kwargs):
             receipts.append((att["id"], kind))
 
-        delivered_flushes = []
-        adapter.deliver = AsyncMock(side_effect=lambda msgs: delivered_flushes.append(msgs))
-        adapter._repool_messages = [{"sender": "greg", "body": "queued wake"}]
+        self.write_transcript([step(0, "MODEL", "PLANNER_RESPONSE", status="ERROR")])
+
+        async def tail(_path, handle):
+            await handle({
+                "step_index": 0, "created_at": "2026-01-01T00:00:00Z",
+                "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "ERROR",
+            })
+            adapter.proc.stop()
+
+        adapter._tail_jsonl = tail
 
         with (
             patch("partyline.adapters.bundled.antigravity.adapter.receipt", new=fake_receipt),
             patch.object(adapter, "_fresh", return_value=True),
+            patch("partyline.adapters.bundled.antigravity.adapter.asyncio.sleep", new=AsyncMock()),
         ):
-            # Simulate a transcript handle loop processing an ERROR / CANCELLED response
-            transcript_lines = [
-                step(0, "MODEL", "PLANNER_RESPONSE", status="ERROR"),
-            ]
-            self.write_transcript(transcript_lines)
-            log_tail = asyncio.create_task(adapter._tail_log())
-            try:
-                task = asyncio.create_task(
-                    adapter._tail_jsonl(
-                        str(self.brain_root / CONV_ID / ".system_generated" / "logs" / "transcript.jsonl"),
-                        lambda r: None,
-                    )
-                )
-                # Call handle directly via run handler simulation
-                await fake_receipt(adapter.att, ENDED)
-            finally:
-                log_tail.cancel()
-                task.cancel()
+            await adapter._run()
 
         self.assertIn((adapter.att["id"], ENDED), receipts)
 
