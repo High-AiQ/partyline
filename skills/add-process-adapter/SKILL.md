@@ -5,7 +5,8 @@ description: Create, package, import, reload, test, or review a Partyline adapte
 
 # Add a process adapter
 
-Read `docs/adapters.md` before implementation. Use one package per process:
+Read `docs/adapters.md` before implementation. Use one package per process, and the same
+`adapters/<adapter-id>/` layout at the root of external adapter repositories:
 
 ```
 partyline/adapters/bundled/<adapter-id>/
@@ -13,12 +14,15 @@ partyline/adapters/bundled/<adapter-id>/
   adapter.py
 ```
 
-Use the same `adapters/<adapter-id>/` layout at the root of external adapter repositories. Keep
-the directory id lowercase, stable, and URL-safe.
+| DO | DO NOT |
+| --- | --- |
+| Keep the directory id lowercase, stable, and URL-safe | — |
 
 ## Define the manifest
 
-Create `adapter.toml`:
+Create `adapter.toml`. The package id (directory name) may differ from the executable name
+(adapter id `cursor` runs executable `agent`); `requires` lists the executables that must be
+on `PATH`.
 
 ```toml
 [adapter]
@@ -34,108 +38,61 @@ update_command = ["example-process", "update"]
 compact_paste = "/compact"
 ```
 
-Use an argv array for `command`, not a shell string. The adapter package id (directory name)
-may differ from the underlying executable binary name (for example, adapter id `cursor` with
-executable `agent`). `requires` lists the actual executables that must be on `PATH`. For
-unattended attach, bake the CLI's real non-interactive and skip-prompt flags into default
-`command` (e.g. `--yolo --trust`); probe the real CLI rather than guessing to ensure it never
-hangs on trust, sandbox, or approval prompts. `capabilities` is a table; set `resume = true` only
-if re-attaching genuinely reopens the process's previous session, and set `turn_end = "receipt"`
-when the adapter reports turn boundaries from transcript events. `update_command` is an optional
-argv the host runs before a fresh attach when the operator ticks “update CLI first”; omit it when
-the process has no updater. `compact_paste` is an optional exact string sent through the normal
-bracketed-paste-plus-Enter path, not an argv array. Live-probe it in the real TUI, record the
-probed CLI version beside the field, and re-probe after `update_command`: unknown slash commands
-can fuzzy-match a different action (OpenCode 1.18.21 turned `/compact` into `/review`) instead of
-failing closed. Omit the field when the TUI exposes no verified command. Some slash menus require
-an embedded newline to select the item before the sender's final Enter executes it; include that
-byte only when a live probe proves it. Do not guess an update command for another vendor.
-`entrypoint` must name a file inside the package directory, and the class it exports defaults to
-`PartylineAdapter` — override with `class = "..."` if you need a different name. Keep secrets and
-machine-specific paths out of the manifest. Use `env_unset` only for inherited variables that
-would interfere with a child process; an entry ending in `*` clears every variable with that
-prefix.
+| DO | DO NOT |
+| --- | --- |
+| Use an argv array for `command` | Use a shell string |
+| Bake the CLI's real non-interactive and skip-prompt flags into the default `command` (e.g. `--yolo --trust`), probing the real CLI so unattended attach never hangs on trust, sandbox, or approval prompts | Guess the flags |
+| Set `resume = true` only if re-attaching genuinely reopens the previous session | — |
+| Set `turn_end = "receipt"` when the adapter reports turn boundaries from transcript events | — |
+| Provide `update_command` as an argv the host runs before a fresh attach when the operator ticks "update CLI first" | Guess an update command for another vendor; omit it when the process has no updater |
+| Live-probe `compact_paste` in the real TUI, record the probed CLI version beside the field, and re-probe after `update_command` — unknown slash commands can fuzzy-match a different action (OpenCode 1.18.21 turned `/compact` into `/review`) instead of failing closed | Ship an unprobed compact command; omit the field when the TUI exposes no verified one |
+| Include an embedded newline in `compact_paste` only when a live probe proves the slash menu needs it to select the item | — |
+| Point `entrypoint` at a file inside the package; the exported class defaults to `PartylineAdapter` (override with `class = "..."`) | — |
+| Use `env_unset` only for inherited variables that would interfere with a child process (a trailing `*` clears every variable with that prefix) | Put secrets or machine-specific paths in the manifest |
 
 ## Implement lifecycle behavior
 
-Export a `PartylineAdapter` class from `adapter.py`, subclassing the framework adapter base.
-Implement the interactive argv and any transcript or log tailing needed by the process. Preserve
-these invariants:
+Export the adapter class from `adapter.py`, subclassing the framework adapter base, and use
+the attachment working directory and inherited environment.
 
-- Start the actual interactive executable in the supplied pty; do not substitute a headless
-  mode or an SDK call.
-- Send chat input through the inherited bracketed-paste-plus-Enter path.
-- Drain terminal output continuously so the child cannot block.
-- Prefer structured transcripts or logs for assistant replies. Do not turn a terminal screen
-  into chat messages.
-- Report turn boundaries as receipts: post `BEGAN` (`UserPromptSubmit`) when user input is
-  recorded, and `ENDED` (`Stop`) when turns finish (including aborted turns, so badges clear).
-- Receipt adapters are idle-gated by the host: a mention arriving during an open turn is held and
-  flushed only on a real `ENDED`. Plain chatter does not trigger a paste. If the vendor provides
-  positive evidence that a previously pasted digest was skipped, retain that delivery's integer
-  message ids and, when `repool = self.att.get("repool_message_ids")` is present, call
-  `await repool(message_ids)`. The host persists the exact batch across a restart and replays it
-  ordered and deduplicated; never rewind `last_seen`, rescan mentions, or copy message bodies into
-  adapter-owned retry state.
-- A manifest `compact_paste` uses that same idle gate: idle requests paste immediately; mid-turn
-  requests occupy one latest-wins slot and fire only on a real `ENDED`. Do not intercept a chat
-  mention or add a second queue. Identify the vendor's structured compaction record or transcript
-  rewrite, filter summaries from assistant speech, and follow any session-id rotation without
-  replaying the replacement snapshot.
-- Start observing output after this attachment starts, and avoid replaying prior records after
-  a resume. Notice that `_fresh` is timestamp-based: if transcript records carry no timestamps,
-  do not use `_fresh`. Instead, snapshot existing records on open as seen to prevent replaying
-  past turns, and survive file rewrites or compactions by re-anchoring on the record sequence.
-- **Locate the transcript unambiguously.** If the CLI accepts a session id or a session
-  directory, pass one you chose — then the path is exact and nothing else can occupy it. If you
-  must fall back to matching on working directory and start time, you also have to *claim* the
-  file you resolve and skip files another attachment already claimed, and serialize discovery so
-  two attachments cannot resolve at once. Two copies of the same CLI started in one directory
-  seconds apart are otherwise indistinguishable, and the second one will tail the first one's
-  transcript and repost its messages under the wrong handle. When a session UUID is known, tail
-  that exact transcript file only (e.g. `<uuid>/<uuid>.jsonl`) rather than broad globs that could
-  mistake sibling or subagent files for main turns.
-- Report meaningful lifecycle status and cleanly stop background tasks.
-
-Use the attachment working directory and inherited environment. Do not edit shell profiles or
-persist credentials. If a process needs credentials, document its variable name without a value.
+| DO | DO NOT |
+| --- | --- |
+| Start the actual interactive executable in the supplied pty | Substitute a headless mode or an SDK call |
+| Send chat input through the inherited bracketed-paste-plus-Enter path | — |
+| Drain terminal output continuously so the child cannot block | — |
+| Post assistant replies from structured transcripts or logs | Turn a terminal screen into chat messages |
+| Report turn boundaries as receipts: `BEGAN` (`UserPromptSubmit`) when user input is recorded, `ENDED` (`Stop`) when turns finish — including aborted turns, so badges clear | — |
+| On positive vendor evidence that a pasted digest was skipped, retain that delivery's integer message ids and call `await repool(message_ids)` when `repool = self.att.get("repool_message_ids")` is present — the host persists the exact batch across restarts and replays it ordered and deduplicated | Rewind `last_seen`, rescan mentions, or copy message bodies into adapter-owned retry state |
+| Let a manifest `compact_paste` ride the host's idle gate (idle pastes immediately; mid-turn occupies one latest-wins slot fired on a real `ENDED`) | Intercept a chat mention or add a second queue for compaction |
+| Identify the vendor's structured compaction record or transcript rewrite, filter summaries from assistant speech, and follow session-id rotation | Replay the replacement snapshot |
+| Start observing output after this attachment starts; snapshot existing records on open as seen when records carry no timestamps, and survive rewrites or compactions by re-anchoring on the record sequence | Use timestamp-based `_fresh` on records that carry no timestamps; replay prior records after a resume |
+| Pass a session id or directory you chose when the CLI accepts one — the path is then exact and nothing else can occupy it | — |
+| When falling back to cwd/start-time matching: *claim* the resolved file, skip files another attachment claimed, and serialize discovery — two copies of one CLI started in one directory seconds apart are otherwise indistinguishable, and the second tails the first's transcript and reposts its messages under the wrong handle | Let two attachments resolve at once |
+| Tail the exact transcript file when a session UUID is known (e.g. `<uuid>/<uuid>.jsonl`) | Use broad globs that could mistake sibling or subagent files for main turns |
+| Report meaningful lifecycle status and cleanly stop background tasks | Edit shell profiles or persist credentials |
+| Document a needed credential's variable name | Document its value |
 
 ## Ship tests with the adapter
 
-An adapter package owns its own tests. Partyline's own suite covers the adapter *contract* — the
-pty runtime, the manifest loader, the registry — but it cannot cover your adapter's transcript
-format, and it will not install your process to try. For external repositories, put a test file
-beside the package. For bundled adapters in Partyline core, tests live in
-`tests/test_<adapter_id>_adapter.py`.
+An adapter package owns its own tests: Partyline's suite covers the adapter *contract* (pty
+runtime, manifest loader, registry), not your transcript format, and it will not install your
+process to try. External repositories put a test file beside the package; bundled adapters
+use `tests/test_<adapter_id>_adapter.py`.
 
-Test your logic, never the vendor's product:
-
-- **Do** assert on parsing: feed a fixture transcript file you wrote by hand and check which
-  messages come out, that partial and malformed records are survived, and that records predating
-  this attachment are not replayed after a resume.
-- **Do** assert the claiming rule: construct two attachments in one working directory and check
-  the second refuses the first one's transcript.
-- **Do** assert that terminal-screen contents never become chat messages.
-- **Do** add a fixture for the vendor's compaction shape and prove its generated summary never
-  posts as agent speech. Also test transcript rewrites or session rotation when the command does
-  either.
-- **Do not** invoke the real executable, reach the network, or assert that the vendor's CLI
-  writes a particular file. Those tests fail on a machine without the tool installed, and break
-  on someone else's release schedule.
-- **Do not** sleep and hope. If a test needs a background loop to advance, drive the condition
-  explicitly — a counted stub for the wait, a flag the loop checks — rather than a real delay
-  tuned to the machine you happened to write it on. A flaky adapter test is worse than none.
-
-A useful shape, portable to any harness: build the adapter object directly, hand it fakes for the
-two callbacks it takes (one collecting posted messages, one collecting status changes), point it
-at a fixture file in a temporary directory, and assert on what the collectors received. That
-works because the adapter is constructed with its effects passed in — no server, no pty, no
-process required.
+| DO | DO NOT |
+| --- | --- |
+| Build the adapter object directly, hand it fakes for its two callbacks (one collecting posted messages, one collecting status changes), point it at a fixture file in a temporary directory, and assert on what the collectors received — no server, pty, or process required | — |
+| Assert on parsing: feed a hand-written fixture transcript and check which messages come out, that partial and malformed records are survived, and that records predating the attachment are not replayed after a resume | — |
+| Assert the claiming rule: two attachments in one working directory, the second refuses the first's transcript | — |
+| Assert that terminal-screen contents never become chat messages | — |
+| Add a fixture for the vendor's compaction shape and prove its summary never posts as agent speech; test transcript rewrites and session rotation | — |
+| Drive async conditions explicitly — a counted stub for the wait, a flag the loop checks | Sleep and hope; a flaky adapter test is worse than none |
+| — | Invoke the real executable, reach the network, or assert the vendor's CLI writes a particular file — those fail on machines without the tool and break on someone else's release schedule |
 
 ## Test locally
 
-Run partyline with a throwaway database and port. Test start, mention delivery, output posting,
-exit, terminal peek, and stop. Exercise import and reload:
+Run partyline with a throwaway database and port. Test start, mention delivery, output
+posting, exit, terminal peek, and stop.
 
 ```bash
 curl -X POST http://127.0.0.1:8643/api/adapters/import \
@@ -145,5 +102,7 @@ curl -X POST http://127.0.0.1:8643/api/adapters/reload
 curl http://127.0.0.1:8643/api/adapters
 ```
 
-Validate missing manifest fields, duplicate ids, an invalid entrypoint, and a process that exits
-before producing output. Review imported source before executing it.
+| DO | DO NOT |
+| --- | --- |
+| Validate missing manifest fields, duplicate ids, an invalid entrypoint, and a process that exits before producing output | — |
+| Review imported source before executing it | — |
