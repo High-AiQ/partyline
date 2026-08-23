@@ -244,12 +244,7 @@ class Presence:
         flush_held: Callable[[], Awaitable[bool]] | None = None,
         pending_count: Callable[[], int] | None = None,
     ):
-        """Return the adapter, with its wake delivery reporting presence.
-
-        Wrapping ``deliver`` keeps the report where the fact is: the receipt
-        fires only once the digest has actually been written into the pty,
-        so a delivery that raises never claims a turn started.
-        """
+        """Wrap deliver so a receipt fires only after the digest reaches the pty."""
         deliver = adapter.deliver
         att = getattr(adapter, "att", None) or {}
         owner = att.get("runtime_owner")
@@ -260,8 +255,7 @@ class Presence:
 
         async def delivering(messages):
             if self.completions.get(att_id) == RECEIPT and self.is_working(att_id):
-                # ``last_seen`` stays behind this batch.  The queue keeps
-                # only its count; ENDED regenerates the digest from SQLite.
+                # last_seen stays put; ENDED regenerates the digest from SQLite.
                 self.queue.hold(att_id, len(messages))
                 await self._announce(conv_id, att_id, self.phase(att_id))
                 return False

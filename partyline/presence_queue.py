@@ -53,7 +53,7 @@ class DeliveryQueue:
             self._held.pop(att_id, None)
         return delivered
 
-    async def discard_on_exit(self, att_id: str, name: str, status: str) -> list[dict]:
+    async def discard_on_exit(self, att_id: str, name: str, status: str) -> int:
         """Discard held messages on process exit/detach and emit notice if any."""
         count = self._held.pop(att_id, 0)
         if count and att_id in self._post_fns:

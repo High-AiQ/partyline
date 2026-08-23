@@ -106,6 +106,25 @@ class ChatRuntime:
                 raise RuntimeError("attachment ownership changed during mention delivery")
         return True
 
+    def held_wake_hooks(self, conv_id: str, att_id: str, name: str):
+        """Flush and count held wakes from the durable message cursor."""
+
+        async def flush_held() -> bool:
+            current = self.db.get_attachment(att_id)
+            live = self.live.get(att_id)
+            return bool(
+                current and live and await self.deliver_pending(conv_id, current, live)
+            )
+
+        def pending_count() -> int:
+            current = self.db.get_attachment(att_id)
+            if current is None:
+                return 0
+            return len(self.db.messages_after(
+                conv_id, current["last_seen"], exclude_sender=name))
+
+        return flush_held, pending_count
+
     async def route_mentions(self, conv_id: str, msg: dict):
         if msg["sender_type"] == "system":
             return  # join/exit notices mention names but must never wake agents
