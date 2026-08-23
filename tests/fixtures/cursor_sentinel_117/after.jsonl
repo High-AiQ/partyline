@@ -1,0 +1,5 @@
+{"role":"user","message":{"content":[{"type":"text","text":"old prompt"}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"old reply"}]}}
+{"role":"user","message":{"content":[{"type":"text","text":"new prompt"}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"new reply"}]}}
+{"type":"turn_ended","status":"success"}
