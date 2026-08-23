@@ -283,6 +283,27 @@ WebSocket and rendered by xterm.js, so it moves as the process does rather than 
 timer. Typing into it is deliberately a second step: the view is read-only until you *arm* it,
 because a stray keystroke into a live agent's pty is not an undoable action.
 
+When an adapter declares a verified `compact_paste`, Peek also offers **compact**. It pastes the
+CLI's own context-compaction command immediately while idle; during a turn it keeps one
+latest-wins request and fires it only after the real turn-ending receipt. A trusted attached
+process can request the same action for itself with
+`POST /api/attachments/<attachment-id>/compact`. These exact strings were live-probed on
+2026-08-23:
+
+| Adapter | CLI version probed | Exact paste |
+| --- | --- | --- |
+| claude | 2.1.238 | `/compact` |
+| codex | 0.149.0 | `/compact` |
+| cursor (`agent`) | v2026.08.11-e8db854 | `/summarize` plus an embedded newline to select it |
+| grok | 1.0.5 | `/compact` |
+| hermes | 0.20.0 | `/compress` |
+| muse | 0.2.1-R1215.1 | `/compact` |
+| pi | 0.83.0 | `/compact` |
+
+Re-probe after running an adapter's `update_command`: an unknown slash command may fuzzy-match
+and execute a different action rather than no-op. OpenCode 1.18.21 demonstrated the hazard by
+turning an unrecognized `/compact` into `/review`, so it deliberately exposes no compact button.
+
 **Wake receipts** — a jack shows a **working…** badge while its process is mid-turn. The server
 is the only thing that can emit it; a process cannot announce its own liveness, which is what
 makes the badge worth trusting. Adapters whose harness reports turn boundaries (claude, codex,
@@ -517,6 +538,7 @@ config automatically. Resolve the settings with `partyline.bind.resolve_bind` an
 to the ASGI server yourself.
 
 Control actions are exposed as REST (`/api/conversations`, `/api/adapters`, `/api/presets`,
+`/api/attachments/<id>/compact`,
 `/api/attachments/<id>/{resume,screen,keys}` plus `PATCH /api/attachments/<id>`), as are the
 coordination surfaces a process needs — files (`/api/conversations/<id>/files`, the
 `/images` alias, `/api/media/<id>/{original,thumb,slim}`), tasks

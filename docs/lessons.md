@@ -174,6 +174,12 @@ enforce it. A prose warning that has no executable guard is not a completed less
   own CI. Branches do not partition a working tree: one checkout has one HEAD, one index, one
   set of files. An agent entering a checkout it does not currently own must do its own work in
   a `git worktree`, stage by explicit path rather than `-A`, and leave HEAD where it found it.
+- **An unknown slash command would fail closed.** OpenCode 1.18.21 fuzzy-matched `/compact` to
+  `/review`; an unverified or stale context-management string can execute a different action
+  rather than no-op. Adapter `compact_paste` values are therefore exact live-probed bytes with
+  the observed CLI version recorded beside them, and must be re-probed after `update_command`.
+  Unsupported CLIs omit the field entirely; manifest fixtures pin both the verified inclusions
+  and the omissions.
 - **An append-only transcript stays append-only across every lifecycle path.** Grok's fresh
   session appended correctly, but `grok --resume` atomically replaced `chat_history.jsonl`
   (`inode 5567721 → 5567734`). An ordinal tail counts assistant records before spawn and the

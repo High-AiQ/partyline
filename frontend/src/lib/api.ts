@@ -9,6 +9,7 @@ import {
   ConversationSchema,
   FileUploadResponseSchema,
   OkResultSchema,
+  CompactResultSchema,
   PresetSchema,
   PurgeResultSchema,
   RunningProcessSchema,
@@ -33,6 +34,7 @@ import type {
   ConversationDetail,
   FileUploadResponse,
   OkResult,
+  CompactResult,
   Preset,
   PurgeResult,
   RunningProcess,
@@ -103,6 +105,7 @@ export interface PartylineApi {
   resume(attachmentId: string): Promise<Attachment>;
   screen(attachmentId: string): Promise<ScreenResult>;
   sendKey(attachmentId: string, key: string): Promise<OkResult>;
+  compact(attachmentId: string): Promise<CompactResult>;
   presets(): Promise<Preset[]>;
   savePreset(preset: PresetDraft): Promise<Preset>;
   deletePreset(id: string): Promise<OkResult>;
@@ -249,6 +252,12 @@ export const api: PartylineApi = {
       method: "POST",
       body: { key },
       fallback: "could not send key",
+    }),
+  compact: (attachmentId) =>
+    request(`/api/attachments/${attachmentId}/compact`, {
+      schema: CompactResultSchema,
+      method: "POST",
+      fallback: "could not compact this process",
     }),
 
   presets: () => request("/api/presets", { schema: PresetSchema.array() }),

@@ -107,6 +107,15 @@ class PartylineAdapter(Adapter):
         ).fetchone()
         return int(row["id"] if row else 0)
 
+    def _compression_child(self, session_id: str) -> str | None:
+        assert self._db is not None
+        row = self._db.execute(
+            "SELECT id FROM sessions WHERE parent_session_id = ? "
+            "ORDER BY started_at DESC LIMIT 1",
+            (session_id,),
+        ).fetchone()
+        return str(row["id"]) if row else None
+
     @staticmethod
     def _text(content) -> str:
         if isinstance(content, str):
@@ -121,20 +130,38 @@ class PartylineAdapter(Adapter):
             return str(content.get("text") or content.get("content") or "")
         return "" if content is None else str(content)
 
+    @classmethod
+    def _assistant_text(cls, row) -> str | None:
+        """Relay live assistant speech, never a compacted lineage snapshot."""
+        if row["role"] != "assistant" or row["compacted"]:
+            return None
+        if str(row["display_kind"] or "").startswith("compression"):
+            return None
+        body = cls._text(row["content"]).strip()
+        return body or None
+
     async def _tail(self, session_id: str, last_id: int):
         assert self._db is not None
         while self.alive():
+            if child := self._compression_child(session_id):
+                self._release(session_id)
+                with self._claims_lock:
+                    self._claimed_sessions.add(child)
+                session_id = child
+                self._session_id = child
+                # The child starts as a rewritten compacted snapshot. Snapshot
+                # it as seen so retained assistant history cannot replay.
+                last_id = self._latest_message_id(child)
+                if self.on_cli_session is not None:
+                    self.on_cli_session(child)
             rows = self._db.execute(
-                "SELECT id, role, content FROM messages "
+                "SELECT id, role, content, compacted, display_kind FROM messages "
                 "WHERE session_id = ? AND id > ? AND active = 1 ORDER BY id",
                 (session_id, last_id),
             ).fetchall()
             for row in rows:
                 last_id = max(last_id, int(row["id"]))
-                if row["role"] != "assistant":
-                    continue
-                body = self._text(row["content"]).strip()
-                if body:
+                if body := self._assistant_text(row):
                     await self.post(self.att["name"], "agent", body)
             await asyncio.sleep(self.POLL_SECONDS)
 

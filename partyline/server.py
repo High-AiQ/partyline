@@ -33,6 +33,7 @@ from .auth_routes import auth_router
 from .auth_store import ensure_api_token, handle_taken
 from .bind import (BindConfig, apply_server_config, load_bind_config, load_dotenv,
                    parse_bind_args, uvicorn_config)
+from .compact_routes import register_compact_route
 from .adapters import (
     ADAPTERS,
     ADAPTER_METADATA,
@@ -138,6 +139,7 @@ app.state.bind = BindConfig()
 user_sockets = UserSocketRegistry()
 install_auth_guard(app, runtime.db)
 register_terminal_route(app, runtime)
+register_compact_route(app, runtime, presence)
 app.include_router(auth_router(runtime.db, on_handle_change=user_sockets.close_all))
 app.include_router(media_router(runtime, media))
 app.include_router(claims_router(runtime))
@@ -542,8 +544,6 @@ async def detach(att_id: str):
 # -- attachment introspection ----------------------------------------------
 def _hook_url(att_id: str, bind: BindConfig | None = None, token: str = "") -> str:
     return hook_url(att_id, bind or app.state.bind, token)
-
-
 
 @app.get("/api/attachments/{att_id}/screen", response_model=ScreenResponse)
 async def attachment_screen(att_id: str):

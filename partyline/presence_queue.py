@@ -10,6 +10,7 @@ class DeliveryQueue:
 
     def __init__(self) -> None:
         self._held: dict[str, set[int]] = {}
+        self._compact_fns: dict[str, Callable[[], Awaitable[None]]] = {}
         self._persisted_fns: dict[str, Callable[[], list[int]]] = {}
         self._persist_fns: dict[str, Callable[[list[int]], Awaitable[bool]]] = {}
         self._flush_fns: dict[str, Callable[[list[int]], Awaitable[bool]]] = {}
@@ -34,6 +35,7 @@ class DeliveryQueue:
 
     def unregister(self, att_id: str) -> None:
         self._held.pop(att_id, None)
+        self._compact_fns.pop(att_id, None)
         self._flush_fns.pop(att_id, None)
         self._persisted_fns.pop(att_id, None)
         self._persist_fns.pop(att_id, None)
@@ -71,9 +73,13 @@ class DeliveryQueue:
             await self.flush(att_id)
         return True
 
-    async def flush(self, att_id: str) -> bool:
+    async def flush(self, att_id: str, *, turn_ended: bool = False) -> bool:
         """Deliver only the ordered union that caused or survived deferral."""
         message_ids = self.held_ids(att_id)
+        if turn_ended and not message_ids and (compact := self._compact_fns.get(att_id)):
+            await compact()
+            self._compact_fns.pop(att_id, None)
+            return True
         if not message_ids:
             return False
         flush = self._flush_fns.get(att_id)
@@ -88,8 +94,19 @@ class DeliveryQueue:
                     self._held.pop(att_id, None)
         return delivered
 
+    async def compact(
+        self, att_id: str, send: Callable[[], Awaitable[None]], working: bool
+    ) -> bool:
+        """Paste now while idle, or keep one latest-wins slot for turn end."""
+        if working:
+            self._compact_fns[att_id] = send
+            return True
+        await send()
+        return False
+
     async def discard_on_exit(self, att_id: str, name: str, status: str) -> int:
         """Discard held messages on process exit/detach and emit notice if any."""
+        self._compact_fns.pop(att_id, None)
         count = len(self._held.pop(att_id, ()))
         if count and att_id in self._post_fns:
             plural = "mention" if count == 1 else "mentions"
