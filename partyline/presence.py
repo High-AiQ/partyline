@@ -24,9 +24,6 @@ A harness with no such receipt still arms on the pasted wake — the only
 signal it will ever observe — and never self-clears. A guess about when a
 turn ended is a new way to be wrong; the client can lower its confidence
 from ``since`` without the server asserting an ending it never observed.
-
-Nothing here reaches into ``ChatRuntime``: presence wraps the callbacks and
-the adapter the server already builds.
 """
 
 from __future__ import annotations
@@ -35,6 +32,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from .mentions import addresses
 from .presence_contracts import WorkingEvent
 from .presence_queue import DeliveryQueue
 
@@ -257,12 +255,13 @@ class Presence:
         )
 
         async def delivering(messages):
-            if self.completions.get(att_id) == RECEIPT and self.is_working(att_id):
+            holding = self.completions.get(att_id) == RECEIPT and self.is_working(att_id)
+            if holding and not addresses(str(att.get("name") or ""), messages):
                 self.queue.hold(att_id, messages)
                 await self._announce(conv_id, att_id, self.phase(att_id))
                 return False
             await deliver(messages)
-            # A receipt harness arms on its own began, never on the paste.
+            self.queue.release(att_id, messages)
             if self.completions.get(att_id) != RECEIPT:
                 await self.started(conv_id, att_id, owner)
             return True

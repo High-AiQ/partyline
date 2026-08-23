@@ -21,3 +21,13 @@ def mentioned_names(body: str) -> set[str]:
         names.add(found.rstrip(".-_").lower())
     names.discard("")
     return names
+
+
+def addresses(name: str, messages: list[dict]) -> bool:
+    """Whether any message in the batch @mentions this handle or @all."""
+    handle = name.lower()
+    for message in messages:
+        names = mentioned_names(str(message.get("body") or ""))
+        if "all" in names or handle in names:
+            return True
+    return False
