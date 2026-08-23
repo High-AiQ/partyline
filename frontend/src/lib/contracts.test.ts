@@ -84,6 +84,7 @@ describe("wire events with server-omitted null fields", () => {
     });
     if (event.type !== "attachment") throw new Error("expected attachment event");
     expect(event.attachment.cli_session).toBeNull();
+    expect(event.attachment.cwd_git).toBeNull();
   });
 
   it("reads an unarchived conversation without archived_at as archived_at null", () => {
@@ -114,10 +115,12 @@ describe("wire events with server-omitted null fields", () => {
         last_seen: 4,
         created_at: 1754700000,
         cli_session: null,
+        cwd_git: { sha: "d87b3ae", dirty: true },
       },
     });
     if (event.type !== "attachment") throw new Error("expected attachment event");
     expect(event.attachment.cli_session).toBeNull();
+    expect(event.attachment.cwd_git).toEqual({ sha: "d87b3ae", dirty: true });
   });
 });
 

@@ -97,6 +97,17 @@
     {/if}
   </div>
 
+  {#if attachment.cwd_git}
+    <div
+      class="git-state"
+      class:dirty={attachment.cwd_git.dirty}
+      title="{attachment.cwd} · git {attachment.cwd_git.sha} · {attachment.cwd_git.dirty
+        ? 'dirty working tree'
+        : 'clean working tree'}"
+    >
+      git {attachment.cwd_git.sha} · {attachment.cwd_git.dirty ? "dirty" : "clean"}
+    </div>
+  {/if}
   <div class="cmd" title={attachment.cwd}>{attachment.command.join(" ")} · {attachment.status}</div>
 
   {#if live}
@@ -169,10 +180,19 @@
   .cmd {
     color: var(--color-cream-faint);
     font-size: 10.5px;
-    margin-top: 4px;
+    margin-top: 2px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .git-state {
+    color: var(--color-green);
+    font-size: 9.5px;
+    letter-spacing: 0.03em;
+    margin-top: 4px;
+  }
+  .git-state.dirty {
+    color: var(--color-copper-hot);
   }
   .x {
     position: absolute;

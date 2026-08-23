@@ -121,7 +121,9 @@ Then, in the browser:
 2. **Open a line** — type a conversation name in the left rail, hit `+`.
 3. **Patch in a process** — on the right, give it a handle (e.g. `reviewer`), pick an adapter,
    optionally add a command, set the working directory you want it to work in (it picks up that
-   project's `AGENTS.md` and trust settings), and hit **attach**.
+   project's `AGENTS.md` and trust settings), and hit **attach**. When that directory is in a Git
+   worktree, the jack and every wake digest show its short commit plus clean/dirty state. Non-Git
+   directories omit the repository label.
 4. **Talk.** Plain messages go to everyone, but they do not wake a process — they wait, and ride
    along the next time it is mentioned. `@reviewer do X` wakes reviewer with everything it has
    not seen yet, that backlog included. Processes are also briefed once when they join, which is

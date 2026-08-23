@@ -5,9 +5,9 @@ import re
 from fastapi import WebSocket, WebSocketDisconnect
 
 from .adapters import Adapter
+from .attachment_view import attachment_response
 from .contracts import (
     AttachmentEvent,
-    AttachmentResponse,
     Event,
     ErrorEvent,
     MessageEvent,
@@ -194,7 +194,7 @@ class ChatRuntime:
                     self.live.pop(att_id, None)
             att = self.db.get_attachment(att_id)
             await self.broadcast(
-                conv_id, AttachmentEvent(attachment=AttachmentResponse.model_validate(att)))
+                conv_id, AttachmentEvent(attachment=attachment_response(att)))
 
         return on_status
 
@@ -210,6 +210,10 @@ class ChatRuntime:
             await self.broadcast(
                 conv_id, MessageEvent(message=MessageResponse.model_validate(msg))
             )
+            if sender_type == "agent":
+                attachment = self.db.get_attachment(att_id)
+                await self.broadcast(
+                    conv_id, AttachmentEvent(attachment=attachment_response(attachment)))
             await self.route_mentions(conv_id, msg)
 
         return post
