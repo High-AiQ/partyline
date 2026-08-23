@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from partyline.transcript_delivery import TranscriptDeliveryRecord
 from partyline.adapters.bundled.grok.resume import (
     announce_backlog,
     delivery_plan_matches,
@@ -73,9 +74,32 @@ async def tail_grok_transcript(adapter, path: Path, handle) -> None:
                     # New speech proves the restore finished.
                     adapter._resume_swap_pending = False
                     adapter._restoring_to = None
-                    adapter._assistant_fingerprints.append(adapter._fingerprint(line))
+                    record_fingerprint = adapter._fingerprint(line)
+                    adapter._assistant_fingerprints.append(record_fingerprint)
+                    body = adapter._assistant_text(record)
+                    backlog_record = adapter._backlog_to_record > 0 and body is not None
                     await announce_backlog(adapter)
-                    await handle(record)
+                    if backlog_record and adapter._post_resume_record is not None:
+                        # Hatch history is visible but route-inert: old @mentions
+                        # are historical text, not fresh commands to other jacks.
+                        await adapter._post_resume_record(
+                            adapter.att["name"], "agent", body
+                        )
+                    else:
+                        await handle(record)
+                    if backlog_record:
+                        persisted = True
+                        if adapter._mark_transcript_delivery is not None:
+                            persisted = adapter._mark_transcript_delivery(
+                                record_fingerprint, body
+                            )
+                        if persisted:
+                            adapter._delivered_transcript_records.append(
+                                TranscriptDeliveryRecord(record_fingerprint, body)
+                            )
+                        adapter._backlog_to_record -= 1
+                    elif body is not None and adapter._delivered_bodies is not None:
+                        adapter._delivered_bodies.append(body)
         except OSError:
             if not adapter.alive():
                 return
@@ -126,7 +150,7 @@ async def resync_after_replace(adapter, path: Path) -> None:
             adapter._refused_resync = True
             await adapter.post(
                 "system", "system",
-                f"@{adapter.att['name']}: the Grok transcript was replaced and has not "
+                f"{adapter.att['name']}: the Grok transcript was replaced and has not "
                 "settled; holding position and retrying rather than replaying history",
             )
         return

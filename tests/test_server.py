@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from partyline import auth_store, auth_tokens, bind, frontend_build, server
 from partyline.auth_guard import Principal
+from partyline.attachment_resume import TranscriptDeliveryRecord, delivered_history
 from partyline.db import Db
 from partyline.hook_routes import handle_hook
 from partyline.presence import Presence
@@ -540,6 +541,24 @@ class ServerTest(unittest.TestCase):
                 )
             )
         git.assert_not_called()
+
+    def test_resume_hatch_speech_is_visible_but_does_not_route_old_mentions(self):
+        self.add_attachment("old", "grok", status="exited")
+        self.add_attachment("target", "sol")
+        target = FakeAdapter()
+        server.runtime.live["target"] = target
+        self.arun(server.resume_attachment("old"))
+        resumed = server.runtime.live["old"]
+        historical = "@sol do an obsolete task"
+
+        self.arun(resumed.att["post_resume_record"]("grok", "agent", historical))
+        self.assertEqual(target.deliveries, [])
+        self.assertEqual(server.runtime.db.list_messages("line")[-1]["body"], historical)
+
+        self.arun(server.runtime.post_callback(
+            "old", "line", resumed.att["runtime_owner"]
+        )("grok", "agent", historical))
+        self.assertEqual(target.deliveries[-1][-1]["body"], historical)
 
     def test_replacement_cannot_cross_owner_validation_before_pty_delivery(self):
         server.runtime.db.add_attachment(
@@ -1116,6 +1135,14 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(resumed["status"], "running")
         adapter = server.runtime.live["old"]
         self.assertEqual(adapter.att["delivered_bodies"], ["already delivered"])
+        server.runtime.db.add_owned_message(
+            "old", adapter.att["runtime_owner"], "line", "terra", "agent", "late relay"
+        )
+        self.assertTrue(adapter.att["mark_transcript_delivery"](b"fingerprint", "late relay"))
+        history = delivered_history(server.runtime.db, server.runtime.db.get_attachment("old"))
+        self.assertEqual(history.transcript_records, [
+            TranscriptDeliveryRecord(b"fingerprint", "late relay")
+        ])
         self.assertEqual(self.arun(server.attachment_screen("old")), {"screen": "screen"})
         self.assertEqual(self.arun(server.attachment_key("old", server.KeyIn(key="x"))), {"ok": True})
         self.assertEqual(adapter.keys, ["x"])

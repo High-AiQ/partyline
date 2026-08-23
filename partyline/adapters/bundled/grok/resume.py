@@ -18,6 +18,7 @@ import os
 from pathlib import Path
 from typing import TypeVar
 
+from .markers import match_marked_records, unsafe_resume_backlog
 from .transcript import AssistantRecord
 
 MAX_ANCHOR = 64
@@ -79,6 +80,7 @@ async def settled_scan(adapter, path: Path, scan: Callable[[Path], Scan | None])
 
 async def align_delivery_history(adapter, path: Path) -> bool:
     """Replace a file ordinal with Partyline's occurrence-aware boundary."""
+    adapter._backlog_to_record = 0
     snapshot = await settled_snapshot(adapter, path, adapter._assistant_records)
     if snapshot is None or not snapshot[0]:
         return False
@@ -102,17 +104,44 @@ async def align_delivery_history(adapter, path: Path) -> bool:
             adapter._refused_resync = True
             await adapter.post(
                 "system", "system",
-                f"@{adapter.att['name']}: {exc}; skipped restored history to avoid "
+                f"{adapter.att['name']}: {exc}; skipped restored history to avoid "
                 "replay, but new speech will still relay",
             )
         return True
+    skip = set(aligned.skip)
+    marked = match_marked_records(
+        records, skip, adapter._delivered_transcript_records,
+        adapter._legacy_relayed_bodies,
+    )
+    skip.update(marked)
+    backlog = max(0, aligned.backlog - len(marked))
+    if unsafe_resume_backlog(backlog, len(records)):
+        # A small hatch repairs muted speech. A large one is evidence that the
+        # mutable transcript no longer aligns; replaying it can execute hours
+        # of old mentions as new instructions. Refuse and tail only appends.
+        adapter._accounted = len(records)
+        adapter._delivery_skip.clear()
+        adapter._pending_backlog = 0
+        adapter._backlog_to_record = 0
+        adapter._delivery_plan = (
+            identity, tuple(record.fingerprint for record in records)
+        )
+        if not adapter._refused_resync:
+            adapter._refused_resync = True
+            await adapter.post(
+                "system", "system",
+                f"{adapter.att['name']}: resume backlog of {backlog} looks like "
+                "misaligned history — skipped; new speech will relay",
+            )
+        return True
     adapter._accounted = 0
-    adapter._delivery_skip = set(aligned.skip)
+    adapter._delivery_skip = skip
     adapter._delivery_plan = (
         identity, tuple(record.fingerprint for record in records)
     )
     adapter._refused_resync = False
-    adapter._pending_backlog = aligned.backlog
+    adapter._pending_backlog = backlog
+    adapter._backlog_to_record = adapter._pending_backlog
     return True
 
 
@@ -139,7 +168,7 @@ async def announce_backlog(adapter) -> None:
         return  # nothing was held back; a notice would be noise
     await adapter.post(
         "system", "system",
-        f"@{adapter.att['name']}: relaying {backlog} message(s) that never "
+        f"{adapter.att['name']}: relaying {backlog} message(s) that never "
         "reached this line before now — they may answer an older state of it",
     )
 

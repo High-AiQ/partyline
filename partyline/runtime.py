@@ -203,9 +203,7 @@ class ChatRuntime:
 
         return on_status
 
-    def post_callback(
-        self, att_id: str, conv_id: str, runtime_owner: str
-    ):
+    def post_callback(self, att_id: str, conv_id: str, runtime_owner: str, *, route: bool = True):
         async def post(sender: str, sender_type: str, body: str):
             msg = self.db.add_owned_message(
                 att_id, runtime_owner, conv_id, sender, sender_type, body
@@ -215,7 +213,8 @@ class ChatRuntime:
             await self.broadcast(
                 conv_id, MessageEvent(message=MessageResponse.model_validate(msg))
             )
-            await self.route_mentions(conv_id, msg)
+            if route:
+                await self.route_mentions(conv_id, msg)
 
         return post
 
