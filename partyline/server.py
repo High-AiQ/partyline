@@ -447,14 +447,11 @@ async def attach(conv_id: str, body: AttachIn):
     att["digest_rider"] = lambda: tasks.rider(conv_id)
     if update_argv:
         await apply_update(runtime.post_message, conv_id, body.name, update_argv)
-
     adapter = make_adapter(
-        body.adapter,
-        att,
+        body.adapter, att,
         presence.posting(conv_id, att_id, runtime.post_callback(att_id, conv_id, runtime_owner)),
         presence.statusing(
-            conv_id, att_id, runtime.status_callback(att_id, conv_id, runtime_owner), att.get("name", "")
-        ),
+            conv_id, att_id, runtime.status_callback(att_id, conv_id, runtime_owner), body.name),
         on_cli_session=lambda s: runtime.db.set_cli_session(att_id, s, runtime_owner),
     )
     try:
@@ -462,19 +459,9 @@ async def attach(conv_id: str, body: AttachIn):
     except Exception as exc:
         await runtime.db.set_attachment_status_async(att_id, "exited", runtime_owner)
         raise HTTPException(500, f"failed to spawn: {exc}") from exc
-    async def flush_held() -> bool:
-        current = runtime.db.get_attachment(att_id)
-        live = runtime.live.get(att_id)
-        return bool(current and live and await runtime.deliver_pending(conv_id, current, live))
-
-    def pending_count() -> int:
-        current = runtime.db.get_attachment(att_id)
-        if current is None:
-            return 0
-        return len(runtime.db.messages_after(conv_id, current["last_seen"], exclude_sender=body.name))
-
     runtime.live[att_id] = presence.watch(
-        adapter, conv_id, att_id, adapter_completion(body.adapter), flush_held, pending_count
+        adapter, conv_id, att_id, adapter_completion(body.adapter),
+        *runtime.held_wake_hooks(conv_id, att_id, body.name),
     )
 
     await runtime.post_message(
