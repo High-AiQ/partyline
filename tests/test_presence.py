@@ -610,7 +610,7 @@ class TurnIdleQueueTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(presence.is_working("att"))
         self.assertEqual(presence.queue.held_count("att"), 0)
         self.assertEqual(len(posted), 1)
-        self.assertIn("⚠ @composer exited with 2 held mentions undelivered", posted[0][2])
+        self.assertEqual(posted[0][2], "⚠ composer exited with 2 held mentions undelivered")
 
 
 if __name__ == "__main__":

@@ -97,7 +97,7 @@ class PartylineAdapter(Adapter):
                 await self.post(
                     "system",
                     "system",
-                    f"@{self.att['name']}: transcript rewritten beyond recognition — "
+                    f"{self.att['name']}: transcript rewritten beyond recognition — "
                     "re-anchoring positionally",
                 )
                 return resync_positional(path, seen_fps), 0
@@ -207,7 +207,7 @@ class PartylineAdapter(Adapter):
                     await self.post(
                         "system",
                         "system",
-                        f"@{self.att['name']}: no Cursor session appeared after "
+                        f"{self.att['name']}: no Cursor session appeared after "
                         f"{int(self.DISCOVERY_TIMEOUT)}s — run `agent` manually once in "
                         f"{self.att['cwd']}, then re-attach.",
                     )

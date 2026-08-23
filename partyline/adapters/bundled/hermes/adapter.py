@@ -183,7 +183,7 @@ class PartylineAdapter(Adapter):
             if self._db is None:
                 await self.post(
                     "system", "system",
-                    f"@{self.att['name']} could not open the Hermes session store read-only",
+                    f"{self.att['name']} could not open the Hermes session store read-only",
                 )
                 return
 
@@ -209,7 +209,7 @@ class PartylineAdapter(Adapter):
                 if self._session_id is None:
                     await self.post(
                         "system", "system",
-                        f"@{self.att['name']}: no Hermes session appeared after "
+                        f"{self.att['name']}: no Hermes session appeared after "
                         f"{int(self.DISCOVERY_TIMEOUT)}s; transcript tailing stopped",
                     )
                     return

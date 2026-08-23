@@ -63,7 +63,7 @@ class PartylineAdapter(Adapter):
             elif waited > 45.0:
                 await self.post(
                     "system", "system",
-                    f"@{self.att['name']}: no transcript after 45s — the CLI is probably "
+                    f"{self.att['name']}: no transcript after 45s — the CLI is probably "
                     f"showing a first-run or trust prompt. Run `pi` manually once in "
                     f"{self.att['cwd']}, then re-attach.",
                 )

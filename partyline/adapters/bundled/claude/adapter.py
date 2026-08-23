@@ -69,7 +69,7 @@ class PartylineAdapter(BaseAdapter):
             elif waited > 45.0:
                 await self.post(
                     "system", "system",
-                    f"@{self.att['name']}: no transcript after 45s; run the CLI manually "
+                    f"{self.att['name']}: no transcript after 45s; run the CLI manually "
                     f"once in {self.att['cwd']}, then re-attach.",
                 )
                 return
