@@ -13,6 +13,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ.setdefault("PARTYLINE_DB", "/tmp/partyline-test-adapter-base.db")
 
@@ -372,6 +373,15 @@ class DigestTest(unittest.IsolatedAsyncioTestCase):
         adapter = Recorder(["cat"], digest_rider=lambda: "(open tasks: #1 review)")
         digest = adapter.format_digest([{"sender": "greg", "body": "ship it"}])
         self.assertIn("[greg]: ship it\n(open tasks: #1 review)\n(reminder:", digest)
+
+    def test_a_digest_carries_the_attached_cwd_git_identity(self):
+        adapter = Recorder(["cat"], cwd="/project")
+        with patch(
+            "partyline.adapters.briefing.cwd_git_digest",
+            return_value="(cwd git: d87b3ae dirty)",
+        ):
+            digest = adapter.format_digest([{"sender": "greg", "body": "ship it"}])
+        self.assertIn("[greg]: ship it\n(cwd git: d87b3ae dirty)\n(reminder:", digest)
 
     def test_the_rider_is_consulted_at_delivery_time_not_staged(self):
         state = {"open": ["#1 first"]}

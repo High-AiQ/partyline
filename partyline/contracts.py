@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .attachment_contracts import AttachmentResponse
 from .media_contracts import FileRef
 from .presence_contracts import PresenceState, WorkingEvent
 
@@ -101,19 +102,6 @@ class MessageResponse(BaseModel):
 class FileUploadResponse(BaseModel):
     message: MessageResponse
     files: list[FileRef]
-
-
-class AttachmentResponse(BaseModel):
-    id: str
-    conv_id: str
-    name: str
-    adapter: str
-    command: list[str]
-    cwd: str
-    status: Literal["starting", "running", "exited", "detached"]
-    last_seen: int
-    created_at: float
-    cli_session: str | None = None
 
 
 class AttachmentCommandRequest(BaseModel):

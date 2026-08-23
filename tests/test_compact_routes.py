@@ -13,7 +13,9 @@ from partyline.presence import NONE, RECEIPT, Presence
 
 class CompactRouteTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.runtime = SimpleNamespace(live={}, broadcast=AsyncMock())
+        self.runtime = SimpleNamespace(
+            live={}, broadcast=AsyncMock(), broadcast_attachment=AsyncMock()
+        )
         self.presence = Presence(self.runtime)
 
     async def test_rejects_dead_and_unsupported_attachments(self):

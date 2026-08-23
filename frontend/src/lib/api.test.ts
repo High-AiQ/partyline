@@ -39,6 +39,7 @@ const attachment: Attachment = {
   last_seen: 0,
   created_at: 1,
   cli_session: "session-1",
+  cwd_git: null,
 };
 
 const restartRequest: RestartPlanRequest = {
