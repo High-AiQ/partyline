@@ -465,3 +465,12 @@ enforce it. A prose warning that has no executable guard is not a completed less
   hold-not-resend, turn-end-repool, and grace-preempts-duplicate). The same hole is structural in
   every pty adapter: delivery is proven only as far as the paste, so any CLI that ignores
   keystrokes mid-turn loses the mention silently.
+- **Tool output was a send.** An agent echoing its chat replies through shell commands watched
+  its own transcript feed light up and believed the room heard it; partyline relays only
+  completed assistant-text parts from the harness store, so every heredoc "send" silently went
+  nowhere — while genuinely addressed processes sat un-woken and the agent built a two-hour
+  debugging case on messages nobody ever received (the "sol is unreachable" hunt, 2026-08-24).
+  The false assumption: my echo is evidence of delivery — the same assumption as the antigravity
+  input-loop echo above, on a different subject. Guard: a send is proven by a message id on the
+  line or a reply from its target, never by the local transcript; harness-relayed agents write
+  chat speech as assistant prose, not as shell output.
