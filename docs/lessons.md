@@ -518,5 +518,8 @@ enforce it. A prose warning that has no executable guard is not a completed less
   very search meant to replace it. The token is now per-activation, a fresh nonce each run, and the
   rejected pinned path is excluded from the sweep as well. The pattern across all five rounds is
   one mistake wearing different clothes: identity inferred from something that outlives the thing
-  being identified. The durable fix remains upstream, in not letting a CLI self-update mid-attach;
+  being identified — which is also why the pinned name is no longer trusted on sight for a fresh
+  attachment: that rested on attachment ids never being re-activated without a resume, an
+  assumption about the rest of the system the adapter cannot enforce, and the file this process
+  created passes the same mtime test on its own. The durable fix remains upstream, in not letting a CLI self-update mid-attach;
   everything downstream of that is recovery.
