@@ -255,6 +255,7 @@ class Presence:
             lambda: self._announce(conv_id, att_id, self.phase(att_id)),
         )
         att["confirm_delivery_ids"] = confirm_ids
+        att["on_transcript_claimed"] = lambda: self.runtime.credit_unclaimed(att_id, owner)
 
         async def delivering(messages):
             holding = self.completions.get(att_id) == RECEIPT and self.is_working(att_id)
