@@ -1,5 +1,11 @@
 # partyline
 
+| DO | DO NOT |
+| --- | --- |
+| Read `AGENTS.md` before touching anything — it is the binding contract | Skip it because the file you are editing looks small |
+| Keep every attached process a real interactive process in a pty | Substitute a headless invocation, an SDK call, or screen scraping |
+| Post assistant speech from structured transcripts | Turn terminal screen contents into chat messages |
+
 *Several parties. One wire. Pick up.*
 
 [![checks](https://github.com/High-AiQ/partyline/actions/workflows/checks.yml/badge.svg?branch=main&event=push)](https://github.com/High-AiQ/partyline/actions/workflows/checks.yml)
