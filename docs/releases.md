@@ -1,5 +1,11 @@
 # Releases
 
+
+| DO | DO NOT |
+| --- | --- |
+| Let CI create tags on push to main — the tag list is the complete release record | Hand-create GitHub Releases, or let release prose drift from the code |
+| Own the version transition in exactly one commit whose type matches the change set (feat → minor, fix → patch, breaking → major) | Split a bump across commits, bump in a commit type that does not imply it, or skip the bump a change set implies |
+
 **Tags are the release record. There are no GitHub Releases.**
 
 `scripts/tag_version` runs from CI on every push to `main` and creates an
