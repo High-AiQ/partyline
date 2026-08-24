@@ -495,6 +495,15 @@ enforce it. A prose warning that has no executable guard is not a completed less
   spawn and the next attachment's. And on a resume the pinned file always exists — it is the
   session being resumed — so a dropped pin left the adapter tailing a file nobody writes: mute,
   and worse, reported ready. A pinned file now counts only if something has written it since we
-  spawned. Both remain evidence, not proof: once the updater drops the pin the new session has no
-  structural link to the old one, and the durable fix is upstream, in not letting a CLI
-  self-update mid-attach.
+  spawned. Then review broke the spawn-time scheme a second time, and the second break was the
+  useful one: a self-updating CLI opens its session *late* — possibly after an attachment that
+  started after it — so session order is not spawn order, and the attachment needing recovery most
+  is the one a spawn window excludes. The mtime allowance was unsound for a plainer reason: mtime
+  and `spawned_at` are the same host clock, so a grace period only let the previous process's last
+  write vouch for the new one. Timing was the wrong family of discriminator entirely. Sessions are
+  now claimed by content: the adapter matches a transcript against what it typed into its own pty
+  — the briefing, or for a resumed attachment its first wake — which nothing else writes, so
+  concurrent starts pair 1:1 by construction and scan order cannot change the answer. The house
+  rule it belongs to is already written here twice: choose a signal the subject cannot forge, and
+  locate by structured content rather than by inference. The durable fix remains upstream, in not
+  letting a CLI self-update mid-attach; everything downstream of that is recovery.
