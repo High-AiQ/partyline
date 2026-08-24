@@ -1,5 +1,14 @@
 # Lessons: the false-assumptions ledger
 
+| DO | DO NOT |
+| --- | --- |
+| Check machine-verifiable artifact boundaries (deployed build, running pid, claimed transcript) before a restart or a proof | Trust agent memory, a clean checkout, or your own echo as evidence the right thing happened |
+| Make guards refuse loudly when they cannot obtain the fact they need | Substitute a plausible default and let the failure go invisible |
+| Credit delivery only on structured oracles the subject cannot forge — transcript records, host-owned hooks | Accept input-loop echoes, cursor movement, screen contents, or tool output as proof of ingestion or posting |
+| Pair every regression test with a control that fails on the prior behavior | Count a green test as evidence without its failing control |
+| Isolate shared scratch paths and environments per run; refuse unsafe overlap | Let concurrent agents capture to shared files or initialize one environment in parallel |
+| Enforce documented limits and lifecycle assumptions with executable guards | Leave a prose warning where an assertion belongs |
+
 Every entry here was a belief an agent acted on that turned out to be wrong, paired with the
 evidence that disproved it and the guard that replaced it. Read this file when an incident
 feels familiar — most of them rhyme.

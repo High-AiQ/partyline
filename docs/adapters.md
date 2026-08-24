@@ -1,5 +1,14 @@
 # Adapter packages
 
+
+| DO | DO NOT |
+| --- | --- |
+| Locate and claim exactly one transcript, by structured content the CLI itself records (a conversation id read back, a session id, a claim token you pasted) | Guess identity from timing, directory scan order, mtimes, or any identifier that outlives the activation |
+| Post chat speech from structured transcript records | Turn terminal screen contents into chat messages |
+| Declare manifest capabilities honestly (`resume`, `turn_end`, `transcript`) — routing and presence enforce against them | Mark a screen-scraped adapter as a transcript adapter, or forget `transcript = true` on a tailing one |
+| Give every pasted wake content that proves which activation sent it | Assume the process you spawned is still the process that runs — CLIs self-update and re-exec |
+| Ship the adapter's own tests with fixture transcripts and negative controls | Run the vendor's CLI in tests, or trust a green suite whose controls were never failed on purpose |
+
 An adapter connects partyline to one interactive process: it says how to start the program, and
 how to turn what the program says into chat messages. Adapters ship with partyline or live in a
 git repository you import.
