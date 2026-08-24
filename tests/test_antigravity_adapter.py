@@ -608,6 +608,92 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         await adapter._note_user_input(digest, None)
         self.assertEqual(adapter._outstanding, [])
 
+    async def test_a_mid_turn_paste_is_not_credited_by_its_own_log_echo(self):
+        """Regression 2026-08-24: two @gemini-flash mentions pasted mid-turn
+        were credited by the HandleUserInput echo — which is the paste itself
+        bounced back — and never retried, while agy had dropped them. An echo
+        may only settle a wake that was pasted while the CLI was idle."""
+        adapter = self.make()
+        adapter.proc = Process()
+        adapter._turn_open = True
+        sent = []
+        adapter.send_keys = AsyncMock(side_effect=lambda text: sent.append(text))
+        await adapter.deliver([{"sender": "greg", "body": "busy wake"}])
+        digest = adapter.format_digest([{"sender": "greg", "body": "busy wake"}])
+        await adapter._note_log_line(glog_submission(digest, adapter._outstanding[0][1] + 5))
+        self.assertEqual([wake[0] for wake in adapter._outstanding], [digest])
+        self.assertEqual(sent, [digest])  # no blind resend into the busy TUI
+        self.assertEqual(self.messages, [])
+
+    async def test_a_transcript_input_verifies_a_mid_turn_wake(self):
+        adapter = self.make()
+        adapter.proc = Process()
+        adapter._turn_open = True
+        adapter.send_keys = AsyncMock()
+        await adapter.deliver([{"sender": "greg", "body": "queued wake"}])
+        digest = adapter.format_digest([{"sender": "greg", "body": "queued wake"}])
+        await adapter._note_user_input(
+            "<USER_REQUEST>\n" + digest + "\n</USER_REQUEST>", later(adapter._outstanding[0][1])
+        )
+        self.assertEqual(adapter._outstanding, [])
+
+    async def test_a_transcript_input_without_the_digest_holds_a_mid_turn_wake(self):
+        """A transcript record that skips a mid-turn wake proves it was
+        dropped, but resending into a busy TUI feeds the same bit bucket:
+        the wake holds for the turn-end settlement instead."""
+        adapter = self.make()
+        adapter.proc = Process()
+        adapter._turn_open = True
+        sent = []
+        adapter.send_keys = AsyncMock(side_effect=lambda text: sent.append(text))
+        await adapter.deliver([{"id": 7, "sender": "greg", "body": "held wake"}])
+        digest = adapter.format_digest([{"sender": "greg", "body": "held wake"}])
+        await adapter._note_user_input(
+            "<USER_REQUEST>\n/some other command\n</USER_REQUEST>", later(adapter._outstanding[0][1])
+        )
+        self.assertEqual(sent, [digest])  # only the original paste
+        self.assertEqual([wake[0] for wake in adapter._outstanding], [digest])
+
+    async def test_turn_end_repools_a_mid_turn_wake_that_never_began_a_turn(self):
+        adapter = self.make()
+        adapter.proc = Process()
+        adapter._turn_open = True
+        adapter.att["repool_message_ids"] = AsyncMock(return_value=True)
+        adapter.send_keys = AsyncMock()
+        await adapter.deliver([{"id": 9, "sender": "greg", "body": "lost wake"}])
+        with patch(
+            "partyline.adapters.bundled.antigravity.wakes.asyncio.sleep", new=AsyncMock()
+        ):
+            await adapter._settle_turn_end()
+        adapter.att["repool_message_ids"].assert_awaited_once_with([9])
+        self.assertEqual(adapter._outstanding, [])
+        self.assertTrue(any("never began a turn" in body for _, _, body in self.messages))
+
+    async def test_turn_end_grace_lets_a_queued_ingestion_land_first(self):
+        """A mid-turn submission can be queued by the CLI and ingested right
+        after the turn ends; its USER_INPUT lands during the grace and must
+        preempt the repool, or the wake would be delivered twice."""
+        adapter = self.make()
+        adapter.proc = Process()
+        adapter._turn_open = True
+        adapter.att["repool_message_ids"] = AsyncMock(return_value=True)
+        adapter.send_keys = AsyncMock()
+        await adapter.deliver([{"id": 11, "sender": "greg", "body": "maybe queued"}])
+        digest = adapter.format_digest([{"sender": "greg", "body": "maybe queued"}])
+
+        async def land_record_during_grace(_seconds):
+            await adapter._note_user_input(
+                "<USER_REQUEST>\n" + digest + "\n</USER_REQUEST>", later(time.time())
+            )
+
+        with patch(
+            "partyline.adapters.bundled.antigravity.wakes.asyncio.sleep",
+            new=land_record_during_grace,
+        ):
+            await adapter._settle_turn_end()
+        adapter.att["repool_message_ids"].assert_not_awaited()
+        self.assertEqual(adapter._outstanding, [])
+
     async def test_stage_startup_delivery_rejects_a_blank_digest(self):
         resumed = self.make(resume=True, cli_session=CONV_ID)
         resumed.format_digest = lambda messages: "   "
