@@ -15,6 +15,11 @@ from partyline.adapters.compaction import is_compaction_record
 # margin is for permission-mode and snapshot preamble.
 PREAMBLE_RECORDS = 20
 
+# The CLI stamps its own records, so its clock and ours can disagree a little.
+# The adoption floor never reaches back past an earlier attachment's spawn, so
+# this allowance cannot cross an ownership boundary.
+CLOCK_SKEW = 5.0
+
 
 def _stamp(iso_ts) -> float | None:
     """When a record was written, or None if it carries no usable stamp."""
@@ -27,24 +32,25 @@ def _stamp(iso_ts) -> float | None:
 class PartylineAdapter(BaseAdapter):
     kind = "claude"
 
-    # Session ids partyline pinned for live attachments, and transcripts a
-    # live attachment has adopted. Both keep one adapter's discovery from
-    # latching onto another's transcript and reposting its speech under the
-    # wrong handle.
-    _PINNED: set[str] = set()
+    # When each live attachment spawned, and which transcripts they have
+    # adopted. Together they keep one adapter's discovery from latching onto
+    # another's session and reposting its speech under the wrong handle.
+    _LIVE: dict[str, float] = {}
     _CLAIMED: set[str] = set()
+    _DISCOVERY = asyncio.Lock()
 
     _transcript: str = ""
 
+    async def start(self):
+        await super().start()
+        self._LIVE[self.att["id"]] = self.spawned_at
+
     async def stop(self):
-        self._PINNED.discard(self.att["id"])
+        self._LIVE.pop(self.att["id"], None)
         self._CLAIMED.discard(self._transcript)
         await super().stop()
 
     def build_command(self) -> list[str]:
-        # Reserved before the process exists: a neighbour attachment starting
-        # in the same second must not adopt the session this one pinned.
-        self._PINNED.add(self.att["id"])
         cmd = list(self.att["command"]) or ["claude"]
         if self.resume:
             cmd += ["--resume", self.att["id"]]
@@ -75,18 +81,39 @@ class PartylineAdapter(BaseAdapter):
     def transcript_glob(self) -> str:
         return os.path.expanduser(f"~/.claude/projects/*/{self.att['id']}.jsonl")
 
-    def _adoptable(self, path: str) -> bool:
-        """Whether an unpinned transcript is this process's own session.
+    def _pinned_is_ours(self, path: str) -> bool:
+        """Whether the pinned transcript belongs to the process we spawned.
 
-        Two properties identify it and exclude every neighbour: the records
-        name our working directory, and the session's first stamped record
-        was written after we spawned. A CLI the user runs by hand in the same
-        directory fails the second test on its own history, and another
-        attachment's session fails the ``_PINNED`` check before we look.
+        A fresh attachment's pinned name is its own attachment id, so the
+        file can only exist because this process created it. A resume pins a
+        session file that already exists — it is the session being resumed —
+        so its presence proves nothing: a CLI that re-execed without
+        ``--resume`` opened a fresh session and left this one untouched, and
+        tailing it would follow a file nobody writes, mute but reported
+        ready. Only a write since our spawn tells the two apart.
+
+        This is evidence, not proof. Once the updater drops the pin the new
+        session has no structural link to the old one, and nothing in the
+        transcript can restore it; the durable fix is upstream, in not
+        letting a CLI self-update mid-attach.
+        """
+        if not self.resume:
+            return True
+        try:
+            return os.path.getmtime(path) >= self.spawned_at - CLOCK_SKEW
+        except OSError:
+            return False
+
+    def _session_start(self, path: str) -> float | None:
+        """When this transcript's session opened, or None if it is not ours.
+
+        Ours names our working directory. Its first stamped record dates the
+        session; a file still holding only unstamped preamble was created
+        just now, so its mtime dates it instead.
         """
         stem = os.path.splitext(os.path.basename(path))[0]
-        if stem in self._PINNED and stem != self.att["id"]:
-            return False
+        if stem in self._LIVE and stem != self.att["id"]:
+            return None
         cwd_seen = False
         try:
             with open(path, encoding="utf-8", errors="replace") as file:
@@ -100,13 +127,33 @@ class PartylineAdapter(BaseAdapter):
                         continue
                     if cwd := record.get("cwd"):
                         if cwd != self.att["cwd"]:
-                            return False
+                            return None
                         cwd_seen = True
                     if (stamp := _stamp(record.get("timestamp"))) is not None:
-                        return cwd_seen and stamp >= self.spawned_at - 5
+                        return stamp if cwd_seen else None
+            return os.path.getmtime(path) if cwd_seen else None
         except OSError:
-            return False
-        return False
+            return None
+
+    def _adoption_window(self) -> tuple[float, float]:
+        """The span of session start times this attachment may claim.
+
+        Sessions are told apart by when they opened. Ours cannot predate our
+        spawn, and it cannot postdate the spawn of an attachment started
+        after us — that later session belongs to that attachment. Without the
+        upper bound, two CLIs started seconds apart in one directory adopt
+        each other's transcripts and speak under each other's names, with
+        claim order deciding which (found reviewing #124). The floor never
+        reaches back past an attachment that started before us, so the skew
+        allowance is dropped entirely once an attachment started before us:
+        a session opened between their spawn and ours is theirs, and reaching
+        back for it by a few seconds is exactly the swap being prevented.
+        """
+        others = [at for ident, at in self._LIVE.items() if ident != self.att["id"]]
+        earlier = [at for at in others if at <= self.spawned_at]
+        later = [at for at in others if at > self.spawned_at]
+        floor = self.spawned_at if earlier else self.spawned_at - CLOCK_SKEW
+        return floor, min(later) if later else float("inf")
 
     def _find_transcript(self) -> str | None:
         """The pinned transcript, or the session the CLI actually opened.
@@ -115,22 +162,38 @@ class PartylineAdapter(BaseAdapter):
         known before the CLI writes it — but the process partyline spawns is
         not always the process that runs. A ``claude update`` at attach makes
         the CLI re-exec itself with a normalized argv, dropping the pin and
-        opening a randomly-named session instead; the pinned glob then never
-        matches anything (2026-08-24: opus attached this way and could not
-        speak for 42 minutes). Adoption by cwd and spawn time recovers the
-        session the CLI chose, whatever it ended up called.
+        opening a randomly-named session instead (2026-08-24: opus attached
+        this way and could not speak for 42 minutes). Adoption by working
+        directory and session start recovers the session the CLI chose,
+        whatever it ended up called.
         """
         if hits := glob.glob(self.transcript_glob()):
-            self._transcript = hits[0]
-            return hits[0]
+            if self._pinned_is_ours(hits[0]):
+                self._transcript = hits[0]
+                return hits[0]
+        floor, ceiling = self._adoption_window()
         unpinned = glob.glob(os.path.expanduser("~/.claude/projects/*/*.jsonl"))
-        for path in sorted(unpinned, key=os.path.getmtime, reverse=True):
-            if path in self._CLAIMED or not self._adoptable(path):
-                continue
+        started = {path: self._session_start(path) for path in unpinned
+                   if path not in self._CLAIMED}
+        eligible = {path: at for path, at in started.items()
+                    if at is not None and floor <= at < ceiling}
+        # Earliest first: the session nearest our own spawn is ours.
+        for path in sorted(eligible, key=lambda path: eligible[path]):
             self._CLAIMED.add(path)
             self._transcript = path
             return path
         return None
+
+    async def _discover(self) -> str | None:
+        """Resolve this attachment's transcript, one adapter at a time.
+
+        The adoption window already decides ownership by spawn order rather
+        than by who claims first, so this lock is belt to that brace: it
+        matches the codex adapter's discipline and removes the interleaving
+        entirely rather than reasoning about it.
+        """
+        async with self._DISCOVERY:
+            return self._find_transcript()
 
     async def _await_transcript(self) -> str | None:
         """Poll until this process's transcript appears, or the CLI dies.
@@ -146,7 +209,7 @@ class PartylineAdapter(BaseAdapter):
         while self.alive():
             await asyncio.sleep(1.0)
             waited += 1.0
-            if path := self._find_transcript():
+            if path := await self._discover():
                 if warned:
                     await self.post(
                         "system", "system",
