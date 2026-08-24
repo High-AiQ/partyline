@@ -1,5 +1,13 @@
 # Frontend: contracts and conventions
 
+
+| DO | DO NOT |
+| --- | --- |
+| Run `npm run verify` before every frontend commit, and commit the rebuilt `partyline/static/` bundle with the source | Ship UI source whose bundle matches nothing, or a bundle without its source |
+| Keep rules in `src/lib/` (pure, unit-tested), state in runes stores, looks in components | Bury business logic inside components where no test can reach it |
+| Treat `static/build.json` as frontend-bundle identity only; release semver lives in `partyline/__init__.py` | Use either file as the other's source of truth |
+| Let Prettier own formatting; hand-wrap Python by the repository convention | Enforce an autoformatter on hand-wrapped Python or argue style through ESLint |
+
 The client is a Svelte 5 app built by Vite into `partyline/static/`, which the server serves:
 `/` is `index.html` and `/assets/*` is mounted `StaticFiles`. AGENTS.md carries the musts
 (`npm run verify`, rebuild before committing UI changes); this file is the depth behind them.
