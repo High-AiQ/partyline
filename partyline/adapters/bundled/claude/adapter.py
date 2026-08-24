@@ -100,21 +100,27 @@ class PartylineAdapter(BaseAdapter):
     def _pinned_is_ours(self, path: str) -> bool:
         """Whether the pinned transcript belongs to the process we spawned.
 
-        A fresh attachment's pinned name is its own attachment id, so the
-        file can only exist because this process created it. A resume pins a
-        session file that already exists — it is the session being resumed —
-        so its presence proves nothing: a CLI that re-execed without
-        ``--resume`` opened a fresh session and left this one untouched, and
-        tailing it would follow a file nobody writes, mute but reported
-        ready.
+        A resume pins a session file that already exists — it is the session
+        being resumed — so its presence proves nothing: a CLI that re-execed
+        without ``--resume`` opened a fresh session and left this one
+        untouched, and tailing it would follow a file nobody writes, mute but
+        reported ready. Only a write at or after our spawn tells the two
+        apart.
 
-        Only a write at or after our spawn tells the two apart, and the
-        comparison takes no allowance: the file's mtime and ``spawned_at``
-        are both this host's clock, so a second of slack buys nothing and
-        admits the previous process's last write as proof of the new one.
+        The same test is applied to a fresh attachment rather than trusting
+        that its pinned name can only exist because this process made it.
+        That held only while attachment ids were never re-activated without
+        a resume, which is an assumption about the rest of the system this
+        adapter has no way to enforce — and every round of review here has
+        found identity inferred from something outliving the thing being
+        identified. A file this process created passes on its own mtime, so
+        the assumption costs nothing to drop.
+
+        The comparison takes no allowance: the file's mtime and
+        ``spawned_at`` are both this host's clock, so a second of slack buys
+        nothing and admits the previous process's last write as proof of the
+        new one.
         """
-        if not self.resume:
-            return True
         try:
             return os.path.getmtime(path) >= self.spawned_at
         except OSError:

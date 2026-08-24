@@ -563,12 +563,29 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
         with self.searching():
             self.assertEqual(adapter._find_transcript(), pinned)
 
-    def test_a_fresh_attachment_trusts_its_own_pinned_name(self):
+    def test_a_fresh_attachment_takes_its_own_pinned_transcript(self):
         adapter = self.make_adapter()
         pinned = self.write_session("attachment-1")
+        os.utime(pinned, (adapter.spawned_at + 2, adapter.spawned_at + 2))
 
         with self.searching():
             self.assertEqual(adapter._find_transcript(), pinned)
+
+    def test_a_fresh_attachment_does_not_inherit_a_leftover_pinned_file(self):
+        """The pinned name is only ours if this process wrote it.
+
+        Trusting it on sight held only while attachment ids were never
+        re-activated without a resume — an assumption about the rest of the
+        system that this adapter cannot enforce.
+        """
+        previous = self.make_adapter()
+        adapter = self.make_adapter()
+        leftover = self.write_session("attachment-1", pasted=previous._claim_token)
+        os.utime(leftover, (adapter.spawned_at - 1, adapter.spawned_at - 1))
+        fresh = self.write_session("random-id", pasted=adapter._claim_token)
+
+        with self.searching():
+            self.assertEqual(adapter._find_transcript(), fresh)
 
     def test_an_adopted_transcript_is_claimed_against_a_second_adapter(self):
         first = self.make_adapter()
