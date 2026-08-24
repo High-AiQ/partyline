@@ -1,7 +1,11 @@
 """Vendor-free contract tests for the Claude Code adapter."""
 
+import contextlib
 import json
+import shutil
+import tempfile
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -186,8 +190,11 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
         posts: list[tuple[str, str, str]] = []
         adapter = self.make_adapter(posts)
         adapter.resume = False
-        adapter.alive = lambda: True
         adapter.master = 1
+        # The CLI outlives the 45s mark by a long way, then exits. Without a
+        # bound the search would now run for as long as it is alive.
+        polls = iter(range(200))
+        adapter.alive = lambda: next(polls, None) is not None
 
         with (
             patch("partyline.adapters.bundled.claude.adapter.asyncio.sleep", AsyncMock()),
@@ -199,6 +206,53 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(posts[0][2].startswith("claude: no transcript after 45s"))
 
+    async def test_timeout_warns_once_and_keeps_watching(self):
+        """The 45s mark is a warning, not a verdict.
+
+        Returning here left the attachment live, mentionable, and mute: its
+        cursor still advanced while nothing it said could reach the line.
+        """
+        posts: list[tuple[str, str, str]] = []
+        adapter = self.make_adapter(posts)
+        adapter.resume = False
+        adapter.master = 1
+        adapter._fresh = lambda timestamp: True
+        polls = iter(range(300))
+        adapter.alive = lambda: next(polls, None) is not None
+
+        # Empty until well past the old give-up point, then the CLI finally
+        # writes the transcript under the pinned name.
+        pinned_polls = 0
+
+        def fake_glob(pattern):
+            nonlocal pinned_polls
+            if "attachment-1" not in pattern:
+                return []
+            pinned_polls += 1
+            return ["late.jsonl"] if pinned_polls > 60 else []
+
+        async def fake_tail(path, handle):
+            self.assertEqual(path, "late.jsonl")
+
+        adapter._tail_jsonl = fake_tail
+        with (
+            patch("partyline.adapters.bundled.claude.adapter.asyncio.sleep", AsyncMock()),
+            patch("partyline.adapters.bundled.claude.adapter.glob.glob", side_effect=fake_glob),
+            patch("partyline.adapters.bundled.claude.adapter.os.write"),
+            patch.object(adapter, "send_keys", AsyncMock()),
+        ):
+            await adapter._run()
+
+        notices = [body for _, _, body in posts]
+        self.assertEqual(
+            sum(1 for body in notices if "no transcript after 45s" in body), 1,
+            "the warning must not repeat every second",
+        )
+        self.assertTrue(
+            any("the line is reachable again" in body for body in notices),
+            "recovery after a warned wait must be announced",
+        )
+
     async def test_run_retries_briefing_at_12_and_24_seconds(self):
         posts: list[tuple[str, str, str]] = []
         adapter = self.make_adapter(posts)
@@ -207,16 +261,17 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
         adapter._fresh = lambda timestamp: True
         adapter.master = 1
 
-        # Need to simulate waited hitting 12 and 24 before transcript appears
-        # We'll mock glob to return empty for first 24 calls, then found
-        call_count = 0
+        # Simulate waited hitting 12 before the transcript appears. Only the
+        # pinned pattern counts as a poll: an empty search also sweeps the
+        # unpinned sessions, and counting both would misplace the retry.
+        polls = 0
 
         def fake_glob(pattern):
-            nonlocal call_count
-            call_count += 1
-            if call_count < 13:
+            nonlocal polls
+            if "attachment-1" not in pattern:
                 return []
-            return ["found.jsonl"]
+            polls += 1
+            return [] if polls < 13 else ["found.jsonl"]
 
         async def fake_tail(path, handle):
             await handle(
@@ -247,6 +302,144 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mock_write.call_count, 1)
         self.assertGreaterEqual(mock_keys.call_count, 2)  # initial + 1 retry
         self.assertEqual(posts, [("claude", "agent", "after retry")])
+
+
+class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
+    """A CLI that self-updates at attach re-execs without the session pin.
+
+    The pinned transcript name then never appears, and before adoption the
+    adapter went mute while the attachment stayed live and mentionable.
+    """
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root, True)
+        PartylineAdapter._PINNED.clear()
+        PartylineAdapter._CLAIMED.clear()
+        self.addCleanup(PartylineAdapter._PINNED.clear)
+        self.addCleanup(PartylineAdapter._CLAIMED.clear)
+
+    @contextlib.contextmanager
+    def searching(self, pinned: str = "attachment-1.jsonl"):
+        """Point the pinned lookup and the unpinned sweep at the sandbox."""
+        with (
+            patch.object(PartylineAdapter, "transcript_glob",
+                         return_value=str(self.root / pinned)),
+            patch("partyline.adapters.bundled.claude.adapter.os.path.expanduser",
+                  return_value=str(self.root / "*.jsonl")),
+        ):
+            yield
+
+    def write_session(self, name: str, *, cwd: str, stamp: float) -> str:
+        path = self.root / f"{name}.jsonl"
+        records = [
+            {"type": "mode", "mode": "normal", "sessionId": name},
+            {"type": "user", "cwd": cwd, "sessionId": name,
+             "timestamp": datetime.fromtimestamp(stamp, UTC).isoformat().replace("+00:00", "Z")},
+        ]
+        path.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+        return str(path)
+
+    def make_adapter(self, posts: list[tuple[str, str, str]]) -> PartylineAdapter:
+        async def post(sender: str, sender_type: str, body: str) -> None:
+            posts.append((sender, sender_type, body))
+
+        async def on_status(status: str) -> None:
+            return None
+
+        adapter = PartylineAdapter(
+            {"command": ["claude"], "id": "attachment-1", "name": "claude",
+             "cwd": "/work", "resume": False},
+            post, on_status,
+        )
+        adapter.spawned_at = 1_000.0
+        adapter.resume = False
+        adapter._silent_until_wake = False
+        return adapter
+
+    def test_session_opened_after_spawn_in_our_cwd_is_adopted(self):
+        adapter = self.make_adapter([])
+        path = self.write_session("random-id", cwd="/work", stamp=1_002.0)
+
+        with self.searching():
+            self.assertEqual(adapter._find_transcript(), path)
+
+    def test_a_users_own_older_session_is_not_adopted(self):
+        """Greg running the CLI by hand in the same directory is not us."""
+        adapter = self.make_adapter([])
+        self.write_session("hand-run", cwd="/work", stamp=900.0)
+
+        with self.searching():
+            self.assertIsNone(adapter._find_transcript())
+
+    def test_a_session_in_another_directory_is_not_adopted(self):
+        adapter = self.make_adapter([])
+        self.write_session("elsewhere", cwd="/other", stamp=1_002.0)
+
+        with self.searching():
+            self.assertIsNone(adapter._find_transcript())
+
+    def test_another_attachments_pinned_session_is_never_adopted(self):
+        """Two attachments starting together must not swap transcripts."""
+        adapter = self.make_adapter([])
+        PartylineAdapter._PINNED.add("attachment-2")
+        self.write_session("attachment-2", cwd="/work", stamp=1_002.0)
+
+        with self.searching():
+            self.assertIsNone(adapter._find_transcript())
+
+    def test_an_adopted_transcript_is_claimed_against_a_second_adapter(self):
+        first, second = self.make_adapter([]), self.make_adapter([])
+        second.att = dict(second.att, id="attachment-2")
+        path = self.write_session("random-id", cwd="/work", stamp=1_002.0)
+
+        with self.searching("missing.jsonl"):
+            self.assertEqual(first._find_transcript(), path)
+            self.assertIsNone(second._find_transcript())
+
+    def test_the_pinned_transcript_still_wins_when_it_exists(self):
+        adapter = self.make_adapter([])
+        pinned = self.write_session("attachment-1", cwd="/work", stamp=1_002.0)
+        self.write_session("random-id", cwd="/work", stamp=1_003.0)
+
+        with self.searching():
+            self.assertEqual(adapter._find_transcript(), pinned)
+
+    def test_a_transcript_without_a_stamped_record_is_not_adopted(self):
+        """Garbage, truncation, and preamble-only files judge nothing."""
+        adapter = self.make_adapter([])
+        path = self.root / "half-written.jsonl"
+        path.write_text('not json\n{"type": "mode", "cwd": "/work"}\n', encoding="utf-8")
+
+        with self.searching():
+            self.assertIsNone(adapter._find_transcript())
+
+    def test_an_unreadable_transcript_is_not_adopted(self):
+        adapter = self.make_adapter([])
+        self.write_session("locked", cwd="/work", stamp=1_002.0)
+
+        with self.searching(), patch("builtins.open", side_effect=OSError):
+            self.assertIsNone(adapter._find_transcript())
+
+    async def test_stop_releases_the_pin_and_the_claim(self):
+        """A detached attachment must not hold a session another can use."""
+        adapter = self.make_adapter([])
+        path = self.write_session("random-id", cwd="/work", stamp=1_002.0)
+        with self.searching():
+            adapter._find_transcript()
+        self.assertIn(path, PartylineAdapter._CLAIMED)
+
+        await adapter.stop()
+
+        self.assertNotIn(path, PartylineAdapter._CLAIMED)
+        self.assertNotIn("attachment-1", PartylineAdapter._PINNED)
+
+    def test_build_command_reserves_the_pin_before_the_process_exists(self):
+        adapter = self.make_adapter([])
+
+        adapter.build_command()
+
+        self.assertIn("attachment-1", PartylineAdapter._PINNED)
 
 
 if __name__ == "__main__":
