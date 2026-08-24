@@ -123,16 +123,14 @@ class Adapter:
         await self.on_status("running")
 
     def mark_ready(self) -> None:
-        """Declare that this adapter has claimed its session and can be resumed safely.
-
-        Adapters call this only after their transcript/session is unambiguous and
-        ready for another process to start. A process that exits or is stopped
-        before then completes ``wait_ready()`` with ``False`` instead of leaving
-        an orchestrator waiting forever.
-        """
+        """Declare this adapter claimed its session and can be resumed; an
+        exit or stop before then completes ``wait_ready()`` with ``False``."""
         if self._ready_result is None and not self._stopping:
             self._ready_result = True
             self._ready.set()
+            on_claimed = self.att.get("on_transcript_claimed")
+            if on_claimed:
+                on_claimed()
 
     async def wait_ready(self) -> bool:
         """Wait until readiness is declared, or this adapter can never be ready."""

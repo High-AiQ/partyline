@@ -13,3 +13,5 @@ update_command = ["opencode", "upgrade"]
 [adapter.capabilities]
 resume = true
 turn_end = "receipt"
+# Its speech is trusted only from a transcript it has claimed by content.
+transcript = true

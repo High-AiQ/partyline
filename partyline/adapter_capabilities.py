@@ -24,3 +24,21 @@ def adapter_completion(kind: str) -> str:
     capabilities = metadata.get("capabilities") or {}
     turn_end = capabilities.get("turn_end") if isinstance(capabilities, dict) else None
     return "receipt" if turn_end == "receipt" else "none"
+
+
+def claims_transcript(att: dict) -> bool:
+    """Whether this attachment's harness owns a structured transcript that it
+    must claim before anything typed at it counts as delivered.
+
+    Transcript adapters prove identity by content — claude's claim token, the
+    antigravity conversation read-back — so a paste into one is only a probe
+    until the claim shows up in the transcript. A bare process owns no
+    session to claim and keeps the paste-and-credit contract it always had.
+    """
+    capabilities = (att.get("adapter_metadata") or {}).get("capabilities") or {}
+    return bool(capabilities.get("transcript"))
+
+
+def transcript_claimed(adapter) -> bool:
+    """Whether the adapter has opened the transcript it claimed."""
+    return getattr(adapter, "_ready_result", None) is True

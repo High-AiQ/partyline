@@ -14,3 +14,5 @@ update_command = ["agy", "update"]
 # Re-attaching passes --conversation with the recorded id, reopening the session.
 resume = true
 turn_end = "receipt"
+# Its speech is trusted only from a transcript it has claimed by content.
+transcript = true

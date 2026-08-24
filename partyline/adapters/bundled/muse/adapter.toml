@@ -9,5 +9,5 @@ requires = ["muse"]
 # Probed with Muse Code 0.2.1-R1215.1 on 2026-08-23; re-probe after CLI updates.
 compact_paste = "/compact"
 env_unset = []
-capabilities = { resume = true }
+capabilities = { resume = true, transcript = true }
 update_command = ["bash", "-lc", "curl -fsSL https://dev.meta.ai/install.sh | bash"]
