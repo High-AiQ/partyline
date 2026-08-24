@@ -520,6 +520,11 @@ enforce it. A prose warning that has no executable guard is not a completed less
   one mistake wearing different clothes: identity inferred from something that outlives the thing
   being identified — which is also why the pinned name is no longer trusted on sight for a fresh
   attachment: that rested on attachment ids never being re-activated without a resume, an
-  assumption about the rest of the system the adapter cannot enforce, and the file this process
-  created passes the same mtime test on its own. The durable fix remains upstream, in not letting a CLI self-update mid-attach;
+  assumption about the rest of the system the adapter cannot enforce. Replacing it with an mtime
+  test was the same error one more time — `mtime >= spawned_at` says *someone* wrote the file, not
+  that we did, so a previous activation's session touched by its own writer after the new spawn
+  passed while carrying the wrong nonce and hid the session carrying the right one. The pinned name
+  is now searched first for speed and never for authority: content proof decides everywhere, and
+  the mtime fallback survives only for a resumed attachment before its first wake, tried only after
+  no token-bearing session was found. Six rounds, one shape. The durable fix remains upstream, in not letting a CLI self-update mid-attach;
   everything downstream of that is recovery.

@@ -97,29 +97,16 @@ class PartylineAdapter(BaseAdapter):
     def transcript_glob(self) -> str:
         return os.path.expanduser(f"~/.claude/projects/*/{self.att['id']}.jsonl")
 
-    def _pinned_is_ours(self, path: str) -> bool:
-        """Whether the pinned transcript belongs to the process we spawned.
+    def _written_since_spawn(self, path: str) -> bool:
+        """Whether anything has written this file since this process started.
 
-        A resume pins a session file that already exists — it is the session
-        being resumed — so its presence proves nothing: a CLI that re-execed
-        without ``--resume`` opened a fresh session and left this one
-        untouched, and tailing it would follow a file nobody writes, mute but
-        reported ready. Only a write at or after our spawn tells the two
-        apart.
-
-        The same test is applied to a fresh attachment rather than trusting
-        that its pinned name can only exist because this process made it.
-        That held only while attachment ids were never re-activated without
-        a resume, which is an assumption about the rest of the system this
-        adapter has no way to enforce — and every round of review here has
-        found identity inferred from something outliving the thing being
-        identified. A file this process created passes on its own mtime, so
-        the assumption costs nothing to drop.
-
-        The comparison takes no allowance: the file's mtime and
-        ``spawned_at`` are both this host's clock, so a second of slack buys
-        nothing and admits the previous process's last write as proof of the
-        new one.
+        Weak evidence, and the only kind available to a resumed attachment
+        before its first wake: it says *someone* wrote the file, not that we
+        did. A pinned file untouched since we spawned belongs to a process
+        that is no longer writing it, and tailing it would be mute but
+        reported ready. No allowance is taken — mtime and ``spawned_at`` are
+        one host clock, so slack only lets the previous process's last write
+        vouch for the new one.
         """
         try:
             return os.path.getmtime(path) >= self.spawned_at
@@ -159,7 +146,7 @@ class PartylineAdapter(BaseAdapter):
         return False
 
     def _find_transcript(self) -> str | None:
-        """The pinned transcript, or the session the CLI actually opened.
+        """The session carrying this activation's token, pinned or not.
 
         ``build_command`` pins the session id so the transcript's name is
         known before the CLI writes it — but the process partyline spawns is
@@ -168,26 +155,29 @@ class PartylineAdapter(BaseAdapter):
         opening a randomly-named session instead (2026-08-24: opus attached
         this way and could not speak for 42 minutes).
 
-        A resumed attachment has nothing to match until its first wake
-        arrives, and then matches on that. Until then it waits rather than
-        guessing: a wrong guess trades a mute attachment for one speaking
-        under another process's name.
+        The pinned name is searched first for speed, never for authority:
+        content proof decides everywhere, so a leftover session cannot win by
+        being called the right thing or by having been touched at the right
+        moment. Only a resumed attachment, which has nothing to match until
+        its first wake, falls back to the pinned file on the weaker evidence
+        that something has written it since we spawned — and only after no
+        token-bearing session was found, so proof outranks the fallback
+        rather than being skipped by it.
         """
-        rejected = ""
-        if hits := glob.glob(self.transcript_glob()):
-            if self._pinned_is_ours(hits[0]):
-                self._transcript = hits[0]
-                return hits[0]
-            # Judged stale a moment ago; the sweep below must not readmit it.
-            rejected = hits[0]
-        for path in glob.glob(os.path.expanduser("~/.claude/projects/*/*.jsonl")):
-            if path == rejected or path in self._CLAIMED:
+        pinned = next(iter(glob.glob(self.transcript_glob())), "")
+        sweep = glob.glob(os.path.expanduser("~/.claude/projects/*/*.jsonl"))
+        seen = set()
+        for path in ([pinned] if pinned else []) + sweep:
+            if path in seen or path in self._CLAIMED:
                 continue
-            if not self._recorded_our_token(path):
-                continue
-            self._CLAIMED.add(path)
-            self._transcript = path
-            return path
+            seen.add(path)
+            if self._recorded_our_token(path):
+                self._CLAIMED.add(path)
+                self._transcript = path
+                return path
+        if self.resume and pinned and self._written_since_spawn(pinned):
+            self._transcript = pinned
+            return pinned
         return None
 
     async def _await_transcript(self) -> str | None:
