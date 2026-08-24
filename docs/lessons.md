@@ -474,3 +474,49 @@ enforce it. A prose warning that has no executable guard is not a completed less
   input-loop echo above, on a different subject. Guard: a send is proven by a message id on the
   line or a reply from its target, never by the local transcript; harness-relayed agents write
   chat speech as assistant prose, not as shell output.
+- **A missing transcript was a verdict, not a delay.** The claude adapter pins the CLI session id
+  so it can tail `<attachment-id>.jsonl`, waited 45s for that file, then posted a notice and
+  returned. On 2026-08-24 `claude update` ran at attach; the CLI self-updated and re-execed itself
+  with a normalized argv that dropped the pin, opening a randomly-named session instead. The file
+  the adapter watched never existed, so the adapter ended while the process it was attached to ran
+  on perfectly: opus stayed live, mentionable, and cursor-advancing for 42 minutes while nothing it
+  said could reach the line, and the one message that mentioned it was pasted into that window,
+  credited, and never seen. Two false assumptions: that the process partyline spawns is the process
+  that runs, and that a CLI which has not spoken in 45s never will. The adapter now adopts an
+  unpinned session that names our cwd and opened after we spawned (`_find_transcript`, guarded by
+  `_PINNED`/`_CLAIMED` so neighbours cannot swap transcripts), and the 45s mark warns once and keeps
+  watching for as long as the process is alive. Guard: an adapter's silence about a live process is
+  never a reason to stop listening to it — and readiness that is declared but not enforced lets
+  deliveries flow to an attachment that can never answer. Adversarial review then found two ways
+  the first fix was still wrong, both of them the same mistake in miniature — trusting a file's
+  existence instead of its evidence. Ordering candidates by recency let two same-directory
+  attachments adopt each other's sessions, with claim order deciding identity; ownership is now
+  partitioned by spawn time, so each attachment may only claim a session opened between its own
+  spawn and the next attachment's. And on a resume the pinned file always exists — it is the
+  session being resumed — so a dropped pin left the adapter tailing a file nobody writes: mute,
+  and worse, reported ready. A pinned file now counts only if something has written it since we
+  spawned. Then review broke the spawn-time scheme a second time, and the second break was the
+  useful one: a self-updating CLI opens its session *late* — possibly after an attachment that
+  started after it — so session order is not spawn order, and the attachment needing recovery most
+  is the one a spawn window excludes. The mtime allowance was unsound for a plainer reason: mtime
+  and `spawned_at` are the same host clock, so a grace period only let the previous process's last
+  write vouch for the new one. Timing was the wrong family of discriminator entirely. Sessions are
+  now claimed by content: the adapter matches a transcript against what it typed into its own pty
+  — the briefing, or for a resumed attachment its first wake — which nothing else writes, so
+  concurrent starts pair 1:1 by construction and scan order cannot change the answer. The house
+  rule it belongs to is already written here twice: choose a signal the subject cannot forge, and
+  locate by structured content rather than by inference. Matching on the *text* of a wake was still
+  not enough — an `@all` puts the identical digest in every pty, so two resumed attachments matched
+  each other's transcripts and scan order picked the winner. Content only identifies when the
+  content is unique to the claimant, so each attachment now pastes a token naming itself and claims
+  the session that recorded it. That in turn deleted the discovery lock, which had grown a hazard
+  of its own: held across an unbounded wait, one CLI stuck on a login prompt gagged every Claude
+  attached after it. Identity is stated, not inferred, and once it is stated nothing needs
+  serializing. One last turn of the same screw: the first token was the attachment id, which is
+  stable across resumes, so the stale session left behind by a dropped pin still carried it —
+  rejected as the pinned candidate by mtime, then readmitted by the broad sweep and adopted by the
+  very search meant to replace it. The token is now per-activation, a fresh nonce each run, and the
+  rejected pinned path is excluded from the sweep as well. The pattern across all five rounds is
+  one mistake wearing different clothes: identity inferred from something that outlives the thing
+  being identified. The durable fix remains upstream, in not letting a CLI self-update mid-attach;
+  everything downstream of that is recovery.
