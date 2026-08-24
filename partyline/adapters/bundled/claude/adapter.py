@@ -1,7 +1,6 @@
 """Private Claude Code adapter; tails the CLI's JSONL transcript."""
 
 import asyncio
-import contextlib
 import glob
 import json
 import os
@@ -10,50 +9,47 @@ import shlex
 from partyline.adapters.base import Adapter as BaseAdapter
 from partyline.adapters.compaction import is_compaction_record
 
-# How much of a paste is used to recognise it again, and the shortest paste
-# worth recognising. A wake carrying only a line or two is not distinctive
-# enough to name a session by, so it is never used as evidence.
-MARKER_LENGTH = 400
-MARKER_MINIMUM = 80
-
-# A session that recorded our briefing recorded it near the top. Bounding the
-# scan keeps a stranger's multi-megabyte transcript from being read in full on
-# every poll.
+# A session that recorded our claim token recorded it near the top, in the
+# briefing or the first wake. Bounding the scan keeps a stranger's
+# multi-megabyte transcript from being read in full on every poll.
 SCAN_BYTES = 512 * 1024
 
 
 class PartylineAdapter(BaseAdapter):
     kind = "claude"
 
-    # Transcripts a live attachment has adopted, and the discovery it holds
-    # from briefing through claim, so two adapters cannot evaluate the same
-    # unclaimed candidates at once.
+    # Transcripts a live attachment has adopted, so two adapters cannot tail
+    # one session. Claiming needs no lock: a claim token names exactly one
+    # attachment, so no two adapters can ever match the same transcript, and
+    # the set is read and written without awaiting in between.
     _CLAIMED: set[str] = set()
-    _DISCOVERY = asyncio.Lock()
 
     _transcript: str = ""
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # Everything this adapter has written into its pty. Nothing else
-        # writes there, so a transcript that recorded one of these is ours.
-        self._pastes: list[str] = []
+    @property
+    def _claim_token(self) -> str:
+        """The one string that names this attachment and no other.
 
-    def _note_paste(self, text: str) -> None:
-        marker = " ".join(text.split())[:MARKER_LENGTH]
-        if len(marker) >= MARKER_MINIMUM and marker not in self._pastes:
-            self._pastes.append(marker)
-
-    async def deliver(self, messages: list[dict]):
-        """Remember the wake before it is typed.
-
-        A resumed attachment gets no briefing, so its first delivery is the
-        first thing that can identify its session. Recording the digest
-        before the keys are written means a CLI that records it instantly
-        cannot beat us to it.
+        Identity cannot be inferred — not from spawn order, session order, or
+        any clock (review of #124 broke three such schemes). So it is stated
+        instead: a token carrying the attachment id is pasted into this pty
+        with the briefing and with every wake until a transcript is claimed,
+        and the session that records it is ours by construction.
         """
-        self._note_paste(self.format_digest(messages))
-        await super().deliver(messages)
+        return f"[partyline-claim: {self.att['id']}]"
+
+    def briefing(self) -> str:
+        return f"{super().briefing()}\n\n{self._claim_token}"
+
+    def format_digest(self, messages: list[dict]) -> str:
+        """A wake, carrying the claim token until a transcript is claimed.
+
+        Once claimed the token stops being appended: it exists to name an
+        unidentified session, and a wake is the agent's to read, not a place
+        to leave bookkeeping lying around.
+        """
+        text = super().format_digest(messages)
+        return text if self._transcript else f"{text}\n\n{self._claim_token}"
 
     async def stop(self):
         self._CLAIMED.discard(self._transcript)
@@ -113,21 +109,16 @@ class PartylineAdapter(BaseAdapter):
         except OSError:
             return False
 
-    def _recorded_our_paste(self, path: str) -> bool:
-        """Whether this transcript recorded something we typed into our pty.
+    def _recorded_our_token(self, path: str) -> bool:
+        """Whether this transcript recorded the token we pasted into our pty.
 
-        Timing cannot tell two same-directory sessions apart. A CLI that
-        self-updates opens its session late — possibly after an attachment
-        that started after us — so neither session-creation order nor spawn
-        order survives the very case this adapter exists to handle (found
-        reviewing #124, twice). The briefing is the one signal we control:
-        we wrote it into this pty and nothing else did, so a transcript that
-        recorded it is ours by construction rather than by inference. A
-        resumed attachment has no briefing, so its first wake serves the same
-        purpose: the fresh session claims itself on the next delivery.
+        Nothing else writes this pty, and no other attachment pastes this
+        token, so a match is proof rather than inference — and it holds
+        however the sessions interleave, whatever order the scan runs in, and
+        however many attachments share a working directory. An ``@all`` wake
+        that reaches two resumed attachments carries a different token into
+        each, which is what digest text alone could not do.
         """
-        if not self._pastes:
-            return False
         try:
             with open(path, encoding="utf-8", errors="replace") as file:
                 scanned = 0
@@ -144,10 +135,7 @@ class PartylineAdapter(BaseAdapter):
                     if record.get("type") != "user":
                         continue
                     content = (record.get("message") or {}).get("content")
-                    if not isinstance(content, str):
-                        continue
-                    flat = " ".join(content.split())
-                    if any(marker in flat for marker in self._pastes):
+                    if isinstance(content, str) and self._claim_token in content:
                         return True
         except OSError:
             return False
@@ -173,7 +161,7 @@ class PartylineAdapter(BaseAdapter):
                 self._transcript = hits[0]
                 return hits[0]
         for path in glob.glob(os.path.expanduser("~/.claude/projects/*/*.jsonl")):
-            if path in self._CLAIMED or not self._recorded_our_paste(path):
+            if path in self._CLAIMED or not self._recorded_our_token(path):
                 continue
             self._CLAIMED.add(path)
             self._transcript = path
@@ -207,7 +195,6 @@ class PartylineAdapter(BaseAdapter):
             if waited in (12.0, 24.0):
                 os.write(self.master, b"\r")
                 await asyncio.sleep(1.0)
-                self._note_paste(self.briefing())
                 await self.send_keys(self.briefing())
             elif waited > 45.0 and not warned:
                 warned = True
@@ -224,16 +211,13 @@ class PartylineAdapter(BaseAdapter):
         await asyncio.sleep(5.0)
         if not self.alive():
             return
-        # One fresh attachment resolves at a time, from briefing to claim:
-        # matching is by content, so interleaving cannot mispair sessions,
-        # but serializing keeps two adapters from racing for one candidate.
-        # A resume stays out of the lock — it waits for its first wake, which
-        # may be many minutes away, and must not hold the line shut.
-        async with (contextlib.nullcontext() if self.resume else self._DISCOVERY):
-            if not self.resume:
-                self._note_paste(self.briefing())
-                await self.send_keys(self.briefing())
-            path = await self._await_transcript()
+        # No cross-adapter lock. Serializing discovery meant one CLI stuck on
+        # a login or trust prompt held every later attachment's briefing
+        # hostage for as long as it lived, and the claim token removes the
+        # reason for it: no two adapters can match the same transcript.
+        if not self.resume:
+            await self.send_keys(self.briefing())
+        path = await self._await_transcript()
         if path is None:
             return
 
