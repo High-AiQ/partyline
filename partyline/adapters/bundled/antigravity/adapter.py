@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 
 from partyline.adapters import Adapter
-from partyline.adapters.bundled.antigravity import logparse
+from partyline.adapters.bundled.antigravity.wakes import WakeSettlement
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
 
 LOG_ROOT = os.path.expanduser("~/.partyline/sessions/antigravity")
@@ -39,16 +39,18 @@ ECHO_PROBE = 40
 PASTE_PACE = 5.0
 
 
-class PartylineAdapter(Adapter):
+class PartylineAdapter(WakeSettlement, Adapter):
     kind = "antigravity"
 
     MAX_NOTICES = 2
 
     def __init__(self, att, post, on_status, on_cli_session=None):
         super().__init__(att, post, on_status, on_cli_session)
-        self._outstanding: list[tuple[str, float, tuple[int, ...]]] = []
+        self._outstanding: list[tuple[str, float, tuple[int, ...], bool]] = []
         self._resend_counts: dict[str, int] = {}
         self._notices = 0
+        self._turn_open = False
+        self._settle_task: asyncio.Task | None = None
         self._output_event = asyncio.Event()
 
     async def on_output(self, data: bytes):
@@ -83,72 +85,14 @@ class PartylineAdapter(Adapter):
         await super().deliver(messages)
         if digest.strip() and self.alive():
             ids = tuple(message["id"] for message in messages if isinstance(message.get("id"), int))
-            self._outstanding.append((digest, time.time(), ids))
+            # Whether the CLI was already mid-turn decides which evidence may
+            # later settle this wake (see wakes.py) — captured now, at paste.
+            self._outstanding.append((digest, time.time(), ids, self._turn_open))
 
-    @staticmethod
-    def _contains(content: str, probe: str) -> bool:
-        """Whitespace-normalized containment: the TUI may reflow a long paste,
-        so a digest matches the submitted input up to whitespace runs."""
-        return bool(probe) and " ".join(probe.split()) in " ".join(content.split())
-
-    async def _note_user_input(self, content: str, created_at) -> None:
-        """Settle outstanding wakes against a real transcript input.
-
-        A record may only judge digests pasted before it was written: a
-        mention delivered mid-turn pastes a wake that an already-written
-        record cannot contain, and judging it anyway would call a healthy
-        paste skipped. Contained digests are verified. A digest the record
-        predates-but-does-not contain was skipped — proven, not guessed —
-        so it is re-sent up to 2 times; a skip after that re-pools for the
-        next turn-end with one factual notice.
-        """
-        created = None
-        if created_at:
-            try:
-                from datetime import datetime
-                created = datetime.fromisoformat(
-                    str(created_at).replace("Z", "+00:00")
-                ).timestamp()
-            except ValueError:
-                created = None
-        kept: list[tuple[str, float, tuple[int, ...]]] = []
-        for digest, pasted_at, message_ids in self._outstanding:
-            if created is not None and pasted_at >= created:
-                kept.append((digest, pasted_at, message_ids))
-                continue
-            if self._contains(content, digest):
-                self._notices = 0
-                self._resend_counts.pop(digest, None)
-                continue
-            count = self._resend_counts.get(digest, 0) + 1
-            self._resend_counts[digest] = count
-            if count <= 2:
-                kept.append((digest, pasted_at, message_ids))
-                await self.send_keys(digest)
-            else:
-                self._resend_counts.pop(digest, None)
-                repool = self.att.get("repool_message_ids")
-                if repool is not None and message_ids:
-                    await repool(list(message_ids))
-                if self._notices < self.MAX_NOTICES:
-                    self._notices += 1
-                    await self.post(
-                        "system", "system",
-                        f"{self.att['name']}: the CLI submitted other input after "
-                        "this wake was pasted — wake queued for next turn-end",
-                    )
-        self._outstanding = kept
-
-    async def _note_log_line(self, line: str) -> None:
-        """Settle outstanding wakes against a logged submission.
-
-        The pinned log's HandleUserInput line is written at submit time, so
-        it judges minutes before the transcript can. A line without a
-        parseable timestamp cannot judge — degraded evidence is not a
-        verdict. The transcript judge remains as the fallback channel.
-        """
-        if parsed := logparse.submission(line):
-            await self._note_user_input(*parsed)
+    def _schedule_settle(self) -> None:
+        """One turn-end settlement runs at a time; a second end joins it."""
+        if self._settle_task is None or self._settle_task.done():
+            self._settle_task = asyncio.create_task(self._settle_turn_end())
 
     async def _tail_log(self):
         """Follow the pinned `--log-file`, judging wakes by its submissions."""
@@ -266,6 +210,7 @@ class PartylineAdapter(Adapter):
                 prompt = getattr(self, "_startup_prompt", "")
                 if prompt and self._contains(content, prompt):
                     self.mark_startup_delivery_received()
+                self._turn_open = True
                 await receipt(self.att, BEGAN)
             elif (
                 record.get("source") == "MODEL"
@@ -276,9 +221,13 @@ class PartylineAdapter(Adapter):
                 # observed — names are defensive guesses, real aborts leave no record;
                 # exit/detach flush is the guarantee.
                 if status in ("ERROR", "CANCELLED", "ABORTED", "FAILED"):
+                    self._turn_open = False
+                    self._schedule_settle()
                     await receipt(self.att, ENDED)
                 elif status == "DONE":
                     if not record.get("tool_calls"):
+                        self._turn_open = False
+                        self._schedule_settle()
                         await receipt(self.att, ENDED)
                     if isinstance(content, str) and content.strip():
                         await self.post(self.att["name"], "agent", content)

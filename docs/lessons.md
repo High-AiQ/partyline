@@ -451,3 +451,17 @@ enforce it. A prose warning that has no executable guard is not a completed less
   delivery emits the conservative BEGAN receipt, and the transcript still owns ENDED. Fixture
   controls require the semantic tail, prove speech exactly once, and keep genuinely unknown
   rewrites on the bounded three-strike hatch.
+- **A CLI's input-loop log line proved a wake was ingested.** Two `@gemini-flash` mentions pasted
+  into antigravity mid-turn vanished: agy's `HandleUserInput called with text:` logged both at the
+  second they were sent, but the transcript gained no `USER_INPUT` record — agy accepts mid-turn
+  submissions and silently drops them, and the adapter's settlement judge credited the echo as
+  proof of ingestion, advanced nothing back, and left no retry. The false assumption was that
+  acceptance at the input loop equals ingestion by the agent; an echo of our own paste is evidence
+  the subject produces about itself (`docs/lessons.md`: choose a signal it cannot forge). The
+  settlement contract now grades channels: a log echo may only settle a wake pasted while the CLI
+  was idle, a wake pasted mid-turn is settled only by a transcript `USER_INPUT` containing the
+  digest, and turn end is the last court — unproven wakes repool for idle redelivery after a grace
+  that lets a queued ingestion land first (`wakes.py`; regression tests pin echo-no-credit,
+  hold-not-resend, turn-end-repool, and grace-preempts-duplicate). The same hole is structural in
+  every pty adapter: delivery is proven only as far as the paste, so any CLI that ignores
+  keystrokes mid-turn loses the mention silently.
