@@ -47,6 +47,20 @@
     border-color: var(--color-red);
     background: var(--color-red);
   }
+  @media (min-width: 900px) and (max-width: 1199px) {
+    .account {
+      gap: 4px;
+    }
+    .account button {
+      padding: 0 7px;
+    }
+    .handle {
+      max-width: 60px;
+    }
+    .logout {
+      font-size: 9px;
+    }
+  }
   @media (max-width: 899px) {
     .account {
       gap: 4px;
