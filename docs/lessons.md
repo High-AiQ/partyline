@@ -505,5 +505,12 @@ enforce it. A prose warning that has no executable guard is not a completed less
   — the briefing, or for a resumed attachment its first wake — which nothing else writes, so
   concurrent starts pair 1:1 by construction and scan order cannot change the answer. The house
   rule it belongs to is already written here twice: choose a signal the subject cannot forge, and
-  locate by structured content rather than by inference. The durable fix remains upstream, in not
-  letting a CLI self-update mid-attach; everything downstream of that is recovery.
+  locate by structured content rather than by inference. Matching on the *text* of a wake was still
+  not enough — an `@all` puts the identical digest in every pty, so two resumed attachments matched
+  each other's transcripts and scan order picked the winner. Content only identifies when the
+  content is unique to the claimant, so each attachment now pastes a token naming itself and claims
+  the session that recorded it. That in turn deleted the discovery lock, which had grown a hazard
+  of its own: held across an unbounded wait, one CLI stuck on a login prompt gagged every Claude
+  attached after it. Identity is stated, not inferred, and once it is stated nothing needs
+  serializing. The durable fix remains upstream, in not letting a CLI self-update mid-attach;
+  everything downstream of that is recovery.

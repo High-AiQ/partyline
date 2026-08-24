@@ -1,5 +1,6 @@
 """Vendor-free contract tests for the Claude Code adapter."""
 
+import asyncio
 import contextlib
 import json
 import os
@@ -310,12 +311,12 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
 class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
     """A CLI that self-updates at attach re-execs without the session pin.
 
-    The pinned transcript name then never appears, and before adoption the
-    adapter went mute while the attachment stayed live and mentionable.
-    Sessions are matched by what we typed into the pty, never by timing:
-    review of #124 broke a spawn-time scheme twice, because a self-updating
-    CLI opens its session late — after a neighbour that started later than
-    it — and mtime and ``spawned_at`` share one host clock.
+    The pinned transcript name then never appears, and the adapter went mute
+    while the attachment stayed live and mentionable. Identity is stated, not
+    inferred: review of #124 broke spawn-order, session-order and shared
+    clock schemes in turn, and then broke shared digest text too. Each
+    attachment pastes a token naming itself, and claims the session that
+    recorded it.
     """
 
     def setUp(self):
@@ -336,12 +337,11 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
             yield
 
     def write_session(self, name: str, *, cwd: str = "/work",
-                      pasted: str = "") -> str:
-        """A transcript, optionally recording a paste as a user record."""
+                      pasted: str = "unrelated chatter") -> str:
         path = self.root / f"{name}.jsonl"
         records = [{"type": "mode", "sessionId": name},
                    {"type": "user", "cwd": cwd, "sessionId": name,
-                    "message": {"content": pasted or "unrelated chatter"}}]
+                    "message": {"content": pasted}}]
         path.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
         return str(path)
 
@@ -364,9 +364,8 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
         adapter.alive = lambda: True
         return adapter
 
-    def test_the_session_that_recorded_our_briefing_is_ours(self):
+    def test_the_session_that_recorded_our_token_is_ours(self):
         adapter = self.make_adapter()
-        adapter._note_paste(adapter.briefing())
         mine = self.write_session("random-id", pasted=adapter.briefing())
 
         with self.searching():
@@ -375,7 +374,6 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
     def test_a_session_that_recorded_nothing_of_ours_is_not_adopted(self):
         """A CLI the user runs by hand in the same directory is not us."""
         adapter = self.make_adapter()
-        adapter._note_paste(adapter.briefing())
         self.write_session("hand-run")
 
         with self.searching():
@@ -383,31 +381,14 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
 
     def test_a_session_in_another_directory_is_not_adopted(self):
         adapter = self.make_adapter()
-        adapter._note_paste(adapter.briefing())
         self.write_session("elsewhere", cwd="/other", pasted=adapter.briefing())
 
         with self.searching():
             self.assertIsNone(adapter._find_transcript())
 
-    def test_nothing_is_adopted_before_anything_has_been_pasted(self):
-        adapter = self.make_adapter()
-        self.write_session("random-id", pasted="some other briefing entirely")
-
-        with self.searching():
-            self.assertIsNone(adapter._find_transcript())
-
-    def test_concurrent_attachments_claim_their_own_sessions(self):
-        """Content pairs them 1:1 however their sessions interleave.
-
-        Spawn-time windows failed here: the first attachment may self-update
-        and open its session *after* the second one spawned, which put its
-        own transcript permanently outside its window.
-        """
-        first, second = self.make_adapter(name="alpha"), self.make_adapter(
-            ident="attachment-2", name="beta")
-        first._note_paste(first.briefing())
-        second._note_paste(second.briefing())
-        # Deliberately out of order: beta's session opens first.
+    def test_one_attachments_token_never_claims_anothers_session(self):
+        first = self.make_adapter(name="alpha")
+        second = self.make_adapter(ident="attachment-2", name="beta")
         theirs = self.write_session("random-beta", pasted=second.briefing())
         mine = self.write_session("random-alpha", pasted=first.briefing())
 
@@ -416,10 +397,8 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(second._find_transcript(), theirs)
 
     def test_ownership_is_the_same_whichever_adapter_claims_first(self):
-        first, second = self.make_adapter(name="alpha"), self.make_adapter(
-            ident="attachment-2", name="beta")
-        first._note_paste(first.briefing())
-        second._note_paste(second.briefing())
+        first = self.make_adapter(name="alpha")
+        second = self.make_adapter(ident="attachment-2", name="beta")
         theirs = self.write_session("random-beta", pasted=second.briefing())
         mine = self.write_session("random-alpha", pasted=first.briefing())
 
@@ -427,49 +406,119 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(second._find_transcript(), theirs)
             self.assertEqual(first._find_transcript(), mine)
 
+    async def test_one_wake_to_two_resumed_attachments_still_pairs_correctly(self):
+        """An `@all` puts the same digest in both ptys — but not the same token.
+
+        Digest text alone made identity follow scan order here: both
+        transcripts contained the same first-400 characters.
+        """
+        first = self.make_adapter(name="alpha")
+        second = self.make_adapter(ident="attachment-2", name="beta")
+        messages = [{"sender": "greg", "body": "@all status please"}]
+        sent = {}
+        for adapter, handle in ((first, "alpha"), (second, "beta")):
+            adapter.resume = True
+            with patch.object(PartylineAdapter, "send_keys", AsyncMock()):
+                await adapter.deliver(messages)
+            sent[handle] = adapter.format_digest(messages)
+        self.assertNotEqual(sent["alpha"], sent["beta"])
+        theirs = self.write_session("random-beta", pasted=sent["beta"])
+        mine = self.write_session("random-alpha", pasted=sent["alpha"])
+
+        with self.searching("missing.jsonl"):
+            self.assertEqual(first._find_transcript(), mine)
+            self.assertEqual(second._find_transcript(), theirs)
+
+    async def test_a_stalled_attachment_does_not_hold_up_anyone_elses_briefing(self):
+        """A CLI stuck on a login prompt must not gag every later attachment.
+
+        Serialized discovery waited for the whole life of an alive process,
+        so one broken CLI silenced every Claude attached after it. The stall
+        has to be unbounded to model that — a CLI sitting on a trust prompt
+        stays alive — and the stalled adapter is driven into its wait first,
+        so a lock, if one existed, is already held when the later attachment
+        starts. The wait is bounded here instead, so a regression fails
+        rather than hanging the suite.
+        """
+        stalled = self.make_adapter(name="alpha")
+        later = self.make_adapter(ident="attachment-2", name="beta")
+        stalled.alive = lambda: True
+        later_polls = iter(range(200))
+        later.alive = lambda: next(later_polls, None) is not None
+
+        real_sleep = asyncio.sleep
+
+        async def yielding_sleep(*args, **kwargs):
+            await real_sleep(0)
+
+        with (
+            patch("partyline.adapters.bundled.claude.adapter.asyncio.sleep", yielding_sleep),
+            # Plain callables, not mocks: a mock in an unbounded poll records
+            # every call until the memory cap kills the run.
+            patch("partyline.adapters.bundled.claude.adapter.glob.glob",
+                  lambda pattern: []),
+            patch("partyline.adapters.bundled.claude.adapter.os.write",
+                  lambda *args: None),
+            patch.object(stalled, "send_keys", AsyncMock()) as stalled_keys,
+            patch.object(later, "send_keys", AsyncMock()) as later_keys,
+        ):
+            stalled_run = asyncio.ensure_future(stalled._run())
+            for _ in range(100):
+                await real_sleep(0)
+                if stalled_keys.called:
+                    break
+            self.assertTrue(stalled_keys.called, "the stalled adapter never started")
+
+            try:
+                await asyncio.wait_for(later._run(), timeout=5.0)
+            except TimeoutError:
+                self.fail("a stalled attachment blocked a later one's briefing")
+            finally:
+                stalled_run.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await stalled_run
+
+        self.assertTrue(later_keys.called, "the later attachment was never briefed")
+
+    def test_the_token_stops_riding_wakes_once_a_session_is_claimed(self):
+        adapter = self.make_adapter()
+        messages = [{"sender": "greg", "body": "hello"}]
+        self.assertIn(adapter._claim_token, adapter.format_digest(messages))
+
+        adapter._transcript = "/somewhere/claimed.jsonl"
+
+        self.assertNotIn(adapter._claim_token, adapter.format_digest(messages))
+
     async def test_a_resumed_attachment_claims_its_session_on_the_first_wake(self):
-        """A resume gets no briefing, so its first delivery identifies it."""
+        """A resume gets no briefing, so its first wake carries the token."""
         adapter = self.make_adapter()
         adapter.resume = True
-        adapter.att["resume"] = True
-        digest = adapter.format_digest([{"sender": "greg", "body": "x" * 200}])
+        messages = [{"sender": "greg", "body": "back to work"}]
         with patch.object(PartylineAdapter, "send_keys", AsyncMock()):
-            await adapter.deliver([{"sender": "greg", "body": "x" * 200}])
-        fresh = self.write_session("random-resume", pasted=digest)
+            await adapter.deliver(messages)
+        fresh = self.write_session("random-resume", pasted=adapter.format_digest(messages))
 
         with self.searching("missing.jsonl"):
             self.assertEqual(adapter._find_transcript(), fresh)
-
-    def test_a_short_wake_is_too_thin_to_name_a_session_by(self):
-        adapter = self.make_adapter()
-        adapter._note_paste("ok")
-
-        self.assertEqual(adapter._pastes, [])
 
     def test_a_stale_pinned_transcript_loses_to_a_fresh_adoption(self):
         """A resume whose pin was dropped must not tail its own dead session."""
         adapter = self.make_adapter()
         adapter.resume = True
-        adapter._note_paste("d" * 200)
         stale = self.write_session("attachment-1")
         os.utime(stale, (200.0, 200.0))
-        fresh = self.write_session("random-resume", pasted="d" * 200)
+        fresh = self.write_session("random-resume", pasted=adapter._claim_token)
 
         with self.searching():
             self.assertEqual(adapter._find_transcript(), fresh)
 
     def test_a_write_just_before_respawn_is_not_proof_the_pin_survived(self):
-        """mtime and spawned_at are one clock, so no allowance is given.
-
-        A five-second grace let the previous process's last write vouch for
-        the new one, and the stale session won again.
-        """
+        """mtime and spawned_at are one clock, so no allowance is given."""
         adapter = self.make_adapter()
         adapter.resume = True
-        adapter._note_paste("d" * 200)
         stale = self.write_session("attachment-1")
         os.utime(stale, (adapter.spawned_at - 1, adapter.spawned_at - 1))
-        fresh = self.write_session("random-resume", pasted="d" * 200)
+        fresh = self.write_session("random-resume", pasted=adapter._claim_token)
 
         with self.searching():
             self.assertEqual(adapter._find_transcript(), fresh)
@@ -494,17 +543,17 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
     def test_an_adopted_transcript_is_claimed_against_a_second_adapter(self):
         first = self.make_adapter()
         second = self.make_adapter(ident="attachment-2")
-        first._note_paste(first.briefing())
-        second._note_paste(first.briefing())
+        # Contrived: the same token in one file, so only the claim set separates them.
         mine = self.write_session("random-id", pasted=first.briefing())
 
         with self.searching("missing.jsonl"):
             self.assertEqual(first._find_transcript(), mine)
-            self.assertIsNone(second._find_transcript())
+            with patch.object(type(second), "_claim_token",
+                              property(lambda self: first._claim_token)):
+                self.assertIsNone(second._find_transcript())
 
     def test_an_unreadable_transcript_is_not_adopted(self):
         adapter = self.make_adapter()
-        adapter._note_paste(adapter.briefing())
         self.write_session("locked", pasted=adapter.briefing())
 
         with self.searching(), patch("builtins.open", side_effect=OSError):
@@ -512,7 +561,6 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
 
     def test_a_transcript_of_garbage_is_not_adopted(self):
         adapter = self.make_adapter()
-        adapter._note_paste(adapter.briefing())
         (self.root / "half-written.jsonl").write_text("not json\n", encoding="utf-8")
 
         with self.searching():
@@ -520,11 +568,12 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
 
     def test_a_stranger_transcript_is_not_read_past_the_scan_bound(self):
         adapter = self.make_adapter()
-        adapter._note_paste(adapter.briefing())
         path = self.root / "enormous.jsonl"
         filler = json.dumps({"type": "user", "cwd": "/work",
                              "message": {"content": "z" * 4_000}})
-        path.write_text("\n".join([filler] * 200) + "\n", encoding="utf-8")
+        buried = json.dumps({"type": "user", "cwd": "/work",
+                             "message": {"content": adapter._claim_token}})
+        path.write_text("\n".join([filler] * 200 + [buried]) + "\n", encoding="utf-8")
 
         with self.searching():
             self.assertIsNone(adapter._find_transcript())
@@ -532,7 +581,6 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
     async def test_stop_releases_the_claim(self):
         """A detached attachment must not hold a session another can use."""
         adapter = self.make_adapter()
-        adapter._note_paste(adapter.briefing())
         mine = self.write_session("random-id", pasted=adapter.briefing())
         with self.searching("missing.jsonl"):
             adapter._find_transcript()
