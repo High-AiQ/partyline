@@ -2,6 +2,7 @@
 
 import contextlib
 import json
+import os
 import shutil
 import tempfile
 import unittest
@@ -118,6 +119,9 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
         adapter._silent_until_wake = False
         adapter.alive = lambda: True
         adapter._fresh = lambda timestamp: timestamp == "fresh"
+        # These tests isolate the poll and the tail, not transcript identity:
+        # their paths are names, not files on disk.
+        adapter._pinned_is_ours = lambda path: True
         return adapter
 
     async def test_transcript_posts_only_fresh_unique_assistant_text(self):
@@ -314,9 +318,9 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.root = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.root, True)
-        PartylineAdapter._PINNED.clear()
+        PartylineAdapter._LIVE.clear()
         PartylineAdapter._CLAIMED.clear()
-        self.addCleanup(PartylineAdapter._PINNED.clear)
+        self.addCleanup(PartylineAdapter._LIVE.clear)
         self.addCleanup(PartylineAdapter._CLAIMED.clear)
 
     @contextlib.contextmanager
@@ -382,7 +386,7 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
     def test_another_attachments_pinned_session_is_never_adopted(self):
         """Two attachments starting together must not swap transcripts."""
         adapter = self.make_adapter([])
-        PartylineAdapter._PINNED.add("attachment-2")
+        PartylineAdapter._LIVE["attachment-2"] = 1_000.0
         self.write_session("attachment-2", cwd="/work", stamp=1_002.0)
 
         with self.searching():
@@ -405,11 +409,11 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
         with self.searching():
             self.assertEqual(adapter._find_transcript(), pinned)
 
-    def test_a_transcript_without_a_stamped_record_is_not_adopted(self):
-        """Garbage, truncation, and preamble-only files judge nothing."""
+    def test_a_transcript_that_never_names_a_directory_is_not_adopted(self):
+        """Garbage and truncation judge nothing: unreadable is not ours."""
         adapter = self.make_adapter([])
         path = self.root / "half-written.jsonl"
-        path.write_text('not json\n{"type": "mode", "cwd": "/work"}\n', encoding="utf-8")
+        path.write_text('not json\n{"type": "mode"}\n', encoding="utf-8")
 
         with self.searching():
             self.assertIsNone(adapter._find_transcript())
@@ -432,14 +436,90 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
         await adapter.stop()
 
         self.assertNotIn(path, PartylineAdapter._CLAIMED)
-        self.assertNotIn("attachment-1", PartylineAdapter._PINNED)
+        self.assertNotIn("attachment-1", PartylineAdapter._LIVE)
 
-    def test_build_command_reserves_the_pin_before_the_process_exists(self):
+    async def test_start_registers_the_spawn_time_ownership_depends_on(self):
+        """Without this registry every window is unbounded and swaps return."""
         adapter = self.make_adapter([])
 
-        adapter.build_command()
+        async def fake_start(self):
+            self.spawned_at = 1_234.0
 
-        self.assertIn("attachment-1", PartylineAdapter._PINNED)
+        with patch("partyline.adapters.base.Adapter.start", fake_start):
+            await adapter.start()
+
+        self.assertEqual(PartylineAdapter._LIVE["attachment-1"], 1_234.0)
+
+    def test_a_stale_pinned_transcript_loses_to_a_fresh_adoption(self):
+        """A resume whose pin was dropped must not tail its own dead session.
+
+        The pinned file already exists — it is the session being resumed —
+        so its presence proves nothing. Untouched since spawn, it is the file
+        of a process that is no longer writing it.
+        """
+        adapter = self.make_adapter([])
+        adapter.resume = True
+        adapter.att["resume"] = True
+        stale = self.write_session("attachment-1", cwd="/work", stamp=100.0)
+        os.utime(stale, (200.0, 200.0))
+        fresh = self.write_session("random-resume", cwd="/work", stamp=1_002.0)
+
+        with self.searching():
+            self.assertEqual(adapter._find_transcript(), fresh)
+
+    def test_a_pinned_transcript_written_since_spawn_still_wins(self):
+        """The ordinary resume: the CLI kept the pin and is appending."""
+        adapter = self.make_adapter([])
+        adapter.resume = True
+        pinned = self.write_session("attachment-1", cwd="/work", stamp=100.0)
+        os.utime(pinned, (1_002.0, 1_002.0))
+        self.write_session("random-other", cwd="/work", stamp=1_003.0)
+
+        with self.searching():
+            self.assertEqual(adapter._find_transcript(), pinned)
+
+    def test_two_attachments_do_not_swap_each_others_sessions(self):
+        """Spawn order decides ownership, not who searches first.
+
+        Two same-cwd attachments that both lost their pins each see two
+        unclaimed random transcripts. Sorting by recency handed the first
+        adapter the second process's session and let the second reach back
+        through the skew allowance for the first's.
+        """
+        first, second = self.make_adapter([]), self.make_adapter([])
+        second.att = dict(second.att, id="attachment-2")
+        second.spawned_at = 1_002.0
+        PartylineAdapter._LIVE.update({"attachment-1": 1_000.0, "attachment-2": 1_002.0})
+        theirs = self.write_session("random-second", cwd="/work", stamp=1_003.0)
+        ours = self.write_session("random-first", cwd="/work", stamp=1_001.0)
+
+        with self.searching("missing.jsonl"):
+            # Deliberately the later attachment first: claim order must not
+            # decide identity.
+            self.assertEqual(second._find_transcript(), theirs)
+            self.assertEqual(first._find_transcript(), ours)
+
+    def test_ownership_holds_when_the_earlier_attachment_claims_first(self):
+        first, second = self.make_adapter([]), self.make_adapter([])
+        second.att = dict(second.att, id="attachment-2")
+        second.spawned_at = 1_002.0
+        PartylineAdapter._LIVE.update({"attachment-1": 1_000.0, "attachment-2": 1_002.0})
+        theirs = self.write_session("random-second", cwd="/work", stamp=1_003.0)
+        ours = self.write_session("random-first", cwd="/work", stamp=1_001.0)
+
+        with self.searching("missing.jsonl"):
+            self.assertEqual(first._find_transcript(), ours)
+            self.assertEqual(second._find_transcript(), theirs)
+
+    def test_a_preamble_only_session_is_dated_by_its_mtime(self):
+        """A brand-new session has written no stamped record yet."""
+        adapter = self.make_adapter([])
+        path = self.root / "just-opened.jsonl"
+        path.write_text('{"type": "mode", "cwd": "/work"}\n', encoding="utf-8")
+        os.utime(path, (1_001.0, 1_001.0))
+
+        with self.searching():
+            self.assertEqual(adapter._find_transcript(), str(path))
 
 
 if __name__ == "__main__":

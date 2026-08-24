@@ -487,4 +487,14 @@ enforce it. A prose warning that has no executable guard is not a completed less
   `_PINNED`/`_CLAIMED` so neighbours cannot swap transcripts), and the 45s mark warns once and keeps
   watching for as long as the process is alive. Guard: an adapter's silence about a live process is
   never a reason to stop listening to it — and readiness that is declared but not enforced lets
-  deliveries flow to an attachment that can never answer.
+  deliveries flow to an attachment that can never answer. Adversarial review then found two ways
+  the first fix was still wrong, both of them the same mistake in miniature — trusting a file's
+  existence instead of its evidence. Ordering candidates by recency let two same-directory
+  attachments adopt each other's sessions, with claim order deciding identity; ownership is now
+  partitioned by spawn time, so each attachment may only claim a session opened between its own
+  spawn and the next attachment's. And on a resume the pinned file always exists — it is the
+  session being resumed — so a dropped pin left the adapter tailing a file nobody writes: mute,
+  and worse, reported ready. A pinned file now counts only if something has written it since we
+  spawned. Both remain evidence, not proof: once the updater drops the pin the new session has no
+  structural link to the old one, and the durable fix is upstream, in not letting a CLI
+  self-update mid-attach.
