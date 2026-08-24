@@ -6,7 +6,6 @@ import os
 import shutil
 import tempfile
 import unittest
-from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -313,14 +312,16 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
 
     The pinned transcript name then never appears, and before adoption the
     adapter went mute while the attachment stayed live and mentionable.
+    Sessions are matched by what we typed into the pty, never by timing:
+    review of #124 broke a spawn-time scheme twice, because a self-updating
+    CLI opens its session late — after a neighbour that started later than
+    it — and mtime and ``spawned_at`` share one host clock.
     """
 
     def setUp(self):
         self.root = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.root, True)
-        PartylineAdapter._LIVE.clear()
         PartylineAdapter._CLAIMED.clear()
-        self.addCleanup(PartylineAdapter._LIVE.clear)
         self.addCleanup(PartylineAdapter._CLAIMED.clear)
 
     @contextlib.contextmanager
@@ -334,192 +335,212 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
         ):
             yield
 
-    def write_session(self, name: str, *, cwd: str, stamp: float) -> str:
+    def write_session(self, name: str, *, cwd: str = "/work",
+                      pasted: str = "") -> str:
+        """A transcript, optionally recording a paste as a user record."""
         path = self.root / f"{name}.jsonl"
-        records = [
-            {"type": "mode", "mode": "normal", "sessionId": name},
-            {"type": "user", "cwd": cwd, "sessionId": name,
-             "timestamp": datetime.fromtimestamp(stamp, UTC).isoformat().replace("+00:00", "Z")},
-        ]
+        records = [{"type": "mode", "sessionId": name},
+                   {"type": "user", "cwd": cwd, "sessionId": name,
+                    "message": {"content": pasted or "unrelated chatter"}}]
         path.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
         return str(path)
 
-    def make_adapter(self, posts: list[tuple[str, str, str]]) -> PartylineAdapter:
+    def make_adapter(self, ident: str = "attachment-1",
+                     name: str = "claude") -> PartylineAdapter:
         async def post(sender: str, sender_type: str, body: str) -> None:
-            posts.append((sender, sender_type, body))
+            return None
 
         async def on_status(status: str) -> None:
             return None
 
         adapter = PartylineAdapter(
-            {"command": ["claude"], "id": "attachment-1", "name": "claude",
-             "cwd": "/work", "resume": False},
+            {"command": ["claude"], "id": ident, "name": name,
+             "cwd": "/work", "conv_name": "a line", "resume": False},
             post, on_status,
         )
         adapter.spawned_at = 1_000.0
         adapter.resume = False
         adapter._silent_until_wake = False
+        adapter.alive = lambda: True
         return adapter
 
-    def test_session_opened_after_spawn_in_our_cwd_is_adopted(self):
-        adapter = self.make_adapter([])
-        path = self.write_session("random-id", cwd="/work", stamp=1_002.0)
+    def test_the_session_that_recorded_our_briefing_is_ours(self):
+        adapter = self.make_adapter()
+        adapter._note_paste(adapter.briefing())
+        mine = self.write_session("random-id", pasted=adapter.briefing())
 
         with self.searching():
-            self.assertEqual(adapter._find_transcript(), path)
+            self.assertEqual(adapter._find_transcript(), mine)
 
-    def test_a_users_own_older_session_is_not_adopted(self):
-        """Greg running the CLI by hand in the same directory is not us."""
-        adapter = self.make_adapter([])
-        self.write_session("hand-run", cwd="/work", stamp=900.0)
+    def test_a_session_that_recorded_nothing_of_ours_is_not_adopted(self):
+        """A CLI the user runs by hand in the same directory is not us."""
+        adapter = self.make_adapter()
+        adapter._note_paste(adapter.briefing())
+        self.write_session("hand-run")
 
         with self.searching():
             self.assertIsNone(adapter._find_transcript())
 
     def test_a_session_in_another_directory_is_not_adopted(self):
-        adapter = self.make_adapter([])
-        self.write_session("elsewhere", cwd="/other", stamp=1_002.0)
+        adapter = self.make_adapter()
+        adapter._note_paste(adapter.briefing())
+        self.write_session("elsewhere", cwd="/other", pasted=adapter.briefing())
 
         with self.searching():
             self.assertIsNone(adapter._find_transcript())
 
-    def test_another_attachments_pinned_session_is_never_adopted(self):
-        """Two attachments starting together must not swap transcripts."""
-        adapter = self.make_adapter([])
-        PartylineAdapter._LIVE["attachment-2"] = 1_000.0
-        self.write_session("attachment-2", cwd="/work", stamp=1_002.0)
+    def test_nothing_is_adopted_before_anything_has_been_pasted(self):
+        adapter = self.make_adapter()
+        self.write_session("random-id", pasted="some other briefing entirely")
 
         with self.searching():
             self.assertIsNone(adapter._find_transcript())
 
-    def test_an_adopted_transcript_is_claimed_against_a_second_adapter(self):
-        first, second = self.make_adapter([]), self.make_adapter([])
-        second.att = dict(second.att, id="attachment-2")
-        path = self.write_session("random-id", cwd="/work", stamp=1_002.0)
+    def test_concurrent_attachments_claim_their_own_sessions(self):
+        """Content pairs them 1:1 however their sessions interleave.
+
+        Spawn-time windows failed here: the first attachment may self-update
+        and open its session *after* the second one spawned, which put its
+        own transcript permanently outside its window.
+        """
+        first, second = self.make_adapter(name="alpha"), self.make_adapter(
+            ident="attachment-2", name="beta")
+        first._note_paste(first.briefing())
+        second._note_paste(second.briefing())
+        # Deliberately out of order: beta's session opens first.
+        theirs = self.write_session("random-beta", pasted=second.briefing())
+        mine = self.write_session("random-alpha", pasted=first.briefing())
 
         with self.searching("missing.jsonl"):
-            self.assertEqual(first._find_transcript(), path)
-            self.assertIsNone(second._find_transcript())
+            self.assertEqual(first._find_transcript(), mine)
+            self.assertEqual(second._find_transcript(), theirs)
 
-    def test_the_pinned_transcript_still_wins_when_it_exists(self):
-        adapter = self.make_adapter([])
-        pinned = self.write_session("attachment-1", cwd="/work", stamp=1_002.0)
-        self.write_session("random-id", cwd="/work", stamp=1_003.0)
+    def test_ownership_is_the_same_whichever_adapter_claims_first(self):
+        first, second = self.make_adapter(name="alpha"), self.make_adapter(
+            ident="attachment-2", name="beta")
+        first._note_paste(first.briefing())
+        second._note_paste(second.briefing())
+        theirs = self.write_session("random-beta", pasted=second.briefing())
+        mine = self.write_session("random-alpha", pasted=first.briefing())
 
-        with self.searching():
-            self.assertEqual(adapter._find_transcript(), pinned)
+        with self.searching("missing.jsonl"):
+            self.assertEqual(second._find_transcript(), theirs)
+            self.assertEqual(first._find_transcript(), mine)
 
-    def test_a_transcript_that_never_names_a_directory_is_not_adopted(self):
-        """Garbage and truncation judge nothing: unreadable is not ours."""
-        adapter = self.make_adapter([])
-        path = self.root / "half-written.jsonl"
-        path.write_text('not json\n{"type": "mode"}\n', encoding="utf-8")
-
-        with self.searching():
-            self.assertIsNone(adapter._find_transcript())
-
-    def test_an_unreadable_transcript_is_not_adopted(self):
-        adapter = self.make_adapter([])
-        self.write_session("locked", cwd="/work", stamp=1_002.0)
-
-        with self.searching(), patch("builtins.open", side_effect=OSError):
-            self.assertIsNone(adapter._find_transcript())
-
-    async def test_stop_releases_the_pin_and_the_claim(self):
-        """A detached attachment must not hold a session another can use."""
-        adapter = self.make_adapter([])
-        path = self.write_session("random-id", cwd="/work", stamp=1_002.0)
-        with self.searching():
-            adapter._find_transcript()
-        self.assertIn(path, PartylineAdapter._CLAIMED)
-
-        await adapter.stop()
-
-        self.assertNotIn(path, PartylineAdapter._CLAIMED)
-        self.assertNotIn("attachment-1", PartylineAdapter._LIVE)
-
-    async def test_start_registers_the_spawn_time_ownership_depends_on(self):
-        """Without this registry every window is unbounded and swaps return."""
-        adapter = self.make_adapter([])
-
-        async def fake_start(self):
-            self.spawned_at = 1_234.0
-
-        with patch("partyline.adapters.base.Adapter.start", fake_start):
-            await adapter.start()
-
-        self.assertEqual(PartylineAdapter._LIVE["attachment-1"], 1_234.0)
-
-    def test_a_stale_pinned_transcript_loses_to_a_fresh_adoption(self):
-        """A resume whose pin was dropped must not tail its own dead session.
-
-        The pinned file already exists — it is the session being resumed —
-        so its presence proves nothing. Untouched since spawn, it is the file
-        of a process that is no longer writing it.
-        """
-        adapter = self.make_adapter([])
+    async def test_a_resumed_attachment_claims_its_session_on_the_first_wake(self):
+        """A resume gets no briefing, so its first delivery identifies it."""
+        adapter = self.make_adapter()
         adapter.resume = True
         adapter.att["resume"] = True
-        stale = self.write_session("attachment-1", cwd="/work", stamp=100.0)
+        digest = adapter.format_digest([{"sender": "greg", "body": "x" * 200}])
+        with patch.object(PartylineAdapter, "send_keys", AsyncMock()):
+            await adapter.deliver([{"sender": "greg", "body": "x" * 200}])
+        fresh = self.write_session("random-resume", pasted=digest)
+
+        with self.searching("missing.jsonl"):
+            self.assertEqual(adapter._find_transcript(), fresh)
+
+    def test_a_short_wake_is_too_thin_to_name_a_session_by(self):
+        adapter = self.make_adapter()
+        adapter._note_paste("ok")
+
+        self.assertEqual(adapter._pastes, [])
+
+    def test_a_stale_pinned_transcript_loses_to_a_fresh_adoption(self):
+        """A resume whose pin was dropped must not tail its own dead session."""
+        adapter = self.make_adapter()
+        adapter.resume = True
+        adapter._note_paste("d" * 200)
+        stale = self.write_session("attachment-1")
         os.utime(stale, (200.0, 200.0))
-        fresh = self.write_session("random-resume", cwd="/work", stamp=1_002.0)
+        fresh = self.write_session("random-resume", pasted="d" * 200)
+
+        with self.searching():
+            self.assertEqual(adapter._find_transcript(), fresh)
+
+    def test_a_write_just_before_respawn_is_not_proof_the_pin_survived(self):
+        """mtime and spawned_at are one clock, so no allowance is given.
+
+        A five-second grace let the previous process's last write vouch for
+        the new one, and the stale session won again.
+        """
+        adapter = self.make_adapter()
+        adapter.resume = True
+        adapter._note_paste("d" * 200)
+        stale = self.write_session("attachment-1")
+        os.utime(stale, (adapter.spawned_at - 1, adapter.spawned_at - 1))
+        fresh = self.write_session("random-resume", pasted="d" * 200)
 
         with self.searching():
             self.assertEqual(adapter._find_transcript(), fresh)
 
     def test_a_pinned_transcript_written_since_spawn_still_wins(self):
         """The ordinary resume: the CLI kept the pin and is appending."""
-        adapter = self.make_adapter([])
+        adapter = self.make_adapter()
         adapter.resume = True
-        pinned = self.write_session("attachment-1", cwd="/work", stamp=100.0)
-        os.utime(pinned, (1_002.0, 1_002.0))
-        self.write_session("random-other", cwd="/work", stamp=1_003.0)
+        pinned = self.write_session("attachment-1")
+        os.utime(pinned, (adapter.spawned_at + 2, adapter.spawned_at + 2))
 
         with self.searching():
             self.assertEqual(adapter._find_transcript(), pinned)
 
-    def test_two_attachments_do_not_swap_each_others_sessions(self):
-        """Spawn order decides ownership, not who searches first.
-
-        Two same-cwd attachments that both lost their pins each see two
-        unclaimed random transcripts. Sorting by recency handed the first
-        adapter the second process's session and let the second reach back
-        through the skew allowance for the first's.
-        """
-        first, second = self.make_adapter([]), self.make_adapter([])
-        second.att = dict(second.att, id="attachment-2")
-        second.spawned_at = 1_002.0
-        PartylineAdapter._LIVE.update({"attachment-1": 1_000.0, "attachment-2": 1_002.0})
-        theirs = self.write_session("random-second", cwd="/work", stamp=1_003.0)
-        ours = self.write_session("random-first", cwd="/work", stamp=1_001.0)
-
-        with self.searching("missing.jsonl"):
-            # Deliberately the later attachment first: claim order must not
-            # decide identity.
-            self.assertEqual(second._find_transcript(), theirs)
-            self.assertEqual(first._find_transcript(), ours)
-
-    def test_ownership_holds_when_the_earlier_attachment_claims_first(self):
-        first, second = self.make_adapter([]), self.make_adapter([])
-        second.att = dict(second.att, id="attachment-2")
-        second.spawned_at = 1_002.0
-        PartylineAdapter._LIVE.update({"attachment-1": 1_000.0, "attachment-2": 1_002.0})
-        theirs = self.write_session("random-second", cwd="/work", stamp=1_003.0)
-        ours = self.write_session("random-first", cwd="/work", stamp=1_001.0)
-
-        with self.searching("missing.jsonl"):
-            self.assertEqual(first._find_transcript(), ours)
-            self.assertEqual(second._find_transcript(), theirs)
-
-    def test_a_preamble_only_session_is_dated_by_its_mtime(self):
-        """A brand-new session has written no stamped record yet."""
-        adapter = self.make_adapter([])
-        path = self.root / "just-opened.jsonl"
-        path.write_text('{"type": "mode", "cwd": "/work"}\n', encoding="utf-8")
-        os.utime(path, (1_001.0, 1_001.0))
+    def test_a_fresh_attachment_trusts_its_own_pinned_name(self):
+        adapter = self.make_adapter()
+        pinned = self.write_session("attachment-1")
 
         with self.searching():
-            self.assertEqual(adapter._find_transcript(), str(path))
+            self.assertEqual(adapter._find_transcript(), pinned)
+
+    def test_an_adopted_transcript_is_claimed_against_a_second_adapter(self):
+        first = self.make_adapter()
+        second = self.make_adapter(ident="attachment-2")
+        first._note_paste(first.briefing())
+        second._note_paste(first.briefing())
+        mine = self.write_session("random-id", pasted=first.briefing())
+
+        with self.searching("missing.jsonl"):
+            self.assertEqual(first._find_transcript(), mine)
+            self.assertIsNone(second._find_transcript())
+
+    def test_an_unreadable_transcript_is_not_adopted(self):
+        adapter = self.make_adapter()
+        adapter._note_paste(adapter.briefing())
+        self.write_session("locked", pasted=adapter.briefing())
+
+        with self.searching(), patch("builtins.open", side_effect=OSError):
+            self.assertIsNone(adapter._find_transcript())
+
+    def test_a_transcript_of_garbage_is_not_adopted(self):
+        adapter = self.make_adapter()
+        adapter._note_paste(adapter.briefing())
+        (self.root / "half-written.jsonl").write_text("not json\n", encoding="utf-8")
+
+        with self.searching():
+            self.assertIsNone(adapter._find_transcript())
+
+    def test_a_stranger_transcript_is_not_read_past_the_scan_bound(self):
+        adapter = self.make_adapter()
+        adapter._note_paste(adapter.briefing())
+        path = self.root / "enormous.jsonl"
+        filler = json.dumps({"type": "user", "cwd": "/work",
+                             "message": {"content": "z" * 4_000}})
+        path.write_text("\n".join([filler] * 200) + "\n", encoding="utf-8")
+
+        with self.searching():
+            self.assertIsNone(adapter._find_transcript())
+
+    async def test_stop_releases_the_claim(self):
+        """A detached attachment must not hold a session another can use."""
+        adapter = self.make_adapter()
+        adapter._note_paste(adapter.briefing())
+        mine = self.write_session("random-id", pasted=adapter.briefing())
+        with self.searching("missing.jsonl"):
+            adapter._find_transcript()
+        self.assertIn(mine, PartylineAdapter._CLAIMED)
+
+        await adapter.stop()
+
+        self.assertNotIn(mine, PartylineAdapter._CLAIMED)
 
 
 if __name__ == "__main__":
