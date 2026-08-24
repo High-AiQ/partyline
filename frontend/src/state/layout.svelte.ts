@@ -1,12 +1,6 @@
-/**
- * Which region of the app is on screen.
- *
- * On a desktop this store does nothing: all three columns are visible at once
- * and there is nothing to choose between. Below the breakpoint there is not
- * room for three columns — the centre one collapsed to zero width, which meant
- * the conversation itself was invisible on a phone — so the rails become
- * drawers over the line and exactly one of them can be open.
- */
+/** Which side regions are visible as columns or narrow-screen drawers. */
+
+import { z } from "zod";
 
 /** The rails, which become overlay drawers on a narrow screen. */
 export type DrawerName = "rail" | "board";
@@ -21,12 +15,51 @@ export type DrawerName = "rail" | "board";
  */
 export const NARROW_MAX_WIDTH = 899;
 const NARROW_QUERY = `(max-width: ${String(NARROW_MAX_WIDTH)}px)`;
+const DESKTOP_COLUMNS_KEY = "partyline_desktop_columns";
 
-class Layout {
+export const DesktopColumnsSchema = z.object({
+  railCollapsed: z.boolean(),
+  boardCollapsed: z.boolean(),
+});
+export type DesktopColumns = z.infer<typeof DesktopColumnsSchema>;
+
+const DEFAULT_DESKTOP_COLUMNS: DesktopColumns = {
+  railCollapsed: false,
+  boardCollapsed: false,
+};
+
+function readDesktopColumns(): DesktopColumns {
+  try {
+    const raw = localStorage.getItem(DESKTOP_COLUMNS_KEY);
+    if (raw === null) return DEFAULT_DESKTOP_COLUMNS;
+    const parsed = DesktopColumnsSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : DEFAULT_DESKTOP_COLUMNS;
+  } catch {
+    return DEFAULT_DESKTOP_COLUMNS;
+  }
+}
+
+function storeDesktopColumns(columns: DesktopColumns): void {
+  try {
+    localStorage.setItem(DESKTOP_COLUMNS_KEY, JSON.stringify(columns));
+  } catch {
+    // A blocked or full storage area should not make the controls stop working.
+  }
+}
+
+export class Layout {
   /** The open drawer, or null when the line has the screen to itself. */
   drawer = $state<DrawerName | null>(null);
   /** True when the viewport cannot hold all three columns. */
   narrow = $state(false);
+  railCollapsed = $state(false);
+  boardCollapsed = $state(false);
+
+  constructor() {
+    const saved = readDesktopColumns();
+    this.railCollapsed = saved.railCollapsed;
+    this.boardCollapsed = saved.boardCollapsed;
+  }
 
   get drawerOpen(): boolean {
     return this.drawer !== null;
@@ -42,6 +75,15 @@ class Layout {
 
   toggle(name: DrawerName): void {
     this.drawer = this.drawer === name ? null : name;
+  }
+
+  toggleColumn(name: DrawerName): void {
+    if (name === "rail") this.railCollapsed = !this.railCollapsed;
+    else this.boardCollapsed = !this.boardCollapsed;
+    storeDesktopColumns({
+      railCollapsed: this.railCollapsed,
+      boardCollapsed: this.boardCollapsed,
+    });
   }
 
   /**
