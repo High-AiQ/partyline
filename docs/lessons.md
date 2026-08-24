@@ -512,5 +512,11 @@ enforce it. A prose warning that has no executable guard is not a completed less
   the session that recorded it. That in turn deleted the discovery lock, which had grown a hazard
   of its own: held across an unbounded wait, one CLI stuck on a login prompt gagged every Claude
   attached after it. Identity is stated, not inferred, and once it is stated nothing needs
-  serializing. The durable fix remains upstream, in not letting a CLI self-update mid-attach;
+  serializing. One last turn of the same screw: the first token was the attachment id, which is
+  stable across resumes, so the stale session left behind by a dropped pin still carried it —
+  rejected as the pinned candidate by mtime, then readmitted by the broad sweep and adopted by the
+  very search meant to replace it. The token is now per-activation, a fresh nonce each run, and the
+  rejected pinned path is excluded from the sweep as well. The pattern across all five rounds is
+  one mistake wearing different clothes: identity inferred from something that outlives the thing
+  being identified. The durable fix remains upstream, in not letting a CLI self-update mid-attach;
   everything downstream of that is recovery.
