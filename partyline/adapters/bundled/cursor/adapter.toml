@@ -10,5 +10,5 @@ requires = ["agent"]
 # The embedded newline selects the slash-menu item; the base paste adds submit.
 compact_paste = "/summarize\n"
 env_unset = []
-capabilities = { resume = true, turn_end = "receipt" }
+capabilities = { resume = true, turn_end = "receipt", transcript = true }
 update_command = ["agent", "update"]

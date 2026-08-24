@@ -16,3 +16,5 @@ update_command = ["pi", "update", "--self"]
 [adapter.capabilities]
 # Re-attaching reuses the same --session-id, so the process comes back with context.
 resume = true
+# Its speech is trusted only from a transcript it has claimed by content.
+transcript = true

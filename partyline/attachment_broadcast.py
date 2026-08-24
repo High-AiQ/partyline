@@ -9,6 +9,9 @@ async def broadcast_attachment_state(runtime, conv_id: str, att_id: str) -> None
     attachment = runtime.db.get_attachment(att_id)
     if attachment is None:
         return
+    # Every state broadcast courts pasted-but-unproved ids, so a claim that
+    # lands between mentions credits its backlog without waiting for one.
+    runtime.credit_unclaimed(att_id, attachment.get("runtime_owner"))
     response = await attachment_response(attachment)
     await runtime.broadcast(conv_id, AttachmentEvent(attachment=response))
 
