@@ -526,5 +526,13 @@ enforce it. A prose warning that has no executable guard is not a completed less
   passed while carrying the wrong nonce and hid the session carrying the right one. The pinned name
   is now searched first for speed and never for authority: content proof decides everywhere, and
   the mtime fallback survives only for a resumed attachment before its first wake, tried only after
-  no token-bearing session was found. Six rounds, one shape. The durable fix remains upstream, in not letting a CLI self-update mid-attach;
+  no token-bearing session was found. And the claim set itself turned out to hold the same defect:
+  a claim outlived the CLI that made it, and because the pinned path is named after the attachment
+  it is stable across activations — so a re-activation writing its new nonce into that same path
+  was skipped forever, muting the exact case the adapter exists to recover. The fix was not a
+  liveness registry to release dead claims (that is one more lifetime to get wrong, and two earlier
+  rounds had already got it wrong) but to stop consulting claims where proof is available: a claim
+  never outranks the token, and it now guards only the one branch that has no content behind it.
+  Seven rounds, one shape — every time, identity taken from something that outlives the thing being
+  identified. The durable fix remains upstream, in not letting a CLI self-update mid-attach;
   everything downstream of that is recovery.

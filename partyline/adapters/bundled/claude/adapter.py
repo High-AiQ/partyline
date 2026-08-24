@@ -19,10 +19,9 @@ SCAN_BYTES = 512 * 1024
 class PartylineAdapter(BaseAdapter):
     kind = "claude"
 
-    # Transcripts a live attachment has adopted, so two adapters cannot tail
-    # one session. Claiming needs no lock: a claim token names exactly one
-    # attachment, so no two adapters can ever match the same transcript, and
-    # the set is read and written without awaiting in between.
+    # Transcripts currently being tailed, so two adapters cannot follow one
+    # session. It needs no lock: a claim token names exactly one activation,
+    # so the set is read and written without awaiting in between.
     _CLAIMED: set[str] = set()
 
     _transcript: str = ""
@@ -168,14 +167,29 @@ class PartylineAdapter(BaseAdapter):
         sweep = glob.glob(os.path.expanduser("~/.claude/projects/*/*.jsonl"))
         seen = set()
         for path in ([pinned] if pinned else []) + sweep:
-            if path in seen or path in self._CLAIMED:
+            if path in seen:
                 continue
             seen.add(path)
+            # A claim never outranks proof, so none is consulted here. The
+            # pinned path is named after the attachment and so is stable
+            # across activations: re-activate the same attachment and the new
+            # CLI writes its new nonce into the very path an exited
+            # activation claimed, and a claim that outlived its claimant
+            # would mute exactly the case this adapter recovers. Releasing it
+            # on the claimant's death would need a liveness registry —
+            # something to get wrong, and twice already had been. Carrying
+            # our token is the same evidence and needs nothing, and two live
+            # adapters can never collide because no two activations share a
+            # token.
             if self._recorded_our_token(path):
                 self._CLAIMED.add(path)
                 self._transcript = path
                 return path
-        if self.resume and pinned and self._written_since_spawn(pinned):
+        # The one branch with no proof behind it is the only one a claim can
+        # usefully guard.
+        if (self.resume and pinned and pinned not in self._CLAIMED
+                and self._written_since_spawn(pinned)):
+            self._CLAIMED.add(pinned)
             self._transcript = pinned
             return pinned
         return None
