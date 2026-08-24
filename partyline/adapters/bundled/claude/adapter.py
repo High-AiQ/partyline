@@ -19,10 +19,9 @@ SCAN_BYTES = 512 * 1024
 class PartylineAdapter(BaseAdapter):
     kind = "claude"
 
-    # Transcripts a live attachment has adopted, so two adapters cannot tail
-    # one session. Claiming needs no lock: a claim token names exactly one
-    # attachment, so no two adapters can ever match the same transcript, and
-    # the set is read and written without awaiting in between.
+    # Transcripts currently being tailed, so two adapters cannot follow one
+    # session. It needs no lock: a claim token names exactly one activation,
+    # so the set is read and written without awaiting in between.
     _CLAIMED: set[str] = set()
 
     _transcript: str = ""
@@ -97,24 +96,17 @@ class PartylineAdapter(BaseAdapter):
     def transcript_glob(self) -> str:
         return os.path.expanduser(f"~/.claude/projects/*/{self.att['id']}.jsonl")
 
-    def _pinned_is_ours(self, path: str) -> bool:
-        """Whether the pinned transcript belongs to the process we spawned.
+    def _written_since_spawn(self, path: str) -> bool:
+        """Whether anything has written this file since this process started.
 
-        A fresh attachment's pinned name is its own attachment id, so the
-        file can only exist because this process created it. A resume pins a
-        session file that already exists — it is the session being resumed —
-        so its presence proves nothing: a CLI that re-execed without
-        ``--resume`` opened a fresh session and left this one untouched, and
-        tailing it would follow a file nobody writes, mute but reported
-        ready.
-
-        Only a write at or after our spawn tells the two apart, and the
-        comparison takes no allowance: the file's mtime and ``spawned_at``
-        are both this host's clock, so a second of slack buys nothing and
-        admits the previous process's last write as proof of the new one.
+        Weak evidence, and the only kind available to a resumed attachment
+        before its first wake: it says *someone* wrote the file, not that we
+        did. A pinned file untouched since we spawned belongs to a process
+        that is no longer writing it, and tailing it would be mute but
+        reported ready. No allowance is taken — mtime and ``spawned_at`` are
+        one host clock, so slack only lets the previous process's last write
+        vouch for the new one.
         """
-        if not self.resume:
-            return True
         try:
             return os.path.getmtime(path) >= self.spawned_at
         except OSError:
@@ -153,7 +145,7 @@ class PartylineAdapter(BaseAdapter):
         return False
 
     def _find_transcript(self) -> str | None:
-        """The pinned transcript, or the session the CLI actually opened.
+        """The session carrying this activation's token, pinned or not.
 
         ``build_command`` pins the session id so the transcript's name is
         known before the CLI writes it — but the process partyline spawns is
@@ -162,26 +154,44 @@ class PartylineAdapter(BaseAdapter):
         opening a randomly-named session instead (2026-08-24: opus attached
         this way and could not speak for 42 minutes).
 
-        A resumed attachment has nothing to match until its first wake
-        arrives, and then matches on that. Until then it waits rather than
-        guessing: a wrong guess trades a mute attachment for one speaking
-        under another process's name.
+        The pinned name is searched first for speed, never for authority:
+        content proof decides everywhere, so a leftover session cannot win by
+        being called the right thing or by having been touched at the right
+        moment. Only a resumed attachment, which has nothing to match until
+        its first wake, falls back to the pinned file on the weaker evidence
+        that something has written it since we spawned — and only after no
+        token-bearing session was found, so proof outranks the fallback
+        rather than being skipped by it.
         """
-        rejected = ""
-        if hits := glob.glob(self.transcript_glob()):
-            if self._pinned_is_ours(hits[0]):
-                self._transcript = hits[0]
-                return hits[0]
-            # Judged stale a moment ago; the sweep below must not readmit it.
-            rejected = hits[0]
-        for path in glob.glob(os.path.expanduser("~/.claude/projects/*/*.jsonl")):
-            if path == rejected or path in self._CLAIMED:
+        pinned = next(iter(glob.glob(self.transcript_glob())), "")
+        sweep = glob.glob(os.path.expanduser("~/.claude/projects/*/*.jsonl"))
+        seen = set()
+        for path in ([pinned] if pinned else []) + sweep:
+            if path in seen:
                 continue
-            if not self._recorded_our_token(path):
-                continue
-            self._CLAIMED.add(path)
-            self._transcript = path
-            return path
+            seen.add(path)
+            # A claim never outranks proof, so none is consulted here. The
+            # pinned path is named after the attachment and so is stable
+            # across activations: re-activate the same attachment and the new
+            # CLI writes its new nonce into the very path an exited
+            # activation claimed, and a claim that outlived its claimant
+            # would mute exactly the case this adapter recovers. Releasing it
+            # on the claimant's death would need a liveness registry —
+            # something to get wrong, and twice already had been. Carrying
+            # our token is the same evidence and needs nothing, and two live
+            # adapters can never collide because no two activations share a
+            # token.
+            if self._recorded_our_token(path):
+                self._CLAIMED.add(path)
+                self._transcript = path
+                return path
+        # The one branch with no proof behind it is the only one a claim can
+        # usefully guard.
+        if (self.resume and pinned and pinned not in self._CLAIMED
+                and self._written_since_spawn(pinned)):
+            self._CLAIMED.add(pinned)
+            self._transcript = pinned
+            return pinned
         return None
 
     async def _await_transcript(self) -> str | None:

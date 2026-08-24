@@ -97,6 +97,16 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
     # is shipped to every user to support a test they will never run.
     fixture = Path(__file__).parent / "fixtures" / "claude_transcript.jsonl"
 
+    def setUp(self):
+        # Claims outlive the adapter that made them: nothing clears the set
+        # when a CLI exits on its own. Harmless in production, because a new
+        # activation carries a new nonce and so can never want a path an old
+        # one took — but in one process it leaks between tests.
+        # Cleared for isolation between tests only. The production release
+        # path is liveness-driven and proved by its own regression below.
+        PartylineAdapter._CLAIMED.clear()
+        self.addCleanup(PartylineAdapter._CLAIMED.clear)
+
     def make_adapter(self, posts: list[tuple[str, str, str]]) -> PartylineAdapter:
         async def post(sender: str, sender_type: str, body: str) -> None:
             posts.append((sender, sender_type, body))
@@ -121,7 +131,7 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
         adapter._fresh = lambda timestamp: timestamp == "fresh"
         # These tests isolate the poll and the tail, not transcript identity:
         # their paths are names, not files on disk.
-        adapter._pinned_is_ours = lambda path: True
+        adapter._recorded_our_token = lambda path: True
         return adapter
 
     async def test_transcript_posts_only_fresh_unique_assistant_text(self):
@@ -146,11 +156,21 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
         posts: list[tuple[str, str, str]] = []
         adapter = self.make_adapter(posts)
         adapter.resume = False
-        adapter.alive = lambda: True
+        polls = iter(range(200))
+        adapter.alive = lambda: next(polls, None) is not None
         adapter._fresh = lambda timestamp: True
 
-        # Simulate transcript appearing after two empty globs, then found
-        globs = [[], [], ["found.jsonl"]]
+        # Simulate the transcript appearing after two empty polls. Only the
+        # pinned pattern counts as a poll: a miss also sweeps the unpinned
+        # sessions, and counting both would misplace the appearance.
+        polls_seen = 0
+
+        def fake_glob(pattern):
+            nonlocal polls_seen
+            if "attachment-1" not in pattern:
+                return []
+            polls_seen += 1
+            return ["found.jsonl"] if polls_seen > 2 else []
 
         async def fake_tail(path, handle):
             await handle(
@@ -165,7 +185,7 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
         adapter._tail_jsonl = fake_tail
         with (
             patch("partyline.adapters.bundled.claude.adapter.asyncio.sleep", AsyncMock()),
-            patch("partyline.adapters.bundled.claude.adapter.glob.glob", side_effect=globs),
+            patch("partyline.adapters.bundled.claude.adapter.glob.glob", side_effect=fake_glob),
             patch.object(adapter, "send_keys", AsyncMock()) as mock_keys,
         ):
             await adapter._run()
@@ -261,7 +281,8 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
         posts: list[tuple[str, str, str]] = []
         adapter = self.make_adapter(posts)
         adapter.resume = False
-        adapter.alive = lambda: True
+        lifetime = iter(range(200))
+        adapter.alive = lambda: next(lifetime, None) is not None
         adapter._fresh = lambda timestamp: True
         adapter.master = 1
 
@@ -322,6 +343,8 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.root = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.root, True)
+        # Cleared for isolation between tests only. The production release
+        # path is liveness-driven and proved by its own regression below.
         PartylineAdapter._CLAIMED.clear()
         self.addCleanup(PartylineAdapter._CLAIMED.clear)
 
@@ -521,15 +544,19 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
         with self.searching():
             self.assertEqual(adapter._find_transcript(), fresh)
 
-    def test_a_rejected_pinned_transcript_is_not_readmitted_by_the_sweep(self):
-        """Even carrying our own token, a file judged stale stays rejected."""
+    def test_a_pinned_transcript_carrying_our_token_is_ours_whatever_its_mtime(self):
+        """Proof beats the clock in both directions.
+
+        An old mtime on a file this activation demonstrably wrote is a fact
+        about the filesystem, not about ownership.
+        """
         adapter = self.make_adapter()
         adapter.resume = True
-        stale = self.write_session("attachment-1", pasted=adapter._claim_token)
-        os.utime(stale, (200.0, 200.0))
+        pinned = self.write_session("attachment-1", pasted=adapter._claim_token)
+        os.utime(pinned, (200.0, 200.0))
 
         with self.searching():
-            self.assertIsNone(adapter._find_transcript())
+            self.assertEqual(adapter._find_transcript(), pinned)
 
     def test_a_stale_pinned_transcript_loses_to_a_fresh_adoption(self):
         """A resume whose pin was dropped must not tail its own dead session."""
@@ -563,24 +590,81 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
         with self.searching():
             self.assertEqual(adapter._find_transcript(), pinned)
 
-    def test_a_fresh_attachment_trusts_its_own_pinned_name(self):
+    def test_a_fresh_attachment_takes_its_own_pinned_transcript(self):
         adapter = self.make_adapter()
-        pinned = self.write_session("attachment-1")
+        pinned = self.write_session("attachment-1", pasted=adapter.briefing())
 
         with self.searching():
             self.assertEqual(adapter._find_transcript(), pinned)
 
-    def test_an_adopted_transcript_is_claimed_against_a_second_adapter(self):
+    def test_a_fresh_attachment_does_not_inherit_a_leftover_pinned_file(self):
+        """The pinned name is only ours if this activation wrote it.
+
+        Trusting it on sight held only while attachment ids were never
+        re-activated without a resume — an assumption about the rest of the
+        system that this adapter cannot enforce.
+        """
+        previous = self.make_adapter()
+        adapter = self.make_adapter()
+        leftover = self.write_session("attachment-1", pasted=previous._claim_token)
+        os.utime(leftover, (adapter.spawned_at - 1, adapter.spawned_at - 1))
+        fresh = self.write_session("random-id", pasted=adapter._claim_token)
+
+        with self.searching():
+            self.assertEqual(adapter._find_transcript(), fresh)
+
+    def test_a_leftover_pinned_file_touched_after_we_start_still_loses(self):
+        """Being written is not being written *by us*.
+
+        `mtime >= spawned_at` says only that someone wrote the file. A
+        previous activation's session touched by its own writer after we
+        spawned passed that test while carrying the wrong token, and hid the
+        session carrying the right one.
+        """
+        previous = self.make_adapter()
+        adapter = self.make_adapter()
+        leftover = self.write_session("attachment-1", pasted=previous._claim_token)
+        os.utime(leftover, (adapter.spawned_at + 5, adapter.spawned_at + 5))
+        ours = self.write_session("random-id", pasted=adapter._claim_token)
+
+        with self.searching():
+            self.assertEqual(adapter._find_transcript(), ours)
+
+    def test_a_resumed_attachment_prefers_proof_over_the_pinned_fallback(self):
+        """Content outranks the weaker mtime evidence, never the reverse."""
+        previous = self.make_adapter()
+        adapter = self.make_adapter()
+        adapter.resume = True
+        pinned = self.write_session("attachment-1", pasted=previous._claim_token)
+        os.utime(pinned, (adapter.spawned_at + 5, adapter.spawned_at + 5))
+        ours = self.write_session("random-resume", pasted=adapter._claim_token)
+
+        with self.searching():
+            self.assertEqual(adapter._find_transcript(), ours)
+
+    def test_a_fresh_attachment_waits_rather_than_taking_an_unproven_pin(self):
+        """Nothing yet proves the pinned file is ours, so nothing is claimed."""
+        adapter = self.make_adapter()
+        pinned = self.write_session("attachment-1")
+        os.utime(pinned, (adapter.spawned_at + 5, adapter.spawned_at + 5))
+
+        with self.searching():
+            self.assertIsNone(adapter._find_transcript())
+
+    def test_a_second_adapter_cannot_take_a_session_it_did_not_write(self):
+        """No claim needed: the token it is looking for is not in there.
+
+        This replaces a test that forced two adapters to share a token to
+        exercise the claim set. Sharing a token is now impossible, so the
+        contrivance was asserting against a state the design excludes.
+        """
         first = self.make_adapter()
         second = self.make_adapter(ident="attachment-2")
-        # Contrived: the same token in one file, so only the claim set separates them.
         mine = self.write_session("random-id", pasted=first.briefing())
 
         with self.searching("missing.jsonl"):
             self.assertEqual(first._find_transcript(), mine)
-            with patch.object(type(second), "_claim_token",
-                              property(lambda self: first._claim_token)):
-                self.assertIsNone(second._find_transcript())
+            self.assertIsNone(second._find_transcript())
 
     def test_an_unreadable_transcript_is_not_adopted(self):
         adapter = self.make_adapter()
@@ -604,6 +688,42 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
         buried = json.dumps({"type": "user", "cwd": "/work",
                              "message": {"content": adapter._claim_token}})
         path.write_text("\n".join([filler] * 200 + [buried]) + "\n", encoding="utf-8")
+
+        with self.searching():
+            self.assertIsNone(adapter._find_transcript())
+
+    def test_a_reactivated_attachment_reclaims_its_own_pinned_path(self):
+        """The exact lifecycle this adapter exists to protect.
+
+        The pinned path is named after the attachment, so it is stable across
+        activations. An exited activation's claim on it is never released by
+        ``stop()`` — a CLI that quits on its own is dropped from the runtime's
+        live map without teardown — and the replacement, writing its new
+        nonce into that same path, was skipped forever.
+        """
+        previous = self.make_adapter()
+        pinned = self.write_session("attachment-1", pasted=previous.briefing())
+        with self.searching():
+            self.assertEqual(previous._find_transcript(), pinned)
+        # The CLI exits on its own: no stop(), just a dead process.
+        previous.alive = lambda: False
+
+        replacement = self.make_adapter()
+        (self.root / "attachment-1.jsonl").write_text(
+            json.dumps({"type": "user", "cwd": "/work",
+                        "message": {"content": replacement.briefing()}}) + "\n",
+            encoding="utf-8")
+
+        with self.searching():
+            self.assertEqual(replacement._find_transcript(), pinned)
+
+    def test_a_claim_still_guards_the_unproven_resume_fallback(self):
+        """The one branch with no content behind it keeps its guard."""
+        adapter = self.make_adapter()
+        adapter.resume = True
+        pinned = self.write_session("attachment-1")
+        os.utime(pinned, (adapter.spawned_at + 5, adapter.spawned_at + 5))
+        PartylineAdapter._CLAIMED.add(pinned)
 
         with self.searching():
             self.assertIsNone(adapter._find_transcript())
