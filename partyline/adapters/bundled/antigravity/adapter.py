@@ -51,6 +51,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
         self._notices = 0
         self._turn_open = False
         self._settle_task: asyncio.Task | None = None
+        self._settle_queued = False
         self._output_event = asyncio.Event()
 
     async def on_output(self, data: bytes):
@@ -90,9 +91,19 @@ class PartylineAdapter(WakeSettlement, Adapter):
             self._outstanding.append((digest, time.time(), ids, self._turn_open))
 
     def _schedule_settle(self) -> None:
-        """One turn-end settlement runs at a time; a second end joins it."""
-        if self._settle_task is None or self._settle_task.done():
-            self._settle_task = asyncio.create_task(self._settle_turn_end())
+        """One settlement runs at a time; an end landing during a pass queues
+        exactly one more pass, so every turn end gets its own court date."""
+        if self._settle_task is not None and not self._settle_task.done():
+            self._settle_queued = True
+            return
+        self._settle_task = asyncio.create_task(self._run_settlements())
+
+    async def _run_settlements(self) -> None:
+        while True:
+            await self._settle_turn_end()
+            if not self._settle_queued:
+                return
+            self._settle_queued = False
 
     async def _tail_log(self):
         """Follow the pinned `--log-file`, judging wakes by its submissions."""

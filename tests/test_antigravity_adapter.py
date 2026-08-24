@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, patch
 
 from partyline.adapters.bundled.antigravity import adapter as antigravity_module
 from partyline.adapters.bundled.antigravity import logparse
+from partyline.adapters.bundled.antigravity import wakes as wakes_module
 from partyline.adapters.bundled.antigravity.adapter import PartylineAdapter
 from partyline.adapters.receipts import BEGAN, ENDED
 
@@ -692,6 +693,58 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         ):
             await adapter._settle_turn_end()
         adapter.att["repool_message_ids"].assert_not_awaited()
+        self.assertEqual(adapter._outstanding, [])
+
+    async def test_a_second_turn_end_gets_its_own_settlement(self):
+        """Regression (sol's review of #122): an end landing while a grace
+        pass is running used to be swallowed — a wake pasted into the second
+        turn stayed outstanding forever because the only pending pass had
+        snapshotted before it existed. Every turn end now queues exactly one
+        more pass, which courts the wakes that arrived after the snapshot."""
+        adapter = self.make()
+        adapter.proc = Process()
+        adapter._turn_open = True
+        adapter.att["repool_message_ids"] = AsyncMock(return_value=True)
+        adapter.send_keys = AsyncMock()
+        await adapter.deliver([{"id": 21, "sender": "greg", "body": "wake one"}])
+        digest1 = adapter.format_digest([{"sender": "greg", "body": "wake one"}])
+        gate = asyncio.Event()
+        graces = {"n": 0}
+        real_sleep = asyncio.sleep
+
+        async def gated_sleep(seconds):
+            # Patching asyncio.sleep intercepts every sleeper in the loop —
+            # including this test's own yields — so delegate everything that
+            # is not a grace sleep back to the real sleeper.
+            if seconds != wakes_module.REPOOL_GRACE:
+                await real_sleep(min(seconds, 0.05))
+                return
+            graces["n"] += 1
+            if graces["n"] == 1:
+                await gate.wait()
+
+        with patch(
+            "partyline.adapters.bundled.antigravity.wakes.asyncio.sleep", new=gated_sleep
+        ):
+            adapter._turn_open = False
+            adapter._schedule_settle()  # pass one: snapshot has wake one only
+            await asyncio.sleep(0.05)
+            # wake one settles from its transcript record during the grace…
+            await adapter._note_user_input(
+                "<USER_REQUEST>\n" + digest1 + "\n</USER_REQUEST>", later(time.time())
+            )
+            # …and wake two is pasted into turn two, which ends mid-grace.
+            await adapter.deliver([{"id": 22, "sender": "greg", "body": "wake two"}])
+            adapter._turn_open = False
+            adapter._schedule_settle()  # queued behind the running pass
+            gate.set()
+            for _ in range(50):
+                if adapter.att["repool_message_ids"].await_count:
+                    break
+                await asyncio.sleep(0.02)
+            await adapter._settle_task
+        self.assertEqual(graces["n"], 2)
+        adapter.att["repool_message_ids"].assert_awaited_once_with([22])
         self.assertEqual(adapter._outstanding, [])
 
     async def test_stage_startup_delivery_rejects_a_blank_digest(self):
