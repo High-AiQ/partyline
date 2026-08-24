@@ -102,6 +102,8 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
         # when a CLI exits on its own. Harmless in production, because a new
         # activation carries a new nonce and so can never want a path an old
         # one took — but in one process it leaks between tests.
+        # Cleared for isolation between tests only. The production release
+        # path is liveness-driven and proved by its own regression below.
         PartylineAdapter._CLAIMED.clear()
         self.addCleanup(PartylineAdapter._CLAIMED.clear)
 
@@ -341,6 +343,8 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.root = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.root, True)
+        # Cleared for isolation between tests only. The production release
+        # path is liveness-driven and proved by its own regression below.
         PartylineAdapter._CLAIMED.clear()
         self.addCleanup(PartylineAdapter._CLAIMED.clear)
 
@@ -647,17 +651,20 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
         with self.searching():
             self.assertIsNone(adapter._find_transcript())
 
-    def test_an_adopted_transcript_is_claimed_against_a_second_adapter(self):
+    def test_a_second_adapter_cannot_take_a_session_it_did_not_write(self):
+        """No claim needed: the token it is looking for is not in there.
+
+        This replaces a test that forced two adapters to share a token to
+        exercise the claim set. Sharing a token is now impossible, so the
+        contrivance was asserting against a state the design excludes.
+        """
         first = self.make_adapter()
         second = self.make_adapter(ident="attachment-2")
-        # Contrived: the same token in one file, so only the claim set separates them.
         mine = self.write_session("random-id", pasted=first.briefing())
 
         with self.searching("missing.jsonl"):
             self.assertEqual(first._find_transcript(), mine)
-            with patch.object(type(second), "_claim_token",
-                              property(lambda self: first._claim_token)):
-                self.assertIsNone(second._find_transcript())
+            self.assertIsNone(second._find_transcript())
 
     def test_an_unreadable_transcript_is_not_adopted(self):
         adapter = self.make_adapter()
@@ -681,6 +688,42 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
         buried = json.dumps({"type": "user", "cwd": "/work",
                              "message": {"content": adapter._claim_token}})
         path.write_text("\n".join([filler] * 200 + [buried]) + "\n", encoding="utf-8")
+
+        with self.searching():
+            self.assertIsNone(adapter._find_transcript())
+
+    def test_a_reactivated_attachment_reclaims_its_own_pinned_path(self):
+        """The exact lifecycle this adapter exists to protect.
+
+        The pinned path is named after the attachment, so it is stable across
+        activations. An exited activation's claim on it is never released by
+        ``stop()`` — a CLI that quits on its own is dropped from the runtime's
+        live map without teardown — and the replacement, writing its new
+        nonce into that same path, was skipped forever.
+        """
+        previous = self.make_adapter()
+        pinned = self.write_session("attachment-1", pasted=previous.briefing())
+        with self.searching():
+            self.assertEqual(previous._find_transcript(), pinned)
+        # The CLI exits on its own: no stop(), just a dead process.
+        previous.alive = lambda: False
+
+        replacement = self.make_adapter()
+        (self.root / "attachment-1.jsonl").write_text(
+            json.dumps({"type": "user", "cwd": "/work",
+                        "message": {"content": replacement.briefing()}}) + "\n",
+            encoding="utf-8")
+
+        with self.searching():
+            self.assertEqual(replacement._find_transcript(), pinned)
+
+    def test_a_claim_still_guards_the_unproven_resume_fallback(self):
+        """The one branch with no content behind it keeps its guard."""
+        adapter = self.make_adapter()
+        adapter.resume = True
+        pinned = self.write_session("attachment-1")
+        os.utime(pinned, (adapter.spawned_at + 5, adapter.spawned_at + 5))
+        PartylineAdapter._CLAIMED.add(pinned)
 
         with self.searching():
             self.assertIsNone(adapter._find_transcript())
