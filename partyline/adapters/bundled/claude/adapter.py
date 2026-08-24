@@ -5,6 +5,7 @@ import glob
 import json
 import os
 import shlex
+import uuid
 
 from partyline.adapters.base import Adapter as BaseAdapter
 from partyline.adapters.compaction import is_compaction_record
@@ -25,18 +26,28 @@ class PartylineAdapter(BaseAdapter):
     _CLAIMED: set[str] = set()
 
     _transcript: str = ""
+    _nonce: str = ""
 
     @property
     def _claim_token(self) -> str:
-        """The one string that names this attachment and no other.
+        """The one string that names this activation and no other.
 
         Identity cannot be inferred — not from spawn order, session order, or
         any clock (review of #124 broke three such schemes). So it is stated
-        instead: a token carrying the attachment id is pasted into this pty
-        with the briefing and with every wake until a transcript is claimed,
-        and the session that records it is ours by construction.
+        instead: a token is pasted into this pty with the briefing and with
+        every wake until a transcript is claimed, and the session that
+        records it is ours by construction.
+
+        The token is per-activation, not per-attachment. An attachment id is
+        stable across resumes, so every transcript this attachment ever wrote
+        still carries it — including the stale session a dropped pin left
+        behind, which would then be adopted by the very search meant to
+        replace it. A fresh nonce each time the adapter runs makes only this
+        activation's own sessions eligible.
         """
-        return f"[partyline-claim: {self.att['id']}]"
+        if not self._nonce:
+            self._nonce = uuid.uuid4().hex[:12]
+        return f"[partyline-claim: {self.att['id']}/{self._nonce}]"
 
     def briefing(self) -> str:
         return f"{super().briefing()}\n\n{self._claim_token}"
@@ -156,12 +167,17 @@ class PartylineAdapter(BaseAdapter):
         guessing: a wrong guess trades a mute attachment for one speaking
         under another process's name.
         """
+        rejected = ""
         if hits := glob.glob(self.transcript_glob()):
             if self._pinned_is_ours(hits[0]):
                 self._transcript = hits[0]
                 return hits[0]
+            # Judged stale a moment ago; the sweep below must not readmit it.
+            rejected = hits[0]
         for path in glob.glob(os.path.expanduser("~/.claude/projects/*/*.jsonl")):
-            if path in self._CLAIMED or not self._recorded_our_token(path):
+            if path == rejected or path in self._CLAIMED:
+                continue
+            if not self._recorded_our_token(path):
                 continue
             self._CLAIMED.add(path)
             self._transcript = path

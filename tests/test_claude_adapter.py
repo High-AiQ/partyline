@@ -501,6 +501,36 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
         with self.searching("missing.jsonl"):
             self.assertEqual(adapter._find_transcript(), fresh)
 
+    def test_a_previous_activations_token_does_not_claim_its_old_session(self):
+        """The attachment id is stable across resumes; the token must not be.
+
+        A stale pinned transcript written by an earlier activation of this
+        same attachment still carries an id-only token. Rejected by mtime as
+        the pinned candidate, it was then readmitted by the broad sweep and
+        adopted anyway — the search meant to replace it choosing it.
+        """
+        previous = self.make_adapter()
+        adapter = self.make_adapter()
+        self.assertNotEqual(previous._claim_token, adapter._claim_token,
+                            "two activations must not share a token")
+        stale = self.write_session("attachment-1", pasted=previous._claim_token)
+        os.utime(stale, (200.0, 200.0))
+        fresh = self.write_session("random-resume", pasted=adapter._claim_token)
+        adapter.resume = True
+
+        with self.searching():
+            self.assertEqual(adapter._find_transcript(), fresh)
+
+    def test_a_rejected_pinned_transcript_is_not_readmitted_by_the_sweep(self):
+        """Even carrying our own token, a file judged stale stays rejected."""
+        adapter = self.make_adapter()
+        adapter.resume = True
+        stale = self.write_session("attachment-1", pasted=adapter._claim_token)
+        os.utime(stale, (200.0, 200.0))
+
+        with self.searching():
+            self.assertIsNone(adapter._find_transcript())
+
     def test_a_stale_pinned_transcript_loses_to_a_fresh_adoption(self):
         """A resume whose pin was dropped must not tail its own dead session."""
         adapter = self.make_adapter()
