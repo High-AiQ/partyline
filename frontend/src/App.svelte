@@ -111,7 +111,12 @@
 {/if}
 
 {#if session.signedIn}
-  <div id="app" class="drawer-{layout.drawer ?? 'none'}">
+  <div
+    id="app"
+    class="drawer-{layout.drawer ?? 'none'}"
+    class:rail-collapsed={layout.railCollapsed}
+    class:board-collapsed={layout.boardCollapsed}
+  >
     <Rail />
 
     <main id="main">
@@ -184,6 +189,46 @@
     display: none;
   }
 
+  /* ── desktop: independently collapsible side columns ──────────────────
+     The rails keep their full width while translating out of the viewport;
+     their grid tracks close alongside them so the line takes the freed room. */
+  @media (min-width: 900px) {
+    #app {
+      transition: grid-template-columns 0.22s ease;
+    }
+    #app > :global(#rail) {
+      width: 250px;
+      transition:
+        transform 0.22s ease,
+        opacity 0.15s ease;
+    }
+    #app > :global(#board) {
+      width: 288px;
+      transition:
+        transform 0.22s ease,
+        opacity 0.15s ease;
+    }
+    #app.rail-collapsed {
+      grid-template-columns: 0 1fr 288px;
+    }
+    #app.board-collapsed {
+      grid-template-columns: 250px 1fr 0;
+    }
+    #app.rail-collapsed.board-collapsed {
+      grid-template-columns: 0 1fr 0;
+    }
+    #app.rail-collapsed > :global(#rail) {
+      opacity: 0;
+      pointer-events: none;
+      transform: translateX(-100%);
+    }
+    #app.board-collapsed > :global(#board) {
+      opacity: 0;
+      pointer-events: none;
+      transform: translateX(100%);
+    }
+  }
+
   /* ── narrow: one region at a time ──────────────────────────────────────
      Three fixed-ish columns do not fit below roughly 900px, and the one that
      gave way was the middle one: at 390px the centre column computed to 0px,
@@ -237,6 +282,7 @@
   /* A drawer that slides is a nice touch; a drawer that slides for someone who
      asked the system not to animate is not. It still opens and closes. */
   @media (prefers-reduced-motion: reduce) {
+    #app,
     #app > :global(#rail),
     #app > :global(#board) {
       transition: none;

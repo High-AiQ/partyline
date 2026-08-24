@@ -41,6 +41,7 @@ from scripts.ui_auth import (
     post_json,
     register_test_account,
 )
+from scripts import ui_column_states
 REPO_ROOT = Path(__file__).resolve().parent.parent
 STARTUP_TIMEOUT = 30.0
 VIEWPORT = {"width": 1280, "height": 800}
@@ -397,9 +398,7 @@ def capture_all(out_dir="/tmp/partyline-ui", *, freeze_animations=False) -> list
         page.wait_for_selector("#composer")
         seed_room(page)
         ui.shot("09-feed-populated")
-        ui.element_shot("10-message-process", ".msg:nth-of-type(2)")
-        ui.element_shot("11-message-human", ".msg:nth-of-type(1)")
-        ui.element_shot("12-board-jacks", "#jacks")
+        ui_column_states.capture_line_details(ui)
 
         # The popover ranks live processes above dead ones above humans, which
         # is a rule with consequences: mentioning a dead handle does nothing.
@@ -443,6 +442,7 @@ def capture_all(out_dir="/tmp/partyline-ui", *, freeze_animations=False) -> list
         page.locator("#input").click()
         page.wait_for_timeout(300)
         ui.shot("17-narrow-keyboard-up")
+        ui_column_states.capture_desktop_columns(ui, VIEWPORT)
 
         return list(ui.shots)
 

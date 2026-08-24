@@ -14,6 +14,7 @@
   import TopicDialog from "../dialogs/TopicDialog.svelte";
   import TaskDrawer from "../dialogs/TaskDrawer.svelte";
   import AccountMenu from "./AccountMenu.svelte";
+  import ColumnToggle from "./ColumnToggle.svelte";
 
   const topic = $derived((room.conversation?.topic ?? "").trim());
   /** Live jacks only: the badge answers "is anything running", not "how many
@@ -22,6 +23,8 @@
 </script>
 
 <div id="topbar">
+  <ColumnToggle side="rail" />
+
   <button
     class="drawer-toggle lines"
     type="button"
@@ -62,6 +65,7 @@
   {/if}
 
   <AccountMenu />
+  <ColumnToggle side="board" count={liveJacks} />
 
   <button
     class="drawer-toggle jacks"
@@ -124,9 +128,8 @@
     color: var(--color-cream-faint);
   }
 
-  /* Both rails are on screen at all times above the breakpoint, so their
-     handles are not merely unnecessary there — they would be a second,
-     contradictory way to reach something already visible. */
+  /* These handles stay in the line when a desktop column leaves the grid, so
+     reopening it never depends on finding a control inside the hidden panel. */
   .drawer-toggle {
     display: none;
   }
@@ -145,6 +148,36 @@
     stroke: currentColor;
     stroke-linecap: round;
     stroke-width: 2;
+  }
+
+  @media (min-width: 900px) and (max-width: 1199px) {
+    #topbar {
+      padding: 12px;
+      align-items: center;
+      gap: 8px;
+    }
+    #convname {
+      min-width: 0;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #convmeta {
+      display: none;
+    }
+    .task-toggle span {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+    }
+    .task-toggle {
+      width: 34px;
+      padding: 0;
+      justify-content: center;
+    }
   }
 
   @media (max-width: 899px) {
@@ -167,7 +200,6 @@
     #convmeta {
       display: none;
     }
-
     .drawer-toggle {
       display: flex;
       align-items: center;
