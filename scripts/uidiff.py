@@ -269,14 +269,14 @@ def check(baseline_dir: Path = BASELINE_DIR) -> int:
     # Only judge states both sides consider trustworthy. One the baseline could
     # not pin down is not evidence of anything — and neither is one *this* run
     # could not pin down, which must not fall through to the comparison and be
-    # reported as "removed". Saying a state vanished when it merely wobbled
-    # sends someone hunting a deletion that never happened.
+    # reported as "removed". The current side is compared in full, though —
+    # filtering it to baseline names would make ADDED unreachable and silently
+    # unwatch a state the baseline never recorded.
     judged = judgeable(baseline, result.unstable)
-    comparable = {name: value for name, value in result.stable.items() if name in judged}
-    differences = compare(judged, comparable)
+    differences = compare(judged, result.stable)
 
     if not differences:
-        print(f"  ✓ all {len(comparable)} comparable states look exactly as they did")
+        print(f"  ✓ all {len(result.stable)} comparable states look exactly as they did")
         return 0
 
     for difference in differences:

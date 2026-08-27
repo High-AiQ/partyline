@@ -161,6 +161,15 @@ class JudgeableTest(unittest.TestCase):
         judged = judgeable(self.BASE, ())
         self.assertEqual(compare(judged, {"a": "1", "b": "2"}), [Difference("c", Change.REMOVED)])
 
+    def test_a_state_the_baseline_never_recorded_is_reported_as_new(self):
+        # `check()` used to filter the current capture to baseline names before
+        # comparing, which made the ADDED path unreachable — so a harness that
+        # gained a state silently lost coverage against an older baseline. The
+        # comparison must judge the full current stable set.
+        judged = judgeable(self.BASE, ())
+        current = {**self.BASE, "18-gate": "new"}
+        self.assertEqual(compare(judged, current), [Difference("18-gate", Change.ADDED)])
+
 
 class ExclusiveRunTest(unittest.TestCase):
     """Two captures must never overlap.
