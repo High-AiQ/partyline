@@ -9,20 +9,16 @@ kind of task people quietly stop doing.
     uv run python -m scripts.uidiff baseline   # before: record how it looks now
     uv run python -m scripts.uidiff check      # after: report anything that moved
 
-`check` exits non-zero if any state changed, so it can gate a merge. A reported
-difference is not automatically a bug — an intentional visual change shows up
-here too — but it does have to be *looked at*, which is the point. Re-run
-`baseline` to accept a change deliberately.
+`check` exits non-zero if any state changed, so it can gate a merge; a reported
+difference must be *looked at* — re-run `baseline` to accept it deliberately.
 
 The comparison is on the encoded PNG bytes, and **every command captures the
 state set twice**. That is not belt and braces; it is the whole design.
 
-Headless Chromium is nearly, not fully, deterministic: about one run in three
-has a single state off by a hair, and not the same state each time. The fix is
-not a fuzz threshold — which would hide the small changes most worth catching —
-but the property that separates the cases: a timing flake differs *sometimes*,
-a real change differs *every time*, so each command captures twice and trusts
-only states the two runs agree on.
+Headless Chromium is nearly, not fully, deterministic — about one run in three
+has a single state off by a hair. The fix is not a fuzz threshold but the
+property that separates flake from change: a flake differs *sometimes*, a real
+change *every time*, so capture twice and trust the agreement.
 """
 
 from __future__ import annotations
@@ -117,8 +113,7 @@ class Difference:
 
 
 # -- comparison ------------------------------------------------------------
-# Pure functions over {name: digest} maps, so the interesting logic is testable
-# without a browser, a server, or a screenshot.
+# Pure functions over {name: digest} maps, so the logic is testable without a browser.
 
 
 def digest(data: bytes) -> str:
@@ -214,8 +209,7 @@ def capture(out_dir: Path, frontend_dir: Path = REPO_ROOT / "frontend",
     from scripts.uishot import capture_all
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    # Frozen animations remove the largest source of frame-to-frame variation.
-    # They do not remove all of it, which is why callers capture twice.
+    # Frozen animations vary run to run, which is why callers capture twice.
     return capture_all(out_dir=str(out_dir), freeze_animations=True)
 
 
@@ -236,10 +230,16 @@ def capture_twice(keep_dir: Path) -> Capture:
         if keep_dir.exists():
             shutil.rmtree(keep_dir)
         shutil.copytree(first_dir, keep_dir)
-        # A state only the confirm run produced is still known to the baseline.
-        for path in set(confirm_dir.glob("*.png")) - set(first_dir.glob("*.png")):
-            shutil.copy2(path, keep_dir / path.name)
+        merge_confirm_only(keep_dir, first_dir, confirm_dir)
     return result
+
+
+def merge_confirm_only(keep_dir: Path, first_dir: Path, confirm_dir: Path) -> None:
+    """Copy confirm-run states the first run missed; never overwrite the rest."""
+    first_names = {path.name for path in first_dir.glob("*.png")}
+    for path in confirm_dir.glob("*.png"):
+        if path.name not in first_names:
+            shutil.copy2(path, keep_dir / path.name)
 
 
 def report_unstable(capture_result: Capture) -> None:
