@@ -443,7 +443,7 @@ def capture_all(out_dir="/tmp/partyline-ui", *, freeze_animations=False) -> list
         page.wait_for_timeout(300)
         ui.shot("17-narrow-keyboard-up")
         ui_column_states.capture_desktop_columns(ui, VIEWPORT)
-
+        ui_column_states.capture_extra_states(ui)
         return list(ui.shots)
 
 
