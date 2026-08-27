@@ -161,14 +161,52 @@ class JudgeableTest(unittest.TestCase):
         judged = judgeable(self.BASE, ())
         self.assertEqual(compare(judged, {"a": "1", "b": "2"}), [Difference("c", Change.REMOVED)])
 
+
+def check_differences(known, trusted, unstable, current):
+    """The comparison wiring `check()` performs, mirrored for the tests.
+
+    `known` is every state the baseline recorded; `trusted` is the subset it
+    could pin down (stable-states.txt). The mirror is deliberate — this is the
+    composition the real command runs, and the invariants below are its contract.
+    """
+    baseline = {name: value for name, value in known.items() if name in trusted}
+    judged = judgeable(baseline, unstable)
+    comparables = {name: value for name, value in current.items()
+                   if name in judged or name not in known}
+    return compare(judged, comparables)
+
+
+class CheckCompositionTest(unittest.TestCase):
+    """The three-way distinction `check()` must keep straight: trusted states
+    are judged, recorded-but-untrusted states are neither judged nor reported,
+    and states the baseline never recorded are reported as new."""
+
     def test_a_state_the_baseline_never_recorded_is_reported_as_new(self):
         # `check()` used to filter the current capture to baseline names before
         # comparing, which made the ADDED path unreachable — so a harness that
-        # gained a state silently lost coverage against an older baseline. The
-        # comparison must judge the full current stable set.
-        judged = judgeable(self.BASE, ())
-        current = {**self.BASE, "18-gate": "new"}
-        self.assertEqual(compare(judged, current), [Difference("18-gate", Change.ADDED)])
+        # gained a state silently lost coverage against an older baseline.
+        known = {"a": "1"}
+        self.assertEqual(check_differences(known, {"a"}, (), {"a": "1", "18-gate": "new"}),
+                         [Difference("18-gate", Change.ADDED)])
+
+    def test_a_known_but_untrusted_state_is_not_reported_as_new(self):
+        # The baseline recorded `13-mention-popover` but never pinned it down,
+        # so it is absent from stable-states.txt. A run that finally stabilises
+        # it must not be misreported as a new state — it is known, just untrusted.
+        known = {"a": "1", "wobbly": "2"}
+        self.assertEqual(check_differences(known, {"a"}, (), {"a": "1", "wobbly": "2"}), [])
+
+    def test_new_and_known_but_untrusted_states_are_told_apart(self):
+        known = {"a": "1", "wobbly": "2"}
+        current = {"a": "1", "wobbly": "2", "18-gate": "new"}
+        self.assertEqual(check_differences(known, {"a"}, (), current),
+                         [Difference("18-gate", Change.ADDED)])
+
+    def test_a_wobbly_current_state_stays_out_of_the_judgement(self):
+        # reconcile() quarantines a wobbly state into `unstable`; it never
+        # reaches the stable set, so it is neither judged nor reported as new.
+        known = {"a": "1"}
+        self.assertEqual(check_differences(known, {"a"}, ("wobbly-now",), {"a": "1"}), [])
 
 
 class ExclusiveRunTest(unittest.TestCase):
