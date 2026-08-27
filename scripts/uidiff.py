@@ -17,18 +17,12 @@ here too — but it does have to be *looked at*, which is the point. Re-run
 The comparison is on the encoded PNG bytes, and **every command captures the
 state set twice**. That is not belt and braces; it is the whole design.
 
-Headless Chromium is *nearly* deterministic, not deterministic. Measured here:
-two captures of an unchanged build usually match exactly, but roughly one run
-in three has a single state off by a hair — and not the same state each time.
-A check that reports a phantom change one run in three is a check people learn
-to ignore, at which point it hides every real regression too.
-
-The fix is not a fuzz threshold, which would hide the small changes most worth
-catching. It is to use the property that actually separates the two cases: a
-timing flake differs *sometimes*, a real change differs *every time*. So each
-command captures twice and only trusts states where the two agree. A state that
-disagrees with itself is reported as unstable and excluded from the comparison
-rather than being quietly counted as either same or different.
+Headless Chromium is nearly, not fully, deterministic: about one run in three
+has a single state off by a hair, and not the same state each time. The fix is
+not a fuzz threshold — which would hide the small changes most worth catching —
+but the property that separates the cases: a timing flake differs *sometimes*,
+a real change differs *every time*, so each command captures twice and trusts
+only states the two runs agree on.
 """
 
 from __future__ import annotations
@@ -42,6 +36,8 @@ import tempfile
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+
+from scripts.bundle_identity import StaleBundle, stale_bundle_error
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BASELINE_DIR = REPO_ROOT / ".ui-baseline"
@@ -210,8 +206,11 @@ def _with_exclusive_run(command):
     return guarded
 
 
-def capture(out_dir: Path) -> list[Path]:
-    """Render the standard state set into `out_dir`, as still frames."""
+def capture(out_dir: Path, frontend_dir: Path = REPO_ROOT / "frontend",
+            static_dir: Path = REPO_ROOT / "partyline" / "static") -> list[Path]:
+    """Render the standard state set, refusing a bundle that predates the source."""
+    if (stale := stale_bundle_error(frontend_dir, static_dir)) is not None:
+        raise StaleBundle(stale)
     from scripts.uishot import capture_all
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -295,8 +294,8 @@ def main(argv=None) -> int:
             return record_baseline()
         if command == "check":
             return check()
-    except HarnessBusy as busy:
-        print(f"  ✗ {busy}")
+    except (HarnessBusy, StaleBundle) as refused:
+        print(f"  ✗ {refused}")
         return 3
     print(__doc__)
     return 2
