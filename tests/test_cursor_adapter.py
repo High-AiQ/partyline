@@ -235,7 +235,9 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             (None, "direct text"),
         )
 
-        # Assistant tool_use alongside text -> skipped
+        # Assistant text alongside tool_use -> text still posts. Since Cursor
+        # 2026.08.25 the renderer coalesces a turn's leading speech with its
+        # first tool calls into one record, so this text is genuine speech.
         self.assertEqual(
             parse_record(
                 {
@@ -243,6 +245,21 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                     "message": {
                         "content": [
                             {"type": "text", "text": "Checking how to post...\n\n[REDACTED]"},
+                            {"type": "tool_use", "name": "Shell", "input": {"command": "ls"}},
+                        ]
+                    },
+                }
+            ),
+            (None, "Checking how to post..."),
+        )
+
+        # Assistant tool_use with no text -> nothing to post
+        self.assertEqual(
+            parse_record(
+                {
+                    "role": "assistant",
+                    "message": {
+                        "content": [
                             {"type": "tool_use", "name": "Shell", "input": {"command": "ls"}},
                         ]
                     },
@@ -829,7 +846,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(self.messages), 1)
             self.assertIn("re-anchoring positionally", self.messages[0][2])
 
-    async def test_tail_transcript_filters_tool_use_and_redacted(self):
+    async def test_tail_transcript_posts_coalesced_text_and_filters_redacted(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "composer.jsonl"
             records = [
@@ -874,7 +891,13 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 await task
 
             self.assertEqual(receipts_seen, [BEGAN, ENDED])
-            self.assertEqual(self.messages, [("agent", "agent", "composer here — connected.")])
+            self.assertEqual(
+                self.messages,
+                [
+                    ("agent", "agent", "Checking tools..."),
+                    ("agent", "agent", "composer here — connected."),
+                ],
+            )
 
     async def test_tail_transcript_sanitized_fixture(self):
         fixture_path = Path(__file__).parent / "fixtures" / "cursor_transcript.jsonl"
@@ -901,6 +924,11 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             self.messages,
             [
+                (
+                    "agent",
+                    "agent",
+                    "Checking how to post to the partyline chat, then sending a short hello.",
+                ),
                 (
                     "agent",
                     "agent",
@@ -1418,6 +1446,97 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(hatched, [])
             self.assertEqual(self.messages[-1], ("agent", "agent", "mute-probe-1"))
             self.assertIn(ENDED, receipts_seen)
+
+    async def test_turn_start_sentinel_removal_shrinks_watermark(self):
+        """Cursor 2026.08.25 deletes the trailing sentinel when a turn starts.
+
+        The rewrite replaces the turn_ended line with the new turn's user
+        record. The watermark must shrink by the already-seen sentinel on the
+        first attempt — no strikes, no positional hatch.
+        """
+        adapter = self.make_adapter()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "live.jsonl"
+            old = [
+                '{"role":"user","message":{"content":[{"type":"text","text":"q1"}]}}\n',
+                '{"role":"assistant","message":{"content":[{"type":"text","text":"ok"}]}}\n',
+                '{"type":"turn_ended","status":"success"}\n',
+            ]
+            seen = [fingerprint(line) for line in old]
+            adapter._sentinel_fps.add(seen[-1])
+            rewritten = [
+                old[0],
+                old[1],
+                '{"role":"user","message":{"content":[{"type":"text","text":"q2"}]}}\n',
+            ]
+            path.write_text("".join(rewritten), encoding="utf-8")
+
+            self.assertEqual(
+                await adapter._handle_resync(path, seen, 0), (seen[:-1], 0)
+            )
+            self.assertEqual(self.messages, [])
+
+            # A non-sentinel watermark tail must NOT be shrunk away.
+            plain_seen = [fingerprint(line) for line in old[:2]] + [
+                fingerprint('{"type":"checkpoint"}\n')
+            ]
+            self.assertEqual(
+                await adapter._handle_resync(path, plain_seen, 0), (plain_seen, 1)
+            )
+
+    async def test_live_captured_turn_start_rewrite_no_notice_no_replay(self):
+        """Live-captured 2026.08.25 write sequence: incremental mid-turn
+        appends, then the sentinel-deleting rewrite at the next turn's start.
+
+        Snapshots taken with a mtime watcher against a real `agent` session
+        (same inode throughout). Every stage must relay without a
+        re-anchoring notice, and coalesced text+tool_use speech must post.
+        """
+        fixtures = Path(__file__).parent / "fixtures" / "cursor_turnstart_0825"
+        stages = sorted(fixtures.glob("*.jsonl"))
+        self.assertEqual(len(stages), 7)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "live.jsonl"
+            path.write_text(stages[0].read_text(encoding="utf-8"), encoding="utf-8")
+
+            adapter = self.make_adapter()
+            adapter.proc = Process()
+
+            receipts_seen: list[str] = []
+
+            async def mock_receipt(att, event):
+                receipts_seen.append(event)
+
+            with patch(
+                "partyline.adapters.bundled.cursor.adapter.receipt",
+                side_effect=mock_receipt,
+            ):
+                task = asyncio.create_task(adapter._tail_transcript(path))
+                for stage in stages[1:]:
+                    await asyncio.sleep(0.05)
+                    path.write_text(
+                        stage.read_text(encoding="utf-8"), encoding="utf-8"
+                    )
+                await asyncio.sleep(0.05)
+                adapter.proc.stop()
+                await task
+
+            hatched = [m for m in self.messages if "re-anchoring positionally" in m[2]]
+            self.assertEqual(hatched, [])
+            self.assertEqual(
+                self.messages,
+                [
+                    (
+                        "agent",
+                        "agent",
+                        'I\'ll run that command now, then reply with just "done".',
+                    ),
+                    ("agent", "agent", "done"),
+                    ("agent", "agent", "done-two"),
+                ],
+            )
+            self.assertEqual(receipts_seen, [BEGAN, ENDED, BEGAN, ENDED])
 
     async def test_resume_snapshot_handles_oserror(self):
         adapter = self.make_adapter(resume=True, cli_session="sess-1")
