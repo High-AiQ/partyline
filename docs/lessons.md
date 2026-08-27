@@ -542,6 +542,20 @@ enforce it. A prose warning that has no executable guard is not a completed less
   liveness registry to release dead claims (that is one more lifetime to get wrong, and two earlier
   rounds had already got it wrong) but to stop consulting claims where proof is available: a claim
   never outranks the token, and it now guards only the one branch that has no content behind it.
-  Seven rounds, one shape — every time, identity taken from something that outlives the thing being
-  identified. The durable fix remains upstream, in not letting a CLI self-update mid-attach;
-  everything downstream of that is recovery.
+   Seven rounds, one shape — every time, identity taken from something that outlives the thing being
+   identified. The durable fix remains upstream, in not letting a CLI self-update mid-attach;
+   everything downstream of that is recovery.
+- **`uidiff check` proves a source refactor is pixel-identical.** A Slice A Tailwind conversion ran
+  `uidiff baseline` then `uidiff check`, got "all 20 comparable states look exactly as they did",
+  and claimed parity. The check was the committed bundle against itself: `scripts/uishot.py` starts
+  a real server and points the browser at `/`, which serves `partyline/static` — the *committed*
+  build, not the live source. Nothing had rebuilt it, so the run proved the old UI was identical to
+  the old UI, and the actual source change broke the narrow topbar (an `AccountMenu` padding
+  specificity quirk flattened into utilities) unseen. The reviewer caught it by rebuilding the
+  bundle first, at which point `uidiff` reported the two narrow states honestly. The guard: a parity
+  claim is only about the source if the bundle the capture renders was built from it, so `uidiff`
+  now refuses to capture when `partyline/static/build.json` does not match a hash of the current
+  `frontend/src` (a Python mirror of Vite's `sourceBuildId()`), and the skill brackets the change:
+  build + baseline the untouched base, make the change, rebuild, then check. The shape to remember:
+  **a proof is only as strong as the artifact the harness actually exercised** — check what the tool
+  renders, not what you meant it to render.

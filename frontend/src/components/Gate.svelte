@@ -39,17 +39,30 @@
   }
 </script>
 
-<div id="gate">
-  <section class="card" aria-labelledby="auth-title">
-    <h1 id="auth-title">party<em>line</em></h1>
-    <p class="tagline">several parties. one wire. pick up.</p>
+<div id="gate" class="fixed inset-0 z-100 grid min-h-dvh place-items-center overflow-y-auto p-6">
+  <section
+    class="card w-[min(400px,100%)] rounded-lg border border-line bg-ink-2 p-8 shadow-[0_24px_70px_rgb(0_0_0/0.38)]"
+    aria-labelledby="auth-title"
+  >
+    <h1
+      id="auth-title"
+      class="font-serif text-center text-[clamp(48px,14vw,64px)] font-normal leading-none text-cream"
+    >
+      party<em class="text-copper">line</em>
+    </h1>
+    <p class="my-2 mb-7 text-center text-[12px] tracking-[0.04em] text-cream-dim">
+      several parties. one wire. pick up.
+    </p>
 
     {#if !session.authReady}
-      <p class="checking" role="status">checking your connection…</p>
+      <p class="checking min-h-[88px] pt-7 text-center text-cream-dim" role="status">
+        checking your connection…
+      </p>
     {:else}
-      <div class="mode-tabs" aria-label="authentication mode">
+      <div class="mode-tabs mb-[22px] grid grid-cols-2 gap-2" aria-label="authentication mode">
         <button
           type="button"
+          class="min-h-11"
           class:active={mode === "login"}
           aria-pressed={mode === "login"}
           onclick={() => {
@@ -58,6 +71,7 @@
         >
         <button
           type="button"
+          class="min-h-11"
           class:active={mode === "register"}
           aria-pressed={mode === "register"}
           onclick={() => {
@@ -66,10 +80,11 @@
         >
       </div>
 
-      <form id="authForm" onsubmit={submit}>
-        <label for="authEmail">email</label>
+      <form id="authForm" class="flex flex-col" onsubmit={submit}>
+        <label for="authEmail" class="mt-3 mb-1.5 text-[11px] tracking-[0.05em] text-cream-dim">email</label>
         <input
           id="authEmail"
+          class="min-h-11 w-full p-[9px] px-[11px] text-[16px]"
           bind:this={emailField}
           bind:value={email}
           type="email"
@@ -80,9 +95,12 @@
         />
 
         {#if mode === "register"}
-          <label for="authHandle">handle</label>
+          <label for="authHandle" class="mt-3 mb-1.5 text-[11px] tracking-[0.05em] text-cream-dim"
+            >handle</label
+          >
           <input
             id="authHandle"
+            class="min-h-11 w-full p-[9px] px-[11px] text-[16px]"
             bind:value={handle}
             autocomplete="nickname"
             minlength="3"
@@ -91,12 +109,17 @@
             aria-describedby="handleHint"
             required
           />
-          <p id="handleHint" class="hint">3–32 letters, numbers, dots, underscores, or hyphens</p>
+          <p id="handleHint" class="hint mt-[5px] text-[10px] leading-[1.45] text-cream-faint">
+            3–32 letters, numbers, dots, underscores, or hyphens
+          </p>
         {/if}
 
-        <label for="authPassword">password</label>
+        <label for="authPassword" class="mt-3 mb-1.5 text-[11px] tracking-[0.05em] text-cream-dim"
+          >password</label
+        >
         <input
           id="authPassword"
+          class="min-h-11 w-full p-[9px] px-[11px] text-[16px]"
           bind:value={password}
           type="password"
           autocomplete={mode === "register" ? "new-password" : "current-password"}
@@ -105,11 +128,21 @@
           required
         />
         {#if mode === "register"}
-          <p class="hint">at least 8 characters</p>
+          <p class="hint mt-[5px] text-[10px] leading-[1.45] text-cream-faint">at least 8 characters</p>
         {/if}
 
-        <div class="form-status" class:error={Boolean(error)} aria-live="polite">{error}</div>
-        <button class="primary submit" type="submit" disabled={submitting}>
+        <div
+          class="form-status min-h-[38px] pt-3 text-[11px] leading-[1.45] text-cream-faint"
+          class:error={Boolean(error)}
+          aria-live="polite"
+        >
+          {error}
+        </div>
+        <button
+          class="primary submit min-h-11 w-full disabled:cursor-wait disabled:opacity-55"
+          type="submit"
+          disabled={submitting}
+        >
           {submitting ? "connecting…" : mode === "register" ? "create account" : "connect"}
         </button>
       </form>
@@ -118,104 +151,27 @@
 </div>
 
 <style>
+  /* `arrive` at the gate's 0.28s tempo, a class-based active tab, and the
+     error status share a stateful-class shape Tailwind has no variant for.
+     The `(max-width: 480px)` tweak stays hand-written because Tailwind's
+     `max-*` variants are exclusive of the boundary, and the reduced-motion
+     override must sit beside the animation it disables (a utility layer
+     cannot beat this scoped rule). The background stays as the original
+     single shorthand too: Tailwind re-writes `rgb(217 142 74 / 0.08)` to an
+     8-bit alpha hex and shifts the gradient compositing by a channel. */
   #gate {
-    position: fixed;
-    inset: 0;
-    z-index: 100;
-    display: grid;
-    place-items: center;
-    min-height: 100dvh;
-    padding: 24px;
-    overflow-y: auto;
     background: radial-gradient(circle at 50% 12%, rgb(217 142 74 / 0.08), transparent 42%), var(--color-ink);
   }
   .card {
-    width: min(400px, 100%);
-    padding: 32px;
-    border: 1px solid var(--color-line);
-    border-radius: 8px;
-    background: var(--color-ink-2);
-    box-shadow: 0 24px 70px rgb(0 0 0 / 0.38);
     animation: arrive 0.28s ease both;
-  }
-  h1 {
-    color: var(--color-cream);
-    font-family: var(--font-serif);
-    font-size: clamp(48px, 14vw, 64px);
-    font-weight: 400;
-    line-height: 1;
-    text-align: center;
-  }
-  h1 em {
-    color: var(--color-copper);
-    font-style: italic;
-  }
-  .tagline {
-    margin: 8px 0 28px;
-    color: var(--color-cream-dim);
-    font-size: 12px;
-    letter-spacing: 0.04em;
-    text-align: center;
-  }
-  .checking {
-    min-height: 88px;
-    padding-top: 28px;
-    color: var(--color-cream-dim);
-    text-align: center;
-  }
-  .mode-tabs {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-    margin-bottom: 22px;
-  }
-  .mode-tabs button {
-    min-height: 44px;
   }
   .mode-tabs button.active {
     border-color: var(--color-copper);
     color: var(--color-copper-hot);
     background: rgb(217 142 74 / 0.08);
   }
-  form {
-    display: flex;
-    flex-direction: column;
-  }
-  label {
-    margin: 12px 0 6px;
-    color: var(--color-cream-dim);
-    font-size: 11px;
-    letter-spacing: 0.05em;
-  }
-  input {
-    width: 100%;
-    min-height: 44px;
-    padding: 9px 11px;
-    font-size: 16px;
-  }
-  .hint {
-    margin-top: 5px;
-    color: var(--color-cream-faint);
-    font-size: 10px;
-    line-height: 1.45;
-  }
-  .form-status {
-    min-height: 38px;
-    padding-top: 12px;
-    color: var(--color-cream-faint);
-    font-size: 11px;
-    line-height: 1.45;
-  }
   .form-status.error {
     color: var(--color-red);
-  }
-  .submit {
-    min-height: 44px;
-    width: 100%;
-  }
-  button:disabled {
-    cursor: wait;
-    opacity: 0.55;
   }
   @media (max-width: 480px) {
     #gate {

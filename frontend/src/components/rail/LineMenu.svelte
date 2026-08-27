@@ -74,32 +74,44 @@
 />
 
 <div
-  class="conv-menu"
+  class="conv-menu fixed z-60 flex min-w-[132px] flex-col rounded-md border border-panel-line bg-panel p-[5px]"
   bind:this={panel}
   style:top="{top}px"
   style:left="{left}px"
   role="menu"
   aria-label="line actions for {conversation.name}"
 >
-  <button type="button" role="menuitem" onclick={choose(onrename)}>rename</button>
-  <button type="button" role="menuitem" onclick={choose(onclaims)}>claims</button>
-  <button type="button" role="menuitem" class="close-processes" onclick={choose(oncloseprocesses)}
-    >close processes</button
+  <button
+    type="button"
+    role="menuitem"
+    class="rounded-[3px] border-0 bg-transparent p-2 px-[11px] text-left text-[10.5px] whitespace-nowrap tracking-[0.06em] text-cream-dim transition-colors duration-100 hover:bg-copper hover:text-ink focus-visible:bg-copper focus-visible:text-ink focus-visible:outline-0"
+    onclick={choose(onrename)}>rename</button
   >
-  <button type="button" role="menuitem" class="delete" onclick={choose(ondelete)}>delete</button>
+  <button
+    type="button"
+    role="menuitem"
+    class="rounded-[3px] border-0 bg-transparent p-2 px-[11px] text-left text-[10.5px] whitespace-nowrap tracking-[0.06em] text-cream-dim transition-colors duration-100 hover:bg-copper hover:text-ink focus-visible:bg-copper focus-visible:text-ink focus-visible:outline-0"
+    onclick={choose(onclaims)}>claims</button
+  >
+  <button
+    type="button"
+    role="menuitem"
+    class="close-processes rounded-[3px] border-0 bg-transparent p-2 px-[11px] text-left text-[10.5px] whitespace-nowrap tracking-[0.06em] text-copper-hot transition-colors duration-100 hover:bg-copper hover:text-ink focus-visible:bg-copper focus-visible:text-ink focus-visible:outline-0"
+    onclick={choose(oncloseprocesses)}>close processes</button
+  >
+  <button
+    type="button"
+    role="menuitem"
+    class="delete rounded-[3px] border-0 bg-transparent p-2 px-[11px] text-left text-[10.5px] whitespace-nowrap tracking-[0.06em] text-red transition-colors duration-100 hover:bg-red hover:text-cream focus-visible:bg-red focus-visible:text-cream focus-visible:outline-0"
+    onclick={choose(ondelete)}>delete</button
+  >
 </div>
 
 <style>
+  /* The multi-layer shadow, the `menu-in` entrance, and the copper hairline
+       are a poor fit for utility classes: the hairline is a pseudo-element and
+       the animation is not a theme token. */
   .conv-menu {
-    position: fixed;
-    z-index: 60;
-    display: flex;
-    flex-direction: column;
-    min-width: 132px;
-    padding: 5px;
-    background: var(--color-panel);
-    border: 1px solid var(--color-panel-line);
-    border-radius: 6px;
     box-shadow:
       0 18px 42px rgb(0 0 0 / 0.55),
       0 2px 6px rgb(0 0 0 / 0.4),
@@ -116,36 +128,5 @@
     height: 1px;
     background: linear-gradient(90deg, transparent, var(--color-copper), transparent);
     opacity: 0.55;
-  }
-  button {
-    border: 0;
-    background: none;
-    text-align: left;
-    padding: 8px 11px;
-    font-size: 10.5px;
-    white-space: nowrap;
-    color: var(--color-cream-dim);
-    border-radius: 3px;
-    letter-spacing: 0.06em;
-    transition:
-      background 0.1s,
-      color 0.1s;
-  }
-  button:hover,
-  button:focus-visible {
-    color: var(--color-ink);
-    background: var(--color-copper);
-    outline: 0;
-  }
-  .delete {
-    color: var(--color-red);
-  }
-  .close-processes {
-    color: var(--color-copper-hot);
-  }
-  .delete:hover,
-  .delete:focus-visible {
-    color: var(--color-cream);
-    background: var(--color-red);
   }
 </style>

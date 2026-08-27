@@ -9,26 +9,16 @@ kind of task people quietly stop doing.
     uv run python -m scripts.uidiff baseline   # before: record how it looks now
     uv run python -m scripts.uidiff check      # after: report anything that moved
 
-`check` exits non-zero if any state changed, so it can gate a merge. A reported
-difference is not automatically a bug — an intentional visual change shows up
-here too — but it does have to be *looked at*, which is the point. Re-run
-`baseline` to accept a change deliberately.
+`check` exits non-zero if any state changed, so it can gate a merge; a reported
+difference must be *looked at* — re-run `baseline` to accept it deliberately.
 
 The comparison is on the encoded PNG bytes, and **every command captures the
 state set twice**. That is not belt and braces; it is the whole design.
 
-Headless Chromium is *nearly* deterministic, not deterministic. Measured here:
-two captures of an unchanged build usually match exactly, but roughly one run
-in three has a single state off by a hair — and not the same state each time.
-A check that reports a phantom change one run in three is a check people learn
-to ignore, at which point it hides every real regression too.
-
-The fix is not a fuzz threshold, which would hide the small changes most worth
-catching. It is to use the property that actually separates the two cases: a
-timing flake differs *sometimes*, a real change differs *every time*. So each
-command captures twice and only trusts states where the two agree. A state that
-disagrees with itself is reported as unstable and excluded from the comparison
-rather than being quietly counted as either same or different.
+Headless Chromium is nearly, not fully, deterministic — about one run in three
+has a single state off by a hair. The fix is not a fuzz threshold but the
+property that separates flake from change: a flake differs *sometimes*, a real
+change *every time*, so capture twice and trust the agreement.
 """
 
 from __future__ import annotations
@@ -42,6 +32,8 @@ import tempfile
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+
+from scripts.bundle_identity import StaleBundle, stale_bundle_error
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BASELINE_DIR = REPO_ROOT / ".ui-baseline"
@@ -121,8 +113,7 @@ class Difference:
 
 
 # -- comparison ------------------------------------------------------------
-# Pure functions over {name: digest} maps, so the interesting logic is testable
-# without a browser, a server, or a screenshot.
+# Pure functions over {name: digest} maps, so the logic is testable without a browser.
 
 
 def digest(data: bytes) -> str:
@@ -210,13 +201,15 @@ def _with_exclusive_run(command):
     return guarded
 
 
-def capture(out_dir: Path) -> list[Path]:
-    """Render the standard state set into `out_dir`, as still frames."""
+def capture(out_dir: Path, frontend_dir: Path = REPO_ROOT / "frontend",
+            static_dir: Path = REPO_ROOT / "partyline" / "static") -> list[Path]:
+    """Render the standard state set, refusing a bundle that predates the source."""
+    if (stale := stale_bundle_error(frontend_dir, static_dir)) is not None:
+        raise StaleBundle(stale)
     from scripts.uishot import capture_all
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    # Frozen animations remove the largest source of frame-to-frame variation.
-    # They do not remove all of it, which is why callers capture twice.
+    # Frozen animations vary run to run, which is why callers capture twice.
     return capture_all(out_dir=str(out_dir), freeze_animations=True)
 
 
@@ -237,7 +230,16 @@ def capture_twice(keep_dir: Path) -> Capture:
         if keep_dir.exists():
             shutil.rmtree(keep_dir)
         shutil.copytree(first_dir, keep_dir)
+        merge_confirm_only(keep_dir, first_dir, confirm_dir)
     return result
+
+
+def merge_confirm_only(keep_dir: Path, first_dir: Path, confirm_dir: Path) -> None:
+    """Copy confirm-run states the first run missed; never overwrite the rest."""
+    first_names = {path.name for path in first_dir.glob("*.png")}
+    for path in confirm_dir.glob("*.png"):
+        if path.name not in first_names:
+            shutil.copy2(path, keep_dir / path.name)
 
 
 def report_unstable(capture_result: Capture) -> None:
@@ -256,24 +258,22 @@ def record_baseline(out_dir: Path = BASELINE_DIR) -> int:
 
 @_with_exclusive_run
 def check(baseline_dir: Path = BASELINE_DIR) -> int:
-    baseline = digests(baseline_dir)
+    known = digests(baseline_dir)
     trusted = read_stable_list(baseline_dir)
-    if not baseline or trusted is None:
+    if not known or trusted is None:
         print(f"no baseline at {baseline_dir}\n  → run `scripts.uidiff baseline` before the change")
         return 2
-    baseline = {name: value for name, value in baseline.items() if name in trusted}
+    baseline = {name: value for name, value in known.items() if name in trusted}
 
     current_dir = baseline_dir.parent / CURRENT_DIRNAME
     result = capture_twice(current_dir)
     report_unstable(result)
 
-    # Only judge states both sides consider trustworthy. One the baseline could
-    # not pin down is not evidence of anything — and neither is one *this* run
-    # could not pin down, which must not fall through to the comparison and be
-    # reported as "removed". Saying a state vanished when it merely wobbled
-    # sends someone hunting a deletion that never happened.
+    # Only judge states both sides consider trustworthy; a state either side
+    # failed to pin down is not judged. `known` is the recorded union, so a
+    # state the baseline saw but could not pin down is never reported as new.
     judged = judgeable(baseline, result.unstable)
-    comparable = {name: value for name, value in result.stable.items() if name in judged}
+    comparable = {name: value for name, value in result.stable.items() if name in judged or name not in known}
     differences = compare(judged, comparable)
 
     if not differences:
@@ -295,8 +295,8 @@ def main(argv=None) -> int:
             return record_baseline()
         if command == "check":
             return check()
-    except HarnessBusy as busy:
-        print(f"  ✗ {busy}")
+    except (HarnessBusy, StaleBundle) as refused:
+        print(f"  ✗ {refused}")
         return 3
     print(__doc__)
     return 2

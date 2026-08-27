@@ -25,20 +25,29 @@ uv run --locked python -m scripts.uishot --out /tmp/partyline-ui   # the standar
 ## Prove an invisible change is invisible
 
 Bracket any change claiming not to touch the UI — a refactor, a conversion, a formatter run.
-The tooling renders the 17-state standard set (rail, menus, dialogs, populated feed in both
-message modes, board, mention popover, narrow layouts) and compares PNG bytes.
+The tooling renders the 24-state standard set (rail, menus, dialogs, populated feed in both
+message modes, board, mention popover, narrow layouts, the pre-auth gate, and the wire banners)
+and compares PNG bytes.
 
 ```bash
-uv run --locked python -m scripts.uidiff baseline   # before the change
+uv run --locked python -m scripts.uidiff baseline   # on the untouched base, before the change
 uv run --locked python -m scripts.uidiff check      # after; non-zero if anything moved
 ```
 
-Three details of the capture tooling are load-bearing, each established by measurement after
+The capture renders the *committed* `partyline/static/` bundle, not the live source. The order
+matters and the two commands bracket the change: build and record the baseline on the *untouched*
+base, make the change, rebuild, then check. Recording the baseline after the change writes the
+changed UI down as the truth, and a subsequent clean check proves nothing. `uidiff` refuses to
+run when the bundle is stale, but refuse loudly is the last line — rebuild first.
+
+Four details of the capture tooling are load-bearing, each established by measurement after
 the obvious assumption turned out to be wrong. Preserve them when touching `scripts/uishot.py`
 or `scripts/uidiff.py`.
 
 | DO | DO NOT |
 | --- | --- |
+| `npm run build` + `uidiff baseline` on the untouched base, then make the change, rebuild, then `uidiff check` | Run `uidiff baseline` after the change — it records the changed UI as the baseline and makes the check vacuous |
+| — | Claim parity from a check against a stale `partyline/static/` — it renders the bundle, not the source |
 | Capture every state twice and compare only when consecutive captures agree — that separates a timing flake from a regression | Add a fuzz threshold that would hide small changes worth catching |
 | Run finite animations and transitions to their end state; pause only infinite ones (the LED pulse, a ringing jack) at a fixed frame | Suppress animations with `animation-duration: 0s` — `fill-mode: both` pins a zero-duration animation to its *opening* frame and the whole feed captures faded |
 | Give fixtures a fixed timestamp — messages render `HH:MM` | — |

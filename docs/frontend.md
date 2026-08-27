@@ -5,6 +5,9 @@
 | --- | --- |
 | Run `npm run verify` before every frontend commit, and commit the rebuilt `partyline/static/` bundle with the source | Ship UI source whose bundle matches nothing, or a bundle without its source |
 | Keep rules in `src/lib/` (pure, unit-tested), state in runes stores, looks in components | Bury business logic inside components where no test can reach it |
+| Prefer Tailwind utility classes on markup for layout, spacing, color, typography, and simple states | Add new hand-written rules in `<style>` for anything a utility already expresses |
+| Keep design tokens in `src/app.css` `@theme` and use the generated utilities (`bg-ink`, `text-copper`, …) | Invent parallel color or spacing constants inside component CSS |
+| Leave custom CSS for keyframes, complex selectors, pseudo-elements, and shared `@layer components` vocabulary (`.led`, dialog forms) when utilities would obscure the contract | Grow per-component scoped styles for ordinary layout and chrome Tailwind already covers |
 | Treat `static/build.json` as frontend-bundle identity only; release semver lives in `partyline/__init__.py` | Use either file as the other's source of truth |
 | Let Prettier own formatting; hand-wrap Python by the repository convention | Enforce an autoformatter on hand-wrapped Python or argue style through ESLint |
 
@@ -65,7 +68,22 @@ Layout, and where things belong:
 - `src/state/*.svelte.ts` — runes stores: `session`, `room`, `wire`, `draft`,
   `dialogs`. One owner per concern; components read them and call methods.
 - `src/components/` — presentation, grouped by region (`rail/`, `chat/`,
-  `board/`, `dialogs/`).
+  `board/`, `dialogs/`). Looks are Tailwind utilities on the markup first;
+  a component `<style>` block is the exception, not the default.
+- `src/app.css` — Tailwind v4 entry (`@import "tailwindcss"`), `@theme` design
+  tokens, base resets, and shared `@layer components` vocabulary reused across
+  regions. Token names become utilities (`--color-ink` → `bg-ink` / `text-ink`).
+
+**Styling.** Tailwind is the default for component looks. Convert layout,
+spacing, color, and typography to utilities before reaching for a scoped rule.
+Custom CSS stays legitimate for animations/keyframes, pseudo-elements (the film
+grain), selectors Tailwind expresses poorly, and the shared vocabulary in
+`@layer components` that several regions must share by construction (`.led`,
+dialog form chrome). When you add a token, put it in `@theme` so both utilities
+and any remaining hand-written rules read one source of truth. Responsive
+rules still have to agree with `NARROW_MAX_WIDTH` in `state/layout.svelte.ts`
+(today: `899px`) — a utility breakpoint that drifts from that constant is the
+same bug the dual-source note below is about.
 
 **Authentication.** `src/lib/http.ts` owns the credential lifecycle. Access and refresh tokens
 live in `localStorage` (shared, so a second tab is already signed in); the socket `client_id`

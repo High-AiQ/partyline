@@ -22,91 +22,48 @@
 </script>
 
 <div
-  class="overlay"
+  class="overlay fixed inset-0 z-50 flex items-center justify-center bg-[rgb(8_10_9/0.75)] backdrop-blur-[2px]"
   role="presentation"
   onmousedown={(event) => (pressedBackdrop = event.target === event.currentTarget)}
   onclick={(event) => {
     if (event.target === event.currentTarget && pressedBackdrop) close();
   }}
 >
-  <div class="modal" class:wide role="dialog" aria-modal="true" aria-label={title}>
-    <header>
-      <h2>{title}</h2>
-      <button class="close" type="button" title="close" aria-label="close" onclick={close}>✕</button>
+  <!-- `max-h-[82dvh]`, not `vh` or `%`: a soft keyboard shortens the viewport
+         rather than covering it, and `vh` keeps measuring the taller pre-keyboard
+         one — which crops exactly the dialogs that ask you to type something. -->
+  <div
+    class="modal flex max-h-[82dvh] w-[min(560px,92vw)] flex-col rounded-lg border border-line bg-ink-2 shadow-[0_24px_60px_rgb(0_0_0/0.55)]"
+    class:wide
+    role="dialog"
+    aria-modal="true"
+    aria-label={title}
+  >
+    <header
+      class="flex min-h-[52px] flex-none items-center justify-between border-b border-dashed border-line py-1 pr-2 pl-5"
+    >
+      <h2 class="font-serif text-[20px] font-normal text-cream italic">{title}</h2>
+      <button
+        class="close size-11 cursor-pointer border-0 bg-transparent p-0 text-[14px] text-cream-faint hover:bg-transparent hover:text-red"
+        type="button"
+        title="close"
+        aria-label="close"
+        onclick={close}>✕</button
+      >
     </header>
-    <div class="content">
+    <div class="content flex min-h-0 flex-col gap-[10px] overflow-y-auto px-5 pt-[14px] pb-5">
       {@render children()}
     </div>
   </div>
 </div>
 
 <style>
-  .overlay {
-    position: fixed;
-    inset: 0;
-    background: rgb(8 10 9 / 0.75);
-    backdrop-filter: blur(2px);
-    z-index: 50;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
+  /* `arrive` is a theme token at 0.28s; the modal uses the same keyframes a
+       shade faster, so the animation stays hand-written. */
   .modal {
-    background: var(--color-ink-2);
-    border: 1px solid var(--color-line);
-    border-radius: 8px;
-    width: min(560px, 92vw);
-    /* `dvh`: a soft keyboard shortens the viewport rather than covering it, and
-       `vh` keeps measuring the taller pre-keyboard one — which crops exactly
-       the dialogs that ask you to type something, the debrief and the
-       type-the-name confirmations among them. */
-    max-height: 82dvh;
-    display: flex;
-    flex-direction: column;
-    box-shadow: 0 24px 60px rgb(0 0 0 / 0.55);
     animation: arrive 0.22s ease both;
   }
   .modal.wide {
     width: min(980px, 96vw);
-  }
-
-  header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex: none;
-    min-height: 52px;
-    padding: 4px 8px 4px 20px;
-    border-bottom: 1px dashed var(--color-line);
-  }
-  h2 {
-    font-family: var(--font-serif);
-    font-style: italic;
-    font-weight: 400;
-    font-size: 20px;
-    color: var(--color-cream);
-  }
-  .close {
-    width: 44px;
-    height: 44px;
-    background: none;
-    border: 0;
-    color: var(--color-cream-faint);
-    cursor: pointer;
-    font-size: 14px;
-    padding: 0;
-  }
-  .close:hover {
-    color: var(--color-red);
-    background: none;
-  }
-
-  .content {
-    min-height: 0;
-    padding: 14px 20px 20px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
   }
 </style>
