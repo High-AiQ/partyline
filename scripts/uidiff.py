@@ -236,6 +236,9 @@ def capture_twice(keep_dir: Path) -> Capture:
         if keep_dir.exists():
             shutil.rmtree(keep_dir)
         shutil.copytree(first_dir, keep_dir)
+        # A state only the confirm run produced is still known to the baseline.
+        for path in set(confirm_dir.glob("*.png")) - set(first_dir.glob("*.png")):
+            shutil.copy2(path, keep_dir / path.name)
     return result
 
 
@@ -255,28 +258,26 @@ def record_baseline(out_dir: Path = BASELINE_DIR) -> int:
 
 @_with_exclusive_run
 def check(baseline_dir: Path = BASELINE_DIR) -> int:
-    baseline = digests(baseline_dir)
+    known = digests(baseline_dir)
     trusted = read_stable_list(baseline_dir)
-    if not baseline or trusted is None:
+    if not known or trusted is None:
         print(f"no baseline at {baseline_dir}\n  → run `scripts.uidiff baseline` before the change")
         return 2
-    baseline = {name: value for name, value in baseline.items() if name in trusted}
+    baseline = {name: value for name, value in known.items() if name in trusted}
 
     current_dir = baseline_dir.parent / CURRENT_DIRNAME
     result = capture_twice(current_dir)
     report_unstable(result)
 
-    # Only judge states both sides consider trustworthy. One the baseline could
-    # not pin down is not evidence of anything — and neither is one *this* run
-    # could not pin down, which must not fall through to the comparison and be
-    # reported as "removed". The current side is compared in full, though —
-    # filtering it to baseline names would make ADDED unreachable and silently
-    # unwatch a state the baseline never recorded.
+    # Only judge states both sides consider trustworthy; a state either side
+    # failed to pin down is not judged. `known` is the recorded union, so a
+    # state the baseline saw but could not pin down is never reported as new.
     judged = judgeable(baseline, result.unstable)
-    differences = compare(judged, result.stable)
+    comparable = {name: value for name, value in result.stable.items() if name in judged or name not in known}
+    differences = compare(judged, comparable)
 
     if not differences:
-        print(f"  ✓ all {len(result.stable)} comparable states look exactly as they did")
+        print(f"  ✓ all {len(comparable)} comparable states look exactly as they did")
         return 0
 
     for difference in differences:
