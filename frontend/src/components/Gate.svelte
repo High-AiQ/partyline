@@ -39,10 +39,7 @@
   }
 </script>
 
-<div
-  id="gate"
-  class="fixed inset-0 z-100 grid min-h-dvh place-items-center overflow-y-auto p-6 bg-ink [background-image:radial-gradient(circle_at_50%_12%,rgb(217_142_74/0.08),transparent_42%)]"
->
+<div id="gate" class="fixed inset-0 z-100 grid min-h-dvh place-items-center overflow-y-auto p-6">
   <section
     class="card w-[min(400px,100%)] rounded-lg border border-line bg-ink-2 p-8 shadow-[0_24px_70px_rgb(0_0_0/0.38)]"
     aria-labelledby="auth-title"
@@ -155,11 +152,16 @@
 
 <style>
   /* `arrive` at the gate's 0.28s tempo, a class-based active tab, and the
-       error status share a stateful-class shape Tailwind has no variant for.
-       The `(max-width: 480px)` tweak stays hand-written because Tailwind's
-       `max-*` variants are exclusive of the boundary, and the reduced-motion
-       override must sit beside the animation it disables (a utility layer
-       cannot beat this scoped rule). */
+     error status share a stateful-class shape Tailwind has no variant for.
+     The `(max-width: 480px)` tweak stays hand-written because Tailwind's
+     `max-*` variants are exclusive of the boundary, and the reduced-motion
+     override must sit beside the animation it disables (a utility layer
+     cannot beat this scoped rule). The background stays as the original
+     single shorthand too: Tailwind re-writes `rgb(217 142 74 / 0.08)` to an
+     8-bit alpha hex and shifts the gradient compositing by a channel. */
+  #gate {
+    background: radial-gradient(circle at 50% 12%, rgb(217 142 74 / 0.08), transparent 42%), var(--color-ink);
+  }
   .card {
     animation: arrive 0.28s ease both;
   }

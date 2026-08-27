@@ -14,7 +14,7 @@
 {#if room.notice}
   <div
     id="wireNotice"
-    class="fixed left-1/2 top-[18px] z-70 max-w-[min(560px,90vw)] -translate-x-1/2 rounded-[5px] border border-line bg-ink-2 px-[14px] py-2 text-[11px] text-cream-dim shadow-[0_12px_30px_rgb(0_0_0/0.45)]"
+    class="fixed left-1/2 top-[18px] z-70 max-w-[min(560px,90vw)] rounded-[5px] border border-line bg-ink-2 px-[14px] py-2 text-[11px] text-cream-dim shadow-[0_12px_30px_rgb(0_0_0/0.45)]"
     class:error={room.notice.kind === "error"}
     role="status"
     aria-live="polite"
@@ -26,7 +26,7 @@
 {#if wire.outage}
   <div
     id="wireDown"
-    class="fixed left-1/2 top-[18px] z-71 flex max-w-[min(560px,90vw)] -translate-x-1/2 items-center gap-[9px] rounded-[5px] border border-red/55 bg-panel px-[14px] py-2 text-[11px] tracking-[0.04em] text-red shadow-[0_12px_30px_rgb(0_0_0/0.45)]"
+    class="fixed left-1/2 top-[18px] z-71 flex max-w-[min(560px,90vw)] items-center gap-[9px] rounded-[5px] border border-red/55 bg-panel px-[14px] py-2 text-[11px] tracking-[0.04em] text-red shadow-[0_12px_30px_rgb(0_0_0/0.45)]"
     class:stopped={wire.outage.stopped}
     role="status"
     aria-live="polite"
@@ -37,9 +37,16 @@
 
 <style>
   /* The `arrive` and `wire-pulse` animations stay hand-written — the task is
-       to keep keyframes and animation declarations in CSS. */
+       to keep keyframes and animation declarations in CSS. The centering
+       translate is also hand-written, as `transform` rather than Tailwind's
+       `translate` property: the `arrive` keyframes animate `transform`, so a
+       normal `transform: translateX(-50%)` is overridden by the animation
+       (leaving the banner offset), while v4's separate `translate` longhand
+       would survive it and shift the banner to a centred position — a pixel
+       difference in exactly the states the parity set does not cover. */
   #wireNotice,
   #wireDown {
+    transform: translateX(-50%);
     animation: arrive 0.2s ease both;
   }
   #wireNotice.error {
