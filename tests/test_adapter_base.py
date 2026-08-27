@@ -19,7 +19,7 @@ os.environ.setdefault("PARTYLINE_DB", "/tmp/partyline-test-adapter-base.db")
 
 from partyline.adapters.base import Adapter
 from partyline.adapters.briefing import child_env
-from partyline.adapters.terminal import terminal_responses
+from partyline.adapters.terminal import drain_write, terminal_responses
 from datetime import UTC
 
 
@@ -240,6 +240,55 @@ class AdapterKeystrokeTest(unittest.IsolatedAsyncioTestCase):
         # Bracketed paste, so a human mid-keystroke does not have their input
         # spliced into the middle of the delivered message. Enter comes after.
         self.assertEqual(written, b"\x1b[200~hello line\x1b[201~\r")
+
+    async def test_send_keys_survives_partial_writes_on_a_full_buffer(self):
+        """A digest larger than the free kernel buffer must land whole.
+
+        The 2026-08-27 sol incident: a 14KB wake digest hit a non-blocking
+        pty whose buffer had ~9.7KB free; os.write's short count was ignored
+        and the rest of the paste — including messages already credited as
+        delivered and the bracketed-paste terminator — vanished silently.
+        """
+        read_fd, write_fd = os.pipe()
+        self.addCleanup(os.close, read_fd)
+        os.set_blocking(write_fd, False)
+        try:
+            import fcntl
+            fcntl.fcntl(write_fd, fcntl.F_SETPIPE_SZ, 4096)
+        except OSError:
+            pass
+        adapter = Recorder(["cat"])
+        adapter.master = write_fd
+        payload = "x" * 40_000
+
+        received = bytearray()
+
+        async def drain():
+            while b"\x1b[201~\r" not in received:
+                chunk = await asyncio.to_thread(os.read, read_fd, 1024)
+                if not chunk:
+                    return
+                received.extend(chunk)
+                await asyncio.sleep(0.005)
+
+        drainer = asyncio.create_task(drain())
+        await adapter.send_keys(payload)
+        os.close(write_fd)
+        await asyncio.wait_for(drainer, 10)
+
+        self.assertEqual(
+            bytes(received), b"\x1b[200~" + payload.encode() + b"\x1b[201~\r"
+        )
+
+    async def test_drain_write_raises_when_the_buffer_never_drains(self):
+        """A wedged CLI must fail the paste loudly so the wake is redelivered."""
+        read_fd, write_fd = os.pipe()
+        self.addCleanup(os.close, read_fd)
+        self.addCleanup(os.close, write_fd)
+        os.set_blocking(write_fd, False)
+
+        with self.assertRaises(OSError):
+            await drain_write(write_fd, b"x" * 200_000, stall_seconds=0.05)
 
     async def test_pasted_text_reaches_the_process_and_renders_on_the_screen(self):
         adapter = Recorder(["cat"])

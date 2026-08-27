@@ -28,7 +28,7 @@ from partyline.adapters.briefing import (
     format_digest,
     safe_rider,
 )
-from partyline.adapters.terminal import KEYS, screen_text, terminal_responses
+from partyline.adapters.terminal import KEYS, drain_write, screen_text, terminal_responses
 from partyline.terminal_viewers import TerminalViewer, TerminalViewerRegistry
 
 
@@ -254,9 +254,9 @@ class Adapter:
 
     async def send_keys(self, text: str):
         assert self.master is not None
-        os.write(self.master, b"\x1b[200~" + text.encode() + b"\x1b[201~")
+        await drain_write(self.master, b"\x1b[200~" + text.encode() + b"\x1b[201~")
         await asyncio.sleep(0.35)
-        os.write(self.master, b"\r")
+        await drain_write(self.master, b"\r")
 
     def screen_text(self) -> str:
         return screen_text(self._term)
