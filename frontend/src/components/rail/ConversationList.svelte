@@ -40,29 +40,31 @@
      propagation, so this cannot fight with the toggle above. -->
 <svelte:body on:click={() => (menu = null)} />
 
-<nav id="convs" aria-label="lines">
+<nav id="convs" class="min-h-0 flex-1 overflow-y-auto py-2.5" aria-label="lines">
   {#each room.conversations as conversation (conversation.id)}
     {@const open = menu?.conversation.id === conversation.id}
-    <div class="conv-row" class:menu-open={open}>
+    <div class="conv-row group relative flex items-stretch" class:menu-open={open}>
       <button
-        class="conv"
+        class="conv relative flex min-w-0 w-full flex-1 cursor-pointer items-center gap-2 border-0 bg-transparent p-[9px] pl-5 pr-[54px] text-left text-[13.5px] text-cream-dim [font-family:inherit] group-hover:bg-ink-3 group-hover:text-cream group-focus-within:bg-ink-3 group-focus-within:text-cream group-[.menu-open]:bg-ink-3 group-[.menu-open]:text-cream"
         class:active={room.conversation?.id === conversation.id}
         title={conversation.topic || undefined}
         onclick={() => room.open(conversation)}
       >
-        <span class="conv-name">{conversation.name}</span>
+        <span class="conv-name min-w-0 truncate">{conversation.name}</span>
         {#if conversation.live_count > 0}
           <span
-            class="line-live"
+            class="line-live inline-flex flex-none"
             title="{conversation.live_count} live"
             aria-label="{conversation.live_count} live"
             ><span class="led running" aria-hidden="true"></span></span
           >
         {/if}
       </button>
-      <div class="conv-actions">
+      <div
+        class="conv-actions absolute top-1/2 right-2 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto group-[.menu-open]:opacity-100 group-[.menu-open]:pointer-events-auto"
+      >
         <button
-          class="conv-more"
+          class="conv-more size-11 bg-ink-2 p-0 text-[16px] leading-none text-cream-faint hover:bg-copper hover:text-ink aria-expanded:bg-copper aria-expanded:text-ink"
           type="button"
           title="line actions"
           aria-label="line actions for {conversation.name}"
@@ -89,51 +91,9 @@
 {/if}
 
 <style>
-  #convs {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    padding: 10px 0;
-  }
-
-  .conv-row {
-    position: relative;
-    display: flex;
-    align-items: stretch;
-  }
-  .conv {
-    display: flex;
-    align-items: center;
-    flex: 1;
-    min-width: 0;
-    width: 100%;
-    text-align: left;
-    background: none;
-    border: 0;
-    cursor: pointer;
-    font: inherit;
-    color: var(--color-cream-dim);
-    padding: 9px 54px 9px 20px;
-    position: relative;
-    gap: 8px;
-  }
-  .conv-name {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .line-live {
-    display: inline-flex;
-    flex: none;
-  }
-  .conv:hover,
-  .conv-row:focus-within .conv,
-  .conv-row.menu-open .conv {
-    color: var(--color-cream);
-    background: var(--color-ink-3);
-  }
-
+  /* The active-line copper marker is a pseudo-element on a state class, and
+     `.active` itself would collide with Tailwind's `:active` pseudo-class —
+     neither has a clean utility spelling. */
   .conv.active {
     color: var(--color-copper-hot);
     background: var(--color-ink-3);
@@ -148,44 +108,12 @@
     background: var(--color-copper);
   }
 
-  .conv-actions {
-    position: absolute;
-    right: 8px;
-    top: 50%;
-    transform: translateY(-50%);
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.15s;
-  }
-  .conv-row:hover .conv-actions,
-  .conv-row:focus-within .conv-actions,
-  .conv-row.menu-open .conv-actions {
-    opacity: 1;
-    pointer-events: auto;
-  }
-  /* A touch screen has no hover to reveal them with. */
+  /* A touch screen has no hover to reveal the row actions with, and Tailwind
+     has no `(hover: none)` media-query variant. */
   @media (hover: none) {
     .conv-actions {
       opacity: 1;
       pointer-events: auto;
     }
-  }
-
-  .conv-more {
-    width: 44px;
-    height: 44px;
-    padding: 0;
-    background: var(--color-ink-2);
-    color: var(--color-cream-faint);
-    font-size: 16px;
-    line-height: 1;
-  }
-  .conv-more:hover,
-  .conv-more[aria-expanded="true"] {
-    color: var(--color-ink);
-    background: var(--color-copper);
   }
 </style>

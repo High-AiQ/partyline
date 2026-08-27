@@ -5,16 +5,16 @@
   import ChangeHandleDialog from "../dialogs/ChangeHandleDialog.svelte";
 </script>
 
-<div class="account">
+<div class="account flex shrink-0 items-center gap-1.5">
   <button
-    class="handle"
+    class="handle min-h-[34px] max-w-[150px] truncate px-[9px] text-copper-hot"
     type="button"
     title="change handle"
     aria-label="change handle, currently {session.handle}"
     onclick={() => dialogs.open(ChangeHandleDialog)}>@{session.handle}</button
   >
   <button
-    class="logout"
+    class="logout min-h-[34px] px-[9px] text-cream-faint hover:border-red hover:bg-red"
     type="button"
     onclick={() => {
       session.logout();
@@ -23,30 +23,10 @@
 </div>
 
 <style>
-  .account {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex: none;
-  }
-  .account button {
-    min-height: 34px;
-    padding: 0 9px;
-  }
-  .handle {
-    max-width: 150px;
-    overflow: hidden;
-    color: var(--color-copper-hot);
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .logout {
-    color: var(--color-cream-faint);
-  }
-  .logout:hover {
-    border-color: var(--color-red);
-    background: var(--color-red);
-  }
+  /* Tailwind's `max-*` variants are exclusive of the boundary, so the
+       documented `(max-width: 899px)` narrow breakpoint stays hand-written —
+       at exactly 899px it must keep agreeing with `NARROW_MAX_WIDTH`. The
+       tablet band lives here with it so the breakpoints read as one block. */
   @media (min-width: 900px) and (max-width: 1199px) {
     .account {
       gap: 4px;

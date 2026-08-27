@@ -53,26 +53,40 @@
   }
 </script>
 
-<details id="archiveSection" ontoggle={onToggle}>
-  <summary>
+<details
+  id="archiveSection"
+  class="max-h-[30%] overflow-y-auto border-t border-dashed border-line text-cream-faint"
+  ontoggle={onToggle}
+>
+  <summary
+    class="cursor-pointer list-none px-5 py-2.5 text-[10.5px] tracking-[0.05em] hover:bg-ink-3 hover:text-cream-dim"
+  >
     archived lines
-    <span id="archiveCount">{room.archived.length ? `(${String(room.archived.length)})` : ""}</span>
+    <span id="archiveCount" class="text-[10px] text-cream-faint"
+      >{room.archived.length ? `(${String(room.archived.length)})` : ""}</span
+    >
   </summary>
-  <nav id="archivedConvs" aria-label="archived lines">
+  <nav id="archivedConvs" class="px-3 pb-2" aria-label="archived lines">
     {#if loading}
-      <div class="archive-note">loading…</div>
+      <div class="archive-note px-2 pb-1.5 text-[10px] italic text-cream-faint">loading…</div>
     {:else if failed}
-      <div class="archive-note">could not load the archive</div>
+      <div class="archive-note px-2 pb-1.5 text-[10px] italic text-cream-faint">
+        could not load the archive
+      </div>
     {:else if !room.archived.length}
-      <div class="archive-note">no archived lines</div>
+      <div class="archive-note px-2 pb-1.5 text-[10px] italic text-cream-faint">no archived lines</div>
     {:else}
       {#each room.archived as conversation (conversation.id)}
-        <div class="archive-row">
-          <span class="name" title={conversation.name}>{conversation.name}</span>
-          <div class="archive-actions">
+        <div
+          class="archive-row mb-[3px] flex items-center gap-[7px] rounded border border-cream-faint/45 p-[5px] px-2 text-cream-faint"
+        >
+          <span class="name min-w-0 flex-1 truncate text-[10.5px]" title={conversation.name}
+            >{conversation.name}</span
+          >
+          <div class="archive-actions flex shrink-0 gap-1">
             <button
               type="button"
-              class="restore"
+              class="restore border-green/35 px-1.5 py-1 text-[9.5px] text-green"
               title="restore this line"
               disabled={restoring === conversation.id}
               onclick={() => restore(conversation)}
@@ -80,7 +94,7 @@
             >
             <button
               type="button"
-              class="purge"
+              class="purge border-red/35 px-1.5 py-1 text-[9.5px] text-red"
               title="permanently delete this line"
               onclick={() => {
                 onpurge(conversation);
@@ -94,19 +108,8 @@
 </details>
 
 <style>
-  #archiveSection {
-    border-top: 1px dashed var(--color-line);
-    max-height: 30%;
-    overflow-y: auto;
-    color: var(--color-cream-faint);
-  }
-  summary {
-    list-style: none;
-    cursor: pointer;
-    padding: 10px 20px;
-    font-size: 10.5px;
-    letter-spacing: 0.05em;
-  }
+  /* The ▸/▾ disclosure marker and the vendor details-marker reset are
+       pseudo-elements Tailwind has no clean spelling for. */
   summary::-webkit-details-marker {
     display: none;
   }
@@ -118,59 +121,5 @@
   }
   #archiveSection[open] summary::before {
     content: "▾";
-  }
-  summary:hover {
-    color: var(--color-cream-dim);
-    background: var(--color-ink-3);
-  }
-
-  #archiveCount {
-    color: var(--color-cream-faint);
-    font-size: 10px;
-  }
-  #archivedConvs {
-    padding: 0 12px 8px;
-  }
-
-  .archive-note {
-    padding: 0 8px 6px;
-    font-size: 10px;
-    font-style: italic;
-    color: var(--color-cream-faint);
-  }
-  .archive-row {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 5px 8px;
-    margin-bottom: 3px;
-    border: 1px solid rgb(93 91 82 / 0.45);
-    border-radius: 4px;
-    color: var(--color-cream-faint);
-  }
-  .name {
-    min-width: 0;
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 10.5px;
-  }
-  .archive-actions {
-    display: flex;
-    gap: 4px;
-    flex: none;
-  }
-  .archive-actions button {
-    padding: 4px 6px;
-    font-size: 9.5px;
-  }
-  .restore {
-    color: var(--color-green);
-    border-color: rgb(127 176 105 / 0.35);
-  }
-  .purge {
-    color: var(--color-red);
-    border-color: rgb(201 111 90 / 0.35);
   }
 </style>
