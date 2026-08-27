@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
+
 import pyte
 
 
@@ -77,3 +80,32 @@ def _osc_end(stream: bytes, start: int) -> tuple[int | None, bytes]:
         if stream[index:index + 2] == b"\x1b\\":
             return index, b"\x1b\\"
     return None, b""
+
+
+async def drain_write(fd: int, data: bytes, stall_seconds: float = 60.0) -> None:
+    """Write to a non-blocking pty master until every byte lands.
+
+    A payload larger than the free kernel tty buffer makes ``os.write``
+    return a short count (or raise ``BlockingIOError``); dropping the
+    remainder silently loses messages already credited as delivered — and a
+    lost bracketed-paste terminator makes the next paste merge into this one.
+    Raising on a stall redelivers: the delivery cursor only advances after
+    the paste returns, so a wedged (or dead) CLI keeps its undelivered
+    messages.
+    """
+    view = memoryview(data)
+    stalled = 0.0
+    while view:
+        try:
+            written = os.write(fd, view)
+        except BlockingIOError:
+            if stalled >= stall_seconds:
+                raise OSError(
+                    "pty stopped draining input; aborting the paste so the "
+                    "undelivered messages stay queued"
+                ) from None
+            stalled += 0.02
+            await asyncio.sleep(0.02)
+            continue
+        stalled = 0.0
+        view = view[written:]
