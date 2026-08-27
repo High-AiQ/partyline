@@ -1,0 +1,7 @@
+{"role":"user","message":{"content":[{"type":"text","text":"<timestamp>Thursday, Aug 27, 2026, 5:10 AM (UTC-4)</timestamp>\n<user_query>\nRun exactly: echo hello-one. Then reply with just the word done.\n</user_query>"}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"I'll run that command now, then reply with just \"done\"."},{"type":"tool_use","name":"Shell","input":{"command":"echo hello-one","description":"Echo hello-one exactly"}}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"done"}]}}
+{"role":"user","message":{"content":[{"type":"text","text":"<timestamp>Thursday, Aug 27, 2026, 5:10 AM (UTC-4)</timestamp>\n<user_query>\nRun exactly: echo hello-two. Then reply with just the word done-two.\n</user_query>"}]}}
+{"role":"assistant","message":{"content":[{"type":"tool_use","name":"Shell","input":{"command":"echo hello-two","description":"Echo hello-two exactly"}}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"done-two"}]}}
+{"type":"turn_ended","status":"success"}
