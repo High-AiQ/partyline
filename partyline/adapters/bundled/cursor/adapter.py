@@ -29,6 +29,13 @@ class PartylineAdapter(Adapter):
     POLL_SECONDS = 0.5
     DISCOVERY_TIMEOUT = 45.0
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Fingerprints of every turn_ended sentinel this process has observed,
+        # so a resync can recognize the watermark's tail as a sentinel after
+        # Cursor deletes it from the file at the next turn's start.
+        self._sentinel_fps: set[str] = set()
+
     async def stop(self):
         self._CLAIMED.discard(getattr(self, "_session_id", "") or "")
         await super().stop()
@@ -87,7 +94,11 @@ class PartylineAdapter(Adapter):
                 lines = fh.readlines()
         except OSError:
             return seen_fps, failures
-        incoming_fps = [fingerprint(line) for line in lines if line.endswith("\n")]
+        complete = [line for line in lines if line.endswith("\n")]
+        incoming_fps = [fingerprint(line) for line in complete]
+        for line, fp in zip(complete, incoming_fps, strict=True):
+            if self._tail_is_turn_ended([line]):
+                self._sentinel_fps.add(fp)
         resynced = resync_fingerprints(path, seen_fps, incoming_fps)
         if resynced == seen_fps and seen_fps:
             # An unchanged prefix is a successful sequential re-read, not a
@@ -100,15 +111,19 @@ class PartylineAdapter(Adapter):
                 return seen_fps, 0
             if (
                 incoming_fps[: len(seen_fps) - 1] == seen_fps[:-1]
-                and incoming_fps[-1:] == seen_fps[-1:]
-                and self._tail_is_turn_ended(lines)
+                and seen_fps[-1] in self._sentinel_fps
             ):
-                # Current Cursor inserts one completed turn before the single
-                # trailing sentinel when it re-renders the file. Shrinking the
-                # watermark by that sentinel lets the normal tail loop consume
-                # the inserted records without replaying delivered speech.
-                # A rewrite spanning multiple prior turns may not have this
-                # shape and deliberately falls through to the bounded hatch.
+                # Since 2026.08.25 Cursor deletes the trailing turn_ended
+                # sentinel at the START of the next turn and appends the new
+                # records in its place (a fresh sentinel lands at turn end);
+                # older builds instead inserted the completed turn before the
+                # still-present sentinel. Both shapes leave every delivered
+                # non-sentinel record in place, so shrinking the watermark by
+                # the already-seen sentinel lets the normal tail loop consume
+                # whatever follows. A sentinel is never speech, so the shrink
+                # cannot replay a delivered message. A rewrite that edits
+                # earlier records deliberately falls through to the bounded
+                # hatch.
                 return seen_fps[:-1], 0
             failures += 1
             if failures >= 3:
@@ -145,12 +160,15 @@ class PartylineAdapter(Adapter):
 
     async def _tail_transcript(self, path: Path) -> None:
         seen_fps: list[str] = []
+        self._sentinel_fps = set()
         if self.resume and path.is_file():
             try:
                 with open(path, encoding="utf-8", errors="replace") as f:
                     for line in f:
                         if line.endswith("\n"):
                             seen_fps.append(fingerprint(line))
+                            if self._tail_is_turn_ended([line]):
+                                self._sentinel_fps.add(seen_fps[-1])
             except OSError:
                 pass
 
@@ -206,6 +224,8 @@ class PartylineAdapter(Adapter):
                             continue
                         if not isinstance(record, dict):
                             continue
+                        if record.get("type") == "turn_ended":
+                            self._sentinel_fps.add(fp)
                         event, text = parse_record(record)
                         if event:
                             await receipt(self.att, event)
