@@ -50,13 +50,16 @@
   }
 </script>
 
-<aside id="rail">
-  <div id="wordmark">
-    <h1>party<em>line</em></h1>
-    <p>
+<aside id="rail" class="flex min-w-0 flex-col border-r border-line bg-ink-2">
+  <div id="wordmark" class="border-b border-dashed border-line px-5 pb-[18px] pt-[26px]">
+    <h1 class="font-serif text-[34px] font-normal tracking-[0.5px] text-cream">
+      party<em class="text-copper">line</em>
+    </h1>
+    <p class="mt-1 text-[10.5px] tracking-[0.06em] text-cream-faint">
       humans &amp; processes, one wire
       {#if session.version}<span
           id="ver"
+          class="rounded-[3px] border border-copper/30 px-[5px] align-[1px] text-[9px] tracking-[0.08em] text-copper"
           title="server v{session.version} · this tab: {describeBuild(__PARTYLINE_BUILD__)}"
           >v{session.version}</span
         >{/if}
@@ -70,9 +73,10 @@
     ondelete={deleteLine}
   />
 
-  <form id="newconv" onsubmit={openLine}>
+  <form id="newconv" class="flex gap-2 border-t border-dashed border-line px-5 py-[14px]" onsubmit={openLine}>
     <input
       id="newconvName"
+      class="min-w-0 flex-1"
       bind:value={newLineName}
       placeholder="new line…"
       maxlength="60"
@@ -84,12 +88,16 @@
 
   <ArchiveSection onpurge={purgeLine} />
 
-  <div id="me">
-    <span>operator&nbsp;<b id="meName">{session.handle}</b></span>
-    <span class="me-actions">
+  <div
+    id="me"
+    class="flex items-center justify-between border-t border-line px-5 py-3 text-[11px] text-cream-faint"
+  >
+    <span>operator&nbsp;<b id="meName" class="font-medium text-cream-dim">{session.handle}</b></span>
+    <span class="me-actions flex shrink-0 items-center">
       <button
         id="stopServer"
         type="button"
+        class="ml-1.5 border-line px-2 py-0.5 text-[10px] text-cream-faint hover:border-red hover:bg-red hover:text-cream"
         title="stop the partyline server"
         onclick={() => {
           dialogs.open(StopServerDialog);
@@ -98,90 +106,3 @@
     </span>
   </div>
 </aside>
-
-<style>
-  #rail {
-    background: var(--color-ink-2);
-    border-right: 1px solid var(--color-line);
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-  }
-
-  #wordmark {
-    padding: 26px 20px 18px;
-    border-bottom: 1px dashed var(--color-line);
-  }
-  h1 {
-    font-family: var(--font-serif);
-    font-weight: 400;
-    font-size: 34px;
-    letter-spacing: 0.5px;
-    color: var(--color-cream);
-  }
-  h1 em {
-    color: var(--color-copper);
-    font-style: italic;
-  }
-  #wordmark p {
-    color: var(--color-cream-faint);
-    font-size: 10.5px;
-    margin-top: 4px;
-    letter-spacing: 0.06em;
-  }
-  #ver {
-    color: var(--color-copper);
-    border: 1px solid rgb(217 142 74 / 0.3);
-    border-radius: 3px;
-    padding: 0 5px;
-    font-size: 9px;
-    letter-spacing: 0.08em;
-    vertical-align: 1px;
-  }
-
-  #newconv {
-    padding: 14px 20px;
-    border-top: 1px dashed var(--color-line);
-    display: flex;
-    gap: 8px;
-  }
-  #newconv input {
-    flex: 1;
-    min-width: 0;
-  }
-
-  #me {
-    padding: 12px 20px;
-    border-top: 1px solid var(--color-line);
-    color: var(--color-cream-faint);
-    font-size: 11px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-  #me b {
-    color: var(--color-cream-dim);
-    font-weight: 500;
-  }
-  #me button {
-    font-size: 10px;
-    padding: 2px 8px;
-  }
-  .me-actions {
-    display: flex;
-    align-items: center;
-    flex: none;
-  }
-  /* Stopping the server is not a routine action: it sits quiet until reached
-     for, then goes red — it should never be the brightest thing in the rail. */
-  #stopServer {
-    margin-left: 6px;
-    color: var(--color-cream-faint);
-    border-color: var(--color-line);
-  }
-  #stopServer:hover {
-    color: var(--color-cream);
-    background: var(--color-red);
-    border-color: var(--color-red);
-  }
-</style>
