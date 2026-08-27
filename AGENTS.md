@@ -60,6 +60,7 @@ bundle is committed. TypeScript is strict through compiler and ESLint. Full conv
 | DO | DO NOT |
 | --- | --- |
 | Run `npm run verify` green, then `npm run build` → `partyline/static/`, and commit the bundle | Ship frontend changes without the rebuilt bundle |
+| Prefer Tailwind utilities for component looks; depth in `docs/frontend.md` | Grow scoped `<style>` for layout/color/typography Tailwind already covers |
 | Give every boundary-crossing value a named contract — Zod in the browser, Pydantic v2 on the server | Use `any`, double casts, or blanket suppressions |
 | Keep the release version single-sourced in `partyline/__init__.py` | Treat `static/build.json` as anything but a bundle identifier |
 

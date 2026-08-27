@@ -14,7 +14,7 @@
 </script>
 
 <button
-  class="column-toggle"
+  class="column-toggle flex h-[34px] flex-none items-center justify-center gap-1.5 bg-ink-2 px-[9px]"
   class:collapsed
   type="button"
   title={collapsed ? `show ${noun}` : `hide ${noun}`}
@@ -26,44 +26,36 @@
   }}
 >
   {#if side === "rail"}
-    <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7" /></svg>
+    <svg
+      class="size-[13px] fill-none stroke-current stroke-2 transition-transform duration-[220ms] motion-reduce:transition-none [stroke-linecap:round] [stroke-linejoin:round]"
+      aria-hidden="true"
+      viewBox="0 0 24 24"><path d="m15 5-7 7 7 7" /></svg
+    >
     <span>lines</span>
   {:else}
     <span class="led" class:running={count > 0}></span>
     <span>jacks</span>
-    <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7" /></svg>
+    <svg
+      class="size-[13px] fill-none stroke-current stroke-2 transition-transform duration-[220ms] motion-reduce:transition-none [stroke-linecap:round] [stroke-linejoin:round]"
+      aria-hidden="true"
+      viewBox="0 0 24 24"><path d="m9 5 7 7-7 7" /></svg
+    >
   {/if}
 </button>
 
 <style>
-  button {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    flex: none;
-    height: 34px;
-    padding: 0 9px;
-    background: var(--color-ink-2);
-  }
-  svg {
-    width: 13px;
-    height: 13px;
-    fill: none;
-    stroke: currentColor;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    stroke-width: 2;
-    transition: transform 0.22s ease;
-  }
-  button.collapsed {
+  /* The collapsed tint and the rotated chevron are a class-based state with a
+     descendant selector — a poor fit for utility variants. The breakpoints
+     stay hand-written: Tailwind's `max-*` variants are exclusive of the
+     boundary, and `(max-width: 899px)` must keep agreeing with
+     `NARROW_MAX_WIDTH`. */
+  .column-toggle.collapsed {
     color: var(--color-copper-hot);
     border-color: rgb(217 142 74 / 0.5);
   }
-  button.collapsed svg {
+  .column-toggle.collapsed svg {
     transform: rotate(180deg);
   }
-
   @media (min-width: 900px) and (max-width: 1199px) {
     button {
       min-width: 34px;
@@ -77,16 +69,9 @@
       clip: rect(0 0 0 0);
     }
   }
-
   @media (max-width: 899px) {
     button {
       display: none;
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    svg {
-      transition: none;
     }
   }
 </style>
