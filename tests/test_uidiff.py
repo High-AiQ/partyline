@@ -6,6 +6,7 @@ that moved something and was reported clean. It is pure functions over
 """
 
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,7 @@ from scripts.uidiff import (  # noqa: E402
     digest,
     digests,
     judgeable,
+    merge_confirm_only,
     reconcile,
     same_shots,
 )
@@ -294,6 +296,49 @@ def make_frontend(root: Path) -> Path:
     (frontend / "src" / "App.svelte").write_text("<h1>hi</h1>", encoding="utf-8")
     (frontend / "src" / "lib" / "api.ts").write_text("export const api = 1;", encoding="utf-8")
     return frontend
+
+
+class MergeConfirmOnlyTest(unittest.TestCase):
+    """The confirm run's extra states join the persisted baseline, and a
+    state present in both runs keeps the first run's capture.
+
+    This is the production path: `capture_twice` publishes `first_dir` to the
+    baseline and then calls `merge_confirm_only`, so a state only the second
+    run produced is still *known* to the baseline — never later misreported as
+    a genuinely new harness state.
+    """
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        for name in ("first", "confirm"):
+            (self.root / name).mkdir()
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def test_a_confirm_only_state_is_persisted(self):
+        (self.root / "first" / "01-a.png").write_bytes(b"first-a")
+        (self.root / "confirm" / "01-a.png").write_bytes(b"confirm-a")
+        (self.root / "confirm" / "02-confirm-only.png").write_bytes(b"confirm-only")
+        # capture_twice publishes first_dir to keep_dir, then merges the extras.
+        shutil.copytree(self.root / "first", self.root / "keep")
+        merge_confirm_only(self.root / "keep", self.root / "first", self.root / "confirm")
+        self.assertEqual((self.root / "keep" / "01-a.png").read_bytes(), b"first-a")
+        self.assertEqual((self.root / "keep" / "02-confirm-only.png").read_bytes(), b"confirm-only")
+        self.assertEqual(sorted(p.name for p in (self.root / "keep").glob("*.png")),
+                         ["01-a.png", "02-confirm-only.png"])
+
+    def test_a_same_name_first_capture_is_not_overwritten(self):
+        # The control that fails on the old implementation: subtracting full
+        # Path objects across two different parents can never match, so every
+        # confirm PNG overwrote the first run's. Comparing by filename keeps
+        # the publication invariant that the first run's capture wins.
+        (self.root / "first" / "01-a.png").write_bytes(b"first-a")
+        (self.root / "confirm" / "01-a.png").write_bytes(b"confirm-a")
+        shutil.copytree(self.root / "first", self.root / "keep")
+        merge_confirm_only(self.root / "keep", self.root / "first", self.root / "confirm")
+        self.assertEqual((self.root / "keep" / "01-a.png").read_bytes(), b"first-a")
 
 
 class StaleBundleTest(unittest.TestCase):
