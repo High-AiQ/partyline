@@ -40,10 +40,11 @@
        to keep keyframes and animation declarations in CSS. The centering
        translate is also hand-written, as `transform` rather than Tailwind's
        `translate` property: the `arrive` keyframes animate `transform`, so a
-       normal `transform: translateX(-50%)` is overridden by the animation
+       normal        `transform: translateX(-50%)` is overridden by the animation
        (leaving the banner offset), while v4's separate `translate` longhand
        would survive it and shift the banner to a centred position — a pixel
-       difference in exactly the states the parity set does not cover. */
+       difference in exactly the states (19-wire-notice, 20-wire-down) the
+       parity harness now covers. */
   #wireNotice,
   #wireDown {
     transform: translateX(-50%);
