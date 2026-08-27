@@ -555,6 +555,7 @@ enforce it. A prose warning that has no executable guard is not a completed less
   bundle first, at which point `uidiff` reported the two narrow states honestly. The guard: a parity
   claim is only about the source if the bundle the capture renders was built from it, so `uidiff`
   now refuses to capture when `partyline/static/build.json` does not match a hash of the current
-  `frontend/src` (a Python mirror of Vite's `sourceBuildId()`), and the skill says rebuild before
-  the baseline and the check. The shape to remember: **a proof is only as strong as the artifact the
-  harness actually exercised** — check what the tool renders, not what you meant it to render.
+  `frontend/src` (a Python mirror of Vite's `sourceBuildId()`), and the skill brackets the change:
+  build + baseline the untouched base, make the change, rebuild, then check. The shape to remember:
+  **a proof is only as strong as the artifact the harness actually exercised** — check what the tool
+  renders, not what you meant it to render.
