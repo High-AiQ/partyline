@@ -19,11 +19,11 @@
     session.adapters.find((adapter) => adapter.id === adapterId)?.overrides_bundled ?? false;
 </script>
 
-<aside id="board">
-  <h2>on the line</h2>
-  <div id="jacks">
+<aside id="board" class="bg-ink-2 border-l border-line flex flex-col overflow-y-auto">
+  <h2 class="font-serif italic font-normal text-[17px] text-cream-dim px-[18px] pt-5 pb-2.5">on the line</h2>
+  <div id="jacks" class="px-3 pb-2">
     {#if !jacks.length}
-      <div class="note">nobody attached yet</div>
+      <div class="note px-2 text-[11px] italic text-cream-faint">nobody attached yet</div>
     {:else}
       {#each jacks as attachment (attachment.id)}
         <JackCard
@@ -36,34 +36,8 @@
     {/if}
   </div>
 
-  <h3>patch in a process</h3>
+  <h3 class="font-serif italic font-normal text-[17px] text-cream-dim px-[18px] pt-5 pb-2.5">
+    patch in a process
+  </h3>
   <AttachForm />
 </aside>
-
-<style>
-  #board {
-    background: var(--color-ink-2);
-    border-left: 1px solid var(--color-line);
-    display: flex;
-    flex-direction: column;
-    overflow-y: auto;
-  }
-  h2,
-  h3 {
-    font-family: var(--font-serif);
-    font-style: italic;
-    font-weight: 400;
-    font-size: 17px;
-    color: var(--color-cream-dim);
-    padding: 20px 18px 10px;
-  }
-  #jacks {
-    padding: 0 12px 8px;
-  }
-  .note {
-    padding: 0 8px;
-    color: var(--color-cream-faint);
-    font-size: 11px;
-    font-style: italic;
-  }
-</style>

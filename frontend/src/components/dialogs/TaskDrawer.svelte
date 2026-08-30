@@ -105,28 +105,51 @@
 </script>
 
 <div
-  class="task-overlay"
+  class="fixed inset-0 z-50 bg-[rgb(8_10_9/0.66)] backdrop-blur-[2px]"
   role="presentation"
   onmousedown={(event) => (pressedBackdrop = event.target === event.currentTarget)}
   onclick={(event) => {
     if (event.target === event.currentTarget && pressedBackdrop) close();
   }}
 >
-  <div class="task-drawer" role="dialog" aria-modal="true" aria-label="line tasks">
-    <header>
+  <div
+    class="task-drawer absolute inset-y-0 right-0 flex w-[min(430px,94vw)] flex-col border-l border-panel-line bg-ink-2 shadow-[-24px_0_60px_rgb(0_0_0/0.5)] max-[480px]:w-screen"
+    role="dialog"
+    aria-modal="true"
+    aria-label="line tasks"
+  >
+    <header
+      class="flex min-h-[70px] items-center justify-between border-b border-dashed border-line p-[10px_10px_10px_20px]"
+    >
       <div>
-        <p>shared state</p>
-        <h2>line tasks</h2>
+        <p class="text-[9px] uppercase tracking-[0.12em] text-cream-faint">shared state</p>
+        <h2 class="font-serif text-[24px] leading-[1.1] font-normal italic text-cream">line tasks</h2>
       </div>
-      <button class="close" type="button" title="close" aria-label="close tasks" onclick={close}>✕</button>
+      <button
+        class="h-[44px] w-[44px] border-0 bg-transparent p-0 hover:bg-transparent hover:text-red"
+        type="button"
+        title="close"
+        aria-label="close tasks"
+        onclick={close}>✕</button
+      >
     </header>
 
-    <form class="task-form" onsubmit={add}>
-      <label for="taskBody">new task</label>
-      <textarea id="taskBody" bind:value={body} maxlength="500" rows="3" placeholder="What needs doing?"
-      ></textarea>
-      <div class="assign-row">
-        <label for="taskOwner">assign to</label>
+    <form class="flex flex-col gap-[7px] border-b border-line px-[20px] py-[18px]" onsubmit={add}>
+      <label class="text-[9px] uppercase tracking-[0.12em] text-cream-faint" for="taskBody">new task</label>
+      <textarea
+        class="min-h-[68px] w-full resize-y rounded-[4px] border border-line bg-ink p-[9px_10px] text-cream [font:inherit] [outline:0] focus:border-copper"
+        id="taskBody"
+        bind:value={body}
+        maxlength="500"
+        rows="3"
+        placeholder="What needs doing?"></textarea>
+      <div
+        class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-[8px] max-[480px]:grid-cols-[1fr_auto]"
+      >
+        <label
+          class="text-[9px] uppercase tracking-[0.12em] text-cream-faint max-[480px]:[grid-column:1/-1]"
+          for="taskOwner">assign to</label
+        >
         <select id="taskOwner" bind:value={owner}>
           <option value="">unassigned</option>
           {#each owners as name (name)}
@@ -139,21 +162,25 @@
       </div>
     </form>
 
-    {#if error}<p class="task-error" role="alert">{error}</p>{/if}
+    {#if error}<p class="mx-[20px] mt-[12px] text-[11px] text-red" role="alert">{error}</p>{/if}
 
-    <div class="task-list" aria-live="polite">
+    <div class="flex min-h-0 flex-col gap-[5px] overflow-y-auto p-[10px_14px_20px]" aria-live="polite">
       {#if loading}
-        <p class="empty">loading tasks…</p>
+        <p class="p-[20px_4px] text-center text-[11px] italic text-cream-faint">loading tasks…</p>
       {:else if !tasks.length}
-        <p class="empty">nothing open — this line is clear</p>
+        <p class="p-[20px_4px] text-center text-[11px] italic text-cream-faint">
+          nothing open — this line is clear
+        </p>
       {:else}
         {#each openTasks as task (task.id)}
           <TaskCard {task} {owners} onupdate={update} onremove={remove} />
         {/each}
 
         {#if doneTasks.length}
-          <details>
-            <summary>{doneTasks.length} completed</summary>
+          <details class="mt-[8px]">
+            <summary class="mb-[7px] cursor-pointer text-[10px] text-cream-faint"
+              >{doneTasks.length} completed</summary
+            >
             {#each doneTasks as task (task.id)}
               <TaskCard {task} {owners} onupdate={update} onremove={remove} />
             {/each}
@@ -165,130 +192,16 @@
 </div>
 
 <style>
-  .task-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 50;
-    background: rgb(8 10 9 / 0.66);
-    backdrop-filter: blur(2px);
-  }
+  /* Animation stays scoped: keyframes plus the reduced-motion opt-out are the
+     kind of CSS Tailwind utilities shouldn't own (docs/frontend.md). Everything
+     else on .task-drawer lives in utilities on the markup. */
   .task-drawer {
-    position: absolute;
-    inset: 0 0 0 auto;
-    width: min(430px, 94vw);
-    display: flex;
-    flex-direction: column;
-    background: var(--color-ink-2);
-    border-left: 1px solid var(--color-panel-line);
-    box-shadow: -24px 0 60px rgb(0 0 0 / 0.5);
     animation: drawer-in 0.22s ease both;
-  }
-  header {
-    min-height: 70px;
-    padding: 10px 10px 10px 20px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    border-bottom: 1px dashed var(--color-line);
-  }
-  header p,
-  .task-form label {
-    color: var(--color-cream-faint);
-    font-size: 9px;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-  }
-  h2 {
-    color: var(--color-cream);
-    font-family: var(--font-serif);
-    font-size: 24px;
-    font-style: italic;
-    font-weight: 400;
-    line-height: 1.1;
-  }
-  .close {
-    width: 44px;
-    height: 44px;
-    padding: 0;
-    border: 0;
-    background: none;
-  }
-  .close:hover {
-    color: var(--color-red);
-    background: none;
-  }
-  .task-form {
-    padding: 18px 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 7px;
-    border-bottom: 1px solid var(--color-line);
-  }
-  textarea {
-    width: 100%;
-    resize: vertical;
-    min-height: 68px;
-    padding: 9px 10px;
-    color: var(--color-cream);
-    background: var(--color-ink);
-    border: 1px solid var(--color-line);
-    border-radius: 4px;
-    font: inherit;
-    outline: 0;
-  }
-  textarea:focus {
-    border-color: var(--color-copper);
-  }
-  .assign-row {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 8px;
-  }
-  .task-error {
-    margin: 12px 20px 0;
-    color: var(--color-red);
-    font-size: 11px;
-  }
-  .task-list {
-    min-height: 0;
-    overflow-y: auto;
-    padding: 10px 14px 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-  }
-  .empty {
-    color: var(--color-cream-faint);
-    font-size: 11px;
-    font-style: italic;
-    padding: 20px 4px;
-    text-align: center;
-  }
-  details {
-    margin-top: 8px;
-  }
-  summary {
-    cursor: pointer;
-    color: var(--color-cream-faint);
-    font-size: 10px;
-    margin-bottom: 7px;
   }
   @keyframes drawer-in {
     from {
       opacity: 0;
       transform: translateX(18px);
-    }
-  }
-  @media (max-width: 480px) {
-    .task-drawer {
-      width: 100vw;
-    }
-    .assign-row {
-      grid-template-columns: 1fr auto;
-    }
-    .assign-row label {
-      grid-column: 1 / -1;
     }
   }
   @media (prefers-reduced-motion: reduce) {

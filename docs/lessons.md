@@ -53,6 +53,13 @@ misleading evidence:
 These are durable false assumptions from dogfooding, paired with the evidence and guard that
 replaced them:
 
+- **A pixel-identical fixture set proved every migrated state kept its CSS contract.** The
+  Tailwind migration dropped `white-space: pre-wrap` from system messages, but all 24 visual
+  states stayed byte-identical because the fixture's only system notice was one line. Real update
+  and reattachment notices are multiline, so they would collapse in production. Preserve
+  state-wide inherited declarations explicitly, add a focused contract test for states the visual
+  fixture does not exercise, and treat screenshot parity as evidence about captured fixtures—not
+  unobserved reachable states.
 - **An absolute URL the server built was fetchable as written.** The first file posted through
   a reverse proxy after v0.46.0 handed every process a media URL whose scheme was `http` because
   uvicorn only honours `X-Forwarded-Proto` from addresses it is told to trust, and its default is

@@ -104,21 +104,29 @@
     </div>
 
     {#if canPlan}
-      <div class="plan">
-        <label class="plan-toggle">
-          <input type="checkbox" bind:checked={planReattach} />
+      <div class="flex flex-col gap-[7px] border-t border-dashed border-line pt-2.5">
+        <label class="flex cursor-pointer items-start gap-2 text-[11.5px] text-cream-dim">
+          <!-- A checkbox is a real hit target, not a decoration beside the label. -->
+          <input
+            type="checkbox"
+            class="mt-[1px] h-[15px] w-[15px] flex-none accent-copper"
+            bind:checked={planReattach}
+          />
           <span>
             offer to bring back {resumable.length}
             {resumable.length === 1 ? "process" : "processes"} on
-            <b>{room.conversation?.name ?? "this line"}</b> when partyline returns
+            <b class="font-semibold text-copper-hot">{room.conversation?.name ?? "this line"}</b> when partyline
+            returns
           </span>
         </label>
 
         {#if planReattach}
-          <label class="plan-label" for="restartDebrief"> what they should be told on the way back in </label>
+          <label class="text-[10px] tracking-[0.05em] text-cream-faint" for="restartDebrief">
+            what they should be told on the way back in
+          </label>
           <textarea
             id="restartDebrief"
-            class="debriefBox"
+            class="min-h-[84px] resize-y rounded border border-line bg-ink px-[11px] py-[9px] text-[12px] text-cream outline-0 focus:border-copper"
             bind:value={debrief}
             maxlength={DEBRIEF_MAX}
             placeholder={"restarting to pick up the new build — pull, re-read your slice, and post status.\nthey come back one at a time, each fully ready before the next starts"}
@@ -140,53 +148,3 @@
     />
   {/if}
 </Modal>
-
-<style>
-  .plan {
-    display: flex;
-    flex-direction: column;
-    gap: 7px;
-    border-top: 1px dashed var(--color-line);
-    padding-top: 10px;
-  }
-  .plan-toggle {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    color: var(--color-cream-dim);
-    font-size: 11.5px;
-    cursor: pointer;
-  }
-  .plan-toggle input {
-    /* A checkbox is a real hit target, not a decoration beside the label. */
-    width: 15px;
-    height: 15px;
-    margin-top: 1px;
-    flex: none;
-    accent-color: var(--color-copper);
-  }
-  .plan-toggle b {
-    color: var(--color-copper-hot);
-    font-weight: 600;
-  }
-  .plan-label {
-    color: var(--color-cream-faint);
-    font-size: 10px;
-    letter-spacing: 0.05em;
-  }
-  .debriefBox {
-    background: var(--color-ink);
-    border: 1px solid var(--color-line);
-    border-radius: 4px;
-    color: var(--color-cream);
-    padding: 9px 11px;
-    font: inherit;
-    font-size: 12px;
-    min-height: 84px;
-    resize: vertical;
-    outline: 0;
-  }
-  .debriefBox:focus {
-    border-color: var(--color-copper);
-  }
-</style>

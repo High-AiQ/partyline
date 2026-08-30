@@ -31,27 +31,45 @@
   }
 </script>
 
-<div class="files">
+<div class="mt-2 grid w-full max-w-[720px] gap-2">
   {#each files as file, index (file.id)}
     {#if file.kind === "audio"}
-      <div class="attachment">
-        <audio controls preload="metadata" src={authenticatedResourceUrl(file.urls.original)}></audio>
-        <span class="meta">{fileLabel(file, index)} · {file.mime} · {humanSize(file.bytes)}</span>
+      <div class="grid gap-1 overflow-hidden rounded-md border border-line bg-ink-2 px-2.5 py-2">
+        <audio
+          class="h-9 w-full"
+          controls
+          preload="metadata"
+          src={authenticatedResourceUrl(file.urls.original)}
+        ></audio>
+        <span class="truncate text-[10px] text-cream-faint"
+          >{fileLabel(file, index)} · {file.mime} · {humanSize(file.bytes)}</span
+        >
       </div>
     {:else if file.kind === "video"}
-      <div class="attachment">
+      <div class="grid gap-1 overflow-hidden rounded-md border border-line bg-ink-2 px-2.5 py-2">
         <!-- eslint-disable-next-line svelte/no-unused-svelte-ignore -- svelte-check warns, the eslint plugin does not -->
         <!-- svelte-ignore a11y_media_has_caption -- arbitrary uploads have no caption sidecar -->
-        <video controls preload="metadata" src={authenticatedResourceUrl(file.urls.original)}></video>
-        <span class="meta">{fileLabel(file, index)} · {file.mime} · {humanSize(file.bytes)}</span>
+        <video
+          class="block max-h-80 w-full rounded bg-ink"
+          controls
+          preload="metadata"
+          src={authenticatedResourceUrl(file.urls.original)}
+        ></video>
+        <span class="truncate text-[10px] text-cream-faint"
+          >{fileLabel(file, index)} · {file.mime} · {humanSize(file.bytes)}</span
+        >
       </div>
     {:else}
-      <div class="attachment card">
-        <span class="icon" aria-hidden="true">📎</span>
-        <span class="label" title={fileLabel(file, index)}>{fileLabel(file, index)}</span>
-        <span class="meta">{file.mime} · {humanSize(file.bytes)}</span>
+      <div
+        class="card grid items-center gap-2.5 overflow-hidden rounded-md border border-line bg-ink-2 px-2.5 py-2 [grid-template-columns:24px_minmax(0,1fr)_auto_auto]"
+      >
+        <span class="text-center text-[15px]" aria-hidden="true">📎</span>
+        <span class="truncate text-xs text-cream" title={fileLabel(file, index)}
+          >{fileLabel(file, index)}</span
+        >
+        <span class="truncate text-[10px] text-cream-faint">{file.mime} · {humanSize(file.bytes)}</span>
         <button
-          class="download"
+          class="download min-h-11 border-0 bg-transparent p-0 text-[11px] text-copper-hot hover:bg-transparent hover:underline disabled:cursor-wait disabled:opacity-60"
           type="button"
           disabled={downloading === file.id}
           aria-label={`download ${fileLabel(file, index)}`}
@@ -61,77 +79,4 @@
     {/if}
   {/each}
 </div>
-<div class="download-error" aria-live="polite">{downloadError}</div>
-
-<style>
-  .files {
-    display: grid;
-    gap: 8px;
-    width: min(100%, 720px);
-    margin-top: 8px;
-  }
-  .attachment {
-    display: grid;
-    gap: 4px;
-    overflow: hidden;
-    border: 1px solid var(--color-line);
-    border-radius: 6px;
-    background: var(--color-ink-2);
-    padding: 8px 10px;
-  }
-  audio {
-    width: 100%;
-    height: 36px;
-  }
-  video {
-    display: block;
-    width: 100%;
-    max-height: 320px;
-    border-radius: 4px;
-    background: var(--color-ink);
-  }
-  .meta {
-    overflow: hidden;
-    color: var(--color-cream-faint);
-    font-size: 10px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .card {
-    grid-template-columns: 24px minmax(0, 1fr) auto auto;
-    align-items: center;
-    gap: 10px;
-  }
-  .card .icon {
-    font-size: 15px;
-    text-align: center;
-  }
-  .card .label {
-    overflow: hidden;
-    color: var(--color-cream);
-    font-size: 12px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .download {
-    min-height: 44px;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: var(--color-copper-hot);
-    font-size: 11px;
-  }
-  .download:hover {
-    background: transparent;
-    text-decoration: underline;
-  }
-  .download:disabled {
-    cursor: wait;
-    opacity: 0.6;
-  }
-  .download-error {
-    min-height: 14px;
-    color: var(--color-red);
-    font-size: 10px;
-  }
-</style>
+<div class="min-h-3.5 text-[10px] text-red" aria-live="polite">{downloadError}</div>

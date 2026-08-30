@@ -51,9 +51,12 @@
 
 {#if image}
   <Modal title={image.title ?? `image ${String(index + 1)} of ${String(images.length)}`} wide {close}>
-    <div class="viewer">
-      <div class="stage">
+    <div class="flex min-h-0 flex-col gap-2.5">
+      <div
+        class="stage relative grid min-h-[180px] place-items-center overflow-hidden rounded-md border border-line bg-ink"
+      >
         <img
+          class="block h-auto max-h-[62dvh] w-auto max-w-full object-contain"
           src={authenticatedResourceUrl(image.urls.slim ?? image.urls.original)}
           alt={fileLabel(image, index)}
           width={image.slim?.width ?? image.width}
@@ -62,7 +65,7 @@
         />
         {#if images.length > 1}
           <button
-            class="nav previous"
+            class="nav previous absolute top-1/2 left-2.5 h-[52px] w-11 -translate-y-1/2 border-[rgb(233_226_212/0.32)] bg-[rgb(14_16_15/0.75)] p-0 font-sans text-[34px] leading-none text-cream hover:bg-[rgb(14_16_15/0.75)]"
             type="button"
             aria-label="previous image"
             onclick={() => {
@@ -72,7 +75,7 @@
             <span aria-hidden="true">‹</span>
           </button>
           <button
-            class="nav next"
+            class="nav next absolute top-1/2 right-2.5 h-[52px] w-11 -translate-y-1/2 border-[rgb(233_226_212/0.32)] bg-[rgb(14_16_15/0.75)] p-0 font-sans text-[34px] leading-none text-cream hover:bg-[rgb(14_16_15/0.75)]"
             type="button"
             aria-label="next image"
             onclick={() => {
@@ -83,117 +86,29 @@
           </button>
         {/if}
       </div>
-      <div class="details">
+      <div class="details flex items-start justify-between gap-4">
         <div>
-          {#if image.title}<h3>{image.title}</h3>{/if}
-          {#if image.description}<p>{image.description}</p>{/if}
-          <span class="dimensions"
+          {#if image.title}<h3 class="text-[13px] font-semibold text-cream">{image.title}</h3>{/if}
+          {#if image.description}<p class="mt-[3px] whitespace-pre-wrap text-cream-dim">
+              {image.description}
+            </p>{/if}
+          <span class="text-[10px] text-cream-faint"
             >{image.width}×{image.height} · {(image.bytes / 1_000_000).toFixed(2)} MB</span
           >
         </div>
-        <button class="download" type="button" disabled={downloading} onclick={downloadOriginal}
-          >{downloading ? "downloading…" : "download original ↓"}</button
+        <button
+          class="download min-h-11 flex-none border-0 bg-transparent p-0 text-[11px] leading-[44px] text-copper-hot hover:bg-transparent hover:underline disabled:cursor-wait disabled:opacity-60"
+          type="button"
+          disabled={downloading}
+          onclick={downloadOriginal}>{downloading ? "downloading…" : "download original ↓"}</button
         >
       </div>
-      <div class="download-error" aria-live="polite">{downloadError}</div>
+      <div class="min-h-3.5 text-right text-[10px] text-red" aria-live="polite">{downloadError}</div>
       {#if images.length > 1}
-        <div class="position" aria-live="polite">{index + 1} / {images.length}</div>
+        <div class="position text-center text-[10px] text-cream-faint" aria-live="polite">
+          {index + 1} / {images.length}
+        </div>
       {/if}
     </div>
   </Modal>
 {/if}
-
-<style>
-  .viewer {
-    display: flex;
-    min-height: 0;
-    flex-direction: column;
-    gap: 10px;
-  }
-  .stage {
-    position: relative;
-    display: grid;
-    min-height: 180px;
-    place-items: center;
-    overflow: hidden;
-    border: 1px solid var(--color-line);
-    border-radius: 6px;
-    background: var(--color-ink);
-  }
-  img {
-    display: block;
-    width: auto;
-    max-width: 100%;
-    height: auto;
-    max-height: 62dvh;
-    object-fit: contain;
-  }
-  .nav {
-    position: absolute;
-    top: 50%;
-    width: 44px;
-    height: 52px;
-    padding: 0;
-    transform: translateY(-50%);
-    border-color: rgb(233 226 212 / 0.32);
-    background: rgb(14 16 15 / 0.75);
-    color: var(--color-cream);
-    font-family: sans-serif;
-    font-size: 34px;
-    line-height: 1;
-  }
-  .previous {
-    left: 10px;
-  }
-  .next {
-    right: 10px;
-  }
-  .details {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 16px;
-  }
-  h3 {
-    color: var(--color-cream);
-    font-size: 13px;
-    font-weight: 600;
-  }
-  p {
-    margin-top: 3px;
-    color: var(--color-cream-dim);
-    white-space: pre-wrap;
-  }
-  .dimensions,
-  .position {
-    color: var(--color-cream-faint);
-    font-size: 10px;
-  }
-  .download {
-    flex: none;
-    min-height: 44px;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: var(--color-copper-hot);
-    font-size: 11px;
-    line-height: 44px;
-  }
-  .download:hover {
-    background: transparent;
-    text-decoration: underline;
-  }
-  .download:disabled {
-    cursor: wait;
-    opacity: 0.6;
-  }
-  .download-error {
-    min-height: 14px;
-    color: var(--color-red);
-    font-size: 10px;
-    text-align: right;
-  }
-  .position {
-    text-align: center;
-  }
-</style>

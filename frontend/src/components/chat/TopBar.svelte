@@ -22,11 +22,11 @@
   const liveJacks = $derived(latestJacks(room.attachments).filter(isLive).length);
 </script>
 
-<div id="topbar">
+<div id="topbar" class="flex items-baseline gap-[14px] border-b border-line px-7 py-4">
   <ColumnToggle side="rail" />
 
   <button
-    class="drawer-toggle lines"
+    class="drawer-toggle lines hidden"
     type="button"
     title="lines"
     aria-label="show lines"
@@ -36,10 +36,18 @@
     }}>☰</button
   >
 
-  <span id="convname">{room.conversation?.name ?? "—"}</span>
+  <span id="convname" class="flex-none font-serif text-[24px] font-normal text-cream italic"
+    >{room.conversation?.name ?? "—"}</span
+  >
   {#if room.conversation}
+    <!-- A button, not a span: it does something when clicked, so it should be
+           reachable by keyboard and announced as an action. Styled back down to
+           look like the line of text it is. -->
     <button
       id="convmeta"
+      class="min-w-0 flex-1 cursor-pointer truncate border-0 border-b border-dashed border-transparent bg-transparent p-0 text-left text-[11.5px] italic transition-colors hover:border-b-copper/40 hover:bg-transparent {topic
+        ? 'text-cream-dim hover:text-copper-hot'
+        : 'text-cream-faint'}"
       class:unset={!topic}
       type="button"
       title={topic
@@ -51,14 +59,16 @@
 
   {#if room.conversation}
     <button
-      class="task-toggle"
+      class="task-toggle inline-flex h-[34px] flex-none items-center gap-1.5 px-2.5"
       type="button"
       title="shared line tasks"
       aria-label="open shared line tasks"
       onclick={() => dialogs.open(TaskDrawer)}
     >
-      <svg aria-hidden="true" viewBox="0 0 24 24"
-        ><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" /></svg
+      <svg
+        class="size-[15px] fill-none stroke-current stroke-2 [stroke-linecap:round]"
+        aria-hidden="true"
+        viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" /></svg
       >
       <span>tasks</span>
     </button>
@@ -68,7 +78,7 @@
   <ColumnToggle side="board" count={liveJacks} />
 
   <button
-    class="drawer-toggle jacks"
+    class="drawer-toggle jacks hidden"
     type="button"
     title="processes on this line"
     aria-label="show processes on this line"
@@ -83,73 +93,10 @@
 </div>
 
 <style>
-  #topbar {
-    padding: 16px 28px;
-    border-bottom: 1px solid var(--color-line);
-    display: flex;
-    align-items: baseline;
-    gap: 14px;
-  }
-  #convname {
-    font-family: var(--font-serif);
-    font-size: 24px;
-    font-weight: 400;
-    font-style: italic;
-    color: var(--color-cream);
-    flex: none;
-  }
-  /* A button, not a span: it does something when clicked, so it should be
-     reachable by keyboard and announced as an action. Styled back down to look
-     like the line of text it is. */
-  #convmeta {
-    background: none;
-    border: 0;
-    padding: 0;
-    font: inherit;
-    text-align: left;
-    color: var(--color-cream-dim);
-    font-size: 11.5px;
-    font-style: italic;
-    min-width: 0;
-    flex: 1;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    cursor: pointer;
-    border-bottom: 1px dashed transparent;
-    transition: color 0.15s;
-  }
-  #convmeta:hover {
-    color: var(--color-copper-hot);
-    background: none;
-    border-bottom-color: rgb(217 142 74 / 0.4);
-  }
-  #convmeta.unset {
-    color: var(--color-cream-faint);
-  }
-
-  /* These handles stay in the line when a desktop column leaves the grid, so
-     reopening it never depends on finding a control inside the hidden panel. */
-  .drawer-toggle {
-    display: none;
-  }
-  .task-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    flex: none;
-    height: 34px;
-    padding: 0 10px;
-  }
-  .task-toggle svg {
-    width: 15px;
-    height: 15px;
-    fill: none;
-    stroke: currentColor;
-    stroke-linecap: round;
-    stroke-width: 2;
-  }
-
+  /* Tailwind's `max-*` variants are exclusive of the boundary, so the
+       documented `(max-width: 899px)` narrow breakpoint stays hand-written —
+       at exactly 899px it must keep agreeing with `NARROW_MAX_WIDTH`. The
+       tablet band lives here with it so the breakpoints read as one block. */
   @media (min-width: 900px) and (max-width: 1199px) {
     #topbar {
       padding: 12px;
@@ -195,8 +142,8 @@
       text-overflow: ellipsis;
     }
     /* The topic is a whole line of prose competing for a width that no longer
-       exists. It stays editable from the line's own row in the drawer; it does
-       not get to push the controls off screen. */
+         exists. It stays editable from the line's own row in the drawer; it does
+         not get to push the controls off screen. */
     #convmeta {
       display: none;
     }

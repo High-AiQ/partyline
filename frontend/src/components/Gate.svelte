@@ -62,7 +62,7 @@
       <div class="mode-tabs mb-[22px] grid grid-cols-2 gap-2" aria-label="authentication mode">
         <button
           type="button"
-          class="min-h-11"
+          class="min-h-11 {mode === 'login' ? 'border-copper bg-[rgb(217_142_74/0.08)] text-copper-hot' : ''}"
           class:active={mode === "login"}
           aria-pressed={mode === "login"}
           onclick={() => {
@@ -71,7 +71,9 @@
         >
         <button
           type="button"
-          class="min-h-11"
+          class="min-h-11 {mode === 'register'
+            ? 'border-copper bg-[rgb(217_142_74/0.08)] text-copper-hot'
+            : ''}"
           class:active={mode === "register"}
           aria-pressed={mode === "register"}
           onclick={() => {
@@ -132,8 +134,9 @@
         {/if}
 
         <div
-          class="form-status min-h-[38px] pt-3 text-[11px] leading-[1.45] text-cream-faint"
-          class:error={Boolean(error)}
+          class="form-status min-h-[38px] pt-3 text-[11px] leading-[1.45] {error
+            ? 'text-red'
+            : 'text-cream-faint'}"
           aria-live="polite"
         >
           {error}
@@ -151,9 +154,8 @@
 </div>
 
 <style>
-  /* `arrive` at the gate's 0.28s tempo, a class-based active tab, and the
-     error status share a stateful-class shape Tailwind has no variant for.
-     The `(max-width: 480px)` tweak stays hand-written because Tailwind's
+  /* `arrive` runs at the gate's 0.28s tempo. The `(max-width: 480px)` tweak
+     stays hand-written because Tailwind's
      `max-*` variants are exclusive of the boundary, and the reduced-motion
      override must sit beside the animation it disables (a utility layer
      cannot beat this scoped rule). The background stays as the original
@@ -164,14 +166,6 @@
   }
   .card {
     animation: arrive 0.28s ease both;
-  }
-  .mode-tabs button.active {
-    border-color: var(--color-copper);
-    color: var(--color-copper-hot);
-    background: rgb(217 142 74 / 0.08);
-  }
-  .form-status.error {
-    color: var(--color-red);
   }
   @media (max-width: 480px) {
     #gate {

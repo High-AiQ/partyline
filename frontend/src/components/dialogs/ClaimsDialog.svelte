@@ -37,23 +37,25 @@
 <Modal title="claims · {conversation.name}" {close}>
   <p class="dialog-note">write ownership for this line · read-only here</p>
   {#if loading}
-    <p class="empty">loading claims…</p>
+    <p class="py-[22px] text-cream-faint text-center italic">loading claims…</p>
   {:else if error}
-    <p class="error" role="alert">{error}</p>
+    <p class="text-red" role="alert">{error}</p>
   {:else if !claims.length}
-    <p class="empty">no paths claimed</p>
+    <p class="py-[22px] text-cream-faint text-center italic">no paths claimed</p>
   {:else}
-    <div class="claims">
+    <div class="flex flex-col gap-2">
       {#each claims as claim (claim.id)}
-        <article>
-          <header>
-            <strong>@{claim.owner}</strong>
-            <span title={new Date(claim.expires_at * 1000).toLocaleString()}>{expires(claim.expires_at)}</span
+        <article class="px-3 py-2.5 border border-line rounded-[5px] bg-ink-3">
+          <header class="flex justify-between gap-3 mb-[7px]">
+            <strong class="text-copper-hot font-semibold">@{claim.owner}</strong>
+            <span
+              class="text-cream-faint text-[10px]"
+              title={new Date(claim.expires_at * 1000).toLocaleString()}>{expires(claim.expires_at)}</span
             >
           </header>
-          <ul>
+          <ul class="flex flex-col gap-1 list-none">
             {#each claim.paths as path (path)}
-              <li><code>{path}</code></li>
+              <li><code class="text-cream-dim text-[11px] wrap-anywhere">{path}</code></li>
             {/each}
           </ul>
         </article>
@@ -61,51 +63,3 @@
     </div>
   {/if}
 </Modal>
-
-<style>
-  .claims {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  article {
-    padding: 10px 12px;
-    border: 1px solid var(--color-line);
-    border-radius: 5px;
-    background: var(--color-ink-3);
-  }
-  header {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 7px;
-  }
-  strong {
-    color: var(--color-copper-hot);
-    font-weight: 600;
-  }
-  header span {
-    color: var(--color-cream-faint);
-    font-size: 10px;
-  }
-  ul {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    list-style: none;
-  }
-  code {
-    color: var(--color-cream-dim);
-    font-size: 11px;
-    overflow-wrap: anywhere;
-  }
-  .empty {
-    padding: 22px 0;
-    color: var(--color-cream-faint);
-    text-align: center;
-    font-style: italic;
-  }
-  .error {
-    color: var(--color-red);
-  }
-</style>

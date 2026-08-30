@@ -45,7 +45,10 @@
     {@const open = menu?.conversation.id === conversation.id}
     <div class="conv-row group relative flex items-stretch" class:menu-open={open}>
       <button
-        class="conv relative flex min-w-0 w-full flex-1 cursor-pointer items-center gap-2 border-0 bg-transparent p-[9px] pl-5 pr-[54px] text-left text-[13.5px] text-cream-dim [font-family:inherit] group-hover:bg-ink-3 group-hover:text-cream group-focus-within:bg-ink-3 group-focus-within:text-cream group-[.menu-open]:bg-ink-3 group-[.menu-open]:text-cream"
+        class="conv relative flex min-w-0 w-full flex-1 cursor-pointer items-center gap-2 border-0 p-[9px] pl-5 pr-[54px] text-left text-[13.5px] [font-family:inherit] {room
+          .conversation?.id === conversation.id
+          ? 'bg-ink-3 text-copper-hot'
+          : 'bg-transparent text-cream-dim group-hover:bg-ink-3 group-hover:text-cream group-focus-within:bg-ink-3 group-focus-within:text-cream group-[.menu-open]:bg-ink-3 group-[.menu-open]:text-cream'}"
         class:active={room.conversation?.id === conversation.id}
         title={conversation.topic || undefined}
         onclick={() => room.open(conversation)}
@@ -91,13 +94,7 @@
 {/if}
 
 <style>
-  /* The active-line copper marker is a pseudo-element on a state class, and
-     `.active` itself would collide with Tailwind's `:active` pseudo-class —
-     neither has a clean utility spelling. */
-  .conv.active {
-    color: var(--color-copper-hot);
-    background: var(--color-ink-3);
-  }
+  /* The active-line copper marker is a pseudo-element on a state class. */
   .conv.active::before {
     content: "";
     position: absolute;

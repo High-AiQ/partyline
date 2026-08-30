@@ -33,8 +33,9 @@
          rather than covering it, and `vh` keeps measuring the taller pre-keyboard
          one — which crops exactly the dialogs that ask you to type something. -->
   <div
-    class="modal flex max-h-[82dvh] w-[min(560px,92vw)] flex-col rounded-lg border border-line bg-ink-2 shadow-[0_24px_60px_rgb(0_0_0/0.55)]"
-    class:wide
+    class="modal flex max-h-[82dvh] {wide
+      ? 'w-[min(980px,96vw)]'
+      : 'w-[min(560px,92vw)]'} flex-col rounded-lg border border-line bg-ink-2 shadow-[0_24px_60px_rgb(0_0_0/0.55)]"
     role="dialog"
     aria-modal="true"
     aria-label={title}
@@ -62,8 +63,5 @@
        shade faster, so the animation stays hand-written. */
   .modal {
     animation: arrive 0.22s ease both;
-  }
-  .modal.wide {
-    width: min(980px, 96vw);
   }
 </style>

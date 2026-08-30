@@ -76,23 +76,30 @@
   });
 </script>
 
-<div id="feed" bind:this={feed} {onscroll}>
+<div id="feed" class="min-h-0 flex-1 overflow-y-auto px-7 pt-[22px] pb-2.5" bind:this={feed} {onscroll}>
   {#if !room.conversation}
-    <div class="empty">
-      <div class="art">no line selected</div>
+    <div class="empty mt-[12vh] text-center text-[12.5px] text-cream-faint">
+      <div class="art mb-2.5 font-serif text-[26px] italic text-cream-dim">no line selected</div>
       pick a conversation, or open a new one
     </div>
   {:else if !room.messages.length}
-    <div class="empty">
-      <div class="art">the line is open</div>
+    <div class="empty mt-[12vh] text-center text-[12.5px] text-cream-faint">
+      <div class="art mb-2.5 font-serif text-[26px] italic text-cream-dim">the line is open</div>
       patch in a process on the right, or just start talking
     </div>
   {:else}
     {#if room.history.loadingOlder}
-      <div class="history-status" aria-live="polite">loading earlier messages…</div>
+      <div
+        class="history-status mx-auto mb-[14px] block w-fit font-mono text-[11px] text-cream-faint"
+        aria-live="polite"
+      >
+        loading earlier messages…
+      </div>
     {:else if room.history.olderError}
-      <button class="history-status retry" type="button" onclick={() => void loadOlder()}
-        >earlier messages could not load · retry</button
+      <button
+        class="history-status retry mx-auto mb-[14px] block w-fit cursor-pointer border-0 border-b border-copper bg-transparent px-0.5 py-[5px] font-mono text-[11px] text-cream-faint"
+        type="button"
+        onclick={() => void loadOlder()}>earlier messages could not load · retry</button
       >
     {/if}
     {#each room.messages as message (message.id)}
@@ -102,44 +109,12 @@
 </div>
 
 <style>
-  #feed {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    padding: 22px 28px 10px;
-  }
-  .empty {
-    color: var(--color-cream-faint);
-    text-align: center;
-    margin-top: 12vh;
-    font-size: 12.5px;
-  }
-  .history-status {
-    display: block;
-    width: fit-content;
-    margin: 0 auto 14px;
-    color: var(--color-cream-faint);
-    font: 11px var(--font-mono);
-  }
-  .retry {
-    border: 0;
-    border-bottom: 1px solid var(--color-copper);
-    background: transparent;
-    padding: 5px 2px;
-    cursor: pointer;
-  }
+  /* Tailwind's `max-*` variants are exclusive of the boundary, so the
+       documented `(max-width: 899px)` narrow breakpoint stays hand-written —
+       at exactly 899px it must keep agreeing with `NARROW_MAX_WIDTH`. */
   @media (max-width: 899px) {
-    /* Desktop gutters are a luxury at 390px; the message column needs them
-       back more than the layout needs the breathing room. */
     #feed {
       padding: 16px 14px 8px;
     }
-  }
-  .art {
-    font-family: var(--font-serif);
-    font-style: italic;
-    font-size: 26px;
-    color: var(--color-cream-dim);
-    margin-bottom: 10px;
   }
 </style>
