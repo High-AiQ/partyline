@@ -14,8 +14,10 @@
 {#if room.notice}
   <div
     id="wireNotice"
-    class="fixed left-1/2 top-[18px] z-70 max-w-[min(560px,90vw)] rounded-[5px] border border-line bg-ink-2 px-[14px] py-2 text-[11px] text-cream-dim shadow-[0_12px_30px_rgb(0_0_0/0.45)]"
-    class:error={room.notice.kind === "error"}
+    class="fixed left-1/2 top-[18px] z-70 max-w-[min(560px,90vw)] rounded-[5px] border bg-ink-2 px-[14px] py-2 text-[11px] shadow-[0_12px_30px_rgb(0_0_0/0.45)] {room
+      .notice.kind === 'error'
+      ? 'border-red/55 text-red'
+      : 'border-line text-cream-dim'}"
     role="status"
     aria-live="polite"
   >
@@ -26,12 +28,15 @@
 {#if wire.outage}
   <div
     id="wireDown"
-    class="fixed left-1/2 top-[18px] z-71 flex max-w-[min(560px,90vw)] items-center gap-[9px] rounded-[5px] border border-red/55 bg-panel px-[14px] py-2 text-[11px] tracking-[0.04em] text-red shadow-[0_12px_30px_rgb(0_0_0/0.45)]"
-    class:stopped={wire.outage.stopped}
+    class="fixed left-1/2 top-[18px] z-71 flex max-w-[min(560px,90vw)] items-center gap-[9px] rounded-[5px] border bg-panel px-[14px] py-2 text-[11px] tracking-[0.04em] shadow-[0_12px_30px_rgb(0_0_0/0.45)] {wire
+      .outage.stopped
+      ? 'border-panel-line text-cream-dim'
+      : 'border-red/55 text-red'}"
     role="status"
     aria-live="polite"
   >
-    <span class="pulse size-[6px] rounded-full bg-red"></span><span>{wire.outage.message}</span>
+    <span class="pulse size-[6px] rounded-full {wire.outage.stopped ? 'stopped bg-cream-faint' : 'bg-red'}"
+    ></span><span>{wire.outage.message}</span>
   </div>
 {/if}
 
@@ -50,10 +55,6 @@
     transform: translateX(-50%);
     animation: arrive 0.2s ease both;
   }
-  #wireNotice.error {
-    color: var(--color-red);
-    border-color: rgb(201 111 90 / 0.55);
-  }
   .pulse {
     animation: wire-pulse 1.4s ease-in-out infinite;
   }
@@ -69,12 +70,7 @@
 
   /* A deliberate stop is a known state, not an alarm: keep the banner while
        retrying, but drop the warning colour and pulse until the server returns. */
-  #wireDown.stopped {
-    color: var(--color-cream-dim);
-    border-color: var(--color-panel-line);
-  }
-  #wireDown.stopped .pulse {
-    background: var(--color-cream-faint);
+  .pulse.stopped {
     animation: none;
   }
 </style>

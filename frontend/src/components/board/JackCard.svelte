@@ -61,11 +61,22 @@
   }
 </script>
 
-<div class="jack" class:dead={!live} class:attention={needsYou}>
-  <div class="row">
-    <span class="led {attachment.status}"></span>
+<div
+  class="jack relative mb-2 rounded-[5px] border bg-ink-3 px-[11px] py-[9px] {needsYou
+    ? 'border-copper-hot/70'
+    : 'border-line'}"
+  class:dead={!live}
+  class:opacity-75={!live}
+  class:attention={needsYou}
+>
+  <div class="row flex items-center gap-2">
+    <span
+      class="led {attachment.status}{needsYou
+        ? ' bg-copper-hot shadow-[0_0_8px_var(--color-copper-hot)]'
+        : ''}"
+    ></span>
     <button
-      class="name"
+      class="name cursor-pointer border-0 bg-transparent p-0 text-inherit [font-size:inherit] font-semibold hover:bg-transparent hover:text-copper-hot!"
       type="button"
       style:color="hsl({hue(attachment.name.toLowerCase())} 55% 68%)"
       title="insert @{attachment.name}"
@@ -73,7 +84,10 @@
         onmention(attachment.name);
       }}>{attachment.name}</button
     >
-    <span class="tag">{attachment.adapter}</span>
+    <span
+      class="tag rounded-[3px] border border-copper/35 px-[5px] text-[9.5px] tracking-[0.05em] text-copper"
+      >{attachment.adapter}</span
+    >
     {#if entry}
       <WorkingBadge {entry} />
     {/if}
@@ -85,16 +99,22 @@
       >
     {/if}
     {#if live}
-      <button class="x" type="button" title="detach" aria-label="detach {attachment.name}" onclick={detach}
-        >✕</button
+      <button
+        class="x absolute right-2 top-1.5 cursor-pointer border-0 bg-transparent p-0.5 text-[12px] text-cream-faint hover:bg-transparent hover:text-red"
+        type="button"
+        title="detach"
+        aria-label="detach {attachment.name}"
+        onclick={detach}>✕</button
       >
     {/if}
   </div>
 
   {#if attachment.cwd_git}
     <div
-      class="git-state"
+      class="git-state mt-1 text-[9.5px] tracking-[0.03em]"
       class:dirty={attachment.cwd_git.dirty}
+      class:text-green={!attachment.cwd_git.dirty}
+      class:text-copper-hot={attachment.cwd_git.dirty}
       title="{attachment.cwd} · git {attachment.cwd_git.sha} · {attachment.cwd_git.dirty
         ? 'dirty working tree'
         : 'clean working tree'}"
@@ -102,16 +122,25 @@
       git {attachment.cwd_git.sha} · {attachment.cwd_git.dirty ? "dirty" : "clean"}
     </div>
   {/if}
-  <div class="cmd" title={attachment.cwd}>{attachment.command.join(" ")} · {attachment.status}</div>
+  <div class="cmd mt-0.5 truncate text-[10.5px] text-cream-faint" title={attachment.cwd}>
+    {attachment.command.join(" ")} · {attachment.status}
+  </div>
 
   {#if live}
-    <button class="resume peek-btn" type="button" title="live view of this agent's terminal" onclick={peek}>
+    <button
+      class="resume peek-btn mt-1.5 px-[9px] py-0.5 text-[10px] {needsYou
+        ? 'text-ink bg-copper border-copper-hot origin-[50%_80%]'
+        : 'text-green border-green/40 hover:border-green hover:bg-green hover:text-ink'}"
+      type="button"
+      title="live view of this agent's terminal"
+      onclick={peek}
+    >
       {needsYou ? "⏸ answer" : "⌗ peek"}
     </button>
   {/if}
   {#if resumable}
     <button
-      class="resume"
+      class="resume mt-1.5 px-[9px] py-0.5 text-[10px] text-green border-green/40 hover:border-green hover:bg-green hover:text-ink"
       type="button"
       title="respawn with full session context"
       disabled={resuming}
@@ -122,7 +151,7 @@
   {/if}
   {#if !live}
     <button
-      class="resume edit-btn"
+      class="resume edit-btn mt-1.5 ml-[5px] px-[9px] py-0.5 text-[10px] text-copper border-copper/40 hover:border-copper hover:bg-copper hover:text-ink"
       type="button"
       title="change the command used on next resume"
       onclick={edit}
@@ -133,103 +162,8 @@
 </div>
 
 <style>
-  .jack {
-    border: 1px solid var(--color-line);
-    border-radius: 5px;
-    background: var(--color-ink-3);
-    padding: 9px 11px;
-    margin-bottom: 8px;
-    position: relative;
-  }
-  .jack.dead {
-    opacity: 0.75;
-  }
-  .row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .name {
-    font-weight: 600;
-    cursor: pointer;
-    background: none;
-    border: 0;
-    padding: 0;
-    font-size: inherit;
-  }
-  .name:hover {
-    color: var(--color-copper-hot) !important;
-    background: none;
-  }
-
-  .tag {
-    font-size: 9.5px;
-    color: var(--color-copper);
-    border: 1px solid rgb(217 142 74 / 0.35);
-    border-radius: 3px;
-    padding: 0 5px;
-    letter-spacing: 0.05em;
-  }
-  .cmd {
-    color: var(--color-cream-faint);
-    font-size: 10.5px;
-    margin-top: 2px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .git-state {
-    color: var(--color-green);
-    font-size: 9.5px;
-    letter-spacing: 0.03em;
-    margin-top: 4px;
-  }
-  .git-state.dirty {
-    color: var(--color-copper-hot);
-  }
-  .x {
-    position: absolute;
-    top: 6px;
-    right: 8px;
-    background: none;
-    border: 0;
-    color: var(--color-cream-faint);
-    cursor: pointer;
-    font: inherit;
-    font-size: 12px;
-    padding: 2px;
-  }
-  .x:hover {
-    color: var(--color-red);
-    background: none;
-  }
-
-  .resume {
-    margin-top: 6px;
-    font-size: 10px;
-    padding: 2px 9px;
-    color: var(--color-green);
-    border-color: rgb(127 176 105 / 0.4);
-  }
-  .resume:hover {
-    background: var(--color-green);
-    border-color: var(--color-green);
-    color: var(--color-ink);
-  }
-  .edit-btn {
-    color: var(--color-copper);
-    border-color: rgb(217 142 74 / 0.4);
-    margin-left: 5px;
-  }
-  .edit-btn:hover {
-    background: var(--color-copper);
-    border-color: var(--color-copper);
-  }
-
   /* a process is stuck on a dialog: the whole jack rings until someone peeks */
   .jack.attention {
-    border-color: rgb(242 176 107 / 0.7);
     animation: ring-glow 1.1s ease-in-out infinite;
   }
   @keyframes ring-glow {
@@ -244,16 +178,10 @@
     }
   }
   .jack.attention .led {
-    background: var(--color-copper-hot);
-    box-shadow: 0 0 8px var(--color-copper-hot);
     animation: pulse-led 0.55s infinite;
   }
   .jack.attention .peek-btn {
-    color: var(--color-ink);
-    background: var(--color-copper);
-    border-color: var(--color-copper-hot);
     animation: jiggle 1.6s ease-in-out infinite;
-    transform-origin: 50% 80%;
   }
   /* a burst of rattle, then a beat of rest — like a phone ringing */
   @keyframes jiggle {

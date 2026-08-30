@@ -15,25 +15,35 @@
   const view = $derived(taskView(task));
 </script>
 
-<div class="task-row" class:done>
+<div
+  class="task-row flex items-start gap-[9px] rounded-[5px] border border-line bg-ink-3 px-[8px] {done
+    ? 'mt-[6px] py-[4px] opacity-[0.62]'
+    : 'py-[6px]'}"
+>
   <button
-    class="check"
+    class="grid h-[26px] w-[26px] flex-none place-items-center p-0 text-green"
     type="button"
     title={done ? "reopen" : "mark done"}
     aria-label="{done ? 'reopen' : 'mark done'} task: {view.summary}"
     onclick={() => onupdate(task, { status: done ? "open" : "done" })}
   >
-    {#if done}✓{:else}<span></span>{/if}
+    {#if done}✓{:else}<span class="h-[11px] w-[11px] rounded-[2px] border border-current"></span>{/if}
   </button>
-  <div class="task-main">
-    <p>{view.summary}</p>
+  <div class="task-main min-w-0 flex-1">
+    <p class="text-[12px] wrap-anywhere text-cream {done ? 'line-through' : ''}">{view.summary}</p>
     {#if view.doneWhen && !done}
-      <p class="done-when" title={view.doneWhen}>⤷ {view.doneWhen}</p>
+      <p
+        class="done-when mt-[2px] text-[10.5px] wrap-anywhere line-clamp-2 text-cream-faint"
+        title={view.doneWhen}
+      >
+        ⤷ {view.doneWhen}
+      </p>
     {/if}
     {#if !done}
-      <label>
-        <span>owner</span>
+      <label class="mt-[5px] flex items-center gap-[7px]">
+        <span class="text-[9px] uppercase tracking-[0.12em] text-cream-faint">owner</span>
         <select
+          class="px-[6px] py-[3px] text-[10px]"
           value={task.owner ?? ""}
           aria-label="owner for {view.summary}"
           onchange={(event) => onupdate(task, { owner: event.currentTarget.value || null })}
@@ -47,91 +57,10 @@
     {/if}
   </div>
   <button
-    class="remove"
+    class="h-[26px] w-[26px] flex-none border-0 bg-transparent p-0 hover:bg-transparent hover:text-red"
     type="button"
     title="delete task"
     aria-label="delete task: {view.summary}"
     onclick={() => onremove(task)}>✕</button
   >
 </div>
-
-<style>
-  .task-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 9px;
-    padding: 6px 8px;
-    border: 1px solid var(--color-line);
-    border-radius: 5px;
-    background: var(--color-ink-3);
-  }
-  .task-main {
-    flex: 1;
-    min-width: 0;
-  }
-  p {
-    color: var(--color-cream);
-    overflow-wrap: anywhere;
-    font-size: 12px;
-  }
-  .done-when {
-    color: var(--color-cream-faint);
-    font-size: 10.5px;
-    margin-top: 2px;
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    overflow: hidden;
-  }
-  label {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    margin-top: 5px;
-  }
-  label span {
-    color: var(--color-cream-faint);
-    font-size: 9px;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-  }
-  select {
-    padding: 3px 6px;
-    font-size: 10px;
-  }
-  .check {
-    width: 26px;
-    height: 26px;
-    flex: none;
-    padding: 0;
-    display: grid;
-    place-items: center;
-    color: var(--color-green);
-  }
-  .check span {
-    width: 11px;
-    height: 11px;
-    border: 1px solid currentColor;
-    border-radius: 2px;
-  }
-  .remove {
-    width: 26px;
-    height: 26px;
-    padding: 0;
-    flex: none;
-    border: 0;
-    background: none;
-  }
-  .remove:hover {
-    color: var(--color-red);
-    background: none;
-  }
-  .done {
-    opacity: 0.62;
-    margin-top: 6px;
-    padding: 4px 8px;
-  }
-  .done p {
-    text-decoration: line-through;
-  }
-</style>

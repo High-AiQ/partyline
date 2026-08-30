@@ -178,9 +178,12 @@
     />
   {/key}
 
-  <div class="box" aria-busy={uploading}>
+  <div
+    class="box flex items-end gap-3 rounded-md border border-line bg-ink-2 px-3 py-2.5 transition-colors focus-within:border-copper"
+    aria-busy={uploading}
+  >
     <button
-      class="attach"
+      class="attach grid size-11 flex-none place-items-center p-0 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-line disabled:hover:bg-ink-3 disabled:hover:text-cream-dim"
       type="button"
       aria-label="attach files"
       title="attach up to 6 files"
@@ -189,7 +192,11 @@
         openPicker++;
       }}
     >
-      <svg viewBox="0 0 24 24" aria-hidden="true">
+      <svg
+        class="size-[18px] fill-none stroke-current stroke-[1.8] [stroke-linecap:round] [stroke-linejoin:round]"
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+      >
         <path
           d="M21.4 11.6 12 21a6 6 0 0 1-8.5-8.5l10-10a4 4 0 1 1 5.7 5.7l-10 10a2 2 0 0 1-2.9-2.8l9.3-9.3"
         />
@@ -197,6 +204,7 @@
     </button>
     <textarea
       id="input"
+      class="max-h-[180px] min-h-[22px] flex-1 resize-none border-0 bg-transparent text-cream outline-0 [font-family:inherit]"
       bind:this={box}
       bind:value={draft.text}
       rows="1"
@@ -211,83 +219,26 @@
       onblur={() => setTimeout(closeToken, 150)}></textarea>
     <button
       id="send"
-      class="primary"
+      class="primary min-h-11 self-end disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-line disabled:hover:bg-ink-3 disabled:hover:text-cream-dim"
       type="button"
       disabled={uploading || (!draft.text.trim() && !pendingFiles.files.length)}
       onclick={() => void send()}>{uploading ? "uploading…" : "send"}</button
     >
   </div>
-  <div class="hint">
+  <div class="hint mt-1.5 text-[10px] text-cream-faint">
     enter to send · shift+enter or ctrl+j for a new line · agents only wake when @mentioned · @all rings every
     running agent
   </div>
 </ComposerDropZone>
 
 <style>
-  .box {
-    display: flex;
-    align-items: flex-end;
-    gap: 12px;
-    background: var(--color-ink-2);
-    border: 1px solid var(--color-line);
-    border-radius: 6px;
-    padding: 10px 12px;
-    transition: border-color 0.15s;
-  }
-  .attach {
-    display: grid;
-    width: 44px;
-    height: 44px;
-    flex: none;
-    place-items: center;
-    padding: 0;
-  }
-  .attach svg {
-    width: 18px;
-    fill: none;
-    stroke: currentColor;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    stroke-width: 1.8;
-  }
-  button:disabled {
-    cursor: not-allowed;
-    opacity: 0.45;
-  }
-  button:disabled:hover {
-    border-color: var(--color-line);
-    background: var(--color-ink-3);
-    color: var(--color-cream-dim);
-  }
-  .box:focus-within {
-    border-color: var(--color-copper);
-  }
-  #input {
-    flex: 1;
-    background: none;
-    border: 0;
-    outline: 0;
-    resize: none;
-    color: var(--color-cream);
-    font: inherit;
-    max-height: 180px;
-    min-height: 22px;
-  }
-  .hint {
-    color: var(--color-cream-faint);
-    font-size: 10px;
-    margin-top: 6px;
-  }
-
+  /* Tailwind's `max-*` variants are exclusive of the boundary, so the
+     documented `(max-width: 899px)` narrow breakpoint stays hand-written. */
   @media (max-width: 899px) {
     /* Three lines of keyboard advice, none of which applies to a touch
        keyboard, on the screen with the least room to spare. */
     .hint {
       display: none;
     }
-  }
-  #send {
-    align-self: flex-end;
-    min-height: 44px;
   }
 </style>

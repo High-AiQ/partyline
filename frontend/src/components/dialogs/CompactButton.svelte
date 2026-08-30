@@ -8,17 +8,14 @@
   let { attachmentId }: Props = $props();
   let busy = $state(false);
   let status = $state("");
-  let failed = $state(false);
 
   async function compact(): Promise<void> {
     busy = true;
     status = "";
-    failed = false;
     try {
       const result = await api.compact(attachmentId);
       status = result.queued ? "queued for turn end" : "compact command sent";
     } catch (error) {
-      failed = true;
       status = error instanceof ApiError ? error.message : "could not compact this process";
     } finally {
       busy = false;
@@ -28,15 +25,8 @@
 
 <button type="button" onclick={compact} disabled={busy}>{busy ? "sending…" : "compact"}</button>
 {#if status}
-  <span class:error={failed} class="status" aria-live="polite">{status}</span>
+  <!-- Parity note: the pre-migration `.error` rule referenced an undefined
+       `--color-danger` token and never applied; failure text has always
+       rendered cream-faint. Fixing that is a separate change. -->
+  <span class="text-cream-faint text-[10.5px]" aria-live="polite">{status}</span>
 {/if}
-
-<style>
-  .status {
-    color: var(--color-cream-faint);
-    font-size: 10.5px;
-  }
-  .error {
-    color: var(--color-danger);
-  }
-</style>

@@ -78,19 +78,33 @@
   }
 </script>
 
-<input class="file-input" bind:this={picker} type="file" multiple onchange={chooseFiles} tabindex="-1" />
+<input
+  class="absolute h-px w-px overflow-hidden whitespace-nowrap [clip:rect(0,0,0,0)]"
+  bind:this={picker}
+  type="file"
+  multiple
+  onchange={chooseFiles}
+  tabindex="-1"
+/>
 
 {#if selectedFiles.length}
-  <div class="previews" aria-label="files ready to attach">
+  <div class="previews mb-2 flex gap-[7px] overflow-x-auto pb-0.5" aria-label="files ready to attach">
     {#each selectedFiles as selected, index (selected.preview ?? selected.file.name + String(index))}
-      <div class="preview">
+      <div
+        class="preview grid flex-none grid-cols-[38px_minmax(70px,120px)_38px] items-center overflow-hidden rounded-[5px] border border-line bg-ink-2"
+      >
         {#if selected.preview}
-          <img src={selected.preview} alt="" />
+          <img class="size-[38px] object-cover" src={selected.preview} alt="" />
         {:else}
-          <span class="file-icon" aria-hidden="true">📎</span>
+          <span class="file-icon grid size-[38px] place-items-center p-0 text-[15px]" aria-hidden="true"
+            >📎</span
+          >
         {/if}
-        <span title={selected.file.name}>{selected.file.name}</span>
+        <span class="truncate px-[7px] text-[10px] text-cream-dim" title={selected.file.name}
+          >{selected.file.name}</span
+        >
         <button
+          class="min-h-11 w-[38px] rounded-none border-0 border-l border-line bg-transparent p-0 hover:bg-transparent"
           type="button"
           aria-label={`remove ${selected.file.name}`}
           onclick={() => {
@@ -102,93 +116,19 @@
       </div>
     {/each}
   </div>
-  <div class="metadata">
-    <label>
-      title <span>(optional, shared by this batch)</span>
+  <div class="metadata mb-2 grid grid-cols-[1fr_1.5fr] gap-2">
+    <label class="flex flex-col gap-[3px] text-[10px] text-cream-dim">
+      title <span class="text-cream-faint">(optional, shared by this batch)</span>
       <input bind:value={fileTitle} maxlength="200" placeholder="what is shared?" />
     </label>
-    <label>
-      description <span>(optional)</span>
+    <label class="flex flex-col gap-[3px] text-[10px] text-cream-dim">
+      description <span class="text-cream-faint">(optional)</span>
       <input bind:value={fileDescription} maxlength="2000" placeholder="context for people and agents" />
     </label>
   </div>
 {/if}
 
 <style>
-  .file-input {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-  }
-  .previews {
-    display: flex;
-    gap: 7px;
-    overflow-x: auto;
-    margin-bottom: 8px;
-    padding-bottom: 2px;
-  }
-  .preview {
-    display: grid;
-    grid-template-columns: 38px minmax(70px, 120px) 38px;
-    align-items: center;
-    flex: none;
-    overflow: hidden;
-    border: 1px solid var(--color-line);
-    border-radius: 5px;
-    background: var(--color-ink-2);
-  }
-  .preview img {
-    width: 38px;
-    height: 38px;
-    object-fit: cover;
-  }
-  .preview span {
-    overflow: hidden;
-    padding: 0 7px;
-    color: var(--color-cream-dim);
-    font-size: 10px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .preview .file-icon {
-    display: grid;
-    width: 38px;
-    height: 38px;
-    place-items: center;
-    padding: 0;
-    font-size: 15px;
-  }
-  .preview button {
-    width: 38px;
-    min-height: 44px;
-    padding: 0;
-    border: 0;
-    border-left: 1px solid var(--color-line);
-    border-radius: 0;
-    background: transparent;
-  }
-  .metadata {
-    display: grid;
-    grid-template-columns: 1fr 1.5fr;
-    gap: 8px;
-    margin-bottom: 8px;
-  }
-  .metadata label {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    color: var(--color-cream-dim);
-    font-size: 10px;
-  }
-  .metadata label span {
-    color: var(--color-cream-faint);
-  }
-  .metadata input {
-    min-width: 0;
-  }
   @media (max-width: 520px) {
     .metadata {
       grid-template-columns: 1fr;

@@ -25,19 +25,34 @@
   const when = $derived(
     new Date(message.created_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
   );
+  // Operational notices include multiline update and reattachment reports.
+  // Their whitespace contract is the same as human-authored bodies.
+  const bodyClass = $derived(
+    isSystem
+      ? "inline-block max-w-full whitespace-pre-wrap border-y border-dashed border-line px-[18px] py-[3px] text-[11px] text-cream-faint italic [overflow-wrap:anywhere]"
+      : message.sender_type === "agent"
+        ? "whitespace-normal break-words text-cream"
+        : "whitespace-pre-wrap break-words text-cream",
+  );
+  const rootClass = $derived(isSystem ? "max-w-none text-center my-[18px]" : "max-w-[860px] mb-[14px]");
 </script>
 
-<div class="msg" class:system={isSystem}>
+<div class="msg animate-[arrive_0.28s_ease_both] {rootClass}">
   {#if !isSystem}
-    <div class="head">
-      <span class="who {message.sender_type}" style:color={senderColor(message.sender, message.sender_type)}>
+    <div class="head mb-0.5 flex items-baseline gap-2.5">
+      <span
+        class="who font-semibold text-[12.5px] {message.sender_type}"
+        style:color={senderColor(message.sender, message.sender_type)}
+      >
         {message.sender}
       </span>
-      <span class="when">{when}</span>
+      <span class="when text-[10px] text-cream-faint">{when}</span>
     </div>
   {/if}
-  <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised in renderMessage -->
-  <div class="body" class:rich={message.sender_type === "agent"}>{@html body}</div>
+  <div class="body {bodyClass}">
+    <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised in renderMessage -->
+    {@html body}
+  </div>
   {#if images.length}
     <ImageGrid {images} />
   {/if}
@@ -47,64 +62,19 @@
 </div>
 
 <style>
-  .msg {
-    margin: 0 0 14px;
-    max-width: 860px;
-    animation: arrive 0.28s ease both;
-  }
-  .head {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    margin-bottom: 2px;
-  }
-  .who {
-    font-weight: 600;
-    font-size: 12.5px;
-  }
   /* A process gets a patch-cable arrow, so the eye can sort people from
-     machines without reading a single name. */
+       machines without reading a single name. */
   .who.agent::before {
     content: "▸ ";
     color: var(--color-copper);
     font-weight: 400;
   }
-  .when {
-    color: var(--color-cream-faint);
-    font-size: 10px;
-  }
-
-  .body {
-    white-space: pre-wrap;
-    word-wrap: break-word;
-    color: var(--color-cream);
-  }
-  /* Block markdown brings its own paragraphs, so pre-wrap would double every
-     gap. Rich bodies wrap normally and let the block margins do the spacing. */
-  .body.rich {
-    white-space: normal;
-  }
-
-  .msg.system {
-    max-width: none;
-    text-align: center;
-    margin: 18px 0;
-  }
-  .msg.system .body {
-    display: inline-block;
-    color: var(--color-cream-faint);
-    font-size: 11px;
-    font-style: italic;
-    border-top: 1px dashed var(--color-line);
-    border-bottom: 1px dashed var(--color-line);
-    padding: 3px 18px;
-    max-width: 100%;
-    overflow-wrap: anywhere;
-  }
 
   /* ── rendered message bodies ──
-     These target markup produced by renderMessage, so they are :global — but
-     scoped under .body, which only this component draws. */
+       These target markup produced by renderMessage, so they are :global — but
+       scoped under .body, which only this component draws. The classes come
+       from the markdown renderer, not from markup we can put utilities on, so
+       they stay hand-written like the shared vocabulary in app.css. */
   .body :global(.mention) {
     color: var(--color-copper-hot);
     background: rgb(217 142 74 / 0.09);
@@ -136,7 +106,7 @@
   }
 
   /* Headings stay close to body size: this is a chat line, not a document, and
-     a 28px h1 in a message bubble reads as shouting. */
+       a 28px h1 in a message bubble reads as shouting. */
   .body :global(.md-h) {
     font-family: var(--font-serif);
     font-style: italic;
@@ -170,7 +140,7 @@
     margin-bottom: 0;
   }
   /* Tailwind's preflight sets `list-style: none` on ul/ol, which is right for
-     navigation and wrong for prose. A process writing a list means a list. */
+       navigation and wrong for prose. A process writing a list means a list. */
   .body :global(ul) {
     list-style: disc;
     margin: 6px 0 6px 4px;

@@ -181,22 +181,28 @@
 </script>
 
 <Modal title="peek · {attachment.name}" wide {close}>
-  <div class="viewport">
+  <div
+    class="flex min-h-[88px] max-h-[56vh] items-center justify-center overflow-auto rounded-[5px] border border-line bg-[#0a0c0b] px-[14px] py-[12px]"
+  >
     {#if stream.unavailable}
-      <pre class="screen" aria-label="terminal for {attachment.name}">(attachment is not live)</pre>
+      <pre
+        class="m-0 text-[11px] leading-[1.4] whitespace-pre text-[#c9c4b6]"
+        aria-label="terminal for {attachment.name}">(attachment is not live)</pre>
     {:else}
       <div
-        class="host"
+        class="leading-[0]"
         bind:this={host}
         aria-label="terminal for {attachment.name}"
         onfocusout={onHostFocusOut}
       ></div>
     {/if}
   </div>
-  <div class="drive-row">
+  <div class="flex flex-wrap items-baseline gap-x-3 gap-y-2">
     {#if armed}
-      <span class="controlling">controlling @{attachment.name}</span>
-      <span class="caution">this process may be mid-turn — a keystroke lands in its terminal</span>
+      <span class="text-[12px] text-copper">controlling @{attachment.name}</span>
+      <span class="text-[10.5px] text-cream-faint"
+        >this process may be mid-turn — a keystroke lands in its terminal</span
+      >
     {:else}
       <button type="button" onclick={takeControl} disabled={!ready || stream.unavailable}
         >drive this terminal</button
@@ -206,70 +212,16 @@
       <CompactButton attachmentId={attachment.id} />
     {/if}
   </div>
-  <div class="keypad">
-    <span class="lbl">send key:</span>
+  <div class="flex flex-wrap items-center gap-1.5">
+    <span class="mr-1 text-[10px] text-cream-faint">send key:</span>
     {#each KEYS as key (key)}
-      <button type="button" onclick={() => press(key)}>{key}</button>
+      <button type="button" class="px-2.5 py-1 text-[10.5px]" onclick={() => press(key)}>{key}</button>
     {/each}
     {#if keypadError}
-      <span class="caution">{keypadError}</span>
+      <span class="text-[10.5px] text-cream-faint">{keypadError}</span>
     {/if}
   </div>
   <div class="dialog-note">
     live view of the agent’s terminal — keys go through live while driving; the keypad always posts
   </div>
 </Modal>
-
-<style>
-  .viewport {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    overflow: auto;
-    min-height: 88px;
-    max-height: 56vh;
-    background: #0a0c0b;
-    border: 1px solid var(--color-line);
-    border-radius: 5px;
-    padding: 12px 14px;
-  }
-  .host {
-    line-height: 0;
-  }
-  .screen {
-    margin: 0;
-    font-size: 11px;
-    line-height: 1.4;
-    color: #c9c4b6;
-    white-space: pre;
-  }
-  .drive-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 12px;
-    align-items: baseline;
-  }
-  .controlling {
-    color: var(--color-copper);
-    font-size: 12px;
-  }
-  .caution {
-    color: var(--color-cream-faint);
-    font-size: 10.5px;
-  }
-  .keypad {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    align-items: center;
-  }
-  .keypad button {
-    font-size: 10.5px;
-    padding: 4px 10px;
-  }
-  .lbl {
-    color: var(--color-cream-faint);
-    font-size: 10px;
-    margin-right: 4px;
-  }
-</style>
