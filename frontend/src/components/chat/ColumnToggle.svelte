@@ -11,11 +11,11 @@
   let { side, count = 0 }: Props = $props();
   const collapsed = $derived(side === "rail" ? layout.railCollapsed : layout.boardCollapsed);
   const noun = $derived(side === "rail" ? "lines" : "processes on this line");
+  const toggleClass = $derived(collapsed ? "text-copper-hot border-[rgb(217_142_74/0.5)]" : "");
 </script>
 
 <button
-  class="column-toggle flex h-[34px] flex-none items-center justify-center gap-1.5 bg-ink-2 px-[9px]"
-  class:collapsed
+  class="column-toggle flex h-[34px] flex-none items-center justify-center gap-1.5 bg-ink-2 px-[9px] {toggleClass}"
   type="button"
   title={collapsed ? `show ${noun}` : `hide ${noun}`}
   aria-label={collapsed ? `show ${noun}` : `hide ${noun}`}
@@ -27,7 +27,8 @@
 >
   {#if side === "rail"}
     <svg
-      class="size-[13px] fill-none stroke-current stroke-2 transition-transform duration-[220ms] motion-reduce:transition-none [stroke-linecap:round] [stroke-linejoin:round]"
+      class="chevron size-[13px] fill-none stroke-current stroke-2 transition-transform duration-[220ms] motion-reduce:transition-none [stroke-linecap:round] [stroke-linejoin:round]"
+      class:rotate-180={collapsed}
       aria-hidden="true"
       viewBox="0 0 24 24"><path d="m15 5-7 7 7 7" /></svg
     >
@@ -36,7 +37,8 @@
     <span class="led" class:running={count > 0}></span>
     <span>jacks</span>
     <svg
-      class="size-[13px] fill-none stroke-current stroke-2 transition-transform duration-[220ms] motion-reduce:transition-none [stroke-linecap:round] [stroke-linejoin:round]"
+      class="chevron size-[13px] fill-none stroke-current stroke-2 transition-transform duration-[220ms] motion-reduce:transition-none [stroke-linecap:round] [stroke-linejoin:round]"
+      class:rotate-180={collapsed}
       aria-hidden="true"
       viewBox="0 0 24 24"><path d="m9 5 7 7-7 7" /></svg
     >
@@ -44,18 +46,10 @@
 </button>
 
 <style>
-  /* The collapsed tint and the rotated chevron are a class-based state with a
-     descendant selector — a poor fit for utility variants. The breakpoints
-     stay hand-written: Tailwind's `max-*` variants are exclusive of the
-     boundary, and `(max-width: 899px)` must keep agreeing with
-     `NARROW_MAX_WIDTH`. */
-  .column-toggle.collapsed {
-    color: var(--color-copper-hot);
-    border-color: rgb(217 142 74 / 0.5);
-  }
-  .column-toggle.collapsed svg {
-    transform: rotate(180deg);
-  }
+  /* Tailwind's `max-*` variants are exclusive of the boundary, so the
+     documented `(max-width: 899px)` narrow breakpoint stays hand-written —
+     at exactly 899px it must keep agreeing with `NARROW_MAX_WIDTH`. The
+     tablet band lives here with it so the breakpoints read as one block. */
   @media (min-width: 900px) and (max-width: 1199px) {
     button {
       min-width: 34px;

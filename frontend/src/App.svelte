@@ -113,13 +113,17 @@
 {#if session.signedIn}
   <div
     id="app"
-    class="drawer-{layout.drawer ?? 'none'}"
+    class="drawer-{layout.drawer ??
+      'none'} grid h-full grid-cols-[250px_1fr_288px] grid-rows-[minmax(0,100%)]"
     class:rail-collapsed={layout.railCollapsed}
     class:board-collapsed={layout.boardCollapsed}
   >
     <Rail />
 
-    <main id="main">
+    <main
+      id="main"
+      class="flex min-w-0 flex-col overflow-hidden bg-[radial-gradient(1200px_500px_at_50%_-200px,#171b18_0%,var(--color-ink)_60%)]"
+    >
       {#if session.instanceName}
         <InstanceBanner name={session.instanceName} />
       {/if}
@@ -136,7 +140,7 @@
       <!-- Tapping away is how a drawer is dismissed on a touch screen, where
            there is no Escape key to reach for. -->
       <div
-        class="drawer-backdrop"
+        class="drawer-backdrop hidden"
         role="presentation"
         onclick={() => {
           layout.close();
@@ -167,26 +171,8 @@
 {/each}
 
 <style>
-  #app {
-    display: grid;
-    grid-template-columns: 250px 1fr 288px;
-    grid-template-rows: minmax(0, 100%);
-    height: 100%;
-  }
   #app > :global(*) {
     min-height: 0;
-  }
-
-  #main {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    overflow: hidden;
-    background: radial-gradient(1200px 500px at 50% -200px, #171b18 0%, var(--color-ink) 60%);
-  }
-
-  .drawer-backdrop {
-    display: none;
   }
 
   /* ── desktop: independently collapsible side columns ──────────────────

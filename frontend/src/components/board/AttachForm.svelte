@@ -87,10 +87,10 @@
   }
 </script>
 
-<form id="attach" onsubmit={attach}>
-  <label for="aPreset">preset</label>
-  <div id="presetRow">
-    <select id="aPreset" bind:value={presetId} onchange={applyPreset}>
+<form id="attach" class="flex flex-col gap-[7px] px-3 pt-1 pb-5" onsubmit={attach}>
+  <label for="aPreset" class="mb-[-4px] text-[10px] tracking-[0.05em] text-cream-faint">preset</label>
+  <div id="presetRow" class="flex items-center gap-1.5">
+    <select id="aPreset" class="min-w-0 flex-1" bind:value={presetId} onchange={applyPreset}>
       <option value="">— none —</option>
       {#each session.presets as preset (preset.id)}
         <option value={preset.id}>{preset.title}</option>
@@ -99,6 +99,7 @@
     <button
       type="button"
       id="presetSave"
+      class="flex-none px-2 py-1.5 text-[10.5px]"
       title="save current name/adapter/command as a preset"
       onclick={() =>
         dialogs.open(PresetDialog, {
@@ -108,6 +109,7 @@
     <button
       type="button"
       id="presetManage"
+      class="flex-none px-2 py-1.5 text-[10.5px]"
       title="view / edit presets"
       onclick={() => dialogs.open(PresetsDialog)}
     >
@@ -115,11 +117,13 @@
     </button>
   </div>
 
-  <label for="aName">name (the @handle)</label>
+  <label for="aName" class="mb-[-4px] text-[10px] tracking-[0.05em] text-cream-faint"
+    >name (the @handle)</label
+  >
   <input id="aName" bind:value={name} placeholder="reviewer" maxlength="32" autocomplete="off" />
 
-  <div class="adapter-row">
-    <label for="aAdapter">adapter</label>
+  <div class="adapter-row flex items-baseline justify-between">
+    <label for="aAdapter" class="mb-[-4px] text-[10px] tracking-[0.05em] text-cream-faint">adapter</label>
     <button
       type="button"
       id="adapterImport"
@@ -127,8 +131,8 @@
       onclick={() => dialogs.open(ImportAdaptersDialog)}>+ import…</button
     >
   </div>
-  <div class="adapter-picker">
-    <select id="aAdapter" bind:value={adapter} onchange={onAdapterChosen}>
+  <div class="adapter-picker flex items-center gap-1.5">
+    <select id="aAdapter" class="min-w-0 flex-1" bind:value={adapter} onchange={onAdapterChosen}>
       {#each session.adapters as option (option.id)}
         <option value={option.id}
           >{adapterLabel(option.id)}{option.overrides_bundled ? " (imported)" : ""}</option
@@ -144,86 +148,30 @@
     {/if}
   </div>
 
-  <label for="aCmd">command (blank = adapter default)</label>
+  <label for="aCmd" class="mb-[-4px] text-[10px] tracking-[0.05em] text-cream-faint"
+    >command (blank = adapter default)</label
+  >
   <input id="aCmd" bind:value={command} placeholder="blank = adapter default" autocomplete="off" />
 
-  <label for="aCwd">working directory</label>
+  <label for="aCwd" class="mb-[-4px] text-[10px] tracking-[0.05em] text-cream-faint">working directory</label>
   <input id="aCwd" bind:value={cwd} placeholder="~/code/myproject" autocomplete="off" />
 
-  <label class="update-row" for="aUpdate" title={updateTitle}>
+  <label
+    class="update-row flex items-center gap-2 min-h-11 cursor-pointer text-[10px] tracking-[0.05em] text-cream-faint has-[input:disabled]:cursor-default"
+    for="aUpdate"
+    title={updateTitle}
+  >
     update CLI first
-    <input id="aUpdate" type="checkbox" bind:checked={updateCli} disabled={!canUpdate} title={updateTitle} />
+    <input
+      id="aUpdate"
+      class="h-[15px] w-[15px] flex-none p-0 accent-copper"
+      type="checkbox"
+      bind:checked={updateCli}
+      disabled={!canUpdate}
+      title={updateTitle}
+    />
   </label>
 
   <button class="primary" type="submit" disabled={attaching}>{attaching ? "attaching…" : "attach"}</button>
-  <div class="note">the real interactive process is spawned in a pty</div>
+  <div class="note text-[10px] italic text-cream-faint">the real interactive process is spawned in a pty</div>
 </form>
-
-<style>
-  #attach {
-    padding: 4px 12px 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 7px;
-  }
-  label {
-    color: var(--color-cream-faint);
-    font-size: 10px;
-    letter-spacing: 0.05em;
-    margin-bottom: -4px;
-  }
-  .note {
-    color: var(--color-cream-faint);
-    font-size: 10px;
-    font-style: italic;
-  }
-
-  #presetRow {
-    display: flex;
-    gap: 6px;
-    align-items: center;
-  }
-  #presetRow select {
-    flex: 1;
-    min-width: 0;
-  }
-  #presetRow button {
-    padding: 6px 8px;
-    font-size: 10.5px;
-    flex: none;
-  }
-
-  .adapter-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-  }
-  .adapter-picker {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .adapter-picker select {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .update-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-height: 44px;
-    margin-bottom: 0;
-    cursor: pointer;
-  }
-  .update-row:has(input:disabled) {
-    cursor: default;
-  }
-  .update-row input[type="checkbox"] {
-    width: 15px;
-    height: 15px;
-    padding: 0;
-    flex: none;
-    accent-color: var(--color-copper);
-  }
-</style>

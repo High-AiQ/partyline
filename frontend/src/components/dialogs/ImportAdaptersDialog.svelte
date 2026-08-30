@@ -48,37 +48,18 @@
 </script>
 
 <Modal title="import adapters" {close}>
-  <div class="grid">
-    <label for="iRepo">repository</label>
+  <div class="grid grid-cols-[110px_1fr] gap-x-2.5 gap-y-1.5 items-center">
+    <label class="text-cream-faint text-[10px] tracking-[0.05em] text-right" for="iRepo">repository</label>
     <input id="iRepo" bind:value={repository} placeholder="https://github.com/you/partyline-adapters.git" />
-    <label for="iRef">ref (optional)</label>
+    <label class="text-cream-faint text-[10px] tracking-[0.05em] text-right" for="iRef">ref (optional)</label>
     <input id="iRef" bind:value={ref} placeholder="main" />
   </div>
 
   <p class="dialog-note">Imported adapters run as you, unsandboxed. Only import code you trust.</p>
 
-  <div class="actions">
+  <div class="flex justify-end">
     <button type="button" class="primary" disabled={busy} onclick={go}>import</button>
   </div>
 
   <p class="line-status" class:error={failed} aria-live="polite">{status}</p>
 </Modal>
-
-<style>
-  .grid {
-    display: grid;
-    grid-template-columns: 110px 1fr;
-    gap: 6px 10px;
-    align-items: center;
-  }
-  label {
-    color: var(--color-cream-faint);
-    font-size: 10px;
-    letter-spacing: 0.05em;
-    text-align: right;
-  }
-  .actions {
-    display: flex;
-    justify-content: flex-end;
-  }
-</style>

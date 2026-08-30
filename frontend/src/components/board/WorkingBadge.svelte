@@ -31,31 +31,21 @@
 
 {#if badge}
   <span
-    class="working {badge.tone} {badge.dot} {badge.pulse}"
+    class="working {badge.tone} {badge.dot} {badge.pulse} inline-flex items-center gap-1 text-[9px] tracking-[0.04em] whitespace-nowrap"
+    class:text-green={badge.tone !== "copper"}
+    class:text-copper={badge.tone === "copper"}
     role="status"
-    title={badge.tooltip || undefined}><span></span>{badge.label}</span
+    title={badge.tooltip || undefined}
+    ><span
+      class={badge.dot === "hollow"
+        ? "h-[5px] w-[5px] rounded-full bg-transparent border border-current shadow-none"
+        : "h-[5px] w-[5px] rounded-full bg-current shadow-[0_0_7px_currentColor]"}
+    ></span>{badge.label}</span
   >
 {/if}
 
 <style>
-  .working {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    color: var(--color-green);
-    font-size: 9px;
-    letter-spacing: 0.04em;
-    white-space: nowrap;
-  }
-  .copper {
-    color: var(--color-copper);
-  }
   .working span {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: currentColor;
-    box-shadow: 0 0 7px currentColor;
     animation: working-pulse 1s ease-in-out infinite;
   }
   /* speaking, or any state whose pulse is off: the dot stays lit, not blinking */
@@ -64,12 +54,6 @@
   }
   .slow span {
     animation: working-pulse 2.4s ease-in-out infinite;
-  }
-  /* a guess: outline instead of fill, and no glow to project confidence */
-  .hollow span {
-    background: transparent;
-    border: 1px solid currentColor;
-    box-shadow: none;
   }
   @keyframes working-pulse {
     50% {

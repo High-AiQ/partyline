@@ -80,7 +80,14 @@
 
   <div class="live-list">
     {#each offer.attachments as attachment (attachment.id)}
-      <div class="live-item">
+      <!-- `.live-item` is shared with the delete-line and stop-server dialogs,
+           where the list means "these will be stopped" and the red wash is a
+           warning. Here the same list means the opposite — these are coming
+           back — so the shape is kept and the alarm is taken out of it: the
+           utilities below sit in a later layer than the shared component, so
+           they win at equal specificity. -->
+      <div class="live-item border-line bg-ink-3">
+        <!-- nothing is running yet — a lit LED would claim something untrue -->
         <span class="led"></span>
         <span style:color="hsl({hue(attachment.name.toLowerCase())} 55% 68%)">@{attachment.name}</span>
         <span class="on">{attachment.adapter}</span>
@@ -89,9 +96,11 @@
   </div>
 
   {#if offer.debrief}
-    <div class="debrief">
+    <div class="border-l-2 border-copper pl-[11px]">
       <div class="dialog-note">each one wakes with this</div>
-      <p class="debrief-body">{offer.debrief}</p>
+      <p class="max-h-[30vh] overflow-y-auto text-[12px] whitespace-pre-wrap wrap-anywhere text-cream-dim">
+        {offer.debrief}
+      </p>
     </div>
   {/if}
 
@@ -115,32 +124,3 @@
     >
   </div>
 </Modal>
-
-<style>
-  /* `.live-item` is shared with the delete-line and stop-server dialogs, where
-     the list means "these will be stopped" and the red wash is a warning. Here
-     the same list means the opposite — these are coming back — so the shape is
-     kept and the alarm is taken out of it. */
-  .live-item {
-    border-color: var(--color-line);
-    background: var(--color-ink-3);
-  }
-  .live-item .led {
-    /* Nothing is running yet: these are the processes that *would* be. A green
-       live LED here would claim something that is not true. */
-    background: var(--color-cream-faint);
-    box-shadow: none;
-  }
-  .debrief {
-    border-left: 2px solid var(--color-copper);
-    padding-left: 11px;
-  }
-  .debrief-body {
-    color: var(--color-cream-dim);
-    font-size: 12px;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    max-height: 30vh;
-    overflow-y: auto;
-  }
-</style>

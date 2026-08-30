@@ -42,45 +42,17 @@
 <Modal title="line topic · {conversation?.name ?? ''}" {close}>
   <div class="line-status" class:error={Boolean(error)} aria-live="polite">{error}</div>
   <textarea
-    class="topicBox"
+    class="min-h-[120px] resize-y rounded border border-line bg-ink px-[11px] py-[9px] text-[12px] text-cream outline-0 focus:border-copper"
     bind:this={field}
     bind:value={topic}
     maxlength={MAX}
     aria-label="line topic"
     placeholder={"what is this line about? project, culture, standing instructions —\nagents receive it in their join briefing, and hear about changes at their next wake"}
   ></textarea>
-  <div class="topicRow">
-    <span class="count">{topic.length} / {MAX}</span>
+  <div class="flex items-baseline justify-between gap-2.5">
+    <span class="text-[10px] text-cream-faint">{topic.length} / {MAX}</span>
     <button type="button" class="primary" disabled={saving} onclick={save}>
       {saving ? "saving…" : "save topic"}
     </button>
   </div>
 </Modal>
-
-<style>
-  .topicBox {
-    background: var(--color-ink);
-    border: 1px solid var(--color-line);
-    border-radius: 4px;
-    color: var(--color-cream);
-    padding: 9px 11px;
-    font: inherit;
-    font-size: 12px;
-    min-height: 120px;
-    resize: vertical;
-    outline: 0;
-  }
-  .topicBox:focus {
-    border-color: var(--color-copper);
-  }
-  .topicRow {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 10px;
-  }
-  .count {
-    color: var(--color-cream-faint);
-    font-size: 10px;
-  }
-</style>
