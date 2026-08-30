@@ -619,6 +619,15 @@ class BriefingTest(unittest.TestCase):
         self.assertIn("shared task board", text)
         self.assertIn("$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/tasks", text)
 
+    def test_briefing_teaches_rich_output_and_math_delimiters(self):
+        text = Recorder(["cat"]).briefing()
+        self.assertIn("Rich output", text)
+        self.assertIn("syntax-highlighted", text)
+        self.assertIn(r"\(...\)", text)
+        self.assertIn(r"\[...\]", text)
+        self.assertIn("$$...$$", text)
+        self.assertIn("single `$...$` is left literal", text)
+
 
 class FreshnessTest(unittest.TestCase):
     """`_fresh` is what stops a resumed process replaying its whole history."""

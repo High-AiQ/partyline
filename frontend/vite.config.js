@@ -13,7 +13,7 @@ const outDir = fileURLToPath(new URL("../partyline/static", import.meta.url));
 const buildId = sourceBuildId();
 
 export default defineConfig(({ command }) => ({
-  plugins: [buildManifest(), tailwindcss(), svelte()],
+  plugins: [buildManifest(), woff2OnlyKatex(), tailwindcss(), svelte()],
   // Component tests run in jsdom but still resolve packages through Vite.
   // Without this condition Svelte's default server export wins, and `mount()`
   // fails before the browser behavior under test can run.
@@ -49,6 +49,29 @@ export default defineConfig(({ command }) => ({
     include: ["src/**/*.test.{js,ts}"],
   },
 }));
+
+/** Keep the lazy KaTeX asset set to the modern WOFF2 fonts we support. */
+function woff2OnlyKatex() {
+  return {
+    name: "partyline-katex-woff2-only",
+    enforce: "pre",
+    transform(css, id) {
+      if (!id.endsWith("/katex/dist/katex.min.css")) return;
+      let replacements = 0;
+      const transformed = css.replace(
+        /src:(url\([^)]*\.woff2\) format\("woff2"\)),url\([^)]*\.woff\) format\("woff"\),url\([^)]*\.ttf\) format\("truetype"\)/g,
+        (_declaration, woff2) => {
+          replacements += 1;
+          return `src:${woff2}`;
+        },
+      );
+      if (replacements !== 20) {
+        throw new Error(`expected 20 KaTeX font declarations, transformed ${replacements}`);
+      }
+      return { code: transformed, map: null };
+    },
+  };
+}
 
 function buildManifest() {
   return {

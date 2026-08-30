@@ -7,6 +7,7 @@
    * should reach for `{@html}` on a message body.
    */
   import { renderMessage, senderColor } from "../../lib/markdown";
+  import { enhanceMarkdown } from "../../lib/message-enhancers";
   import { visibleMessageBody } from "../../lib/files";
   import ImageGrid from "./ImageGrid.svelte";
   import FileAttachments from "./FileAttachments.svelte";
@@ -49,7 +50,7 @@
       <span class="when text-[10px] text-cream-faint">{when}</span>
     </div>
   {/if}
-  <div class="body {bodyClass}">
+  <div class="body {bodyClass}" use:enhanceMarkdown={body}>
     <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised in renderMessage -->
     {@html body}
   </div>
@@ -103,6 +104,15 @@
     background: none;
     border: 0;
     padding: 0;
+  }
+  .body :global([data-math="display"]) {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .body :global(.katex-display) {
+    margin: 8px 0;
   }
 
   /* Headings stay close to body size: this is a chat line, not a document, and
