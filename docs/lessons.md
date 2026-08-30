@@ -53,6 +53,12 @@ misleading evidence:
 These are durable false assumptions from dogfooding, paired with the evidence and guard that
 replaced them:
 
+- **An explicitly allowlisted `data-*` attribute survives when DOMPurify's broad data-attribute
+  switch is off.** With `ALLOW_DATA_ATTR: false`, the math and language markers disappeared even
+  though both names were present in `ALLOWED_ATTR`, silently disabling every lazy enhancer. Keep
+  DOMPurify's data-attribute handling enabled, then remove every marker except the two
+  renderer-owned names in the post-sanitize hook. Regression tests must prove both halves: known
+  markers survive and arbitrary `data-*` attributes do not.
 - **A pixel-identical fixture set proved every migrated state kept its CSS contract.** The
   Tailwind migration dropped `white-space: pre-wrap` from system messages, but all 24 visual
   states stayed byte-identical because the fixture's only system notice was one line. Real update
