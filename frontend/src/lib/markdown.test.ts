@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { hue, renderMessage, senderColor } from "./markdown";
+import DOMPurify from "dompurify";
+import {
+  CODE_BLOCK_MAX_BYTES,
+  MATH_DELIMITER_CONTRACT,
+  MATH_MAX_EXPRESSION_BYTES,
+  MATH_MAX_EXPRESSIONS_PER_MESSAGE,
+  normalizeCodeLanguage,
+  hue,
+  renderMessage,
+  senderColor,
+  SUPPORTED_CODE_LANGUAGES,
+} from "./markdown";
 
 describe("renderMessage", () => {
   describe("safety", () => {
@@ -45,6 +56,20 @@ describe("renderMessage", () => {
       // Mentions mean something in this room; drawing a fake one is spoofing.
       const html = renderMessage('<span class="mention">@ops</span> approved this', false);
       expect(html).not.toContain('class="mention">@ops');
+    });
+
+    it("keeps renderer markers through sanitization", () => {
+      const html = renderMessage("```python\nx\n```", true);
+      expect(html).toContain('data-code-language="python"');
+    });
+
+    it("strips arbitrary data attributes without stripping renderer markers", () => {
+      const html = DOMPurify.sanitize(
+        '<span data-math="inline" data-code-language="python" data-untrusted="x">x</span>',
+      );
+      expect(html).toContain('data-math="inline"');
+      expect(html).toContain('data-code-language="python"');
+      expect(html).not.toContain("data-untrusted");
     });
 
     it("strips a class we did not emit from real markdown", () => {
@@ -132,6 +157,110 @@ describe("renderMessage", () => {
     it("survives an empty or missing body", () => {
       expect(renderMessage("", true)).toBe("");
       expect(renderMessage(undefined, false)).toBe("");
+    });
+  });
+
+  describe("code language markers", () => {
+    it("preserves a normalized language marker through sanitization", () => {
+      const html = renderMessage('```python\nprint("hi")\n```', true);
+      expect(html).toContain('data-code-language="python"');
+      expect(html).not.toContain("language-python");
+    });
+
+    it("normalizes common aliases to canonical ids", () => {
+      expect(normalizeCodeLanguage("py")).toBe("python");
+      expect(normalizeCodeLanguage("ts")).toBe("typescript");
+      expect(normalizeCodeLanguage("sh")).toBe("bash");
+      expect(renderMessage("```js\nx\n```", true)).toContain('data-code-language="javascript"');
+    });
+
+    it("drops hostile info strings instead of echoing them into attributes", () => {
+      const html = renderMessage('```python" onclick="alert(1)\ncode\n```', true);
+      expect(html).not.toContain("onclick");
+      expect(html).toMatch(/data-code-language="python"/);
+    });
+
+    it("leaves unknown labels and unlabeled fences plain", () => {
+      expect(renderMessage("```nonsense\nx\n```", true)).not.toContain("data-code-language");
+      expect(renderMessage("```\nx\n```", true)).not.toContain("data-code-language");
+    });
+
+    it("omits the marker when a block exceeds the size ceiling", () => {
+      const body = "```python\n" + "x".repeat(CODE_BLOCK_MAX_BYTES + 1) + "\n```";
+      expect(renderMessage(body, true)).not.toContain("data-code-language");
+      expect(renderMessage(body, true)).toContain("<pre>");
+    });
+
+    it("only allows canonical ids the enhancer registry knows", () => {
+      for (const language of SUPPORTED_CODE_LANGUAGES) {
+        expect(normalizeCodeLanguage(language)).toBe(language);
+      }
+    });
+  });
+
+  describe("math placeholders", () => {
+    it("recognizes the documented delimiter forms", () => {
+      expect(MATH_DELIMITER_CONTRACT.inline).toEqual(["\\(", "\\)"]);
+      expect(renderMessage(String.raw`Inline \(E=mc^2\) here`, true)).toContain(
+        '<span data-math="inline">E=mc^2</span>',
+      );
+      expect(renderMessage(String.raw`\[ \int_0^1 x\,dx \]`, true)).toContain(
+        '<span data-math="display"> \\int_0^1 x\\,dx </span>',
+      );
+      expect(renderMessage("$$\\sum_{i=1}^n i$$", true)).toContain(
+        '<span data-math="display">\\sum_{i=1}^n i</span>',
+      );
+    });
+
+    it("allows display math to span lines", () => {
+      const html = renderMessage("$$\na\n+\nb\n$$", true);
+      expect(html).toContain('data-math="display"');
+      expect(html).toContain("a");
+      expect(html).toContain("b");
+    });
+
+    it("leaves single-dollar currency and shell fragments literal", () => {
+      expect(renderMessage("$5 for coffee", true)).not.toContain("data-math");
+      expect(renderMessage("$x$ stays literal", true)).not.toContain("data-math");
+      expect(renderMessage("cost is $VAR", true)).not.toContain("data-math");
+    });
+
+    it("leaves unmatched delimiters and escaped openers literal", () => {
+      expect(renderMessage(String.raw`\(only open`, true)).not.toContain("data-math");
+      expect(renderMessage(String.raw`\\(not math\)`, true)).not.toContain("data-math");
+    });
+
+    it("does not parse math inside inline or fenced code", () => {
+      expect(renderMessage("`\\(x\\)`", true)).not.toContain("data-math");
+      expect(renderMessage("```\n\\(x\\)\n```", true)).not.toContain("data-math");
+    });
+
+    it("rejects inline math that spans a newline", () => {
+      expect(renderMessage("\\(a\nb\\)", true)).not.toContain("data-math");
+    });
+
+    it("leaves oversized expressions literal", () => {
+      const tex = "x".repeat(MATH_MAX_EXPRESSION_BYTES + 1);
+      expect(renderMessage(String.raw`\(` + tex + String.raw`\)`, true)).not.toContain("data-math");
+    });
+
+    it("stops emitting math markers after the per-message expression cap", () => {
+      const chunks = Array.from(
+        { length: MATH_MAX_EXPRESSIONS_PER_MESSAGE + 1 },
+        (_, index) => String.raw`\(` + "x" + String(index) + String.raw`\)`,
+      ).join(" ");
+      const html = renderMessage(chunks, true);
+      expect(html.match(/data-math="inline"/g)).toHaveLength(MATH_MAX_EXPRESSIONS_PER_MESSAGE);
+    });
+
+    it("does not enable math parsing for human inline-only messages", () => {
+      expect(renderMessage(String.raw`\(E=mc^2\)`, false)).not.toContain("data-math");
+    });
+
+    it("keeps hostile TeX as text inside placeholders", () => {
+      const html = renderMessage(String.raw`\(x<img onerror=alert(1)>\)`, true);
+      expect(html).not.toContain("<img");
+      expect(html).toContain("&lt;img");
     });
   });
 });
