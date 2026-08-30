@@ -35,6 +35,11 @@ class PartylineAdapter(Adapter):
         # so a resync can recognize the watermark's tail as a sentinel after
         # Cursor deletes it from the file at the next turn's start.
         self._sentinel_fps: set[str] = set()
+        # A rewrite earns positional-fallback strikes only while the same
+        # complete snapshot persists. Cursor renders through several distinct
+        # valid-JSONL states; counting those as one failure sequence can skip
+        # the new user record and leading assistant speech.
+        self._failed_snapshot: tuple[str, ...] | None = None
 
     async def stop(self):
         self._CLAIMED.discard(getattr(self, "_session_id", "") or "")
@@ -108,6 +113,7 @@ class PartylineAdapter(Adapter):
             if not self._has_complete_jsonl_tail(lines):
                 return seen_fps, failures
             if sequential == seen_fps:
+                self._failed_snapshot = None
                 return seen_fps, 0
             if (
                 incoming_fps[: len(seen_fps) - 1] == seen_fps[:-1]
@@ -124,7 +130,12 @@ class PartylineAdapter(Adapter):
                 # cannot replay a delivered message. A rewrite that edits
                 # earlier records deliberately falls through to the bounded
                 # hatch.
+                self._failed_snapshot = None
                 return seen_fps[:-1], 0
+            snapshot = tuple(incoming_fps)
+            if snapshot != self._failed_snapshot:
+                self._failed_snapshot = snapshot
+                failures = 0
             failures += 1
             if failures >= 3:
                 await self.post(
@@ -133,8 +144,10 @@ class PartylineAdapter(Adapter):
                     f"{self.att['name']}: transcript rewritten beyond recognition — "
                     "re-anchoring positionally",
                 )
+                self._failed_snapshot = None
                 return resync_positional(path, seen_fps, incoming_fps), 0
             return seen_fps, failures
+        self._failed_snapshot = None
         return resynced, 0
 
     @staticmethod

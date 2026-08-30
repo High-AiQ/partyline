@@ -431,7 +431,8 @@ async def attach(conv_id: str, body: AttachIn):
     att_id = str(uuid.uuid4())
     runtime_owner = str(uuid.uuid4())
     att = runtime.db.add_attachment(
-        att_id, conv_id, body.name, body.adapter, command, cwd, runtime_owner
+        att_id, conv_id, body.name, body.adapter, command, cwd, runtime_owner,
+        start_after_history=True,
     )
     att["api_token"] = ensure_api_token(runtime.db, att_id)
     att["runtime_owner"] = runtime_owner
