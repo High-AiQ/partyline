@@ -13,7 +13,9 @@ The transcript is one JSON object per step. Chat speech is a DONE
 planner steps carrying ``tool_calls`` plus ``GENERIC`` tool-result steps, both
 of which stay off the line. Turn boundaries are real records too: a
 ``USER_INPUT`` step begins a turn and a planner response without tool calls
-ends it, so both are reported as receipts.
+ends it unless a structured background-task record says work is still open.
+That distinction matters because Antigravity speaks an interim update while a
+background command runs, then continues the same turn from a system record.
 """
 
 from __future__ import annotations
@@ -31,6 +33,10 @@ from partyline.adapters.receipts import BEGAN, ENDED, receipt
 LOG_ROOT = os.path.expanduser("~/.partyline/sessions/antigravity")
 BRAIN_ROOT = Path.home() / ".gemini" / "antigravity-cli" / "brain"
 CREATED = re.compile(r"Created conversation ([0-9a-fA-F-]{36})")
+TASK_STARTED = re.compile(r"background task with task id:\s*(\S+)", re.IGNORECASE)
+TASK_SETTLED = re.compile(
+    r'Task id "([^"]+)" (?:finished|was canceled)', re.IGNORECASE
+)
 # How much of a digest's tail must be visible to prove it sits in the
 # composer: a long paste scrolls, so only its end stays on the 40-line screen.
 ECHO_PROBE = 40
@@ -50,6 +56,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
         self._resend_counts: dict[str, int] = {}
         self._notices = 0
         self._turn_open = False
+        self._background_tasks: set[str] = set()
         self._settle_task: asyncio.Task | None = None
         self._settle_queued = False
         self._output_event = asyncio.Event()
@@ -63,8 +70,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
         return bool(probe) and probe in "".join(self.screen_text().split())
 
     async def send_keys(self, text: str):
-        assert self.master is not None
-        os.write(self.master, b"\x1b[200~" + text.encode() + b"\x1b[201~")
+        await self._write_all(b"\x1b[200~" + text.encode() + b"\x1b[201~")
         deadline = time.time() + PASTE_PACE
         while self.alive() and not self._composer_shows(text):
             remaining = deadline - time.time()
@@ -75,13 +81,13 @@ class PartylineAdapter(WakeSettlement, Adapter):
                 await asyncio.wait_for(self._output_event.wait(), remaining)
             except TimeoutError:
                 break
-        os.write(self.master, b"\r")
+        await self._write_all(b"\r")
 
     async def deliver(self, messages: list[dict]):
         if self.master is not None and any(
             self._composer_shows(wake[0]) for wake in self._outstanding
         ):
-            os.write(self.master, b"\r")
+            await self._write_all(b"\r")
         digest = self.format_digest(messages)
         await super().deliver(messages)
         if digest.strip() and self.alive():
@@ -216,27 +222,43 @@ class PartylineAdapter(WakeSettlement, Adapter):
                 return
             seen.add(key)
             content = record.get("content") or ""
-            if record.get("source") == "USER_EXPLICIT" and record.get("type") == "USER_INPUT":
+            source = record.get("source")
+            record_type = record.get("type")
+            status = record.get("status")
+            if (
+                source == "MODEL"
+                and record_type == "GENERIC"
+                and status == "RUNNING"
+                and isinstance(content, str)
+            ):
+                if started := TASK_STARTED.search(content):
+                    self._background_tasks.add(started.group(1))
+            elif (
+                source == "SYSTEM"
+                and record_type == "SYSTEM_MESSAGE"
+                and isinstance(content, str)
+            ):
+                if settled := TASK_SETTLED.search(content):
+                    self._background_tasks.discard(settled.group(1))
+            elif source == "USER_EXPLICIT" and record_type == "USER_INPUT":
                 await self._note_user_input(content, record.get("created_at"))
                 prompt = getattr(self, "_startup_prompt", "")
                 if prompt and self._contains(content, prompt):
                     self.mark_startup_delivery_received()
+                self._background_tasks.clear()
                 self._turn_open = True
                 await receipt(self.att, BEGAN)
-            elif (
-                record.get("source") == "MODEL"
-                and record.get("type") == "PLANNER_RESPONSE"
-            ):
-                status = record.get("status")
+            elif source == "MODEL" and record_type == "PLANNER_RESPONSE":
                 # 2026-08-22: 2,386 DONE / 48 RUNNING across 15 sessions; no abort status ever
                 # observed — names are defensive guesses, real aborts leave no record;
                 # exit/detach flush is the guarantee.
                 if status in ("ERROR", "CANCELLED", "ABORTED", "FAILED"):
+                    self._background_tasks.clear()
                     self._turn_open = False
                     self._schedule_settle()
                     await receipt(self.att, ENDED)
                 elif status == "DONE":
-                    if not record.get("tool_calls"):
+                    if not record.get("tool_calls") and not self._background_tasks:
                         self._turn_open = False
                         self._schedule_settle()
                         await receipt(self.att, ENDED)

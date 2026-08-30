@@ -460,6 +460,15 @@ enforce it. A prose warning that has no executable guard is not a completed less
   delivery emits the conservative BEGAN receipt, and the transcript still owns ENDED. Fixture
   controls require the semantic tail, prove speech exactly once, and keep genuinely unknown
   rewrites on the bounded three-strike hatch.
+- **Three different render snapshots were not three failures.** Cursor re-renders its JSONL
+  through several newline-complete, in-place states. The resync escape budget accumulated across
+  those changing states, so an ordinary turn-start reached the positional hatch; that hatch
+  credited records the tailer had never parsed, including the user receipt and leading assistant
+  acknowledgment. The false assumption was that every unsuccessful read described the same
+  failed rewrite. A strike sequence is now keyed to the complete snapshot: progress restarts the
+  budget, while one stable unknown state still escapes after three reads. The regression changes
+  the snapshot three times, proves no hatch, then holds it steady and proves the hatch remains
+  reachable.
 - **A CLI's input-loop log line proved a wake was ingested.** Two `@gemini-flash` mentions pasted
   into antigravity mid-turn vanished: agy's `HandleUserInput called with text:` logged both at the
   second they were sent, but the transcript gained no `USER_INPUT` record — agy accepts mid-turn
@@ -559,3 +568,17 @@ enforce it. A prose warning that has no executable guard is not a completed less
   build + baseline the untouched base, make the change, rebuild, then check. The shape to remember:
   **a proof is only as strong as the artifact the harness actually exercised** — check what the tool
   renders, not what you meant it to render.
+- **One successful `os.write` meant a whole pty paste was delivered.** A late-added Grok began
+  with `last_seen=0`, so its first mention built a 31 KB history digest. The nonblocking pty write
+  could accept only a prefix or raise EAGAIN; Partyline ignored the return count, the transcript
+  recorded no new input, and every later mention retried the same poisoned cursor. Two guards are
+  required: fresh attachments start after the pre-attach message high-water mark, while traffic
+  posted during startup remains unread, and pty writes loop through short writes/backpressure.
+  That retry is bounded: an indefinitely stalled reader must not hold the cross-process delivery
+  reservation forever. A failed transport keeps the cursor and posts a visible warning instead of
+  dropping the sender.
+- **Speech without tool calls was an Antigravity turn end.** Antigravity background commands emit
+  a structured `GENERIC/RUNNING` task record, an interim speech-only planner response, then a
+  structured system completion before model work resumes. Treating that interim speech as `ENDED`
+  hid the working badge and falsely repooled mid-turn wakes into a still-busy CLI. The adapter now
+  tracks structured background task ids and accepts a speech-only completion only when none remain.
