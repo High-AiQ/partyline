@@ -173,9 +173,37 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
             step(0, "USER_EXPLICIT", "USER_INPUT", "<USER_REQUEST>\nhi\n</USER_REQUEST>"),
             step(1, "SYSTEM", "CHECKPOINT", "{{ CHECKPOINT 0 }}"),
             step(2, "MODEL", "PLANNER_RESPONSE", "", tool_calls=[{"name": "view_file"}]),
-            step(3, "MODEL", "GENERIC", "tool output stays off the line"),
-            step(4, "MODEL", "PLANNER_RESPONSE", "done working"),
-            step(4, "MODEL", "PLANNER_RESPONSE", "duplicate write"),
+            step(
+                3,
+                "MODEL",
+                "GENERIC",
+                "Tool is running as a background task with task id: conversation/task-3",
+                status="RUNNING",
+            ),
+            step(
+                4,
+                "MODEL",
+                "GENERIC",
+                "Tool is running as a background task with task id: conversation/task-4",
+                status="RUNNING",
+            ),
+            step(5, "MODEL", "PLANNER_RESPONSE", "still working"),
+            step(
+                6,
+                "SYSTEM",
+                "SYSTEM_MESSAGE",
+                'Task id "conversation/task-3" finished with result: ok',
+            ),
+            step(
+                7,
+                "SYSTEM",
+                "SYSTEM_MESSAGE",
+                'Task id "conversation/task-4" was canceled with result: canceled',
+            ),
+            step(8, "MODEL", "PLANNER_RESPONSE", "", tool_calls=[{"name": "view_file"}]),
+            step(9, "MODEL", "GENERIC", "tool output stays off the line"),
+            step(10, "MODEL", "PLANNER_RESPONSE", "done working"),
+            step(10, "MODEL", "PLANNER_RESPONSE", "duplicate write"),
         ])
         sent = []
         adapter.send_keys = AsyncMock(side_effect=lambda text: sent.append(text))
@@ -194,7 +222,10 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
             patch("partyline.adapters.bundled.antigravity.adapter.receipt", new=AsyncMock()) as mock_receipt,
         ):
             await adapter._run()
-        self.assertEqual(self.messages, [("agent", "agent", "done working")])
+        self.assertEqual(
+            self.messages,
+            [("agent", "agent", "still working"), ("agent", "agent", "done working")],
+        )
         self.assertEqual(sent, [adapter.briefing()])
         self.assertEqual(sessions, [CONV_ID])
         self.assertEqual(
@@ -554,11 +585,8 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         adapter.master = 7
         adapter.screen_text = lambda: "input box is empty"
         writes = []
-        with (
-            patch("partyline.adapters.bundled.antigravity.adapter.os.write",
-                  side_effect=lambda fd, data: writes.append(data)),
-            patch.object(antigravity_module, "PASTE_PACE", 30.0),
-        ):
+        adapter._write_all = AsyncMock(side_effect=lambda data: writes.append(data))
+        with patch.object(antigravity_module, "PASTE_PACE", 30.0):
             sending = asyncio.create_task(adapter.send_keys("wake eight"))
             await asyncio.sleep(0.05)
             self.assertEqual(len(writes), 1)  # paste written, Enter held
@@ -578,19 +606,12 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         adapter.master = 7
         adapter.screen_text = lambda: "nothing"
         writes = []
-        with (
-            patch("partyline.adapters.bundled.antigravity.adapter.os.write",
-                  side_effect=lambda fd, data: writes.append(data)),
-            patch.object(antigravity_module, "PASTE_PACE", 0.05),
-        ):
+        adapter._write_all = AsyncMock(side_effect=lambda data: writes.append(data))
+        with patch.object(antigravity_module, "PASTE_PACE", 0.05):
             await adapter.send_keys("wake nine")
         self.assertEqual(writes[-1], b"\r")
         # A deadline already past still sends the Enter — pacing, not a verdict.
-        with (
-            patch("partyline.adapters.bundled.antigravity.adapter.os.write",
-                  side_effect=lambda fd, data: writes.append(data)),
-            patch.object(antigravity_module, "PASTE_PACE", -1.0),
-        ):
+        with patch.object(antigravity_module, "PASTE_PACE", -1.0):
             await adapter.send_keys("wake ten")
         self.assertEqual(writes[-1], b"\r")
 
@@ -780,11 +801,8 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
 
         writes = []
         adapter.send_keys = PartylineAdapter.send_keys.__get__(adapter)
-        with (
-            patch("partyline.adapters.bundled.antigravity.adapter.os.write",
-                  side_effect=lambda fd, data: writes.append(data)),
-            patch.object(antigravity_module, "PASTE_PACE", 0.05),
-        ):
+        adapter._write_all = AsyncMock(side_effect=lambda data: writes.append(data))
+        with patch.object(antigravity_module, "PASTE_PACE", 0.05):
             adapter.screen_text = lambda: "nothing of ours here"
             await adapter.deliver([{"sender": "greg", "body": "second wake"}])
             self.assertTrue(writes[0].startswith(b"\x1b[200~"))  # no flush

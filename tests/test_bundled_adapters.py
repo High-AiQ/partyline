@@ -963,7 +963,7 @@ class RawAdapterTest(RecordingAdapterTest):
             digest, "please check this\nplain follow-up\n(cwd git: d87b3ae clean)"
         )
         adapter.master = 7
-        with patch("partyline.adapters.bundled.raw.adapter.os.write") as write:
-            await adapter.send_keys("hello")
-        write.assert_called_once_with(7, b"hello\r")
+        adapter._write_all = AsyncMock()
+        await adapter.send_keys("hello")
+        adapter._write_all.assert_awaited_once_with(b"hello\r")
         self.assertIs(RawAdapter, raw_module.PartylineAdapter)

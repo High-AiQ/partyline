@@ -13,12 +13,13 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 os.environ.setdefault("PARTYLINE_DB", "/tmp/partyline-test-adapter-base.db")
 
 from partyline.adapters.base import Adapter
 from partyline.adapters.briefing import child_env
+from partyline.adapters import pty_io
 from partyline.adapters.terminal import terminal_responses
 from datetime import UTC
 
@@ -240,6 +241,103 @@ class AdapterKeystrokeTest(unittest.IsolatedAsyncioTestCase):
         # Bracketed paste, so a human mid-keystroke does not have their input
         # spliced into the middle of the delivered message. Enter comes after.
         self.assertEqual(written, b"\x1b[200~hello line\x1b[201~\r")
+
+    async def test_send_keys_retries_backpressure_and_short_writes(self):
+        adapter = Recorder(["cat"])
+        adapter.master = 7
+        written = bytearray()
+        attempts = 0
+
+        def constrained_write(_fd, data):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise BlockingIOError()
+            count = min(4, len(data))
+            written.extend(bytes(data[:count]))
+            return count
+
+        wait_writable = AsyncMock()
+        with (
+            patch("partyline.adapters.pty_io.os.write", side_effect=constrained_write),
+            patch(
+                "partyline.adapters.pty_io.wait_writable", new=wait_writable
+            ),
+            patch("partyline.adapters.base.asyncio.sleep", new=AsyncMock()),
+        ):
+            await adapter.send_keys("a digest larger than one pty write")
+
+        self.assertEqual(
+            bytes(written),
+            b"\x1b[200~a digest larger than one pty write\x1b[201~\r",
+        )
+        wait_writable.assert_awaited_once_with(7)
+
+    async def test_complete_pty_write_rejects_zero_progress(self):
+        with patch("partyline.adapters.pty_io.os.write", return_value=0):
+            with self.assertRaisesRegex(OSError, "made no progress"):
+                await pty_io.write_all(7, b"wake")
+
+    async def test_complete_pty_write_times_out_when_reader_stalls(self):
+        never_writable = asyncio.Event()
+
+        async def block_forever(_fd):
+            await never_writable.wait()
+
+        with (
+            patch("partyline.adapters.pty_io.os.write", side_effect=BlockingIOError()),
+            patch(
+                "partyline.adapters.pty_io.wait_writable",
+                side_effect=block_forever,
+            ),
+            patch("partyline.adapters.pty_io.WRITE_TIMEOUT", 0.01),
+        ):
+            with self.assertRaisesRegex(OSError, "timed out"):
+                await pty_io.write_all(7, b"wake")
+
+    async def test_complete_pty_write_drains_real_backpressure(self):
+        read_fd, write_fd = os.pipe()
+        self.addCleanup(os.close, read_fd)
+        self.addCleanup(os.close, write_fd)
+        os.set_blocking(read_fd, False)
+        os.set_blocking(write_fd, False)
+        payload = b"wake" * (512 * 1024)
+        writing = asyncio.create_task(pty_io.write_all(write_fd, payload))
+        await asyncio.sleep(0)
+        self.assertFalse(writing.done())
+
+        received = bytearray()
+        while len(received) < len(payload):
+            try:
+                received.extend(os.read(read_fd, 65536))
+            except BlockingIOError:
+                await asyncio.sleep(0)
+        await writing
+
+        self.assertEqual(bytes(received), payload)
+
+    async def test_wait_writable_registers_and_removes_the_pty_fd(self):
+        real_loop = asyncio.get_running_loop()
+
+        class Loop:
+            added = None
+            removed = None
+
+            def create_future(self):
+                return real_loop.create_future()
+
+            def add_writer(self, fd, callback):
+                self.added = fd
+                callback()
+
+            def remove_writer(self, fd):
+                self.removed = fd
+
+        loop = Loop()
+        with patch("partyline.adapters.pty_io.asyncio.get_running_loop", return_value=loop):
+            await pty_io.wait_writable(7)
+
+        self.assertEqual((loop.added, loop.removed), (7, 7))
 
     async def test_pasted_text_reaches_the_process_and_renders_on_the_screen(self):
         adapter = Recorder(["cat"])
