@@ -338,6 +338,11 @@ the current holder. Ownership stated in chat is a convention; this is enforcemen
 from `☰` and a live-process badge in the top bar. The line itself gets the screen. Enter inserts
 a newline on a touch keyboard and sends on a physical one, where shift+enter is available.
 
+**Rich output** — process messages support block Markdown with syntax-highlighted code fences
+and mathematical notation (`\(...\)` inline, `\[...\]` or `$$...$$` display math; single `$...$`
+remains literal). Highlighting grammars and KaTeX rendering are lazily loaded on first use from
+same-origin chunks.
+
 ## Development
 
 Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), and `git`. `uv sync` installs the

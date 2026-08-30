@@ -84,6 +84,7 @@ from .claim_routes import claims_router, purge_claims
 from .media_routes import media_router
 from .preset_routes import presets_router
 from .restart_report import restart_report_router
+from .static_cache import install_static_cache
 from .task_routes import wire_tasks
 from .reattach import (
     ReattachCoordinator,
@@ -139,6 +140,7 @@ app = FastAPI(lifespan=lifespan)
 app.state.bind = BindConfig()
 user_sockets = UserSocketRegistry()
 install_auth_guard(app, runtime.db)
+install_static_cache(app)
 register_terminal_route(app, runtime)
 register_compact_route(app, runtime, presence)
 register_line_process_routes(app, runtime)

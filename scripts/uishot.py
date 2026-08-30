@@ -42,6 +42,7 @@ from scripts.ui_auth import (
     register_test_account,
 )
 from scripts import ui_column_states
+from scripts.ui_fixtures import AGENT_BODY
 REPO_ROOT = Path(__file__).resolve().parent.parent
 STARTUP_TIMEOUT = 30.0
 VIEWPORT = {"width": 1280, "height": 800}
@@ -272,29 +273,6 @@ LINES = ["alpha line", "beta line", "gamma line", "delta line", "epsilon line",
 # screenshot differ from every other one and drown a parity check in noise.
 FIXED_SENT_AT = 1_700_000_000
 
-# One process message exercising everything the renderer can do, because the
-# markdown pipeline is the most intricate rendering in the app and the states
-# below it used to leave it completely uncovered.
-AGENT_BODY = """## Migration status
-
-Ported the pure libraries to **TypeScript**. Notes for @greg and @sol:
-
-- schemas own the boundary
-- `latestJacks()` keeps the *live wins* rule
-- see [the contract](https://example.com/contracts)
-
-| module | lines |
-|---|---|
-| room | 226 |
-| wire | 178 |
-
-> A flaky test is worse than an uncovered line.
-
-```js
-const jacks = latestJacks(room.attachments);
-```
-"""
-
 SEED_ROOM = """
 (seed) => {
   const room = window.partyline.room;
@@ -334,6 +312,9 @@ def seed_room(page):
         ],
     })
     page.wait_for_selector(".msg .body table")
+    page.wait_for_selector("code[data-code-highlighted='true']")
+    page.wait_for_selector("[data-math-rendered='true'] .katex")
+    page.evaluate("() => document.fonts.ready")
 
 
 def capture_all(out_dir="/tmp/partyline-ui", *, freeze_animations=False) -> list[Path]:
