@@ -20,6 +20,7 @@ from collections.abc import Awaitable, Callable
 
 import pyte
 
+from partyline.adapters import pty_io
 from partyline.adapters.task_logging import log_task_deaths
 from partyline.adapters.briefing import (
     BRIEFING,
@@ -36,7 +37,7 @@ Post = Callable[[str, str, str], Awaitable[None]]
 Status = Callable[[str], Awaitable[None]]
 
 
-class Adapter:
+class Adapter(pty_io.PtyWriter):
     """Base class for a process connected through a pseudo-terminal."""
 
     kind = "process"
@@ -253,10 +254,9 @@ class Adapter:
         return format_digest(messages, safe_rider(self.att), str(self.att.get("cwd", "")))
 
     async def send_keys(self, text: str):
-        assert self.master is not None
-        os.write(self.master, b"\x1b[200~" + text.encode() + b"\x1b[201~")
+        await self._write_all(b"\x1b[200~" + text.encode() + b"\x1b[201~")
         await asyncio.sleep(0.35)
-        os.write(self.master, b"\r")
+        await self._write_all(b"\r")
 
     def screen_text(self) -> str:
         return screen_text(self._term)

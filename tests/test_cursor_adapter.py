@@ -770,9 +770,30 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await adapter._handle_resync(path, seen, 2), (seen, 2))
 
             # A shorter rewrite that is complete must still reach the escape
-            # hatch eventually; only an incomplete JSONL tail gets a free wait.
+            # hatch eventually, but its distinct snapshot starts a new budget.
             path.write_text(lines[0], encoding="utf-8")
+            self.assertEqual(await adapter._handle_resync(path, seen, 1), (seen, 1))
+
+    async def test_resync_strikes_require_one_stable_unknown_snapshot(self):
+        adapter = self.make_adapter()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "live.jsonl"
+            old = ['{"old":1}\n', '{"old":2}\n', '{"old":3}\n']
+            seen = [fingerprint(line) for line in old]
+
+            for step in range(3):
+                changing = [f'{{"render":{step},"line":{index}}}\n' for index in range(3)]
+                path.write_text("".join(changing), encoding="utf-8")
+                self.assertEqual(
+                    await adapter._handle_resync(path, seen, 1), (seen, 1)
+                )
+            self.assertEqual(self.messages, [])
+
             self.assertEqual(await adapter._handle_resync(path, seen, 1), (seen, 2))
+            current, failures = await adapter._handle_resync(path, seen, 2)
+            self.assertEqual(failures, 0)
+            self.assertNotEqual(current, seen)
+            self.assertIn("re-anchoring positionally", self.messages[-1][2])
 
     async def test_tail_rerender_inserts_before_sentinel_without_notice_or_replay(self):
         fixtures = Path(__file__).parent / "fixtures" / "cursor_sentinel_117"

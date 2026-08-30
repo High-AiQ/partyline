@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import re
 import time
 
@@ -52,8 +51,7 @@ class RawAdapter(Adapter):
         return "\n".join(part for part in (lines, cwd_git_digest(self.att["cwd"])) if part)
 
     async def send_keys(self, text: str):
-        assert self.master is not None
-        os.write(self.master, text.encode() + b"\r")
+        await self._write_all(text.encode() + b"\r")
 
 
 PartylineAdapter = RawAdapter

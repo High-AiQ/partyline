@@ -1,6 +1,10 @@
 """Mention-based delivery routing for live attachments."""
 
+import logging
+
 from .mentions import mentioned_names
+
+logger = logging.getLogger(__name__)
 
 
 async def route_message(runtime, conv_id: str, message: dict) -> None:
@@ -10,6 +14,7 @@ async def route_message(runtime, conv_id: str, message: dict) -> None:
     names = mentioned_names(message["body"])
     ring_all = "all" in names
     unreachable: list[str] = []
+    failed: list[str] = []
     delivered: set[str] = set()
     queued: set[str] = set()
     for attachment in runtime.db.list_attachments(conv_id):
@@ -34,10 +39,14 @@ async def route_message(runtime, conv_id: str, message: dict) -> None:
             if not ring_all and attachment["name"] not in unreachable:
                 unreachable.append(attachment["name"])
             continue
-        if await runtime.deliver_pending(conv_id, attachment, adapter):
-            delivered.add(attachment["name"].lower())
-        else:
-            queued.add(attachment["name"].lower())
+        try:
+            if await runtime.deliver_pending(conv_id, attachment, adapter):
+                delivered.add(attachment["name"].lower())
+            else:
+                queued.add(attachment["name"].lower())
+        except OSError:
+            logger.exception("pty wake delivery to @%s failed", attachment["name"])
+            failed.append(attachment["name"])
 
     unavailable = [
         name
@@ -50,4 +59,12 @@ async def route_message(runtime, conv_id: str, message: dict) -> None:
             "system",
             "system",
             f"⚠ @{name} was mentioned but is not attached — nothing was delivered",
+        )
+    for name in failed:
+        await runtime.post_message(
+            conv_id,
+            "system",
+            "system",
+            f"⚠ @{name} wake delivery failed before cursor credit — "
+            "check peek and mention it again",
         )

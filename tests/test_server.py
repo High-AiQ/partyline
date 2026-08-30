@@ -435,6 +435,25 @@ class ServerTest(unittest.TestCase):
 
         self.assertEqual(server.runtime.db.get_attachment("one")["last_seen"], 0)
 
+    def test_pty_delivery_failure_keeps_cursor_and_warns_without_dropping_socket(self):
+        self.add_attachment("one", "grok")
+        adapter = FakeAdapter()
+
+        async def fail_pty_write(_messages):
+            raise OSError("pty closed")
+
+        adapter.deliver = fail_pty_write
+        server.runtime.live["one"] = adapter
+        message = server.runtime.db.add_message("line", "greg", "human", "@grok hello")
+
+        with patch("partyline.message_routing.logger.exception") as logged:
+            self.arun(server.runtime.route_mentions("line", message))
+
+        self.assertEqual(server.runtime.db.get_attachment("one")["last_seen"], 0)
+        logged.assert_called_once()
+        notice = server.runtime.db.list_messages("line")[-1]
+        self.assertIn("@grok wake delivery failed before cursor credit", notice["body"])
+
     def test_stale_adapter_callbacks_cannot_mutate_or_post_after_replacement(self):
         server.runtime.db.add_attachment(
             "old",
@@ -907,6 +926,48 @@ class ServerTest(unittest.TestCase):
                 "line",
                 server.AttachIn(name="TERRA", adapter="fake", cwd=self.directory.name),
             )
+        )
+
+    def test_fresh_attach_skips_history_without_losing_startup_messages(self):
+        old = [
+            server.runtime.db.add_message(
+                "line", "greg", "human", f"pre-attach chatter {index}"
+            )
+            for index in range(5)
+        ]
+        during_attach = None
+
+        async def fake_apply(*_args, **_kwargs):
+            nonlocal during_attach
+            during_attach = server.runtime.db.add_message(
+                "line", "greg", "human", "@luna posted while update ran"
+            )
+
+        with (
+            patch.dict(
+                server.ADAPTER_METADATA["fake"],
+                {"update_command": ["fake-cli", "update"]},
+            ),
+            patch("partyline.server.apply_update", side_effect=fake_apply),
+        ):
+            attached = self.arun(
+                server.attach(
+                    "line",
+                    server.AttachIn(
+                        name="luna", adapter="fake", cwd=self.directory.name, update=True
+                    ),
+                )
+            )
+
+        self.assertEqual(attached["last_seen"], old[-1]["id"])
+        join = server.runtime.db.list_messages("line")[-1]
+        mention = server.runtime.db.add_message("line", "greg", "human", "@luna hello")
+        self.arun(server.runtime.route_mentions("line", mention))
+
+        adapter = server.runtime.live[attached["id"]]
+        self.assertEqual(
+            [message["id"] for message in adapter.deliveries[0]],
+            [during_attach["id"], join["id"], mention["id"]],
         )
 
     def test_update_true_without_a_command_is_400_before_a_row_exists(self):

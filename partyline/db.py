@@ -318,13 +318,15 @@ class Db:
 
     # -- attachments -------------------------------------------------------
     def add_attachment(
-        self, att_id, conv_id, name, adapter, command, cwd, runtime_owner=None
+        self, att_id, conv_id, name, adapter, command, cwd, runtime_owner=None,
+        *, start_after_history=False,
     ):
         ts = time.time()
         self._exec(
             "INSERT INTO attachments("
-            "id,conv_id,name,adapter,command,cwd,status,runtime_owner,created_at)"
-            " VALUES(?,?,?,?,?,?,?,?,?)",
+            "id,conv_id,name,adapter,command,cwd,status,runtime_owner,last_seen,created_at)"
+            " VALUES(?,?,?,?,?,?,?,?,CASE WHEN ? THEN COALESCE((SELECT MAX(id) "
+            "FROM messages WHERE conv_id=?),0) ELSE 0 END,?)",
             (
                 att_id,
                 conv_id,
@@ -334,6 +336,8 @@ class Db:
                 cwd,
                 "starting",
                 runtime_owner,
+                start_after_history,
+                conv_id,
                 ts,
             ),
         )
