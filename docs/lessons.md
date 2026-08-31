@@ -463,6 +463,13 @@ enforce it. A prose warning that has no executable guard is not a completed less
   the incident, not a synthetic shape. Found via an await-chain dump of the wedged task; the same
   hunt exposed that adapter tasks held in `_tasks` die silently (strong refs suppress the
   unretrieved-exception warning) — they now log their own deaths.
+- **Assistant `text` beside a tool call was user-facing speech.** Cursor's JSONL uses ordinary
+  assistant text blocks for internal progress narration and places them beside `tool_use`; the
+  actual answer follows in a later text-only record. Treating every text block as speech flooded
+  the room with play-by-play such as “Checking how to post…”, and a synthetic expectation had
+  encoded that leak as correct. Cursor now suppresses text from records containing `tool_use` or
+  `tool_call` while preserving text-only answers. The negative control is the live sanitized
+  transcript fixture: its tool-associated line must not post, while its later answer must.
 - **A transcript sentinel was not a stable final position, and a user record was not a live-start
   signal.** Cursor now stores canonical state in SQLite and re-renders its JSONL by inserting the
   completed turn before one byte-identical trailing `turn_ended`; it writes the user, assistant,
