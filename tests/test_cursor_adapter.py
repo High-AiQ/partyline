@@ -235,9 +235,8 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             (None, "direct text"),
         )
 
-        # Assistant text alongside tool_use -> text still posts. Since Cursor
-        # 2026.08.25 the renderer coalesces a turn's leading speech with its
-        # first tool calls into one record, so this text is genuine speech.
+        # Cursor writes internal progress text beside tool invocations. The
+        # user-facing answer arrives later in its own text-only record.
         self.assertEqual(
             parse_record(
                 {
@@ -250,7 +249,23 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                     },
                 }
             ),
-            (None, "Checking how to post..."),
+            (None, None),
+        )
+
+        # The older tool_call spelling is narration too.
+        self.assertEqual(
+            parse_record(
+                {
+                    "role": "assistant",
+                    "message": {
+                        "content": [
+                            {"type": "text", "text": "Running a command..."},
+                            {"type": "tool_call", "name": "exec"},
+                        ]
+                    },
+                }
+            ),
+            (None, None),
         )
 
         # Assistant tool_use with no text -> nothing to post
@@ -867,7 +882,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(self.messages), 1)
             self.assertIn("re-anchoring positionally", self.messages[0][2])
 
-    async def test_tail_transcript_posts_coalesced_text_and_filters_redacted(self):
+    async def test_tail_transcript_suppresses_tool_narration_and_redacted_text(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "composer.jsonl"
             records = [
@@ -915,7 +930,6 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 self.messages,
                 [
-                    ("agent", "agent", "Checking tools..."),
                     ("agent", "agent", "composer here — connected."),
                 ],
             )
@@ -945,11 +959,6 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             self.messages,
             [
-                (
-                    "agent",
-                    "agent",
-                    "Checking how to post to the partyline chat, then sending a short hello.",
-                ),
                 (
                     "agent",
                     "agent",
@@ -1511,7 +1520,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
 
         Snapshots taken with a mtime watcher against a real `agent` session
         (same inode throughout). Every stage must relay without a
-        re-anchoring notice, and coalesced text+tool_use speech must post.
+        re-anchoring notice, and tool-associated progress must stay private.
         """
         fixtures = Path(__file__).parent / "fixtures" / "cursor_turnstart_0825"
         stages = sorted(fixtures.glob("*.jsonl"))
@@ -1548,11 +1557,6 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 self.messages,
                 [
-                    (
-                        "agent",
-                        "agent",
-                        'I\'ll run that command now, then reply with just "done".',
-                    ),
                     ("agent", "agent", "done"),
                     ("agent", "agent", "done-two"),
                 ],
