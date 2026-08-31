@@ -79,10 +79,16 @@ def parse_record(record: dict) -> tuple[str | None, str | None]:
     if role == "assistant":
         content = (msg.get("content") if isinstance(msg, dict) else None) or record.get("content")
         if isinstance(content, list):
-            # Since Cursor 2026.08.25 the renderer coalesces a turn's leading
-            # speech with its first tool calls into ONE record, so text that
-            # shares a record with tool_use is genuine chat speech, not tool
-            # narration — suppressing it silently muted delivered messages.
+            # Cursor records internal progress narration as text beside the
+            # tool invocation it introduces. The user-facing answer follows
+            # later in a text-only record; posting both leaks the model's
+            # running commentary into chat. Both spellings occur in fixtures.
+            if any(
+                isinstance(block, dict)
+                and block.get("type") in ("tool_call", "tool_use")
+                for block in content
+            ):
+                return None, None
             texts = [
                 block.get("text", "").replace("[REDACTED]", "").strip()
                 for block in content
