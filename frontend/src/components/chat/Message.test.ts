@@ -1,7 +1,99 @@
 import { mount, unmount } from "svelte";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import Message from "./Message.svelte";
-import type { ChatMessage } from "../../lib/contracts";
+import type { ChatMessage, Conversation } from "../../lib/contracts";
+import { room } from "../../state/room.svelte.js";
+import { session } from "../../state/session.svelte.js";
+import { reviewDecisionStatus } from "../../state/review-decision-status.svelte.js";
+import { dialogs } from "../../state/dialogs.svelte.js";
+
+const conversation: Conversation = {
+  id: "conv-1",
+  name: "storytime updates 13",
+  topic: "",
+  created_at: 1,
+  archived_at: null,
+  live_count: 1,
+};
+
+function clickButton(selector: string): void {
+  const button = document.querySelector(selector);
+  if (!(button instanceof HTMLButtonElement)) {
+    throw new Error(`missing ${selector}`);
+  }
+  button.click();
+}
+
+afterEach(() => {
+  room.conversation = null;
+  session.user = null;
+  session.authReady = true;
+  reviewDecisionStatus.entries = {};
+  dialogs.closeAll();
+  document.body.replaceChildren();
+});
+
+function humanMessage(body: string): ChatMessage {
+  return {
+    id: 3,
+    conv_id: "line-1",
+    sender: "greg",
+    sender_type: "human",
+    body,
+    created_at: 0,
+    files: [],
+  };
+}
+
+describe("review affordance", () => {
+  it("shows a review control only for signed-in humans on agent messages", async () => {
+    room.conversation = conversation;
+    session.authReady = true;
+    session.user = { id: 1, email: "greg@example.com", handle: "greg" };
+    const message = mount(Message, {
+      target: document.body,
+      props: { message: agentMessage("ship the producer path") },
+    });
+    try {
+      expect(document.querySelector(".review-btn")).not.toBeNull();
+    } finally {
+      await unmount(message);
+    }
+  });
+
+  it("hides review on system and human messages", async () => {
+    room.conversation = conversation;
+    session.authReady = true;
+    session.user = { id: 1, email: "greg@example.com", handle: "greg" };
+    const system = mount(Message, {
+      target: document.body,
+      props: { message: systemMessage("topic set") },
+    });
+    await unmount(system);
+    mount(Message, {
+      target: document.body,
+      props: { message: humanMessage("looks good") },
+    });
+    expect(document.querySelector(".review-btn")).toBeNull();
+  });
+
+  it("opens the review dialog instead of posting immediately", async () => {
+    room.conversation = conversation;
+    session.authReady = true;
+    session.user = { id: 1, email: "greg@example.com", handle: "greg" };
+    const open = vi.spyOn(dialogs, "open");
+    const message = mount(Message, {
+      target: document.body,
+      props: { message: agentMessage("ready for review") },
+    });
+    try {
+      clickButton(".review-btn");
+      expect(open).toHaveBeenCalledOnce();
+    } finally {
+      await unmount(message);
+    }
+  });
+});
 
 function systemMessage(body: string): ChatMessage {
   return {

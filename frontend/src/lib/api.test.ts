@@ -278,4 +278,30 @@ describe("api", () => {
       body: JSON.stringify(preset),
     });
   });
+
+  it("posts structured review decisions with numeric presentation ids", async () => {
+    const observation = {
+      conversation_id: "conv-1",
+      presentation_message_id: "10650",
+      evidence_kind: "decision",
+      evidence_ref: "decision:source-uuid",
+      sender_id: "partyline-user-1",
+      decision: "approve",
+      observed_at: "2026-09-02T22:15:00Z",
+    };
+    const fetch = vi.fn().mockResolvedValue(response(observation, { status: 201 }));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      api.createReviewDecision("conv-1", {
+        presentation_message_id: 10650,
+        decision: "approve",
+      }),
+    ).resolves.toEqual(observation);
+    expect(fetch).toHaveBeenCalledWith("/api/conversations/conv-1/review-decisions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ presentation_message_id: 10650, decision: "approve" }),
+    });
+  });
 });
