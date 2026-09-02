@@ -34,6 +34,7 @@
       : null,
   );
   const canReview = $derived(session.signedIn && isAgent && lineActive && localDecision === null);
+  const reviewClearance = $derived(canReview ? "pe-12" : "");
   const body = $derived(renderMessage(visibleMessageBody(message), message.sender_type === "agent"));
   const images = $derived(message.files.filter((file) => file.kind === "image"));
   const otherFiles = $derived(message.files.filter((file) => file.kind !== "image"));
@@ -50,9 +51,7 @@
         : "whitespace-pre-wrap break-words text-cream",
   );
   const rootClass = $derived(
-    isSystem
-      ? "max-w-none text-center my-[18px]"
-      : `max-w-[860px] mb-[14px] group relative${canReview ? " pe-12" : ""}`,
+    isSystem ? "max-w-none text-center my-[18px]" : "max-w-[860px] mb-[14px] group relative",
   );
 
   function openReviewDialog(): void {
@@ -63,7 +62,7 @@
 
 <div class="msg animate-[arrive_0.28s_ease_both] {rootClass}">
   {#if !isSystem}
-    <div class="head mb-0.5 flex w-full items-baseline gap-2.5">
+    <div class="head mb-0.5 flex w-full items-baseline gap-2.5 {reviewClearance}">
       <span
         class="who font-semibold text-[12.5px] {message.sender_type}"
         style:color={senderColor(message.sender, message.sender_type)}
@@ -86,15 +85,19 @@
       >
     {/if}
   {/if}
-  <div class="body {bodyClass}" use:enhanceMarkdown={body}>
+  <div class="body {bodyClass} {reviewClearance}" use:enhanceMarkdown={body}>
     <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised in renderMessage -->
     {@html body}
   </div>
   {#if images.length}
-    <ImageGrid {images} />
+    <div class={reviewClearance}>
+      <ImageGrid {images} />
+    </div>
   {/if}
   {#if otherFiles.length}
-    <FileAttachments files={otherFiles} />
+    <div class={reviewClearance}>
+      <FileAttachments files={otherFiles} />
+    </div>
   {/if}
 </div>
 
