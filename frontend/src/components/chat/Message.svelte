@@ -11,7 +11,12 @@
   import { visibleMessageBody } from "../../lib/files";
   import ImageGrid from "./ImageGrid.svelte";
   import FileAttachments from "./FileAttachments.svelte";
+  import ReviewDecisionDialog from "../dialogs/ReviewDecisionDialog.svelte";
   import type { ChatMessage } from "../../lib/contracts";
+  import { dialogs } from "../../state/dialogs.svelte.js";
+  import { reviewDecisionStatus } from "../../state/review-decision-status.svelte.js";
+  import { room } from "../../state/room.svelte.js";
+  import { session } from "../../state/session.svelte.js";
 
   interface Props {
     message: ChatMessage;
@@ -20,6 +25,13 @@
   let { message }: Props = $props();
 
   const isSystem = $derived(message.sender_type === "system");
+  const isAgent = $derived(message.sender_type === "agent");
+  const conversationId = $derived(room.conversation?.id ?? null);
+  const lineActive = $derived(Boolean(conversationId && room.conversation?.archived_at == null));
+  const localDecision = $derived(
+    conversationId ? reviewDecisionStatus.get(conversationId, message.id) : null,
+  );
+  const canReview = $derived(session.signedIn && isAgent && lineActive && localDecision === null);
   const body = $derived(renderMessage(visibleMessageBody(message), message.sender_type === "agent"));
   const images = $derived(message.files.filter((file) => file.kind === "image"));
   const otherFiles = $derived(message.files.filter((file) => file.kind !== "image"));
@@ -35,12 +47,19 @@
         ? "whitespace-normal break-words text-cream"
         : "whitespace-pre-wrap break-words text-cream",
   );
-  const rootClass = $derived(isSystem ? "max-w-none text-center my-[18px]" : "max-w-[860px] mb-[14px]");
+  const rootClass = $derived(
+    isSystem ? "max-w-none text-center my-[18px]" : "max-w-[860px] mb-[14px] group relative",
+  );
+
+  function openReviewDialog(): void {
+    if (!conversationId || !canReview) return;
+    dialogs.open(ReviewDecisionDialog, { message, conversationId });
+  }
 </script>
 
 <div class="msg animate-[arrive_0.28s_ease_both] {rootClass}">
   {#if !isSystem}
-    <div class="head mb-0.5 flex items-baseline gap-2.5">
+    <div class="head mb-0.5 flex w-full items-baseline gap-2.5">
       <span
         class="who font-semibold text-[12.5px] {message.sender_type}"
         style:color={senderColor(message.sender, message.sender_type)}
@@ -48,6 +67,18 @@
         {message.sender}
       </span>
       <span class="when text-[10px] text-cream-faint">{when}</span>
+      {#if localDecision}
+        <span class="review-badge text-[10px] tracking-wide uppercase text-cream-faint">
+          {localDecision === "approve" ? "approved" : "rejected"}
+        </span>
+      {:else if canReview}
+        <button
+          type="button"
+          class="review-btn min-h-11 min-w-11 border border-line bg-ink-3 px-2.5 text-[10px] tracking-wide text-copper-hot uppercase"
+          aria-label="Review this agent presentation"
+          onclick={openReviewDialog}>review</button
+        >
+      {/if}
     </div>
   {/if}
   <div class="body {bodyClass}" use:enhanceMarkdown={body}>
@@ -69,6 +100,25 @@
     content: "▸ ";
     color: var(--color-copper);
     font-weight: 400;
+  }
+
+  .review-btn {
+    margin-left: auto;
+    opacity: 1;
+  }
+
+  @media (hover: hover) {
+    .group:not(:hover):not(:focus-within) .review-btn {
+      opacity: 0;
+    }
+    .group:hover .review-btn,
+    .group:focus-within .review-btn {
+      opacity: 1;
+    }
+  }
+
+  .review-badge {
+    margin-left: auto;
   }
 
   /* ── rendered message bodies ──
