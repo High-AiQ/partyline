@@ -57,13 +57,11 @@ describe("review affordance", () => {
     try {
       expect(document.querySelector(".review-btn")).not.toBeNull();
       const head = document.querySelector(".head");
-      const body = document.querySelector(".body");
       const button = document.querySelector(".review-btn");
       const root = document.querySelector(".msg");
       expect(head?.contains(button)).toBe(false);
-      expect(head?.classList.contains("pe-12")).toBe(true);
-      expect(body?.classList.contains("pe-12")).toBe(true);
-      expect(root?.classList.contains("pe-12")).toBe(false);
+      expect(root?.classList.contains("pe-12")).toBe(true);
+      expect(document.querySelector(".body")?.classList.contains("pe-12")).toBe(false);
     } finally {
       await unmount(message);
     }
