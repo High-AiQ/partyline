@@ -61,7 +61,7 @@
 
 <div class="msg animate-[arrive_0.28s_ease_both] {rootClass}">
   {#if !isSystem}
-    <div class="head mb-0.5 flex w-full items-baseline gap-2.5">
+    <div class="head mb-0.5 flex w-full items-baseline gap-2.5 {canReview ? 'pe-12' : ''}">
       <span
         class="who font-semibold text-[12.5px] {message.sender_type}"
         style:color={senderColor(message.sender, message.sender_type)}
@@ -73,15 +73,16 @@
         <span class="review-badge text-[10px] tracking-wide uppercase text-cream-faint">
           {localDecision === "approve" ? "approved" : "rejected"}
         </span>
-      {:else if canReview}
-        <button
-          type="button"
-          class="review-btn min-h-11 min-w-11 border border-line bg-ink-3 px-2.5 text-[10px] tracking-wide text-copper-hot uppercase"
-          aria-label="Review this agent presentation"
-          onclick={openReviewDialog}>review</button
-        >
       {/if}
     </div>
+    {#if canReview}
+      <button
+        type="button"
+        class="review-btn absolute top-0 right-0 min-h-11 min-w-11 border border-line bg-ink-3 px-2.5 text-[10px] tracking-wide text-copper-hot uppercase"
+        aria-label="Review this agent presentation"
+        onclick={openReviewDialog}>review</button
+      >
+    {/if}
   {/if}
   <div class="body {bodyClass}" use:enhanceMarkdown={body}>
     <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised in renderMessage -->
@@ -105,7 +106,6 @@
   }
 
   .review-btn {
-    margin-left: auto;
     opacity: 1;
   }
 

@@ -1,4 +1,4 @@
-/** POST one immutable structured review decision for a presentation message. */
+/** The review-decision POST used by the human presentation affordance. */
 
 import { request } from "./http";
 import {
