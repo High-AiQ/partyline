@@ -12,6 +12,7 @@
   import type { ReviewDecisionChoice } from "../../lib/review-decisions";
   import type { ChatMessage } from "../../lib/contracts";
   import { reviewDecisionStatus } from "../../state/review-decision-status.svelte.js";
+  import { session } from "../../state/session.svelte.js";
 
   interface Props {
     message: ChatMessage;
@@ -24,12 +25,36 @@
   let busy = $state<ReviewDecisionChoice | null>(null);
   let error = $state("");
   let success = $state<ReviewDecisionChoice | null>(null);
+  let successTimer: ReturnType<typeof setTimeout> | null = null;
 
   const preview = $derived(visibleMessageBody(message).trim().slice(0, 280));
   const truncated = $derived(visibleMessageBody(message).trim().length > 280);
+  const locked = $derived(busy != null || success != null);
+
+  function clearSuccessTimer(): void {
+    if (successTimer !== null) {
+      clearTimeout(successTimer);
+      successTimer = null;
+    }
+  }
+
+  $effect(() => () => {
+    clearSuccessTimer();
+  });
+
+  function guardedClose(): void {
+    if (busy != null) return;
+    clearSuccessTimer();
+    close();
+  }
 
   async function decide(decision: ReviewDecisionChoice): Promise<void> {
     if (busy || success) return;
+    const userId = session.user?.id;
+    if (userId == null) {
+      error = "sign in as a human to record a review decision";
+      return;
+    }
     busy = decision;
     error = "";
     try {
@@ -37,9 +62,11 @@
         presentation_message_id: message.id,
         decision,
       });
-      reviewDecisionStatus.record(conversationId, message.id, decision);
+      reviewDecisionStatus.record(conversationId, message.id, userId, decision);
       success = decision;
-      window.setTimeout(() => {
+      clearSuccessTimer();
+      successTimer = setTimeout(() => {
+        successTimer = null;
         close();
       }, 900);
     } catch (failure: unknown) {
@@ -47,10 +74,9 @@
       busy = null;
     }
   }
-  const locked = $derived(busy != null || success != null);
 </script>
 
-<Modal title="review agent presentation" {close}>
+<Modal title="review agent presentation" close={guardedClose}>
   <p class="dialog-text">
     Record one immutable decision for <strong>@{message.sender}</strong> · message {message.id}. This cannot
     be changed later.
@@ -72,7 +98,7 @@
   </div>
 
   <div class="line-actions">
-    <button type="button" class="min-h-11 min-w-11" disabled={locked} onclick={close}> cancel </button>
+    <button type="button" class="min-h-11 min-w-11" disabled={locked} onclick={guardedClose}> cancel </button>
     <button
       type="button"
       class="danger min-h-11 min-w-[5.5rem]"

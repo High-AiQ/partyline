@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ReviewDecisionInSchema, ReviewObservationSchema, senderIdForUser } from "./review-decisions";
+import { createReviewDecision } from "./review-decision-api";
 
 describe("review decision contracts", () => {
   it("accepts the frozen POST body with a numeric presentation id", () => {
@@ -39,5 +40,35 @@ describe("review decision contracts", () => {
     });
     expect(row.evidence_kind).toBe("decision");
     expect(senderIdForUser(42)).toBe("partyline-user-42");
+  });
+
+  it("posts structured review decisions with numeric presentation ids", async () => {
+    const observation = {
+      conversation_id: "conv-1",
+      presentation_message_id: "10650",
+      evidence_kind: "decision",
+      evidence_ref: "decision:source-uuid",
+      sender_id: "partyline-user-1",
+      decision: "approve",
+      observed_at: "2026-09-02T22:15:00Z",
+    };
+    const fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: vi.fn().mockResolvedValue(observation),
+    });
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      createReviewDecision("conv-1", {
+        presentation_message_id: 10650,
+        decision: "approve",
+      }),
+    ).resolves.toEqual(observation);
+    expect(fetch).toHaveBeenCalledWith("/api/conversations/conv-1/review-decisions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ presentation_message_id: 10650, decision: "approve" }),
+    });
   });
 });
