@@ -18,6 +18,7 @@ through ptys. The pty and transcript-tailing design are load-bearing. Read `READ
 - `partyline/server.py` — FastAPI app: REST, WebSocket, and mention routing
 - `partyline/adapters/` — built-in process adapters and adapter discovery
 - `partyline/db.py` + `partyline/db_schema.py` — SQLite queries, schema, and migrations
+- `partyline/review_observations.py` — immutable structured review-decision store and API
 - `frontend/` — TypeScript web client: Vite + Svelte 5 + Tailwind (`docs/frontend.md`)
 - `partyline/static/` — build output, committed
 - `docs/` — depth: `frontend.md`, `dogfooding.md`, `adapters.md`, `lessons.md`, `releases.md`
@@ -26,6 +27,17 @@ through ptys. The pty and transcript-tailing design are load-bearing. Read `READ
 | DO | DO NOT |
 | --- | --- |
 | Regenerate `partyline/static/` with `npm run build` | Edit `partyline/static/` by hand |
+
+## Structured review decisions
+
+Review observations are a machine-consumed, signed-evidence source; their
+contract is in `docs/review-observations.md`.
+
+| Do | Do not |
+| --- | --- |
+| Derive reviewer identity, timestamp, and locator from the authenticated credential and server | Accept a sender, timestamp, or locator from a client |
+| Keep decisions immutable and use their first-class `decision` kind | Parse a chat body or masquerade a decision as a reaction/reply |
+| Return the closed seven-field observation page at its exact no-slash path | Add fields, cursor metadata, handle mappings, or a slash-redirect variant |
 
 ## Gates — all must pass before every commit
 

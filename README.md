@@ -167,6 +167,13 @@ Every route except the login screen requires a credential, and there are exactly
 Sender identity on every write derives from the credential, never from a client-supplied field:
 an authenticated sender cannot be impersonated, and a handle cannot collide with a taken one.
 
+## Structured review decisions
+
+An authenticated human can create an immutable structured approval or rejection
+for a presented message. This is separate from chat prose and is intended for
+evidence consumers; the exact authenticated API contract is documented in
+[`docs/review-observations.md`](docs/review-observations.md).
+
 Passwords are stored as scrypt hashes. Sessions are stateless JWTs signed with a per-instance
 secret minted into that server's own database on first use, so two servers with separate
 databases can never accept each other's tokens — and deleting a database invalidates every
