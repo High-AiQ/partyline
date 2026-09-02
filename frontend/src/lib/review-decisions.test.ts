@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ReviewDecisionInSchema, ReviewObservationSchema, senderIdForUser } from "./review-decisions";
-import { createReviewDecision } from "./review-decision-api";
+import { createReviewDecision } from "./review-decisions-api";
 
 describe("review decision contracts", () => {
   it("accepts the frozen POST body with a numeric presentation id", () => {

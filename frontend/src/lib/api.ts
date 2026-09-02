@@ -53,7 +53,7 @@ import type {
 import { request } from "./http";
 import { messagePage, type MessagePageRequest } from "./message-api";
 import type { MessagePage } from "./message-page";
-import { createReviewDecision } from "./review-decision-api";
+import { createReviewDecision } from "./review-decisions-api";
 import type { ReviewDecisionIn, ReviewObservation } from "./review-decisions";
 import { AttachmentCreateRequestSchema } from "./attachment-contracts";
 import type { AttachmentCreateRequest } from "./attachment-contracts";

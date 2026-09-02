@@ -56,6 +56,10 @@ describe("review affordance", () => {
     });
     try {
       expect(document.querySelector(".review-btn")).not.toBeNull();
+      const head = document.querySelector(".head");
+      const button = document.querySelector(".review-btn");
+      expect(head?.contains(button)).toBe(false);
+      expect(button?.classList.contains("absolute")).toBe(true);
     } finally {
       await unmount(message);
     }
