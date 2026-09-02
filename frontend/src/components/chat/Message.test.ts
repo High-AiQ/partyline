@@ -57,10 +57,13 @@ describe("review affordance", () => {
     try {
       expect(document.querySelector(".review-btn")).not.toBeNull();
       const head = document.querySelector(".head");
+      const body = document.querySelector(".body");
       const button = document.querySelector(".review-btn");
       const root = document.querySelector(".msg");
       expect(head?.contains(button)).toBe(false);
-      expect(root?.classList.contains("pe-12")).toBe(true);
+      expect(head?.classList.contains("pe-12")).toBe(true);
+      expect(body?.classList.contains("pe-12")).toBe(true);
+      expect(root?.classList.contains("pe-12")).toBe(false);
     } finally {
       await unmount(message);
     }
@@ -96,6 +99,47 @@ describe("review affordance", () => {
       expect(open).toHaveBeenCalledOnce();
     } finally {
       await unmount(message);
+    }
+  });
+
+  it("mounts the review modal with the presentation excerpt", async () => {
+    room.conversation = conversation;
+    session.authReady = true;
+    session.user = { id: 1, email: "greg@example.com", handle: "greg" };
+    const message = mount(Message, {
+      target: document.body,
+      props: { message: agentMessage("ready for review") },
+    });
+    try {
+      clickButton(".review-btn");
+      expect(dialogs.stack).toHaveLength(1);
+      const entry = dialogs.stack[0];
+      if (!entry) throw new Error("missing dialog stack entry");
+      const dialog = mount(entry.component, {
+        target: document.body,
+        props: {
+          ...entry.props,
+          close: () => {
+            dialogs.close(entry.key);
+          },
+        },
+      });
+      try {
+        expect(document.body.textContent).toContain("review agent presentation");
+        expect(document.body.textContent).toContain("ready for review");
+        const reject = document.querySelector("button.danger");
+        const approve = document.querySelector("button.primary");
+        if (!(reject instanceof HTMLButtonElement) || !(approve instanceof HTMLButtonElement)) {
+          throw new Error("missing review modal actions");
+        }
+        expect(reject.textContent.trim()).toBe("reject");
+        expect(approve.textContent.trim()).toBe("approve");
+      } finally {
+        await unmount(dialog);
+      }
+    } finally {
+      await unmount(message);
+      dialogs.closeAll();
     }
   });
 
