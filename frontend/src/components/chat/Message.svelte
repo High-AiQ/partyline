@@ -50,7 +50,9 @@
         : "whitespace-pre-wrap break-words text-cream",
   );
   const rootClass = $derived(
-    isSystem ? "max-w-none text-center my-[18px]" : "max-w-[860px] mb-[14px] group relative",
+    isSystem
+      ? "max-w-none text-center my-[18px]"
+      : `max-w-[860px] mb-[14px] group relative${canReview ? " pe-12" : ""}`,
   );
 
   function openReviewDialog(): void {
@@ -61,7 +63,7 @@
 
 <div class="msg animate-[arrive_0.28s_ease_both] {rootClass}">
   {#if !isSystem}
-    <div class="head mb-0.5 flex w-full items-baseline gap-2.5 {canReview ? 'pe-12' : ''}">
+    <div class="head mb-0.5 flex w-full items-baseline gap-2.5">
       <span
         class="who font-semibold text-[12.5px] {message.sender_type}"
         style:color={senderColor(message.sender, message.sender_type)}
@@ -78,7 +80,7 @@
     {#if canReview}
       <button
         type="button"
-        class="review-btn absolute top-0 right-0 min-h-11 min-w-11 border border-line bg-ink-3 px-2.5 text-[10px] tracking-wide text-copper-hot uppercase"
+        class="review-btn min-h-11 min-w-11 border border-line bg-ink-3 px-2.5 text-[10px] tracking-wide text-copper-hot uppercase"
         aria-label="Review this agent presentation"
         onclick={openReviewDialog}>review</button
       >
@@ -106,6 +108,9 @@
   }
 
   .review-btn {
+    position: absolute;
+    top: 0;
+    right: 0;
     opacity: 1;
   }
 
