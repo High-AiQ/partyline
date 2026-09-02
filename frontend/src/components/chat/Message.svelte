@@ -29,7 +29,9 @@
   const conversationId = $derived(room.conversation?.id ?? null);
   const lineActive = $derived(Boolean(conversationId && room.conversation?.archived_at == null));
   const localDecision = $derived(
-    conversationId ? reviewDecisionStatus.get(conversationId, message.id) : null,
+    conversationId && session.user
+      ? reviewDecisionStatus.get(conversationId, message.id, session.user.id)
+      : null,
   );
   const canReview = $derived(session.signedIn && isAgent && lineActive && localDecision === null);
   const body = $derived(renderMessage(visibleMessageBody(message), message.sender_type === "agent"));

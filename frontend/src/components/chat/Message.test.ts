@@ -93,6 +93,23 @@ describe("review affordance", () => {
       await unmount(message);
     }
   });
+
+  it("does not show another human's local decision badge", async () => {
+    reviewDecisionStatus.record("conv-1", 2, 1, "approve");
+    room.conversation = conversation;
+    session.authReady = true;
+    session.user = { id: 2, email: "ada@example.com", handle: "ada" };
+    const message = mount(Message, {
+      target: document.body,
+      props: { message: agentMessage("ship the producer path") },
+    });
+    try {
+      expect(document.querySelector(".review-badge")).toBeNull();
+      expect(document.querySelector(".review-btn")).not.toBeNull();
+    } finally {
+      await unmount(message);
+    }
+  });
 });
 
 function systemMessage(body: string): ChatMessage {

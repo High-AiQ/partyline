@@ -53,12 +53,8 @@ import type {
 import { request } from "./http";
 import { messagePage, type MessagePageRequest } from "./message-api";
 import type { MessagePage } from "./message-page";
-import {
-  ReviewDecisionInSchema,
-  ReviewObservationSchema,
-  type ReviewDecisionIn,
-  type ReviewObservation,
-} from "./review-decisions";
+import { createReviewDecision } from "./review-decision-api";
+import type { ReviewDecisionIn, ReviewObservation } from "./review-decisions";
 import { AttachmentCreateRequestSchema } from "./attachment-contracts";
 import type { AttachmentCreateRequest } from "./attachment-contracts";
 export { ApiContractError, ApiError, request } from "./http";
@@ -297,11 +293,5 @@ export const api: PartylineApi = {
       fallback: "could not delete preset",
     }),
 
-  createReviewDecision: (conversationId, payload) =>
-    request(`/api/conversations/${conversationId}/review-decisions`, {
-      schema: ReviewObservationSchema,
-      method: "POST",
-      body: ReviewDecisionInSchema.parse(payload),
-      fallback: "could not record review decision",
-    }),
+  createReviewDecision,
 };
