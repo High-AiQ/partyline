@@ -136,4 +136,17 @@ MIGRATIONS = [
     # refuses to drop a column referenced by an index.
     "DROP INDEX IF EXISTS idx_attachments_follow_lead",
     "ALTER TABLE attachments DROP COLUMN follow",
+    # Immutable structured human decisions. They outlive line archiving, but
+    # an explicit permanent purge destroys their authority with the line.
+    """CREATE TABLE IF NOT EXISTS review_decisions(
+        id TEXT PRIMARY KEY,
+        conv_id TEXT NOT NULL,
+        presentation_message_id INTEGER NOT NULL,
+        sender_user_id INTEGER NOT NULL,
+        decision TEXT NOT NULL CHECK(decision IN ('approve', 'reject')),
+        created_at REAL NOT NULL,
+        UNIQUE(conv_id, presentation_message_id, sender_user_id)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_review_decisions_binding "
+    "ON review_decisions(conv_id, presentation_message_id)",
 ]
