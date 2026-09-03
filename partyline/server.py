@@ -78,7 +78,6 @@ from .hook_routes import hook_url, hooks_router
 from .line_process_routes import detach_attachment, register_line_process_routes
 from .message_routes import conversation_detail_response, message_router
 from .message_contracts import ConversationDetailResponse
-from .review_observation_routes import review_observation_router
 from .presence import Presence
 from .media import MediaStore, media_root
 from .claim_routes import claims_router, purge_claims
@@ -148,7 +147,6 @@ register_line_process_routes(app, runtime)
 app.include_router(auth_router(runtime.db, on_handle_change=user_sockets.close_all))
 app.include_router(media_router(runtime, media))
 app.include_router(message_router(runtime, media))
-app.include_router(review_observation_router(runtime))
 app.include_router(claims_router(runtime))
 app.include_router(hooks_router(runtime, presence))
 app.include_router(presets_router(runtime, ADAPTERS))
