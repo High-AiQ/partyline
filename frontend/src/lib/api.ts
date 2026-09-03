@@ -53,8 +53,6 @@ import type {
 import { request } from "./http";
 import { messagePage, type MessagePageRequest } from "./message-api";
 import type { MessagePage } from "./message-page";
-import { createReviewDecision } from "./review-decisions-api";
-import type { ReviewDecisionIn, ReviewObservation } from "./review-decisions";
 import { AttachmentCreateRequestSchema } from "./attachment-contracts";
 import type { AttachmentCreateRequest } from "./attachment-contracts";
 export { ApiContractError, ApiError, request } from "./http";
@@ -112,7 +110,6 @@ export interface PartylineApi {
   presets(): Promise<Preset[]>;
   savePreset(preset: PresetDraft): Promise<Preset>;
   deletePreset(id: string): Promise<OkResult>;
-  createReviewDecision(conversationId: string, payload: ReviewDecisionIn): Promise<ReviewObservation>;
 }
 
 export const api: PartylineApi = {
@@ -292,6 +289,4 @@ export const api: PartylineApi = {
       method: "DELETE",
       fallback: "could not delete preset",
     }),
-
-  createReviewDecision,
 };
