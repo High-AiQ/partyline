@@ -17,6 +17,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from scripts.cockpit_arm import parse_systemd_exec_start  # noqa: E402
 from scripts.cockpit import (  # noqa: E402
     CommandResult,
     Finding,
@@ -27,7 +28,6 @@ from scripts.cockpit import (  # noqa: E402
     check_tree_clean,
     referenced_assets,
     restart_needed,
-    parse_systemd_exec_start,
 )
 from scripts.cockpit_api import resolve_line, schedule_restart_plan  # noqa: E402
 from partyline.contracts import ConversationResponse
@@ -473,6 +473,64 @@ class ArmRestartTest(unittest.TestCase):
         self.assertEqual(result, 0)
         scheduled = self.calls[0]
         self.assertEqual(scheduled[scheduled.index("--server-config") + 1], str(config.resolve()))
+
+    def test_an_explicit_source_server_is_preflighted_and_passed_to_the_trigger(self):
+        source = self.cockpit / "old-checkout" / ".venv" / "bin" / "partyline"
+        source.parent.mkdir(parents=True)
+        source.write_text("present")
+        result = arm_restart(
+            self.cockpit,
+            42,
+            90,
+            "http://127.0.0.1:8643",
+            unit="partyline-restart-test",
+            source_server=source,
+            run=self.fake_run,
+            inspection=self.inspection,
+            generation=lambda _pid: "1234",
+            command_line=lambda _pid: ["/usr/bin/python3", str(source), "--config", "/etc/lan.toml"],
+        )
+        self.assertEqual(result, 0)
+        scheduled = self.calls[0]
+        self.assertEqual(scheduled[scheduled.index("--source-server") + 1], str(source))
+
+    def test_a_source_server_the_pid_is_not_running_refuses_before_scheduling(self):
+        source = self.cockpit / "old-checkout" / ".venv" / "bin" / "partyline"
+        source.parent.mkdir(parents=True)
+        source.write_text("present")
+        for command in (
+            ["/usr/bin/python3", str(self.cockpit / ".venv/bin/partyline")],  # a different binary
+            None,                                                            # unreadable
+        ):
+            with self.subTest(command=command):
+                result = arm_restart(
+                    self.cockpit,
+                    42,
+                    90,
+                    "http://127.0.0.1:8643",
+                    source_server=source,
+                    run=self.fake_run,
+                    inspection=self.inspection,
+                    generation=lambda _pid: "1234",
+                    command_line=lambda _pid, command=command: command,
+                )
+                self.assertEqual(result, 1)
+                self.assertEqual(self.calls, [])
+
+    def test_a_missing_source_server_refuses_before_scheduling(self):
+        result = arm_restart(
+            self.cockpit,
+            42,
+            90,
+            "http://127.0.0.1:8643",
+            source_server=self.cockpit / "nowhere" / "partyline",
+            run=self.fake_run,
+            inspection=self.inspection,
+            generation=lambda _pid: "1234",
+            command_line=lambda _pid: ["irrelevant"],
+        )
+        self.assertEqual(result, 1)
+        self.assertEqual(self.calls, [])
 
     def test_invalid_server_config_refuses_before_scheduling(self):
         config = self.cockpit / "invalid.toml"

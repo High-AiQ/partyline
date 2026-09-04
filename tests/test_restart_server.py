@@ -7,6 +7,7 @@ from pathlib import Path
 
 from scripts.restart_server import (
     EXIT_ALREADY_GONE,
+    EXIT_BAD_ARGUMENTS,
     EXIT_COMMAND_LINE_UNREADABLE,
     EXIT_ENVIRONMENT_UNREADABLE,
     EXIT_REPLACEMENT_UNIMPORTABLE,
@@ -197,6 +198,62 @@ class RestartTest(unittest.TestCase):
             probe=lambda _cwd, _server: None,
         )
         self.assertEqual(executions[0][-1], ["--host", "0.0.0.0", "--port", "9000"])
+
+    def test_an_outgoing_server_from_another_checkout_is_refused_without_a_source(self):
+        """The old console script is the anchor for the preserved flags; a
+        replacement in a new checkout has a different path, so the anchor must
+        be declared rather than guessed — and the refusal must say so."""
+        old_server = self.root / "old-checkout" / "partyline"
+        with self.assertRaises(RestartRefused) as raised:
+            run_restart(
+                42, "1234", self.server, self.log, self.root,
+                generation=lambda _pid: "1234",
+                environment=lambda _pid: {"PATH": "/old/server/path"},
+                command_line=lambda _pid: ["/usr/bin/python3", str(old_server), "--port", "8643"],
+                signal_process=lambda *_args: self.signals.append(_args),
+                wait=lambda *_args: None,
+                launch=lambda *args: self.executions.append(args),
+                probe=lambda _cwd, _server: None,
+            )
+        self.assertEqual(raised.exception.exit_code, EXIT_BAD_ARGUMENTS)
+        self.assertIn("--source-server", str(raised.exception))
+        self.assertEqual((self.signals, self.executions), ([], []))
+
+    def test_an_explicit_source_server_anchors_the_migration(self):
+        old_server = self.root / "old-checkout" / "partyline"
+        run_restart(
+            42, "1234", self.server, self.log, self.root,
+            source_server=old_server,
+            generation=lambda _pid: "1234",
+            environment=lambda _pid: {"PATH": "/old/server/path"},
+            command_line=lambda _pid: [
+                "/usr/bin/python3", str(old_server), "--config", "/etc/lan.toml"
+            ],
+            signal_process=lambda pid, sig: self.signals.append((pid, sig)),
+            wait=lambda *_args: None,
+            launch=lambda *args: self.executions.append(args),
+            probe=lambda _cwd, _server: None,
+        )
+        self.assertEqual(self.signals, [(42, signal.SIGTERM)])
+        server, _log, cwd, _env, arguments = self.executions[0]
+        # The NEW executable is launched, in the NEW cwd, with the OLD flags.
+        self.assertEqual((server, cwd, arguments), (self.server, self.root, ["--config", "/etc/lan.toml"]))
+
+    def test_a_source_server_the_pid_is_not_running_is_refused_before_signalling(self):
+        with self.assertRaises(RestartRefused) as raised:
+            run_restart(
+                42, "1234", self.server, self.log, self.root,
+                source_server=self.root / "elsewhere" / "partyline",
+                generation=lambda _pid: "1234",
+                environment=lambda _pid: {},
+                command_line=lambda _pid: [str(self.server)],
+                signal_process=lambda *_args: self.signals.append(_args),
+                wait=lambda *_args: None,
+                launch=lambda *args: self.executions.append(args),
+                probe=lambda _cwd, _server: None,
+            )
+        self.assertEqual(raised.exception.exit_code, EXIT_BAD_ARGUMENTS)
+        self.assertEqual(self.signals, [])
 
     def test_server_config_rewrites_only_argv_and_preserves_environment(self):
         executions = []

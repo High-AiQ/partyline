@@ -74,6 +74,20 @@ migrate — the CLI flags outrank any config). The trigger still resolves the co
 outgoing environment before it signals anything, and refuses if environment overrides would
 change the config's result rather than returning on an unexpected address.
 
+When the outgoing service runs from a *different* checkout than the one being deployed — the
+first move of a workbench-hosted instance onto its own cockpit clone — name the executable the
+live pid is actually running:
+
+```bash
+uv run python -m scripts.cockpit arm --pid NNNNN --cockpit ~/partyline-lan \
+  --source-server ~/code/partyline/.venv/bin/partyline
+```
+
+The trigger anchors the preserved server flags on that console script instead of the
+replacement's, which the old command line never contains. Arming preflights that the file exists
+and that the pid's command line runs it; the trigger re-checks the same anchor before signalling,
+and the generation, environment, and replacement-import guards are unchanged.
+
 The replacement receives an environment snapshot from the verified outgoing process. This is
 load-bearing: a transient systemd unit does not inherit the interactive user's `PATH`, and attached
 CLIs may live in a user-local directory. If the old environment cannot be read, the trigger refuses
