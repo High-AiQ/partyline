@@ -27,8 +27,9 @@ from partyline.contracts import (
 )
 from scripts.cockpit_venv import cockpit_can_boot, live_version_matches, sync_locked
 from scripts.cockpit_api import schedule_restart_plan
-from scripts.cockpit_arm import parse_systemd_exec_start, preflight_server_config
-from scripts.restart_server import process_generation
+from scripts.cockpit_arm import (preflight_server_config, preflight_source_server,
+                                 verify_armed_unit)
+from scripts.restart_server import process_cmdline, process_generation
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_COCKPIT = Path(os.environ.get("PARTYLINE_COCKPIT", Path.home() / "partyline-cockpit"))
@@ -500,9 +501,11 @@ def arm_restart(
     *,
     unit: str | None = None,
     server_config: Path | None = None,
+    source_server: Path | None = None,
     run: Callable[[list[str]], CommandResult] = run_command,
     inspection: PendingPlanInspection | None = None,
     generation: Callable[[int], str | None] = process_generation,
+    command_line: Callable[[int], list[str] | None] = process_cmdline,
 ) -> int:
     """Schedule the reviewed restart executable and read the timer back.
 
@@ -543,6 +546,10 @@ def arm_restart(
             "fix the explicit config before arming; no restart was scheduled",
         )])
 
+    if source_server and (refused := preflight_source_server(source_server, pid, command_line)):
+        return report([Finding(refused, f"name the executable pid {pid} is running, "
+                               "from the checkout it currently serves")])
+
     script = cockpit / RESTART_SCRIPT.relative_to(REPO_ROOT)
     python = cockpit / ".venv" / "bin" / "python3"
     server = cockpit / ".venv" / "bin" / "partyline"
@@ -571,6 +578,8 @@ def arm_restart(
               "to the line — watch the trigger unit's journal instead")
     if config_proof:
         service_argv.extend(["--server-config", str(config_proof.path)])
+    if source_server:
+        service_argv.extend(["--source-server", str(source_server)])
     command = [
         "systemd-run",
         "--user",
@@ -588,43 +597,20 @@ def arm_restart(
             "resolve the user service error; no process was signalled",
         )])
 
-    timer = f"{unit}.timer"
-    service = f"{unit}.service"
-    timer_state = run([
-        "systemctl", "--user", "show", timer,
-        "-p", "LoadState", "-p", "ActiveState", "-p", "SubState", "-p", "Triggers",
-    ])
-    timer_listing = run([
-        "systemctl", "--user", "list-timers", timer, "--no-pager", "--no-legend",
-    ])
-    service_state = run([
-        "systemctl", "--user", "show", service, "-p", "ExecStart",
-    ])
-    timer_ok = (
-        timer_state.returncode == 0
-        and "LoadState=loaded" in timer_state.stdout
-        and "ActiveState=active" in timer_state.stdout
-        and "SubState=waiting" in timer_state.stdout
-        and f"Triggers={service}" in timer_state.stdout
-        and timer_listing.returncode == 0
-        and timer in timer_listing.stdout
-    )
-    command_ok = (
-        service_state.returncode == 0
-        and parse_systemd_exec_start(service_state.stdout) == service_argv
-    )
-    if not timer_ok or not command_ok:
-        run(["systemctl", "--user", "stop", timer])
+    verified, trigger = verify_armed_unit(run, unit, service_argv)
+    if not verified:
+        run(["systemctl", "--user", "stop", f"{unit}.timer"])
         return report([Finding(
             f"restart unit {unit} could not be verified after scheduling",
             "inspect the unit, then re-arm; an unverified timer is not armed",
         )])
 
-    trigger = timer_listing.stdout.strip()
-    print(f"  ✓ armed {service}\n  ✓ {trigger}\n  ✓ exact generation {pid}/{expected_start}")
+    print(f"  ✓ armed {unit}.service\n  ✓ {trigger}\n  ✓ exact generation {pid}/{expected_start}")
     if config_proof:
         label = f" · {config_proof.instance_name}" if config_proof.instance_name else ""
         print(f"  ✓ config {config_proof.path} → {config_proof.host}:{config_proof.port}{label}")
+    if source_server:
+        print(f"  ✓ migrating from {source_server}")
     return 0
 
 
@@ -658,6 +644,8 @@ def main(argv=None) -> int:
         parser.add_argument("--delay", type=int, default=90, help="seconds before signalling")
         parser.add_argument("--unit", help="stable systemd unit name for tests or diagnosis")
         parser.add_argument("--server-config", type=Path, help="explicit replacement server config")
+        parser.add_argument("--source-server", type=Path,
+                            help="the outgoing server executable when moving to another checkout")
         parser.add_argument(
             "--url",
             default=f"http://127.0.0.1:{os.environ.get('PARTYLINE_PORT', '8642')}",
@@ -685,6 +673,7 @@ def main(argv=None) -> int:
             args.url,
             unit=args.unit,
             server_config=args.server_config,
+            source_server=args.source_server,
         )
     print(__doc__)
     return 2

@@ -20,6 +20,7 @@ from pathlib import Path
 
 from scripts.cockpit_venv import probe_server, replacement_python
 from scripts.cockpit_arm import (
+    arguments_after_executable,
     preflight_server_config,
     resolve_server_config,
     with_server_config,
@@ -167,6 +168,7 @@ def run_restart(
     cwd: Path,
     *,
     server_config: Path | None = None,
+    source_server: Path | None = None,
     generation: Callable[[int], str | None] = process_generation,
     environment: Callable[[int], dict[str, str] | None] = process_environment,
     command_line: Callable[[int], list[str] | None] = process_cmdline,
@@ -197,12 +199,20 @@ def run_restart(
             EXIT_ENVIRONMENT_UNREADABLE,
         )
     command = command_line(pid)
-    if command is None or str(server) not in command:
+    if command is None:
         raise RestartRefused(
-            f"could not read the command line of pid {pid}",
-            EXIT_COMMAND_LINE_UNREADABLE,
+            f"could not read the command line of pid {pid}", EXIT_COMMAND_LINE_UNREADABLE
         )
-    arguments = command[command.index(str(server)) + 1 :]
+    # The outgoing console script anchors the preserved flags. Moving to another
+    # checkout means it differs from the replacement; the operator names it.
+    anchor = source_server or server
+    arguments = arguments_after_executable(command, anchor)
+    if arguments is None:
+        raise RestartRefused(
+            f"pid {pid} is not running {anchor}; pass --source-server with the outgoing "
+            "executable to migrate checkouts",
+            EXIT_BAD_ARGUMENTS,
+        )
     if server_config is not None:
         try:
             arguments = with_server_config(arguments, server_config)
@@ -248,6 +258,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--failure-url")
     parser.add_argument("--report-token")
     parser.add_argument("--server-config", type=Path)
+    parser.add_argument("--source-server", type=Path)
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
@@ -256,7 +267,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         run_restart(
             args.old_pid, args.old_start, args.server, args.logfile, args.cwd,
-            server_config=args.server_config,
+            server_config=args.server_config, source_server=args.source_server,
         )
     except RestartRefused as exc:
         print(exc, file=sys.stderr)
