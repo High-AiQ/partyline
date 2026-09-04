@@ -20,6 +20,19 @@ export const AttachmentCreateRequestSchema = z.object({
 });
 export type AttachmentCreateRequest = z.infer<typeof AttachmentCreateRequestSchema>;
 
+/**
+ * Start a stopped jack over as a brand-new session under the same handle.
+ * Both fields are optional: omit them for a blank fresh start. `checkpoint`
+ * is a path or a short continuation instruction the new process is pointed
+ * at; `after_message_id` is the last chat message the outgoing process
+ * incorporated, so messages posted after it are delivered instead of skipped.
+ */
+export const AttachmentFreshRequestSchema = z.object({
+  checkpoint: z.string().optional(),
+  after_message_id: z.number().int().positive().optional(),
+});
+export type AttachmentFreshRequest = z.infer<typeof AttachmentFreshRequestSchema>;
+
 export const AttachmentSchema = z.object({
   id: z.string(),
   conv_id: z.string(),

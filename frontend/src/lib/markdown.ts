@@ -46,6 +46,12 @@ const headingRenderer = {
     const level = Math.min(depth, 3);
     return `<div class="md-h md-h${String(level)}">${this.parser.parseInline(tokens)}</div>`;
   },
+  // The body is escaped before Marked sees it, and Marked's default codespan
+  // escapes again — `"` became a literal `&quot;` inside every inline code span.
+  // Fenced blocks already pass their text through untouched; do the same here.
+  codespan({ text }: { text: string }) {
+    return `<code>${text}</code>`;
+  },
 };
 
 function renderCodeBlock(text: string, lang: string | undefined): string {

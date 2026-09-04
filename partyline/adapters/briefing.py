@@ -47,6 +47,9 @@ BRIEFING = (
     "job announces itself: unmentioned completions reach humans only and "
     "never wake a process |\n"
     "\n"
+    "To refresh context on this same line: drain calls, save a checkpoint and last incorporated "
+    "message id, then detach and use Start fresh with both fields; Resume retains old context "
+    "(procedure: Partyline docs/agent-refresh.md).\n\n"
     "## Remembering what you learn\n"
     "When you want the room — present or future — to remember something, the repository "
     "is the only shared memory.\n"
@@ -170,3 +173,13 @@ def child_env(env: Mapping[str, str], att: dict) -> dict[str, str]:
     if token := att.get("api_token"):
         result["PARTYLINE_TOKEN"] = str(token)
     return result
+
+
+def fresh_checkpoint_briefing(text: str, checkpoint: str | None) -> str:
+    """A fresh session loads a durable pointer, never its predecessor's transcript."""
+    if checkpoint:
+        text += ("\n\nYou started with fresh context. Read this checkpoint and verify its "
+                 "authoritative state, announce readiness, then wait for the first @mention before "
+                 "resuming work; that wake delivers messages retained after the checkpoint:\n"
+                 + checkpoint)
+    return text

@@ -37,6 +37,15 @@ export function latestJacks<TJack extends Jack>(attachments: readonly TJack[]): 
   return [...byHandle.values()];
 }
 
+/**
+ * A roster snapshot minus the jacks forgotten since it was requested. A fetch
+ * that started before a removal can finish after it, carrying the dead card.
+ */
+export const withoutForgotten = <TJack extends { id: string }>(
+  attachments: readonly TJack[],
+  forgotten: ReadonlySet<string>,
+): TJack[] => attachments.filter((attachment) => !forgotten.has(attachment.id));
+
 /** Does this adapter know how to reopen a previous session? */
 export function canResume(adapters: readonly AdapterResumeInfo[], adapterId: string): boolean {
   const adapter = adapters.find((candidate) => candidate.id === adapterId);

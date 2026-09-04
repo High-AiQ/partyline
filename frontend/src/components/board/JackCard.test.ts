@@ -212,3 +212,39 @@ describe("JackCard cwd git identity", () => {
     }
   });
 });
+
+describe("JackCard lifecycle actions", () => {
+  function mountCard(overrides: Partial<Attachment> = {}) {
+    return mount(JackCard, {
+      target: document.body,
+      props: {
+        attachment: { ...attachment, ...overrides },
+        resumable: false,
+        overridesBundled: false,
+        onmention: vi.fn(),
+      },
+    });
+  }
+
+  it("offers only detach while the process is live", async () => {
+    const card = mountCard();
+    try {
+      expect(document.querySelector("[aria-label='detach sol']")).not.toBeNull();
+      expect(document.querySelector(".fresh-btn")).toBeNull();
+      expect(document.querySelector(".remove-btn")).toBeNull();
+    } finally {
+      await unmount(card);
+    }
+  });
+
+  it("offers start fresh and remove from roster once the process has stopped", async () => {
+    const card = mountCard({ status: "detached" });
+    try {
+      expect(document.querySelector("[aria-label='detach sol']")).toBeNull();
+      expect(document.querySelector(".fresh-btn")?.textContent).toContain("start fresh");
+      expect(document.querySelector("[aria-label='remove sol from roster']")).not.toBeNull();
+    } finally {
+      await unmount(card);
+    }
+  });
+});
