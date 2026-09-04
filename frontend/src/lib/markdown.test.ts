@@ -145,6 +145,23 @@ describe("renderMessage", () => {
       expect(html).toContain("#1 issue");
     });
 
+    it("shows quotes inside inline code as quotes, not as entities", () => {
+      // Regression: the pre-escaped body was escaped a second time by Marked's
+      // codespan renderer, so `{"a":1}` rendered as {&quot;a&quot;:1}.
+      const rich = renderMessage('event: `{"type":"removed"}` done', true);
+      expect(rich).toContain('<code>{"type":"removed"}</code>');
+      expect(rich).not.toContain("&amp;quot;");
+      const plain = renderMessage('run `echo "hi" && ls`', false);
+      expect(plain).toContain('<code>echo "hi" &amp;&amp; ls</code>');
+      expect(plain).not.toContain("&amp;amp;");
+    });
+
+    it("still keeps markup inside inline code inert", () => {
+      const html = renderMessage("see `<img src=x onerror=alert(1)>`", true);
+      expect(html).toContain("<code>&lt;img src=x onerror=alert(1)&gt;</code>");
+      expect(html).not.toContain("<img");
+    });
+
     it("still gives a person inline code and bold", () => {
       expect(renderMessage("run `ls` **now**", false)).toContain("<code>ls</code>");
       expect(renderMessage("run `ls` **now**", false)).toContain("<strong>now</strong>");

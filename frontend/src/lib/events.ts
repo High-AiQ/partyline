@@ -41,6 +41,14 @@ export const AttachmentEventSchema = z.object({
 });
 export type AttachmentEvent = z.infer<typeof AttachmentEventSchema>;
 
+/** A stopped jack was forgotten (or replaced by a fresh one); drop its card. */
+export const AttachmentRemovedEventSchema = z.object({
+  type: z.literal("attachment_removed"),
+  attachment_id: z.string(),
+  conversation_id: z.string(),
+});
+export type AttachmentRemovedEvent = z.infer<typeof AttachmentRemovedEventSchema>;
+
 export const LineLiveEventSchema = z.object({
   type: z.literal("line_live"),
   conversation_id: z.string(),
@@ -120,6 +128,7 @@ const CurrentWireEventSchema = z.discriminatedUnion("type", [
   HelloEventSchema,
   MessageEventSchema,
   AttachmentEventSchema,
+  AttachmentRemovedEventSchema,
   LineLiveEventSchema,
   AttentionEventSchema,
   WorkingEventSchema,

@@ -23,6 +23,7 @@ import pyte
 from partyline.adapters import pty_io
 from partyline.adapters.task_logging import log_task_deaths
 from partyline.adapters.briefing import (
+    fresh_checkpoint_briefing,
     BRIEFING,
     TOPIC_BRIEFING,
     child_env,
@@ -285,7 +286,7 @@ class Adapter(pty_io.PtyWriter):
         text = BRIEFING.format(name=self.att["name"], conv=self.att.get("conv_name", "?"))
         if topic := (self.att.get("topic") or "").strip():
             text += TOPIC_BRIEFING.format(topic=topic)
-        return text
+        return fresh_checkpoint_briefing(text, self.att.get("fresh_checkpoint"))
 
     def alive(self) -> bool:
         return self.proc is not None and self.proc.poll() is None

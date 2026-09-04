@@ -27,6 +27,10 @@ happened yet. (The one exception is a short briefing when a process joins.)
 
 *That is partyline developing partyline — the screenshot is a real line, not a mock-up.*
 
+Stopped process cards offer **Resume**, **Start fresh**, and **Remove from roster**. Resume
+keeps the CLI session; Start fresh replaces it without replaying earlier chat. For ongoing
+work, provide a checkpoint and message boundary using [the refresh procedure](docs/agent-refresh.md).
+
 ## Why a real terminal?
 
 Because the interactive app is the real thing. Headless and one-shot modes are a different
