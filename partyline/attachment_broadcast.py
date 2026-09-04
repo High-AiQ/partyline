@@ -13,6 +13,8 @@ async def broadcast_attachment_state(runtime, conv_id: str, att_id: str) -> None
     # lands between mentions credits its backlog without waiting for one.
     runtime.credit_unclaimed(att_id, attachment.get("runtime_owner"))
     response = await attachment_response(attachment)
+    if runtime.db.get_attachment(att_id) is None:
+        return  # Removal may have completed while the git lookup was in flight.
     await runtime.broadcast(conv_id, AttachmentEvent(attachment=response))
 
     conversation = runtime.db.get_conversation(conv_id)

@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import signal
+import shlex
 import subprocess
 import sys
 import uuid
@@ -18,10 +19,11 @@ from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
 from . import __version__
-from .adapter_capabilities import adapter_completion
 from .adapter_update import apply_update, requested_update_argv
 from .attachment_commands import validated_attachment_command
 from .attachment_resume import resume_adapter
+from .attachment_start import start_attachment
+from .attachment_lifecycle_routes import register_attachment_lifecycle_routes
 from .attachment_view import attachment_response
 from .auth_guard import (
     WS_FORBIDDEN,
@@ -31,7 +33,7 @@ from .auth_guard import (
     websocket_principal,
 )
 from .auth_routes import auth_router
-from .auth_store import ensure_api_token, handle_taken
+from .auth_store import handle_taken
 from .bind import (BindConfig, apply_server_config, load_bind_config, load_dotenv,
                    parse_bind_args, uvicorn_config)
 from .compact_routes import register_compact_route
@@ -436,36 +438,26 @@ async def attach(conv_id: str, body: AttachIn):
         att_id, conv_id, body.name, body.adapter, command, cwd, runtime_owner,
         start_after_history=True,
     )
-    att["api_token"] = ensure_api_token(runtime.db, att_id)
-    att["runtime_owner"] = runtime_owner
-    att["conv_name"] = conv["name"]
-    att["topic"] = conv["topic"]
-    att["hook_url"] = _hook_url(att_id, app.state.bind, runtime_owner)
-    att["digest_rider"] = lambda: tasks.rider(conv_id)
     if update_argv:
         await apply_update(runtime.post_message, conv_id, body.name, update_argv)
-    adapter = make_adapter(
-        body.adapter, att,
-        presence.posting(conv_id, att_id, runtime.post_callback(att_id, conv_id, runtime_owner)),
-        presence.statusing(
-            conv_id, att_id, runtime.status_callback(att_id, conv_id, runtime_owner), body.name),
-        on_cli_session=lambda s: runtime.db.set_cli_session(att_id, s, runtime_owner),
-    )
-    try:
-        await adapter.start()
-    except Exception as exc:
-        await runtime.db.set_attachment_status_async(att_id, "exited", runtime_owner)
-        raise HTTPException(500, f"failed to spawn: {exc}") from exc
-    runtime.live[att_id] = presence.watch(
-        adapter, conv_id, att_id, adapter_completion(body.adapter),
-        *runtime.held_wake_hooks(conv_id, att_id, body.name),
+    return await _start_attachment(att)
+
+
+async def _start_attachment(att, *, checkpoint="", fresh=False):
+    return await start_attachment(
+        att, runtime=runtime, presence=presence, tasks=tasks, make_adapter=make_adapter,
+        hook_url=lambda ident, owner: _hook_url(ident, app.state.bind, owner),
+        checkpoint=checkpoint, fresh=fresh,
     )
 
-    await runtime.post_message(
-        conv_id, "system", "system",
-        f"@{body.name} joined · `{ ' '.join(command) }` · {cwd} · session {att_id}",
-    )
-    return await attachment_response(runtime.db.get_attachment(att_id))
+
+register_attachment_lifecycle_routes(
+    app, runtime, start=lambda att, **kwargs: _start_attachment(att, **kwargs),
+    require_loopback=require_loopback,
+    validate=lambda att: validated_attachment_command(
+        att["adapter"], shlex.join(att["command"]), ADAPTERS, ADAPTER_METADATA
+    ),
+)
 
 
 @app.post("/api/attachments/{att_id}/resume", response_model=AttachmentResponse)

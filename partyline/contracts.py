@@ -196,6 +196,12 @@ class AttachmentEvent(BaseModel):
     attachment: AttachmentResponse
 
 
+class AttachmentRemovedEvent(BaseModel):
+    type: Literal["attachment_removed"] = "attachment_removed"
+    attachment_id: str
+    conversation_id: str
+
+
 class AttentionEvent(BaseModel):
     type: Literal["attention"] = "attention"
     attachment_id: str
@@ -256,6 +262,7 @@ Event = (
     ShutdownEvent
     | MessageEvent
     | AttachmentEvent
+    | AttachmentRemovedEvent
     | LineLiveEvent
     | AttentionEvent
     | WorkingEvent

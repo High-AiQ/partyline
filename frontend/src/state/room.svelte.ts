@@ -12,7 +12,6 @@ import type {
   Attachment,
   ChatMessage,
   Conversation,
-  ErrorEvent,
   ReattachAction,
   ReattachOfferEvent,
   WireEvent,
@@ -23,8 +22,9 @@ import type { WireIdentity } from "../lib/wire-commands";
 import { wire } from "./wire.svelte.js";
 import type { WireContext } from "./wire.svelte.js";
 import { clearConversationRoute, routedConversationId, setConversationRoute } from "../lib/routing";
-import { isLive } from "../lib/attachments";
+import { isLive, withoutForgotten } from "../lib/attachments";
 import { applyLineLive } from "../lib/line-live";
+import { handleWireError } from "./room-wire-error";
 import { MessageHistory } from "./message-history.svelte";
 import { presenceSync } from "./presence-coordinator.svelte.js";
 
@@ -57,6 +57,9 @@ class Room {
   history = new MessageHistory(() => session.handle);
   /** Attachments blocked on a dialog, which the board rings until someone peeks. */
   attention = new SvelteSet<string>();
+  /** Jacks forgotten on this line: a state event that was in flight when the
+   *  record went must not put the card back. */
+  #removed = new Set<string>();
 
   /** A transient toast, distinct from the wire banner: this one goes away. */
   notice = $state<RoomNotice | null>(null);
@@ -111,6 +114,7 @@ class Room {
     this.history.reset();
     this.attachments = [];
     this.attention.clear();
+    this.#removed.clear();
     this.reattachOffer = null;
 
     wire.connect(
@@ -138,7 +142,7 @@ class Room {
     if (epoch !== this.#epoch) return; // a newer line won the race
 
     this.conversation = detail.conversation;
-    this.attachments = detail.attachments;
+    this.attachments = withoutForgotten(detail.attachments, this.#removed);
     presenceSync.finish(presenceFetch, detail.presence, detail.working);
     this.history.seed(detail.messages, detail.has_more_messages);
     void this.loadConversations().catch(ignoreBackgroundFailure);
@@ -167,7 +171,7 @@ class Room {
     if (epoch !== this.#epoch) return; // the line changed under the fetch
 
     this.conversation = detail.conversation;
-    this.attachments = detail.attachments;
+    this.attachments = withoutForgotten(detail.attachments, this.#removed);
     presenceSync.finish(presenceFetch, detail.presence, detail.working);
     this.history.merge(detail.messages);
     await this.history.catchUp(conversation.id, afterId);
@@ -187,6 +191,7 @@ class Room {
     this.history.reset();
     this.attachments = [];
     this.attention.clear();
+    this.#removed.clear();
     this.reattachOffer = null;
     if (clearRoute && routedConversationId()) clearConversationRoute();
   }
@@ -231,6 +236,9 @@ class Room {
       case "attachment":
         this.upsertAttachment(event.attachment);
         break;
+      case "attachment_removed":
+        this.removeAttachment(event.attachment_id);
+        break;
       case "line_live":
         this.conversations = applyLineLive(this.conversations, event);
         break;
@@ -266,7 +274,7 @@ class Room {
         break;
 
       case "error":
-        if (event.conversation_id === convId) this.#onWireError(event, context);
+        if (event.conversation_id === convId) handleWireError(this, event, context);
         break;
     }
   }
@@ -274,31 +282,6 @@ class Room {
   chooseReattach(action: ReattachAction): boolean {
     const offer = this.reattachOffer;
     return offer ? wire.chooseReattach(offer.token, action) : false;
-  }
-
-  /**
-   * A refusal means one of two quite different things, and the page used to
-   * show the same thing for both.
-   *
-   * A pre-handshake refusal is terminal for this connection; retrying the same
-   * rejected line forever would hide the server's useful error behind a banner.
-   */
-  #onWireError(event: ErrorEvent, context: WireContext): void {
-    const message = event.message || "this line is no longer available";
-
-    if (message.includes("archived")) {
-      this.showNotice(message, "error");
-      this.leave();
-      void this.loadConversations().catch(ignoreBackgroundFailure);
-      this.refreshArchiveIfOpen();
-      return;
-    }
-    if (!context.wasReady && !context.claimRejected) {
-      context.rejectClaim();
-      this.showNotice(message, "error");
-      return;
-    }
-    this.showNotice(message, "error");
   }
 
   /**
@@ -312,11 +295,19 @@ class Room {
    * jack that arrives twice.
    */
   upsertAttachment(attachment: Attachment): void {
+    if (this.#removed.has(attachment.id)) return; // a late echo of a forgotten jack
     const index = this.attachments.findIndex((candidate) => candidate.id === attachment.id);
     if (index >= 0) this.attachments[index] = attachment;
     else this.attachments.push(attachment);
     // A process that has exited is no longer waiting on you.
     if (!isLive(attachment)) this.attention.delete(attachment.id);
+  }
+
+  /** Forget a jack; idempotent for the same reason `upsertAttachment` is. */
+  removeAttachment(attachmentId: string): void {
+    this.#removed.add(attachmentId);
+    this.attachments = this.attachments.filter((candidate) => candidate.id !== attachmentId);
+    this.attention.delete(attachmentId);
   }
 
   /** Add a message once and remember its human sender for autocomplete. */

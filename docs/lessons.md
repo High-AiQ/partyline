@@ -602,3 +602,52 @@ enforce it. A prose warning that has no executable guard is not a completed less
   structured system completion before model work resumes. Treating that interim speech as `ENDED`
   hid the working badge and falsely repooled mid-turn wakes into a still-busy CLI. The adapter now
   tracks structured background task ids and accepts a speech-only completion only when none remain.
+
+
+## Attachment refresh transaction locking
+
+The first lifecycle test stalled because the implementation assumed `Db.lock` was reentrant.
+It is a plain `threading.Lock`: calling `get_attachment` inside that lock tries to acquire it
+again. The capped focused run was stopped; lifecycle transactions now use connection-level
+queries while holding the lock. The HTTP lifecycle regression suite exercises those transactions.
+
+| DO | DO NOT |
+| --- | --- |
+| Use connection-level queries inside an existing DB lock/transaction | Call convenience DB methods that acquire the same non-reentrant lock or commit independently |
+
+## Backend verification observes the frontend manifest
+
+A full backend run overlapped a frontend rebuild. Two handshake tests compared the bundle id
+imported at process startup with the newly generated manifest and correctly failed. Backend tests
+and frontend bundle generation are not independent: finish the bundle and hold it stable through
+the final backend run. No cockpit process was affected.
+
+| DO | DO NOT |
+| --- | --- |
+| Coordinate a stable frontend bundle before final backend verification | Regenerate the shared build manifest while backend tests are reading it |
+
+
+## A deleted card can outlive its state broadcast
+
+The review assumed a removal event would be the final event for a stopped attachment. An isolated
+interleaving disproved it: attachment presentation paused for its asynchronous git lookup, removal
+completed, then the old presentation was broadcast and recreated the card. The regression holds
+that lookup while deleting the row; the producer now rechecks existence before broadcasting.
+
+| DO | DO NOT |
+| --- | --- |
+| Recheck attachment existence after asynchronous presentation work | Broadcast a deleted row just because it existed before the await |
+
+
+## A spawn transaction starts before adapter.start
+
+The first fresh-start rollback caught only HTTP errors and covered only adapter creation/start.
+The independent review injected a hook-URL failure after reservation: the replacement stayed
+`starting`, blocking both resume and fresh without a process to detach. Startup now covers setup,
+spawn, registration, announcement, and response construction. Regression tests inject setup and
+late failures, verify the process stops before its record is forgotten, and preserve the card
+when stopping itself fails. Explicit stale-checkpoint limits also prevent accidental full replay.
+
+| DO | DO NOT |
+| --- | --- |
+| Cover every post-reservation failure and keep uncertain processes tracked | Limit rollback to provider/adapter exceptions or erase a row before its process stops |
