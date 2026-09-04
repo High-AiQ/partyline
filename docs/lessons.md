@@ -651,3 +651,16 @@ when stopping itself fails. Explicit stale-checkpoint limits also prevent accide
 | DO | DO NOT |
 | --- | --- |
 | Cover every post-reservation failure and keep uncertain processes tracked | Limit rollback to provider/adapter exceptions or erase a row before its process stops |
+
+
+## A restart trigger cannot find flags it anchors on the wrong executable
+
+`restart_server` located the outgoing server's flags by searching its command line for the
+*replacement's* console-script path. That is the same path only while a service restarts inside
+one checkout; the first migration of the LAN instance off the workbench was refused as "could not
+read the command line", a message that named the wrong cause. The anchor is now explicit
+(`--source-server`), preflighted at arm time against the live pid, and the refusal names the flag.
+
+| DO | DO NOT |
+| --- | --- |
+| Make the outgoing executable an explicit, preflighted input when it can differ from the replacement | Infer it from the replacement's path and report the mismatch as an unreadable process |
