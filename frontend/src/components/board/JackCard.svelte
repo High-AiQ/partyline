@@ -11,6 +11,8 @@
   import WorkingBadge from "./WorkingBadge.svelte";
   import PeekDialog from "../dialogs/PeekDialog.svelte";
   import EditJackDialog from "../dialogs/EditJackDialog.svelte";
+  import FreshJackDialog from "../dialogs/FreshJackDialog.svelte";
+  import RemoveJackDialog from "../dialogs/RemoveJackDialog.svelte";
 
   interface Props {
     attachment: Attachment;
@@ -45,6 +47,14 @@
 
   function edit(): void {
     dialogs.open(EditJackDialog, { attachment });
+  }
+
+  function fresh(): void {
+    dialogs.open(FreshJackDialog, { attachment });
+  }
+
+  function remove(): void {
+    dialogs.open(RemoveJackDialog, { attachment });
   }
 
   async function resume(): Promise<void> {
@@ -106,6 +116,14 @@
         aria-label="detach {attachment.name}"
         onclick={detach}>✕</button
       >
+    {:else}
+      <button
+        class="x remove-btn absolute right-2 top-1.5 cursor-pointer border-0 bg-transparent p-0.5 text-[12px] text-cream-faint hover:bg-transparent hover:text-red"
+        type="button"
+        title="remove from roster (stops tracking this session)"
+        aria-label="remove {attachment.name} from roster"
+        onclick={remove}>⌫</button
+      >
     {/if}
   </div>
 
@@ -150,6 +168,14 @@
     </button>
   {/if}
   {#if !live}
+    <button
+      class="resume fresh-btn mt-1.5 ml-[5px] px-[9px] py-0.5 text-[10px] text-green border-green/40 hover:border-green hover:bg-green hover:text-ink"
+      type="button"
+      title="new session, same handle — no earlier chat is replayed"
+      onclick={fresh}
+    >
+      ✦ start fresh
+    </button>
     <button
       class="resume edit-btn mt-1.5 ml-[5px] px-[9px] py-0.5 text-[10px] text-copper border-copper/40 hover:border-copper hover:bg-copper hover:text-ink"
       type="button"

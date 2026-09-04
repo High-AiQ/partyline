@@ -103,6 +103,15 @@ describe("wire events with server-omitted null fields", () => {
     expect(event.conversation.live_count).toBe(0);
   });
 
+  it("accepts the attachment-removed event that drops a forgotten jack", () => {
+    const event = WireEventSchema.parse({
+      type: "attachment_removed",
+      attachment_id: "att-1",
+      conversation_id: "line",
+    });
+    expect(event).toEqual({ type: "attachment_removed", attachment_id: "att-1", conversation_id: "line" });
+  });
+
   it("accepts the global line live-count event", () => {
     const event = WireEventSchema.parse({
       type: "line_live",

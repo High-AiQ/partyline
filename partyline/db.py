@@ -371,7 +371,11 @@ class Db:
     def _claim_attachment(self, att_id: str, runtime_owner: str) -> bool:
         cur = self._exec(
             "UPDATE attachments SET status='starting',runtime_owner=? "
-            "WHERE id=? AND status NOT IN ('starting','running')",
+            "WHERE id=? AND status NOT IN ('starting','running') "
+            "AND NOT EXISTS (SELECT 1 FROM attachments other "
+            "WHERE other.conv_id=attachments.conv_id "
+            "AND lower(other.name)=lower(attachments.name) AND other.id!=attachments.id "
+            "AND other.status IN ('starting','running'))",
             (runtime_owner, att_id),
         )
         return cur.rowcount == 1
