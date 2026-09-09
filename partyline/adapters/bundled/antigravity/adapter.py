@@ -27,6 +27,7 @@ import time
 from pathlib import Path
 
 from partyline.adapters import Adapter
+from partyline.adapters.bundled.antigravity import interrupt as interrupts
 from partyline.adapters.bundled.antigravity.wakes import WakeSettlement
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
 
@@ -50,6 +51,10 @@ class PartylineAdapter(WakeSettlement, Adapter):
 
     MAX_NOTICES = 2
 
+    async def interrupt(self) -> bool:
+        """Stop the running turn with Esc, confirmed from the transcript."""
+        return await interrupts.interrupt(self)
+
     def __init__(self, att, post, on_status, on_cli_session=None):
         super().__init__(att, post, on_status, on_cli_session)
         self._outstanding: list[tuple[str, float, tuple[int, ...], bool]] = []
@@ -60,6 +65,13 @@ class PartylineAdapter(WakeSettlement, Adapter):
         self._settle_task: asyncio.Task | None = None
         self._settle_queued = False
         self._output_event = asyncio.Event()
+        # Set when the transcript records an interruption, so `@!` can confirm
+        # from Antigravity's own account rather than from the keystroke.
+        self.interrupt_confirmed = asyncio.Event()
+        self.interrupt_since: float | None = None
+        # Notices already spent confirming an interruption. A replayed record
+        # must not answer for a later Esc.
+        self.interrupt_records_used: set[str] = set()
 
     async def on_output(self, data: bytes):
         self._output_event.set()
@@ -233,6 +245,11 @@ class PartylineAdapter(WakeSettlement, Adapter):
             ):
                 if started := TASK_STARTED.search(content):
                     self._background_tasks.add(started.group(1))
+            elif interrupts.is_interrupt_record(
+                record, self.interrupt_since, self.interrupt_records_used
+            ):
+                self.interrupt_records_used.add(interrupts.record_key(record))
+                self.interrupt_confirmed.set()
             elif (
                 source == "SYSTEM"
                 and record_type == "SYSTEM_MESSAGE"

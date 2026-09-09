@@ -20,6 +20,9 @@ from .contracts import (
 from .db import Db, RestartPlan
 from .continuation_delivery import deliver_continuation
 from .restart_lease import run_automatic_restart_plan
+from .restart_scope import (
+    covered_conversation_ids, planned_conversation_ids, select_attachment_ids,
+)
 
 READY_TIMEOUT_SECONDS = 90.0
 MAX_AUTOMATIC_ATTEMPTS = 2
@@ -83,12 +86,13 @@ def restart_plan_response(db: Db, plan: RestartPlan) -> RestartPlanResponse:
     attachments = []
     for attachment_id in plan["attachment_ids"]:
         attachment = db.get_attachment(attachment_id)
-        if attachment is not None and attachment["conv_id"] == plan["conversation_id"]:
+        if attachment is not None:
             attachments.append(
                 ReattachCandidateResponse(
                     id=attachment["id"],
                     name=attachment["name"],
                     adapter=attachment["adapter"],
+                    conversation_id=attachment["conv_id"],
                 )
             )
     return RestartPlanResponse(
@@ -107,15 +111,18 @@ def create_restart_plan(
     conversation = runtime.db.get_conversation(body.conversation_id)
     if conversation is None or conversation["archived_at"]:
         raise RestartPlanError(404, "the requesting line is not available")
-    attachment_ids = [
-        attachment["id"]
-        for attachment in runtime.db.list_attachments(body.conversation_id)
-        if attachment["id"] in runtime.live
-        and attachment["status"] in ("starting", "running")
-        and adapter_can_resume(adapter_metadata.get(attachment["adapter"], {}))
-    ]
+    if body.scope == "all" and body.mode != "automatic":
+        raise RestartPlanError(
+            409, "a manual offer is shown to one tab; plan every line automatically"
+        )
+    attachment_ids = select_attachment_ids(
+        runtime.db,
+        runtime.live,
+        lambda adapter: adapter_can_resume(adapter_metadata.get(adapter, {})),
+        planned_conversation_ids(runtime.db, body.conversation_id, body.scope),
+    )
     if not attachment_ids:
-        raise RestartPlanError(409, "this line has no resumable live processes")
+        raise RestartPlanError(409, "there are no resumable live processes to plan")
     plan = runtime.db.save_restart_plan(
         body.conversation_id,
         attachment_ids,
@@ -231,14 +238,18 @@ class ReattachCoordinator:
         if ensure_owned is not None:
             ensure_owned()
         self.runtime.reattaching.update(attachment_ids)
+        # A line whose processes are recovering hears about it on that line,
+        # even when another line asked for the restart.
+        covered = covered_conversation_ids(self.runtime.db, attachment_ids) or [conv_id]
         try:
-            await self.runtime.post_message(
-                conv_id,
-                "system",
-                "system",
-                f"☏ {start} after the dogfood restart\n\n"
-                f"Continuation debrief: {debrief}",
-            )
+            for line in covered:
+                await self.runtime.post_message(
+                    line,
+                    "system",
+                    "system",
+                    f"☏ {start} after the dogfood restart\n\n"
+                    f"Continuation debrief: {debrief}",
+                )
         except BaseException:
             self.runtime.reattaching.difference_update(attachment_ids)
             raise
@@ -252,16 +263,16 @@ class ReattachCoordinator:
                 if ensure_owned is not None:
                     ensure_owned()
                 attachment = self.runtime.db.get_attachment(attachment_id)
-                if attachment is None or attachment["conv_id"] != conv_id:
+                if attachment is None:
                     failed.append(attachment_id)
                     self.runtime.reattaching.discard(attachment_id)
                     continue
 
-                name = attachment["name"]
+                line, name = attachment["conv_id"], attachment["name"]
                 continuation_confirmed = False
                 try:
                     pending = self.runtime.db.messages_after(
-                        conv_id,
+                        line,
                         attachment["last_seen"],
                         exclude_sender=name,
                     )
@@ -323,7 +334,7 @@ class ReattachCoordinator:
                         unconfirmed_ids.add(attachment_id)
                         detail = "running but its continuation is still unconfirmed"
                     await self.runtime.post_message(
-                        conv_id,
+                        line,
                         "system",
                         "system",
                         f"☏ @{name} is back but {detail} after {self.ready_timeout:g}s — "
@@ -334,7 +345,7 @@ class ReattachCoordinator:
                     failed.append(name)
                     await self._abandon(attachment_id)
                     await self.runtime.post_message(
-                        conv_id,
+                        line,
                         "system",
                         "system",
                         f"⚠ @{name} could not reattach safely: {exc}",
@@ -343,7 +354,7 @@ class ReattachCoordinator:
 
                 ready.append(name)
                 await self.runtime.post_message(
-                    conv_id,
+                    line,
                     "system",
                     "system",
                     f"☏ @{name} is ready after restart; advancing to the next process",
@@ -365,12 +376,13 @@ class ReattachCoordinator:
             summary += f", {len(failed)} failed"
         if unconfirmed:
             summary += f", {len(unconfirmed)} continuation unconfirmed"
-        await self.runtime.post_message(
-            conv_id,
-            "system",
-            "system",
-            f"☏ sequential reattachment finished — {summary}",
-        )
+        for line in covered:
+            await self.runtime.post_message(
+                line,
+                "system",
+                "system",
+                f"☏ sequential reattachment finished — {summary}",
+            )
         return ReattachResult(
             tuple(ready), tuple(failed), tuple(slow), tuple(unconfirmed)
         )

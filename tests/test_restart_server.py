@@ -9,11 +9,13 @@ from scripts.restart_server import (
     EXIT_ALREADY_GONE,
     EXIT_BAD_ARGUMENTS,
     EXIT_COMMAND_LINE_UNREADABLE,
+    EXIT_COVERAGE_CHANGED,
     EXIT_ENVIRONMENT_UNREADABLE,
     EXIT_REPLACEMENT_UNIMPORTABLE,
     EXIT_WRONG_GENERATION,
     RestartRefused,
     process_cmdline,
+    process_cwd,
     process_environment,
     process_generation,
     run_restart,
@@ -133,7 +135,16 @@ class RestartTest(unittest.TestCase):
         self.directory.cleanup()
 
     def invoke(self, generation, wait=lambda *_: None,
-               environment=lambda _pid: {"PATH": "/old/server/path"}):
+               environment=lambda _pid: {"PATH": "/old/server/path"},
+               coverage=None):
+        # Coverage is injected in every case: its real implementation reads a
+        # database, and a unit test must never reach the developer's own.
+        self.coverage_databases = []
+
+        def record(database):
+            self.coverage_databases.append(database)
+            return coverage(database) if coverage else None
+
         return run_restart(
             42,
             "1234",
@@ -149,6 +160,7 @@ class RestartTest(unittest.TestCase):
                 (server, logfile, cwd, env, arguments)
             ),
             probe=lambda _cwd, _server: None,
+            coverage=record,
         )
 
     def test_an_unreadable_generation_is_refused_before_signalling(self):
@@ -196,6 +208,7 @@ class RestartTest(unittest.TestCase):
             wait=lambda *_args: None,
             launch=lambda *args: executions.append(args),
             probe=lambda _cwd, _server: None,
+            coverage=lambda _db: None,
         )
         self.assertEqual(executions[0][-1], ["--host", "0.0.0.0", "--port", "9000"])
 
@@ -233,6 +246,7 @@ class RestartTest(unittest.TestCase):
             wait=lambda *_args: None,
             launch=lambda *args: self.executions.append(args),
             probe=lambda _cwd, _server: None,
+            coverage=lambda _db: None,
         )
         self.assertEqual(self.signals, [(42, signal.SIGTERM)])
         server, _log, cwd, _env, arguments = self.executions[0]
@@ -276,6 +290,7 @@ class RestartTest(unittest.TestCase):
             wait=lambda *_args: None,
             launch=lambda *args: executions.append(args),
             probe=lambda _cwd, _server: None,
+            coverage=lambda _db: None,
         )
         self.assertEqual(executions[0][-2], {"PATH": "/old/server/path", "TOKEN": "kept"})
         # The preserved bind flags are gone: the explicit config owns the bind,
@@ -393,6 +408,7 @@ class RestartTest(unittest.TestCase):
             wait=lambda *_args: None,
             launch=lambda *args: self.executions.append(args),
             probe=lambda _cwd, _server: None,
+            coverage=lambda _db: None,
         )
         self.assertEqual(self.signals, [(42, signal.SIGTERM)])
         self.assertEqual(len(self.executions), 1)
@@ -474,6 +490,107 @@ class FailureReportingTest(unittest.TestCase):
             dialed["url"], "http://127.0.0.1:8642/api/restart-plan/failure")
         self.assertEqual(
             dialed["body"], {"token": "plan-cap-1", "message": "boom"})
+
+
+class DelayedTriggerCoverageTest(unittest.TestCase):
+    """Arming and signalling are ~90 seconds apart; coverage can change between."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        self.server = self.root / "partyline"
+        self.server.write_text("#!/bin/sh\nexit 0\n")
+        self.server.chmod(0o755)
+        self.signals = []
+        self.executions = []
+        self.databases = []
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def invoke(self, coverage, environment):
+        def record(database):
+            self.databases.append(database)
+            return coverage
+
+        return run_restart(
+            42,
+            "1234",
+            self.server,
+            self.root / "cockpit.log",
+            self.root,
+            generation=lambda _pid: "1234",
+            environment=lambda _pid: environment,
+            command_line=lambda _pid: [str(self.server)],
+            signal_process=lambda pid, sig: self.signals.append((pid, sig)),
+            wait=lambda *_: None,
+            launch=lambda *args: self.executions.append(args),
+            probe=lambda _cwd, _server: None,
+            coverage=record,
+        )
+
+    def test_a_process_attached_during_the_delay_stops_the_restart(self):
+        with self.assertRaises(RestartRefused) as raised:
+            self.invoke(
+                "1 live process(es) would be stopped without recovery: @late on 'new'",
+                {"PARTYLINE_DB": "/tmp/instance.db"},
+            )
+
+        self.assertEqual(raised.exception.exit_code, EXIT_COVERAGE_CHANGED)
+        self.assertIn("@late", str(raised.exception))
+        # The whole point: nothing was signalled, so nothing was orphaned.
+        self.assertEqual(self.signals, [])
+        self.assertEqual(self.executions, [])
+
+    def test_unchanged_coverage_signals_and_launches_as_before(self):
+        self.invoke(None, {"PARTYLINE_DB": "/tmp/instance.db"})
+
+        self.assertEqual(self.signals, [(42, signal.SIGTERM)])
+        self.assertEqual(len(self.executions), 1)
+
+    def test_coverage_is_read_from_the_outgoing_servers_own_database(self):
+        self.invoke(None, {"PARTYLINE_DB": "/tmp/instance.db"})
+
+        self.assertEqual(self.databases, [Path("/tmp/instance.db")])
+
+    def test_without_a_configured_database_the_outgoing_home_is_used(self):
+        # Not the trigger's home: a transient systemd unit does not have the
+        # interactive user's, and the default database hangs off it.
+        self.invoke(None, {"HOME": "/home/someone"})
+
+        self.assertEqual(self.databases, [Path("/home/someone/.partyline.db")])
+
+    def test_coverage_is_checked_only_after_the_replacement_proves_importable(self):
+        # Ordering matters: an unimportable replacement is the older, cheaper
+        # refusal and must not be masked by a coverage message.
+        with self.assertRaises(RestartRefused) as raised:
+            run_restart(
+                42, "1234", self.server, self.root / "cockpit.log", self.root,
+                generation=lambda _pid: "1234",
+                environment=lambda _pid: {"PARTYLINE_DB": "/tmp/instance.db"},
+                command_line=lambda _pid: [str(self.server)],
+                signal_process=lambda pid, sig: self.signals.append((pid, sig)),
+                wait=lambda *_: None,
+                launch=lambda *args: self.executions.append(args),
+                probe=lambda _cwd, _server: "no module named PIL",
+                coverage=lambda _db: "would orphan @late",
+            )
+
+        self.assertEqual(raised.exception.exit_code, EXIT_REPLACEMENT_UNIMPORTABLE)
+        self.assertEqual(self.signals, [])
+
+
+class ProcessCwdTest(unittest.TestCase):
+    def test_the_working_directory_is_read_from_the_proc_symlink(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "42").mkdir()
+            (root / "42" / "cwd").symlink_to("/srv/app")
+            self.assertEqual(process_cwd(42, root), Path("/srv/app"))
+
+    def test_an_unreadable_working_directory_is_not_guessed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertIsNone(process_cwd(42, Path(directory)))
 
 
 if __name__ == "__main__":
