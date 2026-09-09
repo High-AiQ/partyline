@@ -26,6 +26,8 @@ import asyncio
 import time
 from datetime import datetime
 
+from partyline.interrupts import InterruptStatus
+
 # Esc. Antigravity's first press cancels the active operation; it is not the
 # exit key, which is a Ctrl+C double-press.
 ESCAPE = b"\x1b"
@@ -91,11 +93,22 @@ def is_interrupt_record(
     return written is not None and written >= since
 
 
+def turn_is_closed(adapter) -> bool:
+    """Whether the adapter *knows* no turn is running.
+
+    Three states, not two. ``False`` and "no idea" are different answers, and
+    only a positive "closed" may skip the keystroke: assuming idle when the
+    state is unknown would silently decline to interrupt a process that was
+    working, which is the one thing `@!` exists to do.
+    """
+    return getattr(adapter, "_turn_open", None) is False
+
+
 async def interrupt(
     adapter,
     timeout: float = CONFIRM_TIMEOUT,
     settle_timeout: float = SETTLE_TIMEOUT,
-) -> bool:
+) -> InterruptStatus:
     """Press Esc, then wait for the turn to actually end.
 
     Two boundaries, and both are needed. The interruption notice proves Esc
@@ -104,12 +117,20 @@ async def interrupt(
     mid-turn submission and silently drops it, which is how two mentions were
     lost on 2026-08-24.
 
-    Returns False rather than raising when the process is gone or either
-    boundary never arrives: an unconfirmed interrupt is a fact for the room,
-    not an error for the caller, and the message is delivered regardless.
+    A turn that is already closed is answered without touching the pty at all.
+    Esc cancels nothing there and Antigravity writes no notice, so waiting for
+    one costs the full timeout before the message is delivered — ten seconds,
+    measured on the live line on 2026-09-09, for a message that needed no
+    interruption in the first place.
+
+    Reports rather than raises when the process is gone or either boundary
+    never arrives: an unconfirmed interrupt is a fact for the room, not an
+    error for the caller, and the message is delivered regardless.
     """
     if not adapter.alive():
-        return False
+        return "unconfirmed"
+    if turn_is_closed(adapter):
+        return "idle"
     event = adapter.interrupt_confirmed
     event.clear()
     # Set before the keystroke: a notice written between the two must count.
@@ -118,14 +139,20 @@ async def interrupt(
     try:
         await asyncio.wait_for(event.wait(), timeout=timeout)
     except TimeoutError:
-        return False
-    return await turn_closed(adapter, settle_timeout)
+        return "unconfirmed"
+    return "interrupted" if await turn_closed(adapter, settle_timeout) else "unconfirmed"
 
 
 async def turn_closed(adapter, timeout: float) -> bool:
-    """Wait for the adapter to observe the turn ending, or give up saying so."""
+    """Wait for the adapter to observe the turn ending, or give up saying so.
+
+    Positive evidence only, the same rule as `turn_is_closed`. An adapter that
+    does not track turn state can never satisfy this, so a fresh notice alone
+    times out as unconfirmed rather than being reported as a closed turn — the
+    notice proves Esc landed, not that the composer is free.
+    """
     deadline = time.monotonic() + timeout
-    while getattr(adapter, "_turn_open", False):
+    while not turn_is_closed(adapter):
         if time.monotonic() >= deadline or not adapter.alive():
             return False
         await asyncio.sleep(0.05)
