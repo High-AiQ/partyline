@@ -24,9 +24,23 @@ no path here ever writes to a mid-turn process.
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime
 
 from . import logparse
+
+# Antigravity records at most about 4 KB of submitted input. Past that it keeps
+# a verbatim head, replaces the middle with this marker, re-appends a
+# well-formed closing envelope — so the record reads as intact — and declares
+# the loss in ``truncated_fields``. Whole-digest containment therefore cannot
+# settle any wake over that size, however cleanly it was delivered.
+TRUNCATION_MARKER = re.compile(r"<truncated \d+ bytes>")
+USER_REQUEST_OPEN = "<USER_REQUEST>"
+
+# How much verbatim head a truncated record must keep before it is allowed to
+# settle anything. A prefix short enough to be shared by two different digests
+# is not evidence about either; this is far longer than any wake preamble.
+MIN_TRUNCATED_PREFIX = 512
 
 # Between a turn ending and a queued submission landing its transcript
 # record there is a race; repooling inside it would double-deliver.
@@ -53,7 +67,54 @@ class WakeSettlement:
         so a digest matches the submitted input up to whitespace runs."""
         return bool(probe) and " ".join(probe.split()) in " ".join(content.split())
 
-    async def _note_user_input(self, content: str, created_at, *, transcript: bool = True):
+    def _truncated_head(self, content: str) -> str:
+        """The part of a declared-truncated record that is still verbatim.
+
+        No marker means no known boundary, so nothing is returned rather than
+        the whole body: a declaration we cannot locate the cut in is a record
+        we cannot trust any part of.
+        """
+        body = content.lstrip()
+        if body.startswith(USER_REQUEST_OPEN):
+            body = body[len(USER_REQUEST_OPEN):]
+        match = TRUNCATION_MARKER.search(body)
+        return "" if match is None else body[: match.start()]
+
+    def _evidences(self, content: str, digest: str, *, truncated: bool = False) -> bool:
+        """Does this record prove the CLI was given `digest`?
+
+        Untruncated records keep the old rule exactly: the whole digest must
+        be there. For a record the CLI has *declared* truncated, the surviving
+        head is still verbatim, so it is matched as an exact prefix of the
+        digest — the part that exists is compared in full, and the part the
+        vendor removed is not silently forgiven. A head too short to identify
+        one digest from another proves nothing and settles nothing.
+
+        This is not a relaxation of matching. It is refusing to demand
+        evidence the recorder is documented not to keep.
+        """
+        if self._contains(content, digest):
+            return True
+        if not truncated or not digest.strip():
+            return False
+        head = " ".join(self._truncated_head(content).split())
+        if len(head) < MIN_TRUNCATED_PREFIX:
+            return False
+        return " ".join(digest.split()).startswith(head)
+
+    async def _settle_user_input_record(self, record: dict, content: str) -> None:
+        """Judge one transcript USER_INPUT record, truncation included."""
+        truncated = "content" in (record.get("truncated_fields") or ())
+        await self._note_user_input(
+            content, record.get("created_at"), truncated=truncated
+        )
+        prompt = getattr(self, "_startup_prompt", "")
+        if prompt and self._evidences(content, prompt, truncated=truncated):
+            self.mark_startup_delivery_received()
+
+    async def _note_user_input(
+        self, content: str, created_at, *, transcript: bool = True, truncated: bool = False
+    ):
         """Settle outstanding wakes against one submitted-input record.
 
         A record may only judge wakes pasted before it was written: a
@@ -71,7 +132,7 @@ class WakeSettlement:
             if created is not None and pasted_at >= created:
                 kept.append((digest, pasted_at, message_ids, mid_turn))
                 continue
-            if self._contains(content, digest):
+            if self._evidences(content, digest, truncated=truncated):
                 if mid_turn and not transcript:
                     kept.append((digest, pasted_at, message_ids, mid_turn))
                     continue

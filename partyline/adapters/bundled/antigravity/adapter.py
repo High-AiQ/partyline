@@ -272,10 +272,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
                 if settled := TASK_SETTLED.search(content):
                     self._background_tasks.discard(settled.group(1))
             elif source == "USER_EXPLICIT" and record_type == "USER_INPUT":
-                await self._note_user_input(content, record.get("created_at"))
-                prompt = getattr(self, "_startup_prompt", "")
-                if prompt and self._contains(content, prompt):
-                    self.mark_startup_delivery_received()
+                await self._settle_user_input_record(record, content)
                 self._background_tasks.clear()
                 self._turn_open = True
                 await receipt(self.att, BEGAN)
