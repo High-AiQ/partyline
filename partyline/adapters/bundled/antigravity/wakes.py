@@ -68,7 +68,12 @@ class WakeSettlement:
         return bool(probe) and " ".join(probe.split()) in " ".join(content.split())
 
     def _truncated_head(self, content: str) -> str:
-        """The part of a declared-truncated record that is still verbatim."""
+        """The part of a declared-truncated record that is still verbatim.
+
+        No marker means no known boundary, so nothing is returned rather than
+        the whole body: a declaration we cannot locate the cut in is a record
+        we cannot trust any part of.
+        """
         body = content.lstrip()
         if body.startswith(USER_REQUEST_OPEN):
             body = body[len(USER_REQUEST_OPEN):]
