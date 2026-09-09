@@ -31,12 +31,16 @@ from partyline.adapters.bundled.grok.transcript import (
     is_assistant_record,
     latest_user_prompt,
 )
+from partyline.adapters.bundled.grok.steering import immediate_mentions_preflight
 from partyline.adapters.bundled.grok.wake_receipts import WakeReceipts
 from partyline.adapters.bundled.grok import turn_hooks
 
 
 class PartylineAdapter(Adapter):
     kind = "grok"
+    # Grok can take a mention into a running turn, but only where the host has
+    # opted into steering. Resolved per environment, never assumed.
+    immediate_mentions_preflight = staticmethod(immediate_mentions_preflight)
     # Kept as class attributes so a test can patch one on an instance, and so
     # the call sites below read the same as they did before the split.
     _assistant_text = staticmethod(assistant_text)
