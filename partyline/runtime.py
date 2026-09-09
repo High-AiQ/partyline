@@ -108,7 +108,7 @@ class ChatRuntime:
         proved ingested. Credit lands when the claim does.
         """
         await self._credit_claimed(att, adapter)
-        pending = self.db.messages_after(conv_id, att["last_seen"], exclude_sender=att["name"])
+        pending = self.db.messages_after(conv_id, att["last_seen"], att["name"], att["id"])
         ours = self._live_uncredited(att["id"], adapter.att.get("runtime_owner"))
         pending = [m for m in pending if m["id"] not in (ours or ())]
         if not pending:

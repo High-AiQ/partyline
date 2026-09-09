@@ -18,6 +18,7 @@ export type SenderType = z.infer<typeof SenderTypeSchema>;
 
 export const ConversationSchema = z.object({
   id: z.string(),
+  parent_id: z.string().nullable().optional(),
   name: z.string(),
   topic: z.string(),
   created_at: z.number(),

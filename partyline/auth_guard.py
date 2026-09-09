@@ -45,6 +45,9 @@ class Principal:
     kind: Literal["user", "machine"]
     name: str  # the current handle / attachment name
     user_id: int | None = None
+    conv_id: str | None = None
+    attachment_id: str | None = None
+    is_lead: bool = False
 
 
 def exempt(path: str) -> bool:
@@ -69,7 +72,13 @@ def resolve_principal(db, token: str) -> Principal | None:
         return None
     attachment = auth_store.attachment_by_api_token(db, token)
     if attachment is not None:
-        return Principal(kind="machine", name=attachment["name"])
+        return Principal(
+            kind="machine",
+            name=attachment["name"],
+            conv_id=attachment["conv_id"],
+            attachment_id=attachment["id"],
+            is_lead=bool(attachment.get("is_lead")),
+        )
     try:
         user_id = decode_token(signing_secret(db), token, TOKEN_TYPE_ACCESS)
     except TokenError:
@@ -92,6 +101,10 @@ def install_auth_guard(app, db) -> None:
                 return JSONResponse(
                     {"detail": "authentication required"}, status_code=401
                 )
+            if principal.kind == "machine" and request.method not in ("GET", "HEAD"):
+                path = request.url.path
+                if path == "/api/presets" or path.startswith(("/api/presets/", "/api/adapters/")):
+                    return JSONResponse({"detail": "instance configuration is human-only"}, status_code=403)
             request.state.principal = principal
         return await call_next(request)
 

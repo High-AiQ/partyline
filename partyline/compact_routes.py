@@ -1,6 +1,9 @@
 """REST command for compacting a live adapter's own conversation context."""
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+
+from .auth_guard import request_principal
+from .machine_scope import deny_unless_attachment
 
 from .contracts import CompactResponse
 from .presence import RECEIPT
@@ -25,5 +28,6 @@ async def request_compact(runtime, presence, att_id: str) -> dict:
 
 def register_compact_route(app: FastAPI, runtime, presence) -> None:
     @app.post("/api/attachments/{att_id}/compact", response_model=CompactResponse)
-    async def compact_attachment(att_id: str):
+    async def compact_attachment(request: Request, att_id: str):
+        deny_unless_attachment(runtime.db, request_principal(request), att_id, "attach")
         return await request_compact(runtime, presence, att_id)

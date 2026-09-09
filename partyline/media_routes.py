@@ -6,6 +6,8 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 
 from .auth_guard import request_principal
+from .hierarchy import stamp_source
+from .machine_scope import deny_unless
 from .contracts import FileRef, FileUploadResponse, MessageEvent, MessageResponse
 from .media import MediaError, MediaStore, prepared_files, validated_metadata
 from .media_digest import digest_body
@@ -62,8 +64,8 @@ def media_router(runtime, store: MediaStore) -> APIRouter:
         body: str | None = Form(None),
     ):
         require_line(conv_id, writing=True)
-        # Sender identity comes from the credential, never a form field.
         principal = request_principal(request)
+        deny_unless(runtime.db, principal, conv_id, "write")
         who = principal.name
         try:
             prepared = prepared_files(await _uploads(file))
@@ -72,6 +74,7 @@ def media_router(runtime, store: MediaStore) -> APIRouter:
             raise _http(exc) from exc
         kind = "agent" if principal.kind == "machine" else "human"
         placeholder = runtime.db.add_message(conv_id, who, kind, "")
+        placeholder = {**placeholder, **stamp_source(runtime.db, placeholder["id"], principal)}
         try:
             store.store(conv_id, placeholder["id"], prepared, title, description)
         except MediaError as exc:
@@ -114,6 +117,7 @@ def media_router(runtime, store: MediaStore) -> APIRouter:
 
     async def list_files(conv_id: str, request: Request):
         require_line(conv_id, writing=False)
+        deny_unless(runtime.db, request_principal(request), conv_id, "read")
         return store.list_conversation(conv_id, str(request.base_url).rstrip("/"))
 
     router.add_api_route(
@@ -132,9 +136,14 @@ def media_router(runtime, store: MediaStore) -> APIRouter:
     )
 
     @router.get("/api/media/{file_id}/{variant}")
-    async def serve_media(file_id: str, variant: str):
+    async def serve_media(request: Request, file_id: str, variant: str):
         if variant not in VARIANTS:
             raise HTTPException(404)
+        owned = runtime.db._exec(
+            "SELECT conv_id FROM images WHERE id=?", (file_id,)
+        ).fetchone()
+        if owned is not None:
+            deny_unless(runtime.db, request_principal(request), owned["conv_id"], "read")
         located = store.file_for(file_id, variant)
         if located is None:
             raise HTTPException(404)

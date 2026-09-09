@@ -685,3 +685,52 @@ separated one.
 | --- | --- |
 | Pass every option value as `--option=value` when any part of it is generated, user-supplied, or a path | Rely on a value never starting with `-` because it usually does not |
 
+### PTY environment does not prove shell-tool environment
+
+A joining briefing claimed that `PARTYLINE_TOKEN` was available to every tool.
+Codex's configured shell environment filtering removed it from nested shell calls,
+although Partyline had injected it into the PTY correctly. The regression test now
+loads a private per-attachment connection with an empty environment and verifies
+that neither its command nor its identity output contains the credential.
+
+| DO | DO NOT |
+| --- | --- |
+| Provide a Partyline-managed authenticated helper for environment-filtering tool runners | Put a credential literal in the briefing or change a user's CLI preset to bypass filtering |
+
+### Read access must not authorize process control
+
+The hierarchy review found terminal-key delivery guarded by the same read
+permission as screen inspection. Reading a line does not authorize answering a
+peer process's prompt. The regression now attempts key delivery as an ordinary
+participant and requires refusal before any PTY write.
+
+| DO | DO NOT |
+| --- | --- |
+| Authorize mutations by their effect, including globally keyed claim deletion and terminal input | Reuse a read permission just because the route also looks up an attachment |
+
+### A returned cursor is a promise about a connection someone else is using
+
+`Db._exec` took the lock, executed, committed, released the lock, and returned
+the live `sqlite3.Cursor`. Callers then fetched their rows — outside the lock,
+against a connection another thread had already begun executing on. The false
+assumption was that a statement is finished when `execute` returns; it is
+finished when its rows have been read.
+
+It did not fail as an exception where the mistake was. A reader came back with
+a conversation row whose every column was `None`, so `parent_id` was missing
+(HTTP 400), the line looked absent (404), or `allows()` computed against nulls
+(403) — three different status codes from one defect, which is what made it
+read as flaky tests rather than a bug. Occasionally it did raise, as
+`InterfaceError: bad parameter or other API misuse`, from a `get_conversation`
+several frames from anything to do with the write.
+
+The control is a load test, not a unit test, because a single-threaded caller
+can never see it: six readers and four writers against one `Db` produced 12
+corrupted reads and an `InterfaceError` on the old code, and zero of either
+once `_exec` materialized its rows under the lock.
+
+| DO | DO NOT |
+| --- | --- |
+| Drain a cursor before releasing the lock that made it safe, and hand back values | Return a live cursor, or any handle into shared state, from behind a lock |
+| Identify "no result set" with `cursor.description is None` | Catch fetch errors to mean "no rows" — that turns a corrupt read into an empty one |
+

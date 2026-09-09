@@ -29,10 +29,13 @@ async def route_message(runtime, conv_id: str, message: dict) -> None:
     queued: set[str] = set()
     for attachment in runtime.db.list_attachments(conv_id):
         directly_addressed = ring_all or attachment["name"].lower() in names
-        if (
-            not directly_addressed
-            or attachment["name"].lower() == message["sender"].lower()
-        ):
+        source = message.get("source_attachment_id")
+        same_speaker = (
+            source == attachment["id"]
+            if source
+            else attachment["name"].lower() == message["sender"].lower()
+        )
+        if not directly_addressed or same_speaker:
             continue
         adapter = (
             runtime.live.get(attachment["id"])

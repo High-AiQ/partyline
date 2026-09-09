@@ -588,7 +588,7 @@ class ServerTest(unittest.TestCase):
         self.add_attachment("target", "sol")
         target = FakeAdapter()
         server.runtime.live["target"] = target
-        self.arun(server.resume_attachment("old"))
+        self.arun(server.resume_attachment(self.principal_request(), "old"))
         resumed = server.runtime.live["old"]
         historical = "@sol do an obsolete task"
 
@@ -785,7 +785,7 @@ class ServerTest(unittest.TestCase):
                         yield
 
                 server.runtime.db._runtime_serialized_async = signalled_guard
-                detaching = asyncio.create_task(server.detach("old"))
+                detaching = asyncio.create_task(server.detach(self.principal_request(), "old"))
                 await lock_attempted.wait()
                 await asyncio.sleep(0.02)
                 self.assertFalse(detaching.done())
@@ -880,7 +880,7 @@ class ServerTest(unittest.TestCase):
 
     def test_attach_rejects_handle_claimed_by_a_human(self):
         self.user_token("terra")
-        self.assert_http(409, server.attach("line", server.AttachIn(
+        self.assert_http(409, server.attach(self.principal_request(), "line", server.AttachIn(
             name="TERRA", adapter="fake", cwd=self.directory.name)))
 
     def test_matching_client_id_reclaims_a_stale_handle(self):
@@ -953,44 +953,45 @@ class ServerTest(unittest.TestCase):
         self.add_attachment("one")
         adapter = FakeAdapter()
         server.runtime.live["one"] = adapter
-        archived = self.arun(server.archive_conversation("line"))
+        request = self.principal_request("greg")
+        archived = self.arun(server.archive_conversation(request, "line"))
         self.assertTrue(archived["archived"])
         self.assertTrue(adapter.stopped)
         self.assertEqual(archived["stopped"], ["terra"])
-        self.assert_http(409, server.archive_conversation("line"))
-        restored = self.arun(server.restore_conversation("line"))
+        self.assert_http(409, server.archive_conversation(request, "line"))
+        restored = self.arun(server.restore_conversation(request, "line"))
         self.assertIsNone(restored["archived_at"])
-        self.assert_http(409, server.purge_conversation("line"))
+        self.assert_http(409, server.purge_conversation(request, "line"))
         leftover = server.tasks.add("line", "must die with the line")
-        self.arun(server.archive_conversation("line"))
-        self.assertEqual(self.arun(server.purge_conversation("line")), {"ok": True, "purged": True})
+        self.arun(server.archive_conversation(request, "line"))
+        self.assertEqual(self.arun(server.purge_conversation(request, "line")), {"ok": True, "purged": True})
         self.assertIsNone(server.runtime.db.get_conversation("line"))
         with self.assertRaises(TaskError):
             server.tasks.get(leftover["id"])
 
     def test_attach_validation_and_success(self):
-        self.assert_http(400, server.attach(
+        self.assert_http(400, server.attach(self.principal_request(),
             "line", server.AttachIn(name="bad name", adapter="fake")
         ))
-        self.assert_http(400, server.attach(
+        self.assert_http(400, server.attach(self.principal_request(),
             "line", server.AttachIn(name="all", adapter="fake")
         ))
-        self.assert_http(400, server.attach(
+        self.assert_http(400, server.attach(self.principal_request(),
             "line", server.AttachIn(name="x", adapter="unknown")
         ))
         server.ADAPTER_METADATA["fake"]["requires"] = ["definitely-not-a-command"]
-        self.assert_http(400, server.attach(
+        self.assert_http(400, server.attach(self.principal_request(),
             "line", server.AttachIn(name="x", adapter="fake")
         ))
         server.ADAPTER_METADATA["fake"]["requires"] = []
         self.assert_http(
-            400, server.attach(
+            400, server.attach(self.principal_request(),
                 "line",
                 server.AttachIn(name="x", adapter="fake", cwd="/no/such/cwd"),
             )
         )
         attached = self.arun(
-            server.attach(
+            server.attach(self.principal_request(),
                 "line",
                 server.AttachIn(name="terra", adapter="fake", cwd=self.directory.name),
             )
@@ -998,7 +999,7 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(attached["name"], "terra")
         self.assertIn(attached["id"], server.runtime.live)
         self.assert_http(
-            409, server.attach(
+            409, server.attach(self.principal_request(),
                 "line",
                 server.AttachIn(name="TERRA", adapter="fake", cwd=self.directory.name),
             )
@@ -1024,10 +1025,10 @@ class ServerTest(unittest.TestCase):
                 server.ADAPTER_METADATA["fake"],
                 {"update_command": ["fake-cli", "update"]},
             ),
-            patch("partyline.server.apply_update", side_effect=fake_apply),
+            patch("partyline.conversation_routes.apply_update", side_effect=fake_apply),
         ):
             attached = self.arun(
-                server.attach(
+                server.attach(self.principal_request(),
                     "line",
                     server.AttachIn(
                         name="luna", adapter="fake", cwd=self.directory.name, update=True
@@ -1050,7 +1051,7 @@ class ServerTest(unittest.TestCase):
         before = server.runtime.db.list_attachments("line")
         self.assert_http(
             400,
-            server.attach(
+            server.attach(self.principal_request(),
                 "line",
                 server.AttachIn(
                     name="probe", adapter="fake", cwd=self.directory.name, update=True
@@ -1071,9 +1072,9 @@ class ServerTest(unittest.TestCase):
             )
             return UpdateResult(1, "already newest")
 
-        with patch("partyline.server.apply_update", side_effect=fake_apply):
+        with patch("partyline.conversation_routes.apply_update", side_effect=fake_apply):
             attached = self.arun(
-                server.attach(
+                server.attach(self.principal_request(),
                     "line",
                     server.AttachIn(
                         name="probe", adapter="fake",
@@ -1090,7 +1091,7 @@ class ServerTest(unittest.TestCase):
         server.ADAPTER_METADATA["fake"]["update_command"] = ["fake-cli", "update"]
         self.add_attachment("old", status="exited")
         with patch("partyline.adapter_update.default_runner") as runner:
-            self.arun(server.resume_attachment("old"))
+            self.arun(server.resume_attachment(self.principal_request(), "old"))
             runner.assert_not_called()
 
     def test_edit_inactive_attachment_command_updates_every_tab(self):
@@ -1155,7 +1156,7 @@ class ServerTest(unittest.TestCase):
     def test_resume_screen_keys_and_detach(self):
         self.add_attachment("old", status="exited")
         server.runtime.db.add_message("line", "terra", "agent", "already delivered")
-        resumed = self.arun(server.resume_attachment("old"))
+        resumed = self.arun(server.resume_attachment(self.principal_request(), "old"))
         self.assertEqual(resumed["status"], "running")
         adapter = server.runtime.live["old"]
         self.assertEqual(adapter.att["delivered_bodies"], ["already delivered"])
@@ -1167,13 +1168,14 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(history.transcript_records, [
             TranscriptDeliveryRecord(b"fingerprint", "late relay")
         ])
-        self.assertEqual(self.arun(server.attachment_screen("old")), {"screen": "screen"})
-        self.assertEqual(self.arun(server.attachment_key("old", server.KeyIn(key="x"))), {"ok": True})
+        req = self.principal_request()
+        self.assertEqual(self.arun(server.attachment_screen(req, "old")), {"screen": "screen"})
+        self.assertEqual(self.arun(server.attachment_key(req, "old", server.KeyIn(key="x"))), {"ok": True})
         self.assertEqual(adapter.keys, ["x"])
-        self.assert_http(400, server.attachment_key("old", server.KeyIn(key="bad")))
-        self.assertEqual(self.arun(server.detach("old")), {"ok": True})
+        self.assert_http(400, server.attachment_key(self.principal_request(), "old", server.KeyIn(key="bad")))
+        self.assertEqual(self.arun(server.detach(self.principal_request(), "old")), {"ok": True})
         self.assertTrue(adapter.stopped)
-        self.assert_http(404, server.attachment_screen("old"))
+        self.assert_http(404, server.attachment_screen(self.principal_request(), "old"))
 
     def test_a_clean_process_exit_leaves_the_attachment_resumable(self):
         self.add_attachment("old", status="running")
@@ -1184,7 +1186,7 @@ class ServerTest(unittest.TestCase):
 
         self.assertNotIn("old", server.runtime.live)
         self.assertEqual(server.runtime.db.get_attachment("old")["status"], "exited")
-        resumed = self.arun(server.resume_attachment("old"))
+        resumed = self.arun(server.resume_attachment(self.principal_request(), "old"))
         self.assertEqual(resumed["status"], "running")
         self.assertIn("old", server.runtime.live)
 
@@ -1220,7 +1222,7 @@ class ServerTest(unittest.TestCase):
         )
         messages_before = server.runtime.db.list_messages("line")
 
-        self.assert_http(409, server.detach("other-owner"))
+        self.assert_http(409, server.detach(self.principal_request(), "other-owner"))
 
         self.assertTrue(old_adapter.stopped)
         self.assertEqual(
@@ -1404,10 +1406,11 @@ def hook_event(att_id, token, request):
 
 
 class FakeRequest:
-    """Just enough Request for the shutdown route's caller check."""
+    """Just enough Request for loopback checks and the auth principal."""
 
     def __init__(self, host):
         self.client = type("Client", (), {"host": host})() if host else None
+        self.state = SimpleNamespace(principal=Principal(kind="user", name="greg"))
 
 
 class ShutdownTest(ServerTest):
@@ -1434,7 +1437,7 @@ class ShutdownTest(ServerTest):
         server.runtime.db.set_attachment_status("a1", "running", None)
         server.runtime.live["a1"] = FakeAdapter()
 
-        running = self.arun(server.running())
+        running = self.arun(server.running(self.principal_request()))
 
         self.assertEqual(running, [{"name": "worker", "adapter": "fake", "conversation": "Line"}])
 
@@ -1442,7 +1445,7 @@ class ShutdownTest(ServerTest):
         server.runtime.db.add_attachment("a1", "line", "worker", "fake", ["fake"], "/tmp")
         server.runtime.db.set_attachment_status("a1", "exited", None)
 
-        self.assertEqual(self.arun(server.running()), [])
+        self.assertEqual(self.arun(server.running(self.principal_request())), [])
 
     def test_shutdown_is_refused_from_a_non_loopback_caller(self):
         """The bind address is configurable, so the caller must be checked."""
@@ -1453,6 +1456,11 @@ class ShutdownTest(ServerTest):
             self.assertEqual(exits, [], "a refused shutdown must not stop the server")
         finally:
             server.request_exit = original
+
+    def test_machine_cannot_shutdown_even_from_loopback(self):
+        request = FakeRequest("127.0.0.1")
+        request.state.principal = Principal(kind="machine", name="worker", conv_id="line", attachment_id="a1")
+        self.assert_http(403, server.shutdown(request))
 
     def test_shutdown_reports_what_it_will_stop_and_warns_every_socket(self):
         server.runtime.db.add_attachment("a1", "line", "worker", "fake", ["fake"], "/tmp")
@@ -1492,6 +1500,31 @@ class ShutdownTest(ServerTest):
             server.plan_restart(
                 FakeRequest("10.0.0.7"),
                 server.RestartPlanRequest(conversation_id="line"),
+            ),
+        )
+        machine = FakeRequest("127.0.0.1")
+        machine.state.principal = Principal(
+            kind="machine",
+            name="worker",
+            conv_id="line",
+            attachment_id="a1",
+            is_lead=False,
+        )
+        from_machine = self.arun(
+            server.plan_restart(
+                machine,
+                server.RestartPlanRequest(
+                    conversation_id="line", debrief="cockpit planner token"
+                ),
+            )
+        )
+        self.assertEqual(from_machine.conversation_id, "line")
+        server.runtime.db.create_conversation("other", "Other")
+        self.assert_http(
+            403,
+            server.plan_restart(
+                machine,
+                server.RestartPlanRequest(conversation_id="other", debrief="nope"),
             ),
         )
 

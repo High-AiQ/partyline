@@ -6,6 +6,8 @@ import unittest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
+from partyline import auth_store, auth_tokens
+from partyline.auth_guard import install_auth_guard
 from partyline.db import Db
 from partyline.media import MediaStore
 from partyline.message_routes import conversation_detail_response, message_router
@@ -32,8 +34,14 @@ class MessageRoutesTest(unittest.TestCase):
             for number in range(1, 46)
         ]
         app = FastAPI()
+        install_auth_guard(app, self.db)
         app.include_router(message_router(self.runtime, self.media))
         self.client = TestClient(app)
+        user = auth_store.create_user(
+            self.db, "greg@example.com", "greg", auth_tokens.hash_password("hunter2222"))
+        token = auth_tokens.create_access_token(
+            auth_tokens.signing_secret(self.db), user["id"])
+        self.client.headers["Authorization"] = f"Bearer {token}"
 
     def tearDown(self):
         self.client.close()
