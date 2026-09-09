@@ -414,6 +414,29 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(adapter._startup_delivery.is_set())
 
+    async def test_a_declaration_without_a_marker_settles_nothing(self):
+        """Declared truncated, but no `<truncated N bytes>` to bound the head.
+
+        Then nothing in the record is known to be verbatim, so there is no
+        prefix to trust and the receipt stays unproven.
+        """
+        adapter = self.make(resume=True, cli_session=CONV_ID)
+        adapter.spawned_at = time.time()
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(adapter.spawned_at + 1))
+        head = "[greg]: " + "x" * 4000
+        adapter._startup_prompt = f"{head} and a tail that was cut"
+        # No closing envelope either, so the *only* thing standing between
+        # this record and a false settlement is the missing marker: the head
+        # here is a genuine prefix of the digest.
+        record = json.loads(step(
+            1, "USER_EXPLICIT", "USER_INPUT", f"<USER_REQUEST>\n{head}",
+            created=now, truncated_fields=["content"],
+        ))
+
+        await adapter._settle_user_input_record(record, record["content"])
+
+        self.assertFalse(adapter._startup_delivery.is_set())
+
     async def test_a_truncated_record_also_settles_an_outstanding_pasted_wake(self):
         """The same cap defeats ordinary wakes, which are then re-sent."""
         adapter = self.make(resume=True, cli_session=CONV_ID)
