@@ -33,7 +33,8 @@ from partyline.adapters.bundled.antigravity import interrupt as interrupts
 from partyline.interrupts import InterruptStatus
 from partyline.adapters.bundled.antigravity.conversation_log import (
     conversation_from_log,
-    log_size,
+    log_mark,
+    suffix_offset,
 )
 from partyline.adapters.bundled.antigravity.wakes import WakeSettlement
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
@@ -78,6 +79,16 @@ class PartylineAdapter(WakeSettlement, Adapter):
         # Notices already spent confirming an interruption. A replayed record
         # must not answer for a later Esc.
         self.interrupt_records_used: set[str] = set()
+        self._log_mark = None
+
+    async def start(self):
+        os.makedirs(LOG_ROOT, exist_ok=True)
+        self._remember_log_mark()
+        await super().start()
+
+    def _remember_log_mark(self) -> None:
+        if self._log_mark is None:
+            self._log_mark = log_mark(Path(self.log_path())) if self.resume else (0, 0)
 
     async def on_output(self, data: bytes):
         self._output_event.set()
@@ -185,9 +196,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
 
     async def _run(self):
         os.makedirs(LOG_ROOT, exist_ok=True)
-        # Resume must ignore Created lines from the previous activation of
-        # this same log file; a fresh attach reads the whole file.
-        mark = log_size(Path(self.log_path())) if self.resume else 0
+        self._remember_log_mark()
         await asyncio.sleep(4.0)
         if not self.alive():
             return
@@ -197,7 +206,8 @@ class PartylineAdapter(WakeSettlement, Adapter):
         conversation = ""
         waited = 0.0
         while not conversation and self.alive():
-            conversation = self._conversation_from_log(after=mark) or ""
+            after = suffix_offset(Path(self.log_path()), self._log_mark)
+            conversation = self._conversation_from_log(after=after) or ""
             if conversation:
                 break
             await asyncio.sleep(1.0)
@@ -270,9 +280,6 @@ class PartylineAdapter(WakeSettlement, Adapter):
                 self._turn_open = True
                 await receipt(self.att, BEGAN)
             elif source == "MODEL" and record_type == "PLANNER_RESPONSE":
-                # 2026-08-22: 2,386 DONE / 48 RUNNING across 15 sessions; no abort status ever
-                # observed — names are defensive guesses, real aborts leave no record;
-                # exit/detach flush is the guarantee.
                 if status in ("ERROR", "CANCELLED", "ABORTED", "FAILED"):
                     self._background_tasks.clear()
                     self._turn_open = False
