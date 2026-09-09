@@ -385,3 +385,26 @@ was found in a real log, harmless only because no uuid followed the phrase.
 | --- | --- |
 | Keep the echo skip matched to the vendor's exact marker | Loosen it into a heuristic that might skip a real CLI line |
 | Re-check that marker when `agy` updates — a reworded log reopens the injection path with these tests still green | Assume a passing suite proves the filter still matches anything |
+
+### Antigravity records at most ~4 KB of submitted input
+
+A `USER_INPUT` record is not a copy of what was submitted. Past roughly 4,096
+characters the CLI keeps a verbatim head, replaces the middle with
+`<truncated N bytes>`, re-appends a well-formed `</USER_REQUEST>` and metadata
+block — so the record reads as intact — and declares the loss in
+`truncated_fields`.
+
+Settlement used whole-digest containment, which such a record can never
+satisfy. The startup receipt for any continuation over the cap therefore timed
+out while delivery had in fact succeeded, which reads as a wedged process that
+is answering normally. One transcript showed both sides of the line: a
+3,468-character wake settled, and 4,091- and 4,088-character wakes did not.
+
+For a record the CLI has declared truncated, the surviving head is matched as
+an exact prefix of the digest instead. The part that exists is still compared
+in full; only the part the vendor removed is excused.
+
+| DO | DO NOT |
+| --- | --- |
+| Read `truncated_fields` before treating a record's absence of text as evidence | Infer truncation from a length threshold — the cap is the vendor's to change |
+| Require enough verbatim head to identify one digest from another | Settle on a prefix short enough that two different wakes share it |
