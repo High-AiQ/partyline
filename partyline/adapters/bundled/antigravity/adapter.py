@@ -221,9 +221,9 @@ class PartylineAdapter(WakeSettlement, Adapter):
             elif waited > 45.0:
                 await self.post(
                     "system", "system",
-                    f"{self.att['name']}: no conversation after 45s — the CLI is probably "
-                    f"showing a first-run or trust prompt. Run `agy` manually once in "
-                    f"{self.att['cwd']}, then re-attach.",
+                    f"{self.att['name']}: no Created or Resuming conversation line in this "
+                    f"activation's log after 45s, so nothing will relay. Usually a first-run "
+                    f"or trust prompt: run `agy` once in {self.att['cwd']}, then re-attach.",
                 )
                 return
         if not conversation or not self.alive():

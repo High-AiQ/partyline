@@ -1,10 +1,16 @@
 """Read this attachment's `--log-file` for the conversation the CLI created.
 
 `agy` accepts no caller-chosen id. The only structured identity it emits is a
-``Created conversation <uuid>`` line on the log Partyline pinned for this
-attachment. Resume used to skip that and tail ``cli_session`` — so when the
-CLI opened a new conversation, the nonce and clearance landed in a file the
-adapter never opened.
+``Created conversation <uuid>`` or ``Resuming conversation <uuid>`` line on the
+log Partyline pinned for this attachment. Resume used to skip that and tail
+``cli_session`` — so when the CLI opened a new conversation, the nonce and
+clearance landed in a file the adapter never opened.
+
+Both verbs matter, and reading only one was its own outage: ``build_command``
+passes ``--conversation`` on resume, so a resumed CLI says "Resuming" and never
+"Created". Discovery that recognised creation alone therefore worked for the
+run that created the conversation and failed on every restart after it, leaving
+a live process nobody was listening to.
 
 Discovery never scans the brain directory. It reads only this attachment's
 log, and on resume only bytes written after the activation marked the file,
@@ -16,7 +22,20 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-CREATED = re.compile(r"Created conversation ([0-9a-fA-F-]{36})")
+# The CLI announces which conversation it is on with two different verbs, and
+# which one it uses is decided by us: `build_command` passes `--conversation`
+# on resume, so a resumed activation only ever says "Resuming". Matching
+# "Created" alone meant discovery could succeed exactly once — the run that
+# created the conversation — and then never again for that attachment.
+CONVERSATION = re.compile(r"(?:Created|Resuming) conversation ([0-9a-fA-F-]{36})")
+
+# The CLI echoes whatever was typed at it back into this same log:
+# ``input_loop.go: HandleUserInput called with text: "…"``. That text is chat
+# anyone on the line can write, so without this an ordinary message could name
+# a conversation and pin the adapter to a transcript of the sender's choosing.
+# Observed in the wild already — a message discussing this very bug contained
+# the phrase, and was harmless only because no uuid followed it.
+ECHOED_INPUT = "HandleUserInput called with text:"
 
 # Bytes remembered at the end of the pre-spawn log. Same-inode truncate then
 # rewrite past the old size keeps inode and size-gte; this tail must still match.
@@ -70,9 +89,12 @@ def suffix_offset(path: Path, mark: LogMark) -> int:
 
 
 def conversation_from_log(path: Path, *, after: int = 0) -> str | None:
-    """The last Created-conversation id in this log, optionally after `after`.
+    """The conversation this activation says it is on, optionally after `after`.
 
     Last-wins so a resume that appends a new id is not stuck on the first.
+    Lines that are the CLI quoting its own input back are skipped: they carry
+    chat text, and chat text is not evidence about which conversation the CLI
+    opened.
     """
     try:
         with path.open("rb") as file:
@@ -81,5 +103,10 @@ def conversation_from_log(path: Path, *, after: int = 0) -> str | None:
             text = file.read().decode("utf-8", errors="replace")
     except OSError:
         return None
-    ids = CREATED.findall(text)
-    return ids[-1] if ids else None
+    found = None
+    for line in text.splitlines():
+        if ECHOED_INPUT in line:
+            continue
+        if match := CONVERSATION.findall(line):
+            found = match[-1]
+    return found
