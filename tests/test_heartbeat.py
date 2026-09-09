@@ -1,0 +1,942 @@
+"""The lead heartbeat: one pending wake, settled only by real delivery.
+
+Every timing assertion here runs on an injected clock. A test that waits out a
+five-minute interval proves the same thing five minutes later, and a test that
+shortens the interval to prove it faster is testing a configuration nobody
+runs.
+"""
+
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from partyline import auth_store, auth_tokens, heartbeat, heartbeat_scheduler
+from partyline.auth_guard import install_auth_guard
+from partyline.auth_store import ensure_api_token
+from partyline.db import Db
+from partyline.heartbeat_routes import heartbeat_router
+from partyline.hierarchy import create_child_conversation, set_lead, set_parent
+from partyline.role_briefing import role_instructions
+from partyline.runtime import ChatRuntime
+
+ROOT = "root"
+OWNER = "lead-att"
+
+
+class FakeAdapter:
+    """A bare process: pasting is delivery, and it can refuse to paste.
+
+    `accept=False` is the wedged case the whole design turns on — the reminder
+    is posted and offered, but the cursor never moves, so the wake stays
+    outstanding and no second reminder joins it.
+    """
+
+    def __init__(self, att: dict):
+        self.att = att
+        self.accept = True
+        self.delivered: list[dict] = []
+
+    async def deliver(self, messages):
+        if not self.accept:
+            return False
+        self.delivered.extend(messages)
+        return None
+
+
+class HeartbeatFixture(unittest.IsolatedAsyncioTestCase):
+    """A root line with a live, appointed manager — the only eligible shape."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.db = Db(Path(self.directory.name) / "partyline.db")
+        self.runtime = ChatRuntime(self.db)
+        self.runtime.broadcast = AsyncMock()
+        self.runtime.route_mentions = AsyncMock()
+        self.db.create_conversation(ROOT, "Root")
+        self.db.add_attachment(
+            OWNER, ROOT, "astra", "raw", ["sh"], self.directory.name, "owner"
+        )
+        self.db.set_attachment_status(OWNER, "running", "owner")
+        set_lead(self.db, ROOT, OWNER)
+        self.adapter = FakeAdapter(self.db.get_attachment(OWNER))
+        self.runtime.live[OWNER] = self.adapter
+        self.runtime.activation_matches = lambda adapter, att: adapter is self.adapter
+        self.now = 1_000.0
+
+    def tearDown(self):
+        self.db.close()
+        self.directory.cleanup()
+
+    def enable(self, **kwargs):
+        return heartbeat.enable(self.db, ROOT, OWNER, now=self.now, **kwargs)
+
+    async def tick(self, advance: float = 0.0):
+        self.now += advance
+        return await heartbeat_scheduler.tick(self.runtime, now=self.now)
+
+    def deliver(self, message_id: int, att_id: str = OWNER):
+        """What a real delivery does to the cursor, and nothing more."""
+        self.db.set_last_seen(att_id, message_id, "owner")
+
+
+class IntervalTest(HeartbeatFixture):
+    async def test_nothing_fires_before_the_first_interval_elapses(self):
+        self.enable()
+
+        self.assertIsNone(await self.tick(heartbeat.DEFAULT_INTERVAL - 1))
+
+        first = await self.tick(1)
+        self.assertIsNotNone(first)
+
+    async def test_the_reminder_names_the_owner_and_grants_nothing(self):
+        self.enable(goal="finish the three books")
+
+        message_id = await self.tick(heartbeat.DEFAULT_INTERVAL)
+
+        posted = [m for m in self.db.list_messages(ROOT) if m["id"] == message_id]
+        body = posted[0]["body"]
+        self.assertIn("@astra", body)
+        self.assertIn("finish the three books", body)
+        self.assertIn("No reply is needed", body)
+        self.assertIn("authorizes no spending", body)
+
+    async def test_the_interval_is_bounded_and_defaults(self):
+        self.assertEqual(heartbeat.normalize_interval(None), heartbeat.DEFAULT_INTERVAL)
+        for bad in (0, 59.9, 3600.1, float("nan"), float("inf"), "soon"):
+            with self.subTest(bad=bad), self.assertRaises(heartbeat.HeartbeatError):
+                heartbeat.normalize_interval(bad)
+        self.assertEqual(heartbeat.normalize_interval(60), 60.0)
+
+    async def test_a_long_outage_produces_one_reminder_not_a_backlog(self):
+        """A suspended host must not owe an hour of identical reminders."""
+        self.enable()
+
+        first = await self.tick(heartbeat.DEFAULT_INTERVAL * 20)
+        self.assertIsNotNone(first)
+        self.deliver(first)
+
+        self.assertIsNone(await self.tick(1), "the missed intervals are not owed")
+        self.assertIsNotNone(await self.tick(heartbeat.DEFAULT_INTERVAL))
+
+
+class OnePendingWakeTest(HeartbeatFixture):
+    async def test_a_second_reminder_waits_for_the_first_to_be_delivered(self):
+        self.enable()
+        self.adapter.accept = False  # offered, never pasted
+        first = await self.tick(heartbeat.DEFAULT_INTERVAL)
+        self.assertIsNotNone(first)
+
+        for _ in range(5):
+            self.assertIsNone(
+                await self.tick(heartbeat.DEFAULT_INTERVAL),
+                "an undelivered reminder must not be joined by another",
+            )
+        self.assertTrue(heartbeat.status(self.db)["wake_pending"])
+
+        self.adapter.accept = True
+        self.assertIsNone(await self.tick(1), "the outstanding one is delivered first")
+        self.assertIsNotNone(await self.tick(heartbeat.DEFAULT_INTERVAL))
+
+    async def test_a_paste_that_never_reached_the_cursor_does_not_settle(self):
+        """Posting is not delivery. Only the durable cursor settles a wake."""
+        self.enable()
+        self.adapter.accept = False
+        first = await self.tick(heartbeat.DEFAULT_INTERVAL)
+
+        # The room saw it and the adapter was offered it; the cursor did not move.
+        self.runtime.broadcast.assert_awaited()
+        self.assertEqual(self.db.get_attachment(OWNER)["last_seen"], 0)
+
+        self.assertIsNone(await self.tick(heartbeat.DEFAULT_INTERVAL))
+        self.assertEqual(heartbeat.status(self.db)["pending_message_id"], first)
+
+        self.deliver(first - 1)
+        self.assertIsNone(
+            await self.tick(heartbeat.DEFAULT_INTERVAL),
+            "a cursor short of the reminder has not delivered it",
+        )
+
+        self.deliver(first)
+        self.assertFalse(heartbeat.settle_delivered(self.db)["pending_message_id"])
+
+    async def test_a_committed_reminder_is_retried_not_replaced(self):
+        """The crash case: the row names the exact message that is owed."""
+        self.enable()
+        self.adapter.accept = False
+        first = await self.tick(heartbeat.DEFAULT_INTERVAL)
+
+        self.adapter.accept = True
+        self.assertIsNone(await self.tick(heartbeat.DEFAULT_INTERVAL * 3))
+
+        self.assertEqual(
+            [message["id"] for message in self.adapter.delivered], [first],
+            "the same reminder was delivered, and no second one was written",
+        )
+        self.assertFalse(heartbeat.status(self.db)["wake_pending"])
+
+    async def test_concurrent_ticks_produce_exactly_one_reminder(self):
+        import asyncio
+
+        self.enable()
+        self.now += heartbeat.DEFAULT_INTERVAL
+
+        results = await asyncio.gather(
+            *(heartbeat_scheduler.tick(self.runtime, now=self.now) for _ in range(8))
+        )
+
+        posted = [value for value in results if value is not None]
+        self.assertEqual(len(posted), 1, f"one reminder, got {posted}")
+
+    async def test_a_restart_mid_flight_does_not_duplicate_the_wake(self):
+        """The pending mark is in the row, so a fresh process still sees it."""
+        self.enable()
+        self.adapter.accept = False
+        first = await self.tick(heartbeat.DEFAULT_INTERVAL)
+
+        reopened = Db(Path(self.directory.name) / "partyline.db")
+        try:
+            self.assertEqual(
+                heartbeat.status(reopened)["pending_message_id"],
+                first,
+                "a restart must not forget an outstanding reminder",
+            )
+            self.assertIsNone(
+                heartbeat.post_due_reminder(
+                    reopened, self.now + 10_000, sender="system",
+                    body_for=lambda row: "should never be written",
+                )
+            )
+        finally:
+            reopened.close()
+
+
+class OwnerTest(HeartbeatFixture):
+    async def test_a_detached_owner_pauses_rather_than_redirecting(self):
+        self.enable()
+        self.db.set_attachment_status(OWNER, "detached", "owner")
+
+        self.assertIsNone(await self.tick(heartbeat.DEFAULT_INTERVAL * 3))
+        self.assertEqual(self.db.list_messages(ROOT), [])
+
+        self.db.set_attachment_status(OWNER, "running", "owner")
+        self.assertIsNotNone(await self.tick(1), "the same owner resumes on return")
+
+    async def test_losing_the_lead_pauses_and_never_wakes_the_replacement(self):
+        self.enable()
+        self.db.add_attachment(
+            "other", ROOT, "someone", "raw", ["sh"], self.directory.name, "owner"
+        )
+        self.db.set_attachment_status("other", "running", "owner")
+        self.runtime.live["other"] = self.adapter
+        set_lead(self.db, ROOT, "other")
+
+        self.assertIsNone(await self.tick(heartbeat.DEFAULT_INTERVAL * 3))
+        self.assertEqual(self.db.list_messages(ROOT), [])
+
+    async def test_a_pending_wake_survives_the_pause_for_its_own_owner(self):
+        self.enable()
+        self.adapter.accept = False
+        first = await self.tick(heartbeat.DEFAULT_INTERVAL)
+        self.db.set_attachment_status(OWNER, "detached", "owner")
+
+        await self.tick(heartbeat.DEFAULT_INTERVAL)
+        self.assertEqual(heartbeat.status(self.db)["pending_message_id"], first)
+
+        self.db.set_attachment_status(OWNER, "running", "owner")
+        self.deliver(first)
+        self.assertIsNotNone(await self.tick(heartbeat.DEFAULT_INTERVAL))
+
+    async def test_a_dead_adapter_is_not_delivery(self):
+        self.enable()
+        self.runtime.live.pop(OWNER)
+
+        self.assertIsNone(await self.tick(heartbeat.DEFAULT_INTERVAL * 2))
+
+    async def test_only_a_root_lead_is_eligible(self):
+        self.assertTrue(heartbeat.is_root_lead(self.db, ROOT, OWNER))
+        self.assertFalse(heartbeat.is_root_lead(self.db, ROOT, "someone-else"))
+        self.assertFalse(heartbeat.is_root_lead(self.db, None, OWNER))
+        self.assertFalse(heartbeat.is_root_lead(self.db, "missing", OWNER))
+
+        create_child_conversation(self.db, ROOT, "child", "Child")
+        self.db.add_attachment(
+            "child-att", "child", "worker", "raw", ["sh"], self.directory.name, "owner"
+        )
+        set_lead(self.db, "child", "child-att")
+        self.assertFalse(
+            heartbeat.is_root_lead(self.db, "child", "child-att"),
+            "a child manager is not the root manager",
+        )
+
+
+class RaceTest(HeartbeatFixture):
+    """What happens between a reminder falling due and having been received."""
+
+    async def test_a_second_connection_reconfiguring_after_the_write_wins(self):
+        """The interleaving the generation column exists for.
+
+        A reminder is committed and pending. Another connection — a second
+        server process, or an operator's helper — disables and re-enables the
+        monitor. The old reminder must not be carried into the new
+        configuration as its outstanding wake.
+        """
+        self.enable()
+        self.adapter.accept = False
+        stale = await self.tick(heartbeat.DEFAULT_INTERVAL)
+        self.assertEqual(heartbeat.status(self.db)["pending_message_id"], stale)
+
+        elsewhere = Db(Path(self.directory.name) / "partyline.db")
+        try:
+            before = heartbeat.get(elsewhere)["generation"]
+            heartbeat.disable(elsewhere)
+            heartbeat.enable(
+                elsewhere, ROOT, OWNER, goal="a different goal", now=self.now
+            )
+            after = heartbeat.get(elsewhere)["generation"]
+        finally:
+            elsewhere.close()
+
+        self.assertGreater(after, before + 1, "disable and enable each advanced it")
+        self.assertFalse(
+            heartbeat.status(self.db)["wake_pending"],
+            "the previous configuration's reminder is not this one's wake",
+        )
+
+        self.adapter.accept = True
+        fresh = await self.tick(heartbeat.DEFAULT_INTERVAL)
+        self.assertIsNotNone(fresh)
+        self.assertNotEqual(fresh, stale, "a new configuration posts its own reminder")
+        self.assertIn("a different goal", self.adapter.delivered[-1]["body"])
+
+    async def test_a_concurrent_disable_never_leaves_a_torn_row(self):
+        """Whoever wins, the row is never pending on a message that isn't there."""
+        import threading
+
+        self.enable()
+        self.now += heartbeat.DEFAULT_INTERVAL
+        elsewhere = Db(Path(self.directory.name) / "partyline.db")
+        started = threading.Event()
+
+        def disable_elsewhere():
+            started.wait(timeout=5)
+            heartbeat.disable(elsewhere)
+
+        worker = threading.Thread(target=disable_elsewhere)
+        worker.start()
+        try:
+            started.set()
+            posted = heartbeat.post_due_reminder(
+                self.db, self.now, sender="system",
+                body_for=lambda row: heartbeat.wake_body("astra", row["goal"]),
+            )
+        finally:
+            worker.join(timeout=5)
+            elsewhere.close()
+
+        row = heartbeat.get(self.db)
+        pending = row["pending_message_id"]
+        if pending is not None:
+            self.assertEqual(pending, posted["id"])
+            ids = [message["id"] for message in self.db.list_messages(ROOT)]
+            self.assertIn(pending, ids, "pending always names a message that exists")
+
+    async def _tick_with_paused_broadcast(self, interfere):
+        """Freeze the tick inside its broadcast await, interfere, then resume.
+
+        The window the review found: ownership was checked before this await
+        and delivery happened after it, with nothing in between re-reading the
+        row. Anything that can change during an await must be proved here.
+        """
+        import asyncio
+
+        entered = asyncio.Event()
+        resume = asyncio.Event()
+
+        async def paused_broadcast(*_args, **_kwargs):
+            entered.set()
+            await resume.wait()
+
+        self.runtime.broadcast = paused_broadcast
+        self.now += heartbeat.DEFAULT_INTERVAL
+        running = asyncio.create_task(
+            heartbeat_scheduler.tick(self.runtime, now=self.now)
+        )
+        await asyncio.wait_for(entered.wait(), timeout=5)
+
+        elsewhere = Db(Path(self.directory.name) / "partyline.db")
+        try:
+            interfere(elsewhere)
+        finally:
+            elsewhere.close()
+
+        resume.set()
+        return await asyncio.wait_for(running, timeout=5)
+
+    async def test_a_disable_during_the_broadcast_await_stops_delivery(self):
+        self.enable()
+
+        await self._tick_with_paused_broadcast(heartbeat.disable)
+
+        self.assertEqual(
+            self.adapter.delivered, [], "the old tick delivered for a dead monitor"
+        )
+        self.assertEqual(self.db.get_attachment(OWNER)["last_seen"], 0)
+
+    async def test_a_reconfigure_during_the_broadcast_await_stops_delivery(self):
+        self.enable()
+
+        def reconfigure(elsewhere):
+            heartbeat.disable(elsewhere)
+            heartbeat.enable(
+                elsewhere, ROOT, OWNER, goal="a different goal", now=self.now
+            )
+
+        await self._tick_with_paused_broadcast(reconfigure)
+
+        self.assertEqual(self.adapter.delivered, [])
+        self.assertFalse(
+            heartbeat.status(self.db)["wake_pending"],
+            "the superseded reminder is not the new configuration's wake",
+        )
+
+    async def test_detaching_during_the_broadcast_await_stops_delivery(self):
+        self.enable()
+
+        await self._tick_with_paused_broadcast(
+            lambda elsewhere: elsewhere.set_attachment_status(
+                OWNER, "detached", "owner"
+            )
+        )
+
+        self.assertEqual(self.adapter.delivered, [])
+
+    async def test_a_removed_attachment_during_the_await_is_survivable(self):
+        """The owner's row can be gone entirely by the time delivery runs."""
+        self.enable()
+
+        def remove(elsewhere):
+            elsewhere.set_attachment_status(OWNER, "detached", "owner")
+            with elsewhere.lock:
+                elsewhere.conn.execute("DELETE FROM attachments WHERE id=?", (OWNER,))
+                elsewhere.conn.commit()
+
+        await self._tick_with_paused_broadcast(remove)
+
+        self.assertEqual(self.adapter.delivered, [])
+
+    async def _tick_paused_at_delivery(self, interfere):
+        """Freeze the tick on the way into delivery, interfere, then resume.
+
+        Grok's probe: pausing at `broadcast` leaves a later window, because
+        `deliver_pending` itself awaits before it reserves and pastes. The
+        interference lands between the scheduler's own check and the paste,
+        which is the only place a guard taken inside the reservation can save.
+        """
+        import asyncio
+
+        entered = asyncio.Event()
+        resume = asyncio.Event()
+        original = self.runtime.deliver_pending
+
+        async def paused_deliver(*args, **kwargs):
+            entered.set()
+            await resume.wait()
+            return await original(*args, **kwargs)
+
+        self.runtime.deliver_pending = paused_deliver
+        self.now += heartbeat.DEFAULT_INTERVAL
+        running = asyncio.create_task(
+            heartbeat_scheduler.tick(self.runtime, now=self.now)
+        )
+        await asyncio.wait_for(entered.wait(), timeout=5)
+
+        elsewhere = Db(Path(self.directory.name) / "partyline.db")
+        try:
+            interfere(elsewhere)
+        finally:
+            elsewhere.close()
+
+        resume.set()
+        return await asyncio.wait_for(running, timeout=5)
+
+    async def test_a_disable_at_the_reservation_boundary_stops_the_paste(self):
+        self.enable()
+
+        await self._tick_paused_at_delivery(heartbeat.disable)
+
+        self.assertEqual(self.adapter.delivered, [], "nothing was pasted")
+        self.assertEqual(
+            self.db.get_attachment(OWNER)["last_seen"], 0, "the cursor did not move"
+        )
+
+    async def test_a_reconfigure_at_the_reservation_boundary_stops_the_paste(self):
+        self.enable()
+
+        def reconfigure(elsewhere):
+            heartbeat.disable(elsewhere)
+            heartbeat.enable(
+                elsewhere, ROOT, OWNER, goal="a different goal", now=self.now
+            )
+
+        await self._tick_paused_at_delivery(reconfigure)
+
+        self.assertEqual(self.adapter.delivered, [])
+        self.assertEqual(self.db.get_attachment(OWNER)["last_seen"], 0)
+
+    async def test_losing_the_lead_at_the_reservation_boundary_stops_the_paste(self):
+        self.enable()
+        self.db.add_attachment(
+            "usurper", ROOT, "someone", "raw", ["sh"], self.directory.name, "owner"
+        )
+
+        await self._tick_paused_at_delivery(
+            lambda elsewhere: set_lead(elsewhere, ROOT, "usurper")
+        )
+
+        self.assertEqual(self.adapter.delivered, [])
+
+    async def test_detaching_at_the_reservation_boundary_stops_the_paste(self):
+        """Detach changes the attachment, not the row: the guard asks both."""
+        self.enable()
+
+        await self._tick_paused_at_delivery(
+            lambda elsewhere: elsewhere.set_attachment_status(
+                OWNER, "detached", "owner"
+            )
+        )
+
+        self.assertEqual(self.adapter.delivered, [])
+        self.assertEqual(self.db.get_attachment(OWNER)["last_seen"], 0)
+
+    async def test_a_dead_adapter_at_the_reservation_boundary_stops_the_paste(self):
+        self.enable()
+
+        def unregister(_elsewhere):
+            self.runtime.live.pop(OWNER)
+
+        await self._tick_paused_at_delivery(unregister)
+
+        self.assertEqual(self.adapter.delivered, [])
+
+    async def test_a_replacement_adapter_at_the_boundary_never_gets_the_paste(self):
+        """A new process adopting the row is not the reader this reminder had."""
+        self.enable()
+        replacement = FakeAdapter(self.db.get_attachment(OWNER))
+
+        def swap(_elsewhere):
+            self.runtime.live[OWNER] = replacement
+
+        await self._tick_paused_at_delivery(swap)
+
+        self.assertEqual(replacement.delivered, [], "the replacement was not woken")
+        self.assertEqual(self.adapter.delivered, [])
+        self.assertEqual(self.db.get_attachment(OWNER)["last_seen"], 0)
+
+    async def test_a_pause_at_the_boundary_keeps_the_reminder_for_its_owner(self):
+        """Pausing is not cancelling: the same wake is still owed, to the same
+        process, and is delivered when it comes back."""
+        self.enable()
+
+        posted = await self._tick_paused_at_delivery(
+            lambda elsewhere: elsewhere.set_attachment_status(
+                OWNER, "detached", "owner"
+            )
+        )
+
+        self.assertEqual(heartbeat.status(self.db)["pending_message_id"], posted)
+
+        self.db.set_attachment_status(OWNER, "running", "owner")
+        self.assertIsNone(await self.tick(1))
+        self.assertEqual([m["id"] for m in self.adapter.delivered], [posted])
+        self.assertFalse(heartbeat.status(self.db)["wake_pending"])
+
+    async def test_an_undisturbed_delivery_still_pastes_and_settles(self):
+        """The guard must not become a reason nothing is ever delivered."""
+        self.enable()
+
+        posted = await self._tick_paused_at_delivery(lambda _elsewhere: None)
+
+        self.assertEqual([m["id"] for m in self.adapter.delivered], [posted])
+        self.assertFalse(heartbeat.status(self.db)["wake_pending"])
+
+    async def test_a_reminder_due_but_disabled_first_is_never_written(self):
+        """Enabled, pending and due are all re-read inside the write itself."""
+        self.enable()
+        self.now += heartbeat.DEFAULT_INTERVAL
+        heartbeat.disable(self.db)
+
+        posted = heartbeat.post_due_reminder(
+            self.db, self.now, sender="system",
+            body_for=lambda row: "should never be written",
+        )
+
+        self.assertIsNone(posted)
+        self.assertEqual(self.db.list_messages(ROOT), [])
+
+    async def test_a_reminder_whose_owner_changed_in_flight_is_left_unowned(self):
+        self.enable()
+        self.adapter.accept = False
+
+        posted = await self.tick(heartbeat.DEFAULT_INTERVAL)
+
+        # The message and its pending reference are written together, so
+        # there is no state in which one exists without the other.
+        self.assertIsNotNone(posted)
+        self.assertEqual(heartbeat.status(self.db)["pending_message_id"], posted)
+
+    async def test_an_owner_on_another_line_is_never_deliverable(self):
+        row = dict(heartbeat.get(self.db) or {}, conv_id="somewhere-else",
+                   attachment_id=OWNER)
+
+        self.assertIsNone(heartbeat_scheduler.deliverable_owner(self.runtime, row))
+
+
+class GoalRoutingTest(HeartbeatFixture):
+    """The goal is the lead's own text, so it must not be able to ring the room."""
+
+    def setUp(self):
+        super().setUp()
+        self.db.add_attachment(
+            "bystander", ROOT, "grok", "raw", ["sh"], self.directory.name, "owner"
+        )
+        self.db.set_attachment_status("bystander", "running", "owner")
+        self.other = FakeAdapter(self.db.get_attachment("bystander"))
+        self.runtime.live["bystander"] = self.other
+        matches = self.runtime.activation_matches
+        self.runtime.activation_matches = lambda adapter, att: (
+            adapter is self.other or matches(adapter, att)
+        )
+
+    async def test_a_goal_naming_all_wakes_nobody_else(self):
+        self.enable(goal="@all drop everything and render the covers")
+
+        posted = await self.tick(heartbeat.DEFAULT_INTERVAL)
+
+        self.assertEqual(
+            [message["id"] for message in self.adapter.delivered], [posted],
+            "the owner received its own reminder",
+        )
+        self.assertEqual(self.other.delivered, [], "and nobody else did")
+        self.assertEqual(self.db.get_attachment("bystander")["last_seen"], 0)
+
+    async def test_a_goal_naming_another_handle_wakes_nobody_else(self):
+        self.enable(goal="chase @grok about the raw submit path")
+
+        await self.tick(heartbeat.DEFAULT_INTERVAL)
+
+        self.assertEqual(self.other.delivered, [])
+
+    async def test_the_reminder_is_never_handed_to_the_mention_router(self):
+        """Mention routing is the mechanism that would honour `@all`."""
+        self.enable(goal="@all")
+
+        await self.tick(heartbeat.DEFAULT_INTERVAL)
+
+        self.runtime.route_mentions.assert_not_awaited()
+
+
+class RootRevalidationTest(HeartbeatFixture):
+    async def test_a_line_that_gains_a_parent_stops_being_eligible(self):
+        """Root is a runtime fact: a line can be linked under another later."""
+        self.enable()
+        self.db.create_conversation("new-parent", "Parent")
+        set_parent(self.db, ROOT, "new-parent")
+
+        self.assertIsNone(await self.tick(heartbeat.DEFAULT_INTERVAL * 3))
+        self.assertEqual(self.db.list_messages(ROOT), [])
+
+        set_parent(self.db, ROOT, None)
+        self.assertIsNotNone(await self.tick(1), "and eligible again when unlinked")
+
+
+class TwoRootLinesTest(HeartbeatFixture):
+    """One database, two unrelated root managers, one singleton monitor."""
+
+    def setUp(self):
+        super().setUp()
+        self.db.create_conversation("other-root", "Other Root")
+        self.db.add_attachment(
+            "other-lead", "other-root", "sol", "raw", ["sh"],
+            self.directory.name, "owner",
+        )
+        self.db.set_attachment_status("other-lead", "running", "owner")
+        set_lead(self.db, "other-root", "other-lead")
+        app = FastAPI()
+        install_auth_guard(app, self.db)
+        app.include_router(heartbeat_router(self.runtime))
+        self.client = TestClient(app)
+
+    def tearDown(self):
+        self.client.close()
+        super().tearDown()
+
+    def as_attachment(self, att_id: str):
+        self.client.headers["Authorization"] = (
+            f"Bearer {ensure_api_token(self.db, att_id)}"
+        )
+
+    async def test_the_other_root_lead_can_neither_read_replace_nor_disable_it(self):
+        self.as_attachment(OWNER)
+        self.assertEqual(
+            self.client.post("/api/heartbeat", json={"goal": "mine"}).status_code, 200
+        )
+
+        self.as_attachment("other-lead")
+        self.assertEqual(self.client.get("/api/heartbeat").status_code, 403)
+        self.assertEqual(self.client.post("/api/heartbeat", json={}).status_code, 403)
+        self.assertEqual(self.client.delete("/api/heartbeat").status_code, 403)
+
+        self.as_attachment(OWNER)
+        state = self.client.get("/api/heartbeat").json()
+        self.assertEqual(state["goal"], "mine")
+        self.assertEqual(state["attachment_id"], OWNER)
+
+    async def test_an_unconfigured_monitor_may_be_claimed_by_either_root_lead(self):
+        self.as_attachment("other-lead")
+
+        self.assertEqual(self.client.get("/api/heartbeat").status_code, 200)
+        self.assertEqual(self.client.post("/api/heartbeat", json={}).status_code, 200)
+        self.assertEqual(
+            self.client.get("/api/heartbeat").json()["attachment_id"], "other-lead"
+        )
+
+    async def test_a_person_may_still_switch_off_a_monitor_they_do_not_own(self):
+        self.as_attachment(OWNER)
+        self.client.post("/api/heartbeat", json={})
+
+        user = auth_store.create_user(
+            self.db, "greg@example.com", "greg",
+            auth_tokens.hash_password("hunter2222"),
+        )
+        self.client.headers["Authorization"] = (
+            f"Bearer {auth_tokens.create_access_token(auth_tokens.signing_secret(self.db), user['id'])}"
+        )
+
+        self.assertFalse(self.client.delete("/api/heartbeat").json()["enabled"])
+
+
+class DisableTest(HeartbeatFixture):
+    async def test_disable_clears_the_pending_wake_and_stops_reminders(self):
+        self.enable()
+        await self.tick(heartbeat.DEFAULT_INTERVAL)
+
+        state = heartbeat.disable(self.db)
+
+        self.assertFalse(state["enabled"])
+        self.assertIsNone(state["pending_message_id"])
+        self.assertIsNone(await self.tick(heartbeat.DEFAULT_INTERVAL * 5))
+
+    async def test_re_enabling_keeps_no_stale_wake_and_restarts_the_interval(self):
+        self.enable()
+        await self.tick(heartbeat.DEFAULT_INTERVAL)
+        heartbeat.disable(self.db)
+
+        self.enable()
+        status = heartbeat.status(self.db, now=self.now)
+        self.assertTrue(status["enabled"])
+        self.assertFalse(status["wake_pending"])
+        self.assertAlmostEqual(status["seconds_until_due"], heartbeat.DEFAULT_INTERVAL)
+
+    async def test_idleness_never_disables_it(self):
+        """Completion is an explicit act; a quiet room is not evidence of it."""
+        self.enable()
+        for _ in range(10):
+            posted = await self.tick(heartbeat.DEFAULT_INTERVAL)
+            if posted is not None:
+                self.deliver(posted)
+
+        self.assertTrue(heartbeat.status(self.db)["enabled"])
+
+
+class StatusTest(HeartbeatFixture):
+    async def test_status_reports_state_interval_due_time_and_pending(self):
+        self.assertEqual(
+            heartbeat.status(self.db, now=self.now),
+            {
+                "enabled": False, "conv_id": None, "attachment_id": None,
+                "interval_seconds": heartbeat.DEFAULT_INTERVAL, "goal": None,
+                "next_due_at": None, "seconds_until_due": None,
+                "wake_pending": False, "pending_message_id": None,
+            },
+        )
+
+        self.enable(interval_seconds=120, goal="ship the books")
+        status = heartbeat.status(self.db, now=self.now)
+        self.assertEqual(status["enabled"], True)
+        self.assertEqual(status["interval_seconds"], 120.0)
+        self.assertEqual(status["goal"], "ship the books")
+        self.assertEqual(status["next_due_at"], self.now + 120)
+        self.assertEqual(status["seconds_until_due"], 120.0)
+        self.assertFalse(status["wake_pending"])
+
+        self.adapter.accept = False
+        posted = await self.tick(120)
+        status = heartbeat.status(self.db, now=self.now)
+        self.assertTrue(status["wake_pending"])
+        self.assertEqual(status["pending_message_id"], posted)
+
+    async def test_seconds_until_due_never_goes_negative(self):
+        self.enable()
+        self.assertEqual(
+            heartbeat.status(self.db, now=self.now + 10_000)["seconds_until_due"], 0.0
+        )
+
+    async def test_the_goal_is_bounded_and_persisted(self):
+        with self.assertRaises(heartbeat.HeartbeatError):
+            heartbeat.normalize_goal("   ")
+        with self.assertRaises(heartbeat.HeartbeatError):
+            heartbeat.normalize_goal("x" * (heartbeat.MAX_GOAL + 1))
+
+        self.enable(goal="  keep the trucks moving  ")
+        reopened = Db(Path(self.directory.name) / "partyline.db")
+        try:
+            self.assertEqual(
+                heartbeat.status(reopened)["goal"], "keep the trucks moving"
+            )
+        finally:
+            reopened.close()
+
+
+class BriefingTest(unittest.TestCase):
+    def test_only_a_root_manager_is_told_about_the_heartbeat(self):
+        actions = ["create_child", "read_reports", "report"]
+
+        root = role_instructions(actions, ROOT, None)
+        self.assertIn("POST /api/heartbeat", root)
+        self.assertIn("DELETE /api/heartbeat", root)
+        self.assertIn("authorizes no", root)
+
+        self.assertNotIn("/api/heartbeat", role_instructions(actions, "child", ROOT))
+        self.assertNotIn("/api/heartbeat", role_instructions(["read", "write"], ROOT, None))
+
+
+class RouteTest(HeartbeatFixture):
+    def setUp(self):
+        super().setUp()
+        app = FastAPI()
+        install_auth_guard(app, self.db)
+        app.include_router(heartbeat_router(self.runtime))
+        self.client = TestClient(app)
+        self.owner_token = ensure_api_token(self.db, OWNER)
+        self.client.headers["Authorization"] = f"Bearer {self.owner_token}"
+
+    def tearDown(self):
+        self.client.close()
+        super().tearDown()
+
+    def human(self):
+        user = auth_store.create_user(
+            self.db, "greg@example.com", "greg",
+            auth_tokens.hash_password("hunter2222"),
+        )
+        return auth_tokens.create_access_token(
+            auth_tokens.signing_secret(self.db), user["id"]
+        )
+
+    async def test_the_root_lead_enables_reads_and_disables_its_own(self):
+        response = self.client.post("/api/heartbeat", json={"interval_seconds": 600})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["interval_seconds"], 600.0)
+        self.assertEqual(response.json()["attachment_id"], OWNER)
+
+        self.assertTrue(self.client.get("/api/heartbeat").json()["enabled"])
+        self.assertFalse(self.client.delete("/api/heartbeat").json()["enabled"])
+
+    async def test_a_bad_interval_is_refused_without_changing_anything(self):
+        self.client.post("/api/heartbeat", json={"interval_seconds": 600})
+
+        self.assertEqual(
+            self.client.post("/api/heartbeat", json={"interval_seconds": 5}).status_code,
+            400,
+        )
+        self.assertEqual(self.client.get("/api/heartbeat").json()["interval_seconds"], 600.0)
+
+    async def test_a_non_root_machine_cannot_read_or_arm_it(self):
+        create_child_conversation(self.db, ROOT, "child", "Child")
+        self.db.add_attachment(
+            "child-att", "child", "worker", "raw", ["sh"], self.directory.name, "owner"
+        )
+        set_lead(self.db, "child", "child-att")
+        self.client.headers["Authorization"] = (
+            f"Bearer {ensure_api_token(self.db, 'child-att')}"
+        )
+
+        for call in (
+            lambda: self.client.get("/api/heartbeat"),
+            lambda: self.client.post("/api/heartbeat", json={}),
+            lambda: self.client.delete("/api/heartbeat"),
+        ):
+            self.assertEqual(call().status_code, 403)
+
+    async def test_a_human_may_read_and_switch_it_off_but_not_own_one(self):
+        self.client.post("/api/heartbeat", json={})
+        self.client.headers["Authorization"] = f"Bearer {self.human()}"
+
+        self.assertTrue(self.client.get("/api/heartbeat").json()["enabled"])
+        self.assertEqual(self.client.post("/api/heartbeat", json={}).status_code, 403)
+        self.assertFalse(self.client.delete("/api/heartbeat").json()["enabled"])
+
+    async def test_an_unauthenticated_caller_is_refused(self):
+        self.client.headers.pop("Authorization")
+
+        self.assertEqual(self.client.get("/api/heartbeat").status_code, 401)
+
+    async def test_an_unknown_field_is_refused(self):
+        response = self.client.post(
+            "/api/heartbeat", json={"interval_seconds": 300, "attachment_id": "someone"}
+        )
+
+        self.assertEqual(response.status_code, 422, "the owner is never a parameter")
+
+
+class ContinuityTest(HeartbeatFixture):
+    async def test_the_row_survives_a_restart_with_its_schedule_intact(self):
+        self.enable(interval_seconds=600, goal="see the release through")
+
+        reopened = Db(Path(self.directory.name) / "partyline.db")
+        try:
+            status = heartbeat.status(reopened, now=self.now)
+            self.assertTrue(status["enabled"])
+            self.assertEqual(status["interval_seconds"], 600.0)
+            self.assertEqual(status["goal"], "see the release through")
+            self.assertEqual(status["attachment_id"], OWNER)
+        finally:
+            reopened.close()
+
+    async def test_re_enabling_bumps_the_generation(self):
+        first = self.enable()["generation"]
+        second = self.enable()["generation"]
+        disabled = heartbeat.disable(self.db)["generation"]
+
+        self.assertGreater(second, first, "a re-enable is a new configuration")
+        self.assertGreater(disabled, second)
+
+
+class SchedulerLoopTest(HeartbeatFixture):
+    async def test_a_failing_tick_does_not_end_the_monitor(self):
+        import asyncio
+
+        calls = []
+
+        async def sleep(_seconds):
+            calls.append(1)
+            if len(calls) >= 3:
+                raise asyncio.CancelledError
+
+        broken = SimpleNamespace(
+            db=SimpleNamespace(),
+            live={},
+        )
+        with self.assertRaises(asyncio.CancelledError):
+            await heartbeat_scheduler.run(broken, sleep=sleep, clock=lambda: self.now)
+
+        self.assertEqual(len(calls), 3, "the loop kept ticking after failures")
+
+
+if __name__ == "__main__":
+    unittest.main()

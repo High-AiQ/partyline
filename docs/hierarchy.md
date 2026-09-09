@@ -89,3 +89,49 @@ of the child's work.
 This release scopes machine credentials to their line and explicitly delegated descendants. Existing projects must appoint managers and link child lines before relying on cross-line API access. Human access remains instance-wide.
 
 Start fresh creates a new attachment identity without inheriting the manager role. Appoint the replacement explicitly; resume retains the existing role.
+
+## The root manager's heartbeat
+
+A stalled tree looks exactly like a healthy one. Children file reports, nobody
+pulls them, and every process sits idle and correct. The heartbeat is the
+optional timer a root manager straps on itself for a goal it means to finish.
+
+`POST /api/heartbeat` enables it, `GET` reports it, `DELETE` turns it off. Only
+the manager of the root line may enable one, and enabling always names the
+caller — there is no parameter for whose process gets reminded, because a timer
+that can be aimed at another process is a way to nag someone else on a
+schedule. A person may read the status and switch it off, which is what an
+operator needs when the owner is wedged, but has no attachment to own one.
+
+| Field | Meaning |
+| --- | --- |
+| `interval_seconds` | 60–3600, default 300 |
+| `goal` | what the manager is seeing through; persisted, shown in the reminder |
+| `next_due_at` / `seconds_until_due` | when the next reminder is due |
+| `wake_pending` | a reminder has been posted and not yet delivered |
+
+Three rules keep it a monitor rather than a second source of noise. **One
+reminder is outstanding at a time** — a second is never posted while the first
+is unanswered, so a manager deep in work does not return to a pile of identical
+nags. **A reminder settles on delivery, not on posting** — the owner's durable
+cursor passing the message is the evidence; a paste is not, or a wedged adapter
+could be reminded forever without receiving anything. **It authorizes nothing**
+— no spending, rendering, or deployment, and it needs no reply when nothing is
+waiting.
+
+If the owner detaches or stops being the root manager, the heartbeat pauses:
+nothing is posted, an outstanding reminder stays outstanding for that same
+owner, and it is never redirected to whoever holds the role now. The
+configuration lives in the database, so a restart resumes the schedule the
+manager chose, including an unsettled reminder.
+
+It never switches itself off. Completion is an explicit `DELETE`, because an
+idle room is not evidence that the work is done — that confusion is the reason
+the heartbeat exists.
+
+A superseded reminder — one committed before the manager disabled or
+re-pointed the monitor — stays in the room, because it was really said. It is
+no longer anyone's outstanding wake and settles nothing, and the tick that
+wrote it will not deliver it; but like any other message on the line it will be
+included the next time that manager's cursor advances. Reminders are written to
+be harmless when read late: they name a goal and grant nothing.
