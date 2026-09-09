@@ -59,7 +59,7 @@ def is_assistant_record(record: object) -> bool:
     )
 
 
-def _unwrap_user_query(body: str) -> str:
+def unwrap_user_query(body: str) -> str:
     """Extract only Grok's full outer query envelope, never an inner substring."""
     stripped = body.strip()
     opening = "<user_query>"
@@ -92,7 +92,7 @@ def user_input(record: object) -> tuple[int, str] | None:
         )
     else:
         return None
-    body = _unwrap_user_query(body)
+    body = unwrap_user_query(body)
     return (record["prompt_index"], body) if body.strip() else None
 
 
