@@ -5,7 +5,8 @@
 | --- | --- |
 | Locate and claim exactly one transcript, by structured content the CLI itself records (a conversation id read back, a session id, a claim token you pasted) | Guess identity from timing, directory scan order, mtimes, or any identifier that outlives the activation |
 | Post chat speech from structured transcript records | Turn terminal screen contents into chat messages |
-| Declare manifest capabilities honestly (`resume`, `turn_end`, `transcript`) — routing and presence enforce against them | Mark a screen-scraped adapter as a transcript adapter, or forget `transcript = true` on a tailing one |
+| Declare manifest capabilities honestly (`resume`, `turn_end`, `transcript`, `immediate_mentions`) — routing and presence enforce against them | Mark a screen-scraped adapter as a transcript adapter, or forget `transcript = true` on a tailing one |
+| Leave `immediate_mentions` unset unless the harness ingests mid-turn, and publish a preflight when that depends on the host | Treat a successful pty write as immediate delivery, or reach immediacy by cancelling the running turn |
 | Give every pasted wake content that proves which activation sent it | Assume the process you spawned is still the process that runs — CLIs self-update and re-exec |
 | Ship the adapter's own tests with fixture transcripts and negative controls | Run the vendor's CLI in tests, or trust a green suite whose controls were never failed on purpose |
 
@@ -56,7 +57,7 @@ update_command = ["example-process", "update"]
 | `command` | default argv when the attach form leaves the command blank — an array, never a shell string |
 | `requires` | executables that must be on `PATH` |
 | `env_unset` | inherited variables to drop before spawning; a trailing `*` clears a whole prefix |
-| `capabilities` | table; `resume = true` only if re-attaching genuinely reopens the previous session |
+| `capabilities` | table; `resume = true` only if re-attaching genuinely reopens the previous session; `immediate_mentions = true` only if a mention reaches a turn that is *already running* (below) |
 | `update_command` | optional argv to check/install CLI updates before a fresh attach; omit or `[]` if the process has no updater. Never a shell string. A pipe install belongs in one `bash -lc` argument. |
 
 Never put secrets or machine-specific paths in a manifest.
@@ -96,6 +97,119 @@ Rules that hold for every adapter:
 - Prefer the process's own structured transcript. Screen scraping is a last resort; the `raw`
   adapter's quiescence flush exists for line-oriented programs with no transcript at all.
 - Don't replay history after a resume, and cancel background tasks on stop.
+
+### Immediate mentions
+
+Most harnesses read their composer only at a turn boundary. Bytes written into a pty are
+therefore *queued*, not delivered: the mention sits behind however long the current turn takes,
+which on a busy agent is minutes, and behind a blocked subagent it can be indefinite. That is a
+property of the CLI, not of partyline, so it is declared per adapter.
+
+```toml
+capabilities = { immediate_mentions = true }
+```
+
+The claim is that a mention arrives at a turn **already in progress**. It is `false` for every
+adapter that does not say otherwise, because the failure mode of guessing is a room that believes
+a message landed while it is still waiting.
+
+Two conditions, deliberately kept apart:
+
+| | question | source |
+|---|---|---|
+| **supported** | does this harness ingest mid-turn at all? | the manifest |
+| **effective** | does it on *this host*, right now? | the adapter's optional preflight |
+
+`partyline.adapter_capabilities.immediate_mentions(kind, env)` resolves both and returns the
+reason. An adapter whose harness needs nothing from the host is effective as soon as it claims
+support. One whose behaviour depends on user configuration publishes a static method on its
+class:
+
+```python
+class PartylineAdapter(Adapter):
+    immediate_mentions_preflight = staticmethod(my_preflight)  # (env) -> (bool, detail)
+```
+
+The preflight must **read only**. A capability check that edits a user's CLI configuration to
+make itself true is not a check. Return the remedy in `detail`: an operator told only "not
+immediate" has to rediscover the setting, the file, and whether a restart is needed.
+
+Immediacy must also be *non-destructive*. Several CLIs offer an interrupt chord that delivers at
+once by cancelling the running turn; that discards in-flight tool results and is not what this
+capability means. If the only way to reach a running turn is to stop it, declare `false`.
+
+**Antigravity (`agy`)** does *not* declare it, and the reason is worth recording because the
+harness looks superficially similar. It queues a mid-turn message and tells the agent that "a
+user-queued message is ready to be dequeued", and 1.1.27 carries a per-message delivery strategy
+internally (`MESSAGE_DELIVERY_STRATEGY_{UNSPECIFIED,WHEN_IDLE,NEXT_INVOCATION}`, a
+`queued_message_delivery_strategy` field, a `GetQueuedMessageDeliveryStrategy` call). But nothing
+exposes that choice: no flag in `agy --help`, no key its `settings.json` accepts, no slash
+command, nothing in `agy changelog`. Its only user-facing mid-turn keys are `Esc` and `Ctrl+C`,
+both documented as interrupts that cancel the running operation. Since the capability forbids
+reaching a turn by stopping it, Antigravity stays `false` until Google exposes the strategy.
+Whether its dequeue prompt causes the *model* to pick a message up before the turn ends is an
+empirical question about model behaviour, not a guarantee the harness offers, and a capability
+must not rest on it.
+
+**Grok Build** is the first implementation. It queues mid-turn follow-ups by default and holds
+them entirely while blocked on a subagent or background task; `[ui] follow_up_behavior = "steer"`
+in `$GROK_HOME/config.toml` (default `~/.grok/config.toml`) makes it inject at the next tool or
+model safe gap instead, leaving in-flight tools alone. There is no environment variable for the
+key and project-scoped config does not carry `[ui]`, so it is a user-wide preference that
+partyline reads and never writes. A running Grok does not reload it — the leader process owns
+config reload and is off by default — so the setting applies to processes started or **resumed**
+afterwards. `partyline/adapters/bundled/grok/steering.py` implements the preflight and cites the
+CLI's own documentation.
+
+### Interrupt and send (`@!name`)
+
+An ordinary mention waits for a turn boundary. `@!name` asks the process to stop what it is doing
+and read the message now. It is the deliberate exception, and every constraint on it exists
+because interrupting is expensive: whatever tool was in flight produces no result, and the model
+is left continuing a task whose output never arrived.
+
+| rule | why |
+|---|---|
+| **Humans only.** An agent-written `@!name` is delivered as a plain mention | an agent's reply wakes other agents, so an agent-authored bang lets a busy room cancel its own work in a loop |
+| **One pending interruption per process.** A second bang while the first is unresolved is dropped, not stacked | repeated `Esc` produced six consecutive interrupt/empty-response cycles in real Antigravity transcripts |
+| **The message is always delivered** — confirmed, refused, or unsupported | the interrupt is best effort; delivery is not |
+| **`@!all` is not interruptible** — it rings the room like `@all` | stopping every process at once is a blast radius nobody asked for |
+| **Confirmation comes from the harness**, never from the keystroke | a successful pty write is not a successful CLI submission |
+
+An adapter opts in by publishing `async def interrupt(self) -> bool` — `True` only when the
+harness itself has confirmed. Absence means unsupported, and the room is told so by name:
+
+```
+⚠ @sol cannot be interrupted — the codex adapter has no supported interrupt,
+  so the message was delivered as an ordinary mention
+```
+
+**Antigravity** implements it, and needs *two* boundaries rather than one:
+
+1. `Esc` cancels the active operation and the CLI records a `SYSTEM`/`ERROR_MESSAGE` step reading
+   *"Error: The stream was interrupted. Please continue the task you were working on."* Nothing
+   else stands in for it — no `PLANNER_RESPONSE` in 28 transcripts (~8,300 steps, read
+   2026-09-09) ever carried a cancelled, aborted, or failed status. The record must also be
+   **newer than the keystroke**, compared exactly — Antigravity writes the transcript on the same
+   host that presses `Esc`, so there is one clock and no skew to absorb, and any backward
+   tolerance is precisely the window in which the *previous* interruption's notice confirms this
+   one. A record with no usable timestamp confirms nothing, because it cannot be placed on either
+   side of that boundary. A notice that has already confirmed an interruption is also spent and
+   cannot confirm another, which closes the same hole from the other side: a stale notice is
+   rejected whether it arrives before this `Esc` (already used) or after it (older than the
+   boundary), and neither check depends on how far behind the tail is running.
+2. The turn must then actually **close**. Confirming the notice alone would report success while
+   the composer was still mid-turn, and Antigravity accepts a mid-turn submission and silently
+   drops it — that is how two mentions were lost on 2026-08-24.
+
+Even with both, an interrupt does not *guarantee* the next paste is ingested, and nothing here
+claims it does. Delivery keeps its existing contract: a wake settles only against a transcript
+`USER_INPUT` record, and an unsettled wake repools for redelivery once the CLI is idle. The
+interrupt improves the odds; settlement is what makes the message safe.
+
+Note the difference from [immediate mentions](#immediate-mentions): that capability requires
+reaching a running turn *without* stopping it, and an adapter must not claim it by interrupting.
+The two are opposites, and an adapter can support either, both, or neither.
 
 ### Resume continuation delivery
 

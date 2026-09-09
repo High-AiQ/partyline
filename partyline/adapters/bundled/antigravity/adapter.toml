@@ -16,3 +16,16 @@ resume = true
 turn_end = "receipt"
 # Its speech is trusted only from a transcript it has claimed by content.
 transcript = true
+# Esc stops the running turn and Antigravity records that it did; see interrupt.py.
+# This is the explicit @!name path only, never routine mention delivery.
+interrupt = true
+# immediate_mentions is deliberately absent, which means false. Antigravity 1.1.27
+# does carry a per-message delivery strategy internally — the binary declares
+# MESSAGE_DELIVERY_STRATEGY_{UNSPECIFIED,WHEN_IDLE,NEXT_INVOCATION} alongside a
+# `queued_message_delivery_strategy` field and a `GetQueuedMessageDeliveryStrategy`
+# call — but nothing exposes it: no CLI flag in `agy --help`, no key its
+# settings.json accepts, no slash command, and no mention in `agy changelog`.
+# Its only user-facing mid-turn keys are Esc and Ctrl+C, both of which the
+# changelog describes as interrupts that cancel the running operation, so
+# reaching the turn that way would discard in-flight tool results.
+# Re-probe after a CLI update; see docs/adapters.md.

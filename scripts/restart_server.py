@@ -18,6 +18,12 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from scripts.cockpit_plan_db import coverage_refusal, database_for_environment
+# Re-exported: the trigger is where these were first needed, and cockpit.py and
+# the tests still import them from here.
+from scripts.process_probe import (  # noqa: F401
+    process_cmdline, process_cwd, process_environment, process_generation,
+)
 from scripts.cockpit_venv import probe_server, replacement_python
 from scripts.cockpit_arm import (
     arguments_after_executable,
@@ -35,6 +41,7 @@ EXIT_SIGNAL_FAILED = 25
 EXIT_ENVIRONMENT_UNREADABLE = 26
 EXIT_COMMAND_LINE_UNREADABLE = 27
 EXIT_REPLACEMENT_UNIMPORTABLE = 28
+EXIT_COVERAGE_CHANGED = 29
 WAIT_SECONDS = 60.0
 
 
@@ -44,60 +51,6 @@ class RestartRefused(RuntimeError):
     def __init__(self, message: str, exit_code: int):
         super().__init__(message)
         self.exit_code = exit_code
-
-
-def process_generation(pid: int, proc_root: Path = Path("/proc")) -> str | None:
-    """Return Linux ``/proc/<pid>/stat`` field 22 without a shell parser.
-
-    The second field is a parenthesised command and may contain spaces, so a
-    naive ``split()[21]`` is not correct.  Fields after the closing parenthesis
-    begin at field 3; start time is therefore index 19 of that suffix.
-    """
-    try:
-        stat = (proc_root / str(pid) / "stat").read_text()
-        suffix = stat[stat.rindex(")") + 1 :].split()
-        start = suffix[19]
-    except (OSError, ValueError, IndexError):
-        return None
-    return start if start.isdigit() else None
-
-
-def process_environment(pid: int, proc_root: Path = Path("/proc")) -> dict[str, str] | None:
-    """Return ``/proc/<pid>/environ`` as a mapping, or None if unreadable.
-
-    The trigger that runs this script lives in a transient systemd unit whose
-    environment is systemd's minimal default — no user PATH, so a server
-    exec'd from here could not find the CLIs it attaches. The replacement must
-    inherit the outgoing server's environment, not the trigger's.
-    """
-    try:
-        raw = (proc_root / str(pid) / "environ").read_bytes()
-    except OSError:
-        return None
-    environment = {}
-    for entry in raw.split(b"\0"):
-        if not entry:
-            continue
-        key, separator, value = entry.partition(b"=")
-        if not separator or not key:
-            continue
-        environment[key.decode(errors="surrogateescape")] = value.decode(
-            errors="surrogateescape")
-    return environment or None
-
-
-def process_cmdline(pid: int, proc_root: Path = Path("/proc")) -> list[str] | None:
-    """Return the exact argument vector from ``/proc/<pid>/cmdline``."""
-    try:
-        raw = (proc_root / str(pid) / "cmdline").read_bytes()
-    except OSError:
-        return None
-    arguments = [
-        entry.decode(errors="surrogateescape")
-        for entry in raw.split(b"\0")
-        if entry
-    ]
-    return arguments or None
 
 
 def post_failure(base_url: str, report_token: str, message: str) -> None:
@@ -176,6 +129,7 @@ def run_restart(
     wait: Callable[[int, str], None] = wait_for_generation_exit,
     launch: Callable[[Path, Path, Path, dict[str, str], list[str]], None] = launch_server,
     probe: Callable[[Path, Path], str | None] | None = None,
+    coverage: Callable[[Path], str | None] = coverage_refusal,
 ) -> None:
     actual_start = generation(pid)
     if actual_start is None:
@@ -240,6 +194,12 @@ def run_restart(
             EXIT_REPLACEMENT_UNIMPORTABLE,
         )
 
+    # Arming checked coverage up to 90 seconds ago; anything attached since is
+    # in no plan, and SIGTERM would take it down with nothing to bring it back.
+    if orphaned := coverage(database_for_environment(env, process_cwd(pid))):
+        raise RestartRefused(
+            f"the plan no longer covers every live process: {orphaned}",
+            EXIT_COVERAGE_CHANGED)
     try:
         signal_process(pid, signal.SIGTERM)
     except OSError as exc:

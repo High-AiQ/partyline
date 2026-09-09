@@ -9,5 +9,7 @@ requires = ["grok"]
 # Probed with Grok Build 1.0.5 on 2026-08-23; re-probe after CLI updates.
 compact_paste = "/compact"
 env_unset = []
-capabilities = { resume = true, turn_end = "receipt", transcript = true }
+# immediate_mentions is a claim about the harness; it is only *effective* when the
+# host sets [ui] follow_up_behavior = "steer" (see steering.py).
+capabilities = { resume = true, turn_end = "receipt", transcript = true, immediate_mentions = true }
 update_command = ["grok", "update"]

@@ -11,6 +11,8 @@ from partyline.reattach import (
     ReattachCoordinator,
     ResumedAttachment,
 )
+from partyline.reattach import create_restart_plan
+from partyline.contracts import RestartPlanRequest
 from partyline.restart_lease import RestartPlanLeaseLost
 from partyline.runtime import ChatRuntime
 
@@ -552,6 +554,138 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
             for message in batch
         ]
         self.assertIn("@terra continue after me", delivered)
+
+
+class FleetPlanTest(unittest.IsolatedAsyncioTestCase):
+    """A restart stops every line, so a plan has to be able to cover every line."""
+
+    async def asyncSetUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.db = Db(f"{self.directory.name}/partyline.db")
+        self.runtime = ChatRuntime(self.db)
+        self.order = []
+        for conv_id, name in (("owner", "Owner line"), ("other", "Other line")):
+            self.db.create_conversation(conv_id, name)
+        for ident, conv_id, name in (
+            ("one", "owner", "sol"), ("two", "other", "terra")
+        ):
+            self.db.add_attachment(
+                ident, conv_id, name, "fake", ["fake"], self.directory.name
+            )
+            self.db.set_attachment_status(ident, "running", None)
+            self.runtime.live[ident] = object()
+
+    async def asyncTearDown(self):
+        self.db.close()
+        self.directory.cleanup()
+
+    def resumable_metadata(self):
+        return {"fake": {"capabilities": {"resume": True}}}
+
+    def test_a_line_scoped_plan_still_covers_only_its_own_processes(self):
+        response = create_restart_plan(
+            self.runtime,
+            self.resumable_metadata(),
+            RestartPlanRequest(conversation_id="owner", mode="automatic"),
+        )
+
+        self.assertEqual([c.id for c in response.attachments], ["one"])
+
+    def test_an_all_scoped_plan_covers_every_line_with_the_owner_first(self):
+        response = create_restart_plan(
+            self.runtime,
+            self.resumable_metadata(),
+            RestartPlanRequest(conversation_id="other", mode="automatic", scope="all"),
+        )
+
+        # Owner first: recovery walks the plan in order, so the line that asked
+        # for the restart gets its processes back before anyone else's.
+        self.assertEqual([c.id for c in response.attachments], ["two", "one"])
+        self.assertEqual(
+            [c.conversation_id for c in response.attachments], ["other", "owner"]
+        )
+
+    def test_a_fleet_plan_cannot_be_a_manual_offer(self):
+        with self.assertRaises(Exception) as raised:
+            create_restart_plan(
+                self.runtime,
+                self.resumable_metadata(),
+                RestartPlanRequest(conversation_id="owner", mode="offer", scope="all"),
+            )
+
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertIn("one tab", raised.exception.detail)
+
+    def test_a_process_whose_adapter_cannot_resume_is_never_planned(self):
+        with self.assertRaises(Exception) as raised:
+            create_restart_plan(
+                self.runtime,
+                {"fake": {"capabilities": {}}},
+                RestartPlanRequest(conversation_id="owner", mode="automatic", scope="all"),
+            )
+
+        self.assertEqual(raised.exception.status_code, 409)
+
+    async def test_recovery_reaches_both_lines_and_reads_each_ones_own_history(self):
+        await self.runtime.post_message("owner", "greg", "human", "owner side news")
+        await self.runtime.post_message("other", "greg", "human", "other side news")
+        plan = self.db.save_restart_plan("owner", ["one", "two"], "Continue.")
+        seen = {}
+
+        async def resume(attachment_id, pending):
+            name = self.db.get_attachment(attachment_id)["name"]
+            seen[name] = [message["body"] for message in pending]
+            adapter = ReadyAdapter(self.order, name)
+            self.runtime.live[attachment_id] = adapter
+            return ResumedAttachment(adapter, False)
+
+        result = await ReattachCoordinator(self.runtime, resume).run(plan, "greg")
+
+        self.assertEqual(result.ready, ("sol", "terra"))
+        # Each process is continued against its own line's history, not the
+        # owning line's.
+        self.assertIn("owner side news", seen["sol"])
+        self.assertNotIn("other side news", seen["sol"])
+        self.assertIn("other side news", seen["terra"])
+        self.assertNotIn("owner side news", seen["terra"])
+
+    async def test_every_covered_line_is_told_the_restart_happened(self):
+        plan = self.db.save_restart_plan("owner", ["one", "two"], "Continue.")
+
+        async def resume(attachment_id, _pending):
+            name = self.db.get_attachment(attachment_id)["name"]
+            adapter = ReadyAdapter(self.order, name)
+            self.runtime.live[attachment_id] = adapter
+            return ResumedAttachment(adapter, False)
+
+        await ReattachCoordinator(self.runtime, resume).run(plan, "greg")
+
+        for conv_id, handle, stranger in (
+            ("owner", "sol", "terra"), ("other", "terra", "sol")
+        ):
+            bodies = [
+                row["body"] for row in self.db.messages_after(conv_id, 0)
+                if row["sender_type"] == "system"
+            ]
+            joined = "\n".join(bodies)
+            self.assertIn("accepted sequential reattachment", joined)
+            self.assertIn("finished", joined)
+            self.assertIn(f"@{handle} is ready", joined)
+            # A line hears about its own processes, not the other line's.
+            self.assertNotIn(f"@{stranger} is ready", joined)
+
+    async def test_an_attachment_deleted_before_recovery_fails_without_stopping_the_run(self):
+        plan = self.db.save_restart_plan("owner", ["missing", "two"], "Continue.")
+
+        async def resume(attachment_id, _pending):
+            adapter = ReadyAdapter(self.order, "terra")
+            self.runtime.live[attachment_id] = adapter
+            return ResumedAttachment(adapter, False)
+
+        result = await ReattachCoordinator(self.runtime, resume).run(plan, "greg")
+
+        self.assertEqual(result.failed, ("missing",))
+        self.assertEqual(result.ready, ("terra",))
 
 
 if __name__ == "__main__":

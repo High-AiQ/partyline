@@ -410,6 +410,82 @@ class ServerTest(unittest.TestCase):
         self.assertIn(
             "nothing was delivered", server.runtime.db.list_messages("line")[-1]["body"])
 
+    def test_a_human_bang_mention_interrupts_and_still_delivers(self):
+        self.add_attachment("one", "agy")
+        adapter = FakeAdapter()
+        interrupts = []
+
+        async def interrupt():
+            interrupts.append(True)
+            return True
+
+        adapter.interrupt = interrupt
+        server.runtime.live["one"] = adapter
+        message = server.runtime.db.add_message("line", "greg", "human", "@!agy stop")
+
+        self.arun(server.runtime.route_mentions("line", message))
+
+        self.assertEqual(len(interrupts), 1)
+        # The interrupt is best effort; the delivery is not.
+        self.assertEqual(adapter.deliveries[-1][-1], message)
+        self.assertIn("was interrupted", server.runtime.db.list_messages("line")[-1]["body"])
+
+    def test_two_banged_processes_each_get_exactly_one_interrupt(self):
+        self.add_attachment("one", "agy")
+        self.add_attachment("two", "agy2")
+        calls = []
+        adapters = {}
+        for ident, name in (("one", "agy"), ("two", "agy2")):
+            adapter = FakeAdapter()
+
+            async def interrupt(handle=name):
+                calls.append(handle)
+                return True
+
+            adapter.interrupt = interrupt
+            adapters[ident] = adapter
+            server.runtime.live[ident] = adapter
+        message = server.runtime.db.add_message(
+            "line", "greg", "human", "@!agy and @!agy2 both stop")
+
+        self.arun(server.runtime.route_mentions("line", message))
+
+        self.assertEqual(sorted(calls), ["agy", "agy2"])
+        for adapter in adapters.values():
+            self.assertEqual(adapter.deliveries[-1][-1], message)
+
+    def test_an_agent_bang_mention_delivers_without_interrupting(self):
+        # An agent's reply wakes other agents; an agent-authored bang would let
+        # the room cancel its own work in a loop.
+        self.add_attachment("one", "agy")
+        adapter = FakeAdapter()
+        interrupts = []
+
+        async def interrupt():
+            interrupts.append(True)
+            return True
+
+        adapter.interrupt = interrupt
+        server.runtime.live["one"] = adapter
+        message = server.runtime.db.add_message("line", "sol", "agent", "@!agy stop")
+
+        self.arun(server.runtime.route_mentions("line", message))
+
+        self.assertEqual(interrupts, [])
+        self.assertEqual(adapter.deliveries[-1][-1], message)
+
+    def test_a_bang_at_an_uninterruptible_adapter_says_so_and_delivers(self):
+        self.add_attachment("one", "terra")
+        adapter = FakeAdapter()
+        server.runtime.live["one"] = adapter
+        message = server.runtime.db.add_message("line", "greg", "human", "@!terra now")
+
+        self.arun(server.runtime.route_mentions("line", message))
+
+        self.assertEqual(adapter.deliveries[-1][-1], message)
+        self.assertIn(
+            "cannot be interrupted", server.runtime.db.list_messages("line")[-1]["body"])
+
     def test_route_mentions_accepts_normal_and_format_interrupted_grok(self):
         self.add_attachment("one", "grok")
         adapter = FakeAdapter()

@@ -104,7 +104,9 @@ class ContractTest(unittest.TestCase):
             HelloEvent(conversation_id="line", handle="greg")
 
     def test_restart_contracts_keep_the_offer_token_and_exact_candidate_shape(self):
-        candidate = ReattachCandidateResponse(id="att-1", name="sol", adapter="codex")
+        candidate = ReattachCandidateResponse(
+            id="att-1", name="sol", adapter="codex", conversation_id="line"
+        )
         plan = RestartPlanResponse(
             conversation_id="line",
             token="offer-token",
@@ -120,7 +122,8 @@ class ContractTest(unittest.TestCase):
                 "reattach": {
                     "conversation_id": "line",
                     "token": "offer-token",
-                    "attachments": [{"id": "att-1", "name": "sol", "adapter": "codex"}],
+                    "attachments": [{"id": "att-1", "name": "sol", "adapter": "codex",
+                                     "conversation_id": "line"}],
                     "debrief": "Continue the review.",
                 },
             },
@@ -137,7 +140,8 @@ class ContractTest(unittest.TestCase):
                 "type": "reattach_offer",
                 "conversation_id": "line",
                 "token": "offer-token",
-                "attachments": [{"id": "att-1", "name": "sol", "adapter": "codex"}],
+                "attachments": [{"id": "att-1", "name": "sol", "adapter": "codex",
+                                 "conversation_id": "line"}],
                 "debrief": "Continue the review.",
             },
         )
