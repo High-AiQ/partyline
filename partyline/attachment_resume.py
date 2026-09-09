@@ -17,6 +17,8 @@ from fastapi import HTTPException
 
 from .adapter_capabilities import adapter_completion
 from .auth_store import ensure_api_token
+from .agent_connection import provision_connection, bind_connection_hint
+from .role_delivery import bind_role_delivery
 from .reattach import ResumedAttachment, adapter_can_resume
 from .transcript_delivery import TranscriptDeliveryRecord
 
@@ -151,7 +153,10 @@ async def resume_adapter(
     # a resumed process keeps the PARTYLINE_TOKEN its briefing already named.
     att["api_token"] = ensure_api_token(runtime.db, att_id)
     att["hook_url"] = hook_url(att_id, runtime_owner)
+    provision_connection(runtime.db.path, att)
     att["digest_rider"] = lambda: tasks.rider(att["conv_id"])
+    bind_connection_hint(att)
+    bind_role_delivery(runtime.db, att)
     history = delivered_history(runtime.db, att)
     att["delivered_bodies"] = history.bodies
     att["delivered_transcript_records"] = history.transcript_records

@@ -8,11 +8,13 @@
    * down to the menu.
    */
   import LineMenu from "./LineMenu.svelte";
+  import { orderedLines } from "../../lib/line-hierarchy";
   import type { Conversation } from "../../lib/contracts";
   import { room } from "../../state/room.svelte";
 
   interface Props {
     onrename: (conversation: Conversation) => void;
+    onmanagement: (conversation: Conversation) => void;
     onclaims: (conversation: Conversation) => void;
     oncloseprocesses: (conversation: Conversation) => void;
     ondelete: (conversation: Conversation) => void;
@@ -23,7 +25,7 @@
     conversation: Conversation;
   }
 
-  let { onrename, onclaims, oncloseprocesses, ondelete }: Props = $props();
+  let { onrename, onmanagement, onclaims, oncloseprocesses, ondelete }: Props = $props();
 
   /** `{anchor, conversation}` while a menu is open, else null. */
   let menu = $state<MenuState | null>(null);
@@ -41,7 +43,7 @@
 <svelte:body on:click={() => (menu = null)} />
 
 <nav id="convs" class="min-h-0 flex-1 overflow-y-auto py-2.5" aria-label="lines">
-  {#each room.conversations as conversation (conversation.id)}
+  {#each orderedLines(room.conversations) as { line: conversation, depth } (conversation.id)}
     {@const open = menu?.conversation.id === conversation.id}
     <div class="conv-row group relative flex items-stretch" class:menu-open={open}>
       <button
@@ -50,9 +52,11 @@
           ? 'bg-ink-3 text-copper-hot'
           : 'bg-transparent text-cream-dim group-hover:bg-ink-3 group-hover:text-cream group-focus-within:bg-ink-3 group-focus-within:text-cream group-[.menu-open]:bg-ink-3 group-[.menu-open]:text-cream'}"
         class:active={room.conversation?.id === conversation.id}
+        style:padding-left="{20 + Math.min(depth, 4) * 16}px"
         title={conversation.topic || undefined}
         onclick={() => room.open(conversation)}
       >
+        {#if depth > 0}<span class="text-cream-faint" aria-label="child line">↳</span>{/if}
         <span class="conv-name min-w-0 truncate">{conversation.name}</span>
         {#if conversation.live_count > 0}
           <span
@@ -87,6 +91,7 @@
     conversation={menu.conversation}
     close={() => (menu = null)}
     {onrename}
+    {onmanagement}
     {onclaims}
     {oncloseprocesses}
     {ondelete}

@@ -1,0 +1,776 @@
+"""Line hierarchy, scoped machine tokens, reports, and revocation."""
+
+import asyncio
+import tempfile
+import threading
+import time
+import unittest
+
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
+
+from partyline import auth_store, reports, auth_tokens, server
+from partyline.auth_guard import install_auth_guard, resolve_principal
+from partyline.db import Db
+from partyline.hierarchy import create_child_conversation, stamp_source, would_cycle
+from partyline.reports import wake_message
+from partyline.machine_scope import deny_unless_attachment
+from partyline.hierarchy_routes import hierarchy_router
+from partyline.media import MediaStore
+from partyline.media_routes import media_router
+from partyline.runtime import ChatRuntime
+from partyline.task_routes import task_router
+from partyline.tasks import TaskStore
+from partyline.conversation_routes import register_conversation_routes
+
+
+def png():
+    from io import BytesIO
+    from PIL import Image
+
+    buffer = BytesIO()
+    Image.new("RGB", (8, 8), (10, 20, 30)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+class HierarchyApiTest(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.db = Db(f"{self.directory.name}/partyline.db")
+        self.runtime = ChatRuntime(self.db)
+        self.store = TaskStore(self.db)
+        self.media = MediaStore(self.db, self.directory.name + "/media")
+        app = FastAPI()
+        install_auth_guard(app, self.db)
+        app.include_router(hierarchy_router(self.runtime))
+        app.include_router(task_router(self.runtime, self.store))
+        app.include_router(media_router(self.runtime, self.media))
+
+        async def fake_start(att, **kwargs):
+            return {"id": att["id"], "name": att["name"], "status": att["status"]}
+
+        register_conversation_routes(
+            app, self.runtime, self.media, None, self.store, {}, {}, fake_start
+        )
+        self.client = TestClient(app)
+        self.parent = self.db.create_conversation("parent", "Parent")
+        self.db.add_attachment("lead-att", "parent", "astra", "fake", ["fake"], "/tmp")
+        self.db.add_attachment("impl-att", "parent", "grok", "fake", ["fake"], "/tmp")
+        user = auth_store.create_user(
+            self.db, "greg@example.com", "greg",
+            auth_tokens.hash_password("hunter2222"),
+        )
+        self.human = {
+            "Authorization": "Bearer "
+            + auth_tokens.create_access_token(
+                auth_tokens.signing_secret(self.db), user["id"]
+            )
+        }
+        self.lead = {
+            "Authorization": "Bearer " + auth_store.ensure_api_token(self.db, "lead-att")
+        }
+        self.impl = {
+            "Authorization": "Bearer " + auth_store.ensure_api_token(self.db, "impl-att")
+        }
+        self.client.headers.update(self.human)
+        self._original_runtime = server.runtime
+        server.runtime = self.runtime
+        appointed = self.client.post(
+            "/api/conversations/parent/lead", json={"attachment_id": "lead-att"}
+        )
+        self.assertEqual(appointed.status_code, 200)
+
+    def tearDown(self):
+        server.runtime = self._original_runtime
+        self.client.close()
+        self.db.close()
+        self.directory.cleanup()
+
+    def test_machine_identity_includes_line_and_lead(self):
+        principal = resolve_principal(
+            self.db, auth_store.ensure_api_token(self.db, "lead-att")
+        )
+        self.assertEqual(principal.conv_id, "parent")
+        self.assertEqual(principal.attachment_id, "lead-att")
+        self.assertTrue(principal.is_lead)
+
+    def test_fresh_session_does_not_inherit_lead(self):
+        self.db.add_attachment("fresh", "parent", "astra-new", "fake", ["fake"], "/tmp")
+        principal = resolve_principal(
+            self.db, auth_store.ensure_api_token(self.db, "fresh")
+        )
+        self.assertFalse(principal.is_lead)
+
+    def test_revocation_drops_descendant_powers_on_the_next_request(self):
+        child = self.client.post(
+            "/api/conversations/parent/children",
+            json={"name": "Child"},
+            headers=self.lead,
+        )
+        self.assertEqual(child.status_code, 201)
+        child_id = child.json()["conversation"]["id"]
+        self.client.post(
+            "/api/conversations/parent/lead", json={"attachment_id": None}
+        )
+        denied = self.client.get(
+            f"/api/conversations/{child_id}/tasks", headers=self.lead
+        )
+        self.assertEqual(denied.status_code, 403)
+
+    def test_implementer_cannot_use_another_line_task_id(self):
+        other = self.db.create_conversation("other", "Other")
+        task = self.store.add(other["id"], "secret")
+        patched = self.client.patch(
+            f"/api/tasks/{task['id']}",
+            json={"status": "done"},
+            headers=self.impl,
+        )
+        self.assertEqual(patched.status_code, 403)
+
+    def test_implementer_cannot_post_media_on_an_unrelated_line(self):
+        self.db.create_conversation("other", "Other")
+        posted = self.client.post(
+            "/api/conversations/other/files",
+            data={"title": "nope"},
+            files=[("file", ("a.png", png(), "image/png"))],
+            headers=self.impl,
+        )
+        self.assertEqual(posted.status_code, 403)
+
+    def test_cycle_is_refused(self):
+        child = create_child_conversation(self.db, "parent", "child", "Child")
+        self.assertTrue(would_cycle(self.db, "parent", "child"))
+        self.assertFalse(would_cycle(self.db, "child", "parent"))
+        self.assertEqual(child["parent_id"], "parent")
+
+    def test_archive_with_children_is_409_purge_requires_archive(self):
+        self.client.post(
+            "/api/conversations/parent/children",
+            json={"name": "Kid"},
+            headers=self.lead,
+        )
+        archived = self.client.delete("/api/conversations/parent")
+        self.assertEqual(archived.status_code, 409)
+
+    def test_reports_do_not_wake_and_are_parent_pulled(self):
+        child = self.client.post(
+            "/api/conversations/parent/children",
+            json={"name": "Kid"},
+            headers=self.lead,
+        ).json()["conversation"]
+        self.db.add_attachment(
+            "child-lead", child["id"], "astra-child", "fake", ["fake"], "/tmp"
+        )
+        self.client.post(
+            f"/api/conversations/{child['id']}/lead",
+            json={"attachment_id": "child-lead"},
+        )
+        child_headers = {
+            "Authorization": "Bearer "
+            + auth_store.ensure_api_token(self.db, "child-lead")
+        }
+        deliveries = []
+
+        async def capture(messages):
+            deliveries.append(messages)
+
+        self.db.set_attachment_status("lead-att", "running", None)
+        self.runtime.live["lead-att"] = type("A", (), {"deliver": capture, "att": {}})()
+        posted = self.client.post(
+            f"/api/conversations/{child['id']}/reports",
+            json={"body": "blocked on ISBN"},
+            headers=child_headers,
+        )
+        self.assertEqual(posted.status_code, 201)
+        self.assertEqual(deliveries, [])
+        listed = self.client.get(
+            "/api/conversations/parent/reports", headers=self.lead
+        )
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(listed.json()[0]["body"], "blocked on ISBN")
+        self.assertEqual(listed.json()[0]["child_conv_id"], child["id"])
+        self.assertEqual(listed.json()[0]["author_attachment_id"], "child-lead")
+
+    def test_same_line_machine_message_posts_as_agent(self):
+        posted = self.client.post(
+            "/api/conversations/parent/messages",
+            json={"body": "hello line"},
+            headers=self.impl,
+        )
+        self.assertEqual(posted.status_code, 200)
+        self.assertEqual(posted.json()["sender_type"], "agent")
+        self.assertEqual(posted.json()["sender"], "grok")
+
+    def test_unrelated_line_is_hidden_from_implementer_list(self):
+        self.db.create_conversation("secret", "Secret")
+        listed = self.client.get("/api/conversations", headers=self.impl)
+        ids = {row["id"] for row in listed.json()}
+        self.assertIn("parent", ids)
+        self.assertNotIn("secret", ids)
+
+    def test_human_still_lists_every_line(self):
+        self.db.create_conversation("secret", "Secret")
+        listed = self.client.get("/api/conversations", headers=self.human)
+        ids = {row["id"] for row in listed.json()}
+        self.assertIn("secret", ids)
+        self.assertIn("parent", ids)
+
+    def test_get_lead_and_capabilities(self):
+        lead = self.client.get("/api/conversations/parent/lead")
+        self.assertEqual(lead.json(), {"attachment_id": "lead-att"})
+        caps = self.client.get("/api/capabilities", headers=self.lead)
+        self.assertEqual(caps.status_code, 200)
+        body = caps.json()
+        self.assertEqual(body["role"], "lead")
+        self.assertIn("create_child", body["actions"])
+        impl = self.client.get("/api/capabilities", headers=self.impl).json()
+        self.assertEqual(impl["role"], "implementer")
+        self.assertNotIn("create_child", impl["actions"])
+
+    def test_human_can_link_an_existing_line_as_a_child(self):
+        self.db.create_conversation("book", "Book")
+        linked = self.client.put(
+            "/api/conversations/book/parent", json={"parent_id": "parent"}
+        )
+        self.assertEqual(linked.status_code, 200)
+        self.assertEqual(linked.json()["parent_id"], "parent")
+        refused = self.client.put(
+            "/api/conversations/book/parent",
+            json={"parent_id": "parent"},
+            headers=self.impl,
+        )
+        self.assertEqual(refused.status_code, 403)
+
+    def test_ancestor_lead_can_appoint_a_child_manager(self):
+        child = self.client.post(
+            "/api/conversations/parent/children",
+            json={"name": "Kid"},
+            headers=self.lead,
+        ).json()["conversation"]
+        self.db.add_attachment(
+            "kid-mgr", child["id"], "astra-kid", "fake", ["fake"], "/tmp"
+        )
+        appointed = self.client.post(
+            f"/api/conversations/{child['id']}/lead",
+            json={"attachment_id": "kid-mgr"},
+            headers=self.lead,
+        )
+        self.assertEqual(appointed.status_code, 200)
+        self.assertEqual(appointed.json()["attachment_id"], "kid-mgr")
+
+    def _child_with_lead(self, name="Kid"):
+        """A child line whose own lead can escalate to this parent."""
+        child = self.client.post(
+            "/api/conversations/parent/children",
+            json={"name": name},
+            headers=self.lead,
+        ).json()["conversation"]
+        self.db.add_attachment(
+            "child-lead", child["id"], "astra-child", "fake", ["fake"], "/tmp"
+        )
+        self.client.post(
+            f"/api/conversations/{child['id']}/lead",
+            json={"attachment_id": "child-lead"},
+        )
+        headers = {
+            "Authorization": "Bearer "
+            + auth_store.ensure_api_token(self.db, "child-lead")
+        }
+        return child, headers
+
+    def _notify(self, child, headers, body):
+        return self.client.post(
+            f"/api/conversations/{child['id']}/reports",
+            json={"body": body, "notify": True},
+            headers=headers,
+        )
+
+    def test_a_notify_with_no_manager_is_kept_and_stays_deliverable(self):
+        """Storing an escalation is not the same as anyone being told.
+
+        With no lead on the parent there is nobody to wake. The report must
+        still be preserved — and must not be recorded as delivered, or the
+        one-pending-notify index would use it to suppress every wake that
+        followed, muting this child for good.
+        """
+        child, headers = self._child_with_lead()
+        self.client.post("/api/conversations/parent/lead", json={"attachment_id": None})
+
+        stored = self._notify(child, headers, "blocked on the shared fix")
+
+        self.assertEqual(stored.status_code, 201)
+        self.assertEqual(stored.json()["body"], "blocked on the shared fix")
+        self.assertIsNone(
+            stored.json()["notified_at"],
+            "no manager was woken, so the report must not claim it was",
+        )
+
+    def test_a_later_notify_retries_a_wake_that_never_happened(self):
+        # The recovery path: once a manager exists, the next escalation from
+        # the same child announces the coalesced report instead of joining a
+        # silence that nobody asked for.
+        child, headers = self._child_with_lead()
+        self.client.post("/api/conversations/parent/lead", json={"attachment_id": None})
+        self._notify(child, headers, "first, unheard")
+
+        deliveries = []
+
+        class Adapter:
+            att = {"runtime_owner": None}
+
+            async def deliver(self, messages):
+                deliveries.append(messages)
+                return True
+
+        self.client.post(
+            "/api/conversations/parent/lead", json={"attachment_id": "lead-att"}
+        )
+        self.db.set_attachment_status("lead-att", "running", None)
+        self.runtime.live["lead-att"] = Adapter()
+
+        second = self._notify(child, headers, "second, please read")
+
+        self.assertEqual(second.status_code, 201)
+        self.assertIsNotNone(second.json()["notified_at"])
+        self.assertEqual(second.json()["body"], "second, please read")
+        self.assertGreater(second.json()["revision"], 1, "it coalesced rather than stacking")
+        self.assertTrue(deliveries, "the manager was finally woken")
+
+    def test_a_delivered_notify_still_goes_quiet_until_acknowledged(self):
+        # The retry must not become a wake per report: once the manager has
+        # been told, further escalations stay silent until the ack.
+        child, headers = self._child_with_lead()
+        deliveries = []
+
+        class Adapter:
+            att = {"runtime_owner": None}
+
+            async def deliver(self, messages):
+                deliveries.append(messages)
+                return True
+
+        self.db.set_attachment_status("lead-att", "running", None)
+        self.runtime.live["lead-att"] = Adapter()
+
+        first = self._notify(child, headers, "one")
+        after_first = len(deliveries)
+        second = self._notify(child, headers, "two")
+
+        self.assertIsNotNone(first.json()["notified_at"])
+        self.assertEqual(len(deliveries), after_first, "no second wake before the ack")
+        self.assertEqual(second.json()["notified_at"], first.json()["notified_at"])
+        self.assertEqual(second.json()["body"], "two", "the newest text is what waits")
+
+    def test_one_wake_while_the_first_is_still_being_delivered(self):
+        """Concurrent escalations must not each wake the manager.
+
+        Every caller sees `notified_at IS NULL` until the first wake finishes,
+        so without an in-flight claim they all decide a wake is owed. The
+        first delivery is held open here to make that window wide.
+        """
+        child, headers = self._child_with_lead()
+        released = threading.Event()
+        deliveries = []
+
+        class BlockingAdapter:
+            att = {"runtime_owner": None}
+
+            async def deliver(self, messages):
+                deliveries.append(messages)
+                await asyncio.get_running_loop().run_in_executor(None, released.wait)
+                return True
+
+        self.db.set_attachment_status("lead-att", "running", None)
+        self.runtime.live["lead-att"] = BlockingAdapter()
+
+        results = []
+        threads = [
+            threading.Thread(
+                target=lambda i=i: results.append(
+                    self._notify(child, headers, f"update {i}").status_code
+                )
+            )
+            for i in range(6)
+        ]
+        for thread in threads:
+            thread.start()
+        # Let the others pile up behind the held delivery before releasing it.
+        time.sleep(0.4)
+        released.set()
+        for thread in threads:
+            thread.join(timeout=15)
+
+        self.assertEqual([code for code in results if code != 201], [])
+        self.assertEqual(len(deliveries), 1, "the manager was woken once, not once per report")
+
+    def test_a_late_expired_attempt_cannot_disturb_a_newer_claim(self):
+        # A lease that ran out can still return. Fenced on the claim value, its
+        # release and its completion both no-op rather than clearing or
+        # finishing a wake that now belongs to someone else.
+        child, headers = self._child_with_lead()
+        self.client.post("/api/conversations/parent/lead", json={"attachment_id": None})
+        stored = self._notify(child, headers, "first").json()
+
+        current = reports.get(self.db, stored["id"])["notifying_at"]
+        stale = (current or 0.0) - 1000.0
+
+        reports.release_wake_claim(self.db, stored["id"], stale)
+        self.assertEqual(
+            reports.get(self.db, stored["id"])["notifying_at"],
+            current,
+            "a stale release must not hand away a newer claim",
+        )
+        reports.mark_notified(self.db, stored["id"], stale)
+        self.assertIsNone(
+            reports.get(self.db, stored["id"])["notified_at"],
+            "a stale attempt must not complete a wake it no longer owns",
+        )
+
+    def test_a_manager_that_is_not_running_is_not_delivery(self):
+        # Routing only ever delivers to a `running` attachment with a live,
+        # matching activation. Anything short of that must leave the report
+        # retryable rather than recorded as announced.
+        child, headers = self._child_with_lead()
+
+        class Adapter:
+            att = {"runtime_owner": None}
+
+            async def deliver(self, messages):
+                raise AssertionError("a manager that cannot be reached was written to")
+
+        for label, status, live in (
+            ("still starting", "starting", True),
+            ("exited but still in live", "exited", True),
+            ("running with no adapter", "running", False),
+        ):
+            with self.subTest(case=label):
+                self.runtime.live.pop("lead-att", None)
+                self.db.set_attachment_status("lead-att", status, None)
+                if live:
+                    self.runtime.live["lead-att"] = Adapter()
+                stored = self._notify(child, headers, f"escalate: {label}")
+
+                self.assertEqual(stored.status_code, 201)
+                self.assertIsNone(
+                    stored.json()["notified_at"],
+                    "an unreachable manager must not count as notified",
+                )
+                self.assertIsNone(
+                    stored.json()["notifying_at"],
+                    "and the claim must be handed back for the next attempt",
+                )
+
+    def test_notify_wakes_once_then_coalesces_until_ack(self):
+        child = self.client.post(
+            "/api/conversations/parent/children",
+            json={"name": "Kid"},
+            headers=self.lead,
+        ).json()["conversation"]
+        self.db.add_attachment(
+            "child-lead", child["id"], "astra-child", "fake", ["fake"], "/tmp"
+        )
+        self.client.post(
+            f"/api/conversations/{child['id']}/lead",
+            json={"attachment_id": "child-lead"},
+        )
+        child_headers = {
+            "Authorization": "Bearer "
+            + auth_store.ensure_api_token(self.db, "child-lead")
+        }
+        deliveries = []
+
+        class Adapter:
+            att = {"runtime_owner": None}
+
+            async def deliver(self, messages):
+                deliveries.append(messages)
+                return True
+
+        self.db.set_attachment_status("lead-att", "running", None)
+        self.runtime.live["lead-att"] = Adapter()
+        first = self.client.post(
+            f"/api/conversations/{child['id']}/reports",
+            json={"body": "blocked", "notify": True},
+            headers=child_headers,
+        )
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(len(deliveries), 1)
+        second = self.client.post(
+            f"/api/conversations/{child['id']}/reports",
+            json={"body": "still blocked", "notify": True},
+            headers=child_headers,
+        )
+        self.assertEqual(second.status_code, 201)
+        self.assertEqual(len(deliveries), 1)
+        self.assertEqual(first.json()["id"], second.json()["id"])
+        self.assertEqual(first.json()["revision"], 1)
+        self.assertEqual(second.json()["revision"], 2)
+        ack = self.client.post(
+            f"/api/conversations/parent/reports/{first.json()['id']}/ack",
+            json={"revision": 2},
+            headers=self.lead,
+        )
+        self.assertIsNotNone(ack.json()["acknowledged_at"])
+        third = self.client.post(
+            f"/api/conversations/{child['id']}/reports",
+            json={"body": "new blocker", "notify": True},
+            headers=child_headers,
+        )
+        self.assertEqual(third.status_code, 201)
+        self.assertEqual(len(deliveries), 2)
+        pointer = wake_message("astra", third.json()["id"])
+        self.assertEqual(deliveries[-1][-1]["body"], pointer)
+        self.assertNotIn("new blocker", pointer)
+
+    def test_notify_wake_ignores_mentions_in_report_text_and_child_name(self):
+        child = self.client.post(
+            "/api/conversations/parent/children",
+            json={"name": "Kid @all @grok"},
+            headers=self.lead,
+        ).json()["conversation"]
+        self.db.add_attachment(
+            "child-lead", child["id"], "astra-child", "fake", ["fake"], "/tmp"
+        )
+        self.client.post(
+            f"/api/conversations/{child['id']}/lead",
+            json={"attachment_id": "child-lead"},
+        )
+        lead_deliveries, sib_deliveries = [], []
+
+        class Adapter:
+            def __init__(self, bucket):
+                self.att = {"runtime_owner": None}
+                self.bucket = bucket
+
+            async def deliver(self, messages):
+                self.bucket.append(messages)
+                return True
+
+        self.db.set_attachment_status("lead-att", "running", None)
+        self.db.set_attachment_status("impl-att", "running", None)
+        self.runtime.live["lead-att"] = Adapter(lead_deliveries)
+        self.runtime.live["impl-att"] = Adapter(sib_deliveries)
+        posted = self.client.post(
+            f"/api/conversations/{child['id']}/reports",
+            json={"body": "blocked @all @grok please", "notify": True},
+            headers={
+                "Authorization": "Bearer "
+                + auth_store.ensure_api_token(self.db, "child-lead")
+            },
+        )
+        self.assertEqual(posted.status_code, 201)
+        self.assertEqual(len(lead_deliveries), 1)
+        self.assertEqual(len(sib_deliveries), 0)
+        wake = lead_deliveries[0][-1]["body"]
+        self.assertEqual(wake, wake_message("astra", posted.json()["id"]))
+        self.assertNotIn("@all", wake)
+        self.assertNotIn("@grok", wake)
+        listed = self.client.get(
+            "/api/conversations/parent/reports", headers=self.lead
+        ).json()
+        self.assertEqual(listed[0]["body"], "blocked @all @grok please")
+
+    def test_same_handle_from_a_child_still_wakes_the_parent_lead(self):
+        child = create_child_conversation(self.db, "parent", "kid", "Kid")
+        self.db.add_attachment(
+            "child-astra", child["id"], "astra", "fake", ["fake"], "/tmp"
+        )
+        deliveries = []
+
+        class Adapter:
+            att = {"runtime_owner": None}
+
+            async def deliver(self, messages):
+                deliveries.append(messages)
+                return True
+
+        self.db.set_attachment_status("lead-att", "running", None)
+        self.runtime.live["lead-att"] = Adapter()
+        principal = resolve_principal(
+            self.db, auth_store.ensure_api_token(self.db, "child-astra")
+        )
+        stored = self.db.add_message("parent", "astra", "agent", "@astra from the child")
+        stored = {**stored, **stamp_source(self.db, stored["id"], principal)}
+        asyncio.run(self.runtime.route_mentions("parent", stored))
+        self.assertEqual(len(deliveries), 1)
+        self.assertEqual(deliveries[0][-1]["source_attachment_id"], "child-astra")
+        self.assertEqual(deliveries[0][-1]["source_conv_id"], "kid")
+
+    def test_http_parent_link_refuses_a_cycle(self):
+        child = create_child_conversation(self.db, "parent", "kid", "Kid")
+        cycled = self.client.put(
+            "/api/conversations/parent/parent", json={"parent_id": child["id"]}
+        )
+        self.assertEqual(cycled.status_code, 400)
+
+    def test_purge_refuses_a_parent_that_still_has_children(self):
+        child = self.client.post(
+            "/api/conversations/parent/children",
+            json={"name": "Kid"},
+            headers=self.lead,
+        ).json()["conversation"]
+        self.assertEqual(self.client.delete("/api/conversations/parent").status_code, 409)
+        self.assertEqual(
+            self.client.delete(f"/api/conversations/{child['id']}/purge").status_code,
+            409,
+        )
+        unlinked = self.client.put(
+            f"/api/conversations/{child['id']}/parent", json={"parent_id": None}
+        )
+        self.assertEqual(unlinked.status_code, 200)
+        archived = self.client.delete("/api/conversations/parent")
+        self.assertEqual(archived.status_code, 200)
+        purged = self.client.delete("/api/conversations/parent/purge")
+        self.assertEqual(purged.status_code, 200)
+
+    def test_attachment_id_scope_matches_the_line(self):
+        self.db.create_conversation("other", "Other")
+        self.db.add_attachment("other-att", "other", "x", "fake", ["fake"], "/tmp")
+        principal = resolve_principal(
+            self.db, auth_store.ensure_api_token(self.db, "impl-att")
+        )
+        with self.assertRaises(HTTPException) as raised:
+            deny_unless_attachment(self.db, principal, "other-att", "read")
+        self.assertEqual(raised.exception.status_code, 403)
+        deny_unless_attachment(self.db, principal, "impl-att", "read")
+
+    def test_implementer_cannot_type_into_a_peer_process(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+        principal = resolve_principal(self.db, auth_store.ensure_api_token(self.db, "impl-att"))
+        request = SimpleNamespace(state=SimpleNamespace(principal=principal))
+        adapter = SimpleNamespace(send_key=AsyncMock())
+        self.runtime.live["lead-att"] = adapter
+        try:
+            with self.assertRaises(HTTPException) as raised:
+                asyncio.run(server.attachment_key(request, "lead-att", server.KeyIn(key="enter")))
+            self.assertEqual(raised.exception.status_code, 403)
+            adapter.send_key.assert_not_called()
+        finally:
+            self.runtime.live.pop("lead-att", None)
+
+    def test_lead_lists_children_and_implementer_cannot_read_them(self):
+        created = self.client.post(
+            "/api/conversations/parent/children",
+            json={"name": "Kid"},
+            headers=self.lead,
+        ).json()["conversation"]
+        listed = self.client.get(
+            "/api/conversations/parent/children", headers=self.lead
+        )
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(listed.json()[0]["id"], created["id"])
+        self.assertEqual(
+            self.client.get(
+                f"/api/conversations/{created['id']}/tasks", headers=self.lead
+            ).status_code,
+            200,
+        )
+        hidden = self.client.get(
+            f"/api/conversations/{created['id']}/tasks", headers=self.impl
+        )
+        self.assertEqual(hidden.status_code, 403)
+
+    def test_machine_message_stamps_source_identity(self):
+        posted = self.client.post(
+            "/api/conversations/parent/messages",
+            json={"body": "hello line"},
+            headers=self.impl,
+        )
+        self.assertEqual(posted.json()["source_attachment_id"], "impl-att")
+        self.assertEqual(posted.json()["source_conv_id"], "parent")
+
+    def test_stale_ack_leaves_an_unseen_notify_update_pending(self):
+        child = self.client.post(
+            "/api/conversations/parent/children",
+            json={"name": "Kid"},
+            headers=self.lead,
+        ).json()["conversation"]
+        self.db.add_attachment(
+            "child-lead", child["id"], "astra-child", "fake", ["fake"], "/tmp"
+        )
+        self.client.post(
+            f"/api/conversations/{child['id']}/lead",
+            json={"attachment_id": "child-lead"},
+        )
+        child_headers = {
+            "Authorization": "Bearer "
+            + auth_store.ensure_api_token(self.db, "child-lead")
+        }
+        first = self.client.post(
+            f"/api/conversations/{child['id']}/reports",
+            json={"body": "blocked", "notify": True},
+            headers=child_headers,
+        ).json()
+        self.assertEqual(first["revision"], 1)
+        updated = self.client.post(
+            f"/api/conversations/{child['id']}/reports",
+            json={"body": "still blocked", "notify": True},
+            headers=child_headers,
+        ).json()
+        self.assertEqual(updated["id"], first["id"])
+        self.assertEqual(updated["revision"], 2)
+        stale = self.client.post(
+            f"/api/conversations/parent/reports/{first['id']}/ack",
+            json={"revision": 1},
+            headers=self.lead,
+        )
+        self.assertEqual(stale.status_code, 409)
+        listed = self.client.get(
+            "/api/conversations/parent/reports", headers=self.lead
+        ).json()
+        self.assertIsNone(listed[0]["acknowledged_at"])
+        self.assertEqual(listed[0]["body"], "still blocked")
+        self.assertEqual(listed[0]["revision"], 2)
+        fresh = self.client.post(
+            f"/api/conversations/parent/reports/{first['id']}/ack",
+            json={"revision": 2},
+            headers=self.lead,
+        )
+        self.assertEqual(fresh.status_code, 200)
+        self.assertIsNotNone(fresh.json()["acknowledged_at"])
+
+    def test_concurrent_notifies_keep_one_pending_row(self):
+        child = self.client.post(
+            "/api/conversations/parent/children",
+            json={"name": "Kid"},
+            headers=self.lead,
+        ).json()["conversation"]
+        self.db.add_attachment(
+            "child-lead", child["id"], "astra-child", "fake", ["fake"], "/tmp"
+        )
+        self.client.post(
+            f"/api/conversations/{child['id']}/lead",
+            json={"attachment_id": "child-lead"},
+        )
+        child_headers = {
+            "Authorization": "Bearer "
+            + auth_store.ensure_api_token(self.db, "child-lead")
+        }
+        failures = []
+
+        def post(index):
+            response = self.client.post(
+                f"/api/conversations/{child['id']}/reports",
+                json={"body": f"update {index}", "notify": True},
+                headers=child_headers,
+            )
+            if response.status_code != 201:
+                failures.append(response.status_code)
+
+        threads = [threading.Thread(target=post, args=(i,)) for i in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(failures, [])
+        listed = self.client.get(
+            "/api/conversations/parent/reports", headers=self.lead
+        ).json()
+        pending = [
+            row
+            for row in listed
+            if row["notify"] and row["acknowledged_at"] is None
+        ]
+        self.assertEqual(len(pending), 1)
+        self.assertGreaterEqual(pending[0]["revision"], 1)

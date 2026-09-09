@@ -8,6 +8,7 @@
   import { session } from "../../state/session.svelte";
   import { dialogs } from "../../state/dialogs.svelte";
   import { describeBuild } from "../../lib/build";
+  import ManagementDialog from "../dialogs/ManagementDialog.svelte";
   import RenameLineDialog from "../dialogs/RenameLineDialog.svelte";
   import DeleteLineDialog from "../dialogs/DeleteLineDialog.svelte";
   import PurgeLineDialog from "../dialogs/PurgeLineDialog.svelte";
@@ -27,6 +28,10 @@
     } catch (error: unknown) {
       room.showNotice(error instanceof ApiError ? error.message : "could not open line", "error");
     }
+  }
+
+  function manageLine(conversation: Conversation): void {
+    dialogs.open(ManagementDialog, { conversation });
   }
 
   function renameLine(conversation: Conversation): void {
@@ -67,6 +72,7 @@
   </div>
 
   <ConversationList
+    onmanagement={manageLine}
     onrename={renameLine}
     onclaims={showClaims}
     oncloseprocesses={closeProcesses}

@@ -90,6 +90,7 @@ class ConversationResponse(BaseModel):
     topic: str = ""
     archived_at: float | None = None
     live_count: int = Field(default=0, ge=0)
+    parent_id: str | None = None
 
 
 class MessageResponse(BaseModel):
@@ -100,6 +101,8 @@ class MessageResponse(BaseModel):
     body: str
     created_at: float
     files: list[FileRef] = Field(default_factory=list)
+    source_attachment_id: str | None = None
+    source_conv_id: str | None = None
 
 
 class FileUploadResponse(BaseModel):

@@ -23,6 +23,7 @@ describe("conversation rail live state", () => {
     const list = mount(ConversationList, {
       target: document.body,
       props: {
+        onmanagement: vi.fn(),
         onrename: vi.fn(),
         onclaims: vi.fn(),
         oncloseprocesses: vi.fn(),
