@@ -361,3 +361,27 @@ EXAMPLE_API_KEY=$(cat ~/.secrets/example) uv run partyline
 ```
 
 Don't put them in shell profiles, manifests, commands stored as presets, or commits.
+
+### Antigravity conversation discovery is read out of a log the CLI also echoes into
+
+`agy` takes no caller-chosen conversation id, so the adapter learns which
+conversation it is on by reading this attachment's own `--log-file` for a
+`Created conversation <uuid>` or `Resuming conversation <uuid>` line written
+after the activation marked the file.
+
+Both verbs are required, and reading one was an outage: `build_command` passes
+`--conversation` on resume, so a resumed CLI only ever says "Resuming".
+Matching "Created" alone worked for the run that created the conversation and
+failed on every restart after it — the process ran, accepted input, and relayed
+nothing, because discovery timed out before a transcript was ever opened.
+
+The same log carries `HandleUserInput called with text: "…"`, the CLI quoting
+its own input back. That input is chat, which anyone on the line can write, so
+those lines are skipped: otherwise a message reading `Created conversation
+<uuid>` would pin the adapter to a transcript of the sender's choosing. This
+was found in a real log, harmless only because no uuid followed the phrase.
+
+| DO | DO NOT |
+| --- | --- |
+| Keep the echo skip matched to the vendor's exact marker | Loosen it into a heuristic that might skip a real CLI line |
+| Re-check that marker when `agy` updates — a reworded log reopens the injection path with these tests still green | Assume a passing suite proves the filter still matches anything |
