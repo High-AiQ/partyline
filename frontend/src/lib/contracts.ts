@@ -83,6 +83,7 @@ export type PresenceCompletion = z.infer<typeof PresenceCompletionSchema>;
 
 export const AdapterCapabilitiesSchema = z.object({
   resume: z.boolean().optional(),
+  interrupt: z.boolean().optional(),
 });
 export type AdapterCapabilities = z.infer<typeof AdapterCapabilitiesSchema>;
 
