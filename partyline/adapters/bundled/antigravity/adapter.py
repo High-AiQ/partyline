@@ -28,6 +28,7 @@ from pathlib import Path
 
 from partyline.adapters import Adapter
 from partyline.adapters.bundled.antigravity import interrupt as interrupts
+from partyline.interrupts import InterruptStatus
 from partyline.adapters.bundled.antigravity.wakes import WakeSettlement
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
 
@@ -51,7 +52,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
 
     MAX_NOTICES = 2
 
-    async def interrupt(self) -> bool:
+    async def interrupt(self) -> InterruptStatus:
         """Stop the running turn with Esc, confirmed from the transcript."""
         return await interrupts.interrupt(self)
 

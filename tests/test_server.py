@@ -417,7 +417,7 @@ class ServerTest(unittest.TestCase):
 
         async def interrupt():
             interrupts.append(True)
-            return True
+            return "interrupted"
 
         adapter.interrupt = interrupt
         server.runtime.live["one"] = adapter
@@ -463,7 +463,7 @@ class ServerTest(unittest.TestCase):
 
         async def interrupt():
             interrupts.append(True)
-            return True
+            return "interrupted"
 
         adapter.interrupt = interrupt
         server.runtime.live["one"] = adapter
