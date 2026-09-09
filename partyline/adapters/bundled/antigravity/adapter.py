@@ -7,6 +7,8 @@ locates the transcript exactly:
 ``~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl``.
 No directory scanning, no claiming: two attachments started in one working
 directory cannot resolve to the same conversation because neither guesses.
+Resume still passes ``--conversation``, but the tailed transcript is the id
+this activation's log actually created — not the stored ``cli_session``.
 
 The transcript is one JSON object per step. Chat speech is a DONE
 ``PLANNER_RESPONSE`` from ``MODEL`` with content; tool loops appear as
@@ -29,12 +31,15 @@ from pathlib import Path
 from partyline.adapters import Adapter
 from partyline.adapters.bundled.antigravity import interrupt as interrupts
 from partyline.interrupts import InterruptStatus
+from partyline.adapters.bundled.antigravity.conversation_log import (
+    conversation_from_log,
+    log_size,
+)
 from partyline.adapters.bundled.antigravity.wakes import WakeSettlement
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
 
 LOG_ROOT = os.path.expanduser("~/.partyline/sessions/antigravity")
 BRAIN_ROOT = Path.home() / ".gemini" / "antigravity-cli" / "brain"
-CREATED = re.compile(r"Created conversation ([0-9a-fA-F-]{36})")
 TASK_STARTED = re.compile(r"background task with task id:\s*(\S+)", re.IGNORECASE)
 TASK_SETTLED = re.compile(
     r'Task id "([^"]+)" (?:finished|was canceled)', re.IGNORECASE
@@ -175,26 +180,24 @@ class PartylineAdapter(WakeSettlement, Adapter):
         self._silent_until_wake = False
         return True
 
-    def _conversation_from_log(self) -> str | None:
-        try:
-            text = Path(self.log_path()).read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            return None
-        match = CREATED.search(text)
-        return match.group(1) if match else None
+    def _conversation_from_log(self, after: int = 0) -> str | None:
+        return conversation_from_log(Path(self.log_path()), after=after)
 
     async def _run(self):
         os.makedirs(LOG_ROOT, exist_ok=True)
+        # Resume must ignore Created lines from the previous activation of
+        # this same log file; a fresh attach reads the whole file.
+        mark = log_size(Path(self.log_path())) if self.resume else 0
         await asyncio.sleep(4.0)
         if not self.alive():
             return
         if not self.resume:
             await self.send_keys(self.briefing())
 
-        conversation = str(self.att.get("cli_session") or "") if self.resume else ""
+        conversation = ""
         waited = 0.0
         while not conversation and self.alive():
-            conversation = self._conversation_from_log() or ""
+            conversation = self._conversation_from_log(after=mark) or ""
             if conversation:
                 break
             await asyncio.sleep(1.0)

@@ -259,6 +259,13 @@ you chose** — the transcript path is then exact and nothing else can occupy it
 adapter does this: it pins `--session-id` to the attachment id and `--session-dir` to a directory
 of its own, so discovery cannot be wrong.
 
+If the CLI will not take a caller-chosen id, pin something else it *does* emit — Antigravity's
+`--log-file` per attachment, then the `Created conversation` line in that file. Resume may still
+pass `--conversation` so the CLI can try to reopen context, but the tailed transcript is the id
+this activation's log actually created after the log was marked. A stored `cli_session` is not
+that evidence: `agy` can open a new conversation anyway, and the old transcript then goes silent
+while the new one holds the recovery speech.
+
 If the CLI gives you nothing to pin and you have to match on working directory and start time,
 then you must also:
 
