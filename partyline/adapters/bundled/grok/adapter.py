@@ -197,7 +197,7 @@ class PartylineAdapter(Adapter):
             )
             self._mark_not_ready()
             return
-        self._wake_receipts.seed(latest_user_prompt(path))
+        self._wake_receipts.seed(latest_user_prompt(path), self)
 
         async def handle(record):
             body = self._assistant_text(record)

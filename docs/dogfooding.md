@@ -177,6 +177,52 @@ the debrief is part of the native startup command and must appear as structured 
 the cursor advances. A failed receipt preserves one recovery retry; a second unconfirmed attempt is
 consumed with an actionable warning while the process remains live.
 
+### When recovery leaves a continuation unconfirmed
+
+`unconfirmed` is not `failed`: the process is running and was left alone on
+purpose. Its cursor stays put, and it stays in `runtime.reattaching` so that
+*if it later exits*, mentions are held rather than reported unreachable.
+
+Nothing used to clear that flag except "start fresh" and removing the jack's
+record — so an operator who detached and resumed kept it for the life of the
+server, and once the process did exit the room was told nothing at all. An
+explicit resume now clears it, which is what an operator means by resuming.
+
+The retained flag never blocked delivery: `message_routing` consults it only
+when there is no live adapter. A process left unconfirmed is still reachable
+while it runs.
+
+To find out *why* a continuation went unconfirmed, add
+
+```
+PARTYLINE_RECEIPT_DIAGNOSTICS=1
+```
+
+to the **cockpit checkout's `.env`**, then deploy and arm as usual. A running
+server's environment cannot be edited from the arming shell, and the trigger
+passes the *outgoing* process's environment through — so the switch has to be
+somewhere the replacement reads at startup, and `.env` is that place. It takes
+effect on the next restart and applies to every Grok attachment the recovery
+resumes. Grok's receipt tracker then logs, every line tagged with the attachment id and
+the activation that owns it: the seeded index, the paste boundary, each
+observed record, whether it matched a pending wake, and — separately — whether
+the delivery callback then granted or refused the credit. Matching and crediting are different failures with
+different fixes, so they are never reported as one.
+
+It is off by default because the server configures only uvicorn's loggers: the
+root logger has no handler, so an INFO record from that module is discarded and
+an operator sees nothing. A unit test asserting on `assertLogs` cannot show
+this, since `assertLogs` installs a handler of its own.
+
+The check runs when a receipt tracker is constructed, not when the module is
+imported. `load_dotenv()` runs in `server.py` well after import, so reading the
+environment at import time would look before the file that sets it had been
+read — the switch would be silently inert.
+
+No prompt text and no credential is ever logged. A digest is identified by
+eight hex characters of the SHA-256 of its whitespace-normalized form, which
+distinguishes "the same string" from "a different string" and reveals neither.
+
 ## Proof after restart
 
 Green local tests are necessary but not sufficient. A dogfood change is complete only when the real

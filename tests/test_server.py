@@ -486,6 +486,52 @@ class ServerTest(unittest.TestCase):
         self.assertIn(
             "cannot be interrupted", server.runtime.db.list_messages("line")[-1]["body"])
 
+    def test_an_explicit_resume_clears_a_retained_reattaching_flag(self):
+        """A stale flag silences the "not attached" warning, not delivery.
+
+        `reattaching` is only consulted when no live adapter exists, so a
+        process left in it after unconfirmed recovery is still reachable while
+        it runs. What the stale flag costs is the diagnostic: once the process
+        does exit, mentions to it are swallowed as "queued for reattachment"
+        and the room is told nothing. Nothing cleared it either — only "start
+        fresh" and removing the jack record did — so detach-and-resume, the
+        obvious remedy, left it set for the life of the server.
+        """
+        # The real sequence an operator runs: the process is gone, they resume
+        # it. The spawn itself is stubbed; what is under test is the route.
+        self.add_attachment("one", "terra", "exited")
+        server.runtime.reattaching.add("one")
+        original = server._resume_adapter
+
+        async def resumed(att_id):
+            server.runtime.live[att_id] = FakeAdapter()
+
+        server._resume_adapter = resumed
+        try:
+            self.arun(server.resume_attachment(self.principal_request(), "one"))
+        finally:
+            server._resume_adapter = original
+
+        self.assertNotIn("one", server.runtime.reattaching)
+
+    def test_a_stale_flag_would_swallow_the_unreachable_warning(self):
+        # The control for why clearing it matters: with the flag set and the
+        # process gone, the room hears nothing at all.
+        self.add_attachment("one", "terra", "exited")
+        message = server.runtime.db.add_message("line", "greg", "human", "@terra")
+
+        server.runtime.reattaching.add("one")
+        self.arun(server.runtime.route_mentions("line", message))
+        self.assertNotIn(
+            "nothing was delivered", server.runtime.db.list_messages("line")[-1]["body"]
+        )
+
+        server.runtime.reattaching.discard("one")
+        self.arun(server.runtime.route_mentions("line", message))
+        self.assertIn(
+            "nothing was delivered", server.runtime.db.list_messages("line")[-1]["body"]
+        )
+
     def test_route_mentions_accepts_normal_and_format_interrupted_grok(self):
         self.add_attachment("one", "grok")
         adapter = FakeAdapter()
