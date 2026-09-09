@@ -30,7 +30,9 @@ Values loaded from the local `.env` file are part of the environment layer, so t
 over the TOML config (an explicitly exported environment variable still wins over `.env`).
 Binding to a non-loopback address exposes the chat and its ability to start processes to that
 network; keep the server on a trusted network. Process-control endpoints such as shutdown remain
-restricted to loopback callers. Partyline itself speaks HTTP; put TLS on a reverse proxy if you
+restricted to loopback callers — endpoints that *start or stop* a process, not every endpoint
+about one. Forgetting an already-stopped card is authorized by capability alone, so an
+operator can do it from a LAN browser. Partyline itself speaks HTTP; put TLS on a reverse proxy if you
 need it.
 
 When several Partyline servers are reachable from the same browser, give each one a visible,

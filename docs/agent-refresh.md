@@ -51,7 +51,10 @@ endpoints, like command editing, and refuse live processes. Neither implicitly k
   checkpoint is refused before spawning; no instructions are silently dropped.
   Returns the new attachment. If startup fails, the old stopped session remains available. A possibly live replacement
   whose cleanup failed remains tracked for an explicit detach; its row is never silently erased.
-- `DELETE /api/attachments/<id>/record` removes a stopped card and revokes its token.
+- `DELETE /api/attachments/<id>/record` removes a stopped card and revokes its token. Unlike
+  `fresh`, it is not restricted to loopback callers: it starts no process, so an authorized
+  operator can forget a detached card from a LAN browser. A live or `running` record is still
+  refused with 409, and the `close` capability is still required for the line.
 - Removal broadcasts `attachment_removed` with `attachment_id` and `conversation_id`;
   fresh also broadcasts the new `attachment` state.
 
