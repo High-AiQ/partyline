@@ -23,8 +23,16 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from typing import Literal
 
 logger = logging.getLogger(__name__)
+
+# What an adapter's `interrupt()` reports back. `idle` is not a failure and not
+# a success: there was no turn to stop, so nothing was attempted and nothing
+# needs confirming. Collapsing it into either of the other two costs the
+# operator the truth — and, before this existed, ten seconds of delivery
+# latency spent waiting for a receipt that could never arrive.
+InterruptStatus = Literal["interrupted", "idle", "unconfirmed"]
 
 # `None` is a real runtime owner, so absence needs its own sentinel.
 _MISSING = object()
@@ -103,7 +111,7 @@ async def interrupt_for(
             "without a second one"
         ))
     try:
-        confirmed = bool(await adapter.interrupt())
+        status = await adapter.interrupt()
     except Exception:
         logger.exception("interrupt of @%s failed", name)
         return InterruptOutcome(True, False, (
@@ -112,8 +120,17 @@ async def interrupt_for(
         ))
     finally:
         pending.release(attachment["id"], owner)
-    if confirmed:
+    # Only the declared status claims an interruption. Anything else — a bare
+    # bool from an adapter written against an older contract, a typo, None —
+    # falls through to "unconfirmed", which understates rather than telling the
+    # room a turn was stopped when nothing proved it.
+    if status == "interrupted":
         return InterruptOutcome(True, True, f"☏ @{name} was interrupted to take this message")
+    if status == "idle":
+        return InterruptOutcome(False, False, (
+            f"☏ @{name} was already idle — the message was delivered straight away, with "
+            "nothing to interrupt"
+        ))
     return InterruptOutcome(True, False, (
         f"⚠ @{name} did not confirm the interruption — the message was delivered, but its "
         "turn may still be running"
