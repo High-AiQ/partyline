@@ -4,6 +4,8 @@ import unittest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from partyline import auth_store, auth_tokens
+from partyline.auth_guard import install_auth_guard
 from partyline.db import Db
 from partyline.line_process_routes import register_line_process_routes
 from partyline.runtime import ChatRuntime
@@ -36,8 +38,14 @@ class CloseLineProcessesTest(unittest.TestCase):
         self.db.create_conversation("line", "Line")
         self.db.create_conversation("other", "Other")
         app = FastAPI()
+        install_auth_guard(app, self.db)
         register_line_process_routes(app, self.runtime)
         self.client = TestClient(app)
+        user = auth_store.create_user(
+            self.db, "greg@example.com", "greg", auth_tokens.hash_password("hunter2222"))
+        token = auth_tokens.create_access_token(
+            auth_tokens.signing_secret(self.db), user["id"])
+        self.client.headers["Authorization"] = f"Bearer {token}"
 
     def tearDown(self):
         self.client.close()

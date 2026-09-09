@@ -136,4 +136,54 @@ MIGRATIONS = [
     # refuses to drop a column referenced by an index.
     "DROP INDEX IF EXISTS idx_attachments_follow_lead",
     "ALTER TABLE attachments DROP COLUMN follow",
+    # Parent/child lines and a human-appointed lead per line. Machines are
+    # scoped to their home line plus descendants of a live lead row.
+    "ALTER TABLE conversations ADD COLUMN parent_id TEXT",
+    "ALTER TABLE attachments ADD COLUMN is_lead INTEGER NOT NULL DEFAULT 0",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_attachments_one_lead "
+    "ON attachments(conv_id) WHERE is_lead=1",
+    "ALTER TABLE messages ADD COLUMN source_attachment_id TEXT",
+    "ALTER TABLE messages ADD COLUMN source_conv_id TEXT",
+    # Child-to-parent reports. Created here rather than on first use: running
+    # `executescript` per request issued an implicit COMMIT on the shared
+    # connection and invalidated cursors another thread was still reading,
+    # which surfaced as `InterfaceError: bad parameter or other API misuse`
+    # under concurrent posts.
+    """CREATE TABLE IF NOT EXISTS line_reports(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        parent_conv_id TEXT NOT NULL,
+        child_conv_id TEXT NOT NULL,
+        author TEXT NOT NULL,
+        author_attachment_id TEXT,
+        body TEXT NOT NULL,
+        notify INTEGER NOT NULL DEFAULT 0,
+        revision INTEGER NOT NULL DEFAULT 1,
+        notified_at REAL,
+        acknowledged_at REAL,
+        created_at REAL NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_line_reports_parent "
+    "ON line_reports(parent_conv_id, id)",
+    # One unacknowledged notify per child: a later escalation coalesces into
+    # that row rather than stacking a second wake.
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_line_reports_one_pending_notify "
+    "ON line_reports(parent_conv_id, child_conv_id) "
+    "WHERE notify=1 AND acknowledged_at IS NULL",
+    # For a database that already ran the pre-migration bootstrap.
+    "ALTER TABLE line_reports ADD COLUMN revision INTEGER NOT NULL DEFAULT 1",
+    # `notified_at` separates "stored" from "the manager was actually told".
+    # Without it, a notify with no lead appointed left a pending row that the
+    # unique index then used to suppress every later wake, muting that child
+    # for good.
+    "ALTER TABLE line_reports ADD COLUMN notified_at REAL",
+    # `notifying_at` is the in-flight claim on the one wake this row is owed.
+    # Without it, concurrent escalations all read `notified_at IS NULL` while
+    # the first wake was still being delivered, and each woke the manager.
+    "ALTER TABLE line_reports ADD COLUMN notifying_at REAL",
+    # Claims existed before hierarchy; normal startup now owns their schema too.
+    """CREATE TABLE IF NOT EXISTS claims(
+      id TEXT PRIMARY KEY, conv_id TEXT NOT NULL, owner TEXT NOT NULL,
+      paths TEXT NOT NULL, created_at REAL NOT NULL, expires_at REAL NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_claims_conv ON claims(conv_id, expires_at)",
 ]

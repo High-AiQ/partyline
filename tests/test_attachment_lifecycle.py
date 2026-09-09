@@ -16,6 +16,8 @@ from partyline.attachment_lifecycle_routes import register_attachment_lifecycle_
 from partyline.attachment_start import start_attachment
 from partyline.attachment_broadcast import broadcast_attachment_state
 from partyline.attachment_contracts import AttachmentResponse
+from partyline import auth_store, auth_tokens
+from partyline.auth_guard import install_auth_guard
 from partyline.auth_store import attachment_by_api_token, ensure_api_token
 from partyline.db import Db
 from partyline.runtime import ChatRuntime
@@ -45,11 +47,20 @@ class LifecycleTest(unittest.TestCase):
         self.tasks = SimpleNamespace(rider=lambda _: "current tasks")
         self.hook_url = lambda ident, owner: f"hook/{ident}/{owner}"
         app = FastAPI()
+        install_auth_guard(app, self.db)
         register_attachment_lifecycle_routes(
             app, self.runtime, start=self.start, require_loopback=self.loopback,
             validate=self.validation,
         )
         self.client = TestClient(app)
+        user = auth_store.create_user(
+            self.db, "greg@example.com", "greg",
+            auth_tokens.hash_password("hunter2222"),
+        )
+        token = auth_tokens.create_access_token(
+            auth_tokens.signing_secret(self.db), user["id"]
+        )
+        self.client.headers["Authorization"] = f"Bearer {token}"
         self.add_old()
 
     def tearDown(self):

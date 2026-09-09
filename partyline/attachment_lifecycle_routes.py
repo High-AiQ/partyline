@@ -5,6 +5,9 @@ import os
 
 from fastapi import HTTPException, Request
 
+from .agent_connection import remove_connection
+from .auth_guard import request_principal
+from .machine_scope import deny_unless_attachment
 from .attachment_contracts import AttachmentResponse
 from .attachment_lifecycle import (FreshAttachmentRequest, create_fresh_record,
                                    remove_stopped_record, require_stopped)
@@ -17,6 +20,7 @@ def register_attachment_lifecycle_routes(app, runtime, *, start, require_loopbac
         request: Request, att_id: str, body: FreshAttachmentRequest | None = None
     ):
         require_loopback(request)
+        deny_unless_attachment(runtime.db, request_principal(request), att_id, "attach")
         body = body or FreshAttachmentRequest()
         att = require_stopped(runtime.db, att_id)
         if att_id in runtime.live:
@@ -49,6 +53,7 @@ def register_attachment_lifecycle_routes(app, runtime, *, start, require_loopbac
 
 
     async def _removed_event(att):
+        remove_connection(runtime.db.path, att["id"])
         runtime.uncredited.pop(att["id"], None)
         runtime.unclaimed_noticed.discard(att["id"])
         runtime.reattaching.discard(att["id"])
@@ -60,6 +65,7 @@ def register_attachment_lifecycle_routes(app, runtime, *, start, require_loopbac
     @app.delete("/api/attachments/{att_id}/record", response_model=OkResponse)
     async def remove_attachment_record(request: Request, att_id: str):
         require_loopback(request)
+        deny_unless_attachment(runtime.db, request_principal(request), att_id, "close")
         if att_id in runtime.live:
             raise HTTPException(409, "detach the process before removing it")
         att = await remove_stopped_record(runtime.db, att_id)

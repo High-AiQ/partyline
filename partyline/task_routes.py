@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
+from .auth_guard import request_principal
 from .contracts import OkResponse
+from .machine_scope import deny_unless
 from .task_contracts import Task, TaskCreateRequest, TaskUpdateRequest, normalize_status
 from .tasks import UNSET, TaskError, TaskStore
 
@@ -25,11 +27,12 @@ def task_router(runtime, store: TaskStore) -> APIRouter:
             raise HTTPException(409, "restore the line before changing its tasks")
 
     @router.get("/api/conversations/{conv_id}/tasks", response_model=list[Task])
-    def list_tasks(conv_id: str, status: str | None = None):
+    def list_tasks(request: Request, conv_id: str, status: str | None = None):
         # The query filter takes the same synonyms as a write, so `?status=
         # completed` lists what `PATCH {"status": "completed"}` produced.
         status = normalize_status(status) if status is not None else None
         require_line(conv_id, writing=False)
+        deny_unless(runtime.db, request_principal(request), conv_id, "read")
         try:
             return store.list(conv_id, status=status)
         except TaskError as exc:
@@ -37,21 +40,23 @@ def task_router(runtime, store: TaskStore) -> APIRouter:
 
     @router.post(
         "/api/conversations/{conv_id}/tasks", response_model=Task, status_code=201)
-    def create_task(conv_id: str, body: TaskCreateRequest):
+    def create_task(request: Request, conv_id: str, body: TaskCreateRequest):
         require_line(conv_id, writing=True)
+        deny_unless(runtime.db, request_principal(request), conv_id, "write")
         try:
             return store.add(conv_id, body.body, body.owner)
         except TaskError as exc:  # pragma: no cover — pydantic validates first;
             raise _http(exc) from exc  # the store's own checks guard direct callers
 
     @router.patch("/api/tasks/{task_id}", response_model=Task)
-    def update_task(task_id: int, body: TaskUpdateRequest):
+    def update_task(request: Request, task_id: int, body: TaskUpdateRequest):
         provided = body.model_fields_set
         try:
             task = store.get(task_id)
         except TaskError as exc:
             raise _http(exc) from exc
         require_line(task["conv_id"], writing=True)
+        deny_unless(runtime.db, request_principal(request), task["conv_id"], "write")
         try:
             return store.update(
                 task_id,
@@ -63,12 +68,13 @@ def task_router(runtime, store: TaskStore) -> APIRouter:
             raise _http(exc) from exc  # the store's own checks guard direct callers
 
     @router.delete("/api/tasks/{task_id}", response_model=OkResponse)
-    def delete_task(task_id: int):
+    def delete_task(request: Request, task_id: int):
         try:
             task = store.get(task_id)
         except TaskError as exc:
             raise _http(exc) from exc
         require_line(task["conv_id"], writing=True)
+        deny_unless(runtime.db, request_principal(request), task["conv_id"], "write")
         store.delete(task_id)
         return OkResponse(ok=True)
 

@@ -15,6 +15,7 @@ from partyline.claims import (
     conflict_for,
     create_claim,
     expire,
+    get_claim,
     list_claims,
     overlaps,
     purge_claims,
@@ -137,12 +138,12 @@ class ClaimApiTest(unittest.TestCase):
             json={"paths": ["partyline/*.py"]}, headers=self.headers["opus"],
         )
         listed = self.client.get("/api/conversations/elsewhere/claims")
-        self.assertEqual(listed.json(), [])
+        self.assertEqual(listed.status_code, 403)
         taken = self.client.post(
             "/api/conversations/elsewhere/claims",
             json={"paths": ["partyline/server.py"]},
         )
-        self.assertEqual(taken.status_code, 200)
+        self.assertEqual(taken.status_code, 403)
 
     def test_an_unknown_line_is_404(self):
         missing = self.client.get("/api/conversations/nope/claims")
@@ -165,6 +166,17 @@ class ClaimApiTest(unittest.TestCase):
         self.assertEqual(refused.status_code, 403)
         self.assertIn("force=true", refused.json()["detail"])
         forced = self.client.delete(f"/api/claims/{ident}?force=true")
+        self.assertEqual(forced.status_code, 403)
+        self.runtime.db._exec("UPDATE attachments SET is_lead=1 WHERE name='grok'")
+        forced = self.client.delete(f"/api/claims/{ident}?force=true")
         self.assertEqual(forced.json(), {"ok": True})
         missing = self.client.delete("/api/claims/does-not-exist")
         self.assertEqual(missing.status_code, 404)
+
+    def test_force_cannot_release_an_unrelated_line_claim(self):
+        self.runtime.db.create_conversation("elsewhere", "Elsewhere")
+        claim = create_claim(self.runtime.db, "elsewhere", "grok", ["outside.py"])
+        for suffix in ("", "?force=true"):
+            response = self.client.delete(f"/api/claims/{claim.id}{suffix}")
+            self.assertEqual(response.status_code, 403)
+        self.assertIsNotNone(get_claim(self.runtime.db, claim.id))

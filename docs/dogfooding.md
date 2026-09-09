@@ -77,6 +77,19 @@ For that one restart:
 
 From the next restart on, `--all` covers everything and none of this is needed.
 
+## Machine planning and hierarchy
+
+An authenticated machine may plan its own line on loopback. Fleet planning also
+requires its manager authority over every line with starting or running
+attachments; unrelated dormant lines do not contribute recovery work. The fleet
+selection itself is never narrowed. If an unrelated live line exists, use an
+authorized human operator for the instance plan. The arm and delayed-trigger
+coverage checks remain instance-wide.
+
+When upgrading existing projects to scoped credentials, preview and apply the
+explicit parent/manager mapping in [hierarchy.md](hierarchy.md) before resuming
+managers. This makes their first resumed briefing reflect the intended roles.
+
 ## Arming a restart
 
 Only arm after preflight is green, every planned participant has explicitly cleared, and no known

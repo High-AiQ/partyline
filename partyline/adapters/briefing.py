@@ -62,7 +62,7 @@ BRIEFING = (
     "\n"
     "## The API and your credential\n"
     "Every partyline API call requires your machine credential: send "
-    "`-H \"Authorization: Bearer $PARTYLINE_TOKEN\"` (already set in your environment).\n"
+    "`-H \"Authorization: Bearer $PARTYLINE_TOKEN\"` (injected into the process environment).\n"
     "\n"
     "| DO | DO NOT |\n"
     "| --- | --- |\n"
@@ -183,3 +183,15 @@ def fresh_checkpoint_briefing(text: str, checkpoint: str | None) -> str:
                  "resuming work; that wake delivers messages retained after the checkpoint:\n"
                  + checkpoint)
     return text
+
+
+def connection_briefing(att: dict) -> str:
+    role = "\n\n" + att["role_briefing"] if att.get("role_briefing") else ""
+    if not (command := att.get("agent_command")):
+        return role
+    return ("\n\nPartyline provides an authenticated helper that works even when your "
+            "shell filters PARTYLINE_* variables. Use this exact command prefix: `"
+            + command + "`. Run `context` to verify your identity; "
+            "`request GET /api/conversations/<id>/tasks` reads your board; "
+            "use `--json-file <path>` (or `-` for stdin) for JSON writes. "
+            "The connection file is private: never read, print, upload, or copy its token." + role)

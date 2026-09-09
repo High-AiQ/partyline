@@ -2,9 +2,11 @@
 
 import asyncio
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from .attachment_view import attachment_response
+from .auth_guard import request_principal
+from .machine_scope import deny_unless
 from .message_contracts import MessagePageResponse
 
 
@@ -33,6 +35,7 @@ def message_router(runtime, media) -> APIRouter:
         response_model=MessagePageResponse,
     )
     async def messages(
+        request: Request,
         conv_id: str,
         before_id: int | None = Query(default=None, ge=1),
         after_id: int | None = Query(default=None, ge=0),
@@ -40,6 +43,7 @@ def message_router(runtime, media) -> APIRouter:
     ):
         if runtime.db.get_conversation(conv_id) is None:
             raise HTTPException(404)
+        deny_unless(runtime.db, request_principal(request), conv_id, "read")
         try:
             rows, has_more = runtime.db.message_page(
                 conv_id, before_id=before_id, after_id=after_id, limit=limit

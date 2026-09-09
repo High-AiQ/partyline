@@ -13,8 +13,9 @@ import uuid
 from typing import Literal, TypedDict
 
 from .db_schema import MIGRATIONS, SCHEMA
+from .query_result import materialize
 from .conversation_queries import ACTIVE_CONVERSATIONS, ARCHIVED_CONVERSATIONS, CONVERSATION_BY_ID
-from .message_queries import select_message_page
+from .message_queries import as_message, select_message_page
 
 
 RestartPlanMode = Literal["offer", "automatic"]
@@ -95,10 +96,11 @@ class Db:
             self.conn.close()
 
     def _exec(self, q, args=()):
+        """One statement, drained before the lock drops; see `query_result`."""
         with self.lock:
-            cur = self.conn.execute(q, args)
+            result = materialize(self.conn.execute(q, args))
             self.conn.commit()
-            return cur
+            return result
 
     def _open_runtime_lock(self) -> int:
         return os.open(self.runtime_lock_path, os.O_CREAT | os.O_RDWR, 0o600)
@@ -205,14 +207,14 @@ class Db:
             "INSERT INTO messages(conv_id,sender,sender_type,body,created_at) VALUES(?,?,?,?,?)",
             (conv_id, sender, sender_type, body, ts),
         )
-        return MessageRow(
+        return as_message(MessageRow(
             id=cur.lastrowid,
             conv_id=conv_id,
             sender=sender,
             sender_type=sender_type,
             body=body,
             created_at=ts,
-        )
+        ))
 
     def add_owned_message(
         self,
@@ -245,14 +247,14 @@ class Db:
             self.conn.commit()
             if message.rowcount != 1 or message.lastrowid is None:
                 return None
-            return MessageRow(
+            return as_message(MessageRow(
                 id=message.lastrowid,
                 conv_id=conv_id,
                 sender=sender,
                 sender_type=sender_type,
                 body=body,
                 created_at=created_at,
-            )
+            ))
 
     def list_messages(self, conv_id, limit=500):
         return self.message_page(conv_id, limit=limit)[0]
@@ -260,14 +262,20 @@ class Db:
     def message_page(self, conv_id, *, before_id=None, after_id=None, limit=20):
         return select_message_page(self._exec, conv_id, before_id, after_id, limit)
 
-    def messages_after(self, conv_id, after_id, exclude_sender=None):
+    def messages_after(self, conv_id, after_id, exclude_sender=None, exclude_attachment_id=None):
         q = "SELECT * FROM messages WHERE conv_id=? AND id>?"
         args = [conv_id, after_id]
-        if exclude_sender is not None:
+        if exclude_attachment_id is not None:
+            q += " AND IFNULL(source_attachment_id,'') != ?"
+            args.append(exclude_attachment_id)
+            if exclude_sender is not None:
+                q += " AND NOT (source_attachment_id IS NULL AND sender = ?)"
+                args.append(exclude_sender)
+        elif exclude_sender is not None:
             q += " AND sender != ?"
             args.append(exclude_sender)
         cur = self._exec(q + " ORDER BY id", args)
-        return [dict(r) for r in cur.fetchall()]
+        return [as_message(r) for r in cur.fetchall()]
 
     def messages_by_ids(self, conv_id: str, message_ids: list[int]) -> list[dict]:
         """Resolve an exact queued batch in transcript order, without re-routing."""
@@ -278,7 +286,7 @@ class Db:
             f"SELECT * FROM messages WHERE conv_id=? AND id IN ({placeholders}) ORDER BY id",
             [conv_id, *message_ids],
         )
-        return [dict(row) for row in cur.fetchall()]
+        return [as_message(row) for row in cur.fetchall()]
 
     def queued_delivery_ids(self, att_id: str) -> list[int]:
         cur = self._exec(
@@ -441,14 +449,14 @@ class Db:
                 raise
             if message.lastrowid is None:  # pragma: no cover - SQLite assigns this on INSERT
                 return None
-            return MessageRow(
+            return as_message(MessageRow(
                 id=message.lastrowid,
                 conv_id=attachment["conv_id"],
                 sender="system",
                 sender_type="system",
                 body=body,
                 created_at=created_at,
-            )
+            ))
 
     def set_last_seen(self, att_id, msg_id, runtime_owner: str | None) -> bool:
         cur = self._exec(

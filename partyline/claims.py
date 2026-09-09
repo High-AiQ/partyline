@@ -18,17 +18,6 @@ TTL_SECONDS = 4 * 3600
 MAX_PATHS = 32
 MAX_PATH_LEN = 240
 
-CLAIMS_DDL = """
-CREATE TABLE IF NOT EXISTS claims(
-  id TEXT PRIMARY KEY,
-  conv_id TEXT NOT NULL,
-  owner TEXT NOT NULL,
-  paths TEXT NOT NULL,
-  created_at REAL NOT NULL,
-  expires_at REAL NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_claims_conv ON claims(conv_id, expires_at);
-"""
 
 
 class Claim(BaseModel):
@@ -49,14 +38,8 @@ class ClaimConflict(BaseModel):
     conflict: Claim
 
 
-def ensure_schema(db) -> None:
-    with db.lock:
-        db.conn.executescript(CLAIMS_DDL)
-        db.conn.commit()
-
 
 def expire(db, now: float | None = None) -> None:
-    ensure_schema(db)
     db._exec("DELETE FROM claims WHERE expires_at<=?", (now if now is not None else time.time(),))
 
 
@@ -162,7 +145,6 @@ def release_claim(db, claim_id: str, owner: str | None = None) -> bool:
 
 
 def purge_claims(db, conv_id: str) -> None:
-    ensure_schema(db)
     db._exec("DELETE FROM claims WHERE conv_id=?", (conv_id,))
 
 

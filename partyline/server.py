@@ -7,7 +7,6 @@ import signal
 import shlex
 import subprocess
 import sys
-import uuid
 from collections.abc import Sequence
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -19,7 +18,6 @@ from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
 from . import __version__
-from .adapter_update import apply_update, requested_update_argv
 from .attachment_commands import validated_attachment_command
 from .attachment_resume import resume_adapter
 from .attachment_start import start_attachment
@@ -33,7 +31,11 @@ from .auth_guard import (
     websocket_principal,
 )
 from .auth_routes import auth_router
-from .auth_store import handle_taken
+from .machine_scope import (
+    allows_restart_plan,
+    deny_unless_attachment,
+    visible_conversation_ids,
+)
 from .bind import (BindConfig, apply_server_config, load_bind_config, load_dotenv,
                    parse_bind_args, uvicorn_config)
 from .compact_routes import register_compact_route
@@ -49,40 +51,31 @@ from .contracts import (
     AdapterImportResponse,
     AdapterMetadataResponse,
     AdapterRemoveResponse,
-    ArchiveResponse,
-    AttachIn,
     AttachmentEvent,
     AttachmentPatchRequest,
     AttachmentResponse,
-    ConvIn,
-    ConversationArchivedEvent,
-    ConversationDeletedEvent,
-    ConversationEvent,
-    ConversationResponse,
     KeyIn,
     LoadedResponse,
     OkResponse,
-    PurgeResponse,
     RestartPlanRequest,
     RestartPlanResponse,
-    RenameIn,
     RunningProcessResponse,
     ScreenResponse,
     ShutdownEvent,
     ShutdownRequest,
     ShutdownResponse,
-    TopicIn,
     VersionResponse,
 )
 from .db import Db
 from .frontend_build import current_frontend_build
 from .hook_routes import hook_url, hooks_router
 from .line_process_routes import detach_attachment, register_line_process_routes
-from .message_routes import conversation_detail_response, message_router
-from .message_contracts import ConversationDetailResponse
+from .message_routes import message_router
 from .presence import Presence
 from .media import MediaStore, media_root
-from .claim_routes import claims_router, purge_claims
+from .claim_routes import claims_router
+from .conversation_routes import register_conversation_routes
+from .hierarchy_routes import hierarchy_router
 from .media_routes import media_router
 from .preset_routes import presets_router
 from .restart_report import restart_report_router
@@ -93,7 +86,7 @@ from .reattach import (
     RestartPlanError,
     create_restart_plan,
 )
-from .runtime import NAME_RE, RESERVED_NAMES, ChatRuntime
+from .runtime import ChatRuntime
 from .terminal_stream import register_terminal_route
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -149,6 +142,7 @@ register_line_process_routes(app, runtime)
 app.include_router(auth_router(runtime.db, on_handle_change=user_sockets.close_all))
 app.include_router(media_router(runtime, media))
 app.include_router(message_router(runtime, media))
+app.include_router(hierarchy_router(runtime))
 app.include_router(claims_router(runtime))
 app.include_router(hooks_router(runtime, presence))
 app.include_router(presets_router(runtime, ADAPTERS))
@@ -219,14 +213,30 @@ def request_exit():
 
 
 @app.get("/api/running", response_model=list[RunningProcessResponse])
-async def running():
-    return runtime.running_processes()
+async def running(request: Request):
+    processes = runtime.running_processes()
+    allowed = visible_conversation_ids(runtime.db, request_principal(request))
+    if allowed is None:
+        return processes
+    names = {
+        row["name"] for row in runtime.db.list_conversations() if row["id"] in allowed
+    }
+    return [process for process in processes if process["conversation"] in names]
 
 
 @app.post("/api/restart-plan", response_model=RestartPlanResponse)
 async def plan_restart(request: Request, body: RestartPlanRequest):
-    """Persist the only line allowed to offer reattachment after a restart."""
+    """Persist a restart plan. Loopback, and machines only for their home line.
+
+    The cockpit planner uses ``PARTYLINE_TOKEN`` against the line that owns
+    the plan. A machine on another line is 403. ``allows()`` still governs
+    conversation, attachment, and report routes; this is not one of them.
+    """
     require_loopback(request)
+    if not allows_restart_plan(
+        request_principal(request), body.conversation_id, db=runtime.db, scope=body.scope
+    ):
+        raise HTTPException(403, "this credential cannot plan a restart for that line")
     return save_restart_plan(body)
 
 
@@ -238,6 +248,13 @@ async def shutdown(request: Request, body: ShutdownRequest | None = None):
     something to assume — check the caller.
     """
     require_loopback(request)
+    if request_principal(request).kind != "user":
+        raise HTTPException(403, "only a human operator may shut down the instance")
+    if body and body.reattach and not allows_restart_plan(
+        request_principal(request), body.reattach.conversation_id,
+        db=runtime.db, scope=body.reattach.scope
+    ):
+        raise HTTPException(403, "this credential cannot plan a restart for that line")
     planned = save_restart_plan(body.reattach) if body and body.reattach else None
     stopping = runtime.running_processes()
     # Tell every open tab before going, so they show a stopped state instead of
@@ -289,160 +306,6 @@ async def remove_adapter(adapter_name: str):
     return {"ok": True, "message": "adapter source remains installed; remove its checkout then reload"}
 
 
-@app.get("/api/conversations", response_model=list[ConversationResponse])
-async def conversations(archived: bool = False):
-    return runtime.db.list_conversations(archived=archived)
-
-
-@app.post("/api/conversations", response_model=ConversationResponse)
-async def create_conversation(body: ConvIn):
-    name = body.name.strip() or "untitled"
-    return runtime.db.create_conversation(str(uuid.uuid4()), name)
-
-
-@app.get("/api/conversations/{conv_id}", response_model=ConversationDetailResponse)
-async def conversation_detail(conv_id: str):
-    return await conversation_detail_response(runtime, presence, media, conv_id)
-
-
-@app.put("/api/conversations/{conv_id}/topic", response_model=ConversationResponse)
-async def set_topic(request: Request, conv_id: str, body: TopicIn):
-    conv = runtime.db.get_conversation(conv_id)
-    if not conv:
-        raise HTTPException(404)
-    topic = body.topic.strip()
-    if len(topic) > 3000:
-        raise HTTPException(400, "topic is capped at 3000 characters")
-    if topic == conv["topic"]:
-        return conv
-    conv = runtime.db.set_topic(conv_id, topic)
-    who = f" by @{request_principal(request).name}"
-    # A system message never wakes agents, but it rides along in the digest at
-    # their next wake — so every agent picks up the new topic lazily, for free.
-    notice = f"☏ topic set{who}: {topic}" if topic else f"☏ topic cleared{who}"
-    await runtime.post_message(conv_id, "system", "system", notice)
-    await runtime.broadcast(conv_id, ConversationEvent(conversation=conv))
-    return conv
-
-
-@app.put("/api/conversations/{conv_id}/name", response_model=ConversationResponse)
-async def rename_conversation(request: Request, conv_id: str, body: RenameIn):
-    conv = runtime.db.get_conversation(conv_id)
-    if not conv:
-        raise HTTPException(404)
-    name = body.name.strip()
-    if not name:
-        raise HTTPException(400, "a line needs a name")
-    if len(name) > 120:
-        raise HTTPException(400, "name is capped at 120 characters")
-    if name == conv["name"]:
-        return conv
-    was = conv["name"]
-    conv = runtime.db.rename_conversation(conv_id, name)
-    who = f" by @{request_principal(request).name}"
-    # Like a topic change: never wakes anyone, but rides along in the next
-    # digest, so agents learn the line's new name without costing a turn.
-    await runtime.post_message(
-        conv_id, "system", "system", f"☏ line renamed{who}: {was} → {name}")
-    await runtime.broadcast(conv_id, ConversationEvent(conversation=conv))
-    return conv
-
-
-@app.delete("/api/conversations/{conv_id}", response_model=ArchiveResponse)
-async def archive_conversation(conv_id: str):
-    """Archive a line: stop its processes, hide it, keep the history."""
-    conv = runtime.db.get_conversation(conv_id)
-    if not conv:
-        raise HTTPException(404)
-    if conv["archived_at"]:
-        raise HTTPException(409, "line is already archived")
-    # Tell watchers before tearing down: a tab sitting on this line should leave
-    # under its own power rather than discover the archive by a failing fetch.
-    event = ConversationArchivedEvent(conversation_id=conv_id)
-    await runtime.broadcast(conv_id, event)
-    # Alias kept for one version so clients written against the first cut of
-    # this route keep working. Remove in 0.17.
-    await runtime.broadcast(conv_id, ConversationDeletedEvent(conversation_id=conv_id))
-    stopped = await runtime.stop_attachments(conv_id)
-    conv = runtime.db.archive_conversation(conv_id)
-    runtime.sockets.pop(conv_id, None)
-    return {"ok": True, "archived": True, "stopped": stopped, "conversation": conv}
-
-
-@app.post("/api/conversations/{conv_id}/restore", response_model=ConversationResponse)
-async def restore_conversation(conv_id: str):
-    """Bring an archived line back. Its processes stay stopped — a restored
-    attachment is resumed one at a time, through the usual resume route."""
-    conv = runtime.db.get_conversation(conv_id)
-    if not conv:
-        raise HTTPException(404)
-    if not conv["archived_at"]:
-        raise HTTPException(409, "line is not archived")
-    conv = runtime.db.restore_conversation(conv_id)
-    await runtime.post_message(
-        conv_id, "system", "system", "☏ line restored from the archive")
-    return conv
-
-
-@app.delete("/api/conversations/{conv_id}/purge", response_model=PurgeResponse)
-async def purge_conversation(conv_id: str):
-    """Destroy an archived line for good. Archiving first is mandatory: it is
-    the step that stops the processes, and it makes this irreversible act
-    something you have to ask for twice."""
-    conv = runtime.db.get_conversation(conv_id)
-    if not conv:
-        raise HTTPException(404)
-    if not conv["archived_at"]:
-        raise HTTPException(409, "archive the line before purging it")
-    await runtime.stop_attachments(conv_id)  # belt and braces: nothing should be live
-    media.delete_conversation(conv_id)  # a purge takes the pictures with it
-    purge_claims(runtime.db, conv_id)
-    tasks.purge(conv_id)
-    runtime.db.delete_conversation(conv_id)
-    runtime.sockets.pop(conv_id, None)
-    return {"ok": True, "purged": True}
-
-
-@app.post("/api/conversations/{conv_id}/attachments", response_model=AttachmentResponse)
-async def attach(conv_id: str, body: AttachIn):
-    conv = runtime.db.get_conversation(conv_id)
-    if not conv:
-        raise HTTPException(404)
-    if conv["archived_at"]:
-        raise HTTPException(409, "restore the line before attaching to it")
-    if not NAME_RE.match(body.name):
-        raise HTTPException(400, "name must be alphanumeric ([A-Za-z0-9_.-], max 32)")
-    if body.name.lower() in RESERVED_NAMES:
-        raise HTTPException(400, f"'{body.name}' is a reserved handle")
-    if handle_taken(runtime.db, body.name):
-        raise HTTPException(409, f"'{body.name}' is registered to a human account")
-    for existing in runtime.db.list_attachments(conv_id):
-        if existing["name"].lower() == body.name.lower() and existing["status"] in ("starting", "running"):
-            raise HTTPException(409, f"'{body.name}' is already attached")
-    try:
-        command = validated_attachment_command(
-            body.adapter, body.command, ADAPTERS, ADAPTER_METADATA
-        )
-        update_argv = requested_update_argv(
-            ADAPTER_METADATA, body.adapter, body.update
-        )
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    cwd = os.path.abspath(os.path.expanduser(body.cwd.strip() or os.getcwd()))
-    if not os.path.isdir(cwd):
-        raise HTTPException(400, f"cwd does not exist: {cwd}")
-
-    att_id = str(uuid.uuid4())
-    runtime_owner = str(uuid.uuid4())
-    att = runtime.db.add_attachment(
-        att_id, conv_id, body.name, body.adapter, command, cwd, runtime_owner,
-        start_after_history=True,
-    )
-    if update_argv:
-        await apply_update(runtime.post_message, conv_id, body.name, update_argv)
-    return await _start_attachment(att)
-
-
 async def _start_attachment(att, *, checkpoint="", fresh=False):
     return await start_attachment(
         att, runtime=runtime, presence=presence, tasks=tasks, make_adapter=make_adapter,
@@ -451,6 +314,26 @@ async def _start_attachment(att, *, checkpoint="", fresh=False):
     )
 
 
+register_conversation_routes(
+    app,
+    runtime,
+    media,
+    presence,
+    tasks,
+    ADAPTERS,
+    ADAPTER_METADATA,
+    _start_attachment,
+)
+from . import conversation_routes as _conversation_routes  # noqa: E402
+from .contracts import AttachIn, RenameIn, TopicIn  # noqa: F401,E402
+
+archive_conversation = _conversation_routes.archive_conversation
+restore_conversation = _conversation_routes.restore_conversation
+purge_conversation = _conversation_routes.purge_conversation
+attach = _conversation_routes.attach
+set_topic = _conversation_routes.set_topic
+rename_conversation = _conversation_routes.rename_conversation
+conversation_detail = _conversation_routes.conversation_detail
 register_attachment_lifecycle_routes(
     app, runtime, start=lambda att, **kwargs: _start_attachment(att, **kwargs),
     require_loopback=require_loopback,
@@ -461,7 +344,8 @@ register_attachment_lifecycle_routes(
 
 
 @app.post("/api/attachments/{att_id}/resume", response_model=AttachmentResponse)
-async def resume_attachment(att_id: str):
+async def resume_attachment(request: Request, att_id: str):
+    deny_unless_attachment(runtime.db, request_principal(request), att_id, "attach")
     await _resume_adapter(att_id)
     return await attachment_response(runtime.db.get_attachment(att_id))
 
@@ -484,6 +368,7 @@ async def edit_attachment(
     att = runtime.db.get_attachment(att_id)
     if not att:
         raise HTTPException(404)
+    deny_unless_attachment(runtime.db, request_principal(request), att_id, "attach")
     require_loopback(request)
     if att_id in runtime.live or att["status"] not in ("exited", "detached"):
         raise HTTPException(409, f"'{att['name']}' must be stopped before editing its command")
@@ -502,7 +387,8 @@ async def edit_attachment(
 
 
 @app.delete("/api/attachments/{att_id}", response_model=OkResponse)
-async def detach(att_id: str):
+async def detach(request: Request, att_id: str):
+    deny_unless_attachment(runtime.db, request_principal(request), att_id, "close")
     return await detach_attachment(runtime, att_id)
 
 
@@ -511,7 +397,8 @@ def _hook_url(att_id: str, bind: BindConfig | None = None, token: str = "") -> s
     return hook_url(att_id, bind or app.state.bind, token)
 
 @app.get("/api/attachments/{att_id}/screen", response_model=ScreenResponse)
-async def attachment_screen(att_id: str):
+async def attachment_screen(request: Request, att_id: str):
+    deny_unless_attachment(runtime.db, request_principal(request), att_id, "read")
     adapter = runtime.live.get(att_id)
     if adapter is None:
         raise HTTPException(404, "attachment is not live")
@@ -519,7 +406,8 @@ async def attachment_screen(att_id: str):
 
 
 @app.post("/api/attachments/{att_id}/keys", response_model=OkResponse)
-async def attachment_key(att_id: str, body: KeyIn):
+async def attachment_key(request: Request, att_id: str, body: KeyIn):
+    deny_unless_attachment(runtime.db, request_principal(request), att_id, "attach")
     adapter = runtime.live.get(att_id)
     if adapter is None:
         raise HTTPException(404, "attachment is not live")
