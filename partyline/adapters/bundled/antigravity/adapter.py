@@ -7,6 +7,8 @@ locates the transcript exactly:
 ``~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl``.
 No directory scanning, no claiming: two attachments started in one working
 directory cannot resolve to the same conversation because neither guesses.
+Resume still passes ``--conversation``, but the tailed transcript is the id
+this activation's log actually created — not the stored ``cli_session``.
 
 The transcript is one JSON object per step. Chat speech is a DONE
 ``PLANNER_RESPONSE`` from ``MODEL`` with content; tool loops appear as
@@ -29,12 +31,16 @@ from pathlib import Path
 from partyline.adapters import Adapter
 from partyline.adapters.bundled.antigravity import interrupt as interrupts
 from partyline.interrupts import InterruptStatus
+from partyline.adapters.bundled.antigravity.conversation_log import (
+    conversation_from_log,
+    log_mark,
+    suffix_offset,
+)
 from partyline.adapters.bundled.antigravity.wakes import WakeSettlement
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
 
 LOG_ROOT = os.path.expanduser("~/.partyline/sessions/antigravity")
 BRAIN_ROOT = Path.home() / ".gemini" / "antigravity-cli" / "brain"
-CREATED = re.compile(r"Created conversation ([0-9a-fA-F-]{36})")
 TASK_STARTED = re.compile(r"background task with task id:\s*(\S+)", re.IGNORECASE)
 TASK_SETTLED = re.compile(
     r'Task id "([^"]+)" (?:finished|was canceled)', re.IGNORECASE
@@ -73,6 +79,16 @@ class PartylineAdapter(WakeSettlement, Adapter):
         # Notices already spent confirming an interruption. A replayed record
         # must not answer for a later Esc.
         self.interrupt_records_used: set[str] = set()
+        self._log_mark = None
+
+    async def start(self):
+        os.makedirs(LOG_ROOT, exist_ok=True)
+        self._remember_log_mark()
+        await super().start()
+
+    def _remember_log_mark(self) -> None:
+        if self._log_mark is None:
+            self._log_mark = log_mark(Path(self.log_path())) if self.resume else (0, 0, b"")
 
     async def on_output(self, data: bytes):
         self._output_event.set()
@@ -175,26 +191,23 @@ class PartylineAdapter(WakeSettlement, Adapter):
         self._silent_until_wake = False
         return True
 
-    def _conversation_from_log(self) -> str | None:
-        try:
-            text = Path(self.log_path()).read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            return None
-        match = CREATED.search(text)
-        return match.group(1) if match else None
+    def _conversation_from_log(self, after: int = 0) -> str | None:
+        return conversation_from_log(Path(self.log_path()), after=after)
 
     async def _run(self):
         os.makedirs(LOG_ROOT, exist_ok=True)
+        self._remember_log_mark()
         await asyncio.sleep(4.0)
         if not self.alive():
             return
         if not self.resume:
             await self.send_keys(self.briefing())
 
-        conversation = str(self.att.get("cli_session") or "") if self.resume else ""
+        conversation = ""
         waited = 0.0
         while not conversation and self.alive():
-            conversation = self._conversation_from_log() or ""
+            after = suffix_offset(Path(self.log_path()), self._log_mark)
+            conversation = self._conversation_from_log(after=after) or ""
             if conversation:
                 break
             await asyncio.sleep(1.0)
@@ -267,9 +280,6 @@ class PartylineAdapter(WakeSettlement, Adapter):
                 self._turn_open = True
                 await receipt(self.att, BEGAN)
             elif source == "MODEL" and record_type == "PLANNER_RESPONSE":
-                # 2026-08-22: 2,386 DONE / 48 RUNNING across 15 sessions; no abort status ever
-                # observed — names are defensive guesses, real aborts leave no record;
-                # exit/detach flush is the guarantee.
                 if status in ("ERROR", "CANCELLED", "ABORTED", "FAILED"):
                     self._background_tasks.clear()
                     self._turn_open = False

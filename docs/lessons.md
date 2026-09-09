@@ -764,6 +764,7 @@ ever joined onto a directory, so traversal is unreachable rather than filtered.
 | Derive an authorized path from state you control, then require the untrusted input to match it | Dereference a path a vendor's transcript hands you, however well it is sanitized |
 | Let an unresolvable receipt leave the wake outstanding | Relax matching to absorb a representation you have not explained |
 
+
 ## A guard named for a risk is not the same as the risk
 
 `require_loopback` exists because starting and stopping a pty belongs to the
@@ -782,3 +783,27 @@ against a non-loopback client, which is the only client the bug was ever about.
 | --- | --- |
 | Ask what an endpoint *does* before deciding where it may be called from | Apply a guard to a route because the route is filed near ones that need it |
 | Exercise a security gate with the real implementation and the caller it excludes | Prove a gate is wired up with a stub and call that coverage |
+
+
+## A stored cli_session is not the conversation this resume is writing
+
+Antigravity's resume still passes `--conversation` with the stored id, but
+`agy` can create a new conversation anyway. The adapter then tailed
+`brain/<old-id>/transcript.jsonl` while the recovery nonce and clearance were
+written to a new transcript. The terminal showed the work; structured relay
+did not.
+
+The pinned `--log-file` is the only attachment-specific identity. Resume
+records size and inode **before** `super().start()` spawns the CLI, then waits
+for a `Created conversation` line after that mark. A mark taken in `_run()`
+is too late: a fast CLI can write the new id before `_run` starts, and
+discovery skips it forever. A truncated or replaced log (shorter, a new inode, or the same inode
+rewritten past the old size so the remembered tail no longer matches)
+resets the offset to zero so the old byte position cannot hide the new
+activation. Discovery never falls back to `cli_session`. `_fresh` still
+drops pre-spawn records on the discovered transcript.
+
+| DO | DO NOT |
+| --- | --- |
+| Discover the conversation from this activation's own log suffix | Tail `cli_session` because `--conversation` was passed |
+| Keep replay protection on the discovered transcript | Scan the brain directory for a newer mtime |

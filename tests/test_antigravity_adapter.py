@@ -18,6 +18,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from partyline.adapters.bundled.antigravity import adapter as antigravity_module
+from partyline.adapters.bundled.antigravity import conversation_log
 from partyline.adapters.bundled.antigravity import logparse
 from partyline.adapters.bundled.antigravity import wakes as wakes_module
 from partyline.adapters.bundled.antigravity.adapter import PartylineAdapter
@@ -107,6 +108,11 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
             f"I0821 server.go:1074] Created conversation {conversation}\n", encoding="utf-8"
         )
 
+    def append_created(self, adapter, conversation):
+        Path(self.log_root).mkdir(parents=True, exist_ok=True)
+        with Path(adapter.log_path()).open("a", encoding="utf-8") as file:
+            file.write(f"I0821 server.go:1074] Created conversation {conversation}\n")
+
     def write_transcript(self, records, conversation=CONV_ID):
         path = self.brain_root / conversation / ".system_generated" / "logs" / "transcript.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -162,6 +168,17 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(adapter._conversation_from_log())
         self.write_log(adapter)
         self.assertEqual(adapter._conversation_from_log(), CONV_ID)
+        earlier = Path(adapter.log_path()).stat().st_size
+        self.assertIsNone(adapter._conversation_from_log(after=earlier))
+        self.append_created(adapter, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee")
+        self.assertEqual(
+            adapter._conversation_from_log(after=earlier),
+            "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+        )
+        self.assertEqual(
+            adapter._conversation_from_log(),
+            "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+        )
 
     async def test_run_tails_planner_text_and_emits_receipts_once(self):
         adapter = self.make(hook_url="http://hook/x")
@@ -252,16 +269,153 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
             await self.post(sender, sender_type, body)
             adapter.proc.stop()
 
+        async def sleep(_seconds):
+            self.write_log(adapter)
+
         adapter.post = post
         adapter.send_keys = AsyncMock()
         with (
-            patch("partyline.adapters.bundled.antigravity.adapter.asyncio.sleep", new=AsyncMock()),
+            patch("partyline.adapters.bundled.antigravity.adapter.asyncio.sleep", new=sleep),
             patch("partyline.adapters.bundled.antigravity.adapter.receipt", new=AsyncMock()),
         ):
             await adapter._run()
         self.assertEqual(self.messages, [("agent", "agent", "fresh answer")])
         adapter.send_keys.assert_not_awaited()
         self.assertTrue(await adapter.wait_startup_delivery_received())
+
+    async def test_resume_tails_the_conversation_this_log_created_not_cli_session(self):
+        """Report 22: agy opened a new conversation; the adapter tailed the old one.
+
+        The stored cli_session and a prior Created line stay in this
+        attachment's log. Speech after resume is only in the new transcript.
+        Discovery must use the Created line written after the activation mark.
+        """
+        old_id = CONV_ID
+        new_id = "0a1b2c3d-4e5f-4678-8abc-def012345678"
+        adapter = self.make(resume=True, cli_session=old_id)
+        adapter.proc = Process()
+        adapter.spawned_at = time.time()
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(adapter.spawned_at + 1))
+        self.write_log(adapter, conversation=old_id)
+        self.write_transcript(
+            [step(0, "MODEL", "PLANNER_RESPONSE", "old transcript speech", created=now)],
+            conversation=old_id,
+        )
+        self.write_transcript(
+            [
+                step(0, "USER_EXPLICIT", "USER_INPUT", "OFFLOAD-RESTART-CLEAR", created=now),
+                step(1, "MODEL", "PLANNER_RESPONSE", "gemini-flash clearance", created=now),
+            ],
+            conversation=new_id,
+        )
+        sessions = []
+        adapter.on_cli_session = sessions.append
+
+        async def post(sender, sender_type, body):
+            await self.post(sender, sender_type, body)
+            adapter.proc.stop()
+
+        async def sleep(_seconds):
+            self.append_created(adapter, new_id)
+
+        adapter.post = post
+        adapter.send_keys = AsyncMock()
+        with (
+            patch("partyline.adapters.bundled.antigravity.adapter.asyncio.sleep", new=sleep),
+            patch("partyline.adapters.bundled.antigravity.adapter.receipt", new=AsyncMock()),
+        ):
+            await adapter._run()
+        self.assertEqual(self.messages, [("agent", "agent", "gemini-flash clearance")])
+        self.assertEqual(sessions, [new_id])
+        self.assertNotIn("old transcript speech", [body for _, _, body in self.messages])
+
+    async def test_resume_keeps_a_created_line_written_during_spawn(self):
+        """The mark must be taken before super().start() spawns the CLI."""
+        old_id = CONV_ID
+        new_id = "11111111-2222-4333-8444-555555555555"
+        adapter = self.make(resume=True, cli_session=old_id)
+        self.write_log(adapter, conversation=old_id)
+        adapter.spawned_at = time.time()
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(adapter.spawned_at + 1))
+        self.write_transcript(
+            [step(0, "MODEL", "PLANNER_RESPONSE", "old transcript speech", created=now)],
+            conversation=old_id,
+        )
+        self.write_transcript(
+            [step(0, "MODEL", "PLANNER_RESPONSE", "spawned conversation speech", created=now)],
+            conversation=new_id,
+        )
+        sessions = []
+        adapter.on_cli_session = sessions.append
+        adapter.send_keys = AsyncMock()
+
+        async def start():
+            os.makedirs(antigravity_module.LOG_ROOT, exist_ok=True)
+            adapter._remember_log_mark()
+            self.append_created(adapter, new_id)
+            adapter.proc = Process()
+            await adapter._run()
+
+        async def post(sender, sender_type, body):
+            await self.post(sender, sender_type, body)
+            adapter.proc.stop()
+
+        adapter.start = start
+        adapter.post = post
+        with (
+            patch("partyline.adapters.bundled.antigravity.adapter.asyncio.sleep", new=AsyncMock()),
+            patch("partyline.adapters.bundled.antigravity.adapter.receipt", new=AsyncMock()),
+        ):
+            await adapter.start()
+        self.assertEqual(self.messages, [("agent", "agent", "spawned conversation speech")])
+        self.assertEqual(sessions, [new_id])
+
+    def test_a_truncated_log_drops_the_old_byte_offset(self):
+        path = Path(self.log_root) / "agent-id.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "padding so the old offset sits past the new file\n"
+            f"Created conversation {CONV_ID}\n",
+            encoding="utf-8",
+        )
+        mark = conversation_log.log_mark(path)
+        new_id = "99999999-aaaa-4bbb-8ccc-ddddeeeeffff"
+        path.write_text(f"Created conversation {new_id}\n", encoding="utf-8")
+        self.assertLess(path.stat().st_size, mark[0])
+        self.assertIsNone(conversation_log.conversation_from_log(path, after=mark[0]))
+        after = conversation_log.suffix_offset(path, mark)
+        self.assertEqual(after, 0)
+        self.assertEqual(conversation_log.conversation_from_log(path, after=after), new_id)
+
+    def test_same_inode_truncate_and_regrow_resets_the_offset(self):
+        """CLI truncates in place and writes past the old size before we poll."""
+        path = Path(self.log_root) / "agent-id.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "x" * 200 + f"\nCreated conversation {CONV_ID}\n",
+            encoding="utf-8",
+        )
+        mark = conversation_log.log_mark(path)
+        inode = path.stat().st_ino
+        new_id = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        grown = (
+            f"Created conversation {new_id}\n"
+            + "y" * (mark[0] + 50)
+        )
+        path.write_text(grown, encoding="utf-8")
+        self.assertEqual(path.stat().st_ino, inode)
+        self.assertGreaterEqual(path.stat().st_size, mark[0])
+        self.assertIsNone(
+            conversation_log.conversation_from_log(path, after=mark[0])
+        )
+        after = conversation_log.suffix_offset(path, mark)
+        self.assertEqual(after, 0)
+        self.assertEqual(
+            conversation_log.conversation_from_log(path, after=after), new_id
+        )
+        self.assertNotEqual(
+            conversation_log.conversation_from_log(path, after=after), CONV_ID
+        )
 
     async def test_run_retries_trust_prompt_then_reports_missing_conversation(self):
         adapter = self.make()
@@ -444,6 +598,8 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         async def sleep(_seconds):
             nonlocal waits
             waits += 1
+            if waits == 1:
+                self.write_log(adapter)
             if waits == 3:
                 self.write_transcript([step(0, "MODEL", "PLANNER_RESPONSE", "late transcript")])
             elif waits > 6:
@@ -518,10 +674,13 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
 
         adapter._tail_jsonl = tail
 
+        async def sleep(_seconds):
+            self.write_log(adapter)
+
         with (
             patch("partyline.adapters.bundled.antigravity.adapter.receipt", new=fake_receipt),
             patch.object(adapter, "_fresh", return_value=True),
-            patch("partyline.adapters.bundled.antigravity.adapter.asyncio.sleep", new=AsyncMock()),
+            patch("partyline.adapters.bundled.antigravity.adapter.asyncio.sleep", new=sleep),
         ):
             await adapter._run()
 
