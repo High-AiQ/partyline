@@ -734,3 +734,32 @@ once `_exec` materialized its rows under the lock.
 | Drain a cursor before releasing the lock that made it safe, and hand back values | Return a live cursor, or any handle into shared state, from behind a lock |
 | Identify "no result set" with `cursor.description is None` | Catch fetch errors to mean "no rows" — that turns a corrupt read into an empty one |
 
+
+## A transcript record is a summary, not the message
+
+Grok's structured transcript is evidence *about* an input, not a copy of it.
+Past roughly 150 KB it stores a head/tail preview with the middle elided and a
+pointer to `prompts/prompt_<ordinal>.txt`, appended after the closing
+`</user_query>` tag. Wake receipts compared that preview against the pasted
+digest, so a wake that arrived perfectly could never be credited — and the
+trailing pointer also defeated envelope unwrapping, which requires the tag at
+both ends.
+
+Three explanations came before the right one — plan timing, seed ordering, and
+an unreachable adapter — because every observable said the delivery had worked:
+the paste succeeded, a new record arrived after the boundary, and the prompt
+file held the digest byte for byte. The diagnostic that ended it logged the
+*fingerprint of the string the matcher actually compared*, which matched
+neither the digest nor the digest in its envelope. That third value was the
+whole answer.
+
+Reading the pointed-at file is the fix, but a receipt decides delivery, so the
+path is computed from the transcript being tailed plus the record's own
+ordinal, and the record must name exactly that file. Nothing from the record is
+ever joined onto a directory, so traversal is unreachable rather than filtered.
+
+| DO | DO NOT |
+| --- | --- |
+| Log the fingerprint of the exact string a comparison used, not of what you believe it used | Assume the parsed value equals the artifact on disk because both describe one event |
+| Derive an authorized path from state you control, then require the untrusted input to match it | Dereference a path a vendor's transcript hands you, however well it is sanitized |
+| Let an unresolvable receipt leave the wake outstanding | Relax matching to absorb a representation you have not explained |
