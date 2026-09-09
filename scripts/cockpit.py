@@ -532,18 +532,23 @@ def arm_restart(
         str(server),
         str(logfile),
         str(cockpit),
-        "--failure-url",
-        base_url,
+        # `--option=value`, never `--option value`. A plan's report token is
+        # `secrets.token_urlsafe`, whose alphabet includes `-`, so roughly one
+        # token in 64 begins with a dash and argparse reads it as an option.
+        # The 0.63.0 cockpit restart refused for exactly this reason. The joined
+        # form also fixes tokens already persisted in a plan, which regenerating
+        # them would not.
+        f"--failure-url={base_url}",
     ]
     if report_token := plan.get("report_token"):
-        service_argv.extend(["--report-token", report_token])
+        service_argv.append(f"--report-token={report_token}")
     else:
         print("  ! plan predates report tokens: a refused restart cannot post "
               "to the line — watch the trigger unit's journal instead")
     if config_proof:
-        service_argv.extend(["--server-config", str(config_proof.path)])
+        service_argv.append(f"--server-config={config_proof.path}")
     if source_server:
-        service_argv.extend(["--source-server", str(source_server)])
+        service_argv.append(f"--source-server={source_server}")
     command = [
         "systemd-run",
         "--user",
