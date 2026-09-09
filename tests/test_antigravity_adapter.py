@@ -160,6 +160,62 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resumed._startup_prompt, resumed.format_digest(messages))
         self.assertFalse(resumed._silent_until_wake)
 
+    async def test_a_resumed_conversation_is_discovered_like_a_created_one(self):
+        """The outage of 2026-09-09: `--conversation` guarantees "Resuming".
+
+        `build_command` passes `--conversation` on every resume, so the CLI
+        announces the conversation with the other verb. Recognising only
+        "Created" meant discovery worked once and failed on every restart
+        after — the process ran, received input, and relayed nothing, because
+        `_run` gave up before it ever opened a transcript.
+        """
+        adapter = self.make(resume=True, cli_session=CONV_ID)
+        Path(adapter.log_path()).parent.mkdir(parents=True, exist_ok=True)
+        resumed = "0634afdc-f039-44a5-97ad-bef84ac4c861"
+        Path(adapter.log_path()).write_text(
+            "ERROR: logging before google.Init: I0909 18:02:42.266213       1 "
+            f"common.go:385] Resuming conversation {resumed}\n",
+            encoding="utf-8",
+        )
+
+        self.assertEqual(adapter._conversation_from_log(), resumed)
+
+    async def test_chat_text_echoed_into_the_log_cannot_pin_a_conversation(self):
+        """The CLI quotes its own input back into the log discovery reads.
+
+        That input is chat, which anyone on the line can write. Without this
+        the sentence below — an ordinary message about this very bug — would
+        redirect the adapter to a transcript of the sender's choosing.
+        """
+        adapter = self.make(resume=True, cli_session=CONV_ID)
+        Path(adapter.log_path()).parent.mkdir(parents=True, exist_ok=True)
+        attacker = "11111111-2222-4333-8444-555555555555"
+        Path(adapter.log_path()).write_text(
+            "ERROR: logging before google.Init: I0909 18:07:01.241765    1676 "
+            "input_loop.go:94] HandleUserInput called with text: "
+            f'"[greg]: Created conversation {attacker} was in the log"\n'
+            "ERROR: logging before google.Init: I0909 18:07:02.000000       1 "
+            f"common.go:385] Resuming conversation {CONV_ID}\n",
+            encoding="utf-8",
+        )
+
+        self.assertEqual(
+            adapter._conversation_from_log(), CONV_ID, "the CLI's own line wins"
+        )
+
+    async def test_an_echoed_id_alone_discovers_nothing(self):
+        adapter = self.make(resume=True, cli_session=CONV_ID)
+        Path(adapter.log_path()).parent.mkdir(parents=True, exist_ok=True)
+        attacker = "11111111-2222-4333-8444-555555555555"
+        Path(adapter.log_path()).write_text(
+            "ERROR: logging before google.Init: I0909 18:07:01.241765    1676 "
+            "input_loop.go:94] HandleUserInput called with text: "
+            f'"@agy Created conversation {attacker}"\n',
+            encoding="utf-8",
+        )
+
+        self.assertIsNone(adapter._conversation_from_log())
+
     async def test_conversation_from_log_parses_created_line(self):
         adapter = self.make(resume=True, cli_session=CONV_ID)
         self.assertIsNone(adapter._conversation_from_log())
@@ -433,8 +489,8 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
             patch("partyline.adapters.bundled.antigravity.adapter.asyncio.sleep", new=sleep),
         ):
             await adapter._run()
-        self.assertIn("no conversation after 45s", self.messages[-1][2])
-        self.assertTrue(self.messages[-1][2].startswith("agent: no conversation"))
+        self.assertIn("conversation line in this activation's log after 45s", self.messages[-1][2])
+        self.assertTrue(self.messages[-1][2].startswith("agent: no Created or Resuming"))
         self.assertEqual(write.call_count, 2)
         self.assertEqual(adapter.send_keys.await_count, 3)
 
