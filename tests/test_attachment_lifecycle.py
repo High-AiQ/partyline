@@ -16,7 +16,7 @@ from partyline.attachment_lifecycle_routes import register_attachment_lifecycle_
 from partyline.attachment_start import start_attachment
 from partyline.attachment_broadcast import broadcast_attachment_state
 from partyline.attachment_contracts import AttachmentResponse
-from partyline import auth_store, auth_tokens
+from partyline import auth_store, auth_tokens, server
 from partyline.auth_guard import install_auth_guard
 from partyline.auth_store import attachment_by_api_token, ensure_api_token
 from partyline.db import Db
@@ -236,11 +236,21 @@ class LifecycleTest(unittest.TestCase):
         self.assertEqual(self.client.delete("/api/attachments/old/record").status_code, 200)
         self.assertIsNone(self.db.get_restart_plan())
 
-    def test_local_control_gate_runs_before_any_mutation(self):
+    def test_local_control_gates_spawning_but_not_forgetting_a_stopped_card(self):
+        """Starting a process is host-local; deleting a dead card is not.
+
+        Greg hit the old conflation from the LAN browser: removing a detached
+        `glm` answered "process control may only be requested from this
+        machine" about a row whose process had already exited, leaving it
+        unremovable from the only interface that shows it.
+        """
         self.loopback.side_effect = HTTPException(403, "local control only")
+
         self.assertEqual(self.fresh({}).status_code, 403)
-        self.assertEqual(self.client.delete("/api/attachments/old/record").status_code, 403)
         self.assertEqual(len(self.db.list_attachments("line")), 1)
+
+        self.assertEqual(self.client.delete("/api/attachments/old/record").status_code, 200)
+        self.assertEqual(self.db.list_attachments("line"), [])
 
     def test_concurrent_old_card_removal_does_not_fail_a_successful_spawn(self):
         self.concurrent_removal = True
@@ -326,3 +336,91 @@ class LifecycleTest(unittest.TestCase):
         self.assertTrue(self.adapters[-1].stopped)
         self.assertEqual(self.runtime.live, {})
         self.assertEqual([att["id"] for att in self.db.list_attachments("line")], ["old"])
+
+
+class RemoteRecordRemovalTest(unittest.TestCase):
+    """The real loopback guard against a caller that is not on this machine.
+
+    `LifecycleTest` injects a stub for `require_loopback`, so it can say which
+    routes consult the gate but never what the gate decides for a LAN browser.
+    That gap is why the conflation shipped: every removal test passed while the
+    only client that mattered — an operator on another host — got a 403.
+    """
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.db = Db(f"{self.directory.name}/test.db")
+        self.runtime = ChatRuntime(self.db)
+        self.db.create_conversation("line", "Line")
+        self.db.create_conversation("other", "Other")
+        self.runtime.broadcast = AsyncMock()
+        app = FastAPI()
+        install_auth_guard(app, self.db)
+        register_attachment_lifecycle_routes(
+            app, self.runtime, start=AsyncMock(),
+            require_loopback=server.require_loopback, validate=Mock(),
+        )
+        # TestClient reports a client host of "testclient", which is exactly
+        # what the guard has to treat as "not this machine".
+        self.client = TestClient(app)
+        self.db.add_attachment(
+            "glm", "line", "glm", "raw", ["sh"], self.directory.name, "owner"
+        )
+        self.db.set_attachment_status("glm", "detached", "owner")
+        user = auth_store.create_user(
+            self.db, "greg@example.com", "greg",
+            auth_tokens.hash_password("hunter2222"),
+        )
+        self.human = auth_tokens.create_access_token(
+            auth_tokens.signing_secret(self.db), user["id"]
+        )
+        self.client.headers["Authorization"] = f"Bearer {self.human}"
+
+    def tearDown(self):
+        self.client.close()
+        self.db.close()
+        self.directory.cleanup()
+
+    def test_an_operator_off_this_host_can_forget_a_detached_record(self):
+        response = self.client.delete("/api/attachments/glm/record")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.db.list_attachments("line"), [])
+
+    def test_the_same_remote_caller_still_cannot_start_a_process(self):
+        response = self.client.post("/api/attachments/glm/fresh")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("from this machine", response.text)
+        self.assertEqual(len(self.db.list_attachments("line")), 1)
+
+    def test_a_live_or_running_record_is_refused_remotely_too(self):
+        self.runtime.live["glm"] = object()
+        self.assertEqual(self.client.delete("/api/attachments/glm/record").status_code, 409)
+
+        # Not tracked here, but the row says it is running: the status re-read
+        # inside `remove_stopped_record` is the refusal that survives a process
+        # started by some other runtime between the check and the delete.
+        del self.runtime.live["glm"]
+        self.db.set_attachment_status("glm", "running", "owner")
+        self.assertEqual(self.client.delete("/api/attachments/glm/record").status_code, 409)
+        self.assertEqual(len(self.db.list_attachments("line")), 1)
+
+    def test_a_machine_on_another_line_is_still_refused(self):
+        self.db.add_attachment(
+            "nosy", "other", "nosy", "raw", ["sh"], self.directory.name, "owner"
+        )
+        token = ensure_api_token(self.db, "nosy")
+        self.client.headers["Authorization"] = f"Bearer {token}"
+
+        response = self.client.delete("/api/attachments/glm/record")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("cannot act on that line", response.text)
+        self.assertEqual(len(self.db.list_attachments("line")), 1)
+
+    def test_an_unauthenticated_remote_caller_is_still_refused(self):
+        self.client.headers.pop("Authorization")
+
+        self.assertEqual(self.client.delete("/api/attachments/glm/record").status_code, 401)
+        self.assertEqual(len(self.db.list_attachments("line")), 1)
