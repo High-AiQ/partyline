@@ -14,6 +14,7 @@
   import { room } from "../../state/room.svelte.js";
   import { draft } from "../../state/draft.svelte.js";
   import { layout } from "../../state/layout.svelte.js";
+  import { session } from "../../state/session.svelte.js";
   import { insertNewline } from "../../lib/composer";
   import { api } from "../../lib/api";
   import type { FileIntake, PendingFiles } from "../../lib/files";
@@ -44,7 +45,7 @@
   });
 
   const candidates = $derived<MentionCandidate[]>(
-    token ? mentionCandidates(token.prefix, room.attachments, room.history.humans) : [],
+    token ? mentionCandidates(token.prefix, room.attachments, room.history.humans, session.adapters) : [],
   );
   const popoverOpen = $derived(Boolean(token) && candidates.length > 0);
 
@@ -162,7 +163,7 @@
 
 <ComposerDropZone disabled={!room.conversation || uploading} onfiles={queueFiles}>
   {#if popoverOpen}
-    <MentionPopover {candidates} {selected} onpick={pick} />
+    <MentionPopover {candidates} {selected} onpick={pick} bang={token?.bang ?? false} />
   {/if}
 
   {#key pickerGeneration}
