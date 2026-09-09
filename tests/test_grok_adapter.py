@@ -4,8 +4,10 @@ import asyncio
 import json
 import os
 import resource
+import logging
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -61,6 +63,7 @@ from partyline.adapters.bundled.grok.transcript import (
     latest_user_prompt,
     user_input,
 )
+from partyline.adapters.bundled.grok.wake_receipts import WakeReceipts, fingerprint
 from partyline.db import Db
 from partyline.presence import Presence
 from partyline.runtime import ChatRuntime
@@ -353,6 +356,176 @@ class WakeCreditTest(unittest.IsolatedAsyncioTestCase):
                 adapter._tail_grok_transcript(transcript, AsyncMock()), timeout=1
             )
             self.assertTrue(confirmed.is_set())
+
+
+RECEIPT_LOGGER = "partyline.adapters.bundled.grok.wake_receipts"
+
+
+class ReceiptDiagnosticsTest(unittest.IsolatedAsyncioTestCase):
+    """Enough to settle the ordering question, and nothing that leaks."""
+
+    def record(self, prompt_index: int, text: str) -> dict:
+        return {
+            "type": "user",
+            "prompt_index": prompt_index,
+            "content": [{"type": "text", "text": f"<user_query>\n{text}\n</user_query>"}],
+        }
+
+    async def observed(self, seed_before, seed_after, record_index, record_text):
+        receipts = WakeReceipts()
+        adapter = make_adapter()
+        adapter.send_keys = AsyncMock()
+        adapter.format_digest = lambda _messages: "the exact wake digest"
+        receipts.seed(seed_before)
+        await receipts.deliver(adapter, [{"id": 1}])
+        if seed_after is not None:
+            receipts.seed(seed_after)
+        with self.assertLogs(RECEIPT_LOGGER, level="INFO") as logs:
+            await receipts.observe(adapter, self.record(record_index, record_text))
+        return receipts, "\n".join(logs.output)
+
+    async def test_the_anti_replay_branch_says_so(self):
+        # The branch that silently ends a wake's chance of being credited is
+        # exactly the one that needed a voice.
+        _, output = await self.observed(1, 9, 9, "the exact wake digest")
+
+        self.assertIn("anti-replay", output)
+        self.assertIn("record 9 not after mark 9", output)
+
+    async def test_a_matched_record_reports_the_match(self):
+        receipts, output = await self.observed(1, None, 5, "the exact wake digest")
+
+        self.assertTrue(receipts.pending[0].confirmed)
+        self.assertIn("matched=wake#0", output)
+
+    async def test_matching_and_crediting_are_reported_separately(self):
+        # A match that the delivery callback refuses leaves the cursor where it
+        # was. Reporting one as the other would send the next diagnosis at the
+        # wrong half of the path.
+        for granted, expected in ((True, "outcome=granted"), (False, "outcome=refused")):
+            with self.subTest(granted=granted):
+                receipts = WakeReceipts()
+                adapter = make_adapter()
+                adapter.send_keys = AsyncMock()
+                adapter.format_digest = lambda _messages: "the exact wake digest"
+
+                async def credit(_ids, granted=granted):
+                    return granted
+
+                adapter.att["confirm_delivery_ids"] = credit
+                receipts.seed(1)
+                await receipts.deliver(adapter, [{"id": 1}])
+                with self.assertLogs(RECEIPT_LOGGER, level="INFO") as logs:
+                    await receipts.observe(
+                        adapter, self.record(5, "the exact wake digest")
+                    )
+                output = "\n".join(logs.output)
+
+                self.assertIn("matched=wake#0", output)
+                self.assertIn(expected, output)
+                self.assertEqual(bool(receipts.pending), not granted,
+                                 "a refused credit keeps the wake outstanding")
+
+    async def test_every_line_names_the_attachment_and_activation(self):
+        # Including the seed: it is the event the unresolved failure turns on,
+        # and two Grok sessions otherwise interleave into one unreadable story.
+        receipts = WakeReceipts()
+        adapter = make_adapter()
+        adapter.att["runtime_owner"] = "activation-1"
+        adapter.send_keys = AsyncMock()
+        adapter.format_digest = lambda _messages: "the exact wake digest"
+        with self.assertLogs(RECEIPT_LOGGER, level="INFO") as logs:
+            receipts.seed(1, adapter)
+            await receipts.deliver(adapter, [{"id": 1}])
+            await receipts.observe(adapter, self.record(5, "the exact wake digest"))
+        lines = [line for line in logs.output if "wake receipt:" in line]
+
+        self.assertTrue(any("seed" in line for line in lines))
+        for line in lines:
+            self.assertIn(f"att={SESSION_ID}", line)
+            self.assertIn("owner=activation-1", line)
+
+    def test_configuration_runs_after_dotenv_not_at_import(self):
+        """`.env` in the checkout is the supported switch.
+
+        `load_dotenv()` runs in `server.py` well after this module is imported,
+        so reading the environment at import would look before the file that
+        sets it had been read. Constructing a tracker is the first thing that
+        happens per attachment, and it happens long after.
+        """
+        from partyline.adapters.bundled.grok import wake_receipts
+
+        logger = logging.getLogger(RECEIPT_LOGGER)
+        def ours():
+            return [h for h in logger.handlers
+                    if getattr(h, "_partyline_receipts", False)]
+
+        installed = ours()
+        for handler in installed:
+            logger.removeHandler(handler)
+        try:
+            # The environment arrives late, exactly as dotenv delivers it.
+            with mock.patch.dict(os.environ, {wake_receipts.DIAGNOSTICS_ENV: "1"}):
+                WakeReceipts()
+                self.assertEqual(len(ours()), 1)
+                WakeReceipts()
+                self.assertEqual(len(ours()), 1, "configuration is idempotent")
+        finally:
+            for handler in ours():
+                logger.removeHandler(handler)
+            for handler in installed:
+                logger.addHandler(handler)
+
+    async def test_an_unmatched_record_reports_why(self):
+        _, output = await self.observed(1, None, 5, "a different digest")
+
+        self.assertIn("matched=none", output)
+        self.assertIn("same_content=False", output)
+        self.assertIn("after_paste=True", output)
+
+    def test_diagnostics_are_off_unless_the_environment_asks(self):
+        """The server configures only uvicorn's loggers.
+
+        The root logger has no handler, so an INFO record from this module is
+        discarded and an operator sees nothing — `assertLogs` hides that,
+        because it installs a handler of its own. The switch is what makes the
+        evidence reachable without turning up every partyline logger.
+        """
+        from partyline.adapters.bundled.grok import wake_receipts
+
+        logger = logging.getLogger(RECEIPT_LOGGER)
+        installed = [h for h in logger.handlers if getattr(h, "_partyline_receipts", False)]
+        for handler in installed:
+            logger.removeHandler(handler)
+        try:
+            for value, expected in (("", 0), ("0", 0), ("no", 0), ("1", 1), ("yes", 1)):
+                with self.subTest(value=value):
+                    for handler in [h for h in logger.handlers
+                                    if getattr(h, "_partyline_receipts", False)]:
+                        logger.removeHandler(handler)
+                    with mock.patch.dict(
+                        os.environ, {wake_receipts.DIAGNOSTICS_ENV: value}
+                    ):
+                        wake_receipts._configure_diagnostics()
+                    self.assertEqual(
+                        len([h for h in logger.handlers
+                             if getattr(h, "_partyline_receipts", False)]),
+                        expected,
+                    )
+        finally:
+            for handler in [h for h in logger.handlers
+                            if getattr(h, "_partyline_receipts", False)]:
+                logger.removeHandler(handler)
+            for handler in installed:
+                logger.addHandler(handler)
+
+    async def test_no_prompt_text_or_credential_is_logged(self):
+        secret = "the exact wake digest"
+        _, output = await self.observed(1, None, 5, secret)
+
+        self.assertNotIn(secret, output)
+        self.assertNotIn("Bearer", output)
+        self.assertIn(fingerprint(secret), output, "identified by fingerprint instead")
 
 
 class TurnHookTest(unittest.TestCase):

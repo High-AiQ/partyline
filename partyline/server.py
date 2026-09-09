@@ -347,6 +347,13 @@ register_attachment_lifecycle_routes(
 async def resume_attachment(request: Request, att_id: str):
     deny_unless_attachment(runtime.db, request_principal(request), att_id, "attach")
     await _resume_adapter(att_id)
+    # An explicit resume is the operator saying "this one is back". Automatic
+    # recovery leaves an unconfirmed attachment in `reattaching`, which routing
+    # consults *only when no live adapter exists*: it never blocks delivery to
+    # a running process, but once that process exits it swallows the "not
+    # attached" warning and the room hears nothing. Nothing else cleared it, so
+    # the flag outlived the recovery it belonged to.
+    runtime.reattaching.discard(att_id)
     return await attachment_response(runtime.db.get_attachment(att_id))
 
 
