@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 import re
-import sqlite3
 import subprocess
 import sys
 import time
@@ -24,6 +23,11 @@ from urllib.request import Request
 
 from partyline.contracts import (
     RestartPlanMode,
+    RestartPlanScope,
+)
+from scripts.cockpit_plan_db import (
+    Finding, LiveAttachment, PendingPlanInspection, inspect_pending_plan,
+    live_attachments, unaccounted_findings,
 )
 from scripts.cockpit_venv import cockpit_can_boot, live_version_matches, sync_locked
 from scripts.cockpit_api import schedule_restart_plan
@@ -51,20 +55,6 @@ RESTART_SCRIPT = REPO_ROOT / "scripts" / "restart_server.py"
 
 class ResponseOpener(Protocol):
     def __call__(self, request: Request) -> HTTPResponse: ...
-
-
-@dataclass(frozen=True)
-class Finding:
-    """One thing that is wrong, and what to do about it."""
-
-    problem: str
-    fix: str
-
-
-@dataclass(frozen=True)
-class PendingPlanInspection:
-    plan: Mapping[str, object] | None
-    findings: list[Finding]
 
 
 @dataclass(frozen=True)
@@ -335,49 +325,6 @@ def restart_needed(repo: Path, old: str, new: str) -> bool:
 # -- commands --------------------------------------------------------------
 
 
-def inspect_pending_plan(database: Path | None = None) -> PendingPlanInspection:
-    """Read the persisted plan without migrating or writing the live database.
-
-    Deliberately not over HTTP: the case this exists to catch is a server that
-    never restarted, and asking that server would be asking the wrong process
-    about its own replacement.  ``mode=ro`` is load-bearing: constructing
-    :class:`partyline.db.Db` would apply migrations and commit from a command
-    advertised as a read-only preflight.
-    """
-    database = database or Path(
-        os.environ.get("PARTYLINE_DB", os.path.expanduser("~/.partyline.db"))
-    )
-    if not database.is_file():
-        return PendingPlanInspection(None, [])
-    try:
-        connection = sqlite3.connect(f"{database.resolve().as_uri()}?mode=ro", uri=True)
-        connection.row_factory = sqlite3.Row
-        try:
-            table = connection.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='restart_plan'"
-            ).fetchone()
-            if table is None:
-                return PendingPlanInspection(None, [])
-            # A plan written by a pre-auth server has no report_token column;
-            # select it only when it exists so the preflight stays readable.
-            names = {info[1] for info in connection.execute(
-                "PRAGMA table_info(restart_plan)")}
-            fields = "conversation_id, token, mode, attempt_count, created_at"
-            if "report_token" in names:
-                fields += ", report_token"
-            row = connection.execute(
-                f"SELECT {fields} FROM restart_plan WHERE singleton=1"
-            ).fetchone()
-            return PendingPlanInspection(dict(row) if row else None, [])
-        finally:
-            connection.close()
-    except sqlite3.Error as exc:
-        return PendingPlanInspection(None, [Finding(
-            f"the live restart plan cannot be inspected read-only: {exc}",
-            f"inspect {database} with sqlite3 before trusting restart state",
-        )])
-
-
 def run_command(args: list[str]) -> CommandResult:
     done = subprocess.run(args, capture_output=True, text=True)
     return CommandResult(done.returncode, done.stdout, done.stderr)
@@ -474,9 +421,11 @@ def plan(
     base_url: str,
     *,
     mode: RestartPlanMode = "automatic",
+    scope: RestartPlanScope = "line",
 ) -> int:
     try:
-        scheduled = schedule_restart_plan(selector, debrief, base_url, mode=mode)
+        scheduled = schedule_restart_plan(
+            selector, debrief, base_url, mode=mode, scope=scope)
     except HTTPError as exc:
         detail = exc.read().decode(errors="replace")
         print(f"could not schedule reattachment: HTTP {exc.code} {detail}")
@@ -484,8 +433,15 @@ def plan(
     except (URLError, ValueError) as exc:
         print(f"could not schedule reattachment: {exc}")
         return 1
-    names = ", ".join(candidate.name for candidate in scheduled.attachments)
-    print(f"  ✓ {scheduled.conversation_id}: {names}")
+    # A server too old to name each candidate's line leaves it empty; that plan
+    # can only be line-scoped, so the owner is the honest label for it.
+    lines = {c.conversation_id or scheduled.conversation_id for c in scheduled.attachments}
+    for line in sorted(lines):
+        covered = [
+            c.name for c in scheduled.attachments
+            if (c.conversation_id or scheduled.conversation_id) == line
+        ]
+        print(f"  ✓ {line}: {', '.join(covered)}")
     if mode == "automatic":
         print("After restart, that line's plan will be consumed automatically; no browser is required.")
     else:
@@ -504,6 +460,8 @@ def arm_restart(
     source_server: Path | None = None,
     run: Callable[[list[str]], CommandResult] = run_command,
     inspection: PendingPlanInspection | None = None,
+    live: list[LiveAttachment] | None = None,
+    database: Path | None = None,
     generation: Callable[[int], str | None] = process_generation,
     command_line: Callable[[int], list[str] | None] = process_cmdline,
 ) -> int:
@@ -513,7 +471,9 @@ def arm_restart(
     only proves scheduling, so the timer state, trigger listing, and service
     command are independently read back before this function says "armed".
     """
-    inspection = inspection or inspect_pending_plan()
+    # One database answers both halves of the coverage question, so the plan and
+    # the live set can never be read from two different instances.
+    inspection = inspection or inspect_pending_plan(database)
     if inspection.findings:
         return report(inspection.findings)
     plan = inspection.plan
@@ -527,6 +487,10 @@ def arm_restart(
             "the persisted restart plan is a manual offer",
             "replace it with an automatic plan before an unattended restart",
         )])
+    if orphaned := unaccounted_findings(
+        plan, live_attachments(database) if live is None else live
+    ):
+        return report(orphaned)
     expected_start = generation(pid)
     if expected_start is None:
         return report([Finding(
@@ -631,13 +595,20 @@ def main(argv=None) -> int:
             help="show the human accept/cancel offer instead of auto-accepting after restart",
         )
         parser.add_argument(
+            "--all",
+            action="store_true",
+            dest="every_line",
+            help="cover every live resumable process on every line, not just this one",
+        )
+        parser.add_argument(
             "--url",
             default=f"http://127.0.0.1:{os.environ.get('PARTYLINE_PORT', '8642')}",
             help="running cockpit base URL",
         )
         args = parser.parse_args(argv[1:])
         mode: RestartPlanMode = "offer" if args.manual_offer else "automatic"
-        return plan(args.line, args.debrief, args.url, mode=mode)
+        scope: RestartPlanScope = "all" if args.every_line else "line"
+        return plan(args.line, args.debrief, args.url, mode=mode, scope=scope)
     if command == "arm":
         parser = ArgumentParser(prog="python -m scripts.cockpit arm")
         parser.add_argument("--pid", required=True, type=int, help="exact current server pid")
@@ -646,6 +617,8 @@ def main(argv=None) -> int:
         parser.add_argument("--server-config", type=Path, help="explicit replacement server config")
         parser.add_argument("--source-server", type=Path,
                             help="the outgoing server executable when moving to another checkout")
+        parser.add_argument("--database", type=Path,
+                            help="the live instance database, when it is not $PARTYLINE_DB")
         parser.add_argument(
             "--url",
             default=f"http://127.0.0.1:{os.environ.get('PARTYLINE_PORT', '8642')}",
@@ -674,6 +647,7 @@ def main(argv=None) -> int:
             unit=args.unit,
             server_config=args.server_config,
             source_server=args.source_server,
+            database=args.database,
         )
     print(__doc__)
     return 2

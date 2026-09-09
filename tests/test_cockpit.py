@@ -29,7 +29,19 @@ from scripts.cockpit import (  # noqa: E402
     referenced_assets,
     restart_needed,
 )
-from scripts.cockpit_api import resolve_line, schedule_restart_plan  # noqa: E402
+from scripts.cockpit_api import (  # noqa: E402
+    refuse_unsupported_fleet_plan,
+    resolve_line,
+    schedule_restart_plan,
+)
+from scripts.cockpit_plan_db import (  # noqa: E402
+    LiveAttachment,
+    coverage_refusal,
+    database_for_environment,
+    live_attachments,
+    planned_attachment_ids,
+    unaccounted_findings,
+)
 from partyline.contracts import ConversationResponse
 
 
@@ -378,6 +390,7 @@ class ArmRestartTest(unittest.TestCase):
                 "mode": "automatic",
                 "attempt_count": 0,
                 "created_at": 1,
+                "attachment_ids": '["a1"]',
             },
             [],
         )
@@ -417,6 +430,7 @@ class ArmRestartTest(unittest.TestCase):
             unit="partyline-restart-test",
             run=self.fake_run,
             inspection=self.inspection,
+            live=[],
             generation=lambda _pid: "1234",
         )
         self.assertEqual(result, 0)
@@ -446,6 +460,7 @@ class ArmRestartTest(unittest.TestCase):
             unit="partyline-restart-test",
             run=missing_timer,
             inspection=self.inspection,
+            live=[],
             generation=lambda _pid: "1234",
         )
         self.assertEqual(result, 1)
@@ -468,6 +483,7 @@ class ArmRestartTest(unittest.TestCase):
             server_config=config,
             run=self.fake_run,
             inspection=self.inspection,
+            live=[],
             generation=lambda _pid: "1234",
         )
         self.assertEqual(result, 0)
@@ -487,6 +503,7 @@ class ArmRestartTest(unittest.TestCase):
             source_server=source,
             run=self.fake_run,
             inspection=self.inspection,
+            live=[],
             generation=lambda _pid: "1234",
             command_line=lambda _pid: ["/usr/bin/python3", str(source), "--config", "/etc/lan.toml"],
         )
@@ -511,6 +528,7 @@ class ArmRestartTest(unittest.TestCase):
                     source_server=source,
                     run=self.fake_run,
                     inspection=self.inspection,
+                    live=[],
                     generation=lambda _pid: "1234",
                     command_line=lambda _pid, command=command: command,
                 )
@@ -526,6 +544,7 @@ class ArmRestartTest(unittest.TestCase):
             source_server=self.cockpit / "nowhere" / "partyline",
             run=self.fake_run,
             inspection=self.inspection,
+            live=[],
             generation=lambda _pid: "1234",
             command_line=lambda _pid: ["irrelevant"],
         )
@@ -543,6 +562,7 @@ class ArmRestartTest(unittest.TestCase):
             server_config=config,
             run=self.fake_run,
             inspection=self.inspection,
+            live=[],
             generation=lambda _pid: "1234",
         )
         self.assertEqual(result, 1)
@@ -565,6 +585,7 @@ class ArmRestartTest(unittest.TestCase):
             unit="partyline-restart-test",
             run=incomplete_readback,
             inspection=self.inspection,
+            live=[],
             generation=lambda _pid: "1234",
         )
         self.assertEqual(result, 1)
@@ -736,7 +757,8 @@ class RestartPlanTest(unittest.TestCase):
                     "conversation_id": "line-1",
                     "token": "offer-token",
                     "mode": "automatic",
-                    "attachments": [{"id": "a1", "name": "sol", "adapter": "codex"}],
+                    "attachments": [{"id": "a1", "name": "sol", "adapter": "codex",
+                                     "conversation_id": "line-1"}],
                     "debrief": "Continue the restart review.",
                 }
             ),
@@ -764,6 +786,7 @@ class RestartPlanTest(unittest.TestCase):
                 "conversation_id": "line-1",
                 "debrief": "Continue the restart review.",
                 "mode": "automatic",
+                "scope": "line",
             },
         )
 
@@ -785,7 +808,8 @@ class RestartPlanTest(unittest.TestCase):
                     "conversation_id": "line-1",
                     "token": "offer-token",
                     "mode": "offer",
-                    "attachments": [{"id": "a1", "name": "sol", "adapter": "codex"}],
+                    "attachments": [{"id": "a1", "name": "sol", "adapter": "codex",
+                                     "conversation_id": "line-1"}],
                     "debrief": "Inspect before continuing.",
                 }
             ),
@@ -810,8 +834,464 @@ class RestartPlanTest(unittest.TestCase):
                 "conversation_id": "line-1",
                 "debrief": "Inspect before continuing.",
                 "mode": "offer",
+                "scope": "line",
             },
         )
+
+
+class LiveAttachmentCoverageTest(unittest.TestCase):
+    """Arming must refuse while a live process would be stopped for good."""
+
+    def plan(self, attachment_ids):
+        return {"mode": "automatic", "attachment_ids": json.dumps(attachment_ids)}
+
+    def test_a_plan_covering_every_live_process_raises_no_finding(self):
+        live = [LiveAttachment("a1", "sol", "one"), LiveAttachment("a2", "terra", "two")]
+
+        self.assertEqual(unaccounted_findings(self.plan(["a1", "a2"]), live), [])
+
+    def test_an_orphan_is_named_with_the_adapter_that_decides_whether_it_can_return(self):
+        live = [LiveAttachment("a2", "terra", "two", "raw")]
+
+        findings = unaccounted_findings(self.plan([]), live)
+
+        self.assertIn("@terra on 'two' (raw)", findings[0].problem)
+
+    def test_a_live_process_outside_the_plan_is_named_with_its_line(self):
+        live = [LiveAttachment("a1", "sol", "one"), LiveAttachment("a2", "terra", "two")]
+
+        findings = unaccounted_findings(self.plan(["a1"]), live)
+
+        self.assertEqual(len(findings), 1)
+        self.assertIn("@terra on 'two'", findings[0].problem)
+        self.assertNotIn("@sol", findings[0].problem)
+        self.assertIn("--all", findings[0].fix)
+        # Re-planning is the obvious next move and it cannot clear a process
+        # whose adapter has no resume, so the fix has to name that outcome.
+        self.assertIn("cannot be resumed by its adapter", findings[0].fix)
+        self.assertIn("stop it explicitly", findings[0].fix)
+
+    def test_a_plan_that_cannot_state_its_coverage_is_refused_rather_than_guessed(self):
+        # A plan written before the coverage column existed knows nothing about
+        # what it covers. Treating that as "covers nothing" would be a guess,
+        # and treating it as "covers everything" would be the dangerous one.
+        findings = unaccounted_findings({"mode": "automatic"}, [])
+
+        self.assertEqual(len(findings), 1)
+        self.assertIn("does not record which processes", findings[0].problem)
+        self.assertIsNone(planned_attachment_ids({"mode": "automatic"}))
+
+    def test_no_plan_at_all_reports_every_live_process(self):
+        findings = unaccounted_findings(None, [LiveAttachment("a1", "sol", "one")])
+
+        self.assertIn("@sol on 'one'", findings[0].problem)
+
+    def test_live_attachments_reads_running_processes_across_every_line(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "partyline.db"
+            connection = sqlite3.connect(database)
+            connection.execute("CREATE TABLE conversations(id TEXT, name TEXT)")
+            connection.execute(
+                "CREATE TABLE attachments(id TEXT, conv_id TEXT, name TEXT, "
+                "adapter TEXT, status TEXT, created_at REAL)"
+            )
+            connection.executemany(
+                "INSERT INTO conversations VALUES(?,?)",
+                [("c1", "Alpha"), ("c2", "Beta")],
+            )
+            connection.executemany(
+                "INSERT INTO attachments VALUES(?,?,?,?,?,?)",
+                [
+                    ("a1", "c1", "sol", "codex", "running", 1),
+                    ("a2", "c2", "terra", "claude", "starting", 2),
+                    ("a3", "c1", "gone", "codex", "exited", 3),
+                    ("a4", "missing", "orphan", "raw", "running", 4),
+                ],
+            )
+            connection.commit()
+            connection.close()
+
+            found = live_attachments(database)
+
+        # SQLite sorts NULL first, so a process whose line has gone leads the
+        # list rather than hiding at the end of it.
+        self.assertEqual(
+            [(a.attachment_id, a.handle, a.line, a.adapter) for a in found],
+            [
+                ("a4", "orphan", "an archived line", "raw"),
+                ("a1", "sol", "Alpha", "codex"),
+                ("a2", "terra", "Beta", "claude"),
+            ],
+        )
+
+    def test_a_missing_database_has_nothing_live(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(live_attachments(Path(directory) / "absent.db"), [])
+
+    def test_arming_refuses_before_scheduling_anything(self):
+        scheduled = []
+
+        result = arm_restart(
+            Path("/nonexistent"),
+            42,
+            90,
+            "http://127.0.0.1:8642",
+            run=lambda args: scheduled.append(args) or CommandResult(0),
+            inspection=PendingPlanInspection(
+                {
+                    "conversation_id": "line-1",
+                    "token": "token",
+                    "mode": "automatic",
+                    "attempt_count": 0,
+                    "created_at": 1,
+                    "attachment_ids": '["a1"]',
+                },
+                [],
+            ),
+            live=[LiveAttachment("a1", "sol", "one"), LiveAttachment("a9", "grok", "two")],
+            generation=lambda _pid: "1234",
+        )
+
+        self.assertEqual(result, 1)
+        self.assertEqual(scheduled, [], "a refused arm must not schedule a restart")
+
+
+class FleetPlanRequestTest(unittest.TestCase):
+    """`--all` widens which processes a plan recovers, not which line owns it."""
+
+    def test_scope_is_sent_and_coverage_is_reported_per_line(self):
+        conversations = [
+            ConversationResponse(
+                id="line-1", name="Parent", created_at=1, topic="", archived_at=None
+            ),
+        ]
+        responses = [
+            FakeResponse([line.model_dump() for line in conversations]),
+            # `--all` asks the live server whether it understands the field.
+            FakeResponse({"version": "0.63.0", "build": "b", "instance_name": None}),
+            FakeResponse(
+                {
+                    "conversation_id": "line-1",
+                    "token": "t",
+                    "attachments": [
+                        {"id": "a1", "name": "sol", "adapter": "codex",
+                         "conversation_id": "line-1"},
+                        {"id": "a2", "name": "terra", "adapter": "claude",
+                         "conversation_id": "line-2"},
+                    ],
+                    "debrief": "Continue.",
+                }
+            ),
+        ]
+        requests = []
+
+        def open_url(request):
+            requests.append(request)
+            return responses.pop(0)
+
+        with mock.patch.dict(os.environ, {"PARTYLINE_TOKEN": "att-token"}):
+            planned = schedule_restart_plan(
+                "line-1", "Continue.", "http://127.0.0.1:8642", open_url, scope="all"
+            )
+
+        self.assertEqual(requests[1].full_url, "http://127.0.0.1:8642/api/version")
+        self.assertEqual(json.loads(requests[2].data)["scope"], "all")
+        self.assertEqual(
+            {candidate.conversation_id for candidate in planned.attachments},
+            {"line-1", "line-2"},
+        )
+
+    def test_an_explicit_database_answers_both_halves_of_the_coverage_question(self):
+        # The live instance may not be $PARTYLINE_DB — ours is
+        # `.partyline-lan.db`. Reading the plan from one database and the live
+        # set from another would compare two different instances.
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "instance.db"
+            connection = sqlite3.connect(database)
+            connection.execute(
+                "CREATE TABLE restart_plan(singleton INTEGER PRIMARY KEY, "
+                "conversation_id TEXT, token TEXT, mode TEXT, attempt_count INTEGER, "
+                "created_at REAL, attachment_ids TEXT)"
+            )
+            connection.execute(
+                "INSERT INTO restart_plan VALUES(1,'c1','t','automatic',0,1,'[\"a1\"]')"
+            )
+            connection.execute("CREATE TABLE conversations(id TEXT, name TEXT)")
+            connection.execute(
+                "CREATE TABLE attachments(id TEXT, conv_id TEXT, name TEXT, "
+                "adapter TEXT, status TEXT, created_at REAL)"
+            )
+            connection.execute("INSERT INTO conversations VALUES('c1','Alpha')")
+            connection.execute(
+                "INSERT INTO attachments VALUES('a2','c1','late','codex','running',2)"
+            )
+            connection.commit()
+            connection.close()
+            scheduled = []
+
+            with mock.patch.dict(os.environ, {"PARTYLINE_DB": "/nonexistent/other.db"}):
+                result = arm_restart(
+                    Path("/nonexistent"), 42, 90, "http://127.0.0.1:8642",
+                    run=lambda args: scheduled.append(args) or CommandResult(0),
+                    generation=lambda _pid: "1234",
+                    database=database,
+                )
+
+        # Without --database the plan would be unreadable and arm would refuse
+        # for the wrong reason; with it, the real orphan is named.
+        self.assertEqual(result, 1)
+        self.assertEqual(scheduled, [])
+
+
+class FleetPlanBootstrapTest(unittest.TestCase):
+    """The first upgrade runs against a server that cannot honour `--all`."""
+
+    def test_an_older_server_is_refused_with_the_bootstrap_procedure(self):
+        with self.assertRaises(ValueError) as raised:
+            refuse_unsupported_fleet_plan(
+                "http://127.0.0.1:8642", lambda _url: {"version": "0.62.1"}
+            )
+
+        message = str(raised.exception)
+        self.assertIn("0.62.1", message)
+        self.assertIn("0.63.0", message)
+        # A refusal that does not say what to do instead is a dead end, and
+        # this is the one restart with no way to plan around it.
+        self.assertIn("cockpit line alone", message)
+        self.assertIn("dogfooding.md", message)
+
+    def test_the_release_that_understands_all_is_accepted(self):
+        self.assertIsNone(
+            refuse_unsupported_fleet_plan(
+                "http://127.0.0.1:8642", lambda _url: {"version": "0.63.0"}
+            )
+        )
+        self.assertIsNone(
+            refuse_unsupported_fleet_plan(
+                "http://127.0.0.1:8642", lambda _url: {"version": "1.0.0-rc1"}
+            )
+        )
+
+    def test_an_unreadable_version_is_refused_rather_than_assumed_new(self):
+        for payload in ({}, {"version": "not-a-version"}):
+            with self.subTest(payload=payload), self.assertRaises(ValueError):
+                refuse_unsupported_fleet_plan(
+                    "http://127.0.0.1:8642", lambda _url, p=payload: p
+                )
+
+    def test_an_unreachable_server_refuses_rather_than_planning_blind(self):
+        def unreachable(_url):
+            raise OSError("connection refused")
+
+        with self.assertRaisesRegex(ValueError, "could not read the live version"):
+            refuse_unsupported_fleet_plan("http://127.0.0.1:8642", unreachable)
+
+    def test_a_line_scoped_plan_needs_no_version_check(self):
+        # The old server understands a line-scoped plan perfectly well; only
+        # `--all` is new, so only `--all` pays for the extra round trip.
+        conversations = [ConversationResponse(
+            id="line-1", name="Parent", created_at=1, topic="", archived_at=None
+        )]
+        responses = [
+            FakeResponse([line.model_dump() for line in conversations]),
+            FakeResponse({
+                "conversation_id": "line-1",
+                "token": "t",
+                # An older server does not name each candidate's line.
+                "attachments": [{"id": "a1", "name": "sol", "adapter": "codex"}],
+                "debrief": "Continue.",
+            }),
+        ]
+
+        with mock.patch.dict(os.environ, {"PARTYLINE_TOKEN": "att-token"}):
+            planned = schedule_restart_plan(
+                "line-1", "Continue.", "http://127.0.0.1:8642", lambda r: responses.pop(0)
+            )
+
+        self.assertEqual(planned.attachments[0].conversation_id, "")
+
+
+class TriggerTimeCoverageTest(unittest.TestCase):
+    """The trigger re-reads coverage from the outgoing instance's own database."""
+
+    def test_a_relative_path_is_refused_before_any_unrelated_database_is_read(self):
+        # The dangerous case is not a missing file: it is an unrelated database
+        # of the same name in the trigger's own directory, whose plan may cover
+        # its own attachments perfectly and so report nothing to orphan.
+        with tempfile.TemporaryDirectory() as directory:
+            decoy = Path(directory) / "relative.db"
+            connection = sqlite3.connect(decoy)
+            connection.execute(
+                "CREATE TABLE restart_plan(singleton INTEGER PRIMARY KEY, "
+                "conversation_id TEXT, token TEXT, mode TEXT, attempt_count INTEGER, "
+                "created_at REAL, attachment_ids TEXT)"
+            )
+            connection.execute(
+                "INSERT INTO restart_plan VALUES(1,'c1','t','automatic',0,1,'[\"a1\"]')"
+            )
+            connection.execute("CREATE TABLE conversations(id TEXT, name TEXT)")
+            connection.execute(
+                "CREATE TABLE attachments(id TEXT, conv_id TEXT, name TEXT, "
+                "adapter TEXT, status TEXT, created_at REAL)"
+            )
+            connection.execute("INSERT INTO conversations VALUES('c1','Alpha')")
+            connection.execute(
+                "INSERT INTO attachments VALUES('a1','c1','sol','codex','running',1)"
+            )
+            connection.commit()
+            connection.close()
+            # The decoy is fully covered: read as an answer, it says "proceed".
+            self.assertIsNone(coverage_refusal(decoy))
+
+            previous = os.getcwd()
+            os.chdir(directory)
+            try:
+                refusal = coverage_refusal(Path("relative.db"))
+            finally:
+                os.chdir(previous)
+
+        self.assertIsNotNone(refusal)
+        self.assertIn("relative", refusal)
+        self.assertIn("working directory could not be resolved", refusal)
+
+    def test_a_relative_database_resolves_against_the_servers_own_directory(self):
+        self.assertEqual(
+            database_for_environment({"PARTYLINE_DB": "state/live.db"}, Path("/srv/app")),
+            Path("/srv/app/state/live.db"),
+        )
+
+    def test_a_relative_database_with_no_readable_directory_stays_relative(self):
+        # It stays relative on purpose: `coverage_refusal` rejects a non-absolute
+        # path outright, so an unrelated database in the trigger's directory is
+        # never opened, let alone believed.
+        self.assertEqual(
+            database_for_environment({"PARTYLINE_DB": "state/live.db"}, None),
+            Path("state/live.db"),
+        )
+
+    def test_an_absolute_database_ignores_the_working_directory(self):
+        self.assertEqual(
+            database_for_environment({"PARTYLINE_DB": "/srv/live.db"}, Path("/elsewhere")),
+            Path("/srv/live.db"),
+        )
+
+    def test_an_unreadable_plan_finding_is_propagated_not_swallowed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "partyline.db"
+            connection = sqlite3.connect(database)
+            connection.execute("CREATE TABLE restart_plan(singleton INTEGER PRIMARY KEY)")
+            connection.execute("CREATE TABLE attachments(id TEXT)")
+            connection.commit()
+            connection.close()
+            with mock.patch(
+                "scripts.cockpit_plan_db.inspect_pending_plan",
+                return_value=PendingPlanInspection(None, [Finding("db is unreadable", "fix it")]),
+            ):
+                refusal = coverage_refusal(database)
+
+        self.assertEqual(refusal, "db is unreadable")
+
+    def test_the_configured_database_wins_over_any_home(self):
+        self.assertEqual(
+            database_for_environment({"PARTYLINE_DB": "/srv/live.db", "HOME": "/home/x"}),
+            Path("/srv/live.db"),
+        )
+
+    def test_the_outgoing_home_supplies_the_default_database(self):
+        self.assertEqual(
+            database_for_environment({"HOME": "/home/x"}), Path("/home/x/.partyline.db")
+        )
+
+    def test_a_missing_database_refuses_rather_than_reading_it_as_nothing_live(self):
+        # The live instance is not always $PARTYLINE_DB. A path with no database
+        # is the wrong path, not an instance with nothing to lose.
+        with tempfile.TemporaryDirectory() as directory:
+            refusal = coverage_refusal(Path(directory) / "absent.db")
+
+        self.assertIsNotNone(refusal)
+        self.assertIn("missing at", refusal)
+        self.assertIn("absent.db", refusal)
+
+    def test_a_database_without_the_schema_refuses(self):
+        for tables in ([], ["restart_plan"], ["attachments"]):
+            with self.subTest(tables=tables), tempfile.TemporaryDirectory() as directory:
+                database = Path(directory) / "partyline.db"
+                connection = sqlite3.connect(database)
+                for table in tables:
+                    connection.execute(f"CREATE TABLE {table}(id TEXT)")
+                connection.execute("CREATE TABLE unrelated(id TEXT)")
+                connection.commit()
+                connection.close()
+
+                refusal = coverage_refusal(database)
+
+                self.assertIsNotNone(refusal)
+                self.assertIn("has no", refusal)
+
+    def test_a_plan_that_has_gone_between_arming_and_signalling_refuses(self):
+        # Something else consumed or cleared the plan; recovery would resume
+        # nothing at all.
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "partyline.db"
+            connection = sqlite3.connect(database)
+            connection.execute(
+                "CREATE TABLE restart_plan(singleton INTEGER PRIMARY KEY, "
+                "conversation_id TEXT, token TEXT, mode TEXT, attempt_count INTEGER, "
+                "created_at REAL, attachment_ids TEXT)"
+            )
+            connection.execute(
+                "CREATE TABLE attachments(id TEXT, conv_id TEXT, name TEXT, "
+                "adapter TEXT, status TEXT, created_at REAL)"
+            )
+            connection.commit()
+            connection.close()
+
+            refusal = coverage_refusal(database)
+
+        self.assertIn("no longer recorded", refusal)
+
+    def test_an_unreadable_database_is_refused_rather_than_assumed_covered(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "partyline.db"
+            database.write_bytes(b"this is not a sqlite database at all")
+
+            refusal = coverage_refusal(database)
+
+        self.assertIsNotNone(refusal)
+        self.assertIn("could not be re-read", refusal)
+
+    def test_a_live_process_outside_the_plan_is_reported_from_the_database(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "partyline.db"
+            connection = sqlite3.connect(database)
+            connection.execute(
+                "CREATE TABLE restart_plan(singleton INTEGER PRIMARY KEY, "
+                "conversation_id TEXT, token TEXT, mode TEXT, attempt_count INTEGER, "
+                "created_at REAL, attachment_ids TEXT)"
+            )
+            connection.execute(
+                "INSERT INTO restart_plan VALUES(1,'c1','t','automatic',0,1,'[\"a1\"]')"
+            )
+            connection.execute("CREATE TABLE conversations(id TEXT, name TEXT)")
+            connection.execute(
+                "CREATE TABLE attachments(id TEXT, conv_id TEXT, name TEXT, "
+                "adapter TEXT, status TEXT, created_at REAL)"
+            )
+            connection.execute("INSERT INTO conversations VALUES('c1','Alpha')")
+            connection.executemany(
+                "INSERT INTO attachments VALUES(?,?,?,?,?,?)",
+                [
+                    ("a1", "c1", "sol", "codex", "running", 1),
+                    ("a2", "c1", "late", "codex", "running", 2),
+                ],
+            )
+            connection.commit()
+            connection.close()
+
+            refusal = coverage_refusal(database)
+
+        self.assertIn("@late on 'Alpha'", refusal)
+        self.assertNotIn("@sol", refusal)
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ from .line_process_contracts import LineLiveEvent
 from .presence_contracts import WorkingEvent
 
 RestartPlanMode = Literal["offer", "automatic"]
+RestartPlanScope = Literal["line", "all"]
 
 
 class ConvIn(BaseModel):
@@ -123,12 +124,21 @@ class ReattachCandidateResponse(BaseModel):
     id: str
     name: str
     adapter: str
+    # The line this process lives on, which a fleet plan does not share with
+    # the line that owns the plan. Defaulted so this client can still read a
+    # plan from a server old enough not to send it.
+    conversation_id: str = ""
 
 
 class RestartPlanRequest(BaseModel):
     conversation_id: str
     debrief: str = Field(default="", max_length=10_000)
     mode: RestartPlanMode = "offer"
+    # "line" plans the requesting line only; "all" plans every live resumable
+    # process on every unarchived line, so a restart cannot silently orphan a
+    # line nobody remembered. A manual offer is shown to one tab, so only an
+    # automatic plan may be fleet-wide.
+    scope: RestartPlanScope = "line"
 
 
 class RestartPlanResponse(BaseModel):

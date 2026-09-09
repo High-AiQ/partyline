@@ -38,6 +38,8 @@ Sign in → open a line → attach a process with a handle and adapter → talk 
 | --- | --- |
 | Why a real pty (not headless) | [docs/why-pty.md](docs/why-pty.md) |
 | Adapters (Claude Code, Codex, …) | [docs/adapters.md](docs/adapters.md) |
+| Mentions during a running turn | [docs/adapters.md](docs/adapters.md#immediate-mentions) |
+| `@!name` — interrupt and send | [docs/adapters.md](docs/adapters.md#interrupt-and-send-name) |
 | Credentials for attached processes | [docs/credentials.md](docs/credentials.md) |
 | Security & caveats | [docs/security.md](docs/security.md) |
 | Agent refresh / checkpoints | [docs/agent-refresh.md](docs/agent-refresh.md) |

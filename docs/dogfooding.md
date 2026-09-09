@@ -31,10 +31,10 @@ deploying merely starts the old code again.
 ```bash
 uv run python -m scripts.cockpit check
 uv run python -m scripts.cockpit deploy
-uv run python -m scripts.cockpit plan "partyline refactoring" \
+uv run python -m scripts.cockpit plan "partyline refactoring" --all \
   --debrief "Continue from the committed handoff."
 # After every planned participant has explicitly cleared:
-uv run python -m scripts.cockpit arm --pid NNNNN
+uv run python -m scripts.cockpit arm --pid NNNNN --database ~/.partyline-lan.db
 ```
 
 `check`, `deploy`, and `plan` do not restart anything. `check` refuses a dirty or unpushed
@@ -45,14 +45,69 @@ or an automatic plan that has remained unclaimed long enough to show that its tr
 verifies that the tree matches the workbench. A matching commit with a stale
 venv is how v0.32.0 left the line down.
 
-`plan` is line-scoped and automatic by default. It persists the exact resumable attachments and a
-continuation debrief; use `--manual-offer` only when a human should explicitly accept the plan.
-Planning is authorization, not a restart.
+`plan` is automatic by default and persists the exact resumable attachments plus a continuation
+debrief; use `--manual-offer` only when a human should explicitly accept the plan. Planning is
+authorization, not a restart.
+
+The named line always *owns* the plan — it is where a manual offer appears and where a failure is
+reported. `--all` widens which processes the plan recovers, not which line owns it: every live
+resumable process on every unarchived line, in owner-first order. A shutdown stops every attached
+process on every line, so on an instance hosting more than one live line, `--all` is the normal
+choice. A manual offer is shown to one tab and stays line-scoped; `--all` requires an automatic plan.
+
+Recovery then reads each process's own line: its pending messages, its readiness notices, and its
+failures are posted where that process lives, and every covered line hears the start banner and the
+closing summary.
+
+### The one restart that cannot be planned fleet-wide
+
+The first upgrade onto fleet planning is a bootstrap: the server still running is the one that does
+not understand `--all`, so it would persist a line-scoped plan while reporting success, and arming
+would then refuse it with no way forward. `plan --all` therefore checks the live `/api/version` and
+refuses first, naming this procedure.
+
+For that one restart:
+
+1. `plan` the cockpit line alone — a line-scoped plan is all the running server can write.
+2. Close every other line's processes deliberately, with the close control. These are exactly the
+   processes the arm refusal would otherwise name; closing them is the decision, made once, in the
+   open, with each line checkpointed first.
+3. `arm`. Coverage now holds, because nothing else is live.
+4. Reattach the closed lines afterwards and prove each continuation receipt.
+
+From the next restart on, `--all` covers everything and none of this is needed.
 
 ## Arming a restart
 
 Only arm after preflight is green, every planned participant has explicitly cleared, and no known
 finding remains. Any participant may block the restart.
+
+Arming also refuses while any live process is missing from the plan, naming each one with its line.
+The restart stops every attached process but recovery resumes only what the plan names, so an
+unaccounted process comes back detached and silent — the same shape of failure that let two broken
+triggers go unnoticed for hours. Re-plan with `--all`, or deliberately close the processes you do
+not intend to bring back. Each name carries its adapter, because a process whose adapter cannot
+resume can never appear in a plan however many times you re-plan: it has to be stopped explicitly,
+or knowingly lost, and that is somebody's decision rather than a side effect.
+
+Coverage is checked twice, because arming and restarting are up to 90 seconds apart. The trigger
+re-reads the plan and the live processes from the outgoing server's *own* database — resolved from
+that server's environment snapshot, since a transient systemd unit inherits neither `PARTYLINE_DB`
+nor the interactive user's `HOME`, and a relative `PARTYLINE_DB` means relative to the server's
+own working directory — and refuses before signalling if anything attached in the meantime.
+
+Every way of *not knowing* is a refusal: a database path that is still relative, or a database
+that is missing, unreadable, without the schema, or no longer holding the plan, stops the restart.
+A relative path is rejected before any filesystem read, because a same-named database in the
+trigger's own directory would answer for the wrong instance — and if that one happened to be fully
+covered, it would wave the restart through. None of those is an instance with nothing
+to lose; each is either the wrong path or an instance something else has already changed, and the
+only question at that moment is whether SIGTERM is about to strand a process.
+
+The arming side reads `$PARTYLINE_DB`, falling back to `~/.partyline.db`. When the instance runs
+on another database — this one is `~/.partyline-lan.db` — pass `--database` so the plan and the
+live set are read from the same instance. The trigger does not need the flag: it takes the path
+from the outgoing server itself.
 
 `arm` is the only supported trigger. It schedules a reviewed Python executable through systemd,
 then reads back the timer and complete service argv before reporting success. It identifies the old
