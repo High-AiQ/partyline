@@ -18,30 +18,53 @@ from pathlib import Path
 
 CREATED = re.compile(r"Created conversation ([0-9a-fA-F-]{36})")
 
-LogMark = tuple[int, int]
+# Bytes remembered at the end of the pre-spawn log. Same-inode truncate then
+# rewrite past the old size keeps inode and size-gte; this tail must still match.
+TAIL = 64
+LogMark = tuple[int, int, bytes]
 
 
 def log_mark(path: Path) -> LogMark:
-    """Size and inode before this activation may write. Missing file is (0, 0)."""
+    """Size, inode, and end bytes before this activation may write."""
     try:
         info = path.stat()
     except OSError:
-        return (0, 0)
-    return (info.st_size, info.st_ino)
+        return (0, 0, b"")
+    length = min(TAIL, info.st_size)
+    try:
+        with path.open("rb") as file:
+            if info.st_size > length:
+                file.seek(info.st_size - length)
+            tail = file.read(length)
+    except OSError:
+        return (0, 0, b"")
+    return (info.st_size, info.st_ino, tail)
 
 
 def suffix_offset(path: Path, mark: LogMark) -> int:
-    """Byte offset of this activation's writes, or 0 if the log was replaced.
+    """Byte offset of this activation's writes, or 0 if the log was rewritten.
 
-    A truncated or replaced file can be shorter than the remembered offset;
-    seeking there would skip a new ``Created conversation`` at the start.
+    Shorter size or a new inode is the obvious replacement. The CLI can also
+    truncate the same inode and write past the old size before we poll: inode
+    and size both look fine, but the remembered tail at that boundary will
+    not match, so the offset resets rather than hiding a new Created line.
     """
-    size, inode = mark
+    size, inode, tail = mark
     try:
         info = path.stat()
     except OSError:
         return 0
     if info.st_ino != inode or info.st_size < size:
+        return 0
+    if size == 0:
+        return 0
+    try:
+        with path.open("rb") as file:
+            file.seek(size - len(tail))
+            current = file.read(len(tail))
+    except OSError:
+        return 0
+    if current != tail:
         return 0
     return size
 
