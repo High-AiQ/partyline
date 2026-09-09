@@ -763,3 +763,22 @@ ever joined onto a directory, so traversal is unreachable rather than filtered.
 | Log the fingerprint of the exact string a comparison used, not of what you believe it used | Assume the parsed value equals the artifact on disk because both describe one event |
 | Derive an authorized path from state you control, then require the untrusted input to match it | Dereference a path a vendor's transcript hands you, however well it is sanitized |
 | Let an unresolvable receipt leave the wake outstanding | Relax matching to absorb a representation you have not explained |
+
+## A guard named for a risk is not the same as the risk
+
+`require_loopback` exists because starting and stopping a pty belongs to the
+host that owns it. It was also applied to `DELETE /api/attachments/<id>/record`,
+which deletes a row whose process has already exited. From the LAN browser —
+the only interface that shows the card — removing a detached process answered
+`process control may only be requested from this machine`, about something that
+controls no process. The record could not be removed at all.
+
+Every removal test passed, because they injected a stub for the gate. A stub
+records which routes *consult* a guard; it cannot say what the guard decides
+for the caller who actually hits it. The regression uses the real function
+against a non-loopback client, which is the only client the bug was ever about.
+
+| DO | DO NOT |
+| --- | --- |
+| Ask what an endpoint *does* before deciding where it may be called from | Apply a guard to a route because the route is filed near ones that need it |
+| Exercise a security gate with the real implementation and the caller it excludes | Prove a gate is wired up with a stub and call that coverage |

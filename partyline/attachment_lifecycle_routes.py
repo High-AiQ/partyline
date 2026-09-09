@@ -64,7 +64,19 @@ def register_attachment_lifecycle_routes(app, runtime, *, start, require_loopbac
 
     @app.delete("/api/attachments/{att_id}/record", response_model=OkResponse)
     async def remove_attachment_record(request: Request, att_id: str):
-        require_loopback(request)
+        # Deliberately not loopback. `require_loopback` exists so that starting
+        # and stopping a pty stays with the host that owns it; removing a
+        # stopped card controls no process — it deletes a row whose process is
+        # already gone. Requiring host locality here refused an operator's own
+        # LAN browser with a process-control message about something that
+        # controls nothing, and left a detached record unremovable from the
+        # only interface that shows it.
+        #
+        # What actually protects this route is unchanged: the `close`
+        # capability below, and two live-process refusals — the tracked-process
+        # check here, and `remove_stopped_record`, which re-reads the status
+        # under the lock, so a process that starts between them is still
+        # refused.
         deny_unless_attachment(runtime.db, request_principal(request), att_id, "close")
         if att_id in runtime.live:
             raise HTTPException(409, "detach the process before removing it")
