@@ -438,10 +438,11 @@ class ArmRestartTest(unittest.TestCase):
         self.assertEqual(scheduled[0], "systemd-run")
         self.assertNotIn("/bin/bash", scheduled)
         self.assertIn(str(self.cockpit / "scripts/restart_server.py"), scheduled)
-        self.assertIn("--failure-url", scheduled)
-        self.assertIn("http://127.0.0.1:8642", scheduled)
-        self.assertIn("--report-token", scheduled)
-        self.assertIn("plan-cap-1", scheduled)
+        # Joined, never split: a value beginning with `-` would otherwise be
+        # read as an option by the trigger's own parser.
+        self.assertIn("--failure-url=http://127.0.0.1:8642", scheduled)
+        self.assertIn("--report-token=plan-cap-1", scheduled)
+        self.assertNotIn("--report-token", [arg for arg in scheduled if "=" not in arg])
         self.assertTrue(any(call[:3] == ["systemctl", "--user", "list-timers"]
                             for call in self.calls), "arm never read its timer back")
 
@@ -488,7 +489,7 @@ class ArmRestartTest(unittest.TestCase):
         )
         self.assertEqual(result, 0)
         scheduled = self.calls[0]
-        self.assertEqual(scheduled[scheduled.index("--server-config") + 1], str(config.resolve()))
+        self.assertIn(f"--server-config={config.resolve()}", scheduled)
 
     def test_an_explicit_source_server_is_preflighted_and_passed_to_the_trigger(self):
         source = self.cockpit / "old-checkout" / ".venv" / "bin" / "partyline"
@@ -509,7 +510,7 @@ class ArmRestartTest(unittest.TestCase):
         )
         self.assertEqual(result, 0)
         scheduled = self.calls[0]
-        self.assertEqual(scheduled[scheduled.index("--source-server") + 1], str(source))
+        self.assertIn(f"--source-server={source}", scheduled)
 
     def test_a_source_server_the_pid_is_not_running_refuses_before_scheduling(self):
         source = self.cockpit / "old-checkout" / ".venv" / "bin" / "partyline"
@@ -568,12 +569,38 @@ class ArmRestartTest(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertEqual(self.calls, [])
 
+    def test_a_report_token_beginning_with_a_dash_is_still_a_value(self):
+        """The 0.63.0 cockpit restart refused before stopping its old process.
+
+        `secrets.token_urlsafe` draws from a base64url alphabet that includes
+        `-`, so roughly one token in 64 starts with one. Passed as
+        `--report-token <value>`, the trigger's argparse read it as an unknown
+        option and exited on bad arguments — after the timer had fired and
+        before anything was signalled.
+        """
+        dashed = "-Xy_leading-dash-token"
+        inspection = PendingPlanInspection({**self.inspection.plan, "report_token": dashed}, [])
+
+        result = arm_restart(
+            self.cockpit, 42, 90, "http://127.0.0.1:8642",
+            unit="partyline-restart-test",
+            run=self.fake_run,
+            inspection=inspection,
+            live=[],
+            generation=lambda _pid: "1234",
+        )
+
+        self.assertEqual(result, 0)
+        scheduled = self.calls[0]
+        self.assertIn(f"--report-token={dashed}", scheduled)
+        self.assertNotIn(dashed, scheduled, "a bare dashed value is an option, not a value")
+
     def test_missing_failure_warning_argument_refuses_to_claim_armed(self):
         def incomplete_readback(args):
             result = self.fake_run(args)
             if args[:3] == ["systemctl", "--user", "show"] and args[3].endswith(".service"):
                 return CommandResult(0, result.stdout.replace(
-                    " --failure-url http://127.0.0.1:8642", ""
+                    " --failure-url=http://127.0.0.1:8642", ""
                 ))
             return result
 

@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import os
+
 from scripts.restart_server import (
     EXIT_ALREADY_GONE,
     EXIT_BAD_ARGUMENTS,
@@ -14,6 +16,7 @@ from scripts.restart_server import (
     EXIT_REPLACEMENT_UNIMPORTABLE,
     EXIT_WRONG_GENERATION,
     RestartRefused,
+    main,
     process_cmdline,
     process_cwd,
     process_environment,
@@ -591,6 +594,39 @@ class ProcessCwdTest(unittest.TestCase):
     def test_an_unreadable_working_directory_is_not_guessed(self):
         with tempfile.TemporaryDirectory() as directory:
             self.assertIsNone(process_cwd(42, Path(directory)))
+
+
+class DashedOptionValueTest(unittest.TestCase):
+    """A plan's report token can begin with `-`; the trigger must still parse it.
+
+    `secrets.token_urlsafe` draws from base64url, which includes `-`, so about
+    one token in 64 starts with one. The 0.63.0 cockpit restart fired its timer
+    and then refused on bad arguments, before signalling anything, because the
+    token had been passed as a separate argument.
+    """
+
+    def invoke(self, *token_argv):
+        # Our own pid with a generation that cannot match: the run gets past
+        # argument parsing and then refuses for a reason that is not parsing,
+        # which is exactly the distinction under test.
+        return main([
+            str(os.getpid()), "not-this-generation",
+            "/nonexistent/server", "/tmp/cockpit.log", "/tmp",
+            *token_argv,
+        ])
+
+    def test_a_separate_dashed_value_is_read_as_an_option(self):
+        self.assertEqual(
+            self.invoke("--report-token", "-Xy_leading-dash"), EXIT_BAD_ARGUMENTS)
+
+    def test_the_joined_form_carries_the_same_value_through(self):
+        self.assertEqual(
+            self.invoke("--report-token=-Xy_leading-dash"), EXIT_WRONG_GENERATION)
+
+    def test_an_ordinary_token_parses_either_way(self):
+        for argv in (["--report-token", "plain"], ["--report-token=plain"]):
+            with self.subTest(argv=argv):
+                self.assertEqual(self.invoke(*argv), EXIT_WRONG_GENERATION)
 
 
 if __name__ == "__main__":
