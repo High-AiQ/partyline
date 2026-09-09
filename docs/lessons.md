@@ -664,3 +664,24 @@ read the command line", a message that named the wrong cause. The anchor is now 
 | DO | DO NOT |
 | --- | --- |
 | Make the outgoing executable an explicit, preflighted input when it can differ from the replacement | Infer it from the replacement's path and report the mismatch as an unreadable process |
+
+### A generated secret is not a safe command-line argument
+
+The 0.63.0 cockpit restart fired its timer and then refused, before signalling
+anything, on bad arguments. The plan's `report_token` came from
+`secrets.token_urlsafe`, whose base64url alphabet includes `-`, so roughly one
+token in 64 begins with a dash; passed as `--report-token <value>`, the
+trigger's own argparse read it as an unknown option. The false assumption was
+that a random value is inert as an argument — it is inert as *data*, and every
+option value is parsed before it is data.
+
+The joined `--option=value` form fixes tokens already persisted in a plan,
+which regenerating them would not, and removes the whole class rather than the
+one instance. The control is at both ends: the cockpit schedules the joined
+form, and the trigger accepts a dashed token there while still rejecting the
+separated one.
+
+| DO | DO NOT |
+| --- | --- |
+| Pass every option value as `--option=value` when any part of it is generated, user-supplied, or a path | Rely on a value never starting with `-` because it usually does not |
+

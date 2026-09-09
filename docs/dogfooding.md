@@ -109,6 +109,10 @@ on another database — this one is `~/.partyline-instance.db` — pass `--datab
 live set are read from the same instance. The trigger does not need the flag: it takes the path
 from the outgoing server itself.
 
+Every option in the scheduled argv is passed as `--option=value`. A plan's report token is a
+`secrets.token_urlsafe` value whose alphabet includes `-`, and the separated form let the trigger's
+parser read a dashed token as an option — see `docs/lessons.md`.
+
 `arm` is the only supported trigger. It schedules a reviewed Python executable through systemd,
 then reads back the timer and complete service argv before reporting success. It identifies the old
 server by PID **and** process-generation start time, waits for that exact generation to exit, and
