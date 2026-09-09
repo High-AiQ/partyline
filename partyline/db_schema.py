@@ -186,4 +186,20 @@ MIGRATIONS = [
       paths TEXT NOT NULL, created_at REAL NOT NULL, expires_at REAL NOT NULL
     )""",
     "CREATE INDEX IF NOT EXISTS idx_claims_conv ON claims(conv_id, expires_at)",
+    # One tree, one root manager, one monitor. The singleton check is what
+    # makes "at most one pending wake" a property of the schema rather than of
+    # whichever process happens to be ticking.
+    """CREATE TABLE IF NOT EXISTS lead_heartbeat(
+      singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+      conv_id TEXT NOT NULL,
+      attachment_id TEXT NOT NULL,
+      interval_seconds REAL NOT NULL,
+      goal TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      next_due_at REAL NOT NULL,
+      pending_message_id INTEGER,
+      generation INTEGER NOT NULL DEFAULT 1,
+      created_at REAL NOT NULL
+    )""",
+    "ALTER TABLE lead_heartbeat ADD COLUMN generation INTEGER NOT NULL DEFAULT 1",
 ]

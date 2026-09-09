@@ -45,6 +45,19 @@ def role_instructions(actions: Collection[str], conv_id: str, parent_id: str | N
             "retry when the parent manager is available. "
             "Do not notify for acknowledgments or routine chatter."
         )
+    if parent_id is None:
+        blocks.append(
+            "You are the root manager, so you may run a heartbeat on yourself: a timer that "
+            "reminds you to work your inbox while a goal is in progress. Enable it with "
+            'POST /api/heartbeat and JSON {"interval_seconds":300,"goal":"what you are seeing '
+            'through"} — the interval is 60-3600 seconds. GET /api/heartbeat shows whether it '
+            "is on, the interval, when the next reminder is due, and whether one is still "
+            "undelivered. Only one reminder is ever outstanding, and it is delivered like any "
+            "other message. It needs no reply when nothing is waiting, and it authorizes no "
+            "spending, rendering, or deployment. Turn it off with DELETE /api/heartbeat once "
+            "the goal is met — it will not decide that for you, and an idle room is not "
+            "evidence the work is done."
+        )
     blocks.append(
         "Keep budget, acceptance, artifact ownership, and checkpoint responsibilities explicit. "
         "Do not start a paid wave or restart processes merely because an endpoint is available."

@@ -75,6 +75,8 @@ from .presence import Presence
 from .media import MediaStore, media_root
 from .claim_routes import claims_router
 from .conversation_routes import register_conversation_routes
+from . import heartbeat_scheduler
+from .heartbeat_routes import heartbeat_router
 from .hierarchy_routes import hierarchy_router
 from .media_routes import media_router
 from .preset_routes import presets_router
@@ -122,12 +124,17 @@ async def lifespan(app):
     runtime.db.mark_stale_attachments()
     automatic_task = asyncio.create_task(_run_automatic_reattachment())
     app.state.automatic_reattach_task = automatic_task
+    # The monitor's state is in the database, so a restart resumes whatever the
+    # lead had configured — including an unsettled wake, which stays unsettled.
+    heartbeat_task = asyncio.create_task(heartbeat_scheduler.run(runtime))
+    app.state.heartbeat_task = heartbeat_task
     try:
         yield
     finally:
-        automatic_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await automatic_task
+        for task in (automatic_task, heartbeat_task):
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
         await runtime.shutdown()
 
 
@@ -143,6 +150,7 @@ app.include_router(auth_router(runtime.db, on_handle_change=user_sockets.close_a
 app.include_router(media_router(runtime, media))
 app.include_router(message_router(runtime, media))
 app.include_router(hierarchy_router(runtime))
+app.include_router(heartbeat_router(runtime))
 app.include_router(claims_router(runtime))
 app.include_router(hooks_router(runtime, presence))
 app.include_router(presets_router(runtime, ADAPTERS))
