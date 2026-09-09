@@ -176,8 +176,23 @@ is left continuing a task whose output never arrived.
 | **`@!all` is not interruptible** — it rings the room like `@all` | stopping every process at once is a blast radius nobody asked for |
 | **Confirmation comes from the harness**, never from the keystroke | a successful pty write is not a successful CLI submission |
 
-An adapter opts in by publishing `async def interrupt(self) -> bool` — `True` only when the
-harness itself has confirmed. Absence means unsupported, and the room is told so by name:
+An adapter opts in by publishing `async def interrupt(self)`, returning one of three statuses.
+Two would not be enough — a process with no turn running is neither a success nor a failure:
+
+| status | meaning |
+|---|---|
+| `interrupted` | the harness itself confirmed a running turn was stopped |
+| `idle` | there was no turn to stop, so nothing was attempted and nothing needs confirming |
+| `unconfirmed` | it was attempted and the harness never proved it worked |
+
+`idle` must be answered **without touching the pty**. On 2026-09-09 a live `@!` landed two
+seconds after its target's turn had already closed: `Esc` cancelled nothing, no notice was ever
+written, and the message was held for the full ten-second confirmation timeout before delivery.
+The fast path is only taken on a *positive* "closed" — an adapter that does not track turn state
+is unknown, not idle, and still gets the keystroke, because assuming idle would silently decline
+to interrupt a process that was working.
+
+Absence of the method means unsupported, and the room is told so by name:
 
 ```
 ⚠ @sol cannot be interrupted — the codex adapter has no supported interrupt,

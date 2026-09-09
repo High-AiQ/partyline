@@ -11,6 +11,7 @@ from partyline.adapters.bundled.antigravity.interrupt import (
     interrupt as antigravity_interrupt,
     is_interrupt_record,
     record_key,
+    turn_is_closed,
 )
 from partyline.interrupts import (
     PendingInterrupts,
@@ -76,7 +77,7 @@ class BangParsingTest(unittest.TestCase):
 class Adapter:
     """The narrow adapter surface the interrupt policy touches."""
 
-    def __init__(self, confirmed=True, raises=False):
+    def __init__(self, confirmed="interrupted", raises=False):
         self.confirmed = confirmed
         self.raises = raises
         self.calls = 0
@@ -103,15 +104,24 @@ class InterruptPolicyTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(supports_interrupt(Uninterruptible()))
 
     async def test_a_confirmed_interrupt_says_so(self):
-        adapter = Adapter(confirmed=True)
+        adapter = Adapter(confirmed="interrupted")
 
         outcome = await interrupt_for(self.attachment, adapter, pending=self.pending)
 
         self.assertEqual((outcome.attempted, outcome.confirmed), (True, True))
         self.assertIn("was interrupted", outcome.notice)
 
+    async def test_an_idle_process_is_reported_as_idle_not_as_a_failure(self):
+        outcome = await interrupt_for(self.attachment, Adapter(confirmed="idle"),
+                                      pending=self.pending)
+
+        self.assertEqual((outcome.attempted, outcome.confirmed), (False, False))
+        self.assertIn("was already idle", outcome.notice)
+        self.assertIn("nothing to interrupt", outcome.notice)
+        self.assertNotIn("⚠", outcome.notice, "an idle process is not a warning")
+
     async def test_an_unconfirmed_interrupt_does_not_claim_success(self):
-        adapter = Adapter(confirmed=False)
+        adapter = Adapter(confirmed="unconfirmed")
 
         outcome = await interrupt_for(self.attachment, adapter, pending=self.pending)
 
@@ -127,6 +137,18 @@ class InterruptPolicyTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("antigravity", outcome.notice)
         self.assertIn("delivered as an ordinary mention", outcome.notice)
 
+    async def test_only_the_declared_status_claims_an_interruption(self):
+        # An adapter written against an older bool contract, or one that
+        # returns something unexpected, must not be read as "a turn was
+        # stopped". Understating is the safe direction.
+        for value in (True, False, None, "yes", 1):
+            with self.subTest(returned=value):
+                outcome = await interrupt_for(
+                    self.attachment, Adapter(confirmed=value), pending=self.pending
+                )
+                self.assertFalse(outcome.confirmed)
+                self.assertIn("did not confirm", outcome.notice)
+
     async def test_a_failing_interrupt_is_reported_rather_than_raised(self):
         outcome = await interrupt_for(self.attachment, Adapter(raises=True), pending=self.pending)
 
@@ -140,7 +162,7 @@ class InterruptPolicyTest(unittest.IsolatedAsyncioTestCase):
         async def slow():
             adapter.calls += 1
             await released.wait()
-            return True
+            return "interrupted"
 
         adapter.interrupt = slow
         first = asyncio.create_task(
@@ -185,7 +207,7 @@ class InterruptPolicyTest(unittest.IsolatedAsyncioTestCase):
             async def slow():
                 adapter.calls += 1
                 await gate.wait()
-                return True
+                return "interrupted"
 
             adapter.interrupt = slow
             return adapter, gate
@@ -238,10 +260,26 @@ def notice(offset: float = 0.0, step: int = 1) -> dict:
             "content": "Error: The stream was interrupted. Please continue the task."}
 
 
+class NoTurnState:
+    """An adapter that never tracks turns, so its state is simply unknown."""
+
+    def __init__(self):
+        self.written = []
+        self.interrupt_confirmed = asyncio.Event()
+        self.interrupt_since = None
+        self.interrupt_records_used = set()
+
+    def alive(self):
+        return True
+
+    def write_terminal(self, data):
+        self.written.append(data)
+
+
 class FakePty:
     """The adapter surface `interrupt()` touches, with a transcript tail."""
 
-    def __init__(self, alive=True, turn_open=False):
+    def __init__(self, alive=True, turn_open=True):
         self.alive_flag = alive
         self.written = []
         self.interrupt_confirmed = asyncio.Event()
@@ -286,11 +324,13 @@ class AntigravityInterruptTest(unittest.IsolatedAsyncioTestCase):
         async def confirm():
             await asyncio.sleep(0)
             pty.tail(notice())
+            # Both boundaries: the notice, then the turn actually ending.
+            pty._turn_open = False
 
         asyncio.create_task(confirm())
-        confirmed = await antigravity_interrupt(pty, timeout=1, settle_timeout=1)
+        status = await antigravity_interrupt(pty, timeout=1, settle_timeout=1)
 
-        self.assertTrue(confirmed)
+        self.assertEqual(status, "interrupted")
         self.assertEqual(pty.written, [ESCAPE])
 
     async def test_a_notice_from_moments_earlier_does_not_confirm_this_esc(self):
@@ -334,9 +374,9 @@ class AntigravityInterruptTest(unittest.IsolatedAsyncioTestCase):
             pty.tail(notice(offset=-600))
 
         asyncio.create_task(replay_stale())
-        confirmed = await antigravity_interrupt(pty, timeout=0.2, settle_timeout=1)
+        status = await antigravity_interrupt(pty, timeout=0.2, settle_timeout=1)
 
-        self.assertFalse(confirmed)
+        self.assertEqual(status, "unconfirmed")
         self.assertFalse(pty.interrupt_confirmed.is_set())
 
     async def test_a_notice_without_a_usable_timestamp_does_not_confirm(self):
@@ -361,9 +401,9 @@ class AntigravityInterruptTest(unittest.IsolatedAsyncioTestCase):
             pty.tail(notice())
 
         asyncio.create_task(confirm())
-        confirmed = await antigravity_interrupt(pty, timeout=1, settle_timeout=0.15)
+        status = await antigravity_interrupt(pty, timeout=1, settle_timeout=0.15)
 
-        self.assertFalse(confirmed, "the turn never closed")
+        self.assertEqual(status, "unconfirmed", "the turn never closed")
 
     async def test_a_turn_closing_after_the_notice_completes_the_confirmation(self):
         pty = FakePty(turn_open=True)
@@ -375,31 +415,116 @@ class AntigravityInterruptTest(unittest.IsolatedAsyncioTestCase):
             pty._turn_open = False
 
         asyncio.create_task(confirm_then_close())
-        confirmed = await antigravity_interrupt(pty, timeout=1, settle_timeout=2)
+        status = await antigravity_interrupt(pty, timeout=1, settle_timeout=2)
 
-        self.assertTrue(confirmed)
+        self.assertEqual(status, "interrupted")
 
     async def test_a_keystroke_alone_is_not_a_confirmation(self):
         pty = FakePty()
 
-        confirmed = await antigravity_interrupt(pty, timeout=0.05)
+        status = await antigravity_interrupt(pty, timeout=0.05)
 
-        self.assertFalse(confirmed)
+        self.assertEqual(status, "unconfirmed")
         self.assertEqual(pty.written, [ESCAPE], "Esc was sent; only the receipt is missing")
 
     async def test_a_dead_process_is_not_typed_at(self):
         pty = FakePty(alive=False)
 
-        self.assertFalse(await antigravity_interrupt(pty, timeout=0.05))
+        self.assertEqual(await antigravity_interrupt(pty, timeout=0.05), "unconfirmed")
         self.assertEqual(pty.written, [])
 
     async def test_a_stale_confirmation_cannot_satisfy_the_next_interrupt(self):
         pty = FakePty()
         pty.interrupt_confirmed.set()
 
-        confirmed = await antigravity_interrupt(pty, timeout=0.05)
+        status = await antigravity_interrupt(pty, timeout=0.05)
 
-        self.assertFalse(confirmed, "each interrupt waits for its own record")
+        self.assertEqual(status, "unconfirmed", "each interrupt waits for its own record")
+
+
+class IdleFastPathTest(unittest.IsolatedAsyncioTestCase):
+    """A bang at a process with no running turn must not cost a timeout.
+
+    Measured on the live line on 2026-09-09: `@!gemini-flash` was sent two
+    seconds after that process's turn had already closed. Esc cancelled
+    nothing, Antigravity wrote no notice, and the message was held for the full
+    ten-second confirmation timeout before being delivered.
+    """
+
+    def test_only_a_positive_closed_counts_as_closed(self):
+        # Three states. "No idea" is not "idle": assuming so would decline to
+        # interrupt a process that was working.
+        self.assertTrue(turn_is_closed(FakePty(turn_open=False)))
+        self.assertFalse(turn_is_closed(FakePty(turn_open=True)))
+        self.assertFalse(turn_is_closed(NoTurnState()))
+
+    async def test_a_closed_turn_is_answered_without_touching_the_pty(self):
+        pty = FakePty(turn_open=False)
+
+        status = await antigravity_interrupt(pty, timeout=30, settle_timeout=30)
+
+        self.assertEqual(status, "idle")
+        self.assertEqual(pty.written, [], "Esc cancels nothing when nothing is running")
+        self.assertIsNone(pty.interrupt_since, "no boundary is taken for a keystroke never sent")
+
+    async def test_the_idle_answer_does_not_wait(self):
+        # The generous timeouts above would dominate the runtime if the fast
+        # path were not taken; this pins that it returns promptly.
+        pty = FakePty(turn_open=False)
+
+        started = time.monotonic()
+        await antigravity_interrupt(pty, timeout=30, settle_timeout=30)
+
+        self.assertLess(time.monotonic() - started, 1.0)
+
+    async def test_an_open_turn_still_gets_the_keystroke(self):
+        pty = FakePty(turn_open=True)
+
+        async def confirm_then_close():
+            await asyncio.sleep(0)
+            pty.tail(notice())
+            await asyncio.sleep(0.05)
+            pty._turn_open = False
+
+        asyncio.create_task(confirm_then_close())
+        status = await antigravity_interrupt(pty, timeout=1, settle_timeout=2)
+
+        self.assertEqual(status, "interrupted")
+        self.assertEqual(pty.written, [ESCAPE])
+
+    async def test_an_unknown_turn_state_is_never_reported_as_a_closed_turn(self):
+        # A notice proves Esc landed; it does not prove the composer is free.
+        # An adapter with no turn state must time out unconfirmed rather than
+        # letting the notice alone stand for closure.
+        pty = NoTurnState()
+
+        async def confirm():
+            await asyncio.sleep(0)
+            pty.interrupt_confirmed.set()
+
+        asyncio.create_task(confirm())
+        status = await antigravity_interrupt(pty, timeout=1, settle_timeout=0.15)
+
+        self.assertEqual(status, "unconfirmed")
+        self.assertEqual(pty.written, [ESCAPE])
+
+    async def test_an_unknown_turn_state_still_gets_the_keystroke(self):
+        # Fail towards trying: an adapter that cannot say is not an adapter
+        # saying "idle".
+        pty = NoTurnState()
+
+        status = await antigravity_interrupt(pty, timeout=0.05, settle_timeout=0.05)
+
+        self.assertEqual(status, "unconfirmed")
+        self.assertEqual(pty.written, [ESCAPE])
+
+    async def test_a_dead_process_is_unconfirmed_rather_than_idle(self):
+        # It may well have been mid-turn when it died; "idle" would be a claim
+        # about its work, not about its absence.
+        pty = FakePty(alive=False, turn_open=False)
+
+        self.assertEqual(await antigravity_interrupt(pty, timeout=0.05), "unconfirmed")
+        self.assertEqual(pty.written, [])
 
 
 if __name__ == "__main__":
