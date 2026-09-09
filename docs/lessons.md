@@ -794,10 +794,13 @@ written to a new transcript. The terminal showed the work; structured relay
 did not.
 
 The pinned `--log-file` is the only attachment-specific identity. Resume
-records the log's size at activation and waits for a `Created conversation`
-line in the bytes after that mark. The stored session is never used to pick
-the tailed file. `_fresh` still drops pre-spawn records on whichever
-transcript that id locates.
+records size and inode **before** `super().start()` spawns the CLI, then waits
+for a `Created conversation` line after that mark. A mark taken in `_run()`
+is too late: a fast CLI can write the new id before `_run` starts, and
+discovery skips it forever. A truncated or replaced log (shorter, or a new
+inode) resets the offset to zero so the old byte position cannot hide the
+new activation. `_fresh` still drops pre-spawn records on the discovered
+transcript.
 
 | DO | DO NOT |
 | --- | --- |

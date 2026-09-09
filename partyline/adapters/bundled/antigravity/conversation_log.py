@@ -18,12 +18,32 @@ from pathlib import Path
 
 CREATED = re.compile(r"Created conversation ([0-9a-fA-F-]{36})")
 
+LogMark = tuple[int, int]
 
-def log_size(path: Path) -> int:
+
+def log_mark(path: Path) -> LogMark:
+    """Size and inode before this activation may write. Missing file is (0, 0)."""
     try:
-        return path.stat().st_size
+        info = path.stat()
+    except OSError:
+        return (0, 0)
+    return (info.st_size, info.st_ino)
+
+
+def suffix_offset(path: Path, mark: LogMark) -> int:
+    """Byte offset of this activation's writes, or 0 if the log was replaced.
+
+    A truncated or replaced file can be shorter than the remembered offset;
+    seeking there would skip a new ``Created conversation`` at the start.
+    """
+    size, inode = mark
+    try:
+        info = path.stat()
     except OSError:
         return 0
+    if info.st_ino != inode or info.st_size < size:
+        return 0
+    return size
 
 
 def conversation_from_log(path: Path, *, after: int = 0) -> str | None:
