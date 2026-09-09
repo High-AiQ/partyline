@@ -8,6 +8,7 @@ import logging
 import os
 from dataclasses import dataclass
 
+from . import offloaded_prompt
 from .transcript import user_input
 
 # Receipt diagnostics. The unresolved failure is an ordering question — which
@@ -133,6 +134,26 @@ class WakeReceipts:
         adapter._silent_until_wake = False
         return False
 
+    def _full_content(self, adapter, prompt_index: int, content: str) -> str:
+        """Replace an offloaded preview with the text the session recorded.
+
+        Grok stores a large paste as a truncated preview plus a pointer to
+        ``prompts/prompt_<ordinal>.txt``; the preview cannot equal the digest,
+        so a delivered wake went uncredited. Resolution is confined to that one
+        session-owned file for that one ordinal — see ``offloaded_prompt``.
+        Anything unresolvable keeps the preview and so credits nothing.
+        """
+        if not offloaded_prompt.is_offloaded(content):
+            return content
+        getter = getattr(adapter, "_transcript", None)
+        transcript = getter() if callable(getter) else None
+        resolved = offloaded_prompt.resolve(content, prompt_index, transcript)
+        logger.info(
+            "wake receipt: %s record %s offloaded outcome=%s",
+            _who(adapter), prompt_index, "unresolved" if resolved is None else "resolved",
+        )
+        return content if resolved is None else resolved
+
     async def observe(self, adapter, record: object) -> None:
         parsed = user_input(record)
         if parsed is None:
@@ -150,6 +171,7 @@ class WakeReceipts:
             )
             return
         self.prompt_index = prompt_index
+        content = self._full_content(adapter, prompt_index, content)
         matched_index: int | None = None
         for index, wake in enumerate(self.pending):
             if (
