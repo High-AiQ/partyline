@@ -388,7 +388,16 @@ def capture_all(out_dir="/tmp/partyline-ui", *, freeze_animations=False) -> list
         composer.type("@")
         page.wait_for_selector("#mentionPop .opt")
         ui.shot("13-mention-popover")
+
+        # The same list one keystroke later. `@!` is an interrupt-and-send, and
+        # the affordance has to survive the bang rather than vanish with it —
+        # the token used to stop matching at `!`, which closed the popover.
+        composer.type("!")
+        page.wait_for_selector("#mentionPop.interrupting .opt")
+        page.wait_for_timeout(400)  # let the one-shot rattle settle before the shot
+        ui.shot("13b-mention-popover-interrupt")
         page.keyboard.press("Escape")
+        composer.fill("")
 
         # ── narrow ──
         # Last, and in the same session: switching the viewport is one-way for
@@ -400,6 +409,16 @@ def capture_all(out_dir="/tmp/partyline-ui", *, freeze_animations=False) -> list
         page.set_viewport_size(NARROW_VIEWPORT)
         page.wait_for_timeout(250)
         ui.shot("14-narrow-line")
+
+        # The interrupt list on a phone: 230px of popover inside 390px of
+        # screen, with a banner that must not wrap into the rows.
+        page.locator("#input").fill("")
+        page.locator("#input").click()
+        page.keyboard.type("@!")
+        page.wait_for_selector("#mentionPop.interrupting .opt")
+        page.wait_for_timeout(400)
+        ui.shot("14b-narrow-mention-interrupt")
+        page.keyboard.press("Escape")
 
         page.locator(".drawer-toggle.lines").click()
         page.wait_for_timeout(350)
