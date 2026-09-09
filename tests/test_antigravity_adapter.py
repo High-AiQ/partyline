@@ -339,6 +339,124 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         adapter.send_keys.assert_not_awaited()
         self.assertTrue(await adapter.wait_startup_delivery_received())
 
+    async def test_a_declared_truncated_record_settles_the_startup_receipt(self):
+        """Task 172: the CLI keeps ~4 KB and says so; delivery still happened.
+
+        The shape is the real one from `gemini-flash` step 223 — verbatim head,
+        `<truncated N bytes>` in the middle, a re-appended closing envelope so
+        it reads as intact, and `truncated_fields: ["content"]`. Whole-digest
+        containment can never match it, so before this the startup receipt
+        timed out on every continuation over the cap while ordinary relay
+        worked perfectly.
+        """
+        adapter = self.make(resume=True, cli_session=CONV_ID)
+        adapter.spawned_at = time.time()
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(adapter.spawned_at + 1))
+        head = "[greg]: " + "x" * 4000
+        adapter._startup_prompt = f"{head}\n[astra]: {'y' * 4000}\nnonce-abc"
+        record = json.loads(step(
+            1, "USER_EXPLICIT", "USER_INPUT",
+            f"<USER_REQUEST>\n{head}\n<truncated 3206 bytes>\ncontinue\n"
+            "</USER_REQUEST>\n<ADDITIONAL_METADATA>\nlocal time\n</ADDITIONAL_METADATA>",
+            created=now, truncated_fields=["content"],
+        ))
+
+        await adapter._settle_user_input_record(record, record["content"])
+
+        self.assertTrue(await adapter.wait_startup_delivery_received())
+
+    async def test_a_truncated_head_that_is_not_a_prefix_settles_nothing(self):
+        """The surviving head is verbatim, so it must match exactly."""
+        adapter = self.make(resume=True, cli_session=CONV_ID)
+        adapter.spawned_at = time.time()
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(adapter.spawned_at + 1))
+        adapter._startup_prompt = "[greg]: " + "x" * 4000 + " nonce-abc"
+        record = json.loads(step(
+            1, "USER_EXPLICIT", "USER_INPUT",
+            "<USER_REQUEST>\n[greg]: " + "z" * 4000 + "\n<truncated 900 bytes>\n"
+            "</USER_REQUEST>",
+            created=now, truncated_fields=["content"],
+        ))
+
+        await adapter._settle_user_input_record(record, record["content"])
+
+        self.assertFalse(adapter._startup_delivery.is_set())
+
+    async def test_a_truncated_head_too_short_to_identify_settles_nothing(self):
+        adapter = self.make(resume=True, cli_session=CONV_ID)
+        adapter.spawned_at = time.time()
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(adapter.spawned_at + 1))
+        adapter._startup_prompt = "[greg]: hello" + " x" * 4000
+        record = json.loads(step(
+            1, "USER_EXPLICIT", "USER_INPUT",
+            "<USER_REQUEST>\n[greg]: hello\n<truncated 9000 bytes>\n</USER_REQUEST>",
+            created=now, truncated_fields=["content"],
+        ))
+
+        await adapter._settle_user_input_record(record, record["content"])
+
+        self.assertFalse(adapter._startup_delivery.is_set())
+
+    async def test_an_undeclared_record_still_requires_the_whole_digest(self):
+        """Without the vendor's declaration, a partial record proves nothing."""
+        adapter = self.make(resume=True, cli_session=CONV_ID)
+        adapter.spawned_at = time.time()
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(adapter.spawned_at + 1))
+        head = "[greg]: " + "x" * 4000
+        adapter._startup_prompt = f"{head} and the rest that was cut"
+        record = json.loads(step(
+            1, "USER_EXPLICIT", "USER_INPUT",
+            f"<USER_REQUEST>\n{head}\n<truncated 40 bytes>\n</USER_REQUEST>",
+            created=now,
+        ))
+
+        await adapter._settle_user_input_record(record, record["content"])
+
+        self.assertFalse(adapter._startup_delivery.is_set())
+
+    async def test_a_declaration_without_a_marker_settles_nothing(self):
+        """Declared truncated, but no `<truncated N bytes>` to bound the head.
+
+        Then nothing in the record is known to be verbatim, so there is no
+        prefix to trust and the receipt stays unproven.
+        """
+        adapter = self.make(resume=True, cli_session=CONV_ID)
+        adapter.spawned_at = time.time()
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(adapter.spawned_at + 1))
+        head = "[greg]: " + "x" * 4000
+        adapter._startup_prompt = f"{head} and a tail that was cut"
+        # No closing envelope either, so the *only* thing standing between
+        # this record and a false settlement is the missing marker: the head
+        # here is a genuine prefix of the digest.
+        record = json.loads(step(
+            1, "USER_EXPLICIT", "USER_INPUT", f"<USER_REQUEST>\n{head}",
+            created=now, truncated_fields=["content"],
+        ))
+
+        await adapter._settle_user_input_record(record, record["content"])
+
+        self.assertFalse(adapter._startup_delivery.is_set())
+
+    async def test_a_truncated_record_also_settles_an_outstanding_pasted_wake(self):
+        """The same cap defeats ordinary wakes, which are then re-sent."""
+        adapter = self.make(resume=True, cli_session=CONV_ID)
+        adapter.spawned_at = time.time()
+        adapter.send_keys = AsyncMock()
+        digest = "[greg]: " + "x" * 4000 + "\n[astra]: tail that was cut"
+        adapter._outstanding = [(digest, time.time() - 5, (41,), False)]
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time()))
+        record = json.loads(step(
+            1, "USER_EXPLICIT", "USER_INPUT",
+            "<USER_REQUEST>\n[greg]: " + "x" * 4000 + "\n<truncated 30 bytes>\n"
+            "</USER_REQUEST>",
+            created=now, truncated_fields=["content"],
+        ))
+
+        await adapter._settle_user_input_record(record, record["content"])
+
+        self.assertEqual(adapter._outstanding, [], "the wake was proven, not re-sent")
+        adapter.send_keys.assert_not_awaited()
+
     async def test_resume_tails_the_conversation_this_log_created_not_cli_session(self):
         """Report 22: agy opened a new conversation; the adapter tailed the old one.
 
