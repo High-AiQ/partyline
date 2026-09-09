@@ -88,7 +88,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
 
     def _remember_log_mark(self) -> None:
         if self._log_mark is None:
-            self._log_mark = log_mark(Path(self.log_path())) if self.resume else (0, 0)
+            self._log_mark = log_mark(Path(self.log_path())) if self.resume else (0, 0, b"")
 
     async def on_output(self, data: bytes):
         self._output_event.set()

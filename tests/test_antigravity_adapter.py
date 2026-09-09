@@ -387,6 +387,36 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(after, 0)
         self.assertEqual(conversation_log.conversation_from_log(path, after=after), new_id)
 
+    def test_same_inode_truncate_and_regrow_resets_the_offset(self):
+        """CLI truncates in place and writes past the old size before we poll."""
+        path = Path(self.log_root) / "agent-id.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "x" * 200 + f"\nCreated conversation {CONV_ID}\n",
+            encoding="utf-8",
+        )
+        mark = conversation_log.log_mark(path)
+        inode = path.stat().st_ino
+        new_id = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        grown = (
+            f"Created conversation {new_id}\n"
+            + "y" * (mark[0] + 50)
+        )
+        path.write_text(grown, encoding="utf-8")
+        self.assertEqual(path.stat().st_ino, inode)
+        self.assertGreaterEqual(path.stat().st_size, mark[0])
+        self.assertIsNone(
+            conversation_log.conversation_from_log(path, after=mark[0])
+        )
+        after = conversation_log.suffix_offset(path, mark)
+        self.assertEqual(after, 0)
+        self.assertEqual(
+            conversation_log.conversation_from_log(path, after=after), new_id
+        )
+        self.assertNotEqual(
+            conversation_log.conversation_from_log(path, after=after), CONV_ID
+        )
+
     async def test_run_retries_trust_prompt_then_reports_missing_conversation(self):
         adapter = self.make()
         adapter.proc = Process()

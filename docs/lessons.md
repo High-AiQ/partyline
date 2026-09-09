@@ -797,10 +797,11 @@ The pinned `--log-file` is the only attachment-specific identity. Resume
 records size and inode **before** `super().start()` spawns the CLI, then waits
 for a `Created conversation` line after that mark. A mark taken in `_run()`
 is too late: a fast CLI can write the new id before `_run` starts, and
-discovery skips it forever. A truncated or replaced log (shorter, or a new
-inode) resets the offset to zero so the old byte position cannot hide the
-new activation. `_fresh` still drops pre-spawn records on the discovered
-transcript.
+discovery skips it forever. A truncated or replaced log (shorter, a new inode, or the same inode
+rewritten past the old size so the remembered tail no longer matches)
+resets the offset to zero so the old byte position cannot hide the new
+activation. Discovery never falls back to `cli_session`. `_fresh` still
+drops pre-spawn records on the discovered transcript.
 
 | DO | DO NOT |
 | --- | --- |
