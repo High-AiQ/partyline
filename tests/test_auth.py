@@ -112,6 +112,9 @@ class MachineTokenTest(DbBackedTest):
         token = auth_store.ensure_api_token(self.db, "a1")
         principal = resolve_principal(self.db, token)
         self.assertEqual(("machine", "opus"), (principal.kind, principal.name))
+        self.assertEqual("line", principal.conv_id)
+        self.assertEqual("a1", principal.attachment_id)
+        self.assertFalse(principal.is_lead)
 
     def test_child_env_carries_the_token(self):
         token = auth_store.ensure_api_token(self.db, "a1")

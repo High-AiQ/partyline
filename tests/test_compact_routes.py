@@ -1,6 +1,10 @@
 """REST compact requests use manifest pastes and the shared idle gate."""
 
 import unittest
+import tempfile
+
+from partyline.db import Db
+from partyline.auth_guard import Principal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -60,7 +64,17 @@ class CompactRouteTest(unittest.IsolatedAsyncioTestCase):
             send_keys=AsyncMock(),
         )
         self.runtime.live["codex"] = adapter
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.runtime.db = Db(directory.name + "/test.db")
+        self.addCleanup(self.runtime.db.close)
+        self.runtime.db.create_conversation("line", "Line")
+        self.runtime.db.add_attachment("codex", "line", "codex", "fake", ["fake"], directory.name)
         app = FastAPI()
+        @app.middleware("http")
+        async def authenticate(request, call_next):
+            request.state.principal = Principal(kind="user", name="operator")
+            return await call_next(request)
         register_compact_route(app, self.runtime, self.presence)
 
         with TestClient(app) as client:

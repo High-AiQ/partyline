@@ -8,8 +8,10 @@ dead. Every assertion here is about *who* produced the signal as much as when.
 import asyncio
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+from partyline.auth_guard import Principal
 from partyline.presence import Presence
 
 
@@ -394,7 +396,10 @@ class SnapshotTest(unittest.IsolatedAsyncioTestCase):
                 await presence.finished("line", "also-busy")
                 await presence.started("another-line", "elsewhere")
 
-                detail = await server.conversation_detail("line")
+                request = SimpleNamespace(
+                    state=SimpleNamespace(principal=Principal(kind="user", name="greg"))
+                )
+                detail = await server.conversation_detail(request, "line")
                 self.assertEqual(detail["working"], ["busy"])
             finally:
                 server.runtime, server.presence, server.media = saved

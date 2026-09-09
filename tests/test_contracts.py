@@ -37,6 +37,7 @@ class ContractTest(unittest.TestCase):
                 "topic": "standing brief",
                 "archived_at": None,
                 "live_count": 0,
+                "parent_id": None,
             },
         )
 

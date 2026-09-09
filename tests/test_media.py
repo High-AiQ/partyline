@@ -15,16 +15,19 @@ from unittest import mock
 from io import BytesIO
 from pathlib import Path
 
+from types import SimpleNamespace
+
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from PIL import Image
 
 from partyline import auth_store, auth_tokens, media_files as files, media_images as images
-from partyline.auth_guard import install_auth_guard
+from partyline.auth_guard import Principal, install_auth_guard
 from partyline.db import Db
 from partyline.media import MediaError, MediaStore, media_root
-from partyline.media_routes import media_router
+from partyline.presence import Presence
 from partyline.runtime import ChatRuntime
+from partyline.media_routes import media_router
 
 
 def png(width=8, height=8, color=(200, 30, 30)) -> bytes:
@@ -543,8 +546,9 @@ class ServerWiringTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             db = Db(f"{directory}/partyline.db")
             store = MediaStore(db, Path(directory) / "media")
-            original_runtime, original_media = server.runtime, server.media
-            server.runtime, server.media = ChatRuntime(db), store
+            runtime = ChatRuntime(db)
+            original = (server.runtime, server.media, server.presence)
+            server.runtime, server.media, server.presence = runtime, store, Presence(runtime)
             try:
                 db.create_conversation("line", "Line")
                 message = db.add_message("line", "opus", "agent", "look")
@@ -555,12 +559,15 @@ class ServerWiringTest(unittest.TestCase):
                     "T",
                     None,
                 )
-                detail = asyncio.run(server.conversation_detail("line"))
+                request = SimpleNamespace(
+                    state=SimpleNamespace(principal=Principal(kind="user", name="opus"))
+                )
+                detail = asyncio.run(server.conversation_detail(request, "line"))
                 self.assertEqual(detail["messages"][0]["files"][0].title, "T")
                 with self.assertRaises(HTTPException):
-                    asyncio.run(server.conversation_detail("missing"))
+                    asyncio.run(server.conversation_detail(request, "missing"))
             finally:
-                server.runtime, server.media = original_runtime, original_media
+                server.runtime, server.media, server.presence = original
                 db.close()
 
 

@@ -4,9 +4,11 @@ import asyncio
 
 from fastapi import HTTPException
 
+from .agent_connection import provision_connection
 from .adapter_capabilities import adapter_completion
 from .attachment_view import attachment_response
 from .auth_store import ensure_api_token
+from .role_delivery import bind_role_delivery
 
 
 def prepare_attachment(att, runtime, tasks, hook_url, checkpoint):
@@ -14,7 +16,9 @@ def prepare_attachment(att, runtime, tasks, hook_url, checkpoint):
     att["api_token"] = ensure_api_token(runtime.db, att["id"])
     att["conv_name"], att["topic"] = conv["name"], conv["topic"]
     att["hook_url"] = hook_url(att["id"], att["runtime_owner"])
+    provision_connection(runtime.db.path, att)
     att["digest_rider"] = lambda: tasks.rider(att["conv_id"])
+    bind_role_delivery(runtime.db, att)
     att["fresh_checkpoint"] = checkpoint
 
 

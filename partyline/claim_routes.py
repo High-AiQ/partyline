@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 
 from .auth_guard import request_principal
+from .machine_scope import deny_unless
 from .claims import (
     Claim,
     ClaimConflict,
@@ -29,8 +30,7 @@ def claims_router(runtime) -> APIRouter:
     @router.post("/api/conversations/{conv_id}/claims", response_model=Claim)
     async def post_claim(request: Request, conv_id: str, body: ClaimIn):
         require_line(conv_id)
-        # The owner is the authenticated caller — a client-supplied owner
-        # would let any valid token claim paths as any handle.
+        deny_unless(runtime.db, request_principal(request), conv_id, "write")
         owner = request_principal(request).name
         try:
             return create_claim(runtime.db, conv_id, owner, body.paths)
@@ -45,8 +45,9 @@ def claims_router(runtime) -> APIRouter:
             ) from exc
 
     @router.get("/api/conversations/{conv_id}/claims", response_model=list[Claim])
-    async def get_claims(conv_id: str):
+    async def get_claims(request: Request, conv_id: str):
         require_line(conv_id)
+        deny_unless(runtime.db, request_principal(request), conv_id, "read")
         return list_claims(runtime.db, conv_id)
 
     @router.delete("/api/claims/{claim_id}", response_model=dict)
@@ -54,7 +55,12 @@ def claims_router(runtime) -> APIRouter:
         # Your own claims release freely. Releasing someone else's needs the
         # explicit ?force=true — a named override for stale locks (claims
         # also expire on their own), never an impersonated owner.
-        owner = None if force else request_principal(request).name
+        principal = request_principal(request)
+        row = runtime.db._exec("SELECT conv_id FROM claims WHERE id=?", (claim_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404)
+        deny_unless(runtime.db, principal, row["conv_id"], "close" if force else "write")
+        owner = None if force else principal.name
         try:
             gone = release_claim(runtime.db, claim_id, owner)
         except PermissionError as exc:

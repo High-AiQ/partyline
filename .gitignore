@@ -21,3 +21,6 @@ node_modules/
 .ui-baseline/
 .ui-current/
 .ui-baseline.lock
+
+# Per-attachment machine credentials beside the configured database.
+*.agent-connections/
