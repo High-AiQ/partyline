@@ -19,7 +19,7 @@ import asyncio
 import logging
 import time
 
-from . import heartbeat, heartbeat_snapshot, heartbeat_wake
+from . import heartbeat, heartbeat_files, heartbeat_snapshot, heartbeat_wake
 from .contracts import MessageEvent
 from .message_contracts import MessageResponse
 
@@ -212,16 +212,22 @@ async def tick(runtime, *, now: float | None = None) -> int | None:
     snapshot = heartbeat_snapshot.build(
         runtime.db, row["conv_id"], row["since_id"], row["attachment_id"]
     )
+    digest = heartbeat_snapshot.canonical_hash(snapshot)
+    # Written before the reminder is committed, so the pointer never names a
+    # file that is not there yet. If the post is then refused, the file is an
+    # orphan holding exactly the bytes the next identical snapshot would write.
+    path = heartbeat_files.write(runtime.db.path, digest, snapshot)
     claimed = heartbeat_wake.post_due_reminder(
         runtime.db,
         moment,
         sender="system",
         snapshot=snapshot,
-        snapshot_hash=heartbeat_snapshot.canonical_hash(snapshot),
+        snapshot_hash=digest,
         body_for=lambda pending, delta: heartbeat.wake_body(
             owner["name"], pending["goal"]
-        ) + "\n" + heartbeat_snapshot.render(delta),
+        ) + "\n" + heartbeat_files.pointer(digest, delta, path),
     )
+    heartbeat_files.prune(runtime.db.path)
     if claimed is None:
         return None
     posted, generation, _snapshot = claimed

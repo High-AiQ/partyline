@@ -147,8 +147,19 @@ root line and its descendants since `since_id`: per line, the count of new
 non-system messages, who spoke, processes that are behind or not running
 (keyed by `attachment_id`, never handle — a replacement keeps the handle), open
 task count, and unacknowledged reports. No message bodies: the shape of
-activity, not its content. The same snapshot is readable any time at
-`GET /api/heartbeat/status`.
+activity, not its content. The wake itself carries only a pointer — a one-line count of lines with news,
+reports waiting, and processes behind, plus the snapshot's digest and path. The
+payload is written to `<database>/heartbeat/sha256-<digest>.json`, mode 0600,
+and fetched with `GET /api/heartbeat/snapshots/<digest>`; the live snapshot is
+readable any time at `GET /api/heartbeat/status`. Inlining the JSON put
+kilobytes into a room humans read, which was the first heartbeat's mistake at a
+different scale.
+
+The filename is the snapshot's own digest, so writing is idempotent, the
+pointer is self-verifying — fetch it, re-hash it, compare — and no string a
+caller supplies ever reaches a path: the digest is matched against
+`sha256:[0-9a-f]{16}` *before* it becomes a filename. Writes rename into place,
+because another process reads these files.
 
 Message ids do the change detection because they are monotonic and survive
 restarts. The hash has exactly one job — deciding whether this snapshot equals
