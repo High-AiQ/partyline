@@ -6,6 +6,7 @@ shortens the interval to prove it faster is testing a configuration nobody
 runs.
 """
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -1340,6 +1341,63 @@ class SnapshotFileTest(HeartbeatFixture):
                 self.assertIsNone(heartbeat_files.read(self.db.path, hostile))
                 with self.assertRaises(ValueError):
                     heartbeat_files.write(self.db.path, hostile, {"v": 1})
+
+    async def test_the_file_is_private_from_the_instant_it_appears(self):
+        """Grok's residual: a chmod after the rename is a window, however brief.
+
+        The rename is what publishes the file, so the mode has to be right
+        before it — another process may look at any instant, which is the whole
+        reason the write renames into place.
+        """
+        snapshot = heartbeat_snapshot.build(self.db, ROOT, 0, OWNER)
+        digest = heartbeat_snapshot.canonical_hash(snapshot)
+        original = os.umask(0)
+        try:
+            path = heartbeat_files.write(self.db.path, digest, snapshot)
+        finally:
+            os.umask(original)
+
+        self.assertEqual(
+            path.stat().st_mode & 0o777, 0o600,
+            "a permissive umask must not widen a published snapshot",
+        )
+
+    async def test_the_snapshot_directory_is_private_too(self):
+        """A listing of digests and mtimes is a map of when this tree was busy."""
+        snapshot = heartbeat_snapshot.build(self.db, ROOT, 0, OWNER)
+        heartbeat_files.write(
+            self.db.path, heartbeat_snapshot.canonical_hash(snapshot), snapshot
+        )
+
+        root = heartbeat_files.snapshot_root(self.db.path)
+
+        self.assertEqual(root.stat().st_mode & 0o777, 0o700)
+
+    async def test_crash_leftovers_are_collected(self):
+        """A `.partial` can only come from a write that died; nothing finishes it."""
+        root = heartbeat_files.snapshot_root(self.db.path)
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "sha256-0000000000000000.json.partial").write_text("{", encoding="utf-8")
+
+        removed = heartbeat_files.prune(self.db.path)
+
+        self.assertEqual(removed, 1)
+        self.assertEqual(list(root.glob("*.partial")), [])
+
+    async def test_a_failed_write_leaves_nothing_behind(self):
+        class Unserializable:
+            pass
+
+        snapshot = heartbeat_snapshot.build(self.db, ROOT, 0, OWNER)
+        digest = heartbeat_snapshot.canonical_hash(snapshot)
+
+        with self.assertRaises(TypeError):
+            heartbeat_files.write(
+                self.db.path, digest, {**snapshot, "bad": Unserializable()}
+            )
+
+        root = heartbeat_files.snapshot_root(self.db.path)
+        self.assertEqual(list(root.glob("*.partial")), [], "the temp file was removed")
 
     async def test_a_partial_write_is_never_visible(self):
         """Another process fetches this file; it must never see half of one."""
