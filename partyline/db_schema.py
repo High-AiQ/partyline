@@ -202,4 +202,31 @@ MIGRATIONS = [
       created_at REAL NOT NULL
     )""",
     "ALTER TABLE lead_heartbeat ADD COLUMN generation INTEGER NOT NULL DEFAULT 1",
+    # The delta the monitor reports, and what lets it stay quiet. `since_id` is
+    # the message boundary already reported; `snapshot_hash` is the digest of
+    # the last posted snapshot, so an identical one can be skipped rather than
+    # spending the lead's turn on "nothing changed" — the failure that made the
+    # first heartbeat useless overnight. `quiet_wakes` counts those skips and is
+    # deliberately *not* part of the hash: a counter that changes every skip
+    # would guarantee a changed digest and defeat the whole mechanism.
+    "ALTER TABLE lead_heartbeat ADD COLUMN since_id INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE lead_heartbeat ADD COLUMN pending_since_id INTEGER",
+    "ALTER TABLE lead_heartbeat ADD COLUMN snapshot_hash TEXT",
+    "ALTER TABLE lead_heartbeat ADD COLUMN quiet_wakes INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE lead_heartbeat ADD COLUMN quiet_if_unchanged INTEGER NOT NULL DEFAULT 1",
+    # The task board was created on first use by `tasks.py`. The heartbeat
+    # snapshot reads it on every tick, including on an instance where nobody
+    # has touched a task yet, so it belongs in the migration history like every
+    # other table — and `docs/lessons.md` already records what running
+    # `executescript` per request does to a shared connection.
+    """CREATE TABLE IF NOT EXISTS tasks(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      conv_id TEXT NOT NULL,
+      body TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','done')),
+      owner TEXT,
+      created_at REAL NOT NULL,
+      updated_at REAL NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_tasks_conv ON tasks(conv_id, status, id)",
 ]

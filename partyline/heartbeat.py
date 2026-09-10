@@ -27,13 +27,11 @@ is always an explicit act, never a timer that quietly decided it was done.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
 
-from .db import Db, MessageRow
+from .db import Db
 from .hierarchy import lead_attachment, parent_id_of
-from .message_queries import as_message
 
-DEFAULT_INTERVAL = 300.0
+DEFAULT_INTERVAL = 900.0
 # A minute is the floor because the reminder competes with the lead's actual
 # turn; anything faster is a denial of service dressed as diligence. An hour is
 # the ceiling because past that the monitor cannot notice a stall worth
@@ -116,6 +114,7 @@ def enable(
     *,
     interval_seconds: float | None = None,
     goal: str | None = None,
+    quiet_if_unchanged: bool = True,
     now: float | None = None,
 ) -> dict:
     """Start or re-point the monitor at the caller's own attachment.
@@ -132,17 +131,26 @@ def enable(
     text = normalize_goal(goal)
     moment = time.time() if now is None else now
     with db.lock:
+        # Bootstrap the boundary to the present. Starting at zero would make
+        # the first wake a dump of the room's entire history, which is the
+        # opposite of a delta.
+        head = db.conn.execute("SELECT MAX(id) AS head FROM messages").fetchone()
+        since = (head["head"] if head else 0) or 0
         db.conn.execute(
             "INSERT INTO lead_heartbeat("
             "singleton,conv_id,attachment_id,interval_seconds,goal,enabled,"
-            "next_due_at,pending_message_id,generation,created_at)"
-            " VALUES(1,?,?,?,?,1,?,NULL,1,?)"
+            "next_due_at,pending_message_id,generation,created_at,"
+            "since_id,pending_since_id,snapshot_hash,quiet_wakes,quiet_if_unchanged)"
+            " VALUES(1,?,?,?,?,1,?,NULL,1,?,?,NULL,NULL,0,?)"
             " ON CONFLICT(singleton) DO UPDATE SET"
             " conv_id=excluded.conv_id, attachment_id=excluded.attachment_id,"
             " interval_seconds=excluded.interval_seconds, goal=excluded.goal,"
             " enabled=1, next_due_at=excluded.next_due_at, pending_message_id=NULL,"
-            " generation=lead_heartbeat.generation+1",
-            (conv_id, attachment_id, interval, text, moment + interval, moment),
+            " generation=lead_heartbeat.generation+1, since_id=excluded.since_id,"
+            " pending_since_id=NULL, snapshot_hash=NULL, quiet_wakes=0,"
+            " quiet_if_unchanged=excluded.quiet_if_unchanged",
+            (conv_id, attachment_id, interval, text, moment + interval, moment,
+             since, 1 if quiet_if_unchanged else 0),
         )
         db.conn.commit()
     return get(db)
@@ -189,6 +197,10 @@ def status(db: Db, *, now: float | None = None) -> dict:
             "seconds_until_due": None,
             "wake_pending": False,
             "pending_message_id": None,
+            "since_id": 0,
+            "snapshot_hash": None,
+            "quiet_wakes": 0,
+            "quiet_if_unchanged": True,
         }
     moment = time.time() if now is None else now
     pending = row["pending_message_id"]
@@ -204,95 +216,8 @@ def status(db: Db, *, now: float | None = None) -> dict:
         ),
         "wake_pending": pending is not None,
         "pending_message_id": pending,
+        "since_id": row["since_id"],
+        "snapshot_hash": row["snapshot_hash"],
+        "quiet_wakes": row["quiet_wakes"],
+        "quiet_if_unchanged": bool(row["quiet_if_unchanged"]),
     }
-
-
-def post_due_reminder(
-    db: Db, now: float, *, sender: str, body_for: Callable[[dict], str]
-) -> tuple[MessageRow, int] | None:
-    """Write the reminder and claim it as pending in one transaction.
-
-    This is the whole crash story. Posting first and marking pending second
-    leaves a window where a restart sees no pending wake and posts a duplicate;
-    marking first and posting second leaves a pending reference to a message
-    that does not exist, which mutes the monitor permanently. Doing both in one
-    transaction removes the choice: after a crash the reminder either exists
-    and is pending, or neither happened. Delivery of a committed message is
-    then freely retryable, because the cursor decides when it is settled.
-
-    `body_for` receives the committed row, so the goal that goes into the text
-    is the one this generation actually holds — not one read a moment earlier.
-    The generation is returned alongside the message: delivery happens after
-    this transaction, and must be able to prove it is still delivering for the
-    configuration that asked.
-
-    The conditions are also the duplicate guard: concurrent ticks all run this,
-    and SQLite lets exactly one of them past ``pending_message_id IS NULL``.
-    """
-    moment = time.time() if now is None else now
-    with db.lock, db.conn:
-        row = db.conn.execute(
-            "SELECT * FROM lead_heartbeat WHERE singleton=1"
-        ).fetchone()
-        if row is None:
-            return None
-        row = dict(row)
-        if not row["enabled"] or row["pending_message_id"] is not None:
-            return None
-        if row["next_due_at"] > moment:
-            return None
-        body = body_for(row)
-        cursor = db.conn.execute(
-            "INSERT INTO messages(conv_id,sender,sender_type,body,created_at)"
-            " VALUES(?,?,?,?,?)",
-            (row["conv_id"], sender, "system", body, moment),
-        )
-        message_id = cursor.lastrowid
-        # A suspended host can leave the mark many intervals in the past. One
-        # reminder is owed, not one per interval missed.
-        due = row["next_due_at"] + row["interval_seconds"]
-        if due <= moment:
-            due = moment + row["interval_seconds"]
-        changed = db.conn.execute(
-            "UPDATE lead_heartbeat SET pending_message_id=?, next_due_at=?"
-            " WHERE singleton=1 AND generation=? AND pending_message_id IS NULL",
-            (message_id, due, row["generation"]),
-        )
-        if changed.rowcount != 1:  # pragma: no cover - the lock excludes it
-            raise RuntimeError("heartbeat row changed inside its own transaction")
-    return (
-        as_message(
-            MessageRow(
-                id=message_id,
-                conv_id=row["conv_id"],
-                sender=sender,
-                sender_type="system",
-                body=body,
-                created_at=moment,
-            )
-        ),
-        row["generation"],
-    )
-
-
-def settle_delivered(db: Db, *, now: float | None = None) -> dict | None:
-    """Clear the pending wake once its owner's cursor has passed the message.
-
-    Delivery is read from the attachment's own durable cursor, which only
-    advances when a message has actually been handed over. That is why a
-    paste, a broadcast, or elapsed time cannot settle a wake here.
-    """
-    row = get(db)
-    if row is None or row["pending_message_id"] is None:
-        return row
-    att = db.get_attachment(row["attachment_id"])
-    if att is None or att["last_seen"] < row["pending_message_id"]:
-        return row
-    with db.lock:
-        db.conn.execute(
-            "UPDATE lead_heartbeat SET pending_message_id=NULL"
-            " WHERE singleton=1 AND pending_message_id=?",
-            (row["pending_message_id"],),
-        )
-        db.conn.commit()
-    return get(db)

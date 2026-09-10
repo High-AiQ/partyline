@@ -105,7 +105,7 @@ operator needs when the owner is wedged, but has no attachment to own one.
 
 | Field | Meaning |
 | --- | --- |
-| `interval_seconds` | 60–3600, default 300 |
+| `interval_seconds` | 60–3600, default 900 (fifteen minutes) |
 | `goal` | what the manager is seeing through; persisted, shown in the reminder |
 | `next_due_at` / `seconds_until_due` | when the next reminder is due |
 | `wake_pending` | a reminder has been posted and not yet delivered |
@@ -135,3 +135,30 @@ no longer anyone's outstanding wake and settles nothing, and the tick that
 wrote it will not deliver it; but like any other message on the line it will be
 included the next time that manager's cursor advances. Reminders are written to
 be harmless when read late: they name a goal and grant nothing.
+
+### The heartbeat carries a delta, and usually says nothing
+
+The first version repeated the manager's own goal every interval. Overnight it
+woke its lead sixty times and every reply was "no action taken" — a monitor
+that reports the clock trains its reader to ignore it.
+
+A wake is now earned by the room's state. Each tick builds a snapshot of the
+root line and its descendants since `since_id`: per line, the count of new
+non-system messages, who spoke, processes that are behind or not running
+(keyed by `attachment_id`, never handle — a replacement keeps the handle), open
+task count, and unacknowledged reports. No message bodies: the shape of
+activity, not its content. The same snapshot is readable any time at
+`GET /api/heartbeat/status`.
+
+Message ids do the change detection because they are monotonic and survive
+restarts. The hash has exactly one job — deciding whether this snapshot equals
+the last posted one — and two fields are kept out of it deliberately:
+`head_id`, which moves for unrelated lines and for the monitor's own reminder,
+and `quiet_wakes`, which increments on every skip. Hashing either guarantees a
+changed digest and suppression never fires.
+
+| DO | DO NOT |
+| --- | --- |
+| Let a quiet skip advance `next_due_at` only — the delta stays owed | Advance `since_id` on a wake nobody read |
+| Exclude the monitor's own reminders from the delta | Let the heartbeat become permanently actionable because of itself |
+| Break the quiet when a line holds open tasks and shows nothing for several checks | Treat every silence as healthy — that is the stall this exists to catch |
