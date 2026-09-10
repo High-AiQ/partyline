@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from partyline import (auth_store, auth_tokens, heartbeat, heartbeat_scheduler,
-                       heartbeat_snapshot, heartbeat_wake)
+                       heartbeat_files, heartbeat_snapshot, heartbeat_wake)
 from partyline.auth_guard import install_auth_guard
 from partyline.auth_store import ensure_api_token
 from partyline.db import Db
@@ -82,6 +82,14 @@ class HeartbeatFixture(unittest.IsolatedAsyncioTestCase):
         """
         kwargs.setdefault("quiet_if_unchanged", False)
         return heartbeat.enable(self.db, ROOT, OWNER, now=self.now, **kwargs)
+
+    def saved(self, message_id: int) -> dict:
+        """The snapshot the reminder pointed at, fetched the way a lead would."""
+        body = self.body(message_id)
+        digest = [word for word in body.split() if word.startswith("sha256:")][0]
+        payload = heartbeat_files.read(self.db.path, digest)
+        self.assertIsNotNone(payload, f"the pointer named a missing file: {digest}")
+        return payload
 
     def body(self, message_id: int) -> str:
         return [m for m in self.db.list_messages(ROOT) if m["id"] == message_id][0]["body"]
@@ -1064,8 +1072,8 @@ class QuietSnapshotTest(HeartbeatFixture):
         posted = await self.tick(heartbeat.DEFAULT_INTERVAL)
 
         self.assertIsNotNone(posted)
-        self.assertIn('"attachment_id":"peer"', self.body(posted))
-        self.assertIn('"unread":1', self.body(posted))
+        agent = self.saved(posted)["lines"][0]["agents"][0]
+        self.assertEqual((agent["attachment_id"], agent["unread"]), ("peer", 1))
 
     async def test_new_speech_earns_exactly_one_wake(self):
         self.enable()
@@ -1075,8 +1083,9 @@ class QuietSnapshotTest(HeartbeatFixture):
         posted = await self.tick(heartbeat.DEFAULT_INTERVAL)
 
         self.assertIsNotNone(posted)
-        self.assertIn('"new":1', self.body(posted))
-        self.assertIn('"senders":["greg"]', self.body(posted))
+        self.assertIn("1 line(s) with new messages", self.body(posted))
+        line = self.saved(posted)["lines"][0]
+        self.assertEqual((line["new"], line["senders"]), (1, ["greg"]))
         self.deliver(posted)
         self.assertIsNone(
             await self.tick(heartbeat.DEFAULT_INTERVAL),
@@ -1144,7 +1153,8 @@ class QuietSnapshotTest(HeartbeatFixture):
         posted = await self.tick(heartbeat.DEFAULT_INTERVAL)
 
         self.assertIsNotNone(posted, "a waiting report is worth a wake")
-        self.assertIn('"reports":[{', self.body(posted))
+        self.assertIn("1 report(s) waiting", self.body(posted))
+        self.assertEqual(len(self.saved(posted)["reports"]), 1)
 
     async def test_a_behind_or_stopped_agent_is_actionable(self):
         self.enable()
@@ -1156,8 +1166,9 @@ class QuietSnapshotTest(HeartbeatFixture):
         posted = await self.tick(heartbeat.DEFAULT_INTERVAL)
 
         self.assertIsNotNone(posted, "a process nobody is feeding is news")
-        self.assertIn('"status":"detached"', self.body(posted))
-        self.assertIn('"attachment_id":"worker"', self.body(posted))
+        self.assertIn("1 process(es) behind", self.body(posted))
+        agent = self.saved(posted)["lines"][0]["agents"][0]
+        self.assertEqual((agent["attachment_id"], agent["status"]), ("worker", "detached"))
 
     async def test_agents_are_keyed_by_attachment_not_handle(self):
         """A replacement keeps the handle and is a different process."""
@@ -1255,3 +1266,150 @@ class SnapshotHashTest(HeartbeatFixture):
         )
 
         self.assertNotIn("a private instruction", rendered)
+
+
+class SnapshotFileTest(HeartbeatFixture):
+    """The delta lives in a file; the room sees one line about it.
+
+    Inlining the JSON was right about the information and wrong about the
+    delivery — it dumped kilobytes into a room humans read, which is the first
+    heartbeat's mistake one level up.
+    """
+
+    def enable(self, **kwargs):
+        kwargs.setdefault("quiet_if_unchanged", True)
+        return heartbeat.enable(self.db, ROOT, OWNER, now=self.now, **kwargs)
+
+    async def test_the_wake_carries_a_pointer_not_the_payload(self):
+        self.enable()
+        self.db.add_message(ROOT, "greg", "human", "a private instruction")
+
+        posted = await self.tick(heartbeat.DEFAULT_INTERVAL)
+        body = self.body(posted)
+
+        self.assertLess(len(body), 600, "the room gets a sentence, not a dump")
+        self.assertNotIn('"lines"', body, "no JSON payload in the message")
+        self.assertNotIn("a private instruction", body)
+        self.assertIn("sha256:", body)
+        self.assertEqual(self.saved(posted)["lines"][0]["new"], 1)
+
+    async def test_the_pointer_digest_verifies_the_file_it_names(self):
+        self.enable()
+        self.db.add_message(ROOT, "greg", "human", "news")
+        posted = await self.tick(heartbeat.DEFAULT_INTERVAL)
+
+        body = self.body(posted)
+        digest = [word for word in body.split() if word.startswith("sha256:")][0]
+
+        self.assertEqual(
+            heartbeat_snapshot.canonical_hash(self.saved(posted)), digest,
+            "a fetched snapshot re-hashes to the digest that named it",
+        )
+
+    async def test_an_identical_snapshot_reuses_one_file(self):
+        """The name is the content, so writing twice is writing once."""
+        snapshot = heartbeat_snapshot.build(self.db, ROOT, 0, OWNER)
+        digest = heartbeat_snapshot.canonical_hash(snapshot)
+
+        first = heartbeat_files.write(self.db.path, digest, snapshot)
+        second = heartbeat_files.write(self.db.path, digest, snapshot)
+
+        self.assertEqual(first, second)
+        self.assertEqual(
+            len(list(heartbeat_files.snapshot_root(self.db.path).glob("*.json"))), 1
+        )
+
+    async def test_a_snapshot_file_is_private_to_this_user(self):
+        snapshot = heartbeat_snapshot.build(self.db, ROOT, 0, OWNER)
+        digest = heartbeat_snapshot.canonical_hash(snapshot)
+
+        path = heartbeat_files.write(self.db.path, digest, snapshot)
+
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    async def test_no_caller_supplied_string_ever_becomes_a_path(self):
+        """The digest is validated before it is a filename, not after."""
+        for hostile in (
+            "sha256:../../../../etc/passwd",
+            "../../etc/passwd",
+            "sha256:" + "g" * 16,
+            "sha256:0123456789abcdef/../..",
+            "", "sha256:", "/etc/passwd",
+        ):
+            with self.subTest(hostile=hostile):
+                self.assertIsNone(heartbeat_files.read(self.db.path, hostile))
+                with self.assertRaises(ValueError):
+                    heartbeat_files.write(self.db.path, hostile, {"v": 1})
+
+    async def test_a_partial_write_is_never_visible(self):
+        """Another process fetches this file; it must never see half of one."""
+        snapshot = heartbeat_snapshot.build(self.db, ROOT, 0, OWNER)
+        digest = heartbeat_snapshot.canonical_hash(snapshot)
+        heartbeat_files.write(self.db.path, digest, snapshot)
+
+        leftovers = list(
+            heartbeat_files.snapshot_root(self.db.path).glob("*.partial")
+        )
+
+        self.assertEqual(leftovers, [], "the write renames into place")
+
+    async def test_old_snapshots_are_pruned_but_recent_ones_kept(self):
+        root = heartbeat_files.snapshot_root(self.db.path)
+        root.mkdir(parents=True, exist_ok=True)
+        for index in range(12):
+            (root / f"sha256-{index:016x}.json").write_text("{}", encoding="utf-8")
+
+        removed = heartbeat_files.prune(self.db.path, keep=5)
+
+        self.assertEqual(removed, 7)
+        self.assertEqual(len(list(root.glob("sha256-*.json"))), 5)
+
+    async def test_the_directory_follows_the_database(self):
+        self.assertEqual(
+            heartbeat_files.snapshot_root("/tmp/example.db"),
+            Path("/tmp/example/heartbeat"),
+        )
+
+
+class SnapshotDownloadTest(HeartbeatFixture):
+    def setUp(self):
+        super().setUp()
+        app = FastAPI()
+        install_auth_guard(app, self.db)
+        app.include_router(heartbeat_router(self.runtime))
+        self.client = TestClient(app)
+        self.client.headers["Authorization"] = (
+            f"Bearer {ensure_api_token(self.db, OWNER)}"
+        )
+
+    def tearDown(self):
+        self.client.close()
+        super().tearDown()
+
+    async def test_the_root_lead_can_download_a_snapshot_by_digest(self):
+        snapshot = heartbeat_snapshot.build(self.db, ROOT, 0, OWNER)
+        digest = heartbeat_snapshot.canonical_hash(snapshot)
+        heartbeat_files.write(self.db.path, digest, snapshot)
+
+        response = self.client.get(f"/api/heartbeat/snapshots/{digest}")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), snapshot)
+
+    async def test_an_unknown_or_hostile_digest_is_404_not_a_file_read(self):
+        for digest in ("sha256:" + "0" * 16, "sha256:..", "nonsense"):
+            with self.subTest(digest=digest):
+                self.assertEqual(
+                    self.client.get(f"/api/heartbeat/snapshots/{digest}").status_code,
+                    404,
+                )
+
+    async def test_an_unauthenticated_caller_cannot_download_one(self):
+        snapshot = heartbeat_snapshot.build(self.db, ROOT, 0, OWNER)
+        digest = heartbeat_snapshot.canonical_hash(snapshot)
+        heartbeat_files.write(self.db.path, digest, snapshot)
+        self.client.headers.pop("Authorization")
+
+        self.assertEqual(
+            self.client.get(f"/api/heartbeat/snapshots/{digest}").status_code, 401
+        )

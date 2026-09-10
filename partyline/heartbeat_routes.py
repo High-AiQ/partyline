@@ -11,7 +11,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
-from . import heartbeat, heartbeat_snapshot
+from . import heartbeat, heartbeat_files, heartbeat_snapshot
 from .auth_guard import request_principal
 
 
@@ -111,6 +111,20 @@ def heartbeat_router(runtime) -> APIRouter:
             "stalled": heartbeat_snapshot.stalled_lines(snapshot),
             "quiet_wakes": row["quiet_wakes"],
         }
+
+    @router.get("/api/heartbeat/snapshots/{digest}")
+    def get_saved_snapshot(request: Request, digest: str):
+        """Fetch a snapshot a reminder pointed at.
+
+        The digest is validated against a strict pattern before it becomes a
+        filename, so nothing a caller sends can leave the snapshot directory.
+        An unknown or malformed digest is the same answer: 404.
+        """
+        _caller(request)
+        saved = heartbeat_files.read(runtime.db.path, digest)
+        if saved is None:
+            raise HTTPException(404, "no snapshot with that digest")
+        return saved
 
     @router.delete("/api/heartbeat", response_model=HeartbeatStatus)
     def disable_heartbeat(request: Request):
