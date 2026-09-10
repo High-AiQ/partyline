@@ -49,7 +49,7 @@ def role_instructions(actions: Collection[str], conv_id: str, parent_id: str | N
         blocks.append(
             "You are the root manager, so you may run a heartbeat on yourself: a timer that "
             "reminds you to work your inbox while a goal is in progress. Enable it with "
-            'POST /api/heartbeat and JSON {"interval_seconds":300,"goal":"what you are seeing '
+            'POST /api/heartbeat and JSON {"interval_seconds":900,"goal":"what you are seeing '
             'through"} — the interval is 60-3600 seconds. GET /api/heartbeat shows whether it '
             "is on, the interval, when the next reminder is due, and whether one is still "
             "undelivered. Only one reminder is ever outstanding, and it is delivered like any "
