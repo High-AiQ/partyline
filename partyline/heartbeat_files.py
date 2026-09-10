@@ -60,17 +60,26 @@ def write(db_path, digest: str, snapshot: dict) -> Path:
     """
     root = snapshot_root(db_path)
     root.mkdir(parents=True, exist_ok=True)
+    # The directory too: a listing of digests and mtimes is a map of when this
+    # tree was busy, and permissions on the files alone do not hide it.
+    os.chmod(root, 0o700)
     final = root / _name(digest)
     temporary = final.with_suffix(".json.partial")
     body = json.dumps(snapshot, sort_keys=True, indent=2) + "\n"
-    with open(temporary, "w", encoding="utf-8") as handle:
-        handle.write(body)
-        handle.flush()
-        os.fsync(handle.fileno())
+    # Created 0600 rather than chmod'd afterwards. Fixing the mode after the
+    # rename leaves a window — however brief — in which the finished file is
+    # readable at whatever the umask allowed, and the whole point of the rename
+    # is that another process may look at any instant.
+    handle = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as file:
+            file.write(body)
+            file.flush()
+            os.fsync(file.fileno())
+    except BaseException:
+        os.unlink(temporary)
+        raise
     os.replace(temporary, final)
-    # Readable by this user alone: the delta names lines, handles, and process
-    # state, which is not information for anyone else on the host.
-    os.chmod(final, 0o600)
     return final
 
 
@@ -87,14 +96,20 @@ def read(db_path, digest: str) -> dict | None:
 
 
 def prune(db_path, keep: int = KEEP_SNAPSHOTS) -> int:
-    """Drop the oldest snapshots beyond `keep`. Returns how many were removed."""
+    """Drop the oldest snapshots beyond `keep`, and any crash leftovers.
+
+    A `.json.partial` can only exist if a write died between create and
+    rename. Nothing will ever finish it, and leaving them means a crash loop
+    slowly fills the directory with files no one reads.
+    """
     root = snapshot_root(db_path)
     try:
         files = sorted(root.glob("sha256-*.json"), key=lambda p: p.stat().st_mtime)
+        abandoned = list(root.glob("*.partial"))
     except OSError:
         return 0
     removed = 0
-    for path in files[: max(0, len(files) - keep)]:
+    for path in [*files[: max(0, len(files) - keep)], *abandoned]:
         try:
             path.unlink()
             removed += 1
