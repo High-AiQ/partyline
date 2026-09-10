@@ -15,7 +15,8 @@ from unittest.mock import AsyncMock
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from partyline import auth_store, auth_tokens, heartbeat, heartbeat_scheduler
+from partyline import (auth_store, auth_tokens, heartbeat, heartbeat_scheduler,
+                       heartbeat_snapshot, heartbeat_wake)
 from partyline.auth_guard import install_auth_guard
 from partyline.auth_store import ensure_api_token
 from partyline.db import Db
@@ -73,7 +74,21 @@ class HeartbeatFixture(unittest.IsolatedAsyncioTestCase):
         self.directory.cleanup()
 
     def enable(self, **kwargs):
+        """Wake on the clock, which is what the lifecycle tests are about.
+
+        Quiet suppression is a separate decision with its own tests; leaving it
+        on here would make every wake-lifecycle test depend on room activity
+        and prove nothing about the lifecycle.
+        """
+        kwargs.setdefault("quiet_if_unchanged", False)
         return heartbeat.enable(self.db, ROOT, OWNER, now=self.now, **kwargs)
+
+    def body(self, message_id: int) -> str:
+        return [m for m in self.db.list_messages(ROOT) if m["id"] == message_id][0]["body"]
+
+    def snapshot(self, db=None):
+        """Whatever the delta happens to be; these tests are about the wake."""
+        return heartbeat_snapshot.build(db or self.db, ROOT, 0)
 
     async def tick(self, advance: float = 0.0):
         self.now += advance
@@ -106,6 +121,9 @@ class IntervalTest(HeartbeatFixture):
         self.assertIn("authorizes no spending", body)
 
     async def test_the_interval_is_bounded_and_defaults(self):
+        # Pinned to the value Greg asked for. Every other assertion uses the
+        # symbol, so without this the default could drift unnoticed.
+        self.assertEqual(heartbeat.DEFAULT_INTERVAL, 900.0, "fifteen minutes")
         self.assertEqual(heartbeat.normalize_interval(None), heartbeat.DEFAULT_INTERVAL)
         for bad in (0, 59.9, 3600.1, float("nan"), float("inf"), "soon"):
             with self.subTest(bad=bad), self.assertRaises(heartbeat.HeartbeatError):
@@ -162,7 +180,7 @@ class OnePendingWakeTest(HeartbeatFixture):
         )
 
         self.deliver(first)
-        self.assertFalse(heartbeat.settle_delivered(self.db)["pending_message_id"])
+        self.assertFalse(heartbeat_wake.settle_delivered(self.db)["pending_message_id"])
 
     async def test_a_committed_reminder_is_retried_not_replaced(self):
         """The crash case: the row names the exact message that is owed."""
@@ -206,9 +224,10 @@ class OnePendingWakeTest(HeartbeatFixture):
                 "a restart must not forget an outstanding reminder",
             )
             self.assertIsNone(
-                heartbeat.post_due_reminder(
+                heartbeat_wake.post_due_reminder(
                     reopened, self.now + 10_000, sender="system",
-                    body_for=lambda row: "should never be written",
+                    snapshot=self.snapshot(reopened), snapshot_hash="sha256:x",
+                    body_for=lambda row, delta: "should never be written",
                 )
             )
         finally:
@@ -295,7 +314,8 @@ class RaceTest(HeartbeatFixture):
             before = heartbeat.get(elsewhere)["generation"]
             heartbeat.disable(elsewhere)
             heartbeat.enable(
-                elsewhere, ROOT, OWNER, goal="a different goal", now=self.now
+                elsewhere, ROOT, OWNER, goal="a different goal", now=self.now,
+                quiet_if_unchanged=False,
             )
             after = heartbeat.get(elsewhere)["generation"]
         finally:
@@ -330,9 +350,10 @@ class RaceTest(HeartbeatFixture):
         worker.start()
         try:
             started.set()
-            posted = heartbeat.post_due_reminder(
+            posted = heartbeat_wake.post_due_reminder(
                 self.db, self.now, sender="system",
-                body_for=lambda row: heartbeat.wake_body("astra", row["goal"]),
+                snapshot=self.snapshot(), snapshot_hash="sha256:x",
+                body_for=lambda row, delta: heartbeat.wake_body("astra", row["goal"]),
             )
         finally:
             worker.join(timeout=5)
@@ -341,7 +362,7 @@ class RaceTest(HeartbeatFixture):
         row = heartbeat.get(self.db)
         pending = row["pending_message_id"]
         if pending is not None:
-            self.assertEqual(pending, posted["id"])
+            self.assertEqual(pending, posted[0]["id"])
             ids = [message["id"] for message in self.db.list_messages(ROOT)]
             self.assertIn(pending, ids, "pending always names a message that exists")
 
@@ -393,7 +414,8 @@ class RaceTest(HeartbeatFixture):
         def reconfigure(elsewhere):
             heartbeat.disable(elsewhere)
             heartbeat.enable(
-                elsewhere, ROOT, OWNER, goal="a different goal", now=self.now
+                elsewhere, ROOT, OWNER, goal="a different goal", now=self.now,
+                quiet_if_unchanged=False,
             )
 
         await self._tick_with_paused_broadcast(reconfigure)
@@ -480,7 +502,8 @@ class RaceTest(HeartbeatFixture):
         def reconfigure(elsewhere):
             heartbeat.disable(elsewhere)
             heartbeat.enable(
-                elsewhere, ROOT, OWNER, goal="a different goal", now=self.now
+                elsewhere, ROOT, OWNER, goal="a different goal", now=self.now,
+                quiet_if_unchanged=False,
             )
 
         await self._tick_paused_at_delivery(reconfigure)
@@ -570,9 +593,10 @@ class RaceTest(HeartbeatFixture):
         self.now += heartbeat.DEFAULT_INTERVAL
         heartbeat.disable(self.db)
 
-        posted = heartbeat.post_due_reminder(
+        posted = heartbeat_wake.post_due_reminder(
             self.db, self.now, sender="system",
-            body_for=lambda row: "should never be written",
+            snapshot=self.snapshot(), snapshot_hash="sha256:x",
+            body_for=lambda row, delta: "should never be written",
         )
 
         self.assertIsNone(posted)
@@ -762,6 +786,8 @@ class StatusTest(HeartbeatFixture):
                 "interval_seconds": heartbeat.DEFAULT_INTERVAL, "goal": None,
                 "next_due_at": None, "seconds_until_due": None,
                 "wake_pending": False, "pending_message_id": None,
+                "since_id": 0, "snapshot_hash": None, "quiet_wakes": 0,
+                "quiet_if_unchanged": True,
             },
         )
 
@@ -886,6 +912,40 @@ class RouteTest(HeartbeatFixture):
 
         self.assertEqual(self.client.get("/api/heartbeat").status_code, 401)
 
+    async def test_the_status_endpoint_returns_the_same_delta_without_posting(self):
+        """An operator can see what the monitor is reacting to, for free."""
+        self.client.post("/api/heartbeat", json={})
+        self.db.add_message(ROOT, "greg", "human", "something to report")
+
+        response = self.client.get("/api/heartbeat/status")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertTrue(payload["actionable"])
+        self.assertEqual(payload["snapshot"]["lines"][0]["senders"], ["greg"])
+        self.assertTrue(payload["hash"].startswith("sha256:"))
+        self.assertNotIn("something to report", response.text)
+        self.assertEqual(
+            [m for m in self.db.list_messages(ROOT) if m["sender_type"] == "system"],
+            [], "reading the snapshot posts nothing",
+        )
+
+    async def test_the_status_endpoint_is_404_before_anything_is_configured(self):
+        self.assertEqual(self.client.get("/api/heartbeat/status").status_code, 404)
+
+    async def test_the_status_endpoint_refuses_another_lines_manager(self):
+        self.client.post("/api/heartbeat", json={})
+        create_child_conversation(self.db, ROOT, "child", "Child")
+        self.db.add_attachment(
+            "child-att", "child", "worker", "raw", ["sh"], self.directory.name, "owner"
+        )
+        set_lead(self.db, "child", "child-att")
+        self.client.headers["Authorization"] = (
+            f"Bearer {ensure_api_token(self.db, 'child-att')}"
+        )
+
+        self.assertEqual(self.client.get("/api/heartbeat/status").status_code, 403)
+
     async def test_an_unknown_field_is_refused(self):
         response = self.client.post(
             "/api/heartbeat", json={"interval_seconds": 300, "attachment_id": "someone"}
@@ -940,3 +1000,258 @@ class SchedulerLoopTest(HeartbeatFixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class QuietSnapshotTest(HeartbeatFixture):
+    """Quiet by default: a wake is earned by the room's state, not the clock.
+
+    The first heartbeat woke its lead sixty times in one night and each wake
+    said only what the lead already knew, so the only possible reply was "no
+    action taken". These tests are that night, encoded.
+    """
+
+    def enable(self, **kwargs):
+        kwargs.setdefault("quiet_if_unchanged", True)
+        return heartbeat.enable(self.db, ROOT, OWNER, now=self.now, **kwargs)
+
+    async def test_an_unchanged_room_is_never_woken_about(self):
+        self.enable()
+
+        for _ in range(20):
+            self.assertIsNone(await self.tick(heartbeat.DEFAULT_INTERVAL))
+
+        self.assertEqual(self.db.list_messages(ROOT), [], "nothing was posted")
+        self.assertEqual(heartbeat.status(self.db)["quiet_wakes"], 20)
+
+    async def test_a_peer_on_the_root_line_does_not_keep_it_awake(self):
+        """Grok's probe: the monitor must not make the room look unread.
+
+        Reminders are delivered to the owner alone, so on the heartbeat's own
+        line every peer is behind by the number of wakes posted. Counting those
+        keeps `is_actionable` true forever and suppression never fires again —
+        and the plain quiet test misses it entirely, because it has no peer.
+        """
+        peer = FakeAdapter(self.db.add_attachment(
+            "peer", ROOT, "grok", "raw", ["sh"], self.directory.name, "owner"
+        ))
+        self.db.set_attachment_status("peer", "running", "owner")
+        self.enable()
+
+        self.db.add_message(ROOT, "greg", "human", "something real")
+        first = await self.tick(heartbeat.DEFAULT_INTERVAL)
+        self.assertIsNotNone(first)
+        self.deliver(first)
+        # The peer read the human message but not the owner-only reminder,
+        # which is the state every real line is in after a wake.
+        self.db.set_last_seen("peer", first - 1, "owner")
+
+        for _ in range(10):
+            self.assertIsNone(
+                await self.tick(heartbeat.DEFAULT_INTERVAL),
+                "a peer behind only by our own reminders is not news",
+            )
+        self.assertEqual(peer.delivered, [])
+
+    async def test_a_peer_genuinely_behind_is_still_reported(self):
+        """The exclusion must not blind the monitor to a real backlog."""
+        self.db.add_attachment(
+            "peer", ROOT, "grok", "raw", ["sh"], self.directory.name, "owner"
+        )
+        self.db.set_attachment_status("peer", "running", "owner")
+        self.enable()
+        self.db.add_message(ROOT, "greg", "human", "@grok please look at this")
+
+        posted = await self.tick(heartbeat.DEFAULT_INTERVAL)
+
+        self.assertIsNotNone(posted)
+        self.assertIn('"attachment_id":"peer"', self.body(posted))
+        self.assertIn('"unread":1', self.body(posted))
+
+    async def test_new_speech_earns_exactly_one_wake(self):
+        self.enable()
+        self.assertIsNone(await self.tick(heartbeat.DEFAULT_INTERVAL))
+
+        self.db.add_message(ROOT, "greg", "human", "a new instruction")
+        posted = await self.tick(heartbeat.DEFAULT_INTERVAL)
+
+        self.assertIsNotNone(posted)
+        self.assertIn('"new":1', self.body(posted))
+        self.assertIn('"senders":["greg"]', self.body(posted))
+        self.deliver(posted)
+        self.assertIsNone(
+            await self.tick(heartbeat.DEFAULT_INTERVAL),
+            "the same news does not earn a second wake",
+        )
+
+    async def test_the_monitors_own_reminders_are_not_news(self):
+        """Otherwise the heartbeat is permanently actionable because of itself."""
+        self.enable()
+        self.db.add_message(ROOT, "greg", "human", "something happened")
+        first = await self.tick(heartbeat.DEFAULT_INTERVAL)
+        self.deliver(first)
+
+        for _ in range(5):
+            self.assertIsNone(await self.tick(heartbeat.DEFAULT_INTERVAL))
+
+    async def test_a_quiet_skip_keeps_the_delta_owed(self):
+        """A skipped wake must not silently consume what it declined to report."""
+        self.enable()
+        before = heartbeat.status(self.db)["since_id"]
+
+        await self.tick(heartbeat.DEFAULT_INTERVAL)
+
+        self.assertEqual(heartbeat.status(self.db)["since_id"], before)
+
+    async def test_since_id_advances_only_when_the_wake_is_delivered(self):
+        self.enable()
+        self.db.add_message(ROOT, "greg", "human", "news")
+        self.adapter.accept = False
+        posted = await self.tick(heartbeat.DEFAULT_INTERVAL)
+        before = heartbeat.status(self.db)["since_id"]
+
+        self.assertEqual(before, 0, "an undelivered reminder moves no boundary")
+
+        self.adapter.accept = True
+        self.deliver(posted)
+        heartbeat_wake.settle_delivered(self.db)
+
+        # The boundary is the delta that was reported, which stops short of
+        # the reminder itself — the reminder is not news.
+        self.assertEqual(heartbeat.status(self.db)["since_id"], posted - 1)
+
+    async def test_enabling_bootstraps_the_boundary_to_the_present(self):
+        """Starting at zero would make the first wake a history dump."""
+        for index in range(30):
+            self.db.add_message(ROOT, "greg", "human", f"old {index}")
+
+        state = self.enable()
+
+        self.assertGreater(state["since_id"], 0)
+        self.assertIsNone(
+            await self.tick(heartbeat.DEFAULT_INTERVAL),
+            "history before the monitor existed is not a delta",
+        )
+
+    async def test_an_unacknowledged_report_is_actionable_without_new_speech(self):
+        from partyline.hierarchy import create_child_conversation
+        from partyline.reports import add as add_report
+
+        self.enable()
+        create_child_conversation(self.db, ROOT, "child", "Child")
+        self.assertIsNone(await self.tick(heartbeat.DEFAULT_INTERVAL))
+
+        add_report(self.db, ROOT, "child", "worker", "a blocker needs you")
+        posted = await self.tick(heartbeat.DEFAULT_INTERVAL)
+
+        self.assertIsNotNone(posted, "a waiting report is worth a wake")
+        self.assertIn('"reports":[{', self.body(posted))
+
+    async def test_a_behind_or_stopped_agent_is_actionable(self):
+        self.enable()
+        self.db.add_attachment(
+            "worker", ROOT, "worker", "raw", ["sh"], self.directory.name, "owner"
+        )
+        self.db.set_attachment_status("worker", "detached", "owner")
+
+        posted = await self.tick(heartbeat.DEFAULT_INTERVAL)
+
+        self.assertIsNotNone(posted, "a process nobody is feeding is news")
+        self.assertIn('"status":"detached"', self.body(posted))
+        self.assertIn('"attachment_id":"worker"', self.body(posted))
+
+    async def test_agents_are_keyed_by_attachment_not_handle(self):
+        """A replacement keeps the handle and is a different process."""
+        self.enable()
+        self.db.add_attachment(
+            "first", ROOT, "worker", "raw", ["sh"], self.directory.name, "owner"
+        )
+        self.db.set_attachment_status("first", "exited", "owner")
+        snapshot = heartbeat_snapshot.build(self.db, ROOT, 0)
+
+        listed = [
+            agent for line in snapshot["lines"] for agent in line["agents"]
+        ]
+        self.assertIn("first", [agent["attachment_id"] for agent in listed])
+
+    async def test_a_silent_line_holding_open_work_eventually_raises_an_alarm(self):
+        from partyline.hierarchy import create_child_conversation
+        from partyline.tasks import TaskStore
+
+        self.enable()
+        create_child_conversation(self.db, ROOT, "child", "Child")
+        TaskStore(self.db).add("child", "render the covers", owner="worker")
+
+        posted = None
+        for _ in range(heartbeat_snapshot.STALL_AFTER_QUIET + 1):
+            posted = posted or await self.tick(heartbeat.DEFAULT_INTERVAL)
+
+        self.assertIsNotNone(posted, "silence with assigned work is the stall")
+        self.assertEqual(
+            heartbeat.status(self.db)["quiet_wakes"], 0, "the counter reset"
+        )
+
+    async def test_a_silent_line_with_no_open_work_never_alarms(self):
+        from partyline.hierarchy import create_child_conversation
+
+        self.enable()
+        create_child_conversation(self.db, ROOT, "child", "Child")
+
+        for _ in range(heartbeat_snapshot.STALL_AFTER_QUIET * 3):
+            self.assertIsNone(await self.tick(heartbeat.DEFAULT_INTERVAL))
+
+    async def test_quiet_can_be_switched_off(self):
+        self.enable(quiet_if_unchanged=False)
+
+        self.assertIsNotNone(await self.tick(heartbeat.DEFAULT_INTERVAL))
+
+
+class SnapshotHashTest(HeartbeatFixture):
+    async def test_head_id_is_reported_but_never_hashed(self):
+        """The correction that saves suppression.
+
+        `head_id` moves for unrelated lines and for the monitor's own posted
+        reminder. Hashing it would change the digest on every single wake, so
+        suppression would never fire and the overnight failure would repeat
+        with a JSON payload attached.
+        """
+        first = heartbeat_snapshot.build(self.db, ROOT, 0)
+        self.db.create_conversation("elsewhere", "Unrelated")
+        self.db.add_message("elsewhere", "greg", "human", "not this tree")
+        second = heartbeat_snapshot.build(self.db, ROOT, 0)
+
+        self.assertNotEqual(first["head_id"], second["head_id"])
+        self.assertEqual(
+            heartbeat_snapshot.canonical_hash(first),
+            heartbeat_snapshot.canonical_hash(second),
+        )
+
+    async def test_the_hash_is_stable_and_order_independent(self):
+        snapshot = heartbeat_snapshot.build(self.db, ROOT, 0)
+        shuffled = dict(reversed(list(snapshot.items())))
+
+        self.assertEqual(
+            heartbeat_snapshot.canonical_hash(snapshot),
+            heartbeat_snapshot.canonical_hash(shuffled),
+        )
+
+    async def test_the_hash_changes_when_the_tree_changes(self):
+        before = heartbeat_snapshot.canonical_hash(
+            heartbeat_snapshot.build(self.db, ROOT, 0)
+        )
+        self.db.add_message(ROOT, "greg", "human", "news")
+
+        self.assertNotEqual(
+            before,
+            heartbeat_snapshot.canonical_hash(
+                heartbeat_snapshot.build(self.db, ROOT, 0)
+            ),
+        )
+
+    async def test_no_message_body_reaches_the_snapshot(self):
+        self.db.add_message(ROOT, "greg", "human", "a private instruction")
+
+        rendered = heartbeat_snapshot.render(
+            heartbeat_snapshot.build(self.db, ROOT, 0)
+        )
+
+        self.assertNotIn("a private instruction", rendered)

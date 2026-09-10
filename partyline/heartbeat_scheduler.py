@@ -19,7 +19,7 @@ import asyncio
 import logging
 import time
 
-from . import heartbeat
+from . import heartbeat, heartbeat_snapshot, heartbeat_wake
 from .contracts import MessageEvent
 from .message_contracts import MessageResponse
 
@@ -140,6 +140,52 @@ async def _deliver_claimed(
     )
 
 
+def _stay_quiet(runtime, row: dict, now: float) -> bool:
+    """Decide not to wake the lead, because there is nothing to wake it about.
+
+    This is the whole answer to the overnight failure: sixty reminders that
+    each said only what the lead already knew. A wake is now earned by the
+    state, not by the clock.
+
+    A skip still costs the interval — `next_due_at` moves — but never the
+    delta: `since_id` stays where it is, so the first wake that does fire
+    reports everything accumulated since the lead last actually read one.
+
+    Silence is not always innocent. A line holding open tasks with nothing to
+    show for it across `STALL_AFTER_QUIET` checks is exactly the stall this
+    monitor exists to notice, so that one breaks the quiet.
+    """
+    if not row["quiet_if_unchanged"]:
+        return False
+    snapshot = heartbeat_snapshot.build(
+        runtime.db, row["conv_id"], row["since_id"], row["attachment_id"]
+    )
+    if heartbeat_snapshot.is_actionable(snapshot):
+        return False
+    digest = heartbeat_snapshot.canonical_hash(snapshot)
+    unchanged = digest == row["snapshot_hash"]
+    # The stall test comes *before* the skip is recorded. Recording it first
+    # would move `next_due_at` into the future, and the post that this very
+    # branch is deciding to allow would then be refused as not yet due — the
+    # alarm could never fire.
+    if (
+        unchanged
+        and row["quiet_wakes"] + 1 >= heartbeat_snapshot.STALL_AFTER_QUIET
+        and heartbeat_snapshot.stalled_lines(snapshot)
+    ):
+        return False
+    # Changed but not actionable, or unchanged and not yet stalled: record the
+    # digest so an identical state stays quiet, and spend no turn.
+    heartbeat_wake.record_quiet_skip(runtime.db, _next_due(row, now), digest)
+    return True
+
+
+def _next_due(row: dict, now: float) -> float:
+    """The next boundary, catching up rather than owing every missed one."""
+    due = row["next_due_at"] + row["interval_seconds"]
+    return due if due > now else now + row["interval_seconds"]
+
+
 async def tick(runtime, *, now: float | None = None) -> int | None:
     """One pass: settle what arrived, retry what is owed, or post what is due.
 
@@ -149,7 +195,7 @@ async def tick(runtime, *, now: float | None = None) -> int | None:
     message that is owed.
     """
     moment = time.time() if now is None else now
-    row = heartbeat.settle_delivered(runtime.db, now=moment)
+    row = heartbeat_wake.settle_delivered(runtime.db, now=moment)
     if row is None or not row["enabled"]:
         return None
     owner = deliverable_owner(runtime, row)
@@ -159,17 +205,26 @@ async def tick(runtime, *, now: float | None = None) -> int | None:
         await _deliver_claimed(
             runtime, owner["id"], row["generation"], row["pending_message_id"]
         )
-        heartbeat.settle_delivered(runtime.db, now=moment)
+        heartbeat_wake.settle_delivered(runtime.db, now=moment)
         return None
-    claimed = heartbeat.post_due_reminder(
+    if _stay_quiet(runtime, row, moment):
+        return None
+    snapshot = heartbeat_snapshot.build(
+        runtime.db, row["conv_id"], row["since_id"], row["attachment_id"]
+    )
+    claimed = heartbeat_wake.post_due_reminder(
         runtime.db,
         moment,
         sender="system",
-        body_for=lambda pending: heartbeat.wake_body(owner["name"], pending["goal"]),
+        snapshot=snapshot,
+        snapshot_hash=heartbeat_snapshot.canonical_hash(snapshot),
+        body_for=lambda pending, delta: heartbeat.wake_body(
+            owner["name"], pending["goal"]
+        ) + "\n" + heartbeat_snapshot.render(delta),
     )
     if claimed is None:
         return None
-    posted, generation = claimed
+    posted, generation, _snapshot = claimed
     await runtime.broadcast(
         row["conv_id"], MessageEvent(message=MessageResponse.model_validate(posted))
     )
@@ -177,7 +232,7 @@ async def tick(runtime, *, now: float | None = None) -> int | None:
     # Settle here as well as at the top of the next tick, so `status` is
     # truthful the moment a reminder has actually landed rather than for the
     # rest of the tick interval.
-    heartbeat.settle_delivered(runtime.db, now=moment)
+    heartbeat_wake.settle_delivered(runtime.db, now=moment)
     return posted["id"]
 
 
