@@ -11,7 +11,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
-from . import heartbeat
+from . import heartbeat, heartbeat_snapshot
 from .auth_guard import request_principal
 
 
@@ -20,6 +20,7 @@ class HeartbeatIn(BaseModel):
 
     interval_seconds: float | None = None
     goal: str | None = None
+    quiet_if_unchanged: bool = True
 
 
 class HeartbeatStatus(BaseModel):
@@ -32,6 +33,10 @@ class HeartbeatStatus(BaseModel):
     seconds_until_due: float | None
     wake_pending: bool
     pending_message_id: int | None
+    since_id: int
+    snapshot_hash: str | None
+    quiet_wakes: int
+    quiet_if_unchanged: bool
 
 
 def heartbeat_router(runtime) -> APIRouter:
@@ -79,10 +84,33 @@ def heartbeat_router(runtime) -> APIRouter:
                 principal.attachment_id,
                 interval_seconds=body.interval_seconds,
                 goal=body.goal,
+                quiet_if_unchanged=body.quiet_if_unchanged,
             )
         except heartbeat.HeartbeatError as exc:
             raise HTTPException(exc.status_code, exc.detail) from exc
         return heartbeat.status(db)
+
+    @router.get("/api/heartbeat/status")
+    def get_heartbeat_snapshot(request: Request):
+        """The same delta a wake would carry, without spending a turn on it.
+
+        Readable at any time, and identical to what the reminder inlines, so
+        an operator can see exactly what the monitor is or is not reacting to.
+        """
+        _caller(request)
+        row = heartbeat.get(db)
+        if row is None:
+            raise HTTPException(404, "no heartbeat is configured")
+        snapshot = heartbeat_snapshot.build(
+            db, row["conv_id"], row["since_id"], row["attachment_id"]
+        )
+        return {
+            "snapshot": snapshot,
+            "hash": heartbeat_snapshot.canonical_hash(snapshot),
+            "actionable": heartbeat_snapshot.is_actionable(snapshot),
+            "stalled": heartbeat_snapshot.stalled_lines(snapshot),
+            "quiet_wakes": row["quiet_wakes"],
+        }
 
     @router.delete("/api/heartbeat", response_model=HeartbeatStatus)
     def disable_heartbeat(request: Request):
