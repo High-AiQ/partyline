@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { orderedLines } from "./line-hierarchy";
+import { descendantLineIds, orderedLines } from "./line-hierarchy";
 
 describe("line hierarchy navigation", () => {
   it("keeps children beside their parent even when creation order is reversed", () => {
@@ -24,5 +24,18 @@ describe("line hierarchy navigation", () => {
       { id: "b", parent_id: "a" },
     ];
     expect(orderedLines(lines).map(({ line }) => line.id)).toEqual(["orphan", "a", "b"]);
+  });
+
+  it("returns all recursive descendant line ids", () => {
+    const lines = [
+      { id: "root" },
+      { id: "child1", parent_id: "root" },
+      { id: "child2", parent_id: "root" },
+      { id: "grandchild", parent_id: "child1" },
+      { id: "other" },
+    ];
+    expect(descendantLineIds("root", lines)).toEqual(["child1", "child2", "grandchild"]);
+    expect(descendantLineIds("child1", lines)).toEqual(["grandchild"]);
+    expect(descendantLineIds("other", lines)).toEqual([]);
   });
 });

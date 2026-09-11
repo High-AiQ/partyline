@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from partyline import auth_store, auth_tokens
 from partyline.auth_guard import install_auth_guard
 from partyline.db import Db
+from partyline.hierarchy import set_parent
 from partyline.line_process_routes import register_line_process_routes
 from partyline.runtime import ChatRuntime
 
@@ -52,14 +53,14 @@ class CloseLineProcessesTest(unittest.TestCase):
         self.db.close()
         self.directory.cleanup()
 
-    def add_live(self, ident: str, name: str) -> Adapter:
+    def add_live(self, ident: str, name: str, conv_id: str = "line") -> Adapter:
         owner = f"owner-{ident}"
         self.db.add_attachment(
-            ident, "line", name, "raw", ["sh"], self.directory.name, owner
+            ident, conv_id, name, "raw", ["sh"], self.directory.name, owner
         )
         self.db.set_attachment_status(ident, "running", owner)
         adapter = Adapter(
-            {"runtime_owner": owner}, self.runtime.status_callback(ident, "line", owner)
+            {"runtime_owner": owner}, self.runtime.status_callback(ident, conv_id, owner)
         )
         self.runtime.live[ident] = adapter
         return adapter
@@ -102,3 +103,38 @@ class CloseLineProcessesTest(unittest.TestCase):
         self.db.archive_conversation("line")
         archived = self.client.post("/api/conversations/line/attachments/close")
         self.assertEqual(archived.status_code, 409)
+
+    def test_close_detaches_processes_across_sublines(self):
+        parent_adapter = self.add_live("one", "sol", conv_id="line")
+        self.db.create_conversation("sub", "Subline")
+        set_parent(self.db, "sub", "line")
+        child_adapter = self.add_live("two", "fable", conv_id="sub")
+        self.db.create_conversation("sub2", "Grandchild")
+        set_parent(self.db, "sub2", "sub")
+        grandchild_adapter = self.add_live("three", "echo", conv_id="sub2")
+
+        response = self.client.post("/api/conversations/line/attachments/close")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {"ok": True, "stopped": ["sol", "fable", "echo"]},
+        )
+        self.assertTrue(parent_adapter.stopped)
+        self.assertTrue(child_adapter.stopped)
+        self.assertTrue(grandchild_adapter.stopped)
+        self.assertEqual(self.db.get_conversation("line")["live_count"], 0)
+        self.assertEqual(self.db.get_conversation("sub")["live_count"], 0)
+        self.assertEqual(self.db.get_conversation("sub2")["live_count"], 0)
+        self.assertEqual(
+            [message["body"] for message in self.db.list_messages("line")],
+            ["@sol detached"],
+        )
+        self.assertEqual(
+            [message["body"] for message in self.db.list_messages("sub")],
+            ["@fable detached"],
+        )
+        self.assertEqual(
+            [message["body"] for message in self.db.list_messages("sub2")],
+            ["@echo detached"],
+        )
+
