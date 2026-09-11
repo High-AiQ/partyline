@@ -1051,6 +1051,30 @@ class ServerTest(unittest.TestCase):
             )
         )
 
+    def test_attach_refuses_a_live_handle_from_a_related_line(self):
+        server.runtime.db.create_conversation("kid", "Kid")
+        server.runtime.db._exec(
+            "UPDATE conversations SET parent_id='line' WHERE id='kid'")
+        self.add_attachment("line-jack", "terra")
+        self.assert_http(
+            409, server.attach(self.principal_request(),
+                "kid",
+                server.AttachIn(name="TERRA", adapter="fake", cwd=self.directory.name),
+            )
+        )
+
+    def test_resume_refuses_a_live_handle_on_a_related_line(self):
+        server.runtime.db.create_conversation("kid", "Kid")
+        server.runtime.db._exec(
+            "UPDATE conversations SET parent_id='line' WHERE id='kid'")
+        server.runtime.db.add_attachment(
+            "kid-jack", "kid", "terra", "fake", ["fake"], self.directory.name)
+        self.add_attachment("one", "terra", "exited")
+        # The real resume path runs: setUp points make_adapter at FakeAdapter,
+        # so a permitted resume spawns no process and the 409 is the check's.
+        self.assert_http(
+            409, server.resume_attachment(self.principal_request(), "one"))
+
     def test_fresh_attach_skips_history_without_losing_startup_messages(self):
         old = [
             server.runtime.db.add_message(

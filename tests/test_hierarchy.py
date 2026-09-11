@@ -94,6 +94,113 @@ class HierarchyApiTest(unittest.TestCase):
         self.assertEqual(principal.attachment_id, "lead-att")
         self.assertTrue(principal.is_lead)
 
+    def fake_spawn(self, calls):
+        """Route attaches must not spawn real processes; stub the server hook."""
+        original = server._start_attachment
+
+        async def stubbed(att, **kwargs):
+            calls.append(att["id"])
+            return att
+
+        server._start_attachment = stubbed
+        self.addCleanup(setattr, server, "_start_attachment", original)
+
+    def test_attach_refuses_a_live_handle_from_a_related_line(self):
+        # Stubbed before any attach: on pre-fix code the refusal does not
+        # happen and the route would otherwise spawn a real process.
+        self.fake_spawn([])
+        child = self.client.post(
+            "/api/conversations/parent/children",
+            json={"name": "Child"},
+            headers=self.lead,
+        )
+        child_id = child.json()["conversation"]["id"]
+        taken = self.client.post(
+            f"/api/conversations/{child_id}/attachments",
+            json={"name": "ASTRA", "adapter": "raw", "command": "sh", "cwd": "/tmp"},
+        )
+        self.assertEqual(taken.status_code, 409, taken.text)
+        self.assertIn("Parent", taken.json()["detail"])
+        distinct = self.client.post(
+            f"/api/conversations/{child_id}/attachments",
+            json={"name": "astra-child", "adapter": "raw", "command": "sh", "cwd": "/tmp"},
+        )
+        self.assertEqual(distinct.status_code, 200, distinct.text)
+
+    def test_independent_roots_may_reuse_a_live_handle(self):
+        self.db.create_conversation("root2", "Root2")
+        self.fake_spawn([])
+        reused = self.client.post(
+            "/api/conversations/root2/attachments",
+            json={"name": "astra", "adapter": "raw", "command": "sh", "cwd": "/tmp"},
+        )
+        self.assertEqual(reused.status_code, 200, reused.text)
+
+    def test_linking_refuses_a_tree_wide_live_handle_collision(self):
+        self.db.create_conversation("root2", "Root2")
+        self.db.create_conversation("root3", "Root3")
+        self.db.add_attachment("clash-a", "root2", "clash", "fake", ["fake"], "/tmp")
+        self.db.add_attachment("clash-b", "root3", "CLASH", "fake", ["fake"], "/tmp")
+        merged = self.client.put(
+            "/api/conversations/root3/parent", json={"parent_id": "root2"}
+        )
+        self.assertEqual(merged.status_code, 409, merged.text)
+        self.assertIn("clash", merged.json()["detail"].lower())
+        self.db._exec("UPDATE attachments SET name='quieter' WHERE id='clash-b'")
+        linked = self.client.put(
+            "/api/conversations/root3/parent", json={"parent_id": "root2"}
+        )
+        self.assertEqual(linked.status_code, 200, linked.text)
+        self.assertEqual(linked.json()["parent_id"], "root2")
+        # Re-saving the same parent is what the management dialog sends; the
+        # subtrees overlap completely and must not read as a collision.
+        relinked = self.client.put(
+            "/api/conversations/root3/parent", json={"parent_id": "root2"}
+        )
+        self.assertEqual(relinked.status_code, 200, relinked.text)
+
+    def test_linking_under_a_non_root_parent_checks_the_ancestors(self):
+        self.db.create_conversation("proot", "PRoot")
+        self.db.create_conversation("pchild", "PChild")
+        self.db.create_conversation("nomad", "Nomad")
+        self.client.put("/api/conversations/pchild/parent", json={"parent_id": "proot"})
+        self.db.add_attachment("att-1", "proot", "worker", "fake", ["fake"], "/tmp")
+        self.db.add_attachment("att-2", "nomad", "worker", "fake", ["fake"], "/tmp")
+        # The new parent's own subtree is clear; its ANCESTOR holds "worker"
+        # and joins the tree with the link, so the link must be refused.
+        blocked = self.client.put(
+            "/api/conversations/nomad/parent", json={"parent_id": "pchild"}
+        )
+        self.assertEqual(blocked.status_code, 409, blocked.text)
+        self.assertIn("worker", blocked.json()["detail"])
+        self.db._exec("UPDATE attachments SET name='wanderer' WHERE id='att-2'")
+        moved = self.client.put(
+            "/api/conversations/nomad/parent", json={"parent_id": "pchild"}
+        )
+        self.assertEqual(moved.status_code, 200, moved.text)
+
+    def test_repointing_a_parented_line_is_refused_until_unlinked(self):
+        self.db.create_conversation("root2", "Root2")
+        self.db.create_conversation("root3", "Root3")
+        linked = self.client.put(
+            "/api/conversations/root3/parent", json={"parent_id": "root2"}
+        )
+        self.assertEqual(linked.status_code, 200, linked.text)
+        # A parent is set once or cleared, never re-pointed.
+        repointed = self.client.put(
+            "/api/conversations/root3/parent", json={"parent_id": "root3X"}
+        )
+        self.assertEqual(repointed.status_code, 409, repointed.text)
+        self.assertIn("unlink", repointed.json()["detail"])
+        # Unlink releases the set-once: an independent line may link anew.
+        unlinked = self.client.put("/api/conversations/root3/parent", json={"parent_id": None})
+        self.assertEqual(unlinked.status_code, 200, unlinked.text)
+        self.assertIsNone(unlinked.json()["parent_id"])
+        relinked = self.client.put(
+            "/api/conversations/root3/parent", json={"parent_id": "root2"}
+        )
+        self.assertEqual(relinked.status_code, 200, relinked.text)
+
     def test_fresh_session_does_not_inherit_lead(self):
         self.db.add_attachment("fresh", "parent", "astra-new", "fake", ["fake"], "/tmp")
         principal = resolve_principal(

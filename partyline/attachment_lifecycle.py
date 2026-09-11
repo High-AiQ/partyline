@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .db import _att_row
+from .hierarchy import tree_live_name_conflict
 
 
 MAX_REFRESH_MESSAGES = 100
@@ -42,6 +43,16 @@ def _require_stopped(att):
 
 async def create_fresh_record(db, expected, body):
     """Reserve the handle before awaiting spawn; leave the old session on failure."""
+    existing = db.get_attachment(expected["id"])
+    if existing is not None:
+        # Ahead of the locked block: the tree walk takes db.lock per query,
+        # and the locked block must not re-enter it.
+        conflict = tree_live_name_conflict(db, existing["conv_id"], existing["name"])
+        if conflict is not None:
+            other = db.get_conversation(conflict["conv_id"])
+            raise HTTPException(
+                409, f"'{existing['name']}' is already live on '{other['name']}'"
+            )
     async with db._runtime_serialized_async():
         with db.lock, db.conn:
             row = db.conn.execute("SELECT * FROM attachments WHERE id=?", (expected["id"],)).fetchone()

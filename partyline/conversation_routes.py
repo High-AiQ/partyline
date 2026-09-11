@@ -12,6 +12,7 @@ from .attachment_commands import validated_attachment_command
 from .auth_guard import request_principal
 from .auth_store import handle_taken
 from .claim_routes import purge_claims
+from .hierarchy import tree_live_name_conflict
 from .contracts import (
     ArchiveResponse,
     AttachIn,
@@ -191,12 +192,11 @@ def register_conversation_routes(
             raise HTTPException(400, f"'{body.name}' is a reserved handle")
         if handle_taken(runtime.db, body.name):
             raise HTTPException(409, f"'{body.name}' is registered to a human account")
-        for existing in db.list_attachments(conv_id):
-            if (
-                existing["name"].lower() == body.name.lower()
-                and existing["status"] in ("starting", "running")
-            ):
-                raise HTTPException(409, f"'{body.name}' is already attached")
+        conflict = tree_live_name_conflict(db, conv_id, body.name)
+        if conflict is not None:
+            other = db.get_conversation(conflict["conv_id"])
+            place = "" if other["id"] == conv_id else f" on '{other['name']}'"
+            raise HTTPException(409, f"'{body.name}' is already attached{place}")
         try:
             command = validated_attachment_command(
                 body.adapter, body.command, s.ADAPTERS, s.ADAPTER_METADATA
