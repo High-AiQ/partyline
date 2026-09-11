@@ -26,7 +26,9 @@ recorded in [lessons.md](lessons.md).
 
 The instance hosting a conversation must run from a separate **cockpit** checkout. Edit and test in
 the **workbench** checkout, then advance the cockpit deliberately. Restarting a cockpit without
-deploying merely starts the old code again.
+deploying merely starts the old code again. A plain (non-cockpit) instance restart has no
+continuation plan and no automatic recovery — see [restart-recovery.md](restart-recovery.md) for
+that separate procedure.
 
 ```bash
 uv run python -m scripts.cockpit check
@@ -34,7 +36,7 @@ uv run python -m scripts.cockpit deploy
 uv run python -m scripts.cockpit plan "partyline refactoring" --all \
   --debrief "Continue from the committed handoff."
 # After every planned participant has explicitly cleared:
-uv run python -m scripts.cockpit arm --pid NNNNN --database ~/.partyline-instance.db
+uv run python -m scripts.cockpit arm --pid NNNNN --database /absolute/path/to/instance.db
 ```
 
 `check`, `deploy`, and `plan` do not restart anything. `check` refuses a dirty or unpushed
@@ -118,8 +120,8 @@ to lose; each is either the wrong path or an instance something else has already
 only question at that moment is whether SIGTERM is about to strand a process.
 
 The arming side reads `$PARTYLINE_DB`, falling back to `~/.partyline.db`. When the instance runs
-on another database — this one is `~/.partyline-instance.db` — pass `--database` so the plan and the
-live set are read from the same instance. The trigger does not need the flag: it takes the path
+on a non-default database, pass `--database` so the plan and the live set are read from the same
+instance. The trigger does not need the flag: it takes the path
 from the outgoing server itself.
 
 Every option in the scheduled argv is passed as `--option=value`. A plan's report token is a
@@ -151,7 +153,7 @@ first move of a workbench-hosted instance onto its own cockpit clone — name th
 live pid is actually running:
 
 ```bash
-uv run python -m scripts.cockpit arm --pid NNNNN --cockpit ~/partyline-instance \
+uv run python -m scripts.cockpit arm --pid NNNNN --cockpit /absolute/path/to/previous/clone \
   --source-server ~/code/partyline/.venv/bin/partyline
 ```
 
