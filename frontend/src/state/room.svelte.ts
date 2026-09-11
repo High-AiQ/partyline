@@ -27,6 +27,7 @@ import { applyLineLive } from "../lib/line-live";
 import { handleWireError } from "./room-wire-error";
 import { MessageHistory } from "./message-history.svelte";
 import { presenceSync } from "./presence-coordinator.svelte.js";
+import { draft } from "./draft.svelte.js";
 
 export interface RoomNotice {
   message: string;
@@ -111,6 +112,7 @@ class Room {
     if (!fromRoute) setConversationRoute(conversation.id);
 
     this.conversation = conversation;
+    draft.openLine(conversation.id);
     this.history.reset();
     this.attachments = [];
     this.attention.clear();
@@ -188,6 +190,7 @@ class Room {
     presenceSync.reset();
     wire.disconnect();
     this.conversation = null;
+    draft.leaveLine();
     this.history.reset();
     this.attachments = [];
     this.attention.clear();

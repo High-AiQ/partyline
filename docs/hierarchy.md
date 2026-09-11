@@ -5,8 +5,11 @@ manager attachment. The role belongs to that attachment's identity, not its
 handle or model: two processes named `reviewer` on different lines remain
 separate participants.
 
-Humans use the line menu's **management** dialog to choose the parent and the
-manager. Granting a manager delegates control of work beneath that line. Ordinary
+Humans use the line menu's **management** dialog to choose the parent line.
+Appointing a manager is agentic: a person says "B takes the lead" in chat and an
+agent on the line appoints it through the API. With no live manager, any machine
+on that line may appoint one; re-pointing a live manager still requires the
+manager or an ancestor lead. Granting a manager delegates control of work beneath that line. Ordinary
 participants keep access to their own line; a manager can create child lines,
 attach participants, assign work, and inspect descendant progress. Unrelated
 lines remain outside that machine credential's scope. Removing the manager role

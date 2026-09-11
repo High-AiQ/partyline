@@ -3,10 +3,23 @@
 from collections.abc import Collection
 
 
+def _line_people_url(conv_id: str) -> str:
+    return f"GET /api/conversations/{conv_id} lists every process on the line by name and ID."
+
+
 def role_instructions(actions: Collection[str], conv_id: str, parent_id: str | None) -> str:
     """Render knowledge for the capabilities actually granted on this line."""
     if "create_child" not in actions:
-        return ""
+        if "appoint_lead" not in actions:
+            return ""
+        # A line with no live manager: any process on it may hand the role to a
+        # named replacement, which is how a person's "B takes the lead" works.
+        return (
+            "\n\n## Manager handoff\n"
+            "This line has no live manager. If the person asks you to appoint one, "
+            f"{_line_people_url(conv_id)} and then POST "
+            f'/api/conversations/{conv_id}/lead with JSON {{"attachment_id":"<the process ID>"}}.'
+        )
     root = f"/api/conversations/{conv_id}"
     blocks = [
         "You manage this line and its delegated child projects. Use the authenticated API helper "
