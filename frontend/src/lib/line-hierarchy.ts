@@ -34,3 +34,30 @@ export function orderedLines<T extends ParentLinkedLine>(lines: readonly T[]): L
   for (const line of lines) visit(line, 0);
   return rows;
 }
+
+export function descendantLineIds(rootId: string, lines: readonly ParentLinkedLine[]): string[] {
+  const ids = new Set(lines.map((line) => line.id));
+  const children = new Map<string, string[]>();
+  for (const line of lines) {
+    if (line.parent_id && ids.has(line.parent_id)) {
+      const siblings = children.get(line.parent_id) ?? [];
+      siblings.push(line.id);
+      children.set(line.parent_id, siblings);
+    }
+  }
+  const result: string[] = [];
+  const queue = [...(children.get(rootId) ?? [])];
+  const seen = new Set(queue);
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) break;
+    result.push(current);
+    for (const child of children.get(current) ?? []) {
+      if (!seen.has(child)) {
+        seen.add(child);
+        queue.push(child);
+      }
+    }
+  }
+  return result;
+}

@@ -5,6 +5,7 @@
   import { api } from "../../lib/api";
   import { isLive } from "../../lib/attachments";
   import type { Attachment, Conversation } from "../../lib/contracts";
+  import { descendantLineIds } from "../../lib/line-hierarchy";
   import { room } from "../../state/room.svelte.js";
 
   interface Props {
@@ -18,10 +19,10 @@
   let live = $state<Attachment[]>([]);
 
   $effect(() => {
-    api
-      .conversation(conversation.id)
-      .then((detail) => {
-        live = detail.attachments.filter(isLive);
+    const targetIds = [conversation.id, ...descendantLineIds(conversation.id, room.conversations)];
+    Promise.all(targetIds.map((id) => api.conversation(id)))
+      .then((details) => {
+        live = details.flatMap((detail) => detail.attachments.filter(isLive));
       })
       .catch(() => {
         failed = true;
@@ -33,12 +34,15 @@
 
   async function closeProcesses(): Promise<void> {
     const result = await api.closeProcesses(conversation.id);
+    const scope = descendantLineIds(conversation.id, room.conversations).length
+      ? `${conversation.name} and its sub-lines`
+      : conversation.name;
     close();
     await room.loadConversations();
     room.showNotice(
       result.stopped.length
-        ? `closed ${String(result.stopped.length)} process${result.stopped.length === 1 ? "" : "es"} on ${conversation.name}`
-        : `no live processes on ${conversation.name}`,
+        ? `closed ${String(result.stopped.length)} process${result.stopped.length === 1 ? "" : "es"} on ${scope}`
+        : `no live processes on ${scope}`,
     );
   }
 </script>
@@ -49,7 +53,9 @@
   {:else if failed}
     <p class="line-status error" role="alert">Could not load this line. Try again.</p>
   {:else}
-    <p class="dialog-text">Detaches every live process on this line. The line and its history stay.</p>
+    <p class="dialog-text">
+      Detaches every live process on this line and its sub-lines. The line and its history stay.
+    </p>
 
     <div class="live-list">
       {#if live.length}

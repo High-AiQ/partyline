@@ -9,19 +9,7 @@ import { room } from "../../state/room.svelte";
 const detail = ConversationDetailSchema.parse({
   conversation: { id: "child", name: "Child", topic: "", created_at: 1, parent_id: "parent" },
   messages: [],
-  attachments: [
-    {
-      id: "worker",
-      conv_id: "child",
-      name: "worker",
-      adapter: "raw",
-      command: ["sh"],
-      cwd: "/tmp",
-      status: "running",
-      last_seen: 0,
-      created_at: 1,
-    },
-  ],
+  attachments: [],
 });
 
 afterEach(() => {
@@ -30,11 +18,12 @@ afterEach(() => {
 });
 
 describe("management dialog", () => {
-  it("uses attachment identity and saves manager independently of parent", async () => {
+  it("links a parent line and offers no human manager control", async () => {
     vi.spyOn(api, "conversation").mockResolvedValue(detail);
-    vi.spyOn(hierarchyApi, "lead").mockResolvedValue({ attachment_id: "worker" });
-    const saveLead = vi.spyOn(hierarchyApi, "setLead").mockResolvedValue({ attachment_id: null });
-    const saveParent = vi.spyOn(hierarchyApi, "setParent");
+    const saveParent = vi.spyOn(hierarchyApi, "setParent").mockResolvedValue({
+      ...detail.conversation,
+      parent_id: null,
+    });
     vi.spyOn(room, "loadConversations").mockResolvedValue();
     const component = mount(ManagementDialog, {
       target: document.body,
@@ -42,21 +31,23 @@ describe("management dialog", () => {
     });
     try {
       await vi.waitFor(() => {
-        expect(document.querySelector("#lineManager")).not.toBeNull();
+        expect(document.querySelector("#parentLine")).not.toBeNull();
       });
-      const select = document.querySelector("#lineManager");
-      if (!(select instanceof HTMLSelectElement)) throw new Error("missing manager select");
-      expect(select.value).toBe("worker");
+      expect(document.querySelector("#lineManager")).toBeNull();
+      expect([...document.querySelectorAll("button")].some((b) => b.textContent === "save manager")).toBe(
+        false,
+      );
+      const select = document.querySelector("#parentLine");
+      if (!(select instanceof HTMLSelectElement)) throw new Error("missing parent select");
       select.value = "";
       select.dispatchEvent(new Event("change", { bubbles: true }));
       const save = [...document.querySelectorAll("button")].find(
-        (button) => button.textContent === "save manager",
+        (button) => button.textContent === "save parent",
       );
       save?.click();
       await vi.waitFor(() => {
-        expect(saveLead).toHaveBeenCalledWith("child", null);
+        expect(saveParent).toHaveBeenCalledWith("child", null);
       });
-      expect(saveParent).not.toHaveBeenCalled();
     } finally {
       await unmount(component);
     }
@@ -64,7 +55,6 @@ describe("management dialog", () => {
 
   it("does not offer empty replacement values when management failed to load", async () => {
     vi.spyOn(api, "conversation").mockRejectedValue(new Error("offline"));
-    vi.spyOn(hierarchyApi, "lead").mockResolvedValue({ attachment_id: null });
     const component = mount(ManagementDialog, {
       target: document.body,
       props: { conversation: detail.conversation, close: vi.fn() },
