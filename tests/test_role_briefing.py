@@ -9,6 +9,11 @@ class RoleBriefingTests(unittest.TestCase):
     def test_ordinary_participant_gets_no_hierarchy_instructions(self):
         self.assertEqual(role_instructions(["read", "write"], "line", "parent"), "")
 
+    def test_participant_on_a_managerless_line_learns_the_handoff(self):
+        text = role_instructions(["read", "write", "appoint_lead"], "line", None)
+        self.assertIn("Manager handoff", text)
+        self.assertIn("/api/conversations/line/lead", text)
+
     def test_root_manager_gets_delegation_but_no_parent_reporting_playbook(self):
         text = role_instructions(["create_child", "read_reports"], "root", None)
         self.assertIn("/api/conversations/root/children", text)
