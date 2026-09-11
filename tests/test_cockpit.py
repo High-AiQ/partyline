@@ -1030,7 +1030,7 @@ class FleetPlanRequestTest(unittest.TestCase):
 
     def test_an_explicit_database_answers_both_halves_of_the_coverage_question(self):
         # The live instance may not be $PARTYLINE_DB — ours is
-        # `.partyline-instance.db`. Reading the plan from one database and the live
+        # `instance.db`. Reading the plan from one database and the live
         # set from another would compare two different instances.
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "instance.db"
