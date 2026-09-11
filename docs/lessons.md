@@ -8,6 +8,7 @@
 | Pair every regression test with a control that fails on the prior behavior | Count a green test as evidence without its failing control |
 | Isolate shared scratch paths and environments per run; refuse unsafe overlap | Let concurrent agents capture to shared files or initialize one environment in parallel |
 | Enforce documented limits and lifecycle assumptions with executable guards | Leave a prose warning where an assertion belongs |
+| Scrub machine paths, hostnames, and captured transcripts before commit; a public repo is public the moment it is written | Trust push-time review, a human spot-check, or a post-merge scan to keep identifiers out of public git history |
 
 Every entry here was a belief an agent acted on that turned out to be wrong, paired with the
 evidence that disproved it and the guard that replaced it. Read this file when an incident
