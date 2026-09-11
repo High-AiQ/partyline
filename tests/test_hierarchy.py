@@ -258,6 +258,35 @@ class HierarchyApiTest(unittest.TestCase):
         self.assertEqual(appointed.status_code, 200)
         self.assertEqual(appointed.json()["attachment_id"], "kid-mgr")
 
+    def test_non_lead_cannot_repoint_a_live_manager(self):
+        self.db.set_attachment_status("lead-att", "running", None)
+        refused = self.client.post(
+            "/api/conversations/parent/lead",
+            json={"attachment_id": "impl-att"},
+            headers=self.impl,
+        )
+        self.assertEqual(refused.status_code, 403)
+
+    def test_machine_on_the_line_can_appoint_after_the_lead_detaches(self):
+        self.db.set_attachment_status("lead-att", "detached", None)
+        appointed = self.client.post(
+            "/api/conversations/parent/lead",
+            json={"attachment_id": "impl-att"},
+            headers=self.impl,
+        )
+        self.assertEqual(appointed.status_code, 200)
+        self.assertEqual(appointed.json()["attachment_id"], "impl-att")
+
+    def test_machine_cannot_appoint_a_foreign_line_after_its_lead_detaches(self):
+        self.db.create_conversation("other", "Other")
+        self.db.add_attachment("other-mgr", "other", "astra-other", "fake", ["fake"], "/tmp")
+        refused = self.client.post(
+            "/api/conversations/other/lead",
+            json={"attachment_id": "other-mgr"},
+            headers=self.impl,
+        )
+        self.assertEqual(refused.status_code, 403)
+
     def _child_with_lead(self, name="Kid"):
         """A child line whose own lead can escalate to this parent."""
         child = self.client.post(

@@ -8,7 +8,7 @@ from fastapi import HTTPException
 
 from .auth_guard import Principal
 from .db import Db
-from .hierarchy import child_ids, descendants, parent_id_of
+from .hierarchy import child_ids, descendants, lead_attachment, parent_id_of
 
 Capability = Literal[
     "read",
@@ -64,6 +64,21 @@ def _home_lead_tree(db: Db, principal: Principal, conv_id: str) -> bool:
     return conv_id == principal.conv_id or conv_id in descendants(db, principal.conv_id)
 
 
+def _live_lead(db: Db, conv_id: str) -> dict | None:
+    """The manager row only while its process can actually run.
+
+    A detached or exited lead keeps ``is_lead=1`` so resuming it restores the
+    role. That stale flag must not be treated as a manager that could still be
+    re-pointed: after the sole lead detaches, no machine satisfies
+    ``_home_lead_tree``, so without this the line can never get a new manager
+    except from a human.
+    """
+    lead = lead_attachment(db, conv_id)
+    if lead is None or lead["status"] not in ("starting", "running"):
+        return None
+    return lead
+
+
 def allows(db: Db, principal: Principal, conv_id: str, capability: Capability) -> bool:
     if is_human(principal):
         return True
@@ -76,7 +91,11 @@ def allows(db: Db, principal: Principal, conv_id: str, capability: Capability) -
     if capability in ("archive", "link_parent"):
         return False
     if capability == "appoint_lead":
-        return _home_lead_tree(db, principal, conv_id)
+        if _home_lead_tree(db, principal, conv_id):
+            return True
+        # Handoff after a manager detaches: any machine on the line may appoint
+        # a replacement while no live manager holds the role.
+        return principal.conv_id == conv_id and _live_lead(db, conv_id) is None
     if capability == "create_child":
         return principal.is_lead and conv_id == home
     if capability in ("report", "notify"):
