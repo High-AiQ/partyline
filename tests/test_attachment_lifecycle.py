@@ -205,6 +205,16 @@ class LifecycleTest(unittest.TestCase):
         self.assertIn("docs/state.md", fresh_checkpoint_briefing("intro", "docs/state.md"))
         self.assertEqual(self.fresh({"checkpoint": "docs/state.md", "after_message_id": 0}).status_code, 422)
 
+    def test_fresh_refuses_a_live_handle_on_a_related_line(self):
+        self.db.create_conversation("kid", "Kid")
+        self.db._exec("UPDATE conversations SET parent_id='line' WHERE id='kid'")
+        self.db.add_attachment(
+            "kid-worker", "kid", "worker", "raw", ["sh"], self.directory.name
+        )
+        taken = self.fresh()
+        self.assertEqual(taken.status_code, 409, taken.text)
+        self.assertIn("Kid", taken.json()["detail"])
+
     def test_reserved_replacement_prevents_old_resume_and_double_fresh(self):
         old = self.db.get_attachment("old")
         asyncio.run(create_fresh_record(self.db, old, FreshAttachmentRequest()))
