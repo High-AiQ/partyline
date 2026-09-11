@@ -21,6 +21,7 @@ from .contracts import (
     ConversationDeletedEvent,
     ConversationEvent,
     ConversationResponse,
+    ConversationsChangedEvent,
     PurgeResponse,
     RenameIn,
     TopicIn,
@@ -61,7 +62,9 @@ def register_conversation_routes(
         if not is_human(request_principal(request)):
             raise HTTPException(403, "only a human can open a top-level line")
         name = body.name.strip() or "untitled"
-        return runtime.db.create_conversation(str(uuid.uuid4()), name)
+        conv = runtime.db.create_conversation(str(uuid.uuid4()), name)
+        await runtime.broadcast_all(ConversationsChangedEvent())
+        return conv
 
     @app.get("/api/conversations/{conv_id}", response_model=ConversationDetailResponse)
     async def conversation_detail(request: Request, conv_id: str):
@@ -87,6 +90,7 @@ def register_conversation_routes(
         notice = f"☏ topic set{who}: {topic}" if topic else f"☏ topic cleared{who}"
         await runtime.post_message(conv_id, "system", "system", notice)
         await runtime.broadcast(conv_id, ConversationEvent(conversation=conv))
+        await runtime.broadcast_all(ConversationsChangedEvent())
         return conv
 
     @app.put("/api/conversations/{conv_id}/name", response_model=ConversationResponse)
@@ -109,6 +113,7 @@ def register_conversation_routes(
             conv_id, "system", "system", f"☏ line renamed{who}: {was} → {name}"
         )
         await runtime.broadcast(conv_id, ConversationEvent(conversation=conv))
+        await runtime.broadcast_all(ConversationsChangedEvent())
         return conv
 
     @app.delete("/api/conversations/{conv_id}", response_model=ArchiveResponse)
@@ -128,6 +133,7 @@ def register_conversation_routes(
         stopped = await runtime.stop_attachments(conv_id)
         conv = db.archive_conversation(conv_id)
         runtime.sockets.pop(conv_id, None)
+        await runtime.broadcast_all(ConversationsChangedEvent())
         return {"ok": True, "archived": True, "stopped": stopped, "conversation": conv}
 
     @app.post("/api/conversations/{conv_id}/restore", response_model=ConversationResponse)
@@ -142,6 +148,7 @@ def register_conversation_routes(
         await runtime.post_message(
             conv_id, "system", "system", "☏ line restored from the archive"
         )
+        await runtime.broadcast_all(ConversationsChangedEvent())
         return conv
 
     @app.delete("/api/conversations/{conv_id}/purge", response_model=PurgeResponse)
@@ -161,6 +168,7 @@ def register_conversation_routes(
         purge_reports(db, conv_id)
         db.delete_conversation(conv_id)
         runtime.sockets.pop(conv_id, None)
+        await runtime.broadcast_all(ConversationsChangedEvent())
         return {"ok": True, "purged": True}
 
     @app.post(

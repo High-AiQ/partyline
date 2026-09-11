@@ -124,6 +124,11 @@ export const ReattachDecisionEventSchema = z.object({
 });
 export type ReattachDecisionEvent = z.infer<typeof ReattachDecisionEventSchema>;
 
+export const ConversationsChangedEventSchema = z.object({
+  type: z.literal("conversations_changed"),
+});
+export type ConversationsChangedEvent = z.infer<typeof ConversationsChangedEventSchema>;
+
 const CurrentWireEventSchema = z.discriminatedUnion("type", [
   HelloEventSchema,
   MessageEventSchema,
@@ -135,6 +140,7 @@ const CurrentWireEventSchema = z.discriminatedUnion("type", [
   ConversationEventSchema,
   ConversationArchivedEventSchema,
   ConversationDeletedEventSchema,
+  ConversationsChangedEventSchema,
   ErrorEventSchema,
   ShutdownEventSchema,
   ReattachOfferEventSchema,

@@ -276,6 +276,11 @@ class Room {
         this.refreshArchiveIfOpen();
         break;
 
+      case "conversations_changed":
+        void this.loadConversations().catch(ignoreBackgroundFailure);
+        this.refreshArchiveIfOpen();
+        break;
+
       case "error":
         if (event.conversation_id === convId) handleWireError(this, event, context);
         break;

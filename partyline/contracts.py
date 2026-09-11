@@ -265,6 +265,10 @@ class ReattachDecisionEvent(BaseModel):
     action: Literal["started", "cancelled"]
 
 
+class ConversationsChangedEvent(BaseModel):
+    type: Literal["conversations_changed"] = "conversations_changed"
+
+
 class ReattachCommand(BaseModel):
     type: Literal["reattach"]
     token: str
@@ -282,6 +286,7 @@ Event = (
     | ConversationEvent
     | ConversationArchivedEvent
     | ConversationDeletedEvent
+    | ConversationsChangedEvent
     | ErrorEvent
     | HelloEvent
     | ReattachOfferEvent
@@ -291,6 +296,5 @@ Event = (
 
 class HookEventRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
-
     message: str | None = None
     title: str | None = None
