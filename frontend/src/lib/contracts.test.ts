@@ -121,6 +121,11 @@ describe("wire events with server-omitted null fields", () => {
     expect(event).toEqual({ type: "line_live", conversation_id: "line", live_count: 3 });
   });
 
+  it("accepts a conversations_changed event", () => {
+    const event = WireEventSchema.parse({ type: "conversations_changed" });
+    expect(event).toEqual({ type: "conversations_changed" });
+  });
+
   it("still accepts the REST spelling, where the empty field is null", () => {
     const event = WireEventSchema.parse({
       type: "attachment",

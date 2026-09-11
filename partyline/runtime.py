@@ -7,12 +7,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from .adapter_capabilities import claims_transcript, transcript_claimed
 from .adapters import Adapter
 from .attachment_broadcast import broadcast_attachment_state
-from .contracts import (
-    Event,
-    ErrorEvent,
-    MessageEvent,
-    MessageResponse,
-)
+from .contracts import ErrorEvent, Event, MessageEvent, MessageResponse
 from .handshake import hello_payload
 from .db import Db
 from .delivery_hooks import delivery_hooks
@@ -88,6 +83,10 @@ class ChatRuntime:
                 self.human_handles.get(conv_id, {}).pop(ws, None)
                 if not self.human_handles.get(conv_id):
                     self.human_handles.pop(conv_id, None)
+
+    async def broadcast_all(self, event: Event) -> None:
+        for conv_id in list(self.sockets):
+            await self.broadcast(conv_id, event)
 
     async def post_message(self, conv_id: str, sender: str, sender_type: str, body: str):
         msg = self.db.add_message(conv_id, sender, sender_type, body)

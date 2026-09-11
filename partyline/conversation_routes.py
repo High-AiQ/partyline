@@ -12,6 +12,7 @@ from .attachment_commands import validated_attachment_command
 from .auth_guard import request_principal
 from .auth_store import handle_taken
 from .claim_routes import purge_claims
+from .hierarchy import tree_live_name_conflict
 from .contracts import (
     ArchiveResponse,
     AttachIn,
@@ -21,6 +22,7 @@ from .contracts import (
     ConversationDeletedEvent,
     ConversationEvent,
     ConversationResponse,
+    ConversationsChangedEvent,
     PurgeResponse,
     RenameIn,
     TopicIn,
@@ -61,7 +63,9 @@ def register_conversation_routes(
         if not is_human(request_principal(request)):
             raise HTTPException(403, "only a human can open a top-level line")
         name = body.name.strip() or "untitled"
-        return runtime.db.create_conversation(str(uuid.uuid4()), name)
+        conv = runtime.db.create_conversation(str(uuid.uuid4()), name)
+        await runtime.broadcast_all(ConversationsChangedEvent())
+        return conv
 
     @app.get("/api/conversations/{conv_id}", response_model=ConversationDetailResponse)
     async def conversation_detail(request: Request, conv_id: str):
@@ -87,6 +91,7 @@ def register_conversation_routes(
         notice = f"☏ topic set{who}: {topic}" if topic else f"☏ topic cleared{who}"
         await runtime.post_message(conv_id, "system", "system", notice)
         await runtime.broadcast(conv_id, ConversationEvent(conversation=conv))
+        await runtime.broadcast_all(ConversationsChangedEvent())
         return conv
 
     @app.put("/api/conversations/{conv_id}/name", response_model=ConversationResponse)
@@ -109,6 +114,7 @@ def register_conversation_routes(
             conv_id, "system", "system", f"☏ line renamed{who}: {was} → {name}"
         )
         await runtime.broadcast(conv_id, ConversationEvent(conversation=conv))
+        await runtime.broadcast_all(ConversationsChangedEvent())
         return conv
 
     @app.delete("/api/conversations/{conv_id}", response_model=ArchiveResponse)
@@ -128,6 +134,7 @@ def register_conversation_routes(
         stopped = await runtime.stop_attachments(conv_id)
         conv = db.archive_conversation(conv_id)
         runtime.sockets.pop(conv_id, None)
+        await runtime.broadcast_all(ConversationsChangedEvent())
         return {"ok": True, "archived": True, "stopped": stopped, "conversation": conv}
 
     @app.post("/api/conversations/{conv_id}/restore", response_model=ConversationResponse)
@@ -142,6 +149,7 @@ def register_conversation_routes(
         await runtime.post_message(
             conv_id, "system", "system", "☏ line restored from the archive"
         )
+        await runtime.broadcast_all(ConversationsChangedEvent())
         return conv
 
     @app.delete("/api/conversations/{conv_id}/purge", response_model=PurgeResponse)
@@ -161,6 +169,7 @@ def register_conversation_routes(
         purge_reports(db, conv_id)
         db.delete_conversation(conv_id)
         runtime.sockets.pop(conv_id, None)
+        await runtime.broadcast_all(ConversationsChangedEvent())
         return {"ok": True, "purged": True}
 
     @app.post(
@@ -183,12 +192,11 @@ def register_conversation_routes(
             raise HTTPException(400, f"'{body.name}' is a reserved handle")
         if handle_taken(runtime.db, body.name):
             raise HTTPException(409, f"'{body.name}' is registered to a human account")
-        for existing in db.list_attachments(conv_id):
-            if (
-                existing["name"].lower() == body.name.lower()
-                and existing["status"] in ("starting", "running")
-            ):
-                raise HTTPException(409, f"'{body.name}' is already attached")
+        conflict = tree_live_name_conflict(db, conv_id, body.name)
+        if conflict is not None:
+            other = db.get_conversation(conflict["conv_id"])
+            place = "" if other["id"] == conv_id else f" on '{other['name']}'"
+            raise HTTPException(409, f"'{body.name}' is already attached{place}")
         try:
             command = validated_attachment_command(
                 body.adapter, body.command, s.ADAPTERS, s.ADAPTER_METADATA
