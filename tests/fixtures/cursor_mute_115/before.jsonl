@@ -1,0 +1,11 @@
+{"role": "user", "message": {"content": [{"type": "text", "text": "<timestamp>2026-01-01T00:00:00Z</timestamp>\n<user_query>\nredacted turn\n</user_query>"}]}}
+{"role": "assistant", "message": {"content": [{"type": "text", "text": "redacted reply"}]}}
+{"role": "user", "message": {"content": [{"type": "text", "text": "<timestamp>2026-01-01T00:00:00Z</timestamp>\n<user_query>\nredacted turn\n</user_query>"}]}}
+{"role": "assistant", "message": {"content": [{"type": "text", "text": "redacted reply"}]}}
+{"role": "user", "message": {"content": [{"type": "text", "text": "<timestamp>2026-01-01T00:00:00Z</timestamp>\n<user_query>\nredacted turn\n</user_query>"}]}}
+{"role": "assistant", "message": {"content": [{"type": "text", "text": "redacted reply"}]}}
+{"role": "user", "message": {"content": [{"type": "text", "text": "<timestamp>2026-01-01T00:00:00Z</timestamp>\n<user_query>\nredacted turn\n</user_query>"}]}}
+{"role": "assistant", "message": {"content": [{"type": "text", "text": "redacted reply"}]}}
+{"role": "user", "message": {"content": [{"type": "text", "text": "<timestamp>2026-01-01T00:00:00Z</timestamp>\n<user_query>\nredacted turn\n</user_query>"}]}}
+{"role": "assistant", "message": {"content": [{"type": "text", "text": "redacted reply"}]}}
+{"type": "turn_ended", "status": "success"}
