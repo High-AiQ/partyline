@@ -18,6 +18,7 @@ from fastapi import HTTPException
 from .adapter_capabilities import adapter_completion
 from .auth_store import ensure_api_token
 from .agent_connection import provision_connection, bind_connection_hint
+from .hierarchy import tree_live_name_conflict
 from .role_delivery import bind_role_delivery
 from .reattach import ResumedAttachment, adapter_can_resume
 from .transcript_delivery import TranscriptDeliveryRecord
@@ -132,12 +133,11 @@ async def resume_adapter(
     capabilities = adapter_metadata.get(att["adapter"], {})
     if not adapter_can_resume(capabilities):
         raise HTTPException(400, f"the {att['adapter']} adapter has no session to resume")
-    for other in runtime.db.list_attachments(att["conv_id"]):
-        if (
-            other["name"].lower() == att["name"].lower()
-            and other["status"] in ("starting", "running")
-        ):
-            raise HTTPException(409, f"'{att['name']}' is already attached")
+    conflict = tree_live_name_conflict(runtime.db, att["conv_id"], att["name"])
+    if conflict is not None:
+        other = runtime.db.get_conversation(conflict["conv_id"])
+        place = "" if other["id"] == att["conv_id"] else f" on '{other['name']}'"
+        raise HTTPException(409, f"'{att['name']}' is already attached{place}")
 
     conv = runtime.db.get_conversation(att["conv_id"])
     if conv["archived_at"]:
