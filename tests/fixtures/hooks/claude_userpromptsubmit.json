@@ -1,6 +1,6 @@
 {
   "hook_event_name": "UserPromptSubmit",
   "session_id": "sess-claude-1",
-  "cwd": "/workspace/code/partyline",
+  "cwd": "/workspace/partyline",
   "permission_mode": "bypassPermissions"
 }
