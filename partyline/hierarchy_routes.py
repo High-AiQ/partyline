@@ -7,7 +7,12 @@ import uuid
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from .auth_guard import request_principal
-from .contracts import ConversationResponse, MessageEvent, MessageResponse
+from .contracts import (
+    ConversationResponse,
+    ConversationsChangedEvent,
+    MessageEvent,
+    MessageResponse,
+)
 from .hierarchy import (
     HierarchyError,
     child_ids,
@@ -107,12 +112,13 @@ def hierarchy_router(runtime) -> APIRouter:
         return LeadOut(attachment_id=body.attachment_id)
 
     @router.put("/api/conversations/{conv_id}/parent", response_model=ConversationResponse)
-    def link_parent(request: Request, conv_id: str, body: ParentIn):
+    async def link_parent(request: Request, conv_id: str, body: ParentIn):
         deny_unless(db, request_principal(request), conv_id, "link_parent")
         try:
             conv = set_parent(db, conv_id, body.parent_id)
         except HierarchyError as exc:
             raise _http(exc) from exc
+        await runtime.broadcast_all(ConversationsChangedEvent())
         return ConversationResponse.model_validate(conv)
 
     @router.post(
@@ -120,13 +126,14 @@ def hierarchy_router(runtime) -> APIRouter:
         response_model=ChildCreatedResponse,
         status_code=201,
     )
-    def create_child(request: Request, conv_id: str, body: ChildIn):
+    async def create_child(request: Request, conv_id: str, body: ChildIn):
         deny_unless(db, request_principal(request), conv_id, "create_child")
         name = body.name.strip() or "untitled"
         try:
             conv = create_child_conversation(db, conv_id, str(uuid.uuid4()), name)
         except HierarchyError as exc:
             raise _http(exc) from exc
+        await runtime.broadcast_all(ConversationsChangedEvent())
         return ChildCreatedResponse(
             conversation=ConversationResponse.model_validate(conv)
         )

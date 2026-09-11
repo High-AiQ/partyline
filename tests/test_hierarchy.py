@@ -117,6 +117,24 @@ class HierarchyApiTest(unittest.TestCase):
         )
         self.assertEqual(denied.status_code, 403)
 
+    def test_websocket_connected_to_parent_receives_event_when_child_created(self):
+        class DummyWebSocket:
+            def __init__(self):
+                self.sent = []
+
+            async def send_json(self, payload):
+                self.sent.append(payload)
+
+        ws = DummyWebSocket()
+        self.runtime.sockets.setdefault("parent", set()).add(ws)
+        response = self.client.post(
+            "/api/conversations/parent/children",
+            json={"name": "Child"},
+            headers=self.lead,
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(ws.sent, [{"type": "conversations_changed"}])
+
     def test_implementer_cannot_use_another_line_task_id(self):
         other = self.db.create_conversation("other", "Other")
         task = self.store.add(other["id"], "secret")

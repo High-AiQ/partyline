@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { room } from "./room.svelte.js";
+import { session } from "./session.svelte.js";
+import { wire } from "./wire.svelte.js";
+import type { WireEventHandler } from "./wire.svelte.js";
 import { api } from "../lib/api";
 import type { Attachment, Conversation, ConversationDetail } from "../lib/contracts";
 
@@ -28,6 +31,7 @@ const conversation: Conversation = {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  session.clearSession();
   room.leave({ clearRoute: false });
 });
 
@@ -74,5 +78,27 @@ describe("room roster snapshots that were in flight during a removal", () => {
     await resync;
 
     expect(room.attachments).toEqual([]);
+  });
+});
+
+describe("conversations_changed event", () => {
+  it("reloads conversations when conversations_changed wire event is received", async () => {
+    session.user = { id: 1, email: "greg@example.com", handle: "greg" };
+    let wireHandler!: WireEventHandler;
+    vi.spyOn(wire, "connect").mockImplementation((_id, _identity, onEvent) => {
+      wireHandler = onEvent;
+    });
+    const loadSpy = vi.spyOn(room, "loadConversations").mockResolvedValue(undefined);
+    const archiveSpy = vi.spyOn(room, "refreshArchiveIfOpen");
+
+    await room.open(conversation);
+    expect(wireHandler).toBeDefined();
+
+    wireHandler(
+      { type: "conversations_changed" },
+      { wasReady: true, claimRejected: false, rejectClaim: vi.fn() },
+    );
+    expect(loadSpy).toHaveBeenCalled();
+    expect(archiveSpy).toHaveBeenCalled();
   });
 });
