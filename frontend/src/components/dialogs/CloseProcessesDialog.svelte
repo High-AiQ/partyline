@@ -34,12 +34,15 @@
 
   async function closeProcesses(): Promise<void> {
     const result = await api.closeProcesses(conversation.id);
+    const scope = descendantLineIds(conversation.id, room.conversations).length
+      ? `${conversation.name} and its sub-lines`
+      : conversation.name;
     close();
     await room.loadConversations();
     room.showNotice(
       result.stopped.length
-        ? `closed ${String(result.stopped.length)} process${result.stopped.length === 1 ? "" : "es"} on ${conversation.name}`
-        : `no live processes on ${conversation.name}`,
+        ? `closed ${String(result.stopped.length)} process${result.stopped.length === 1 ? "" : "es"} on ${scope}`
+        : `no live processes on ${scope}`,
     );
   }
 </script>
