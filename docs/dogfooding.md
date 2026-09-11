@@ -26,7 +26,8 @@ recorded in [lessons.md](lessons.md).
 
 The instance hosting a conversation must run from a separate **cockpit** checkout. Edit and test in
 the **workbench** checkout, then advance the cockpit deliberately. Restarting a cockpit without
-deploying merely starts the old code again.
+deploying merely starts the old code again. A plain LAN restart has no continuation plan and no
+automatic recovery — see [lan-restart.md](lan-restart.md) for that separate procedure.
 
 ```bash
 uv run python -m scripts.cockpit check
