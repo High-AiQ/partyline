@@ -155,7 +155,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
     def test_parsing_helpers(self):
         cwd = "/tmp/opencode/cursor-probe"
         self.assertEqual(cwd_slug(cwd), "tmp-opencode-cursor-probe")
-        self.assertEqual(cwd_slug("/home/gmccarthy"), "home-gmccarthy")
+        self.assertEqual(cwd_slug("/workspace"), "workspace")
         self.assertEqual(cwd_slug("///abc///def///"), "abc-def")
 
         import hashlib

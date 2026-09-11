@@ -51,7 +51,7 @@ class SyncLockedTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / ".venv").mkdir()
-            os.environ["VIRTUAL_ENV"] = "/home/gmccarthy/code/partyline/.venv"
+            os.environ["VIRTUAL_ENV"] = "/workspace/partyline/.venv"
             try:
                 self.assertIsNone(sync_locked(root, run=run))
             finally:

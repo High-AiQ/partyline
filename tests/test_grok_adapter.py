@@ -623,7 +623,7 @@ class TranscriptTest(unittest.TestCase):
             "type": "assistant",
             "content": (
                 "@greg-at-work I’ll check why the others look stuck on the line "
-                "and whether `https://partyline.home.arpa` is actually up."
+                "and whether `https://partyline.local` is actually up."
             ),
             "tool_calls": [{"id": "a"}, {"id": "b"}, {"id": "c"}],
         }
