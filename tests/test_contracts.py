@@ -35,6 +35,7 @@ class ContractTest(unittest.TestCase):
                 "name": "Line",
                 "created_at": 12.5,
                 "topic": "standing brief",
+                "goal": "",
                 "archived_at": None,
                 "live_count": 0,
                 "parent_id": None,
