@@ -54,6 +54,20 @@ misleading evidence:
 These are durable false assumptions from dogfooding, paired with the evidence and guard that
 replaced them:
 
+- **A worker will `@mention` whoever asked when it finishes, if the briefing tells it to.** It
+  will not, reliably, in any harness: across three days of a three-sub-line project a sub-manager ended
+  turns with "status reported routinely to parent" (a `notify:false` report), with plain prose,
+  or with `@lead` said on its own line while the lead sat on the parent — a mention that reached
+  nobody and left a ⚠ only humans saw. Every stall a person had to break with "hello?" or "all
+  chats are idle again" was one of these; a fifteen-minute heartbeat could not fix it because the
+  manager still had to notice silence and rarely knew what to do about it. The false assumption
+  was that completion is a prose problem. It is a routing problem the server can see: it knows
+  who woke a process, when its harness ended the turn, and whether anything it said reached a
+  live process. `turn_return.py` rings the requester with the last words when nothing did, and
+  `mention_relay.py` lets a manager's mention cross lines as a private copy so "@lead" from a
+  sub-manager means something. Control: `tests/test_return_path.py` fails against the old
+  behaviour — a silent turn end used to produce no message anywhere.
+
 - **An explicitly allowlisted `data-*` attribute survives when DOMPurify's broad data-attribute
   switch is off.** With `ALLOW_DATA_ATTR: false`, the math and language markers disappeared even
   though both names were present in `ALLOWED_ATTR`, silently disabling every lazy enhancer. Keep

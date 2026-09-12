@@ -59,3 +59,32 @@ describe("agent message enhancements", () => {
     }
   });
 });
+
+describe("cross-line message", () => {
+  it("tags a relayed message with the line it was said on and marks it direct", async () => {
+    const relayed: ChatMessage = {
+      ...agentMessage("@lead page one is done"),
+      source_conv_id: "line-2",
+      source_conv_name: "Child",
+      audience_attachment_id: "lead",
+    };
+    const message = mount(Message, { target: document.body, props: { message: relayed } });
+    try {
+      expect(document.querySelector(".via")?.textContent).toBe("via «Child»");
+      expect(document.querySelector(".direct")?.textContent).toContain("direct");
+    } finally {
+      await unmount(message);
+    }
+  });
+
+  it("leaves a message said on this line untagged", async () => {
+    const local: ChatMessage = { ...agentMessage("hello"), source_conv_id: "line-1" };
+    const message = mount(Message, { target: document.body, props: { message: local } });
+    try {
+      expect(document.querySelector(".via")).toBeNull();
+      expect(document.querySelector(".direct")).toBeNull();
+    } finally {
+      await unmount(message);
+    }
+  });
+});
