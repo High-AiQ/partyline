@@ -13,7 +13,18 @@ class LeadIn(BaseModel):
 
 
 class ChildIn(BaseModel):
+    """The hand-off contract: a child line is born knowing its goal and context.
+
+    ``goal`` is what the child's manager will see through, recorded on the
+    line and carried on that manager's every wake; ``topic`` is the standing
+    context every process on the child line reads — where things are, the
+    budget, the gates, the acceptance criterion. Both are optional so a
+    scratch line still costs one field, but the manager pack asks for both.
+    """
+
     name: str = Field(min_length=1, max_length=120)
+    goal: str = Field(default="", max_length=3000)
+    topic: str = Field(default="", max_length=3000)
 
 
 class ReportIn(BaseModel):
