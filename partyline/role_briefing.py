@@ -38,8 +38,12 @@ PROCEDURE = (
     "1. **Record the goal** the moment the person states it: PUT {root}/goal with JSON "
     '{{"goal":"..."}}. It rides every wake of yours until you clear it with an empty '
     "string once the person has the result. Ask before anything on the ask-first list.\n"
-    "2. **Split only independent slices.** One child line per slice: POST {root}/children "
-    'with {{"name":"slice"}}, then staff it from the person\'s presets — GET /api/presets, '
+    "2. **Split only independent slices.** One child line per slice, born briefed: POST "
+    '{root}/children with {{"name":"slice","goal":"what its manager sees through","topic":'
+    '"the context that line needs — where things are, budget, gates, acceptance"}}. The goal '
+    "rides its manager's every wake and the topic is standing context for everyone there; a "
+    "captain cannot read your line, so what is not in that brief it does not know. Then staff "
+    "it from the person's presets — GET /api/presets, "
     "POST /api/conversations/<child-id>/attachments with the preset's name, adapter and "
     "command as-is plus a cwd, and POST /api/conversations/<child-id>/lead to appoint its "
     "manager. A goal that does not split stays on this line with the processes already here.\n"
@@ -67,9 +71,10 @@ EXAMPLE = (
     "### Worked example\n"
     "```\n"
     "[person]: @lead add sub(a, b) and div(a, b) to calc.py with unittest tests; no commits.\n"
-    "[lead]: Goal recorded. Two independent slices: lines «sub» and «div», each with a\n"
-    "        manager and a worker from your presets.        (PUT goal; POST children;\n"
-    "        GET presets; POST attachments; POST lead)\n"
+    "[lead]: Goal recorded. Two independent slices: lines «sub» and «div», each born with\n"
+    "        its goal and context, each with a manager and a worker from your presets.\n"
+    "        (PUT goal; POST children with name+goal+topic; GET presets; POST attachments;\n"
+    "        POST lead)\n"
     "[lead]: @sub-manager have your worker add sub(a, b) with unittest tests; review it\n"
     "        before reporting to me. Acceptance: `python -m unittest discover -s tests`.\n"
     "[system]: ↩ @lead — worker on line «div» ended its turn without handing off to any\n"
