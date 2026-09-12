@@ -15,10 +15,34 @@ attach participants, assign work, and inspect descendant progress. Unrelated
 lines remain outside that machine credential's scope. Removing the manager role
 changes authorization on the next request.
 
-The manager receives the additional API instructions when the role applies.
-Ordinary implementers do not receive the hierarchy playbook. A role change is
-reflected in the next wake's instructions; hiding instructions is a context
-optimization, while the server's authorization checks enforce the boundary.
+The manager receives the **manager pack** when the role applies
+(`partyline/role_briefing.py`): the loop it runs — record the goal, split only
+independent slices and staff them from the person's presets, one addressee per
+assignment with the acceptance criterion, wait for the return, verify the whole,
+tell the person once — plus the ask-first list and one worked example. The
+example is deliberate: in fleet trials, weak models copied the shape they were
+shown far more reliably than they followed rules. Ordinary implementers do not
+receive it. A role change is reflected in the next wake's instructions; hiding
+instructions is a context optimization, while the server's authorization checks
+enforce the boundary.
+
+What stays with the person is the goal, acceptance, budget and spend gates,
+which presets may be used, and anything irreversible; the pack tells a manager
+to ask before those rather than guess. Team shape is a default, not a rule: the
+pack splits independent slices and the person overrides in a clause.
+
+## The goal
+
+A line carries a `goal`: what its manager is seeing through. A person or the
+line's manager records it once with `PUT /api/conversations/<id>/goal` and JSON
+`{"goal":"..."}`; the change is announced on the line. From then on the goal
+rides every wake digest of that line's manager as
+`(goal you are seeing through: …)`, next to the open tasks, until it is cleared
+with an empty string. Ordinary participants never receive it — the topic is the
+standing context for everyone, the goal is the manager's charge. Three fleet
+trials in, the goal was the only state a manager ever had to hold in its head,
+and the heartbeat's failure was reminding it of the clock instead.
+
 
 ## Reporting upward
 

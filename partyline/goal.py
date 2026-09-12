@@ -1,0 +1,60 @@
+"""A line's goal: what its manager is seeing through, said once, carried on every wake.
+
+Three fleet trials in, the only state a root manager ever had to hold in its
+head was the goal — and the heartbeat's whole failure was that it reminded
+the manager of the clock instead. The goal is recorded once, by the person
+or by the manager when the person states it, and rides the manager's digest
+rider next to the open tasks until it is cleared. Ordinary participants do
+not receive it: the line's topic is the standing context for everyone, the
+goal is the manager's charge.
+"""
+
+from __future__ import annotations
+
+from fastapi import FastAPI, HTTPException, Request
+from pydantic import BaseModel
+
+from .auth_guard import request_principal
+from .contracts import ConversationEvent, ConversationResponse
+from .machine_scope import deny_unless
+
+MAX_GOAL = 3000
+
+
+class GoalIn(BaseModel):
+    goal: str = ""
+
+
+def set_goal(db, conv_id: str, goal: str) -> dict:
+    db._exec("UPDATE conversations SET goal=? WHERE id=?", (goal, conv_id))
+    return db.get_conversation(conv_id)
+
+
+def goal_rider(db, conv_id: str) -> str:
+    """The goal line of a manager's wake digest; empty when none is recorded."""
+    conv = db.get_conversation(conv_id) or {}
+    goal = " ".join(str(conv.get("goal") or "").split())
+    return f"(goal you are seeing through: {goal})" if goal else ""
+
+
+def register_goal_route(app: FastAPI, runtime) -> None:
+    @app.put("/api/conversations/{conv_id}/goal", response_model=ConversationResponse)
+    async def put_goal(request: Request, conv_id: str, body: GoalIn):
+        db = runtime.db
+        principal = request_principal(request)
+        # Managers own the goal of their line; a person may set any line's.
+        deny_unless(db, principal, conv_id, "create_child")
+        conv = db.get_conversation(conv_id)
+        if conv is None:
+            raise HTTPException(404)
+        goal = body.goal.strip()
+        if len(goal) > MAX_GOAL:
+            raise HTTPException(400, f"goal is capped at {MAX_GOAL} characters")
+        if goal == (conv.get("goal") or ""):
+            return conv
+        conv = set_goal(db, conv_id, goal)
+        who = f" by @{principal.name}"
+        notice = f"☏ goal set{who}: {goal}" if goal else f"☏ goal cleared{who}"
+        await runtime.post_message(conv_id, "system", "system", notice)
+        await runtime.broadcast(conv_id, ConversationEvent(conversation=conv))
+        return conv

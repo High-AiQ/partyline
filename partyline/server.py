@@ -71,6 +71,7 @@ from .frontend_build import current_frontend_build
 from .hook_routes import hook_url, hooks_router
 from .line_process_routes import detach_attachment, register_line_process_routes
 from .message_routes import message_router
+from .goal import register_goal_route
 from .presence import Presence
 from .media import MediaStore, media_root
 from .claim_routes import claims_router
@@ -146,6 +147,7 @@ install_static_cache(app)
 register_terminal_route(app, runtime)
 register_compact_route(app, runtime, presence)
 register_line_process_routes(app, runtime)
+register_goal_route(app, runtime)
 app.include_router(auth_router(runtime.db, on_handle_change=user_sockets.close_all))
 app.include_router(media_router(runtime, media))
 app.include_router(message_router(runtime, media))
