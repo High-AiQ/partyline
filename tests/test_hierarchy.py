@@ -352,6 +352,29 @@ class HierarchyApiTest(unittest.TestCase):
         self.assertEqual(impl["role"], "implementer")
         self.assertNotIn("create_child", impl["actions"])
 
+    def test_a_child_is_born_with_its_goal_and_context(self):
+        created = self.client.post(
+            "/api/conversations/parent/children",
+            json={"name": "renderer", "goal": "render spreads 1-3",
+                  "topic": "cwd /tmp/book; budget $1; no upscale"},
+            headers=self.lead,
+        )
+        self.assertEqual(created.status_code, 201)
+        child = created.json()["conversation"]
+        self.assertEqual(child["goal"], "render spreads 1-3")
+        self.assertEqual(child["topic"], "cwd /tmp/book; budget $1; no upscale")
+        notices = [m["body"] for m in self.db.list_messages(child["id"])]
+        self.assertEqual(notices, [
+            "☏ topic set by @astra: cwd /tmp/book; budget $1; no upscale",
+            "☏ goal set by @astra: render spreads 1-3",
+        ])
+
+    def test_a_child_without_a_brief_is_silent(self):
+        created = self.client.post(
+            "/api/conversations/parent/children", json={"name": "scratch"}, headers=self.lead)
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(self.db.list_messages(created.json()["conversation"]["id"]), [])
+
     def test_human_can_link_an_existing_line_as_a_child(self):
         self.db.create_conversation("book", "Book")
         linked = self.client.put(

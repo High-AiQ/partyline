@@ -137,6 +137,20 @@ def hierarchy_router(runtime) -> APIRouter:
             conv = create_child_conversation(db, conv_id, str(uuid.uuid4()), name)
         except HierarchyError as exc:
             raise _http(exc) from exc
+        goal, topic = body.goal.strip(), body.topic.strip()
+        if goal or topic:
+            # Born briefed: the goal rides the child manager's wakes, the topic
+            # is standing context for everyone on the child line. Both are
+            # announced there so the hand-off is on the record.
+            db._exec("UPDATE conversations SET goal=?, topic=? WHERE id=?", (goal, topic, conv["id"]))
+            conv = db.get_conversation(conv["id"])
+            who = f"@{request_principal(request).name}"
+            if topic:
+                await runtime.post_message(conv["id"], "system", "system",
+                                           f"☏ topic set by {who}: {topic}")
+            if goal:
+                await runtime.post_message(conv["id"], "system", "system",
+                                           f"☏ goal set by {who}: {goal}")
         await runtime.broadcast_all(ConversationsChangedEvent())
         return ChildCreatedResponse(
             conversation=ConversationResponse.model_validate(conv)
