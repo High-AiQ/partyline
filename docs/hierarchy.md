@@ -16,7 +16,12 @@ lines remain outside that machine credential's scope. Removing the manager role
 changes authorization on the next request.
 
 The manager receives the **manager pack** when the role applies
-(`partyline/role_briefing.py`): the loop it runs — record the goal, split only
+(`partyline/role_briefing.py`). Its first rule: a manager manages and does not
+implement — no code, renders, or paid calls of its own, no file-by-file
+ownership lists; it spins up a sub-line with a captain, briefs it at a high
+level with the context it needs, reviews, decides, and reports. That rule also
+rides every manager wake next to the goal, because it is the one a manager
+drifts from mid-project. Then the loop it runs — record the goal, split only
 independent slices and staff them from the person's presets, one addressee per
 assignment with the acceptance criterion, wait for the return, verify the whole,
 tell the person once — plus the ask-first list and one worked example. The
