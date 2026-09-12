@@ -64,6 +64,30 @@ def interrupt_names(body: str) -> set[str]:
     return names
 
 
+# What may sit between the mentions of a leading run: "@a, @b and @c:".
+_RUN_SEPARATOR = re.compile(r"^(?:[\s,;:&—–-]|and\b)+")
+
+
+def addressees(body: str) -> set[str]:
+    """The handles a message is *for*, as distinct from those it talks about.
+
+    ``@lead please have @worker build it`` is for lead; worker is a reference.
+    The rule: mentions in the leading run — before the first word that is
+    not a mention or a separator — are the addressees. A message with no
+    leading run (``Done. @lead please review``) addresses every mention, so
+    a hand-off at the end of a sentence still counts.
+    """
+    text = _normalized(body).lstrip()
+    found: set[str] = set()
+    while True:
+        match = MENTION_RE.match(text)
+        if match is None:
+            break
+        found |= _handles(match.group(2))
+        text = _RUN_SEPARATOR.sub("", text[match.end():])
+    return found or mentioned_names(body)
+
+
 def addresses(name: str, messages: list[dict]) -> bool:
     """Whether any message in the batch @mentions this handle or @all."""
     handle = name.lower()

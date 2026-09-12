@@ -42,11 +42,12 @@ def role_instructions(actions: Collection[str], conv_id: str, parent_id: str | N
             "Assign by @mentioning a process on any of your child lines from here: a manager's "
             "mentions cross lines and arrive on that process's line as a private copy tagged "
             "`via «your line»`. A child line's manager reaches you the same way; its implementers "
-            "cannot, they report to their own manager. When a process you rang ends its turn "
-            "without handing off to any process, you receive `↩ @you — name on line «X» ended "
-            "its turn…` with its last words: read that line "
-            "(GET /api/conversations/<child-id>/messages?after_id=N) and decide the next step. "
-            "POST /api/conversations/<child-id>/messages with JSON "
+            "cannot, they report to their own manager. Address one process per assignment and "
+            "name any other without the @ — `@sub-manager have worker build X` rings only the "
+            "manager. When a process you rang ends its turn without handing off to any process, "
+            "you receive `↩ @you — name on line «X» ended its turn…` with its last words: read "
+            "that line (GET /api/conversations/<child-id>/messages?after_id=N) and decide the "
+            "next step. POST /api/conversations/<child-id>/messages with JSON "
             '{"body":"@handle the assignment"} says it on that line directly.'
         )
     if "read_reports" in actions:
@@ -58,12 +59,10 @@ def role_instructions(actions: Collection[str], conv_id: str, parent_id: str | N
         )
     if parent_id and "report" in actions:
         blocks.append(
-            f'You are also a child manager. POST {root}/reports with JSON {{"body":"status"}} '
-            "deposits a routine report without waking your parent. For a completed result, question, "
-            'or blocker needing attention, explicitly set "notify":true. Updates coalesce while '
-            "attention is pending. Check notified_at: null means notification has not completed; "
-            "retry when the parent manager is available. "
-            "Do not notify for acknowledgments or routine chatter."
+            "You are also a child manager. To reach your parent line's manager — a result, a "
+            "question, a blocker — @mention them from here; that is the only channel that wakes "
+            f'them. POST {root}/reports with JSON {{"body":"status"}} deposits a routine status '
+            "report in their inbox without waking anyone; never do both for the same event."
         )
     if parent_id is None:
         blocks.append(

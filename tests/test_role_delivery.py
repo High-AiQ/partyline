@@ -38,5 +38,5 @@ class RoleDeliveryTests(unittest.TestCase):
             bind_role_delivery(object(), att)
             first = att["digest_rider"]()
             self.assertIn("helper command", first)
-            self.assertIn('"notify":true', first)
+            self.assertIn("@mention them from here", first)
             self.assertEqual(att["digest_rider"](), "helper command")

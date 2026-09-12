@@ -22,17 +22,17 @@ optimization, while the server's authorization checks enforce the boundary.
 
 ## Reporting upward
 
-A child manager can deposit a report in its parent's inbox. Ordinary reports do
-not start a parent turn. For completion, a question, or a blocker that needs
-attention, an explicit notification can wake the designated parent manager.
-Repeated unacknowledged updates coalesce instead of starting another turn for
-every update. A stored report with `notified_at:null` has not completed its notification;
-retry the escalation after the parent manager becomes available. Ordinary child chatter is never forwarded automatically.
+A child manager reaches its parent line's manager by `@mention` — the mention
+crosses lines for managers (below) and is the only channel that wakes anyone.
+The parent's inbox (`POST .../reports`) is for routine status a manager may
+read later; a deposit never starts a turn. Do not do both for the same event.
+The old `notify` flag still exists on the API but is no longer taught: with the
+relay it was a second wake for the same news.
 
 | DO | DO NOT |
 | --- | --- |
 | Send assignments to a named participant on an explicit child line | Assume a bare mention here reaches the same handle on another line |
-| Deposit routine progress; explicitly notify for a result, question, or blocker needing attention | Turn every status update or acknowledgment into a parent wake |
+| Deposit routine progress in the inbox; `@mention` the parent manager for a result, question, or blocker | Turn every status update or acknowledgment into a parent wake |
 | Keep source line and attachment identity with reports | Infer ownership from a display handle alone |
 | Inspect reports and acknowledge the handled notification before moving on | Treat receipt of a report as acceptance of the work |
 | Grant manager roles only for the intended project scope | Treat a machine credential as instance-wide administration |
@@ -119,6 +119,7 @@ The old form — `POST /api/conversations/<child-id>/messages` from the manager
 | DO | DO NOT |
 | --- | --- |
 | Assign with a plain `@handle` from your own line when you manage the tree above it | Expect an implementer's `@parent-lead` to reach anyone — it is told to tell its own manager |
+| Address one process per assignment and name the rest without `@` | Write `@sub-manager have @worker do X` — that rings the worker too, and on two lines |
 | Read the `via «line»` tag as "this process is elsewhere; reply by mention, not by assuming it is here" | Treat a private copy as the whole conversation on that line — read the line before deciding |
 
 ## The return path
@@ -161,6 +162,18 @@ than a second source of noise:
   notice where it typed; on its own line it reads everything anyway.
 - **Quoted words cannot ring anyone**: mentions inside the excerpt are
   neutralised, and the finished process is named without its sigil.
+- **A request is a message *for* the process, not one that talks about it.**
+  Every `@` rings, but only the leading run of mentions — `@a, @b and @c:` —
+  names who is owed an answer; `@lead please have @worker build it` makes
+  worker's turn owe nothing. A message with no leading run (`Done. @lead
+  please review`) addresses every mention it contains.
+- **A turn that says nothing owes nothing**, and words said before the wake
+  are not this turn's answer. On the first fleet trial, silent ends were a
+  process reading a status line that named it, and the "last words" quoted
+  were its greeting from before the wake.
+- **The decision waits three seconds after the receipt**, because the harness
+  reports the end of a turn on one channel and its last words on another.
+  Speech inside the grace is quoted; a hand-off inside it cancels the notice.
 
 Adapters whose harness reports no turn end (`turn_end` absent from the
 manifest) have no return path; every bundled coding-agent adapter reports one.
