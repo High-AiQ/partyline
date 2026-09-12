@@ -2,6 +2,7 @@
 
 from typing import NamedTuple
 
+from .goal import goal_rider
 from .role_briefing import role_instructions
 
 
@@ -41,6 +42,7 @@ def bind_role_delivery(db, att: dict) -> None:
             update = role_instructions(current.actions, current.conv_id, current.parent_id)
             if not update:
                 update = "Your current role is ordinary participant. Use only your own line's tools."
-        return "\n".join(part for part in (original_rider(), update) if part)
+        goal = goal_rider(db, current.conv_id) if current.role == "lead" else ""
+        return "\n".join(part for part in (original_rider(), goal, update) if part)
 
     att["digest_rider"] = rider

@@ -42,6 +42,7 @@ Sign in → open a line → attach a process with a handle and adapter → talk 
 | `@!name` — interrupt and send | [docs/adapters.md](docs/adapters.md#interrupt-and-send-name) |
 | Managers, child lines, and reports | [docs/hierarchy.md](docs/hierarchy.md) |
 | Mentions across lines and the return path | [docs/hierarchy.md](docs/hierarchy.md#the-return-path) |
+| The manager pack and a line's goal | [docs/hierarchy.md](docs/hierarchy.md#the-goal) |
 | Credentials for attached processes | [docs/credentials.md](docs/credentials.md) |
 | Security & caveats | [docs/security.md](docs/security.md) |
 | Agent refresh / checkpoints | [docs/agent-refresh.md](docs/agent-refresh.md) |

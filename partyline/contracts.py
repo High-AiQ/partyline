@@ -87,6 +87,7 @@ class ConversationResponse(BaseModel):
     name: str
     created_at: float
     topic: str = ""
+    goal: str = ""
     archived_at: float | None = None
     live_count: int = Field(default=0, ge=0)
     parent_id: str | None = None
@@ -137,9 +138,8 @@ class RestartPlanRequest(BaseModel):
     conversation_id: str
     debrief: str = Field(default="", max_length=10_000)
     mode: RestartPlanMode = "offer"
-    # "line" plans the requesting line only; "all" plans every live resumable
-    # process on every unarchived line, so a restart cannot silently orphan a
-    # line nobody remembered. A manual offer is shown to one tab, so only an
+    # "line" plans the requesting line; "all" plans every live resumable process
+    # on every unarchived line. A manual offer is shown to one tab, so only an
     # automatic plan may be fleet-wide.
     scope: RestartPlanScope = "line"
 

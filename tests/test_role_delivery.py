@@ -3,7 +3,11 @@
 import unittest
 from unittest.mock import patch
 
+from types import SimpleNamespace
+
 from partyline.role_delivery import RoleState, bind_role_delivery
+
+NO_GOAL = SimpleNamespace(get_conversation=lambda conv_id: {"goal": ""})
 
 
 class RoleDeliveryTests(unittest.TestCase):
@@ -12,7 +16,7 @@ class RoleDeliveryTests(unittest.TestCase):
         manager = RoleState("lead", "line", None, ("read", "write", "create_child"))
         att = {"id": "worker", "digest_rider": lambda: "task board"}
         with patch("partyline.role_delivery.current_role", return_value=ordinary) as role:
-            bind_role_delivery(object(), att)
+            bind_role_delivery(NO_GOAL, att)
             self.assertEqual(att["role_briefing"], "")
             self.assertEqual(att["digest_rider"](), "task board")
             role.return_value = manager
@@ -27,7 +31,7 @@ class RoleDeliveryTests(unittest.TestCase):
         handoff = RoleState("implementer", "line", None, ("read", "write", "appoint_lead"))
         att = {"id": "worker", "digest_rider": lambda: "task board"}
         with patch("partyline.role_delivery.current_role", return_value=ordinary) as role:
-            bind_role_delivery(object(), att)
+            bind_role_delivery(NO_GOAL, att)
             role.return_value = handoff
             self.assertIn("Manager handoff", att["digest_rider"]())
 
@@ -35,8 +39,8 @@ class RoleDeliveryTests(unittest.TestCase):
         manager = RoleState("lead", "line", "parent", ("create_child", "report"))
         att = {"id": "worker", "resume": True, "digest_rider": lambda: "helper command"}
         with patch("partyline.role_delivery.current_role", return_value=manager):
-            bind_role_delivery(object(), att)
+            bind_role_delivery(NO_GOAL, att)
             first = att["digest_rider"]()
             self.assertIn("helper command", first)
-            self.assertIn("@mention them from here", first)
+            self.assertIn("by @mention from this line", first)
             self.assertEqual(att["digest_rider"](), "helper command")

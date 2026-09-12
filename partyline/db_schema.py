@@ -149,6 +149,8 @@ MIGRATIONS = [
     # every message on a line; other processes never see a copy that is not
     # theirs, so cross-line traffic costs no one else's context.
     "ALTER TABLE messages ADD COLUMN audience_attachment_id TEXT",
+    # goal: what the line's manager is seeing through; rides the manager's digest.
+    "ALTER TABLE conversations ADD COLUMN goal TEXT NOT NULL DEFAULT ''",
     # Child-to-parent reports. Created here rather than on first use: running
     # `executescript` per request issued an implicit COMMIT on the shared
     # connection and invalidated cursors another thread was still reading,
