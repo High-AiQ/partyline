@@ -21,7 +21,8 @@ class RoleDeliveryTests(unittest.TestCase):
             self.assertEqual(att["digest_rider"](), "task board")
             role.return_value = manager
             self.assertIn("Manager tools", att["digest_rider"]())
-            self.assertEqual(att["digest_rider"](), "task board")
+            self.assertEqual(att["digest_rider"](), "task board\n(you manage — delegate to a "
+                             "captain, review, decide; you do not implement)")
             role.return_value = ordinary
             self.assertIn("ordinary participant", att["digest_rider"]())
             self.assertEqual(att["digest_rider"](), "task board")
@@ -43,4 +44,4 @@ class RoleDeliveryTests(unittest.TestCase):
             first = att["digest_rider"]()
             self.assertIn("helper command", first)
             self.assertIn("by @mention from this line", first)
-            self.assertEqual(att["digest_rider"](), "helper command")
+            self.assertTrue(att["digest_rider"]().startswith("helper command\n(you manage"))

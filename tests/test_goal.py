@@ -87,10 +87,12 @@ class GoalRiderTest(unittest.TestCase):
             self.db.set_attachment_status(att, "running", "own")
         set_lead(self.db, "line", "lead")
 
-    def test_the_rider_is_empty_without_a_goal_and_one_line_with(self):
-        self.assertEqual(goal_rider(self.db, "line"), "")
+    def test_the_rider_carries_the_rule_alone_without_a_goal_and_both_with(self):
+        self.assertEqual(goal_rider(self.db, "line"), "(you manage — delegate to a captain, "
+                         "review, decide; you do not implement)")
         self.db._exec("UPDATE conversations SET goal=? WHERE id=?", ("finish  the\nbook", "line"))
-        self.assertEqual(goal_rider(self.db, "line"), "(goal you are seeing through: finish the book)")
+        self.assertEqual(goal_rider(self.db, "line"), "(goal you are seeing through: finish the "
+                         "book; you manage — delegate to a captain, review, decide; you do not implement)")
 
     def test_the_manager_carries_the_goal_and_the_implementer_does_not(self):
         self.db._exec("UPDATE conversations SET goal=? WHERE id=?", ("finish the book", "line"))
@@ -100,5 +102,5 @@ class GoalRiderTest(unittest.TestCase):
         bind_role_delivery(self.db, worker)
         lead["digest_rider"]()  # the first wake carries the pack; the goal rides every wake
 
-        self.assertIn("(goal you are seeing through: finish the book)", lead["digest_rider"]())
-        self.assertNotIn("goal you are seeing through", worker["digest_rider"]())
+        self.assertIn("(goal you are seeing through: finish the book;", lead["digest_rider"]())
+        self.assertNotIn("you do not implement", worker["digest_rider"]())

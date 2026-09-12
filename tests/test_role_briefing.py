@@ -19,6 +19,7 @@ class RoleBriefingTests(unittest.TestCase):
         self.assertIn("/api/conversations/root/children", text)
         self.assertIn("/api/conversations/root/reports", text)
         self.assertIn("PUT /api/conversations/root/goal", text)
+        self.assertIn("### You manage; you do not implement", text)
         self.assertIn("### The loop you run", text)
         self.assertIn("### Ask the person first", text)
         self.assertIn("### Worked example", text)
