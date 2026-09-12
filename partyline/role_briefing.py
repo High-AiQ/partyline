@@ -1,10 +1,91 @@
-"""Only managers receive hierarchy API instructions; permissions remain server-owned."""
+"""The manager pack: only managers receive it; permissions remain server-owned.
+
+Three fleet trials shaped this text. The procedure is the product's operating
+loop, not an opinion about how to run a project, so it lives here once rather
+than in every goal a person types. The worked example is what actually moved
+weak models: they copied the shape they were shown. What stays with the
+person — the goal, acceptance, budget, presets, anything irreversible — is
+listed as the things to ask first.
+"""
 
 from collections.abc import Collection
 
 
 def _line_people_url(conv_id: str) -> str:
     return f"GET /api/conversations/{conv_id} lists every process on the line by name and ID."
+
+
+HANDOFF = (
+    "\n\n## Manager handoff\n"
+    "This line has no live manager. If the person asks you to appoint one, "
+    "{people} and then POST /api/conversations/{conv}/lead with JSON "
+    '{{"attachment_id":"<the process ID>"}}.'
+)
+
+PROCEDURE = (
+    "### The loop you run\n"
+    "1. **Record the goal** the moment the person states it: PUT {root}/goal with JSON "
+    '{{"goal":"..."}}. It rides every wake of yours until you clear it with an empty '
+    "string once the person has the result. Ask before anything on the ask-first list.\n"
+    "2. **Split only independent slices.** One child line per slice: POST {root}/children "
+    'with {{"name":"slice"}}, then staff it from the person\'s presets — GET /api/presets, '
+    "POST /api/conversations/<child-id>/attachments with the preset's name, adapter and "
+    "command as-is plus a cwd, and POST /api/conversations/<child-id>/lead to appoint its "
+    "manager. A goal that does not split stays on this line with the processes already here.\n"
+    "3. **Assign to one process per message**, with the acceptance criterion in the message. "
+    "A manager's @mention crosses lines and lands on that process's line as a private copy "
+    "tagged `via «your line»`; name anyone else without the @, because every @ rings.\n"
+    "4. **Wait for the return.** Your cue is a manager's @mention or a notice like "
+    "`↩ @you — worker on line «X» ended its turn without handing off…; last said: «…»`. "
+    "Read that line before deciding: GET /api/conversations/<child-id>/messages?after_id=N "
+    "(the notice carries N). Redirect with one @mention, or accept.\n"
+    "5. **Verify the whole yourself** before telling the person. A report is receipt, not "
+    "acceptance; run the check the goal named.\n"
+    "6. **Tell the person once, with evidence**, then clear the goal. Ordinary participants "
+    "cannot reach other lines; a child manager reaches you by @mention and nobody else above."
+)
+
+ASK_FIRST = (
+    "### Ask the person first\n"
+    "Commits or pushes to shared branches, deploys and restarts, paid calls beyond a stated "
+    "budget, deleting data, changing presets, and anything else that cannot be undone. Do "
+    "not start a paid wave or restart processes merely because an endpoint is available."
+)
+
+EXAMPLE = (
+    "### Worked example\n"
+    "```\n"
+    "[person]: @lead add sub(a, b) and div(a, b) to calc.py with unittest tests; no commits.\n"
+    "[lead]: Goal recorded. Two independent slices: lines «sub» and «div», each with a\n"
+    "        manager and a worker from your presets.        (PUT goal; POST children;\n"
+    "        GET presets; POST attachments; POST lead)\n"
+    "[lead]: @sub-manager have your worker add sub(a, b) with unittest tests; review it\n"
+    "        before reporting to me. Acceptance: `python -m unittest discover -s tests`.\n"
+    "[system]: ↩ @lead — worker on line «div» ended its turn without handing off to any\n"
+    "        process; last said: «div done, 6 tests pass». Read it all: GET .../messages?after_id=41\n"
+    "[lead]: @div-manager your worker reports done; review and tell me the result.\n"
+    "[div-manager via «div»]: @lead reviewed and accepted: div raises on zero, 6 tests green.\n"
+    "[sub-manager via «sub»]: @lead accepted: sub in, 5 tests green.\n"
+    "[lead]: (runs the suite) @person both in, 11 tests OK, nothing committed.  (PUT goal \"\")\n"
+    "```"
+)
+
+CHILD_MANAGER = (
+    "You are also a child manager. Your parent line's manager reaches you here; you reach "
+    "them the same way, by @mention from this line, for a result, a question, or a blocker "
+    "— that is the only channel that wakes them. POST {root}/reports with JSON "
+    '{{"body":"status"}} deposits a routine status report in their inbox without waking '
+    "anyone; never do both for the same event."
+)
+
+HEARTBEAT = (
+    "You are the root manager, so you may run a heartbeat on yourself: POST /api/heartbeat "
+    'with {"interval_seconds":900,"goal":"..."} reminds you to work your inbox on a timer '
+    "(60-3600 s), one reminder outstanding at a time, and DELETE /api/heartbeat turns it off. "
+    "It authorizes no spending, rendering, or deployment. The return path makes it rarely "
+    "necessary: a process you rang that ends its turn without handing off rings you back. "
+    "An idle room is not evidence the work is done."
+)
 
 
 def role_instructions(actions: Collection[str], conv_id: str, parent_id: str | None) -> str:
@@ -14,72 +95,23 @@ def role_instructions(actions: Collection[str], conv_id: str, parent_id: str | N
             return ""
         # A line with no live manager: any process on it may hand the role to a
         # named replacement, which is how a person's "B takes the lead" works.
-        return (
-            "\n\n## Manager handoff\n"
-            "This line has no live manager. If the person asks you to appoint one, "
-            f"{_line_people_url(conv_id)} and then POST "
-            f'/api/conversations/{conv_id}/lead with JSON {{"attachment_id":"<the process ID>"}}.'
-        )
+        return HANDOFF.format(people=_line_people_url(conv_id), conv=conv_id)
     root = f"/api/conversations/{conv_id}"
     blocks = [
-        "You manage this line and its delegated child projects. Use the authenticated API helper "
-        "from your briefing; `request GET /api/capabilities` shows your current permissions.",
-        f'Create a child with POST {root}/children and JSON {{"name":"project name"}}. '
-        "The returned conversation ID is the explicit destination for later actions.",
+        "You manage this line and its delegated child projects. Use the authenticated API "
+        "helper from your briefing; `request GET /api/capabilities` shows your permissions.",
+        PROCEDURE.format(root=root),
+        ASK_FIRST,
+        EXAMPLE,
     ]
-    if "attach" in actions:
-        blocks.append(
-            "On an authorized descendant, POST /api/conversations/<child-id>/attachments with "
-            "the chosen preset's name, adapter, command, and cwd. Preserve the user's presets."
-        )
-    if "appoint_lead" in actions:
-        blocks.append(
-            'Designate a child manager with POST /api/conversations/<child-id>/lead and '
-            'JSON {"attachment_id":"the attached process ID"}.'
-        )
-    if "assign" in actions:
-        blocks.append(
-            "Assign by @mentioning a process on any of your child lines from here: a manager's "
-            "mentions cross lines and arrive on that process's line as a private copy tagged "
-            "`via «your line»`. A child line's manager reaches you the same way; its implementers "
-            "cannot, they report to their own manager. Address one process per assignment and "
-            "name any other without the @ — `@sub-manager have worker build X` rings only the "
-            "manager. When a process you rang ends its turn without handing off to any process, "
-            "you receive `↩ @you — name on line «X» ended its turn…` with its last words: read "
-            "that line (GET /api/conversations/<child-id>/messages?after_id=N) and decide the "
-            "next step. POST /api/conversations/<child-id>/messages with JSON "
-            '{"body":"@handle the assignment"} says it on that line directly.'
-        )
     if "read_reports" in actions:
         blocks.append(
-            f"Pull child reports with GET {root}/reports. Inspect the latest report before "
-            f'acknowledging it with POST {root}/reports/<report-id>/ack and JSON {{"revision":N}}, '
-            "where N is the revision you read. A 409 means read the update before retrying. "
+            f"Child reports wait in GET {root}/reports; acknowledge one with POST "
+            f'{root}/reports/<report-id>/ack and JSON {{"revision":N}} after reading it. '
             "Receipt is not acceptance of the child's work."
         )
     if parent_id and "report" in actions:
-        blocks.append(
-            "You are also a child manager. To reach your parent line's manager — a result, a "
-            "question, a blocker — @mention them from here; that is the only channel that wakes "
-            f'them. POST {root}/reports with JSON {{"body":"status"}} deposits a routine status '
-            "report in their inbox without waking anyone; never do both for the same event."
-        )
+        blocks.append(CHILD_MANAGER.format(root=root))
     if parent_id is None:
-        blocks.append(
-            "You are the root manager, so you may run a heartbeat on yourself: a timer that "
-            "reminds you to work your inbox while a goal is in progress. Enable it with "
-            'POST /api/heartbeat and JSON {"interval_seconds":900,"goal":"what you are seeing '
-            'through"} — the interval is 60-3600 seconds. GET /api/heartbeat shows whether it '
-            "is on, the interval, when the next reminder is due, and whether one is still "
-            "undelivered. Only one reminder is ever outstanding, and it is delivered like any "
-            "other message. It needs no reply when nothing is waiting, and it authorizes no "
-            "spending, rendering, or deployment. Turn it off with DELETE /api/heartbeat once "
-            "the goal is met — it will not decide that for you, and an idle room is not "
-            "evidence the work is done. The return path usually makes it unnecessary: a "
-            "process you rang that ends its turn without handing off rings you back."
-        )
-    blocks.append(
-        "Keep budget, acceptance, artifact ownership, and checkpoint responsibilities explicit. "
-        "Do not start a paid wave or restart processes merely because an endpoint is available."
-    )
+        blocks.append(HEARTBEAT)
     return "\n\n## Manager tools\n" + "\n\n".join(blocks)

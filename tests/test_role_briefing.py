@@ -18,13 +18,18 @@ class RoleBriefingTests(unittest.TestCase):
         text = role_instructions(["create_child", "read_reports"], "root", None)
         self.assertIn("/api/conversations/root/children", text)
         self.assertIn("/api/conversations/root/reports", text)
+        self.assertIn("PUT /api/conversations/root/goal", text)
+        self.assertIn("### The loop you run", text)
+        self.assertIn("### Ask the person first", text)
+        self.assertIn("### Worked example", text)
+        self.assertIn("/api/heartbeat", text)
         self.assertNotIn('"notify":true', text)
         self.assertNotIn("also a child manager", text)
 
     def test_child_manager_learns_that_a_mention_wakes_and_a_report_does_not(self):
         text = role_instructions(["create_child", "read_reports", "report"], "child", "root")
         self.assertIn("POST /api/conversations/child/reports", text)
-        self.assertIn("@mention them from here", text)
+        self.assertIn("by @mention from this line", text)
         self.assertIn("without waking anyone", text)
         self.assertNotIn('"notify":true', text)
 
