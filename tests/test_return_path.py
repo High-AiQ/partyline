@@ -181,12 +181,50 @@ class CrossLineMentionTest(Tree):
 
 
 class ReturnPathTest(Tree):
-    async def turn(self, att_id, *said):
+    def setUp(self):
+        super().setUp()
+        self.runtime.returns.grace = 0
+
+    async def turn(self, att_id, *said, after=()):
+        """A harness turn: began, speech, the receipt, then any speech the
+        transcript tail posts after the receipt, then the grace runs out."""
         line = self.db.get_attachment(att_id)["conv_id"]
         await self.presence.began(line, att_id)
         for body in said:
             await self.say(att_id, body)
         await self.presence.ended(line, att_id)
+        for body in after:
+            await self.say(att_id, body)
+        await self.runtime.returns.drain()
+
+    async def test_speech_that_lands_after_the_receipt_is_what_gets_quoted(self):
+        await self.say("lead", "@builder count the functions")
+        await self.turn("builder", "On it.", after=("Two functions: add and mul.",))
+
+        [notice] = [b for b in self.adapters["lead"].bodies() if b.startswith("↩")]
+        self.assertIn("last said: «Two functions: add and mul.»", notice)
+
+    async def test_a_hand_off_that_lands_after_the_receipt_cancels_the_notice(self):
+        await self.say("lead", "@sub take page one")
+        await self.turn("sub", "Checking.", after=("@lead page one accepted",))
+
+        self.assertEqual([b for b in self.adapters["lead"].bodies() if b.startswith("↩")], [])
+        self.assertEqual(self.runtime.returns.pending, {})
+
+    async def test_a_cross_line_notice_points_at_everything_since_the_wake(self):
+        wake = (await self.runtime.post_message("parent", "lead", "agent", "x"))["id"]
+        await self.say("lead", "@builder count the functions")
+        await self.turn("builder", "Two.")
+
+        [notice] = [b for b in self.adapters["lead"].bodies() if b.startswith("↩")]
+        self.assertIn(f"GET /api/conversations/child/messages?after_id={wake + 1}", notice)
+
+    async def test_a_same_line_notice_needs_no_pointer(self):
+        await self.say("lead", "@worker run the suite")
+        await self.turn("worker", "Green.")
+
+        [notice] = [b for b in self.adapters["lead"].bodies() if b.startswith("↩")]
+        self.assertNotIn("GET /api", notice)
 
     async def test_a_worker_that_ends_without_handing_off_wakes_the_manager_who_asked(self):
         await self.say("lead", "@builder render page one")
@@ -273,7 +311,7 @@ class ReturnPathTest(Tree):
         await self.turn("builder")
 
         [notice] = [b for b in self.adapters["lead"].bodies() if b.startswith("↩")]
-        self.assertTrue(notice.endswith("without handing off to any process and said nothing"))
+        self.assertIn("without handing off to any process and said nothing. Read it all", notice)
 
     async def test_an_exit_is_not_a_return(self):
         await self.say("lead", "@builder render page one")
@@ -281,6 +319,7 @@ class ReturnPathTest(Tree):
         await self.say("builder", "Working.")
         await self.presence.statusing("child", "builder", self.runtime.status_callback(
             "builder", "child", "own"), "builder")("exited")
+        await self.runtime.returns.drain()
 
         self.assertEqual([b for b in self.adapters["lead"].bodies() if b.startswith("↩")], [])
 
@@ -296,14 +335,18 @@ class ReturnPathTest(Tree):
         await self.presence.began("child", "sub")
         self.runtime.returns.note_spoke("sub", "@lead accepted, report 7 filed")
         await self.presence.ended("child", "sub")
+        await self.runtime.returns.drain()
 
         self.assertEqual([b for b in self.adapters["lead"].bodies() if b.startswith("↩")], [])
 
     async def test_a_forgotten_attachment_owes_nothing(self):
         await self.say("lead", "@builder render page one")
+        await self.presence.began("child", "builder")
+        await self.presence.ended("child", "builder")
         self.presence.forget("builder")
 
         self.assertEqual(self.runtime.returns.requesters, {})
+        self.assertEqual(self.runtime.returns.pending, {})
 
 
 class ExcerptTest(unittest.TestCase):
