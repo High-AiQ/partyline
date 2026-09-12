@@ -21,11 +21,12 @@ class RoleBriefingTests(unittest.TestCase):
         self.assertNotIn('"notify":true', text)
         self.assertNotIn("also a child manager", text)
 
-    def test_child_manager_gets_explicit_report_and_notify_distinction(self):
+    def test_child_manager_learns_that_a_mention_wakes_and_a_report_does_not(self):
         text = role_instructions(["create_child", "read_reports", "report"], "child", "root")
         self.assertIn("POST /api/conversations/child/reports", text)
-        self.assertIn('"notify":true', text)
-        self.assertIn("without waking", text)
+        self.assertIn("@mention them from here", text)
+        self.assertIn("without waking anyone", text)
+        self.assertNotIn('"notify":true', text)
 
     def test_missing_report_capability_does_not_advertise_report_tools(self):
         text = role_instructions(["create_child"], "child", "root")
