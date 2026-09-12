@@ -30,11 +30,19 @@ def set_goal(db, conv_id: str, goal: str) -> dict:
     return db.get_conversation(conv_id)
 
 
+# Rides every manager wake next to the goal, because the pack scrolls away and
+# the one rule a manager drifts from mid-project is this one.
+MANAGER_REMINDER = "you manage — delegate to a captain, review, decide; you do not implement"
+
+
 def goal_rider(db, conv_id: str) -> str:
-    """The goal line of a manager's wake digest; empty when none is recorded."""
+    """The goal line of a manager's wake digest, with the standing rule; the
+    rule alone when no goal is recorded."""
     conv = db.get_conversation(conv_id) or {}
     goal = " ".join(str(conv.get("goal") or "").split())
-    return f"(goal you are seeing through: {goal})" if goal else ""
+    if not goal:
+        return f"({MANAGER_REMINDER})"
+    return f"(goal you are seeing through: {goal}; {MANAGER_REMINDER})"
 
 
 def register_goal_route(app: FastAPI, runtime) -> None:
