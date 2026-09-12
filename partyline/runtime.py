@@ -183,8 +183,8 @@ class ChatRuntime:
         """Persist and flush exact held batches without re-running mention routing."""
         return delivery_hooks(self, conv_id, att_id)
 
-    async def route_mentions(self, conv_id: str, msg: dict):
-        await route_message(self, conv_id, msg)
+    async def route_mentions(self, conv_id: str, msg: dict, *, force: bool = False):
+        await route_message(self, conv_id, msg, force=force)
 
     def status_callback(self, att_id: str, conv_id: str, runtime_owner: str):
         async def on_status(status: str):

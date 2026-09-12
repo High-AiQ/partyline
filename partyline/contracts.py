@@ -25,8 +25,7 @@ class AttachIn(BaseModel):
     update: bool = False
 
 
-# Neither carries a sender: who changed a topic or name is derived from the
-# authenticated principal, never from a client-supplied field.
+# No sender field: who changed a topic or name comes from the authenticated principal.
 class TopicIn(BaseModel):
     topic: str = ""
 
@@ -103,6 +102,8 @@ class MessageResponse(BaseModel):
     files: list[FileRef] = Field(default_factory=list)
     source_attachment_id: str | None = None
     source_conv_id: str | None = None
+    source_conv_name: str | None = None  # the line it was said on, when another
+    audience_attachment_id: str | None = None  # a private copy: one process sees it
 
 
 class FileUploadResponse(BaseModel):
@@ -127,9 +128,8 @@ class ReattachCandidateResponse(BaseModel):
     id: str
     name: str
     adapter: str
-    # The line this process lives on, which a fleet plan does not share with
-    # the line that owns the plan. Defaulted so this client can still read a
-    # plan from a server old enough not to send it.
+    # The line this process lives on; a fleet plan spans lines. Defaulted so an
+    # older server that does not send it still parses.
     conversation_id: str = ""
 
 

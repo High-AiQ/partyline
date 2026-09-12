@@ -3,14 +3,22 @@
 import logging
 
 from .interrupts import interrupt_for
+from .mention_relay import relay_mentions
 from .mentions import interrupt_names, mentioned_names
 
 logger = logging.getLogger(__name__)
 
 
-async def route_message(runtime, conv_id: str, message: dict) -> None:
-    """Deliver direct mentions and @all messages to live attachments."""
-    if message["sender_type"] == "system":
+async def route_message(
+    runtime, conv_id: str, message: dict, *, force: bool = False
+) -> None:
+    """Deliver direct mentions and @all messages to live attachments.
+
+    System notices are not routed unless the caller says so: most of them
+    name a process only to describe it. ``force`` is for the few the server
+    writes *to* a process — the return path's "your worker went quiet".
+    """
+    if message["sender_type"] == "system" and not force:
         return
     names = mentioned_names(message["body"])
     # `@!name` is an operator's "stop and read this". Only a human may write
@@ -27,7 +35,10 @@ async def route_message(runtime, conv_id: str, message: dict) -> None:
     failed: list[str] = []
     delivered: set[str] = set()
     queued: set[str] = set()
+    audience = message.get("audience_attachment_id")
     for attachment in runtime.db.list_attachments(conv_id):
+        if audience and attachment["id"] != audience:
+            continue  # a private copy rings the one process it exists for
         directly_addressed = ring_all or attachment["name"].lower() in names
         source = message.get("source_attachment_id")
         same_speaker = (
@@ -68,10 +79,14 @@ async def route_message(runtime, conv_id: str, message: dict) -> None:
     for notice in notices:
         await runtime.post_message(conv_id, "system", "system", notice)
 
+    # A handle live on a related line is reached there, not reported missing.
+    elsewhere = await relay_mentions(runtime, conv_id, message, names - delivered - queued)
     unavailable = [
         name
         for name in unreachable
-        if name.lower() not in delivered and name.lower() not in queued
+        if name.lower() not in delivered
+        and name.lower() not in queued
+        and name.lower() not in elsewhere
     ]
     for name in unavailable:
         await runtime.post_message(

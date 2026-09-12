@@ -70,6 +70,11 @@ export const ChatMessageSchema = z.object({
   body: z.string(),
   created_at: z.number(),
   files: z.array(FileRefSchema).default([]),
+  // Set when the message was said on another line of the tree and relayed here.
+  source_conv_id: z.string().nullable().optional(),
+  source_conv_name: z.string().nullable().optional(),
+  // A private copy: one process on this line is shown it; people see it too.
+  audience_attachment_id: z.string().nullable().optional(),
 });
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 

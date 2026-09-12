@@ -18,13 +18,14 @@ when it finishes. Pairing makes them robust to a CLI that folds two digests
 into one turn — one pair, not two — so the badge neither wedges on nor
 flickers between turns. A harness that reports them arms only on ``began``:
 a swallowed paste never started a turn, and arming on the write is the
-stuck "working…" a silent paste produces.
+stuck "working…" a silent paste produces. A harness with no such receipt
+still arms on the pasted wake and never self-clears; a guess about when a
+turn ended is a new way to be wrong.
 
-A harness with no such receipt still arms on the pasted wake — the only
-signal it will ever observe — and never self-clears. A guess about when a
-turn ended is a new way to be wrong; the client can lower its confidence
-from ``since`` without the server asserting an ending it never observed.
+The turn boundary is also where the return path (`turn_return.py`) decides
+whether a finished turn answered whoever asked for it.
 """
+
 
 from __future__ import annotations
 
@@ -35,6 +36,7 @@ from dataclasses import dataclass
 from .mentions import addresses
 from .presence_contracts import WorkingEvent
 from .presence_queue import DeliveryQueue
+from .turn_return import ReturnPath
 
 WORKING = "working"
 SPEAKING = "speaking"
@@ -69,13 +71,11 @@ class Presence:
 
     def __init__(self, runtime):
         self.runtime = runtime
-        # attachment id -> its open turn. The line is part of the state
-        # because presence is asked per-conversation: a tab on one line must
+        # attachment id -> its open turn, on its line: a tab on one line must
         # never light a jack belonging to another.
         self.turns: dict[str, Turn] = {}
-        # Monotonic per attachment, bumped on every announcement. A turn
-        # number cannot order transitions *within* a turn, and working →
-        # speaking → working is exactly that.
+        # Monotonic per attachment, bumped on every announcement; a turn
+        # number cannot order working → speaking → working within one turn.
         self.revisions: dict[str, int] = {}
         self.counts: dict[str, int] = {}
         # Which line an attachment belongs to, kept after its turn closes so
@@ -83,6 +83,7 @@ class Presence:
         self.lines: dict[str, str] = {}
         self.completions: dict[str, str] = {}
         self.queue = DeliveryQueue()
+        runtime.returns = self.returns = ReturnPath(runtime)
 
     def register(self, att_id: str, completion: str) -> None:
         """Record how this attachment's harness reports the end of a turn."""
@@ -159,11 +160,8 @@ class Presence:
         return open_turn
 
     async def started(self, conv_id: str, att_id: str, owner: str | None = None) -> None:
-        """A wake was delivered into this attachment's terminal.
-
-        This arms the badge rather than declaring a turn: the CLI has not
-        read the paste yet. A second wake mid-turn is not a new turn.
-        """
+        """A wake reached the terminal: arm the badge (the CLI has not read it
+        yet). A second wake mid-turn is not a new turn."""
         if att_id in self.turns:
             return
         self.counts[att_id] = self.counts.get(att_id, 0) + 1
@@ -176,12 +174,8 @@ class Presence:
     async def began(
         self, conv_id: str, att_id: str, owner: str | None = None, turn: int | None = None
     ) -> None:
-        """The harness reports the CLI has begun a turn.
-
-        Arms the badge if a delivery has not. A began while a turn is open
-        replaces it: no harness interleaves two live turns, so the open one
-        was aborted or missed its end. Second began repairs state only.
-        """
+        """The harness reports a begun turn. Arms the badge if a delivery has
+        not; a began while a turn is open replaces the aborted one."""
         open_turn = self._current(att_id, owner, turn)
         if open_turn is None:
             if turn is not None or att_id in self.turns:
@@ -205,6 +199,7 @@ class Presence:
         if open_turn.open == 0:
             await self.finished(conv_id, att_id)
             await self.runtime.broadcast_attachment(conv_id, att_id)
+            await self.returns.turn_ended(att_id)
             await self.queue.flush(att_id, turn_ended=True)
 
     async def spoke(self, conv_id: str, att_id: str) -> None:
@@ -234,6 +229,7 @@ class Presence:
         self.revisions.pop(att_id, None)
         self.counts.pop(att_id, None)
         self.queue.unregister(att_id)
+        self.returns.forget(att_id)
 
     def watch(
         self, adapter, conv_id: str, att_id: str, completion: str = NONE,
@@ -265,6 +261,7 @@ class Presence:
                 return False
             delivered = await deliver(messages)
             self.queue.release(att_id, messages)
+            self.returns.note_delivered(att_id, messages)
             if self.completions.get(att_id) != RECEIPT:
                 await self.started(conv_id, att_id, owner)
             return delivered is not False
@@ -278,6 +275,7 @@ class Presence:
         async def posted(sender: str, sender_type: str, body: str):
             await post(sender, sender_type, body)
             if sender_type == "agent":
+                self.returns.note_spoke(att_id, body)
                 await self.spoke(conv_id, att_id)
 
         return posted
