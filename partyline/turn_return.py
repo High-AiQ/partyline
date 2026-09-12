@@ -33,14 +33,26 @@ What keeps this a return rather than a second source of noise:
   on the line already and a fleet restart would ring every lead at once.
 * Humans read their own line, so a human requester is told only when it
   asked from another line — an unrouted notice where it was typed.
+* The decision waits a moment after the receipt. A harness reports the end
+  of a turn through one channel and its last words through another (the
+  transcript tail), and on the first live trial the receipt won by a few
+  hundred milliseconds: the notice quoted "on it" while the findings landed
+  one message later. The last words are the notice's payload, so the return
+  is settled after a short grace, and speech that arrives inside it is
+  quoted — or, if it hands off, cancels the notice.
 """
 
 from __future__ import annotations
+
+import asyncio
 
 from .mention_relay import LIVE, is_foreign, post_private, reaches_a_process, speaker_attachment
 from .mentions import addresses, mentioned_names
 
 EXCERPT = 280
+# Long enough for a transcript tail to post the turn's last message after the
+# harness receipt, short enough that a manager is not kept waiting.
+RETURN_GRACE_SECONDS = 3.0
 
 
 def excerpt(body: str | None) -> str:
@@ -61,12 +73,17 @@ class ReturnPath:
 
     def __init__(self, runtime):
         self.runtime = runtime
-        # att_id -> requester attachment id -> its live row at wake time
+        self.grace = RETURN_GRACE_SECONDS
+        # att_id -> requester attachment id -> its row at wake time, plus the
+        # id of the message that rang this process, so a notice can point at
+        # everything said since.
         self.requesters: dict[str, dict[str, dict]] = {}
         # att_id -> human handle -> the line the human typed on
         self.askers: dict[str, dict[str, str]] = {}
         self.addressed: set[str] = set()
         self.last_said: dict[str, str] = {}
+        # att_id -> the return decision waiting out its grace
+        self.pending: dict[str, asyncio.Task] = {}
 
     def _row(self, att_id: str) -> dict | None:
         """The attachment's durable row; a runtime with no database has no return path."""
@@ -77,6 +94,8 @@ class ReturnPath:
         for table in (self.requesters, self.askers, self.last_said):
             table.pop(att_id, None)
         self.addressed.discard(att_id)
+        if task := self.pending.pop(att_id, None):
+            task.cancel()
 
     def note_delivered(self, att_id: str, messages: list[dict]) -> None:
         """Record who woke this process from the batch that was pasted."""
@@ -91,7 +110,10 @@ class ReturnPath:
                 origin = message.get("source_conv_id") or me["conv_id"]
                 asker = speaker_attachment(self.runtime.db, origin, message)
                 if asker is not None and asker["id"] != att_id:
-                    self.requesters.setdefault(att_id, {})[asker["id"]] = asker
+                    entry = self.requesters.setdefault(att_id, {}).setdefault(
+                        asker["id"], {**asker, "since_id": message["id"]}
+                    )
+                    entry["since_id"] = min(entry["since_id"], message["id"])
             elif kind == "human" and is_foreign(message):
                 self.askers.setdefault(att_id, {})[message["sender"]] = message["source_conv_id"]
 
@@ -103,16 +125,38 @@ class ReturnPath:
         self.last_said[att_id] = body
         if reaches_a_process(self.runtime.db, me, mentioned_names(body)):
             self.addressed.add(att_id)
+            if task := self.pending.pop(att_id, None):
+                task.cancel()  # the last words handed off after all
 
-    async def turn_ended(self, att_id: str) -> list[dict]:
-        """The harness closed the turn: ring every requester nobody answered."""
-        requesters = self.requesters.pop(att_id, {})
-        askers = self.askers.pop(att_id, {})
-        said = self.last_said.pop(att_id, None)
-        answered = att_id in self.addressed
+    async def turn_ended(self, att_id: str) -> None:
+        """The harness closed the turn: settle the return once its grace is up."""
+        if att_id in self.pending or not (self.requesters.get(att_id) or self.askers.get(att_id)):
+            return
+        if att_id in self.addressed:
+            self._clear(att_id)
+            return
+        self.pending[att_id] = asyncio.create_task(self._settle(att_id))
+
+    async def drain(self) -> None:
+        """Wait out every pending grace — for tests and shutdown."""
+        for task in list(self.pending.values()):
+            await task
+
+    def _clear(self, att_id: str) -> tuple[dict, dict, str | None]:
+        state = (
+            self.requesters.pop(att_id, {}),
+            self.askers.pop(att_id, {}),
+            self.last_said.pop(att_id, None),
+        )
         self.addressed.discard(att_id)
+        return state
+
+    async def _settle(self, att_id: str) -> list[dict]:
+        await asyncio.sleep(self.grace)
+        self.pending.pop(att_id, None)
+        requesters, askers, said = self._clear(att_id)
         finisher = self._row(att_id)
-        if answered or finisher is None or not (requesters or askers):
+        if finisher is None:
             return []
         posted = []
         for requester in requesters.values():
@@ -121,7 +165,9 @@ class ReturnPath:
                 continue
             if finisher.get("is_lead") and not current.get("is_lead"):
                 continue
-            body = self._notice(current["name"], finisher, current["conv_id"], said)
+            body = self._notice(
+                current["name"], finisher, current["conv_id"], said, requester["since_id"]
+            )
             posted.append(await post_private(
                 self.runtime, current["conv_id"], "system", "system", body,
                 audience=current["id"], source=(att_id, finisher["conv_id"]),
@@ -131,14 +177,19 @@ class ReturnPath:
             posted.append(await self.runtime.post_message(line_id, "system", "system", body))
         return posted
 
-    def _notice(self, to: str, finisher: dict, on_line: str, said: str | None) -> str:
-        where = ""
+    def _notice(
+        self, to: str, finisher: dict, on_line: str, said: str | None, since_id: int | None = None
+    ) -> str:
+        where = pointer = ""
         if finisher["conv_id"] != on_line:
             line = self.runtime.db.get_conversation(finisher["conv_id"]) or {}
             where = f" on line «{line.get('name', '?')}»"
+            if since_id is not None:  # everything since the wake, in one call
+                pointer = (f". Read it all: GET /api/conversations/{finisher['conv_id']}"
+                           f"/messages?after_id={since_id - 1}")
         tail = f"; last said: «{excerpt(said)}»" if said else " and said nothing"
         # The finisher is named without the sigil: this notice must not wake it.
         return (
             f"↩ @{to} — {finisher['name']}{where} ended its turn without handing off "
-            f"to any process{tail}"
+            f"to any process{tail}{pointer}"
         )
