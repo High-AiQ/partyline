@@ -70,6 +70,9 @@ export const ChatMessageSchema = z.object({
   body: z.string(),
   created_at: z.number(),
   files: z.array(FileRefSchema).default([]),
+  source_conv_id: z.string().nullable().optional(), // said on another line, relayed here
+  source_conv_name: z.string().nullable().optional(),
+  audience_attachment_id: z.string().nullable().optional(), // a private copy for one process
 });
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 
@@ -292,7 +295,6 @@ export const ApiErrorBodySchema = z.object({
 });
 export type ApiErrorBody = z.infer<typeof ApiErrorBodySchema>;
 
-// Keep the original import surface stable while the wire-only contracts live
-// in their own file. `events.ts` uses lazy entity schemas to make this
-// intentional re-export cycle safe at runtime.
+// Keep the import surface stable while wire-only contracts live in `events.ts`,
+// whose lazy entity schemas make this intentional re-export cycle safe at runtime.
 export * from "./events";
