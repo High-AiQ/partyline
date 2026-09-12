@@ -67,6 +67,14 @@ replaced them:
   `mention_relay.py` lets a manager's mention cross lines as a private copy so "@lead" from a
   sub-manager means something. Control: `tests/test_return_path.py` fails against the old
   behaviour — a silent turn end used to produce no message anywhere.
+- **Every mention is a request.** The first fleet trial of the return path (a root manager,
+  two sub-lines with a manager and worker each) finished its goal in four minutes, but the
+  rooms filled with `↩` notices about turns nobody had asked for: a manager's status line
+  "@a and @b: files are present" and its assignment "@sub have @worker build it" rang every
+  name in them, and each rung process that ended its turn quietly then bounced back. The false
+  assumption was that a wake and a request are the same thing. Now only the leading run of
+  mentions names who is owed an answer, a turn that says nothing owes nothing, and words said
+  before the wake are not this turn's answer (`tests/test_return_path.py`, addressee tests).
 
 - **An explicitly allowlisted `data-*` attribute survives when DOMPurify's broad data-attribute
   switch is off.** With `ALLOW_DATA_ATTR: false`, the math and language markers disappeared even
