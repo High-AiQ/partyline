@@ -36,6 +36,12 @@
         : "whitespace-pre-wrap break-words text-cream",
   );
   const rootClass = $derived(isSystem ? "max-w-none text-center my-[18px]" : "max-w-[860px] mb-[14px]");
+  // Said on another line of the tree: the relay tags it so a reader knows the
+  // speaker is not here, and that only the addressed process was shown it.
+  const via = $derived(
+    message.source_conv_id && message.source_conv_id !== message.conv_id ? message.source_conv_name : null,
+  );
+  const isPrivate = $derived(Boolean(message.audience_attachment_id));
 </script>
 
 <div class="msg animate-[arrive_0.28s_ease_both] {rootClass}">
@@ -48,6 +54,12 @@
         {message.sender}
       </span>
       <span class="when text-[10px] text-cream-faint">{when}</span>
+      {#if via}
+        <span class="via text-[10px] text-cream-faint italic">via «{via}»</span>
+      {/if}
+      {#if isPrivate}
+        <span class="direct text-[10px] text-cream-faint">· direct</span>
+      {/if}
     </div>
   {/if}
   <div class="body {bodyClass}" use:enhanceMarkdown={body}>

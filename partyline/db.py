@@ -15,7 +15,7 @@ from typing import Literal, TypedDict
 from .db_schema import MIGRATIONS, SCHEMA
 from .query_result import materialize
 from .conversation_queries import ACTIVE_CONVERSATIONS, ARCHIVED_CONVERSATIONS, CONVERSATION_BY_ID
-from .message_queries import as_message, select_message_page
+from .message_queries import MESSAGE_SELECT, as_message, select_message_page
 
 
 RestartPlanMode = Literal["offer", "automatic"]
@@ -263,18 +263,19 @@ class Db:
         return select_message_page(self._exec, conv_id, before_id, after_id, limit)
 
     def messages_after(self, conv_id, after_id, exclude_sender=None, exclude_attachment_id=None):
-        q = "SELECT * FROM messages WHERE conv_id=? AND id>?"
+        """Unseen by one reader: never its own speech, never a copy private to another."""
+        q = MESSAGE_SELECT + " WHERE m.conv_id=? AND m.id>?"
         args = [conv_id, after_id]
         if exclude_attachment_id is not None:
-            q += " AND IFNULL(source_attachment_id,'') != ?"
-            args.append(exclude_attachment_id)
+            q += " AND IFNULL(source_attachment_id,'') != ? AND IFNULL(audience_attachment_id,?) = ?"
+            args += [exclude_attachment_id] * 3
             if exclude_sender is not None:
                 q += " AND NOT (source_attachment_id IS NULL AND sender = ?)"
                 args.append(exclude_sender)
         elif exclude_sender is not None:
             q += " AND sender != ?"
             args.append(exclude_sender)
-        cur = self._exec(q + " ORDER BY id", args)
+        cur = self._exec(q + " ORDER BY m.id", args)
         return [as_message(r) for r in cur.fetchall()]
 
     def messages_by_ids(self, conv_id: str, message_ids: list[int]) -> list[dict]:
@@ -283,7 +284,7 @@ class Db:
             return []
         placeholders = ",".join("?" for _ in message_ids)
         cur = self._exec(
-            f"SELECT * FROM messages WHERE conv_id=? AND id IN ({placeholders}) ORDER BY id",
+            f"{MESSAGE_SELECT} WHERE m.conv_id=? AND m.id IN ({placeholders}) ORDER BY m.id",
             [conv_id, *message_ids],
         )
         return [as_message(row) for row in cur.fetchall()]

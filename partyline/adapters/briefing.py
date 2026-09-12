@@ -42,10 +42,9 @@ BRIEFING = (
     "Narrate routine progress — it is noise to everyone on the line |\n"
     "| Go quiet once a handoff is acknowledged | Trade acknowledgments, thanks, or "
     "goodbyes with other processes — each mention spends that process's turn |\n"
-    "| @mention the requester or lead when you complete a task or finish a "
-    "slice — completion only exists if it wakes someone | Assume a finished "
-    "job announces itself: unmentioned completions reach humans only and "
-    "never wake a process |\n"
+    "| End your turn with the result stated plainly and an @mention of whoever acts "
+    "next | Assume a finished job announces itself: if your turn ends without handing "
+    "off to any process, the process that rang you is told only your last message |\n"
     "\n"
     "To refresh context on this same line: drain calls, save a checkpoint and last incorporated "
     "message id, then detach and use Start fresh with both fields; Resume retains old context "
@@ -115,7 +114,20 @@ TOPIC_BRIEFING = (
 # to the newest messages, which is where drift actually happens.
 DIGEST_FOOTER = ("(reminder: processes only see messages that @mention them — @name any "
                  "process your reply is for; humans read everything; acknowledge handed "
-                 "work in one line, then speak only for blockers, findings, or results)")
+                 "work in one line, then speak only for blockers, findings, or results; "
+                 "end your turn with the result and an @mention of who acts next)")
+
+
+def _speaker(message: dict) -> str:
+    """``sender``, plus the line it was said on when that was another line.
+
+    A sub-manager that reads ``[lead]: @you do X`` replies ``@lead`` on its
+    own line; the tag tells it the lead is elsewhere and the mention is relayed.
+    """
+    source, name = message.get("source_conv_id"), message.get("source_conv_name")
+    if source and name and source != message.get("conv_id"):
+        return f"{message['sender']} via «{name}»"
+    return message["sender"]
 
 
 def format_digest(messages: list[dict], rider: str = "", cwd: str = "") -> str:
@@ -124,7 +136,7 @@ def format_digest(messages: list[dict], rider: str = "", cwd: str = "") -> str:
     The rider is where a line's current facts (its open task board) go, so a
     waking process sees them next to the messages rather than never.
     """
-    lines = "\n".join(f"[{m['sender']}]: {m['body']}" for m in messages)
+    lines = "\n".join(f"[{_speaker(m)}]: {m['body']}" for m in messages)
     # This low-frequency delivery probe stays beside digest construction; all
     # HTTP/WebSocket presentation probes are offloaded from the event loop.
     git = cwd_git_digest(cwd) if cwd else ""

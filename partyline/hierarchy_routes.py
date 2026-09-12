@@ -81,6 +81,10 @@ async def _post_identified(runtime, conv_id, principal, body: str):
     kind = "agent" if principal.kind == "machine" else "human"
     stored = runtime.db.add_message(conv_id, principal.name, kind, body)
     stored = {**stored, **stamp_source(runtime.db, stored["id"], principal)}
+    if kind == "agent" and (returns := getattr(runtime, "returns", None)) is not None:
+        # An API post is the process speaking: a hand-off here settles its turn
+        # exactly as one said through its own pty would.
+        returns.note_spoke(principal.attachment_id, body)
     await runtime.broadcast(
         conv_id, MessageEvent(message=MessageResponse.model_validate(stored))
     )

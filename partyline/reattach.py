@@ -275,6 +275,7 @@ class ReattachCoordinator:
                         line,
                         attachment["last_seen"],
                         exclude_sender=name,
+                        exclude_attachment_id=attachment_id,
                     )
                     resumed = await self.resume_attachment(attachment_id, pending)
                     adapter = resumed.adapter

@@ -39,8 +39,15 @@ def role_instructions(actions: Collection[str], conv_id: str, parent_id: str | N
         )
     if "assign" in actions:
         blocks.append(
-            'Send a named assignment with POST /api/conversations/<child-id>/messages and '
-            'JSON {"body":"@handle the concrete assignment"}. Mentions reach only that destination line.'
+            "Assign by @mentioning a process on any of your child lines from here: a manager's "
+            "mentions cross lines and arrive on that process's line as a private copy tagged "
+            "`via «your line»`. A child line's manager reaches you the same way; its implementers "
+            "cannot, they report to their own manager. When a process you rang ends its turn "
+            "without handing off to any process, you receive `↩ @you — name on line «X» ended "
+            "its turn…` with its last words: read that line "
+            "(GET /api/conversations/<child-id>/messages?after_id=N) and decide the next step. "
+            "POST /api/conversations/<child-id>/messages with JSON "
+            '{"body":"@handle the assignment"} says it on that line directly.'
         )
     if "read_reports" in actions:
         blocks.append(
@@ -69,7 +76,8 @@ def role_instructions(actions: Collection[str], conv_id: str, parent_id: str | N
             "other message. It needs no reply when nothing is waiting, and it authorizes no "
             "spending, rendering, or deployment. Turn it off with DELETE /api/heartbeat once "
             "the goal is met — it will not decide that for you, and an idle room is not "
-            "evidence the work is done."
+            "evidence the work is done. The return path usually makes it unnecessary: a "
+            "process you rang that ends its turn without handing off rings you back."
         )
     blocks.append(
         "Keep budget, acceptance, artifact ownership, and checkpoint responsibilities explicit. "

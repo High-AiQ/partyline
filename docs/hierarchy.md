@@ -93,6 +93,83 @@ This release scopes machine credentials to their line and explicitly delegated d
 
 Start fresh creates a new attachment identity without inheriting the manager role. Appoint the replacement explicitly; resume retains the existing role.
 
+## Mentions across lines
+
+One tree is one mention namespace: a handle is live on exactly one row in the
+whole tree, so `@name` has one meaning wherever it is said. Which lines a
+mention may cross is the shape of the hierarchy, and crossing is a manager's
+act. A line's manager (or a person) reaches every process on its descendant
+lines and the managers of the lines above it. An ordinary participant reaches
+only its own line: it neither hears from nor speaks to other lines, so an
+implementer cannot route around its manager. One that names a process on
+another line is told where that process lives and whom to tell instead.
+
+A mention that crosses lands as a **private copy** on the target's own line:
+stamped with the line it was said on, addressed to exactly that process, and
+delivered through its ordinary cursor and digest as `[name via «line»]`. The
+people on that line see the copy (with a `via` tag) — cross-line traffic is
+observable — but no other process on the line ever receives it, so it costs
+nobody else's context and no sibling comes to believe it shares a line with
+the sender. A copy is never relayed again: a mention crosses the tree at most
+once, and two lines cannot start a ping-pong. `@all` rings one line only.
+
+The old form — `POST /api/conversations/<child-id>/messages` from the manager
+— still works and is the same thing said on the child's line directly.
+
+| DO | DO NOT |
+| --- | --- |
+| Assign with a plain `@handle` from your own line when you manage the tree above it | Expect an implementer's `@parent-lead` to reach anyone — it is told to tell its own manager |
+| Read the `via «line»` tag as "this process is elsewhere; reply by mention, not by assuming it is here" | Treat a private copy as the whole conversation on that line — read the line before deciding |
+
+## The return path
+
+Inside one harness, delegated work returns to its caller by construction: a
+sub-agent's result is the caller's next input. Across harnesses, the only
+return used to be the worker remembering to `@mention` whoever asked. It
+forgot constantly — a turn ends with "committed abc, tree clean", a routine
+report with `notify:false`, or a mention that could not cross — and the
+manager, whose goal it was, was never woken. Reminders in the briefing and a
+fifteen-minute heartbeat both failed, because the manager still had to
+*notice* silence.
+
+The server observes both halves already: the wake digest says which
+processes mentioned this one (its *requesters*), the harness receipt says
+when the turn ended, and the process's own posts say whether it handed off.
+When a turn ends and nothing it said reached a live process, each requester
+receives, on its own line and as a private copy:
+
+```
+↩ @lead — worker on line «Renderer» ended its turn without handing off to any process; last said: «Page one rendered at /tmp/p1.png, tests green.»
+```
+
+The manager is woken by the fact that matters — "your worker finished and
+the ball is with nobody" — not by a clock. What keeps this a return rather
+than a second source of noise:
+
+- **A notice never earns a notice.** It is a system message, so it never
+  counts as a requester: a turn woken only by a notice owes nothing when it
+  ends. One explicit wake yields at most one implicit reply.
+- **Handing off to any live process settles the turn.** Delegating onward
+  means the work is still moving; the requester's next signal comes from the
+  end of that chain, not a false "finished".
+- **A manager wrapping up to a person does not bounce to its implementers.**
+  "@operator the PR is up" is the one turn where a requester's silence is right,
+  so a manager's turn returns only to requesters that are managers.
+- **Only a harness-reported ending returns.** An exit or detach is already
+  announced on the line, and a fleet restart would ring every manager at once.
+- **A person is told only when it asked from another line**, as an unrouted
+  notice where it typed; on its own line it reads everything anyway.
+- **Quoted words cannot ring anyone**: mentions inside the excerpt are
+  neutralised, and the finished process is named without its sigil.
+
+Adapters whose harness reports no turn end (`turn_end` absent from the
+manifest) have no return path; every bundled coding-agent adapter reports one.
+
+| DO | DO NOT |
+| --- | --- |
+| Treat `↩` as the cue to read that line and decide the next step | Reply "noted" and end your turn — that leaves the ball exactly where it was |
+| End a turn with the result stated plainly and an `@mention` of who acts next | Rely on the return path as the way to report — it carries one sentence, not your result |
+
 ## The root manager's heartbeat
 
 A stalled tree looks exactly like a healthy one. Children file reports, nobody

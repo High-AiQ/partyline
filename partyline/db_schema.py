@@ -144,6 +144,11 @@ MIGRATIONS = [
     "ON attachments(conv_id) WHERE is_lead=1",
     "ALTER TABLE messages ADD COLUMN source_attachment_id TEXT",
     "ALTER TABLE messages ADD COLUMN source_conv_id TEXT",
+    # audience_attachment_id: set on a cross-line relay copy or a return-path
+    # notice, which exists for exactly one process on its line. Humans read
+    # every message on a line; other processes never see a copy that is not
+    # theirs, so cross-line traffic costs no one else's context.
+    "ALTER TABLE messages ADD COLUMN audience_attachment_id TEXT",
     # Child-to-parent reports. Created here rather than on first use: running
     # `executescript` per request issued an implicit COMMIT on the shared
     # connection and invalidated cursors another thread was still reading,
