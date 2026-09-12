@@ -306,12 +306,40 @@ class ReturnPathTest(Tree):
         self.assertIn("@person — builder on line «Child» ended its turn", notice)
         self.assertEqual(self.adapters["lead"].delivered, [])  # unrouted: nobody is rung
 
-    async def test_a_silent_turn_is_reported_as_such(self):
+    async def test_a_silent_turn_owes_nothing(self):
         await self.say("lead", "@builder render page one")
         await self.turn("builder")
 
-        [notice] = [b for b in self.adapters["lead"].bodies() if b.startswith("↩")]
-        self.assertIn("without handing off to any process and said nothing. Read it all", notice)
+        self.assertEqual([b for b in self.adapters["lead"].bodies() if b.startswith("↩")], [])
+
+    async def test_words_said_before_the_wake_are_not_this_turns_answer(self):
+        await self.say("builder", "Hello, builder is connected.")
+        await self.say("lead", "@builder render page one")
+        await self.turn("builder")
+
+        self.assertEqual([b for b in self.adapters["lead"].bodies() if b.startswith("↩")], [])
+
+    async def test_a_passing_mention_does_not_make_a_requester(self):
+        """`@sub have builder build it` rings builder too, but only sub owes lead."""
+        await self.say("lead", "@sub please have @builder build page one")
+        await self.turn("builder", "Noted, waiting for sub.")
+
+        self.assertEqual([b for b in self.adapters["lead"].bodies() if b.startswith("↩")], [])
+        await self.turn("sub", "Reviewing the plan.")
+        self.assertEqual(
+            len([b for b in self.adapters["lead"].bodies() if b.startswith("↩")]), 1
+        )
+
+    async def test_a_status_line_naming_a_worker_owes_nothing_either(self):
+        await self.say("lead", "@worker run the suite")
+        await self.turn("worker", "Green.")
+        lead_notices = len([b for b in self.adapters["lead"].bodies() if b.startswith("↩")])
+        await self.say("lead", "@person suite is green; @worker is idle now.")
+        await self.turn("worker", "Yes, idle.")
+
+        self.assertEqual(
+            len([b for b in self.adapters["lead"].bodies() if b.startswith("↩")]), lead_notices
+        )
 
     async def test_an_exit_is_not_a_return(self):
         await self.say("lead", "@builder render page one")
@@ -360,3 +388,23 @@ class ExcerptTest(unittest.TestCase):
 
     def test_nothing_said_is_empty(self):
         self.assertEqual(excerpt(None), "")
+
+
+class AddresseesTest(unittest.TestCase):
+    def test_the_leading_run_names_the_addressees(self):
+        from partyline.mentions import addressees
+
+        self.assertEqual(addressees("@lead please have @worker build it"), {"lead"})
+        self.assertEqual(addressees("@a, @b and @c: files are present"), {"a", "b", "c"})
+        self.assertEqual(addressees("@a — @b — go"), {"a", "b"})
+
+    def test_without_a_leading_run_every_mention_is_addressed(self):
+        from partyline.mentions import addressees
+
+        self.assertEqual(addressees("Done. @lead please review"), {"lead"})
+        self.assertEqual(addressees("Suite green; @a and @b may proceed"), {"a", "b"})
+
+    def test_no_mentions_means_nobody(self):
+        from partyline.mentions import addressees
+
+        self.assertEqual(addressees("just thinking aloud"), set())

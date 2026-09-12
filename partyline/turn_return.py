@@ -33,6 +33,16 @@ What keeps this a return rather than a second source of noise:
   on the line already and a fleet restart would ring every lead at once.
 * Humans read their own line, so a human requester is told only when it
   asked from another line — an unrouted notice where it was typed.
+* A request is a message *for* this process, not one that talks about it.
+  "@lead please have @worker build it" rings worker too — every mention
+  rings — but only lead's turn owes anything: the leading run of mentions
+  names the addressees (`mentions.addressees`). Without this, every status
+  line naming a worker made its author a requester, and the room filled
+  with returns about turns nobody had asked for.
+* A turn that says nothing owes nothing. Words said before the wake are not
+  this turn's words either. On the first fleet trial, silent ends were
+  the process reading a passing mention and having nothing to add, and
+  the "last words" quoted were a greeting from before the wake.
 * The decision waits a moment after the receipt. A harness reports the end
   of a turn through one channel and its last words through another (the
   transcript tail), and on the first live trial the receipt won by a few
@@ -47,7 +57,7 @@ from __future__ import annotations
 import asyncio
 
 from .mention_relay import LIVE, is_foreign, post_private, reaches_a_process, speaker_attachment
-from .mentions import addresses, mentioned_names
+from .mentions import addressees, mentioned_names
 
 EXCERPT = 280
 # Long enough for a transcript tail to post the turn's last message after the
@@ -102,8 +112,9 @@ class ReturnPath:
         me = self._row(att_id)
         if me is None:
             return
+        self.last_said.pop(att_id, None)  # what was said before the wake is not an answer
         for message in messages:
-            if not addresses(me["name"], [message]):
+            if me["name"].lower() not in addressees(str(message.get("body") or "")):
                 continue
             kind = message.get("sender_type")
             if kind == "agent":
@@ -156,7 +167,7 @@ class ReturnPath:
         self.pending.pop(att_id, None)
         requesters, askers, said = self._clear(att_id)
         finisher = self._row(att_id)
-        if finisher is None:
+        if finisher is None or not said:
             return []
         posted = []
         for requester in requesters.values():
@@ -178,7 +189,7 @@ class ReturnPath:
         return posted
 
     def _notice(
-        self, to: str, finisher: dict, on_line: str, said: str | None, since_id: int | None = None
+        self, to: str, finisher: dict, on_line: str, said: str, since_id: int | None = None
     ) -> str:
         where = pointer = ""
         if finisher["conv_id"] != on_line:
@@ -187,7 +198,7 @@ class ReturnPath:
             if since_id is not None:  # everything since the wake, in one call
                 pointer = (f". Read it all: GET /api/conversations/{finisher['conv_id']}"
                            f"/messages?after_id={since_id - 1}")
-        tail = f"; last said: «{excerpt(said)}»" if said else " and said nothing"
+        tail = f"; last said: «{excerpt(said)}»"
         # The finisher is named without the sigil: this notice must not wake it.
         return (
             f"↩ @{to} — {finisher['name']}{where} ended its turn without handing off "
