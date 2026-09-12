@@ -36,6 +36,18 @@ which presets may be used, and anything irreversible; the pack tells a manager
 to ask before those rather than guess. Team shape is a default, not a rule: the
 pack splits independent slices and the person overrides in a clause.
 
+## The hand-off contract
+
+A child line is born briefed. `POST /api/conversations/<parent>/children` takes
+`name`, `goal`, and `topic`: the goal is recorded on the child and rides its
+manager's every wake; the topic is the standing context every process on that
+line reads — where things are, the budget, the gates, the acceptance criterion.
+Both are announced on the child line so the hand-off is on the record. A
+captain cannot read its parent's line, so what is not in the brief it does not
+know; the manager pack asks for both fields every time a slice is split off.
+The appointed manager receives the manager pack on its next wake regardless of
+which line it sits on, so a captain is briefed the same way its root was.
+
 ## The goal
 
 A line carries a `goal`: what its manager is seeing through. A person or the
