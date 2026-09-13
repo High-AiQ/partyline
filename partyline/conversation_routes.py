@@ -13,14 +13,13 @@ from .auth_guard import request_principal
 from .auth_store import handle_taken
 from .claim_routes import purge_claims
 from .hierarchy import tree_live_name_conflict
+from .line_subtree import archive_line, archive_subtree
 from .line_worktree import describe, ensure_placed, line_cwd, remove_for_line
 from .contracts import (
     ArchiveResponse,
     AttachIn,
     AttachmentResponse,
     ConvIn,
-    ConversationArchivedEvent,
-    ConversationDeletedEvent,
     ConversationEvent,
     ConversationResponse,
     ConversationsChangedEvent,
@@ -133,24 +132,23 @@ def register_conversation_routes(
         return conv
 
     @app.delete("/api/conversations/{conv_id}", response_model=ArchiveResponse)
-    async def archive_conversation(request: Request, conv_id: str):
+    async def archive_conversation(
+        request: Request, conv_id: str, include_children: bool = False
+    ):
         runtime = _server().runtime
         db = runtime.db
         deny_unless(db, request_principal(request), conv_id, "archive")
         conv = db.get_conversation(conv_id)
         if conv["archived_at"]:
             raise HTTPException(409, "line is already archived")
-        deny_archive_if_children(db, conv_id)
-        event = ConversationArchivedEvent(conversation_id=conv_id)
-        await runtime.broadcast(conv_id, event)
-        await runtime.broadcast(
-            conv_id, ConversationDeletedEvent(conversation_id=conv_id)
-        )
-        stopped = await runtime.stop_attachments(conv_id)
-        conv = db.archive_conversation(conv_id)
-        runtime.sockets.pop(conv_id, None)
+        if include_children:
+            stopped, archived = await archive_subtree(runtime, conv_id)
+        else:
+            deny_archive_if_children(db, conv_id)
+            stopped, archived = await archive_line(runtime, conv_id), [conv_id]
         await runtime.broadcast_all(ConversationsChangedEvent())
-        return {"ok": True, "archived": True, "stopped": stopped, "conversation": conv}
+        return {"ok": True, "archived": True, "stopped": stopped,
+                "archived_ids": archived, "conversation": db.get_conversation(conv_id)}
 
     @app.post("/api/conversations/{conv_id}/restore", response_model=ConversationResponse)
     async def restore_conversation(request: Request, conv_id: str):

@@ -39,14 +39,17 @@ def register_line_process_routes(app: FastAPI, runtime) -> None:
         "/api/conversations/{conv_id}/attachments/close",
         response_model=CloseProcessesResponse,
     )
-    async def close_line_processes(request: Request, conv_id: str):
+    async def close_line_processes(
+        request: Request, conv_id: str, include_children: bool = True
+    ):
         conversation = runtime.db.get_conversation(conv_id)
         if conversation is None:
             raise HTTPException(404)
         deny_unless(runtime.db, request_principal(request), conv_id, "close")
         if conversation["archived_at"] is not None:
             raise HTTPException(409, "restore the line before closing its processes")
-        target_ids = [conv_id, *descendants(runtime.db, conv_id)]
+        below = descendants(runtime.db, conv_id) if include_children else []
+        target_ids = [conv_id, *below]
         live = [
             att
             for target_id in target_ids

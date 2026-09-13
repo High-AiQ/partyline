@@ -98,8 +98,8 @@ export interface PartylineApi {
   createConversation(name: string): Promise<Conversation>;
   renameConversation(id: string, name: string): Promise<Conversation>;
   setTopic(id: string, topic: string): Promise<Conversation>;
-  archiveConversation(id: string): Promise<ArchiveResult>;
-  closeProcesses(id: string): Promise<CloseProcessesResult>;
+  archiveConversation(id: string, includeChildren?: boolean): Promise<ArchiveResult>;
+  closeProcesses(id: string, includeChildren?: boolean): Promise<CloseProcessesResult>;
   restoreConversation(id: string): Promise<Conversation>;
   purgeConversation(id: string): Promise<PurgeResult>;
   uploadFiles(conversationId: string, upload: FileUpload): Promise<FileUploadResponse>;
@@ -188,14 +188,14 @@ export const api: PartylineApi = {
       body: { topic },
       fallback: "could not save topic",
     }),
-  archiveConversation: (id) =>
-    request(`/api/conversations/${id}`, {
+  archiveConversation: (id, includeChildren = false) =>
+    request(`/api/conversations/${id}${includeChildren ? "?include_children=true" : ""}`, {
       schema: ArchiveResultSchema,
       method: "DELETE",
       fallback: "could not delete line",
     }),
-  closeProcesses: (id) =>
-    request(`/api/conversations/${id}/attachments/close`, {
+  closeProcesses: (id, includeChildren = true) =>
+    request(`/api/conversations/${id}/attachments/close?include_children=${String(includeChildren)}`, {
       schema: CloseProcessesResultSchema,
       method: "POST",
       fallback: "could not close processes",

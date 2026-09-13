@@ -163,6 +163,7 @@ class ArchiveResponse(BaseModel):
     ok: bool
     archived: bool
     stopped: list[str]
+    archived_ids: list[str] = []
     conversation: ConversationResponse
 
 
