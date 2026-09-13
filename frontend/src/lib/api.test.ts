@@ -267,7 +267,14 @@ describe("api", () => {
       adapter: "codex",
       command: "codex",
     };
-    const saved = { id: "preset-1", ...preset, created_at: 1 };
+    const saved = {
+      id: "preset-1",
+      ...preset,
+      created_at: 1,
+      reads_images: false,
+      can_manage: false,
+      implements: true,
+    };
     const fetch = vi.fn().mockResolvedValue(response(saved));
     vi.stubGlobal("fetch", fetch);
 

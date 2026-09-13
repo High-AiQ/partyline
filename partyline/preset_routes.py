@@ -6,7 +6,9 @@ import uuid
 
 from fastapi import APIRouter, HTTPException
 
-from .contracts import OkResponse, PresetIn, PresetResponse
+from .contracts import OkResponse
+from .preset_contracts import PresetIn, PresetResponse
+from .preset_traits import coerce_preset
 from .runtime import NAME_RE, RESERVED_NAMES
 
 
@@ -15,7 +17,7 @@ def presets_router(runtime, adapters) -> APIRouter:
 
     @router.get("/api/presets", response_model=list[PresetResponse])
     async def presets():
-        return runtime.db.list_presets()
+        return [coerce_preset(row) for row in runtime.db.list_presets()]
 
     @router.post("/api/presets", response_model=PresetResponse)
     async def create_preset(body: PresetIn):
@@ -42,6 +44,8 @@ def presets_router(runtime, adapters) -> APIRouter:
         if body.adapter not in adapters:
             raise HTTPException(400, f"adapter must be one of {sorted(adapters)}")
         return runtime.db.save_preset(
-            preset_id, body.title.strip(), body.name, body.adapter, body.command.strip())
+            preset_id, body.title.strip(), body.name, body.adapter, body.command.strip(),
+            reads_images=body.reads_images, can_manage=body.can_manage,
+            implements=body.implements)
 
     return router
