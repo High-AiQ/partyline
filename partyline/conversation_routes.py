@@ -13,7 +13,7 @@ from .auth_guard import request_principal
 from .auth_store import handle_taken
 from .claim_routes import purge_claims
 from .hierarchy import tree_live_name_conflict
-from .line_worktree import line_cwd, remove_for_line
+from .line_worktree import describe, ensure_placed, line_cwd, remove_for_line
 from .contracts import (
     ArchiveResponse,
     AttachIn,
@@ -222,6 +222,8 @@ def register_conversation_routes(
             raise HTTPException(400, str(exc)) from exc
         # A machine works where its line works; a person may choose.
         chosen = "" if not is_human(principal) else body.cwd.strip()
+        if not chosen and (placed := ensure_placed(db, conv_id)) and describe(placed):
+            await runtime.post_message(conv_id, "system", "system", describe(placed))
         cwd = os.path.abspath(os.path.expanduser(
             chosen or line_cwd(db, conv_id) or os.getcwd()))
         if not os.path.isdir(cwd):
