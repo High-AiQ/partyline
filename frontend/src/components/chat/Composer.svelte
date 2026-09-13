@@ -20,6 +20,7 @@
   import type { FileIntake, PendingFiles } from "../../lib/files";
   import { applyMention, mentionCandidates, mentionToken } from "../../lib/mentions";
   import type { MentionToken, MentionCandidate } from "../../lib/mentions";
+  import { tooltip } from "../../lib/tooltip";
 
   let box = $state<HTMLTextAreaElement | null>(null);
   let token = $state<MentionToken | null>(null);
@@ -187,7 +188,7 @@
       class="attach grid size-11 flex-none place-items-center p-0 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-line disabled:hover:bg-ink-3 disabled:hover:text-cream-dim"
       type="button"
       aria-label="attach files"
-      title="attach up to 6 files"
+      use:tooltip={{ label: "attach up to 6 files" }}
       disabled={!room.conversation || uploading}
       onclick={() => {
         openPicker++;

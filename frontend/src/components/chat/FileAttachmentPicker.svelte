@@ -2,6 +2,7 @@
   import { onDestroy } from "svelte";
   import { MAX_FILES_PER_MESSAGE } from "../../lib/files";
   import type { FileIntake, PendingFiles } from "../../lib/files";
+  import { tooltip } from "../../lib/tooltip";
 
   interface Props {
     openPicker: number;
@@ -100,7 +101,7 @@
             >📎</span
           >
         {/if}
-        <span class="truncate px-[7px] text-[10px] text-cream-dim" title={selected.file.name}
+        <span class="truncate px-[7px] text-[10px] text-cream-dim" use:tooltip={{ label: selected.file.name }}
           >{selected.file.name}</span
         >
         <button

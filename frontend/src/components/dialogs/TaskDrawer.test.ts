@@ -133,7 +133,10 @@ describe("TaskDrawer", () => {
       });
       const chip = document.querySelector(".done-when");
       expect(chip?.textContent).toContain("restart lands on 0.0.0.0:8642");
-      expect(chip?.getAttribute("title")).toContain("with the label");
+      const describedBy = chip?.getAttribute("aria-describedby");
+      chip?.dispatchEvent(new MouseEvent("mouseenter"));
+      const description = describedBy ? document.getElementById(describedBy) : null;
+      expect(description?.textContent ?? "").toContain("with the label");
       // the summary renders apart from the expectation, so both stay scannable
       expect(document.querySelector(".task-main p")?.textContent).toContain("Cockpit LAN bootstrap");
     } finally {

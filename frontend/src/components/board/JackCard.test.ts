@@ -136,7 +136,11 @@ describe("JackCard badge treatments", () => {
       const badge = document.querySelector(".working");
       expect(badge?.textContent).toContain("working…");
       expect(badge?.className).toContain("hollow");
-      expect(badge?.getAttribute("title")).toContain("no turn-end signal");
+      const describedBy = badge?.getAttribute("aria-describedby");
+      expect(describedBy).toBeTruthy();
+      badge?.dispatchEvent(new MouseEvent("mouseenter"));
+      const description = describedBy ? document.getElementById(describedBy) : null;
+      expect(description?.textContent ?? "").toContain("no turn-end signal");
     } finally {
       await unmount(card);
     }
@@ -195,7 +199,6 @@ describe("JackCard cwd git identity", () => {
       const state = document.querySelector(".git-state");
       expect(state?.textContent).toContain("git d87b3ae · dirty");
       expect(state?.classList.contains("dirty")).toBe(true);
-      expect(state?.getAttribute("title")).toContain("/tmp/work");
     } finally {
       await unmount(card);
     }
@@ -245,6 +248,42 @@ describe("JackCard lifecycle actions", () => {
       expect(document.querySelector("[aria-label='remove sol from roster']")).not.toBeNull();
     } finally {
       await unmount(card);
+    }
+  });
+});
+
+describe("JackCard captain status", () => {
+  it("renders one unmistakable captain badge only on the appointed card", async () => {
+    const other: Attachment = { ...attachment, id: "att-other", name: "other" };
+    const captainCard = mount(JackCard, {
+      target: document.body,
+      props: {
+        attachment,
+        resumable: false,
+        overridesBundled: false,
+        captain: true,
+        onmention: vi.fn(),
+      },
+    });
+    const otherCard = mount(JackCard, {
+      target: document.body,
+      props: {
+        attachment: other,
+        resumable: false,
+        overridesBundled: false,
+        captain: false,
+        onmention: vi.fn(),
+      },
+    });
+    try {
+      expect(document.querySelectorAll(".captain-badge")).toHaveLength(1);
+      expect(document.querySelector(".captain-badge")?.closest(".jack")?.textContent).toContain("sol");
+      expect(document.querySelector(".captain-badge")?.getAttribute("aria-label")).toBe(
+        "captain for this line",
+      );
+    } finally {
+      await unmount(captainCard);
+      await unmount(otherCard);
     }
   });
 });

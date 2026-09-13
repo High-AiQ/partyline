@@ -4,6 +4,7 @@
   import { ApiError } from "../../lib/api";
   import { coordinationApi } from "../../lib/coordination-api";
   import type { Claim, Conversation } from "../../lib/contracts";
+  import { tooltip } from "../../lib/tooltip";
 
   interface Props {
     conversation: Conversation;
@@ -50,7 +51,8 @@
             <strong class="text-copper-hot font-semibold">@{claim.owner}</strong>
             <span
               class="text-cream-faint text-[10px]"
-              title={new Date(claim.expires_at * 1000).toLocaleString()}>{expires(claim.expires_at)}</span
+              use:tooltip={{ label: new Date(claim.expires_at * 1000).toLocaleString() }}
+              >{expires(claim.expires_at)}</span
             >
           </header>
           <ul class="flex flex-col gap-1 list-none">

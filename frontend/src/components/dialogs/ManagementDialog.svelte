@@ -62,6 +62,7 @@
     try {
       const lead = await hierarchyApi.appoint(conversation.id, captainId || null);
       captainId = lead.attachment_id ?? "";
+      room.setCaptain(conversation.id, lead.attachment_id);
       saved = captainId ? "captain appointed · it has been rung with the captain pack" : "captain cleared";
     } catch (failure: unknown) {
       error = failure instanceof ApiError ? failure.message : "could not appoint the captain";

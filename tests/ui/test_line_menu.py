@@ -14,7 +14,7 @@ class LineMenuTest(unittest.TestCase):
     def test_menu_survives_pointer_trip_and_opens_rename_modal(self):
         with ui_session(["alpha line", "beta line"]) as ui:
             page = ui.page
-            selected_name = page.locator(".conv-row").first.locator(".conv").text_content()
+            selected_name = page.locator(".conv-row").first.locator(".conv-name").inner_text()
             menu = ui.open_row_menu()
 
             box = menu.bounding_box()

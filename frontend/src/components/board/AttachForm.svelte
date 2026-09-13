@@ -1,6 +1,7 @@
 <script lang="ts">
   /** Spawn a real interactive process in a pty and put it on this line. */
   import { adapterLabel, overrideExplanation } from "../../lib/attachments";
+  import { tooltip } from "../../lib/tooltip";
   import { ApiError, api } from "../../lib/api";
   import { room } from "../../state/room.svelte.js";
   import { session } from "../../state/session.svelte.js";
@@ -100,7 +101,7 @@
       type="button"
       id="presetSave"
       class="flex-none px-2 py-1.5 text-[10.5px]"
-      title="save current name/adapter/command as a preset"
+      use:tooltip={{ label: "save current name/adapter/command as a preset" }}
       onclick={() =>
         dialogs.open(PresetDialog, {
           preset: { title: name.trim(), name: name.trim(), adapter, command: command.trim() },
@@ -110,7 +111,7 @@
       type="button"
       id="presetManage"
       class="flex-none px-2 py-1.5 text-[10.5px]"
-      title="view / edit presets"
+      use:tooltip={{ label: "view / edit presets" }}
       onclick={() => dialogs.open(PresetsDialog)}
     >
       manage
@@ -127,7 +128,7 @@
     <button
       type="button"
       id="adapterImport"
-      title="import adapters from a git repository"
+      use:tooltip={{ label: "import adapters from a git repository" }}
       onclick={() => dialogs.open(ImportAdaptersDialog)}>+ import…</button
     >
   </div>
@@ -142,7 +143,7 @@
     {#if selectedAdapter?.overrides_bundled}
       <span
         class="override-badge"
-        title={overrideExplanation(selectedAdapter.id)}
+        use:tooltip={{ label: overrideExplanation(selectedAdapter.id) }}
         aria-label={overrideExplanation(selectedAdapter.id)}>imported adapter</span
       >
     {/if}
@@ -159,7 +160,7 @@
   <label
     class="update-row flex items-center gap-2 min-h-11 cursor-pointer text-[10px] tracking-[0.05em] text-cream-faint has-[input:disabled]:cursor-default"
     for="aUpdate"
-    title={updateTitle}
+    use:tooltip={{ label: updateTitle }}
   >
     update CLI first
     <input
@@ -168,7 +169,7 @@
       type="checkbox"
       bind:checked={updateCli}
       disabled={!canUpdate}
-      title={updateTitle}
+      use:tooltip={{ label: updateTitle }}
     />
   </label>
 
