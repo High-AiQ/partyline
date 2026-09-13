@@ -30,6 +30,19 @@ def clear(db, att_id: str) -> None:
     db._exec("UPDATE attachments SET turn_open=0 WHERE id=?", (att_id,))
 
 
+async def announce_if_interrupted(runtime, att: dict) -> bool:
+    """Before a resume spawns: clear the mark and file the notice for that
+    process alone, unrouted, so it rides the backlog the spawn is given."""
+    from .mention_relay import post_private
+
+    if not was_interrupted(runtime.db, att["id"]):
+        return False
+    clear(runtime.db, att["id"])  # cleared first so a failed post cannot ring twice
+    await post_private(runtime, att["conv_id"], "system", "system",
+                       continue_notice(att["name"]), audience=att["id"], route=False)
+    return True
+
+
 def continue_notice(name: str) -> str:
     return (f"↻ @{name} — your process was restarted in the middle of a turn. Nothing on "
             "disk was lost. Continue exactly where you left off, and hand off with an "

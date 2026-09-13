@@ -880,3 +880,20 @@ are suffixed instead of refused; the helper prints the detail.
 | Put the reason in the 4xx and print it in the helper | Return a bare status a captain must guess at |
 | Vary the pack by depth and enforce the cap server-side | Hand every captain the same "spawn a sub-captain" text |
 | Give each child line its own worktree at birth | Let a machine pick the cwd it edits in |
+
+## A resume must stage its backlog, never paste it blind
+
+The explicit resume route spawned the process with no backlog; the first
+mention routed to it pasted at t=0. Codex's resumed TUI shows an "interrupted"
+banner that eats the first Enter, so the wake sat in the composer unsent —
+twice in one morning, each time until a person pressed Enter. Recovery after
+a restart never had this problem because it hands codex its unread messages
+as the positional prompt of `codex resume`. The route now reads the backlog
+first (including the "continue where you left off" notice, filed unrouted so
+it rides along) and lets the adapter stage it; an adapter that cannot stage
+is given the backlog only after it reports ready.
+
+| DO | DO NOT |
+| --- | --- |
+| Read the backlog before spawning and let the adapter stage it | Post a notice to a process that has not opened its TUI yet |
+| File a resume-time notice unrouted so it joins the backlog | Route it and paste into a composer that drops the Enter |

@@ -7,15 +7,11 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
+from . import turn_marker
 from .adapters import Adapter
 from .contracts import (
-    Event,
-    ReattachCandidateResponse,
-    ReattachCommand,
-    ReattachDecisionEvent,
-    ReattachOfferEvent,
-    RestartPlanRequest,
-    RestartPlanResponse,
+    Event, ReattachCandidateResponse, ReattachCommand, ReattachDecisionEvent,
+    ReattachOfferEvent, RestartPlanRequest, RestartPlanResponse,
 )
 from .db import Db, RestartPlan
 from .continuation_delivery import deliver_continuation
@@ -271,6 +267,7 @@ class ReattachCoordinator:
                 line, name = attachment["conv_id"], attachment["name"]
                 continuation_confirmed = False
                 try:
+                    await turn_marker.announce_if_interrupted(self.runtime, attachment)
                     pending = self.runtime.db.messages_after(
                         line,
                         attachment["last_seen"],
