@@ -85,6 +85,7 @@ from .staffing_routes import staffing_router
 from .restart_report import restart_report_router
 from .static_cache import install_static_cache
 from .task_routes import wire_tasks
+from .resume_continuation import resume_with_backlog
 from .reattach import (
     ReattachCoordinator,
     RestartPlanError,
@@ -358,7 +359,7 @@ register_attachment_lifecycle_routes(
 @app.post("/api/attachments/{att_id}/resume", response_model=AttachmentResponse)
 async def resume_attachment(request: Request, att_id: str):
     deny_unless_attachment(runtime.db, request_principal(request), att_id, "attach")
-    await _resume_adapter(att_id)
+    await resume_with_backlog(runtime, att_id, _resume_adapter)
     # An explicit resume is the operator saying "this one is back". Automatic
     # recovery leaves an unconfirmed attachment in `reattaching`, which routing
     # consults *only when no live adapter exists*: it never blocks delivery to
