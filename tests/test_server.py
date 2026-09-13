@@ -514,6 +514,24 @@ class ServerTest(unittest.TestCase):
 
         self.assertNotIn("one", server.runtime.reattaching)
 
+    def test_a_resume_rings_a_process_that_was_cut_off_mid_turn(self):
+        # The real resume path runs (make_adapter is FakeAdapter). The row says
+        # a turn was open when the process died; the resumed process alone is
+        # told to continue, and the mark does not survive to ring twice.
+        self.add_attachment("one", "terra", "exited")
+        server.runtime.db._exec("UPDATE attachments SET turn_open=1 WHERE id='one'")
+        self.arun(server.resume_attachment(self.principal_request(), "one"))
+        notice = server.runtime.db.list_messages("line")[-1]
+        self.assertIn("restarted in the middle of a turn", notice["body"])
+        self.assertIn("@terra", notice["body"])
+        self.assertEqual(notice["audience_attachment_id"], "one")
+        self.assertEqual(server.runtime.db.get_attachment("one")["turn_open"], 0)
+
+    def test_a_resume_of_a_process_that_finished_its_turn_says_nothing_extra(self):
+        self.add_attachment("one", "terra", "exited")
+        self.arun(server.resume_attachment(self.principal_request(), "one"))
+        self.assertIn("resumed with full context", server.runtime.db.list_messages("line")[-1]["body"])
+
     def test_a_stale_flag_would_swallow_the_unreachable_warning(self):
         # The control for why clearing it matters: with the flag set and the
         # process gone, the room hears nothing at all.
