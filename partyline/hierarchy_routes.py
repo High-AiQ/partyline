@@ -110,16 +110,32 @@ def hierarchy_router(runtime) -> APIRouter:
     @router.post("/api/conversations/{conv_id}/lead", response_model=LeadOut)
     async def appoint_lead(request: Request, conv_id: str, body: LeadIn):
         deny_unless(db, request_principal(request), conv_id, "appoint_lead")
+        before = lead_attachment(db, conv_id)
+        if (before["id"] if before else None) == body.attachment_id:
+            return LeadOut(attachment_id=body.attachment_id)  # already so: no second ring
         try:
             set_lead(db, conv_id, body.attachment_id)
         except HierarchyError as exc:
             raise _http(exc) from exc
         att = db.get_attachment(body.attachment_id) if body.attachment_id else None
-        if att is not None and att["status"] == "running" and att["id"] in runtime.live:
-            # Ring the new manager now rather than on its next wake: a process
-            # that appoints itself mid-turn otherwise keeps acting on the
-            # ordinary briefing, and staffs its own line instead of a child.
-            # The digest rider attaches the manager pack to this delivery.
+
+        def live(row):
+            return row is not None and row["status"] == "running" and row["id"] in runtime.live
+
+        # Ring both sides now rather than on their next wake. A process that
+        # appoints itself mid-turn otherwise keeps acting on the ordinary
+        # briefing; a replaced captain otherwise keeps acting as captain until
+        # something else wakes it. The digest rider carries the pack, or the
+        # "ordinary participant" correction, on these deliveries.
+        if live(before) and before["id"] != (att["id"] if att else None):
+            successor = f"@{att['name']} is" if att else "nobody is"
+            await post_private(
+                runtime, conv_id, "system", "system",
+                f"☏ @{before['name']} is no longer this line's captain — {successor} now. Stop "
+                "assigning, appointing, and crossing lines; finish as an ordinary participant",
+                audience=before["id"],
+            )
+        if live(att):
             await post_private(
                 runtime, conv_id, "system", "system",
                 f"☏ @{att['name']} is now this line's captain — the captain pack rides this "
