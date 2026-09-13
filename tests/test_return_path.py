@@ -219,6 +219,16 @@ class ReturnPathTest(Tree):
         [notice] = [b for b in self.adapters["lead"].bodies() if b.startswith("↩")]
         self.assertIn(f"GET /api/conversations/child/messages?after_id={wake + 1}", notice)
 
+    async def test_a_notice_to_a_child_captain_never_points_at_the_parent_line(self):
+        """The child cannot read the parent line; a pointer it will only get
+        403 from is worse than none."""
+        await self.say("sub", "@lead page one is ready for review")
+        await self.turn("lead", "Looking now.")
+
+        [notice] = [b for b in self.adapters["sub"].bodies() if b.startswith("↩")]
+        self.assertIn("lead on line «", notice)
+        self.assertNotIn("Read it all", notice)
+
     async def test_a_same_line_notice_needs_no_pointer(self):
         await self.say("lead", "@worker run the suite")
         await self.turn("worker", "Green.")

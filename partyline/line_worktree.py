@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import tempfile
 
 from .hierarchy import lead_attachment, parent_id_of
 
@@ -97,13 +98,45 @@ def _exclude(root: str) -> None:
         pass  # a bare or read-only .git: status noise is not worth failing for
 
 
+def project_directory(path: str) -> bool:
+    """A directory it is sane to turn into a repository: somewhere under the
+    user's home, not the home itself, and not a system or temporary tree.
+    The test fixtures' ``/tmp`` would otherwise have been git-initialised."""
+    real = os.path.realpath(path)
+    home = os.path.realpath(os.path.expanduser("~"))
+    tmp = os.path.realpath(tempfile.gettempdir())
+    inside_home = real.startswith(home + os.sep)
+    return inside_home and not real.startswith(tmp + os.sep) and real != tmp
+
+
+def init_repo(path: str | None) -> str | None:
+    """Turn a plain working directory into a repository so children can branch.
+
+    A project started in a blank directory otherwise hands every child line
+    the same directory, and captains spend their turns coordinating writes.
+    One empty root commit is enough for ``git worktree add`` to branch from.
+    """
+    if not path or not os.path.isdir(path) or not os.access(path, os.W_OK):
+        return None
+    if not project_directory(path):
+        return None
+    try:
+        if _git("init", "-q", "-b", "main", cwd=path).returncode != 0:
+            return None
+        done = _git("-c", "user.name=partyline", "-c", "user.email=partyline@localhost",
+                    "commit", "-q", "--allow-empty", "-m", "line root", cwd=path)
+        return path if done.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def place_child(db, parent_id: str, child_id: str) -> dict:
     """Give a new child line its working directory; record and describe it.
 
     Returns ``{"cwd": path or None, "branch": name or None}``.
     """
     parent_cwd = line_cwd(db, parent_id)
-    root = repo_root(parent_cwd)
+    root = repo_root(parent_cwd) or init_repo(parent_cwd)
     placed = {"cwd": parent_cwd, "branch": None}
     if root is not None:
         child = db.get_conversation(child_id) or {}

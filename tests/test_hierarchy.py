@@ -237,6 +237,24 @@ class HierarchyApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(ws.sent, [{"type": "conversations_changed"}])
 
+    def test_a_file_relayed_to_a_process_is_readable_by_that_process_alone(self):
+        posted = self.client.post(
+            "/api/conversations/parent/files", data={"title": "brief"},
+            files=[("file", ("brief.png", png(), "image/png"))],
+        )
+        file_id = posted.json()["files"][0]["id"]
+        self.db.create_conversation("other", "Other")
+        self.db.add_attachment("other-att", "other", "kimi", "fake", ["fake"], "/tmp")
+        stranger = {"Authorization": "Bearer " + auth_store.ensure_api_token(self.db, "other-att")}
+        url = f"/api/media/{file_id}/original"
+        self.assertEqual(self.client.get(url, headers=stranger).status_code, 403)
+        copy = self.db.add_message("other", "astra", "agent", f"read this: http://h/api/media/{file_id}/original")
+        self.db._exec("UPDATE messages SET audience_attachment_id='other-att' WHERE id=?", (copy["id"],))
+        self.assertEqual(self.client.get(url, headers=stranger).status_code, 200)
+        self.db.add_attachment("other-att-2", "other", "glm", "fake", ["fake"], "/tmp")
+        bystander = {"Authorization": "Bearer " + auth_store.ensure_api_token(self.db, "other-att-2")}
+        self.assertEqual(self.client.get(url, headers=bystander).status_code, 403)
+
     def test_implementer_cannot_post_media_on_an_unrelated_line(self):
         self.db.create_conversation("other", "Other")
         posted = self.client.post(
