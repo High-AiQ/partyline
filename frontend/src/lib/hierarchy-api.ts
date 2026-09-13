@@ -2,6 +2,7 @@
 import { z } from "zod";
 import { request } from "./http";
 import { ConversationSchema } from "./contracts";
+import { StaffingSchema, type Staffing } from "./preset-contracts";
 
 export const LeadSchema = z.object({ attachment_id: z.string().nullable() });
 export type Lead = z.infer<typeof LeadSchema>;
@@ -25,5 +26,10 @@ export const hierarchyApi = {
       method: "POST",
       body: { attachment_id: attachmentId },
       fallback: "could not appoint the captain",
+    }),
+  staffing: (id: string): Promise<Staffing> =>
+    request(`/api/conversations/${id}/staffing`, {
+      schema: StaffingSchema,
+      fallback: "could not load staffing",
     }),
 };

@@ -289,6 +289,8 @@ class DbTest(unittest.TestCase):
         self.db.save_preset("one", "Beta", "b", "fake", "new")
         self.assertEqual([p["title"] for p in self.db.list_presets()], ["Alpha", "Beta"])
         self.assertEqual(self.db.get_preset("one")["command"], "new")
+        self.assertFalse(self.db.get_preset("two")["reads_images"])
+        self.assertTrue(self.db.get_preset("two")["implements"])
         self.db.delete_preset("one")
         self.assertIsNone(self.db.get_preset("one"))
 
