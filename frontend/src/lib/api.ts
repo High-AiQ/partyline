@@ -69,6 +69,9 @@ export interface PresetDraft {
   name: string;
   adapter: string;
   command: string;
+  reads_images?: boolean;
+  can_manage?: boolean;
+  implements?: boolean;
 }
 
 export interface FileUpload {

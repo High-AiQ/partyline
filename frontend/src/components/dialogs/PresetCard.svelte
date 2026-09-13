@@ -4,7 +4,9 @@
   import { ApiError, api } from "../../lib/api";
   import type { PresetDraft } from "../../lib/api";
   import type { Preset } from "../../lib/contracts";
+  import { traitsFrom } from "../../lib/preset-traits";
   import { session } from "../../state/session.svelte.js";
+  import ProcessTraits from "../ProcessTraits.svelte";
 
   interface Props {
     preset: PresetDraft;
@@ -25,6 +27,8 @@
   let adapter = $state(preset.adapter);
   /* svelte-ignore state_referenced_locally */
   let command = $state(preset.command);
+  /* svelte-ignore state_referenced_locally */
+  let traits = $state(traitsFrom(preset));
   let error = $state("");
   let busy = $state(false);
 
@@ -37,6 +41,7 @@
         name: name.trim(),
         adapter,
         command: command.trim(),
+        ...traits,
       };
       if (preset.id) draft.id = preset.id;
       const saved = await api.savePreset(draft);
@@ -90,6 +95,8 @@
     >
     <input id="pCmd-{preset.id ?? 'new'}" bind:value={command} placeholder="blank = adapter default" />
   </div>
+
+  <ProcessTraits bind:traits idPrefix={"pTrait-" + (preset.id ?? "new")} />
 
   {#if error}<div class="line-status error">{error}</div>{/if}
 

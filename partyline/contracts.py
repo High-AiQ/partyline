@@ -33,13 +33,6 @@ class RenameIn(BaseModel):
     name: str
 
 
-class PresetIn(BaseModel):
-    title: str
-    name: str
-    adapter: str = "opencode"
-    command: str = ""
-
-
 class KeyIn(BaseModel):
     key: str
 
@@ -114,15 +107,6 @@ class FileUploadResponse(BaseModel):
 
 class AttachmentPatchRequest(BaseModel):
     command: str
-
-
-class PresetResponse(BaseModel):
-    id: str
-    title: str
-    name: str
-    adapter: str
-    command: str
-    created_at: float
 
 
 class ReattachCandidateResponse(BaseModel):

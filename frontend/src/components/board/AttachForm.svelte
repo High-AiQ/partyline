@@ -3,9 +3,11 @@
   import { adapterLabel, overrideExplanation } from "../../lib/attachments";
   import { tooltip } from "../../lib/tooltip";
   import { ApiError, api } from "../../lib/api";
+  import { defaultPresetTraits, traitsFrom } from "../../lib/preset-traits";
   import { room } from "../../state/room.svelte.js";
   import { session } from "../../state/session.svelte.js";
   import { dialogs } from "../../state/dialogs.svelte.js";
+  import ProcessTraits from "../ProcessTraits.svelte";
   import PresetDialog from "../dialogs/PresetDialog.svelte";
   import PresetsDialog from "../dialogs/PresetsDialog.svelte";
   import ImportAdaptersDialog from "../dialogs/ImportAdaptersDialog.svelte";
@@ -16,6 +18,7 @@
   let command = $state("");
   let cwd = $state("");
   let updateCli = $state(false);
+  let traits = $state(defaultPresetTraits());
   let attaching = $state(false);
 
   const selectedAdapter = $derived(session.adapters.find((option) => option.id === adapter));
@@ -45,6 +48,7 @@
     name = preset.name;
     adapter = preset.adapter;
     command = preset.command;
+    traits = traitsFrom(preset);
     if (!adapterCanUpdate(adapter)) updateCli = false;
   }
 
@@ -80,6 +84,7 @@
       name = "";
       command = "";
       updateCli = false;
+      traits = defaultPresetTraits();
     } catch (error) {
       room.showNotice(error instanceof ApiError ? error.message : "attach failed", "error");
     } finally {
@@ -104,7 +109,13 @@
       use:tooltip={{ label: "save current name/adapter/command as a preset" }}
       onclick={() =>
         dialogs.open(PresetDialog, {
-          preset: { title: name.trim(), name: name.trim(), adapter, command: command.trim() },
+          preset: {
+            title: name.trim(),
+            name: name.trim(),
+            adapter,
+            command: command.trim(),
+            ...traits,
+          },
         })}>save</button
     >
     <button
@@ -172,6 +183,11 @@
       use:tooltip={{ label: updateTitle }}
     />
   </label>
+
+  <details id="processTraits">
+    <summary class="cursor-pointer text-[10px] tracking-[0.05em] text-cream-faint">process traits</summary>
+    <ProcessTraits bind:traits idPrefix="attach-trait" />
+  </details>
 
   <button class="primary" type="submit" disabled={attaching}>{attaching ? "attaching…" : "attach"}</button>
   <div class="note text-[10px] italic text-cream-faint">the real interactive process is spawned in a pty</div>

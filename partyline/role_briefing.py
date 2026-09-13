@@ -43,6 +43,14 @@ PROCEDURE = (
     "cannot reach other lines; a child manager reaches you by @mention and nobody else above."
 )
 
+STAFFING_TRAITS = (
+    "### Staffing\n"
+    "Favor can_manage captains, implements workers, and reads_images for visual work. "
+    "GET {root}/staffing lists preset traits and live processes; a match is only the "
+    "unique handle+adapter+command agreement — never infer the rest. Mix models when "
+    "you can; this is advice, not a gate."
+)
+
 ASK_FIRST = (
     "### Ask the person first\n"
     "Commits or pushes to shared branches, deploys and restarts, paid calls beyond a stated "
@@ -138,6 +146,7 @@ def role_instructions(
         "depth and the depth cap.",
         ROLE,
         PROCEDURE.format(root=root, staffing=staffing),
+        STAFFING_TRAITS.format(root=root),
         ASK_FIRST,
         EXAMPLE,
     ]

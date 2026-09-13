@@ -110,15 +110,8 @@ export const AdapterSchema = z.object({
 });
 export type Adapter = z.infer<typeof AdapterSchema>;
 
-export const PresetSchema = z.object({
-  id: z.string(),
-  title: z.string(),
-  name: z.string(),
-  adapter: z.string(),
-  command: z.string(),
-  created_at: z.number(),
-});
-export type Preset = z.infer<typeof PresetSchema>;
+export { PresetSchema } from "./preset-contracts";
+export type { Preset } from "./preset-contracts";
 
 export const RunningProcessSchema = z.object({
   name: z.string(),
