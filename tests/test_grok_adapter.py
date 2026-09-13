@@ -1764,19 +1764,42 @@ class LifecycleTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("could not be counted", posted[0][2])
         self.assertFalse(await adapter.wait_ready())
 
-    async def test_run_reports_a_missing_transcript_after_timeout(self):
+    async def test_run_warns_once_about_a_late_transcript_and_keeps_waiting(self):
+        """A Grok parked on a folder-trust prompt opens its session minutes
+        later; the tail must still be there when it does."""
+        posted = []
+
+        async def collect(sender, sender_type, body):
+            posted.append((sender, sender_type, body))
+
+        path = Path("/tmp/grok-transcript.jsonl")
+        adapter = make_adapter(collector=collect)
+        adapter.TRANSCRIPT_TIMEOUT = 0
+        adapter.alive = lambda: True
+        tail = AsyncMock()
+        with (
+            patch.object(adapter, "_transcript", side_effect=[None, None, None, path]),
+            patch("partyline.adapters.bundled.grok.adapter.asyncio.sleep", new=AsyncMock()),
+            patch.object(adapter, "_tail_grok_transcript", new=tail),
+        ):
+            await adapter._run()
+
+        self.assertEqual(len(posted), 1)
+        self.assertIn("parked on a prompt", posted[0][2])
+        tail.assert_awaited_once()
+
+    async def test_run_stops_quietly_when_the_process_dies_before_its_transcript(self):
         posted = []
 
         async def collect(sender, sender_type, body):
             posted.append((sender, sender_type, body))
 
         adapter = make_adapter(collector=collect)
-        adapter.TRANSCRIPT_TIMEOUT = 0
-        adapter.alive = lambda: True
+        adapter.alive = lambda: False
         with patch.object(adapter, "_transcript", return_value=None):
             await adapter._run()
 
-        self.assertIn("no Grok transcript appeared", posted[0][2])
+        self.assertEqual(posted, [])
 
     async def test_run_waits_for_a_transcript_then_tails_and_records_session(self):
         sessions = []
