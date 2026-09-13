@@ -5,6 +5,7 @@ from typing import NamedTuple
 from .goal import goal_rider
 from .line_depth import depth as line_depth
 from .role_briefing import role_instructions
+from .staffing import staffing_line
 
 
 class RoleState(NamedTuple):
@@ -48,7 +49,10 @@ def bind_role_delivery(db, att: dict) -> None:
             if not update:
                 update = ("Your current role is ordinary participant, not captain. "
                           "Use only your own line's tools.")
-        goal = goal_rider(db, current.conv_id) if current.role == "lead" else ""
-        return "\n".join(part for part in (original_rider(), goal, update) if part)
+        goal = staffing = ""
+        if current.role == "lead":
+            goal = goal_rider(db, current.conv_id)
+            staffing = staffing_line(db, current.conv_id)
+        return "\n".join(part for part in (original_rider(), goal, staffing, update) if part)
 
     att["digest_rider"] = rider
