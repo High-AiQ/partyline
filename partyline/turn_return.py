@@ -43,6 +43,13 @@ What keeps this a return rather than a second source of noise:
   this turn's words either. On the first fleet trial, silent ends were
   the process reading a passing mention and having nothing to add, and
   the "last words" quoted were a greeting from before the wake.
+* A return rings only a requester that is waiting. A captain that acks
+  "@lead on it" and keeps working has not stopped for an answer; ringing
+  it with the lead's "holding" interrupted real work on the live run, and
+  it answered "still holding" — one wasted turn per courtesy. So a return
+  owed to a requester that is mid-turn is deferred until that turn ends,
+  and dropped if the requester handed off to anyone in the meantime: its
+  next signal supersedes the stale one.
 * The decision waits a moment after the receipt. A harness reports the end
   of a turn through one channel and its last words through another (the
   transcript tail), and on the first live trial the receipt won by a few
@@ -81,9 +88,12 @@ def excerpt(body: str | None) -> str:
 class ReturnPath:
     """Per-attachment memory of who asked and whether anyone was answered."""
 
-    def __init__(self, runtime):
+    def __init__(self, runtime, presence=None):
         self.runtime = runtime
+        self.presence = presence
         self.grace = RETURN_GRACE_SECONDS
+        # requester att_id -> notices owed to it while it was mid-turn
+        self.deferred: dict[str, list[tuple[str, str, str]]] = {}
         # att_id -> requester attachment id -> its row at wake time, plus the
         # id of the message that rang this process, so a notice can point at
         # everything said since.
@@ -101,7 +111,7 @@ class ReturnPath:
         return db.get_attachment(att_id) if db is not None else None
 
     def forget(self, att_id: str) -> None:
-        for table in (self.requesters, self.askers, self.last_said):
+        for table in (self.requesters, self.askers, self.last_said, self.deferred):
             table.pop(att_id, None)
         self.addressed.discard(att_id)
         if task := self.pending.pop(att_id, None):
@@ -140,13 +150,25 @@ class ReturnPath:
                 task.cancel()  # the last words handed off after all
 
     async def turn_ended(self, att_id: str) -> None:
-        """The harness closed the turn: settle the return once its grace is up."""
-        if att_id in self.pending or not (self.requesters.get(att_id) or self.askers.get(att_id)):
+        """The harness closed the turn: deliver what was deferred for this process,
+        then settle its own return once the grace is up."""
+        owed = self.deferred.pop(att_id, [])
+        handed_off = att_id in self.addressed
+        if handed_off:
+            owed = []  # it handed off during the turn; the stale notices are superseded
+        for line_id, body, source_att in owed:
+            source = self._row(source_att) or {}
+            await post_private(self.runtime, line_id, "system", "system", body,
+                               audience=att_id, source=(source_att, source.get("conv_id")))
+        if att_id in self.pending:
             return
-        if att_id in self.addressed:
-            self._clear(att_id)
+        if handed_off or not (self.requesters.get(att_id) or self.askers.get(att_id)):
+            self._clear(att_id)  # the turn is over either way; nothing carries into the next
             return
         self.pending[att_id] = asyncio.create_task(self._settle(att_id))
+
+    def _working(self, att_id: str) -> bool:
+        return bool(self.presence is not None and self.presence.is_working(att_id))
 
     async def drain(self) -> None:
         """Wait out every pending grace — for tests and shutdown."""
@@ -179,6 +201,9 @@ class ReturnPath:
             body = self._notice(
                 current["name"], finisher, current["conv_id"], said, requester["since_id"]
             )
+            if self._working(current["id"]):
+                self.deferred.setdefault(current["id"], []).append((current["conv_id"], body, att_id))
+                continue
             posted.append(await post_private(
                 self.runtime, current["conv_id"], "system", "system", body,
                 audience=current["id"], source=(att_id, finisher["conv_id"]),

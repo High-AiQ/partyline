@@ -408,3 +408,72 @@ class AddresseesTest(unittest.TestCase):
         from partyline.mentions import addressees
 
         self.assertEqual(addressees("just thinking aloud"), set())
+
+
+class DeferredReturnTest(ReturnPathTest):
+    """A return rings only a requester that is waiting."""
+
+    async def test_a_working_requester_is_not_interrupted(self):
+        await self.say("sub", "@lead acknowledged, repairing now")  # sub is mid-turn
+        await self.presence.began("child", "sub")
+        await self.turn("lead", "Holding; nothing in flight.")
+
+        self.assertEqual([b for b in self.adapters["sub"].bodies() if b.startswith("↩")], [])
+        self.assertEqual(len(self.runtime.returns.deferred.get("sub", [])), 1)
+
+    async def test_the_deferred_notice_lands_when_the_requester_ends_quietly(self):
+        await self.turn("sub", "@lead which style do you want?")  # asked, then went idle
+        await self.human("child", "@sub keep going meanwhile")
+        await self.presence.began("child", "sub")  # working again when the answer comes
+        await self.turn("lead", "Holding; nothing in flight.")
+        await self.say("sub", "Repair done.")
+        await self.presence.ended("child", "sub")
+        await self.runtime.returns.drain()
+
+        [notice] = [b for b in self.adapters["sub"].bodies() if b.startswith("↩")]
+        self.assertIn("lead on line «Parent» ended its turn", notice)
+        self.assertIn("last said: «Holding; nothing in flight.»", notice)
+        self.assertEqual(self.runtime.returns.deferred, {})
+
+    async def test_a_hand_off_by_the_requester_supersedes_the_deferred_notice(self):
+        await self.say("sub", "@lead acknowledged, repairing now")
+        await self.presence.began("child", "sub")
+        await self.turn("lead", "Holding; nothing in flight.")
+        await self.say("sub", "@lead repair done, please review")
+        await self.presence.ended("child", "sub")
+        await self.runtime.returns.drain()
+
+        self.assertEqual([b for b in self.adapters["sub"].bodies() if b.startswith("↩")], [])
+        self.assertEqual(self.runtime.returns.deferred, {})
+
+    async def test_forgetting_a_requester_drops_what_it_was_owed(self):
+        await self.say("sub", "@lead acknowledged, repairing now")
+        await self.presence.began("child", "sub")
+        await self.turn("lead", "Holding; nothing in flight.")
+        self.presence.forget("sub")
+
+        self.assertEqual(self.runtime.returns.deferred, {})
+
+
+class ApiEchoTest(Tree):
+    async def test_a_tailed_twin_of_an_api_post_is_dropped(self):
+        posted = self.db.add_message("parent", "lead", "agent", "Hello — lead is connected.")
+        self.db._exec("UPDATE messages SET source_attachment_id=?, source_conv_id=? WHERE id=?",
+                      ("lead", "parent", posted["id"]))
+        await self.say("lead", "Hello —  lead is connected.")
+
+        self.assertEqual([m["body"] for m in self.line("parent")], ["Hello — lead is connected."])
+
+    async def test_different_words_are_not_an_echo(self):
+        posted = self.db.add_message("parent", "lead", "agent", "Hello — lead is connected.")
+        self.db._exec("UPDATE messages SET source_attachment_id=? WHERE id=?", ("lead", posted["id"]))
+        await self.say("lead", "Suite is green.")
+
+        self.assertEqual(len(self.line("parent")), 2)
+
+    async def test_another_process_saying_the_same_words_is_not_an_echo(self):
+        posted = self.db.add_message("parent", "lead", "agent", "Standing by.")
+        self.db._exec("UPDATE messages SET source_attachment_id=? WHERE id=?", ("lead", posted["id"]))
+        await self.say("worker", "Standing by.")
+
+        self.assertEqual(len(self.line("parent")), 2)
