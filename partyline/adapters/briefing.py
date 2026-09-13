@@ -1,6 +1,7 @@
 """The joining briefing every attached process receives, and its topic rider."""
 
 import logging
+import re
 from collections.abc import Mapping
 
 from partyline.bind import DEFAULT_HOST, DEFAULT_PORT
@@ -43,6 +44,27 @@ DIGEST_FOOTER = ("(reminder: @name only who acts next; humans read everything; e
                  "turn with the result and that @mention)")
 
 
+_MEDIA_ORIGIN = re.compile(r"https?://[^/\s]+(?=/api/media/)")
+
+
+def local_media_urls(messages: list[dict], api: str) -> list[dict]:
+    """Point a message's media links at the origin this process already uses.
+
+    A file posted from the browser carries the browser's origin — a LAN
+    hostname behind a private certificate. A process on the host fetching
+    that URL fails the certificate check, wanders off to find another way
+    in, and burns a turn. Its own PARTYLINE_API is the same server, so the
+    digest it is pasted says so.
+    """
+    api = api.rstrip("/")
+    out = []
+    for message in messages:
+        body = str(message.get("body") or "")
+        rewritten = _MEDIA_ORIGIN.sub(api, body) if "/api/media/" in body else body
+        out.append({**message, "body": rewritten} if rewritten != body else message)
+    return out
+
+
 def _speaker(message: dict) -> str:
     """``sender``, plus the line it was said on when that was another line.
 
@@ -55,12 +77,15 @@ def _speaker(message: dict) -> str:
     return message["sender"]
 
 
-def format_digest(messages: list[dict], rider: str = "", cwd: str = "") -> str:
+def format_digest(messages: list[dict], rider: str = "", cwd: str = "", api: str = "") -> str:
     """The wake digest: sender-prefixed lines, then live state, then the reminder.
 
     The rider is where a line's current facts (the goal, the staffing board) go, so a
-    waking process sees them next to the messages rather than never.
+    waking process sees them next to the messages rather than never. ``api`` is the
+    origin this process calls; media links are pointed at it.
     """
+    if api:
+        messages = local_media_urls(messages, api)
     lines = "\n".join(f"[{_speaker(m)}]: {m['body']}" for m in messages)
     # This low-frequency delivery probe stays beside digest construction; all
     # HTTP/WebSocket presentation probes are offloaded from the event loop.
