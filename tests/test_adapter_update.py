@@ -135,6 +135,7 @@ class BundledManifestTest(unittest.TestCase):
         "hermes": ["hermes", "update"],
         "pi": ["pi", "update", "--self"],
         "muse": ["bash", "-lc", "curl -fsSL https://dev.meta.ai/install.sh | bash"],
+        "deepseek": ["npm", "install", "--global", "@deepseek-ai/dsh@0.1.5-rc.1"],
         "raw": None,
     }
 
