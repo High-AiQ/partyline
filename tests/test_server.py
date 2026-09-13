@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from fastapi import FastAPI, HTTPException, WebSocketDisconnect
 from fastapi.testclient import TestClient
 
-from partyline import auth_store, auth_tokens, bind, frontend_build, server
+from partyline import resume_continuation, auth_store, auth_tokens, bind, frontend_build, server
 from partyline.auth_guard import Principal
 from partyline.attachment_resume import TranscriptDeliveryRecord, delivered_history
 from partyline.db import Db
@@ -503,7 +503,7 @@ class ServerTest(unittest.TestCase):
         server.runtime.reattaching.add("one")
         original = server._resume_adapter
 
-        async def resumed(att_id):
+        async def resumed(att_id, pending=None):
             server.runtime.live[att_id] = FakeAdapter()
 
         server._resume_adapter = resumed
@@ -520,9 +520,16 @@ class ServerTest(unittest.TestCase):
         # told to continue, and the mark does not survive to ring twice.
         self.add_attachment("one", "terra", "exited")
         server.runtime.db._exec("UPDATE attachments SET turn_open=1 WHERE id='one'")
-        self.arun(server.resume_attachment(self.principal_request(), "one"))
-        notice = server.runtime.db.list_messages("line")[-1]
-        self.assertIn("restarted in the middle of a turn", notice["body"])
+
+        async def resume_and_settle():
+            await server.resume_attachment(self.principal_request(), "one")
+            await resume_continuation.drain()
+
+        self.arun(resume_and_settle())
+        adapter = server.runtime.live["one"]
+        self.assertIn("restarted in the middle of a turn", adapter.deliveries[-1][-1]["body"])
+        notice = [m for m in server.runtime.db.list_messages("line")
+                  if "restarted in the middle of a turn" in m["body"]][0]
         self.assertIn("@terra", notice["body"])
         self.assertEqual(notice["audience_attachment_id"], "one")
         self.assertEqual(server.runtime.db.get_attachment("one")["turn_open"], 0)

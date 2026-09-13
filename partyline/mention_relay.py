@@ -105,7 +105,9 @@ def reaches_a_process(db, speaker: dict, names: set[str]) -> bool:
     return bool(reached)
 
 
-async def post_private(runtime, line_id, sender, sender_type, body, *, audience, source=None):
+async def post_private(
+    runtime, line_id, sender, sender_type, body, *, audience, source=None, route=True
+):
     """Post a message one process on ``line_id`` is shown, then route it there.
 
     ``source`` is ``(attachment id or None, line id)`` of where it was said.
@@ -126,7 +128,8 @@ async def post_private(runtime, line_id, sender, sender_type, body, *, audience,
         audience_attachment_id=audience,
     )
     await runtime.broadcast(line_id, MessageEvent(message=MessageResponse.model_validate(copy)))
-    await runtime.route_mentions(line_id, copy, force=True)
+    if route:
+        await runtime.route_mentions(line_id, copy, force=True)
     return copy
 
 
