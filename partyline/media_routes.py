@@ -13,6 +13,22 @@ from .media import MediaError, MediaStore, prepared_files, validated_metadata
 from .media_digest import digest_body
 from .media_rows import VARIANTS
 
+
+def handed_to(db, principal, file_id: str) -> bool:
+    """A process may read a file that a relayed private copy put in front of it.
+
+    A brief attached on the root line and relayed to a child captain named
+    this file in that captain's own digest; refusing the fetch sent the root
+    captain copying the document to disk by hand.
+    """
+    if principal.kind != "machine" or not principal.attachment_id:
+        return False
+    row = db._exec(
+        "SELECT 1 FROM messages WHERE audience_attachment_id=? AND body LIKE ? LIMIT 1",
+        (principal.attachment_id, f"%/api/media/{file_id}/%"),
+    ).fetchone()
+    return row is not None
+
 # Inline is an allowlist: anything a browser might execute as script from our
 # own origin — html, xhtml, xml, svg — is served as a download instead.
 _INLINE_PREFIXES = ("image/", "audio/", "video/")
@@ -142,7 +158,7 @@ def media_router(runtime, store: MediaStore) -> APIRouter:
         owned = runtime.db._exec(
             "SELECT conv_id FROM images WHERE id=?", (file_id,)
         ).fetchone()
-        if owned is not None:
+        if owned is not None and not handed_to(runtime.db, request_principal(request), file_id):
             deny_unless(runtime.db, request_principal(request), owned["conv_id"], "read")
         located = store.file_for(file_id, variant)
         if located is None:

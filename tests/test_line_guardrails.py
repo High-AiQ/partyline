@@ -17,7 +17,7 @@ from partyline import agent_client, auth_store, auth_tokens, server
 from partyline.auth_guard import install_auth_guard
 from partyline.conversation_routes import register_conversation_routes
 from partyline.db import Db
-from partyline.goal import goal_rider
+from partyline.goal import goal_rider, register_goal_route
 from partyline.hierarchy_routes import hierarchy_router
 from partyline.line_worktree import WORKTREES_DIR, line_cwd, place_child, remove_for_line
 from partyline.media import MediaStore
@@ -38,6 +38,7 @@ class GuardrailTest(unittest.TestCase):
         app = FastAPI()
         install_auth_guard(app, self.db)
         app.include_router(hierarchy_router(self.runtime))
+        register_goal_route(app, self.runtime)
         self.spawned = []
 
         async def fake_start(att, **kwargs):
@@ -183,9 +184,32 @@ class GuardrailTest(unittest.TestCase):
         self.db.add_attachment("kid-x", "kid", "x", "fake", ["fake"], self.directory.name)
         self.assertEqual(line_cwd(self.db, "grandkid"), self.directory.name)
 
-    def test_a_child_of_a_plain_directory_inherits_it(self):
-        child = self.child("root", "scratch")
+    def test_a_plain_project_directory_becomes_a_repository_with_a_worktree_per_child(self):
+        from unittest.mock import patch
+        plain = os.path.join(self.directory.name, "blank")
+        os.makedirs(plain)
+        self.db._exec("UPDATE attachments SET cwd=? WHERE id='root-lead'", (plain,))
+        with patch("partyline.line_worktree.project_directory", return_value=True):
+            child = self.child("root", "scratch")
+        self.assertTrue(os.path.isdir(os.path.join(plain, ".git")))
+        self.assertEqual(child["cwd"], os.path.join(plain, WORKTREES_DIR, "scratch"))
+
+    def test_a_temporary_or_system_directory_is_never_git_initialised(self):
+        from partyline.line_worktree import project_directory
+        self.assertFalse(project_directory(self.directory.name))  # under /tmp
+        self.assertFalse(project_directory(os.path.expanduser("~")))
+        self.assertFalse(project_directory("/"))
+        self.assertTrue(project_directory(os.path.expanduser("~/code/some-project")))
+        child = self.child("root", "scratch")  # the fixture's cwd is under /tmp: inherited
         self.assertEqual(child["cwd"], self.directory.name)
+
+    def test_a_leaf_captain_may_record_its_own_goal(self):
+        mid = self.child("root", "mid", self.machine("root-lead"))
+        leaf = self.child(mid["id"], "leaf", self.captain(mid["id"], "sol"))
+        put = self.client.put(f"/api/conversations/{leaf['id']}/goal", json={"goal": "prove it"},
+                              headers=self.captain(leaf["id"], "luna"))
+        self.assertEqual(put.status_code, 200, put.text)
+        self.assertEqual(put.json()["goal"], "prove it")
 
     # -- helper errors -----------------------------------------------------------
 
