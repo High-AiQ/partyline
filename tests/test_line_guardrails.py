@@ -22,7 +22,6 @@ from partyline.hierarchy_routes import hierarchy_router
 from partyline.line_worktree import WORKTREES_DIR, line_cwd, place_child, remove_for_line
 from partyline.media import MediaStore
 from partyline.runtime import ChatRuntime
-from partyline.tasks import TaskStore
 
 
 def _git(*args, cwd):
@@ -47,7 +46,7 @@ class GuardrailTest(unittest.TestCase):
 
         register_conversation_routes(
             app, self.runtime, MediaStore(self.db, self.directory.name + "/media"),
-            None, TaskStore(self.db), {}, {}, fake_start,
+            None, {}, {}, fake_start,
         )
         self.client = TestClient(app)
         self.addCleanup(self.client.close)

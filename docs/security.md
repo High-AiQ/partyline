@@ -22,7 +22,7 @@ Parent linking is human-only. Managers can appoint managers inside their own
 subtree, and cannot grant access to an unrelated project.
 
 Participants may inspect their own line, including its terminal screens, and
-write messages, tasks, files, and their own claims. Sending terminal keys,
+write messages and files. Sending terminal keys,
 attaching or stopping processes, and overriding another participant's claim
 require manager authority. Preset and adapter configuration changes are human-only. The shutdown API is human-only and loopback-only, as is starting a fresh session; removing a
 stopped attachment record is not, since it controls no process.

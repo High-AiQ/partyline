@@ -11,13 +11,13 @@ from .auth_store import ensure_api_token
 from .role_delivery import bind_role_delivery
 
 
-def prepare_attachment(att, runtime, tasks, hook_url, checkpoint):
+def prepare_attachment(att, runtime, hook_url, checkpoint):
     conv = runtime.db.get_conversation(att["conv_id"])
     att["api_token"] = ensure_api_token(runtime.db, att["id"])
     att["conv_name"], att["topic"] = conv["name"], conv["topic"]
     att["hook_url"] = hook_url(att["id"], att["runtime_owner"])
     provision_connection(runtime.db.path, att)
-    att["digest_rider"] = lambda: tasks.rider(att["conv_id"])
+    att["digest_rider"] = lambda: ""  # role delivery layers the goal and staffing on top
     bind_role_delivery(runtime.db, att)
     att["fresh_checkpoint"] = checkpoint
 
@@ -36,11 +36,11 @@ async def rollback_start(runtime, att):
     await runtime.db.set_attachment_status_async(ident, "exited", att["runtime_owner"])
 
 
-async def start_attachment(att, *, runtime, presence, tasks, make_adapter, hook_url,
+async def start_attachment(att, *, runtime, presence, make_adapter, hook_url,
                            checkpoint="", fresh=False):
     ident, conv_id, owner = att["id"], att["conv_id"], att["runtime_owner"]
     try:
-        prepare_attachment(att, runtime, tasks, hook_url, checkpoint)
+        prepare_attachment(att, runtime, hook_url, checkpoint)
         adapter = make_adapter(
             att["adapter"], att,
             presence.posting(conv_id, ident, runtime.post_callback(ident, conv_id, owner)),

@@ -11,7 +11,6 @@ from .adapter_update import apply_update, requested_update_argv
 from .attachment_commands import validated_attachment_command
 from .auth_guard import request_principal
 from .auth_store import handle_taken
-from .claim_routes import purge_claims
 from .hierarchy import tree_live_name_conflict
 from .line_subtree import archive_line, archive_subtree
 from .line_worktree import describe, ensure_placed, line_cwd, remove_for_line
@@ -60,7 +59,7 @@ def unique_handle(db, conv_id: str, name: str) -> str:
 
 
 def register_conversation_routes(
-    app: FastAPI, runtime, media, presence, tasks, adapters, metadata, start
+    app: FastAPI, runtime, media, presence, adapters, metadata, start
 ) -> None:
     @app.get("/api/conversations", response_model=list[ConversationResponse])
     async def conversations(request: Request, archived: bool = False):
@@ -177,8 +176,6 @@ def register_conversation_routes(
         deny_purge_if_parent_refs(db, conv_id)
         await runtime.stop_attachments(conv_id)
         s.media.delete_conversation(conv_id)
-        purge_claims(runtime.db, conv_id)
-        s.tasks.purge(conv_id)
         purge_reports(db, conv_id)
         remove_for_line(conv)
         db.delete_conversation(conv_id)

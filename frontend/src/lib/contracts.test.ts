@@ -3,10 +3,8 @@ import {
   AuthTokenResponseSchema,
   HandleSchema,
   AdapterSchema,
-  ClaimSchema,
   ConversationDetailSchema,
   FileRefSchema,
-  TaskSchema,
   VersionInfoSchema,
   WireEventSchema,
   WireReattachCommandSchema,
@@ -197,31 +195,6 @@ describe("conversation detail compatibility", () => {
       ],
     });
     expect(detail.presence?.[0]).toMatchObject({ id: "att-1", phase: "idle", revision: 9 });
-  });
-});
-
-describe("coordination contracts", () => {
-  it("parses claims and tasks at the browser boundary", () => {
-    expect(
-      ClaimSchema.parse({
-        id: "claim-1",
-        owner: "sol",
-        paths: ["frontend/**"],
-        created_at: 1,
-        expires_at: 2,
-      }),
-    ).toMatchObject({ owner: "sol", paths: ["frontend/**"] });
-
-    expect(
-      TaskSchema.parse({
-        id: 1,
-        body: "prove the working receipt",
-        status: "open",
-        owner: null,
-        created_at: 1,
-        updated_at: 1,
-      }),
-    ).toMatchObject({ status: "open", owner: null });
   });
 });
 
