@@ -17,9 +17,11 @@
   let loading = $state(true);
   let failed = $state(false);
   let live = $state<Attachment[]>([]);
+  const childIds = $derived(descendantLineIds(conversation.id, room.conversations));
+  let includeChildren = $state<boolean>(true);
 
   $effect(() => {
-    const targetIds = [conversation.id, ...descendantLineIds(conversation.id, room.conversations)];
+    const targetIds = includeChildren ? [conversation.id, ...childIds] : [conversation.id];
     Promise.all(targetIds.map((id) => api.conversation(id)))
       .then((details) => {
         live = details.flatMap((detail) => detail.attachments.filter(isLive));
@@ -33,10 +35,9 @@
   });
 
   async function closeProcesses(): Promise<void> {
-    const result = await api.closeProcesses(conversation.id);
-    const scope = descendantLineIds(conversation.id, room.conversations).length
-      ? `${conversation.name} and its sub-lines`
-      : conversation.name;
+    const result = await api.closeProcesses(conversation.id, includeChildren);
+    const scope =
+      includeChildren && childIds.length ? `${conversation.name} and its sub-lines` : conversation.name;
     close();
     await room.loadConversations();
     room.showNotice(
@@ -53,9 +54,14 @@
   {:else if failed}
     <p class="line-status error" role="alert">Could not load this line. Try again.</p>
   {:else}
-    <p class="dialog-text">
-      Detaches every live process on this line and its sub-lines. The line and its history stay.
-    </p>
+    <p class="dialog-text">Detaches every live process on this line. The line and its history stay.</p>
+
+    {#if childIds.length}
+      <label class="dialog-check">
+        <input type="checkbox" bind:checked={includeChildren} />
+        also close processes on its {childIds.length} child line{childIds.length === 1 ? "" : "s"}
+      </label>
+    {/if}
 
     <div class="live-list">
       {#if live.length}

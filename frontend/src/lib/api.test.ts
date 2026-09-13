@@ -146,7 +146,7 @@ describe("api", () => {
       ok: true,
       stopped: ["sol", "fable"],
     });
-    expect(fetch).toHaveBeenCalledWith("/api/conversations/conv-1/attachments/close", {
+    expect(fetch).toHaveBeenCalledWith("/api/conversations/conv-1/attachments/close?include_children=true", {
       method: "POST",
     });
   });
