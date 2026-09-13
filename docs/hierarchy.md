@@ -43,6 +43,33 @@ which presets may be used, and anything irreversible; the pack tells a manager
 to ask before those rather than guess. Team shape is a default, not a rule: the
 pack splits independent slices and the person overrides in a clause.
 
+## Depth, worktrees, and where work goes
+
+Depth is a line's ancestor count; a root line is depth 0. A machine may create
+child lines only above `MAX_CAPTAIN_DEPTH` (2): a line at the cap is a **leaf**,
+and its captain receives a pack that says so — staff this line from the
+presets, assign, review, report up — instead of the "spin up a sub-line"
+procedure that had every captain spawning another. The pack is gated on being
+captain, not on the create-child permission, so a leaf captain is never
+mistaken for an ordinary participant. `GET /api/capabilities` reports `depth`
+and `max_depth`. People are never boxed by the cap.
+
+A child line is placed when it is born. If the parent line works inside a git
+repository, the child gets `<repo>/.partyline-worktrees/<slug>` on branch
+`line/<slug>` (kept out of `git status` through `.git/info/exclude`), and the
+line hears "☏ working directory: … a git worktree on branch …". Otherwise it
+inherits the parent's directory. A machine attaching a process to a line cannot
+choose another directory: the process works where the line works. A person may.
+Purging a line drops its worktree; the branch stays.
+
+Work goes down, not sideways. Once a line has a child, a machine may no longer
+attach processes to that line: the root captain that could not staff a child
+otherwise hands the job to a sibling on the root line, in the checkout the
+child lines are already editing. Presets double as handles, so the same preset
+used twice in one tree used to collide with a 409 that read as "cannot staff";
+the server now suffixes the handle (`grok-2`) and the agent helper prints the
+server's reason on every failed request.
+
 ## The hand-off contract
 
 A child line is born briefed. `POST /api/conversations/<parent>/children` takes

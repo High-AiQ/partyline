@@ -3,6 +3,7 @@
 from typing import NamedTuple
 
 from .goal import goal_rider
+from .line_depth import depth as line_depth
 from .role_briefing import role_instructions
 
 
@@ -11,6 +12,7 @@ class RoleState(NamedTuple):
     conv_id: str
     parent_id: str | None
     actions: tuple[str, ...]
+    depth: int = 0
 
 
 def current_role(db, attachment_id: str) -> RoleState:
@@ -24,12 +26,14 @@ def current_role(db, attachment_id: str) -> RoleState:
     principal = Principal(kind="machine", name=att["name"], conv_id=att["conv_id"],
                           attachment_id=att["id"], is_lead=bool(att.get("is_lead")))
     state = CapabilityState.model_validate(capability_state(db, principal))
-    return RoleState(state.role, att["conv_id"], state.parent_id, tuple(state.actions))
+    return RoleState(state.role, att["conv_id"], state.parent_id, tuple(state.actions),
+                     line_depth(db, att["conv_id"]))
 
 
 def bind_role_delivery(db, att: dict) -> None:
     initial = current_role(db, att["id"])
-    att["role_briefing"] = role_instructions(initial.actions, initial.conv_id, initial.parent_id)
+    att["role_briefing"] = role_instructions(
+        initial.actions, initial.conv_id, initial.parent_id, initial.depth)
     original_rider = att["digest_rider"]
     previous = None if att.get("resume") else initial
 
@@ -39,7 +43,8 @@ def bind_role_delivery(db, att: dict) -> None:
         update = ""
         if current != previous:
             previous = current
-            update = role_instructions(current.actions, current.conv_id, current.parent_id)
+            update = role_instructions(
+                current.actions, current.conv_id, current.parent_id, current.depth)
             if not update:
                 update = ("Your current role is ordinary participant, not captain. "
                           "Use only your own line's tools.")

@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from .auth_guard import request_principal
 from .contracts import ConversationEvent, ConversationResponse
+from .line_depth import may_create_children
 from .machine_scope import deny_unless
 
 MAX_GOAL = 3000
@@ -33,6 +34,8 @@ def set_goal(db, conv_id: str, goal: str) -> dict:
 # Rides every manager wake next to the goal, because the pack scrolls away and
 # the one rule a manager drifts from mid-project is this one.
 MANAGER_REMINDER = "you are the captain — delegate to a sub-captain, review, decide; you do not implement"
+LEAF_REMINDER = ("you are the leaf captain — staff workers on this line, review, decide; "
+                 "no sub-captains; you do not implement")
 
 
 def goal_rider(db, conv_id: str) -> str:
@@ -40,9 +43,10 @@ def goal_rider(db, conv_id: str) -> str:
     rule alone when no goal is recorded."""
     conv = db.get_conversation(conv_id) or {}
     goal = " ".join(str(conv.get("goal") or "").split())
+    rule = MANAGER_REMINDER if may_create_children(db, conv_id) else LEAF_REMINDER
     if not goal:
-        return f"({MANAGER_REMINDER})"
-    return f"(goal you are seeing through: {goal}; {MANAGER_REMINDER})"
+        return f"({rule})"
+    return f"(goal you are seeing through: {goal}; {rule})"
 
 
 def register_goal_route(app: FastAPI, runtime) -> None:

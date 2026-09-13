@@ -106,9 +106,7 @@ class HierarchyApiTest(unittest.TestCase):
         server._start_attachment = stubbed
         self.addCleanup(setattr, server, "_start_attachment", original)
 
-    def test_attach_refuses_a_live_handle_from_a_related_line(self):
-        # Stubbed before any attach: on pre-fix code the refusal does not
-        # happen and the route would otherwise spawn a real process.
+    def test_attach_suffixes_a_live_handle_from_a_related_line(self):
         self.fake_spawn([])
         child = self.client.post(
             "/api/conversations/parent/children",
@@ -120,8 +118,8 @@ class HierarchyApiTest(unittest.TestCase):
             f"/api/conversations/{child_id}/attachments",
             json={"name": "ASTRA", "adapter": "raw", "command": "sh", "cwd": "/tmp"},
         )
-        self.assertEqual(taken.status_code, 409, taken.text)
-        self.assertIn("Parent", taken.json()["detail"])
+        self.assertEqual(taken.status_code, 200, taken.text)
+        self.assertEqual(taken.json()["name"], "ASTRA-2")  # presets double as handles
         distinct = self.client.post(
             f"/api/conversations/{child_id}/attachments",
             json={"name": "astra-child", "adapter": "raw", "command": "sh", "cwd": "/tmp"},
@@ -424,15 +422,19 @@ class HierarchyApiTest(unittest.TestCase):
         self.assertEqual(child["topic"], "cwd /tmp/book; budget $1; no upscale")
         notices = [m["body"] for m in self.db.list_messages(child["id"])]
         self.assertEqual(notices, [
+            "☏ working directory: /tmp",
             "☏ topic set by @astra: cwd /tmp/book; budget $1; no upscale",
             "☏ goal set by @astra: render spreads 1-3",
         ])
 
-    def test_a_child_without_a_brief_is_silent(self):
+    def test_a_child_without_a_brief_hears_only_where_it_works(self):
         created = self.client.post(
             "/api/conversations/parent/children", json={"name": "scratch"}, headers=self.lead)
         self.assertEqual(created.status_code, 201)
-        self.assertEqual(self.db.list_messages(created.json()["conversation"]["id"]), [])
+        child = created.json()["conversation"]
+        self.assertEqual(child["cwd"], "/tmp")  # inherited: the parent's captain works there
+        self.assertEqual([m["body"] for m in self.db.list_messages(child["id"])],
+                         ["☏ working directory: /tmp"])
 
     def test_human_can_link_an_existing_line_as_a_child(self):
         self.db.create_conversation("book", "Book")
