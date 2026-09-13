@@ -602,15 +602,9 @@ class Db:
         row = cur.fetchone()
         return dict(row) if row else None
 
-    def save_preset(self, preset_id, title, name, adapter, command):
-        ts = time.time()
-        self._exec(
-            "INSERT INTO presets(id,title,name,adapter,command,created_at) VALUES(?,?,?,?,?,?)"
-            " ON CONFLICT(id) DO UPDATE SET title=excluded.title, name=excluded.name,"
-            " adapter=excluded.adapter, command=excluded.command",
-            (preset_id, title, name, adapter, command, ts),
-        )
-        return self.get_preset(preset_id)
+    def save_preset(self, preset_id, title, name, adapter, command, **traits):
+        from .preset_traits import write_preset
+        return write_preset(self, preset_id, title, name, adapter, command, traits)
 
     def delete_preset(self, preset_id):
         self._exec("DELETE FROM presets WHERE id=?", (preset_id,))

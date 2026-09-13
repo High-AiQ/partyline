@@ -1317,6 +1317,9 @@ class ServerTest(unittest.TestCase):
             "title": " My preset ", "name": "x", "adapter": "fake", "command": " run "
         }).json()
         self.assertEqual(preset["title"], "My preset")
+        self.assertFalse(preset["reads_images"])
+        self.assertFalse(preset["can_manage"])
+        self.assertTrue(preset["implements"])
         self.assertEqual(1, len(client.get("/api/presets").json()))
         missing = client.put("/api/presets/missing", json={
             "title": "x", "name": "x", "adapter": "fake"})

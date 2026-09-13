@@ -18,6 +18,9 @@ class RoleBriefingTests(unittest.TestCase):
         self.assertIn("/api/conversations/root/children", text)
         self.assertIn("/api/conversations/root/reports", text)
         self.assertIn("PUT /api/conversations/root/goal", text)
+        self.assertIn("### Staffing", text)
+        self.assertIn("/api/conversations/root/staffing", text)
+        self.assertIn("can_manage captains", text)
         self.assertIn("### You are the captain; you do not implement", text)
         self.assertIn("### The loop you run", text)
         self.assertIn("### Ask the person first", text)
@@ -45,6 +48,7 @@ class RoleBriefingTests(unittest.TestCase):
         self.assertIn("### You are the captain; you do not implement", text)
         self.assertIn("**This line is a leaf** (depth 2 of 2)", text)
         self.assertIn("POST /api/conversations/leaf/attachments", text)
+        self.assertIn("/api/conversations/leaf/staffing", text)
         self.assertNotIn("/children", text)
         self.assertIn("also a child manager", text)
 

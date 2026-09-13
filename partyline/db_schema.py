@@ -238,4 +238,9 @@ MIGRATIONS = [
       updated_at REAL NOT NULL
     )""",
     "CREATE INDEX IF NOT EXISTS idx_tasks_conv ON tasks(conv_id, status, id)",
+    # Process traits on attach presets. Append-only; omitted writes use these
+    # defaults so old clients stay compatible.
+    "ALTER TABLE presets ADD COLUMN reads_images INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE presets ADD COLUMN can_manage INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE presets ADD COLUMN implements INTEGER NOT NULL DEFAULT 1",
 ]
