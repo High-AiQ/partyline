@@ -36,6 +36,7 @@ from dataclasses import dataclass
 from .mentions import addresses
 from .presence_contracts import WorkingEvent
 from .presence_queue import DeliveryQueue
+from .speech_echo import is_api_echo
 from .turn_return import ReturnPath
 
 WORKING = "working"
@@ -83,7 +84,7 @@ class Presence:
         self.lines: dict[str, str] = {}
         self.completions: dict[str, str] = {}
         self.queue = DeliveryQueue()
-        runtime.returns = self.returns = ReturnPath(runtime)
+        runtime.returns = self.returns = ReturnPath(runtime, self)
 
     def register(self, att_id: str, completion: str) -> None:
         """Record how this attachment's harness reports the end of a turn."""
@@ -271,8 +272,10 @@ class Presence:
 
     def posting(self, conv_id: str, att_id: str, post: Callable[..., Awaitable[None]]):
         """Wrap the runtime's post callback so speech is *reported*, not obeyed."""
-
         async def posted(sender: str, sender_type: str, body: str):
+            db = getattr(self.runtime, "db", None)
+            if sender_type == "agent" and db is not None and is_api_echo(db, att_id, conv_id, body):
+                return  # already posted through the API; the tail's twin is not a second event
             await post(sender, sender_type, body)
             if sender_type == "agent":
                 self.returns.note_spoke(att_id, body)
@@ -281,11 +284,7 @@ class Presence:
         return posted
 
     def statusing(
-        self,
-        conv_id: str,
-        att_id: str,
-        on_status: Callable[[str], Awaitable[None]],
-        name: str = "",
+        self, conv_id: str, att_id: str, on_status: Callable[[str], Awaitable[None]], name: str = "",
     ):
         """Wrap the status callback so a stopped process stops looking busy."""
 
