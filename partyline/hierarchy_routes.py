@@ -13,6 +13,7 @@ from .contracts import (
     MessageEvent,
     MessageResponse,
 )
+from .mention_relay import post_private
 from .hierarchy import (
     HierarchyError,
     child_ids,
@@ -107,12 +108,24 @@ def hierarchy_router(runtime) -> APIRouter:
         return LeadOut(attachment_id=None if lead is None else lead["id"])
 
     @router.post("/api/conversations/{conv_id}/lead", response_model=LeadOut)
-    def appoint_lead(request: Request, conv_id: str, body: LeadIn):
+    async def appoint_lead(request: Request, conv_id: str, body: LeadIn):
         deny_unless(db, request_principal(request), conv_id, "appoint_lead")
         try:
             set_lead(db, conv_id, body.attachment_id)
         except HierarchyError as exc:
             raise _http(exc) from exc
+        att = db.get_attachment(body.attachment_id) if body.attachment_id else None
+        if att is not None and att["status"] == "running" and att["id"] in runtime.live:
+            # Ring the new manager now rather than on its next wake: a process
+            # that appoints itself mid-turn otherwise keeps acting on the
+            # ordinary briefing, and staffs its own line instead of a child.
+            # The digest rider attaches the manager pack to this delivery.
+            await post_private(
+                runtime, conv_id, "system", "system",
+                f"☏ @{att['name']} is now this line's captain — the captain pack rides this "
+                "wake; read it before acting further",
+                audience=att["id"],
+            )
         return LeadOut(attachment_id=body.attachment_id)
 
     @router.put("/api/conversations/{conv_id}/parent", response_model=ConversationResponse)

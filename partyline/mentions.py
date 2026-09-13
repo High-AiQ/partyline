@@ -88,6 +88,20 @@ def addressees(body: str) -> set[str]:
     return found or mentioned_names(body)
 
 
+# ``handle:`` or ``handle,`` at the start of a line — how a weak model addresses
+# a colleague when it forgets the sigil. Only meaningful once matched against
+# the live handles on a line, so callers filter; "Status: green" names nobody.
+_LINE_ADDRESS_RE = re.compile(r"(?m)^[ \t]*@?([A-Za-z0-9][A-Za-z0-9_.-]*)[ \t]*[:,](?=\s)")
+
+
+def line_addressed(body: str) -> set[str]:
+    """Handles written as ``name:`` at the start of a line, lower-cased."""
+    names: set[str] = set()
+    for name in _LINE_ADDRESS_RE.findall(_normalized(body)):
+        names |= _handles(name)
+    return names
+
+
 def addresses(name: str, messages: list[dict]) -> bool:
     """Whether any message in the batch @mentions this handle or @all."""
     handle = name.lower()

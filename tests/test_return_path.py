@@ -125,7 +125,7 @@ class CrossLineMentionTest(Tree):
         self.assertEqual(self.line("parent"), [])
         [notice] = self.notices("child")
         self.assertIn("lead is on line «Parent», not this one", notice)
-        self.assertIn("tell @sub, your manager, instead", notice)
+        self.assertIn("tell @sub, your captain, instead", notice)
         self.assertEqual(self.adapters["sub"].delivered, [])  # an instruction, not a wake
 
     async def test_an_implementer_cannot_reach_down_either(self):
@@ -134,14 +134,14 @@ class CrossLineMentionTest(Tree):
         self.assertEqual(self.adapters["builder"].delivered, [])
         [notice] = self.notices("parent")
         self.assertIn("builder is on line «Child»", notice)
-        self.assertIn("tell @lead, your manager", notice)
+        self.assertIn("tell @lead, your captain", notice)
 
     async def test_a_manager_reaches_managers_above_but_not_their_implementers(self):
         await self.say("sub", "@worker please review")
 
         self.assertEqual(self.adapters["worker"].delivered, [])
         [notice] = self.notices("child")
-        self.assertIn("only the managers above it", notice)
+        self.assertIn("only the captains above it", notice)
 
     async def test_a_person_may_cross_in_both_directions(self):
         await self.human("parent", "@builder how is page one?")
@@ -477,3 +477,33 @@ class ApiEchoTest(Tree):
         await self.say("worker", "Standing by.")
 
         self.assertEqual(len(self.line("parent")), 2)
+
+
+class ColonAddressTest(Tree):
+    async def test_a_handle_with_a_colon_at_line_start_rings_that_process(self):
+        await self.say("lead", "worker: run the suite and report back")
+
+        self.assertEqual(self.adapters["worker"].bodies(), ["worker: run the suite and report back"])
+
+    async def test_a_label_that_is_nobody_rings_nobody(self):
+        await self.say("lead", "Status: green, nothing pending")
+
+        self.assertEqual(self.adapters["worker"].delivered, [])
+        self.assertEqual(self.notices("parent"), [])
+
+    async def test_the_colon_form_makes_a_requester_and_settles_a_turn(self):
+        await self.say("lead", "worker: run the suite")
+        await self.presence.began("parent", "worker")
+        await self.say("worker", "Green.")
+        await self.presence.ended("parent", "worker")
+        await self.runtime.returns.drain()
+        self.assertEqual(
+            len([b for b in self.adapters["lead"].bodies() if b.startswith("↩")]), 1)
+
+        await self.say("lead", "worker: now the lint")
+        await self.presence.began("parent", "worker")
+        await self.say("worker", "lead: lint is clean")
+        await self.presence.ended("parent", "worker")
+        await self.runtime.returns.drain()
+        self.assertEqual(
+            len([b for b in self.adapters["lead"].bodies() if b.startswith("↩")]), 1)
