@@ -94,6 +94,18 @@ class CloseLineProcessesTest(unittest.TestCase):
             "type": "line_live", "conversation_id": "line", "live_count": 0,
         })
 
+    def test_close_can_leave_sublines_alone(self):
+        parent_adapter = self.add_live("one", "sol", conv_id="line")
+        self.db.create_conversation("sub", "Subline")
+        set_parent(self.db, "sub", "line")
+        child_adapter = self.add_live("two", "fable", conv_id="sub")
+
+        response = self.client.post(
+            "/api/conversations/line/attachments/close?include_children=false")
+        self.assertEqual(response.json(), {"ok": True, "stopped": ["sol"]})
+        self.assertTrue(parent_adapter.stopped)
+        self.assertFalse(child_adapter.stopped)
+
     def test_empty_missing_and_archived_lines_have_explicit_results(self):
         empty = self.client.post("/api/conversations/line/attachments/close")
         self.assertEqual(empty.json(), {"ok": True, "stopped": []})
