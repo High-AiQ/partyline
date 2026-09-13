@@ -9,18 +9,18 @@ export type { Attachment, AttachmentStatus, CwdGitState } from "./attachment-con
 export const SenderTypeSchema = z.enum(["human", "agent", "system"]);
 export type SenderType = z.infer<typeof SenderTypeSchema>;
 
-// These schemas validate two dialects of the same models: REST spells an
-// empty field `null`; the wire omits it, because `broadcast()` serializes
-// with `exclude_none=True`. A field that can be None on the server must read
-// omitted and null as the same fact — `.nullable()` alone rejects the omitted
-// spelling, which surfaced as "client/server protocol mismatch" the moment a
-// fresh attachment (no cli_session yet) arrived on the wire. Absent means null.
+// Two dialects of the same models: REST spells an empty field `null`; the wire
+// omits it (`broadcast()` serializes with `exclude_none=True`). A field that can
+// be None on the server must read omitted and null as the same fact — `.nullable()`
+// alone rejects the omitted spelling, which surfaced as "client/server protocol
+// mismatch" when a fresh attachment (no cli_session yet) arrived. Absent means null.
 
 export const ConversationSchema = z.object({
   id: z.string(),
   parent_id: z.string().nullable().optional(),
   name: z.string(),
   topic: z.string(),
+  cwd: z.string().nullable().optional(),
   created_at: z.number(),
   archived_at: z.number().nullable().default(null),
   live_count: z.number().int().nonnegative().default(0),

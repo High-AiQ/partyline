@@ -73,6 +73,8 @@ class CapabilityState(BaseModel):
     parent_id: str | None = None
     target_conv_id: str | None = None
     actions: list[str] = Field(default_factory=list)
+    depth: int = 0
+    max_depth: int = 0
 
 
 class MessageIn(BaseModel):

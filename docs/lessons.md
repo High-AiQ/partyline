@@ -856,3 +856,27 @@ polling until the transcript appears or the process dies.
 | --- | --- |
 | Keep waiting for a transcript whose location is pinned while the process lives | Stop tailing on a timer and leave a live process mute |
 | Say in the warning what is probably wrong and what to do | Post a status that names no cause and no recovery |
+
+## A guardrail the captain cannot see is not a guardrail
+
+A root captain created a child line, tried to staff it with the `grok`
+preset, and got `HTTP 409` — nothing else, because the agent helper dropped
+the server's reason ("'grok' is already attached on 'partyline updates'").
+It then assigned the implementation to the grok it already had, on the root
+line, in the checkout where the child line's worker had forty uncommitted
+files. Meanwhile the child captain, holding the same pack as the root, had
+spun up a grandchild with a captain of its own.
+
+Every link in that chain was prose the model could drop: "you do not
+implement", "spin up a sub-line", "plus a cwd". The fixes are structural and
+each names its reason in the refusal: children stop at a depth cap and the
+leaf pack says to staff the line itself; a child line is born in its own git
+worktree and a machine cannot attach a process anywhere else; a line with a
+child refuses machine attachments ("work goes down, not sideways"); handles
+are suffixed instead of refused; the helper prints the detail.
+
+| DO | DO NOT |
+| --- | --- |
+| Put the reason in the 4xx and print it in the helper | Return a bare status a captain must guess at |
+| Vary the pack by depth and enforce the cap server-side | Hand every captain the same "spawn a sub-captain" text |
+| Give each child line its own worktree at birth | Let a machine pick the cwd it edits in |

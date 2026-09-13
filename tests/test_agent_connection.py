@@ -83,10 +83,13 @@ class AgentConnectionTests(unittest.TestCase):
                                        "/api/tasks", "--json-file", str(body)]), 0)
             self.assertEqual(json.loads(call.call_args.args[3]), {"body": "hello"})
         error = io.StringIO()
-        with patch("partyline.agent_client.api_request", side_effect=HTTPError("", 403, "secret", {}, None)):
+        refused = HTTPError("", 403, "secret", {},
+                            io.BytesIO(b'{"detail":"this credential cannot act on that line"}'))
+        with patch("partyline.agent_client.api_request", side_effect=refused):
             with contextlib.redirect_stderr(error):
                 self.assertEqual(main(["--connection", str(self.path), "request", "GET", "/api/tasks"]), 1)
-        self.assertEqual(error.getvalue(), "Partyline request failed: HTTP 403\n")
+        self.assertEqual(error.getvalue(),
+                         "Partyline request failed: HTTP 403: this credential cannot act on that line\n")
 
     def test_request_uses_header(self):
         connection = load_connection(str(self.path))

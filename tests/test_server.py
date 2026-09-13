@@ -1044,24 +1044,26 @@ class ServerTest(unittest.TestCase):
         )
         self.assertEqual(attached["name"], "terra")
         self.assertIn(attached["id"], server.runtime.live)
-        self.assert_http(
-            409, server.attach(self.principal_request(),
+        second = self.arun(
+            server.attach(self.principal_request(),
                 "line",
                 server.AttachIn(name="TERRA", adapter="fake", cwd=self.directory.name),
             )
         )
+        self.assertEqual(second["name"], "TERRA-2")
 
-    def test_attach_refuses_a_live_handle_from_a_related_line(self):
+    def test_attach_suffixes_a_live_handle_from_a_related_line(self):
         server.runtime.db.create_conversation("kid", "Kid")
         server.runtime.db._exec(
             "UPDATE conversations SET parent_id='line' WHERE id='kid'")
         self.add_attachment("line-jack", "terra")
-        self.assert_http(
-            409, server.attach(self.principal_request(),
+        attached = self.arun(
+            server.attach(self.principal_request(),
                 "kid",
                 server.AttachIn(name="TERRA", adapter="fake", cwd=self.directory.name),
             )
         )
+        self.assertEqual(attached["name"], "TERRA-2")
 
     def test_resume_refuses_a_live_handle_on_a_related_line(self):
         server.runtime.db.create_conversation("kid", "Kid")

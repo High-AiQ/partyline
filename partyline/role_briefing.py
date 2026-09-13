@@ -10,6 +10,8 @@ listed as the things to ask first.
 
 from collections.abc import Collection
 
+from .line_depth import MAX_CAPTAIN_DEPTH
+
 
 ROLE = (
     "### You are the captain; you do not implement\n"
@@ -27,15 +29,7 @@ PROCEDURE = (
     "1. **Record the goal** the moment the person states it: PUT {root}/goal with JSON "
     '{{"goal":"..."}}. It rides every wake of yours until you clear it with an empty '
     "string once the person has the result. Ask before anything on the ask-first list.\n"
-    "2. **Split only independent slices.** One child line per slice, born briefed: POST "
-    '{root}/children with {{"name":"slice","goal":"what its manager sees through","topic":'
-    '"the context that line needs — where things are, budget, gates, acceptance"}}. The goal '
-    "rides its manager's every wake and the topic is standing context for everyone there; a "
-    "captain cannot read your line, so what is not in that brief it does not know. Then staff "
-    "it from the person's presets — GET /api/presets, "
-    "POST /api/conversations/<child-id>/attachments with the preset's name, adapter and "
-    "command as-is plus a cwd, and POST /api/conversations/<child-id>/lead to appoint its "
-    "manager. A goal that does not split stays on this line with the processes already here.\n"
+    "2. {staffing}\n"
     "3. **Assign to one process per message**, with the acceptance criterion in the message. "
     "A manager's @mention crosses lines and lands on that process's line as a private copy "
     "tagged `via «your line»`; name anyone else without the @, because every @ rings.\n"
@@ -75,6 +69,32 @@ EXAMPLE = (
     "```"
 )
 
+SPLIT = (
+    "**Split only independent slices.** One child line per slice, born briefed: POST "
+    '{root}/children with {{"name":"slice","goal":"what its manager sees through","topic":'
+    '"the context that line needs — where things are, budget, gates, acceptance"}}. The goal '
+    "rides its manager's every wake and the topic is standing context for everyone there; a "
+    "captain cannot read your line, so what is not in that brief it does not know. Each child "
+    "is born in its own git worktree of this line's repository, on branch `line/<name>`: its "
+    "work stays off your working tree until you accept that branch. Then staff it from the "
+    "person's presets — GET /api/presets, POST /api/conversations/<child-id>/attachments with "
+    "the preset's name, adapter and command as-is (the handle is made unique and the working "
+    "directory is the line's), and POST /api/conversations/<child-id>/lead to appoint its "
+    "captain. You are at depth {depth} of {max_depth}{below}. Work goes down, not sideways: "
+    "once this line has a child, no process may be attached here, and the processes already "
+    "here are not your implementers. A goal that does not split stays on this line only while "
+    "it has no children."
+)
+
+LEAF = (
+    "**This line is a leaf** (depth {max_depth} of {max_depth}): it cannot have child lines "
+    "and you cannot appoint sub-captains. Staff it from the person's presets — GET "
+    "/api/presets, POST {root}/attachments with the preset's name, adapter and command as-is "
+    "(the handle is made unique and the working directory is this line's) — assign to that "
+    "worker with the acceptance criterion, review its work, and report up. You still do not "
+    "implement."
+)
+
 CHILD_MANAGER = (
     "You are also a child manager. Your parent line's manager reaches you here; you reach "
     "them the same way, by @mention from this line, for a result, a question, or a blocker "
@@ -93,16 +113,31 @@ HEARTBEAT = (
 )
 
 
-def role_instructions(actions: Collection[str], conv_id: str, parent_id: str | None) -> str:
-    """Render knowledge for the capabilities actually granted on this line."""
-    if "create_child" not in actions:
+def role_instructions(
+    actions: Collection[str], conv_id: str, parent_id: str | None, depth: int = 0
+) -> str:
+    """Render knowledge for the capabilities actually granted on this line.
+
+    Gated on being captain (``assign`` is a captain's power on its own line),
+    not on ``create_child``: a leaf captain cannot create children and still
+    needs the pack — without it, it would look like an ordinary participant.
+    """
+    if "assign" not in actions:
         return ""  # captains are appointed by a person or a captain, never inferred from chat
     root = f"/api/conversations/{conv_id}"
+    if "create_child" in actions:
+        left = MAX_CAPTAIN_DEPTH - depth - 1
+        below = ("; a child of yours may split once more" if left > 0
+                 else "; a child of yours is a leaf and staffs its own workers")
+        staffing = SPLIT.format(root=root, depth=depth, max_depth=MAX_CAPTAIN_DEPTH, below=below)
+    else:
+        staffing = LEAF.format(root=root, max_depth=MAX_CAPTAIN_DEPTH)
     blocks = [
         "You manage this line and its delegated child projects. Use the authenticated API "
-        "helper from your briefing; `request GET /api/capabilities` shows your permissions.",
+        "helper from your briefing; `request GET /api/capabilities` shows your permissions, "
+        "depth and the depth cap.",
         ROLE,
-        PROCEDURE.format(root=root),
+        PROCEDURE.format(root=root, staffing=staffing),
         ASK_FIRST,
         EXAMPLE,
     ]
