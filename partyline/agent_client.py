@@ -89,12 +89,23 @@ def main(argv=None) -> int:
             sys.stdout.write(output.decode() + "\n")
         return 0
     except HTTPError as exc:
-        print(f"Partyline request failed: HTTP {exc.code}", file=sys.stderr)
+        # The server's reason is the one thing a caller can act on: a 409 with
+        # no detail sent a captain improvising instead of renaming a handle.
+        print(f"Partyline request failed: HTTP {exc.code}: {_detail(exc)}", file=sys.stderr)
     except (OSError, ValueError, URLError):
         # Exception text may contain credentials or caller-supplied JSON.
         print("Partyline connection/request failed; check the connection file and API availability",
               file=sys.stderr)
     return 1
+
+
+def _detail(exc: HTTPError) -> str:
+    try:
+        payload = json.loads(exc.read().decode() or "{}")
+    except (OSError, ValueError):
+        return exc.reason or ""
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    return detail if isinstance(detail, str) else json.dumps(detail or payload)
 
 
 if __name__ == "__main__":
