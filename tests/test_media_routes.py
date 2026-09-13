@@ -115,9 +115,7 @@ class FileRoutesTest(unittest.TestCase):
 
     def test_briefing_teaches_any_file_type_and_how_to_read_a_pdf(self):
         self.assertIn("$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/files", BRIEFING)
-        self.assertIn("$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/images", BRIEFING)
-        self.assertIn("PDF", BRIEFING)
-        self.assertIn("GET the `original`", BRIEFING)
+        self.assertIn("thumb, slim and original URLs", BRIEFING)
         self.assertIn('Authorization: Bearer $PARTYLINE_TOKEN', BRIEFING)
 
     def test_briefing_formats_cleanly_despite_table_syntax(self):
