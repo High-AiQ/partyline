@@ -166,7 +166,6 @@ class CockpitCanBootTest(unittest.TestCase):
 
 class RealImportControlTest(unittest.TestCase):
     def test_this_interpreter_loads_this_worktree(self):
-        os.environ.setdefault("PARTYLINE_DB", "/tmp/partyline-test-cockpit-venv.db")
         root = Path(__file__).resolve().parents[1]
         self.assertTrue(loaded_from_cockpit(root / "partyline" / "__init__.py", root))
         self.assertIsNone(probe_server(Path(sys.executable), root, run=subprocess.run))
@@ -191,7 +190,6 @@ class RealImportControlTest(unittest.TestCase):
                 '__version__ = "0.32.2"\n', encoding="utf-8"
             )
             (workbench / "partyline" / "server.py").write_text("", encoding="utf-8")
-            os.environ.setdefault("PARTYLINE_DB", "/tmp/partyline-test-cockpit-venv.db")
 
             def run(command, **kwargs):
                 env = {**os.environ, "PYTHONPATH": str(workbench)}
@@ -224,7 +222,6 @@ class RealImportControlTest(unittest.TestCase):
             (pkg / "server.py").write_text(
                 "from definitely_not_installed_pillow import Image\n", encoding="utf-8"
             )
-            os.environ.setdefault("PARTYLINE_DB", "/tmp/partyline-test-cockpit-venv.db")
 
             def run(command, **kwargs):
                 return subprocess.run(

@@ -16,7 +16,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
-os.environ.setdefault("PARTYLINE_DB", "/tmp/partyline-test-loader.db")
 
 from partyline.adapters import loader, registry
 from partyline.adapters.base import Adapter
