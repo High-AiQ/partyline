@@ -46,3 +46,32 @@ def staffing_report(db, conv_id: str) -> dict:
                 "traits": None if matched is None else coerce_traits(matched),
             })
     return {"presets_in_use": matched_any, "presets": catalog, "processes": processes}
+
+
+def staffing_line(db, conv_id: str) -> str:
+    """One line for a captain's wake: who is in use anywhere, and which presets are free.
+
+    Rides every captain wake next to the goal, unconditionally: the endpoint
+    is advice a captain has to remember to call, and a captain choosing its
+    next sub-line should see the board without asking.
+    """
+    presets = [row for row in (coerce_preset(p) for p in db.list_presets()) if row]
+    if not presets:
+        return ""
+    in_use: list[str] = []
+    used_ids: set[str] = set()
+    for conv in db.list_conversations():
+        for att in db.list_attachments(conv["id"]):
+            if att["status"] not in LIVE:
+                continue
+            matched = match_preset(att, presets)
+            if matched is not None:
+                used_ids.add(matched["id"])
+            role = " captain" if att.get("is_lead") else ""
+            in_use.append(f"{att['name']} «{conv['name']}»{role}")
+    free = [p for p in presets if p["id"] not in used_ids]
+    traits = {p["id"]: coerce_traits(p) for p in free}
+    captains = ", ".join(p["name"] for p in free if traits[p["id"]]["can_manage"]) or "none"
+    workers = ", ".join(p["name"] for p in free if traits[p["id"]]["implements"]) or "none"
+    busy = "; ".join(in_use) or "nobody"
+    return f"(staffing — in use: {busy}. free captains: {captains}. free workers: {workers})"
