@@ -25,7 +25,6 @@ describe("conversation rail live state", () => {
       props: {
         onmanagement: vi.fn(),
         onrename: vi.fn(),
-        onclaims: vi.fn(),
         oncloseprocesses: vi.fn(),
         ondelete: vi.fn(),
       },

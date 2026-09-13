@@ -122,7 +122,6 @@ async def resume_adapter(
     adapter_metadata,
     make_adapter,
     presence,
-    tasks,
     hook_url,
 ) -> ResumedAttachment:
     att = runtime.db.get_attachment(att_id)
@@ -154,7 +153,7 @@ async def resume_adapter(
     att["api_token"] = ensure_api_token(runtime.db, att_id)
     att["hook_url"] = hook_url(att_id, runtime_owner)
     provision_connection(runtime.db.path, att)
-    att["digest_rider"] = lambda: tasks.rider(att["conv_id"])
+    att["digest_rider"] = lambda: ""
     bind_connection_hint(att)
     bind_role_delivery(runtime.db, att)
     history = delivered_history(runtime.db, att)

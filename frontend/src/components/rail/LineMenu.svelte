@@ -16,13 +16,11 @@
     close: () => void;
     onrename: (conversation: Conversation) => void;
     onmanagement: (conversation: Conversation) => void;
-    onclaims: (conversation: Conversation) => void;
     oncloseprocesses: (conversation: Conversation) => void;
     ondelete: (conversation: Conversation) => void;
   }
 
-  let { anchor, conversation, close, onrename, onmanagement, onclaims, oncloseprocesses, ondelete }: Props =
-    $props();
+  let { anchor, conversation, close, onrename, onmanagement, oncloseprocesses, ondelete }: Props = $props();
 
   let panel = $state<HTMLDivElement | null>(null);
   let top = $state(0);
@@ -94,12 +92,6 @@
     role="menuitem"
     class="rounded-[3px] border-0 bg-transparent p-2 px-[11px] text-left text-[10.5px] whitespace-nowrap tracking-[0.06em] text-cream-dim transition-colors duration-100 hover:bg-copper hover:text-ink focus-visible:bg-copper focus-visible:text-ink focus-visible:outline-0"
     onclick={choose(onrename)}>rename</button
-  >
-  <button
-    type="button"
-    role="menuitem"
-    class="rounded-[3px] border-0 bg-transparent p-2 px-[11px] text-left text-[10.5px] whitespace-nowrap tracking-[0.06em] text-cream-dim transition-colors duration-100 hover:bg-copper hover:text-ink focus-visible:bg-copper focus-visible:text-ink focus-visible:outline-0"
-    onclick={choose(onclaims)}>claims</button
   >
   <button
     type="button"

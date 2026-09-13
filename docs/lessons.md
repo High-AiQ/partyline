@@ -897,3 +897,18 @@ is given the backlog only after it reports ready.
 | --- | --- |
 | Read the backlog before spawning and let the adapter stage it | Post a notice to a process that has not opened its TUI yet |
 | File a resume-time notice unrouted so it joins the backlog | Route it and paste into a composer that drops the Enter |
+
+## A coordination surface nobody uses is prose weight on everyone
+
+The task board and path claims were built when assignment lived only in
+chat and two agents could edit one checkout. After the goal field, the
+child-line brief, the return path, the staffing board and per-line
+worktrees, a full day of captains and workers made eleven task calls — all
+reads, because the briefing told every process to look — and zero writes;
+claims had never been written at all. Each process still paid for a briefing
+section, a rider slot on every wake, and a read call per session. Removed
+outright: tables dropped, routes, dialogs, contracts and prose gone.
+
+| DO | DO NOT |
+| --- | --- |
+| Measure a coordination feature by writes from processes, not by reads the briefing mandates | Keep a surface because it is "harmless" — every process reads its prose |

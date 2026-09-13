@@ -74,7 +74,6 @@ from .message_routes import message_router
 from .goal import register_goal_route
 from .presence import Presence
 from .media import MediaStore, media_root
-from .claim_routes import claims_router
 from .conversation_routes import register_conversation_routes
 from . import heartbeat_scheduler
 from .heartbeat_routes import heartbeat_router
@@ -84,7 +83,6 @@ from .preset_routes import presets_router
 from .staffing_routes import staffing_router
 from .restart_report import restart_report_router
 from .static_cache import install_static_cache
-from .task_routes import wire_tasks
 from .resume_continuation import resume_with_backlog
 from .reattach import (
     ReattachCoordinator,
@@ -155,12 +153,10 @@ app.include_router(media_router(runtime, media))
 app.include_router(message_router(runtime, media))
 app.include_router(hierarchy_router(runtime))
 app.include_router(heartbeat_router(runtime))
-app.include_router(claims_router(runtime))
 app.include_router(hooks_router(runtime, presence))
 app.include_router(presets_router(runtime, ADAPTERS))
 app.include_router(staffing_router(runtime))
 app.include_router(restart_report_router(runtime, lambda r: require_loopback(r)))
-tasks = wire_tasks(app, runtime)
 
 # -- REST ------------------------------------------------------------------
 @app.get("/")
@@ -321,7 +317,7 @@ async def remove_adapter(adapter_name: str):
 
 async def _start_attachment(att, *, checkpoint="", fresh=False):
     return await start_attachment(
-        att, runtime=runtime, presence=presence, tasks=tasks, make_adapter=make_adapter,
+        att, runtime=runtime, presence=presence, make_adapter=make_adapter,
         hook_url=lambda ident, owner: _hook_url(ident, app.state.bind, owner),
         checkpoint=checkpoint, fresh=fresh,
     )
@@ -332,7 +328,6 @@ register_conversation_routes(
     runtime,
     media,
     presence,
-    tasks,
     ADAPTERS,
     ADAPTER_METADATA,
     _start_attachment,
@@ -376,7 +371,7 @@ async def _resume_adapter(
     return await resume_adapter(
         att_id, startup_messages, runtime=runtime,
         adapter_metadata=ADAPTER_METADATA, make_adapter=make_adapter,
-        presence=presence, tasks=tasks,
+        presence=presence,
         hook_url=lambda ident, token: _hook_url(ident, app.state.bind, token),
     )
 

@@ -20,7 +20,6 @@ from partyline.hook_routes import handle_hook
 from partyline.preset_routes import presets_router
 from partyline.restart_report import restart_report_router
 from partyline.runtime import ChatRuntime
-from partyline.tasks import TaskError
 
 
 class FakeAdapter:
@@ -1033,12 +1032,9 @@ class ServerTest(unittest.TestCase):
         restored = self.arun(server.restore_conversation(request, "line"))
         self.assertIsNone(restored["archived_at"])
         self.assert_http(409, server.purge_conversation(request, "line"))
-        leftover = server.tasks.add("line", "must die with the line")
         self.arun(server.archive_conversation(request, "line"))
         self.assertEqual(self.arun(server.purge_conversation(request, "line")), {"ok": True, "purged": True})
         self.assertIsNone(server.runtime.db.get_conversation("line"))
-        with self.assertRaises(TaskError):
-            server.tasks.get(leftover["id"])
 
     def test_attach_validation_and_success(self):
         self.assert_http(400, server.attach(self.principal_request(),
