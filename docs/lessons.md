@@ -836,3 +836,23 @@ drops pre-spawn records on the discovered transcript.
 | --- | --- |
 | Discover the conversation from this activation's own log suffix | Tail `cli_session` because `--conversation` was passed |
 | Keep replay protection on the discovered transcript | Scan the brain directory for a newer mtime |
+
+## A pinned transcript is worth waiting for
+
+Grok's transcript path is pinned to the attachment id, so the adapter waited
+45 s for it and then posted "transcript tailing stopped" and returned. On
+2026-09-13 a freshly updated Grok sat on a folder-trust prompt for eight
+minutes; the person answered it, the session opened, Grok researched and
+answered its assignment, and nothing reached the line — the tail had quit
+long before. The notice had been read as noise, not as a fault to act on.
+
+Giving up buys nothing when the path cannot be wrong: the process is alive,
+so either the session will open or the process will exit, and both end the
+wait on their own. The adapter now warns once — naming the likely cause and
+the recovery, "peek at its terminal and answer the prompt" — and keeps
+polling until the transcript appears or the process dies.
+
+| DO | DO NOT |
+| --- | --- |
+| Keep waiting for a transcript whose location is pinned while the process lives | Stop tailing on a timer and leave a live process mute |
+| Say in the warning what is probably wrong and what to do | Post a status that names no cause and no recovery |
