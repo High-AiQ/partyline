@@ -38,7 +38,6 @@ MAX_SENDERS = 8
 # Consecutive quiet skips before a line holding open work is worth mentioning
 # even though nothing happened. Silence with assigned work is the stall this
 # monitor exists to catch; silence with an empty board is just a quiet room.
-STALL_AFTER_QUIET = 6
 
 
 def _line_snapshot(
@@ -85,10 +84,6 @@ def _line_snapshot(
                 "status": att["status"],
                 "unread": unread,
             })
-    open_tasks = db._exec(
-        "SELECT COUNT(*) AS open FROM tasks WHERE conv_id=? AND status='open'",
-        (conv["id"],),
-    ).fetchone()["open"]
     return {
         "conv_id": conv["id"],
         "name": conv["name"],
@@ -98,7 +93,6 @@ def _line_snapshot(
         "senders_omitted": max(0, len(senders) - MAX_SENDERS),
         "agents": agents[:MAX_AGENTS],
         "agents_omitted": max(0, len(agents) - MAX_AGENTS),
-        "open_tasks": open_tasks,
     }
 
 
@@ -113,7 +107,7 @@ def build(db: Db, conv_id: str, since_id: int, owner_id: str = "") -> dict:
         line = _line_snapshot(db, conv, since_id, conv_id, owner_id)
         # Unchanged lines are omitted unless they are holding something: an
         # inbox of every quiet line is the noise this replaced.
-        if line["new"] or line["agents"] or line["open_tasks"]:
+        if line["new"] or line["agents"]:
             lines.append(line)
     reports = [
         {"id": row["id"], "revision": row["revision"], "child_conv_id": row["child_conv_id"]}
@@ -158,14 +152,6 @@ def is_actionable(snapshot: dict) -> bool:
             return True
     return False
 
-
-def stalled_lines(snapshot: dict) -> list[str]:
-    """Lines holding open work with nothing to show for it."""
-    return [
-        line["name"]
-        for line in snapshot["lines"]
-        if line["open_tasks"] and not line["new"] and not line["agents"]
-    ]
 
 
 def render(snapshot: dict) -> str:

@@ -12,7 +12,6 @@
   import { layout } from "../../state/layout.svelte.js";
   import { isLive, latestJacks } from "../../lib/attachments";
   import TopicDialog from "../dialogs/TopicDialog.svelte";
-  import TaskDrawer from "../dialogs/TaskDrawer.svelte";
   import AccountMenu from "./AccountMenu.svelte";
   import ColumnToggle from "./ColumnToggle.svelte";
   import { tooltip } from "../../lib/tooltip";
@@ -58,23 +57,6 @@
       }}
       onclick={() => dialogs.open(TopicDialog)}>{topic || "set a topic…"}</button
     >
-  {/if}
-
-  {#if room.conversation}
-    <button
-      class="task-toggle topbar-action inline-flex h-[34px] flex-none items-center gap-1.5 px-2.5"
-      type="button"
-      use:tooltip={{ label: "shared line tasks" }}
-      aria-label="open shared line tasks"
-      onclick={() => dialogs.open(TaskDrawer)}
-    >
-      <svg
-        class="size-[15px] fill-none stroke-current stroke-2 [stroke-linecap:round]"
-        aria-hidden="true"
-        viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" /></svg
-      >
-      <span>tasks</span>
-    </button>
   {/if}
 
   <AccountMenu />

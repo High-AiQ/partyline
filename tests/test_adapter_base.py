@@ -614,10 +614,8 @@ class BriefingTest(unittest.TestCase):
     def test_briefing_bans_ack_loops_between_processes(self):
         self.assertIn("Trade acknowledgments, thanks, or goodbyes", Recorder(["cat"]).briefing())
 
-    def test_briefing_points_at_the_shared_task_board(self):
-        text = Recorder(["cat"]).briefing()
-        self.assertIn("shared task board", text)
-        self.assertIn("$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/tasks", text)
+    def test_briefing_has_no_task_board(self):
+        self.assertNotIn("task board", Recorder(["cat"]).briefing())
 
     def test_briefing_teaches_rich_output_and_math_delimiters(self):
         text = Recorder(["cat"]).briefing()

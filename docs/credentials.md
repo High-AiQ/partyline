@@ -58,8 +58,8 @@ briefing followed by:
 
 ```text
 context
-request GET /api/conversations/<conversation-id>/tasks
-request POST /api/conversations/<conversation-id>/tasks --json-file task.json
+request GET /api/conversations/<conversation-id>
+request POST /api/conversations/<conversation-id>/messages --json-file message.json
 ```
 
 `context` displays identity and coordinates without the credential. JSON bodies can

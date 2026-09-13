@@ -108,7 +108,6 @@ def heartbeat_router(runtime) -> APIRouter:
             "snapshot": snapshot,
             "hash": heartbeat_snapshot.canonical_hash(snapshot),
             "actionable": heartbeat_snapshot.is_actionable(snapshot),
-            "stalled": heartbeat_snapshot.stalled_lines(snapshot),
             "quiet_wakes": row["quiet_wakes"],
         }
 

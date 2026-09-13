@@ -16,8 +16,6 @@ from partyline.media import MediaStore
 from partyline.media_routes import media_router
 from partyline.preset_routes import presets_router
 from partyline.runtime import ChatRuntime
-from partyline.task_routes import task_router
-from partyline.tasks import TaskStore
 
 
 class ManagerWorkflowTest(unittest.TestCase):
@@ -25,12 +23,10 @@ class ManagerWorkflowTest(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.db = Db(f"{self.directory.name}/partyline.db")
         self.runtime = ChatRuntime(self.db)
-        self.store = TaskStore(self.db)
         self.media = MediaStore(self.db, self.directory.name + "/media")
         app = FastAPI()
         install_auth_guard(app, self.db)
         app.include_router(hierarchy_router(self.runtime))
-        app.include_router(task_router(self.runtime, self.store))
         app.include_router(media_router(self.runtime, self.media))
         app.include_router(presets_router(self.runtime, {}))
         register_compact_route(app, self.runtime, object())
@@ -43,7 +39,7 @@ class ManagerWorkflowTest(unittest.TestCase):
             return {"id": att["id"], "name": att["name"], "status": att["status"]}
 
         register_conversation_routes(
-            app, self.runtime, self.media, None, self.store, {}, {}, fake_start
+            app, self.runtime, self.media, None, {}, {}, fake_start
         )
         self.client = TestClient(app)
         self.db.create_conversation("root", "Root")
@@ -141,7 +137,7 @@ class ManagerWorkflowTest(unittest.TestCase):
         self.assertIsNotNone(acked.json()["acknowledged_at"])
 
         refused = self.client.get(
-            f"/api/conversations/{child_id}/tasks", headers=self.impl
+            f"/api/conversations/{child_id}", headers=self.impl
         )
         self.assertEqual(refused.status_code, 403)
         self.assertEqual(

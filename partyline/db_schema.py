@@ -240,6 +240,12 @@ MIGRATIONS = [
       updated_at REAL NOT NULL
     )""",
     "CREATE INDEX IF NOT EXISTS idx_tasks_conv ON tasks(conv_id, status, id)",
+    # The task board and path claims are gone: after the goal, the child
+    # brief, the return path and per-line worktrees, no process used either.
+    "DROP INDEX IF EXISTS idx_tasks_conv",
+    "DROP TABLE IF EXISTS tasks",
+    "DROP INDEX IF EXISTS idx_claims_conv",
+    "DROP TABLE IF EXISTS claims",
     # Process traits on attach presets. Append-only; omitted writes use these
     # defaults so old clients stay compatible.
     "ALTER TABLE presets ADD COLUMN reads_images INTEGER NOT NULL DEFAULT 0",

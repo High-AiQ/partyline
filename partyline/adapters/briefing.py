@@ -70,7 +70,7 @@ BRIEFING = (
     "| --- | --- |\n"
     "| Send the Authorization header on every call — the token identifies you | Share "
     "the token on the line |\n"
-    "| Use the API for files, tasks, the goal, and other lines | POST a chat message to "
+    "| Use the API for files, the goal, and other lines | POST a chat message to "
     "your own line — everything you write in your terminal is already posted here |\n"
     "\n"
     "## Sharing and reading files\n"
@@ -98,13 +98,6 @@ BRIEFING = (
     "Fenced code blocks with a language label are syntax-highlighted. For math, use "
     "`\\(...\\)` inline or `\\[...\\]` / `$$...$$` for display; single `$...$` is left "
     "literal.\n"
-    "\n"
-    "## The task board\n"
-    "The line has a shared task board and its open tasks ride every wake digest. Read, "
-    "add, claim, or finish them at "
-    "$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/tasks (GET to read, POST JSON "
-    "to add, PATCH /api/tasks/<id> to claim or complete), with the same Authorization "
-    "header.\n"
     "\n"
     "Say hello in one short line to confirm you are connected."
 )
@@ -138,7 +131,7 @@ def _speaker(message: dict) -> str:
 def format_digest(messages: list[dict], rider: str = "", cwd: str = "") -> str:
     """The wake digest: sender-prefixed lines, then live state, then the reminder.
 
-    The rider is where a line's current facts (its open task board) go, so a
+    The rider is where a line's current facts (the goal, the staffing board) go, so a
     waking process sees them next to the messages rather than never.
     """
     lines = "\n".join(f"[{_speaker(m)}]: {m['body']}" for m in messages)
@@ -151,7 +144,7 @@ def format_digest(messages: list[dict], rider: str = "", cwd: str = "") -> str:
 def safe_rider(att: dict) -> str:
     """Call a line's digest rider, degrading to nothing if it fails.
 
-    The rider is decoration on a load-bearing path: a failing task board must
+    The rider is decoration on a load-bearing path: a failing rider must
     never kill a wake — an undelivered mention looks exactly like a process
     ignoring the room — but it must never fail silently either. Loud in the
     log, invisible to the delivery.
@@ -209,6 +202,6 @@ def connection_briefing(att: dict) -> str:
     return ("\n\nPartyline provides an authenticated helper that works even when your "
             "shell filters PARTYLINE_* variables. Use this exact command prefix: `"
             + command + "`. Run `context` to verify your identity; "
-            "`request GET /api/conversations/<id>/tasks` reads your board; "
+            "`request GET /api/conversations/<id>` reads your line; "
             "use `--json-file <path>` (or `-` for stdin) for JSON writes. "
             "The connection file is private: never read, print, upload, or copy its token." + role)
