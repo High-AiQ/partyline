@@ -464,7 +464,7 @@ class DigestTest(unittest.IsolatedAsyncioTestCase):
             {"sender": "luna", "body": "on it"},
         ])
         self.assertIn("[greg]: ship it\n[luna]: on it", digest)
-        self.assertIn("processes only see messages that @mention them", digest)
+        self.assertIn("@name only who acts next", digest)
 
     def test_a_digest_rider_rides_between_the_lines_and_the_reminder(self):
         adapter = Recorder(["cat"], digest_rider=lambda: "(open tasks: #1 review)")
@@ -500,7 +500,7 @@ class DigestTest(unittest.IsolatedAsyncioTestCase):
         with self.assertLogs("partyline.adapters.briefing", level="WARNING"):
             digest = adapter.format_digest([{"sender": "greg", "body": "ship it"}])
         self.assertIn("[greg]: ship it", digest)
-        self.assertIn("processes only see messages", digest)
+        self.assertIn("humans read everything", digest)
 
     async def test_deliver_sends_nothing_when_there_is_nothing_to_say(self):
         sent = []
@@ -586,7 +586,7 @@ class BriefingTest(unittest.TestCase):
     def test_briefing_names_the_process_and_its_line(self):
         text = Recorder(["cat"]).briefing()
         self.assertIn('You are "dummy"', text)
-        self.assertIn('conversation "a line"', text)
+        self.assertIn('line "a line"', text)
         self.assertNotIn("standing context", text)
 
     def test_a_topic_is_appended_as_standing_context(self):
@@ -600,30 +600,27 @@ class BriefingTest(unittest.TestCase):
     def test_a_line_with_no_name_falls_back_rather_than_raising(self):
         adapter = Recorder(["cat"])
         adapter.att.pop("conv_name")
-        self.assertIn('conversation "?"', adapter.briefing())
+        self.assertIn('line "?"', adapter.briefing())
 
     def test_briefing_teaches_the_authenticated_image_upload_one_liner(self):
         text = Recorder(["cat"]).briefing()
         self.assertIn(
             'curl -H "Authorization: Bearer $PARTYLINE_TOKEN" -F file=@', text)
-        self.assertIn("$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/images", text)
-        self.assertIn("smallest image tier", text)
-        self.assertIn("Share the token on the line", text)
+        self.assertIn("$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/files", text)
+        self.assertIn("fetch the smallest that answers", text)
+        self.assertIn("never post the token", text)
 
     def test_briefing_bans_ack_loops_between_processes(self):
-        self.assertIn("Trade acknowledgments, thanks, or goodbyes", Recorder(["cat"]).briefing())
+        self.assertIn("Never trade thanks or acks with processes", Recorder(["cat"]).briefing())
 
     def test_briefing_has_no_task_board(self):
         self.assertNotIn("task board", Recorder(["cat"]).briefing())
 
     def test_briefing_teaches_rich_output_and_math_delimiters(self):
         text = Recorder(["cat"]).briefing()
-        self.assertIn("Rich output", text)
-        self.assertIn("syntax-highlighted", text)
+        self.assertIn("Fenced code with a language is highlighted", text)
         self.assertIn(r"\(...\)", text)
         self.assertIn(r"\[...\]", text)
-        self.assertIn("$$...$$", text)
-        self.assertIn("single `$...$` is left literal", text)
 
 
 class FreshnessTest(unittest.TestCase):
