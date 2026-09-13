@@ -153,6 +153,8 @@ MIGRATIONS = [
     "ALTER TABLE conversations ADD COLUMN goal TEXT NOT NULL DEFAULT ''",
     # cwd: where a line works; a child line is born in its own git worktree.
     "ALTER TABLE conversations ADD COLUMN cwd TEXT",
+    # turn_open: the process was mid-turn; a resume that finds it set rings "continue".
+    "ALTER TABLE attachments ADD COLUMN turn_open INTEGER NOT NULL DEFAULT 0",
     # Child-to-parent reports. Created here rather than on first use: running
     # `executescript` per request issued an implicit COMMIT on the shared
     # connection and invalidated cursors another thread was still reading,
