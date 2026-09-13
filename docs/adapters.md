@@ -98,6 +98,16 @@ Rules that hold for every adapter:
   adapter's quiescence flush exists for line-oriented programs with no transcript at all.
 - Don't replay history after a resume, and cancel background tasks on stop.
 
+### ACP protocol adapters
+
+Some long-lived CLIs expose an Agent Client Protocol (ACP) server over their standard
+input/output rather than a terminal composer. The `deepseek` adapter still supervises the real
+`dsh --profile acp` process in Partyline's PTY, but sends ACP's newline-terminated JSON-RPC
+frames directly. It must not use the base class's bracketed-paste markers: `\e[200~` and
+`\e[201~` are terminal control bytes and would corrupt a JSON-RPC request. ACP
+`session/update` notifications are a live wire signal, not the adapter's chat source; the
+adapter claims and tails the plain `session.v3.jsonl` persisted by the process instead.
+
 ### Immediate mentions
 
 Most harnesses read their composer only at a turn boundary. Bytes written into a pty are
