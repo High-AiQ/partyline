@@ -163,19 +163,27 @@ class PartylineAdapter(Adapter):
         self._wake_receipts.expect_wait(message_ids)
 
     async def _run(self):
+        # The transcript's path is pinned, so waiting costs nothing and giving
+        # up costs everything: a Grok parked on a folder-trust prompt opened
+        # its session eight minutes after spawn, and a tail that had quit at
+        # 45 s left every later reply unposted. Warn once, keep waiting.
         waited = 0.0
+        warned = False
         path = self._transcript()
-        while path is None and self.alive() and waited < self.TRANSCRIPT_TIMEOUT:
+        while path is None and self.alive():
+            if waited >= self.TRANSCRIPT_TIMEOUT and not warned:
+                warned = True
+                await self.post(
+                    "system", "system",
+                    f"⚠ {self.att['name']} has not opened its Grok session after "
+                    f"{int(self.TRANSCRIPT_TIMEOUT)}s — it is probably parked on a prompt "
+                    "(folder trust, login, update); peek at its terminal and answer it. "
+                    "Nothing it says is lost: tailing starts the moment the session opens",
+                )
             await asyncio.sleep(self.POLL_SECONDS)
             waited += self.POLL_SECONDS
             path = self._transcript()
         if path is None:
-            if self.alive():
-                await self.post(
-                    "system", "system",
-                    f"{self.att['name']}: no Grok transcript appeared after "
-                    f"{int(self.TRANSCRIPT_TIMEOUT)}s; transcript tailing stopped",
-                )
             return
         if self.on_cli_session is not None:
             self.on_cli_session(self._session_id)
