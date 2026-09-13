@@ -5,6 +5,7 @@ import tempfile
 import threading
 import time
 import unittest
+from types import SimpleNamespace
 
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -352,6 +353,30 @@ class HierarchyApiTest(unittest.TestCase):
         self.assertEqual(impl["role"], "implementer")
         self.assertNotIn("create_child", impl["actions"])
 
+    def test_appointing_a_live_manager_rings_it_at_once(self):
+        deliveries = []
+
+        async def capture(messages):
+            deliveries.append(messages)
+
+        self.db.set_attachment_status("impl-att", "running", None)
+        self.runtime.live["impl-att"] = SimpleNamespace(deliver=capture, att={})
+        appointed = self.client.post(
+            "/api/conversations/parent/lead", json={"attachment_id": "impl-att"})
+        self.assertEqual(appointed.status_code, 200)
+        [notice] = [m for m in self.db.list_messages("parent")
+                    if m["body"].startswith("☏ @grok is now this line's captain")]
+        self.assertEqual(notice["audience_attachment_id"], "impl-att")
+        self.assertEqual([m["body"] for batch in deliveries for m in batch][-1], notice["body"])
+
+    def test_appointing_a_manager_that_is_not_live_is_silent(self):
+        self.db.set_attachment_status("impl-att", "exited", None)
+        appointed = self.client.post(
+            "/api/conversations/parent/lead", json={"attachment_id": "impl-att"})
+        self.assertEqual(appointed.status_code, 200)
+        self.assertEqual([m for m in self.db.list_messages("parent")
+                          if "@grok is now this line's captain" in m["body"]], [])
+
     def test_a_child_is_born_with_its_goal_and_context(self):
         created = self.client.post(
             "/api/conversations/parent/children",
@@ -415,15 +440,18 @@ class HierarchyApiTest(unittest.TestCase):
         )
         self.assertEqual(refused.status_code, 403)
 
-    def test_machine_on_the_line_can_appoint_after_the_lead_detaches(self):
+    def test_a_machine_cannot_appoint_a_captain_even_after_the_captain_detaches(self):
+        """No natural-language handoff: a line with no captain waits for a person."""
         self.db.set_attachment_status("lead-att", "detached", None)
-        appointed = self.client.post(
+        refused = self.client.post(
             "/api/conversations/parent/lead",
             json={"attachment_id": "impl-att"},
             headers=self.impl,
         )
-        self.assertEqual(appointed.status_code, 200)
-        self.assertEqual(appointed.json()["attachment_id"], "impl-att")
+        self.assertEqual(refused.status_code, 403)
+        appointed = self.client.post(
+            "/api/conversations/parent/lead", json={"attachment_id": "impl-att"})
+        self.assertEqual(appointed.status_code, 200)  # the person may
 
     def test_machine_cannot_appoint_a_foreign_line_after_its_lead_detaches(self):
         self.db.create_conversation("other", "Other")

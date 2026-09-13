@@ -20,6 +20,52 @@ function detailWith(parentId: string | null) {
   });
 }
 
+describe("management dialog captain control", () => {
+  it("appoints the chosen live process as captain", async () => {
+    vi.spyOn(api, "conversation").mockResolvedValue(detailWith(null));
+    vi.spyOn(hierarchyApi, "lead").mockResolvedValue({ attachment_id: null });
+    const appoint = vi.spyOn(hierarchyApi, "appoint").mockResolvedValue({ attachment_id: "att-1" });
+    room.attachments = [
+      {
+        id: "att-1",
+        conv_id: "child",
+        name: "sol",
+        adapter: "codex",
+        command: [],
+        cwd: "/",
+        status: "running",
+        last_seen: 0,
+        created_at: 1,
+        cli_session: null,
+        cwd_git: null,
+      },
+    ];
+    const dialog = mount(ManagementDialog, {
+      target: document.body,
+      props: { conversation: detailWith(null).conversation, close: vi.fn() },
+    });
+    try {
+      await vi.waitFor(() => {
+        expect(document.querySelector("#captain")).not.toBeNull();
+      });
+      const select = document.querySelector("#captain");
+      if (!(select instanceof HTMLSelectElement)) throw new Error("no captain select");
+      select.value = "att-1";
+      select.dispatchEvent(new Event("change"));
+      const button = [...document.querySelectorAll("button")].find((b) =>
+        b.textContent.includes("appoint captain"),
+      );
+      if (!button) throw new Error("no appoint button");
+      button.click();
+      await vi.waitFor(() => {
+        expect(appoint).toHaveBeenCalledWith("child", "att-1");
+      });
+    } finally {
+      await unmount(dialog);
+    }
+  });
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
   room.conversations = [];
@@ -29,6 +75,7 @@ afterEach(() => {
 describe("management dialog parent control", () => {
   it("offers only unlink once a parent is set, and never re-points it", async () => {
     vi.spyOn(api, "conversation").mockResolvedValue(detailWith("parent"));
+    vi.spyOn(hierarchyApi, "lead").mockResolvedValue({ attachment_id: null });
     const saveParent = vi.spyOn(hierarchyApi, "setParent").mockResolvedValue({
       id: "child",
       name: "Child",
@@ -65,6 +112,7 @@ describe("management dialog parent control", () => {
 
   it("sets a parent for an independent line", async () => {
     vi.spyOn(api, "conversation").mockResolvedValue(detailWith(null));
+    vi.spyOn(hierarchyApi, "lead").mockResolvedValue({ attachment_id: null });
     const saveParent = vi.spyOn(hierarchyApi, "setParent").mockResolvedValue({
       id: "child",
       name: "Child",

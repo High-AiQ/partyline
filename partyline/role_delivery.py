@@ -41,7 +41,8 @@ def bind_role_delivery(db, att: dict) -> None:
             previous = current
             update = role_instructions(current.actions, current.conv_id, current.parent_id)
             if not update:
-                update = "Your current role is ordinary participant. Use only your own line's tools."
+                update = ("Your current role is ordinary participant, not captain. "
+                          "Use only your own line's tools.")
         goal = goal_rider(db, current.conv_id) if current.role == "lead" else ""
         return "\n".join(part for part in (original_rider(), goal, update) if part)
 

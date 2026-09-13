@@ -64,7 +64,7 @@ from __future__ import annotations
 import asyncio
 
 from .mention_relay import LIVE, is_foreign, post_private, reaches_a_process, speaker_attachment
-from .mentions import addressees, mentioned_names
+from .mentions import addressees, line_addressed, mentioned_names
 
 EXCERPT = 280
 # Long enough for a transcript tail to post the turn's last message after the
@@ -124,7 +124,8 @@ class ReturnPath:
             return
         self.last_said.pop(att_id, None)  # what was said before the wake is not an answer
         for message in messages:
-            if me["name"].lower() not in addressees(str(message.get("body") or "")):
+            body = str(message.get("body") or "")
+            if me["name"].lower() not in addressees(body) | line_addressed(body):
                 continue
             kind = message.get("sender_type")
             if kind == "agent":
@@ -144,7 +145,7 @@ class ReturnPath:
         if me is None:
             return
         self.last_said[att_id] = body
-        if reaches_a_process(self.runtime.db, me, mentioned_names(body)):
+        if reaches_a_process(self.runtime.db, me, mentioned_names(body) | line_addressed(body)):
             self.addressed.add(att_id)
             if task := self.pending.pop(att_id, None):
                 task.cancel()  # the last words handed off after all
