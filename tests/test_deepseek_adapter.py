@@ -193,13 +193,31 @@ class DeepSeekAdapterTest(unittest.IsolatedAsyncioTestCase):
         adapter = self.make()
         adapter._session_id = "session-1"
         adapter.format_digest = lambda _messages: "wake"
-        adapter._request = AsyncMock()
+        adapter._write_frame = AsyncMock()
         adapter._silent_until_wake = True
         await adapter.deliver([{"id": 4, "body": "wake"}])
-        adapter._request.assert_awaited_once_with("session/prompt", {
-            "sessionId": "session-1", "prompt": [{"type": "text", "text": "wake"}],
+        adapter._write_frame.assert_awaited_once_with({
+            "jsonrpc": "2.0", "id": 1, "method": "session/prompt",
+            "params": {"sessionId": "session-1",
+                       "prompt": [{"type": "text", "text": "wake"}]},
         })
         self.assertFalse(adapter._silent_until_wake)
+
+    async def test_delivery_returns_when_the_prompt_is_sent_not_when_the_turn_ends(self):
+        """The prompt's result arrives at turn end, minutes later for a local
+        model; a delivery that waited held the sender's HTTP request open."""
+        adapter = self.make()
+        adapter._session_id = "session-1"
+        adapter.format_digest = lambda _messages: "wake"
+        adapter._write_frame = AsyncMock()
+        await asyncio.wait_for(adapter.deliver([{"id": 4, "body": "wake"}]), timeout=1)
+        self.assertEqual(list(adapter._pending), [1])  # the answer is still owed
+        with self.assertLogs("partyline.adapters.bundled.deepseek.adapter", level="WARNING"):
+            await adapter.on_output(
+                b'{"jsonrpc":"2.0","id":1,"error":{"message":"model refused"}}\n')
+            await asyncio.sleep(0)
+        self.assertEqual(adapter._pending, {})
+        await adapter.on_output(b'{"jsonrpc":"2.0","id":99,"result":{}}\n')  # stray: ignored
 
     async def test_resumed_delivery_releases_silence_before_reply_is_tailed(self):
         adapter = self.make(resume=True)
@@ -207,11 +225,10 @@ class DeepSeekAdapterTest(unittest.IsolatedAsyncioTestCase):
         adapter.format_digest = lambda _messages: "wake"
         pending = asyncio.get_running_loop().create_future()
 
-        async def wait_for_request(*_args, **_kwargs):
+        async def wait_for_write(*_args, **_kwargs):
             await pending
-            return {}
 
-        adapter._request = AsyncMock(side_effect=wait_for_request)
+        adapter._write_frame = AsyncMock(side_effect=wait_for_write)
         task = asyncio.create_task(adapter.deliver([{"id": 4, "body": "wake"}]))
         await asyncio.sleep(0)
         self.assertFalse(adapter._silent_until_wake)
@@ -226,7 +243,7 @@ class DeepSeekAdapterTest(unittest.IsolatedAsyncioTestCase):
             },
         })
         self.assertEqual(self.messages, [("luna", "agent", "resumed reply")])
-        pending.set_result({})
+        pending.set_result(None)
         await task
 
     async def test_setup_failure_marks_adapter_not_ready(self):

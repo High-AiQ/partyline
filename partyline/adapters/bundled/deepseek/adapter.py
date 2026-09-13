@@ -11,12 +11,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import tty
 from pathlib import Path
 
 from partyline.adapters import Adapter
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
+
+logger = logging.getLogger(__name__)
 
 
 class PartylineAdapter(Adapter):
@@ -78,6 +81,31 @@ class PartylineAdapter(Adapter):
             return result
         finally:
             self._pending.pop(request_id, None)
+
+    async def _send_request(self, method: str, params: dict) -> None:
+        """Put a request on the wire and return; its result is not waited for.
+
+        ``session/prompt`` answers only when the model's whole turn ends —
+        minutes for a local 27B model — and a delivery that waited for it held
+        the sender's HTTP request open the entire time: the composer sat on
+        "uploading…" long after the message and image were in the chat. The
+        turn's end is observed from the transcript; the response is noise
+        unless it is an error, which is logged.
+        """
+        self._request_id += 1
+        request_id = self._request_id
+        future = asyncio.get_running_loop().create_future()
+        self._pending[request_id] = future
+
+        def settled(done: asyncio.Future) -> None:
+            self._pending.pop(request_id, None)
+            if not done.cancelled() and done.exception() is not None:
+                logger.warning("dsh ACP %s failed for %s: %s",
+                               method, self.att.get("name"), done.exception())
+
+        future.add_done_callback(settled)
+        await self._write_frame({"jsonrpc": "2.0", "id": request_id,
+                                 "method": method, "params": params})
 
     async def on_output(self, data: bytes):
         self._wire_buffer += data.decode("utf-8", errors="replace")
@@ -254,7 +282,7 @@ class PartylineAdapter(Adapter):
         if not self._session_id:
             raise RuntimeError("dsh ACP session is not ready")
         self._silent_until_wake = False
-        await self._request("session/prompt", {
+        await self._send_request("session/prompt", {
             "sessionId": self._session_id,
             "prompt": [{"type": "text", "text": self.format_digest(messages)}],
         })
