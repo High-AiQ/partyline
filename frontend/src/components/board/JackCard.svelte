@@ -81,14 +81,14 @@
   class:opacity-75={!live}
   class:attention={needsYou}
 >
-  <div class="row flex items-center gap-2">
+  <div class="row flex flex-wrap items-center gap-x-2 gap-y-1.5 pr-5">
     <span
       class="led {attachment.status}{needsYou
         ? ' bg-copper-hot shadow-[0_0_8px_var(--color-copper-hot)]'
         : ''}"
     ></span>
     <button
-      class="name cursor-pointer border-0 bg-transparent p-0 text-inherit [font-size:inherit] font-semibold hover:bg-transparent hover:text-copper-hot!"
+      class="name flex-none cursor-pointer whitespace-nowrap border-0 bg-transparent p-0 text-inherit [font-size:inherit] font-semibold hover:bg-transparent hover:text-copper-hot!"
       type="button"
       style:color="hsl({hue(attachment.name.toLowerCase())} 55% 68%)"
       use:tooltip={{ label: `insert @${attachment.name}` }}
@@ -97,7 +97,7 @@
       }}>{attachment.name}</button
     >
     <span
-      class="tag rounded-[3px] border border-copper/35 px-[5px] text-[9.5px] tracking-[0.05em] text-copper"
+      class="tag flex-none whitespace-nowrap rounded-[3px] border border-copper/35 px-[5px] text-[9.5px] tracking-[0.05em] text-copper"
       >{attachment.adapter}</span
     >
     {#if captain}

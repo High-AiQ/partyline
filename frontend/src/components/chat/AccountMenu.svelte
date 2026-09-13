@@ -8,14 +8,14 @@
 
 <div class="account flex shrink-0 items-center gap-1.5">
   <button
-    class="handle max-w-[150px] truncate px-[9px] py-0 text-copper-hot min-h-[34px]"
+    class="handle topbar-action topbar-action-accented max-w-[150px] truncate px-[9px] py-0 min-h-[34px]"
     type="button"
     use:tooltip={{ label: "change handle" }}
     aria-label="change handle, currently {session.handle}"
     onclick={() => dialogs.open(ChangeHandleDialog)}>@{session.handle}</button
   >
   <button
-    class="logout px-[9px] py-0 text-cream-faint min-h-[34px] hover:border-red hover:bg-red"
+    class="logout topbar-action topbar-action-danger px-[9px] py-0 min-h-[34px]"
     type="button"
     onclick={() => {
       session.logout();

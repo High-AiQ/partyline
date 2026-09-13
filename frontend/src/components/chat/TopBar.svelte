@@ -27,7 +27,7 @@
   <ColumnToggle side="rail" />
 
   <button
-    class="drawer-toggle lines hidden"
+    class="drawer-toggle lines topbar-action hidden"
     type="button"
     use:tooltip={{ label: "lines" }}
     aria-label="show lines"
@@ -62,7 +62,7 @@
 
   {#if room.conversation}
     <button
-      class="task-toggle inline-flex h-[34px] flex-none items-center gap-1.5 px-2.5"
+      class="task-toggle topbar-action inline-flex h-[34px] flex-none items-center gap-1.5 px-2.5"
       type="button"
       use:tooltip={{ label: "shared line tasks" }}
       aria-label="open shared line tasks"
@@ -81,7 +81,7 @@
   <ColumnToggle side="board" count={liveJacks} />
 
   <button
-    class="drawer-toggle jacks hidden"
+    class="drawer-toggle jacks topbar-action hidden"
     type="button"
     use:tooltip={{ label: "processes on this line" }}
     aria-label="show processes on this line"
@@ -161,7 +161,6 @@
       height: 44px;
       padding: 0 10px;
       font-size: 15px;
-      background: var(--color-ink-2);
     }
     .drawer-toggle[aria-expanded="true"] {
       color: var(--color-ink);
