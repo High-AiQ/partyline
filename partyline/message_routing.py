@@ -4,7 +4,7 @@ import logging
 
 from .interrupts import interrupt_for
 from .mention_relay import relay_mentions
-from .mentions import interrupt_names, mentioned_names
+from .mentions import interrupt_names, line_addressed, mentioned_names
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +21,11 @@ async def route_message(
     if message["sender_type"] == "system" and not force:
         return
     names = mentioned_names(message["body"])
+    # "worker: take the review" is an address when worker is live here.
+    colon = line_addressed(message["body"])
+    if colon:
+        names |= {a["name"].lower() for a in runtime.db.list_attachments(conv_id)
+                  if a["name"].lower() in colon and a["status"] in ("starting", "running")}
     # `@!name` is an operator's "stop and read this". Only a human may write
     # it: an agent's reply wakes other agents, so an agent-authored bang would
     # let the room cancel its own work in a loop.

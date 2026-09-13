@@ -84,10 +84,10 @@ def withheld_notice(db, conv_id: str, target: dict, crossing: bool) -> str:
     line = db.get_conversation(target["conv_id"]) or {}
     where = f"⚠ {target['name']} is on line «{line.get('name', '?')}», not this one — "
     if crossing:
-        return where + "a manager reaches every process below it and only the managers above it"
+        return where + "a captain reaches every process below it and only the captains above it"
     manager = lead_attachment(db, conv_id)
-    whom = f"tell @{manager['name']}, your manager, instead" if manager else "this line has no manager"
-    return where + f"only a line's manager talks to other lines; {whom}"
+    whom = f"tell @{manager['name']}, your captain, instead" if manager else "this line has no captain"
+    return where + f"only a line's captain talks to other lines; {whom}"
 
 
 def reaches_a_process(db, speaker: dict, names: set[str]) -> bool:

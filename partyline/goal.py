@@ -32,7 +32,7 @@ def set_goal(db, conv_id: str, goal: str) -> dict:
 
 # Rides every manager wake next to the goal, because the pack scrolls away and
 # the one rule a manager drifts from mid-project is this one.
-MANAGER_REMINDER = "you manage — delegate to a captain, review, decide; you do not implement"
+MANAGER_REMINDER = "you are the captain — delegate to a sub-captain, review, decide; you do not implement"
 
 
 def goal_rider(db, conv_id: str) -> str:

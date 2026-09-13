@@ -4,6 +4,7 @@
   import { hierarchyApi } from "../../lib/hierarchy-api";
   import type { Conversation } from "../../lib/contracts";
   import { room } from "../../state/room.svelte";
+  import { isLive } from "../../lib/attachments";
 
   interface Props {
     conversation: Conversation;
@@ -11,6 +12,8 @@
   }
   let { conversation, close }: Props = $props();
   let parentId = $state("");
+  let captainId = $state("");
+  let appointing = $state(false);
   let loading = $state(true);
   let saving = $state(false);
   let ready = $state(false);
@@ -32,6 +35,11 @@
       .then((detail) => {
         if (cancelled) return;
         parentId = detail.conversation.parent_id ?? "";
+        return hierarchyApi.lead(conversation.id);
+      })
+      .then((lead) => {
+        if (cancelled) return;
+        captainId = lead?.attachment_id ?? "";
         ready = true;
       })
       .catch((failure: unknown) => {
@@ -44,6 +52,23 @@
       cancelled = true;
     };
   });
+
+  /** A person appoints the captain here; the server rings it at once with the captain
+   *  pack, and from then on only that captain (or a person) can appoint another. */
+  async function appointCaptain(): Promise<void> {
+    appointing = true;
+    error = "";
+    saved = "";
+    try {
+      const lead = await hierarchyApi.appoint(conversation.id, captainId || null);
+      captainId = lead.attachment_id ?? "";
+      saved = captainId ? "captain appointed · it has been rung with the captain pack" : "captain cleared";
+    } catch (failure: unknown) {
+      error = failure instanceof ApiError ? failure.message : "could not appoint the captain";
+    } finally {
+      appointing = false;
+    }
+  }
 
   async function saveParent(value: string | null): Promise<void> {
     saving = true;
@@ -62,15 +87,25 @@
   }
 </script>
 
-<!-- Managers are appointed by agents in the conversation, not by a person here:
-     a human says "B takes the lead" and an agent on the line makes it so. -->
 <Modal title="management · {conversation.name}" {close}>
-  <p class="dialog-note">Link this line to a parent project. Managers are appointed in chat.</p>
+  <p class="dialog-note">Appoint this line's captain and link it to a parent project.</p>
   <div class="line-status" class:error={Boolean(error)} aria-live="polite">{error || saved}</div>
   {#if loading}
     <p class="py-5 text-cream-faint">loading management…</p>
   {:else if ready}
     <div class="line-form">
+      <label for="captain">captain</label>
+      <select id="captain" bind:value={captainId} disabled={appointing}>
+        <option value="">none · no captain on this line</option>
+        {#each room.attachments.filter(isLive) as process (process.id)}
+          <option value={process.id}>{process.name} · {process.adapter}</option>
+        {/each}
+      </select>
+      <div class="line-actions">
+        <button class="primary" type="button" disabled={appointing} onclick={appointCaptain}
+          >appoint captain</button
+        >
+      </div>
       {#if parentId}
         <p class="dialog-note">parent line</p>
         <p class="dialog-note">linked to {parentName} · unlink to make it independent</p>

@@ -88,11 +88,14 @@ class GoalRiderTest(unittest.TestCase):
         set_lead(self.db, "line", "lead")
 
     def test_the_rider_carries_the_rule_alone_without_a_goal_and_both_with(self):
-        self.assertEqual(goal_rider(self.db, "line"), "(you manage — delegate to a captain, "
-                         "review, decide; you do not implement)")
+        self.assertEqual(goal_rider(self.db, "line"), "(you are the captain — delegate to a "
+                         "sub-captain, review, decide; you do not implement)")
         self.db._exec("UPDATE conversations SET goal=? WHERE id=?", ("finish  the\nbook", "line"))
-        self.assertEqual(goal_rider(self.db, "line"), "(goal you are seeing through: finish the "
-                         "book; you manage — delegate to a captain, review, decide; you do not implement)")
+        self.assertEqual(
+            goal_rider(self.db, "line"),
+            "(goal you are seeing through: finish the book; you are the captain — delegate to a "
+            "sub-captain, review, decide; you do not implement)",
+        )
 
     def test_the_manager_carries_the_goal_and_the_implementer_does_not(self):
         self.db._exec("UPDATE conversations SET goal=? WHERE id=?", ("finish the book", "line"))
