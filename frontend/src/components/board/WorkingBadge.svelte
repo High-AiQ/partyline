@@ -32,7 +32,7 @@
 
 {#if badge}
   <span
-    class="working {badge.tone} {badge.dot} {badge.pulse} inline-flex items-center gap-1 text-[9px] tracking-[0.04em] whitespace-nowrap"
+    class="working {badge.tone} {badge.dot} {badge.pulse} inline-flex flex-none items-center gap-1 text-[9px] tracking-[0.04em] whitespace-nowrap"
     class:text-green={badge.tone !== "copper"}
     class:text-copper={badge.tone === "copper"}
     role="status"

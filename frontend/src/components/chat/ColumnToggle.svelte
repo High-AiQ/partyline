@@ -12,11 +12,11 @@
   let { side, count = 0 }: Props = $props();
   const collapsed = $derived(side === "rail" ? layout.railCollapsed : layout.boardCollapsed);
   const noun = $derived(side === "rail" ? "lines" : "processes on this line");
-  const toggleClass = $derived(collapsed ? "text-copper-hot border-[rgb(217_142_74/0.5)]" : "");
+  const toggleClass = $derived(collapsed ? "topbar-action-selected" : "");
 </script>
 
 <button
-  class="column-toggle flex h-[34px] flex-none items-center justify-center gap-1.5 bg-ink-2 px-[9px] {toggleClass}"
+  class="column-toggle topbar-action flex h-[34px] flex-none items-center justify-center gap-1.5 px-[9px] {toggleClass}"
   type="button"
   use:tooltip={{ label: collapsed ? `show ${noun}` : `hide ${noun}` }}
   aria-label={collapsed ? `show ${noun}` : `hide ${noun}`}

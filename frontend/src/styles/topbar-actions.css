@@ -1,0 +1,43 @@
+/* The top bar mixes controls from three components, but they are one visual
+   family. Keep their interaction states here so a utility on one control
+   cannot leave dark text on a dark surface (or light text on copper). */
+@layer components {
+  .topbar-action {
+    color: var(--color-cream-dim);
+    background: var(--color-ink-2);
+    border-color: var(--color-line);
+  }
+  .topbar-action:hover:not(:disabled) {
+    color: var(--color-ink);
+    background: var(--color-copper);
+    border-color: var(--color-copper);
+  }
+  .topbar-action:active:not(:disabled) {
+    color: var(--color-ink);
+    background: var(--color-copper-hot);
+    border-color: var(--color-copper-hot);
+  }
+  .topbar-action-accented:not(:hover):not(:active):not(:disabled),
+  .topbar-action-selected:not(:hover):not(:active):not(:disabled) {
+    color: var(--color-copper-hot);
+    border-color: rgb(217 142 74 / 0.5);
+  }
+  .topbar-action-danger:hover:not(:disabled),
+  .topbar-action-danger:active:not(:disabled) {
+    color: var(--color-ink);
+    background: var(--color-red);
+    border-color: var(--color-red);
+  }
+  .topbar-action:disabled,
+  .topbar-action:disabled:hover {
+    color: var(--color-cream-dim);
+    background: var(--color-ink-2);
+    border-color: var(--color-line);
+  }
+  .topbar-action:hover:not(:disabled) .led,
+  .topbar-action:active:not(:disabled) .led,
+  .topbar-action[aria-expanded="true"].drawer-toggle .led {
+    background: currentcolor;
+    box-shadow: none;
+  }
+}
