@@ -7,7 +7,7 @@
 | Deploy only through `scripts.cockpit check` → `deploy` → `plan` → `arm` | Restart without deploying, or use any restart trigger other than `arm` |
 | Arm only after green preflight, explicit clears from every planned participant, and zero known findings | Let anyone be mid-turn when the restart lands — including the agent that arms it |
 | Prove recovery afterwards: identity, continuation receipts, `/api/running` snapshots, consumed plan | Announce success without recorded evidence |
-| Find the pid that owns the port and kill that pid | Ever run `pkill -f partyline` — it matches the room you are standing in |
+| Find the pid that owns the port and kill that pid | Ever kill by matching the word partyline in every process's command line — it matches the room you are standing in |
 
 Partyline can improve and restart the cockpit instance it is using to coordinate the work. This is
 **recursive self-improvement**: agents use their own judgment to deploy a reviewed change, recover
