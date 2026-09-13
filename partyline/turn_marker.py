@@ -14,11 +14,12 @@ WORKING_PHASES = ("working", "speaking")
 
 
 def note_phase(db, att_id: str, phase: str) -> None:
-    """Record whether a turn is open, from the phase presence just announced."""
-    if db is None:
-        return
-    db._exec("UPDATE attachments SET turn_open=? WHERE id=?",
-             (1 if phase in WORKING_PHASES else 0, att_id))
+    """Set the mark when presence announces work. Idle never clears it here:
+    a process that exits mid-turn is announced idle too, and an orderly
+    shutdown announced every live process idle a second before killing it —
+    which wiped the very mark the resume needed. Only `ended` clears."""
+    if db is not None and phase in WORKING_PHASES:
+        db._exec("UPDATE attachments SET turn_open=1 WHERE id=?", (att_id,))
 
 
 def was_interrupted(db, att_id: str) -> bool:
@@ -27,6 +28,9 @@ def was_interrupted(db, att_id: str) -> bool:
 
 
 def clear(db, att_id: str) -> None:
+    """The harness reported the turn ended, or a resume consumed the mark."""
+    if db is None:
+        return
     db._exec("UPDATE attachments SET turn_open=0 WHERE id=?", (att_id,))
 
 
