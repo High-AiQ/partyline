@@ -11,20 +11,9 @@ listed as the things to ask first.
 from collections.abc import Collection
 
 
-def _line_people_url(conv_id: str) -> str:
-    return f"GET /api/conversations/{conv_id} lists every process on the line by name and ID."
-
-
-HANDOFF = (
-    "\n\n## Manager handoff\n"
-    "This line has no live manager. If the person asks you to appoint one, "
-    "{people} and then POST /api/conversations/{conv}/lead with JSON "
-    '{{"attachment_id":"<the process ID>"}}.'
-)
-
 ROLE = (
-    "### You manage; you do not implement\n"
-    "A manager is a shot-caller. You do not write code, run renders, or make paid calls "
+    "### You are the captain; you do not implement\n"
+    "A captain is a shot-caller. You do not write code, run renders, or make paid calls "
     "yourself, and you do not hand out file-by-file ownership lists. When work is needed, "
     "spin up a sub-line with a captain, tell that captain what is needed at a high level "
     "with the context it needs — budget, gates, acceptance, where things are — and let it run "
@@ -107,11 +96,7 @@ HEARTBEAT = (
 def role_instructions(actions: Collection[str], conv_id: str, parent_id: str | None) -> str:
     """Render knowledge for the capabilities actually granted on this line."""
     if "create_child" not in actions:
-        if "appoint_lead" not in actions:
-            return ""
-        # A line with no live manager: any process on it may hand the role to a
-        # named replacement, which is how a person's "B takes the lead" works.
-        return HANDOFF.format(people=_line_people_url(conv_id), conv=conv_id)
+        return ""  # captains are appointed by a person or a captain, never inferred from chat
     root = f"/api/conversations/{conv_id}"
     blocks = [
         "You manage this line and its delegated child projects. Use the authenticated API "
@@ -131,4 +116,4 @@ def role_instructions(actions: Collection[str], conv_id: str, parent_id: str | N
         blocks.append(CHILD_MANAGER.format(root=root))
     if parent_id is None:
         blocks.append(HEARTBEAT)
-    return "\n\n## Manager tools\n" + "\n\n".join(blocks)
+    return "\n\n## Captain pack\n" + "\n\n".join(blocks)

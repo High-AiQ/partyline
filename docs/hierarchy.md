@@ -1,15 +1,22 @@
-# Managers and child lines
+# Captains and child lines
+
+In chat and in the web client the manager of a line is its **captain**; the API
+and database keep the older name `lead` (`POST /lead`, `is_lead`). A person
+appoints a captain in the line menu's management dialog, or an agent does it
+through the API; either way the new captain is rung at once with the captain
+pack, and once a line has a captain, only that captain, an ancestor captain, or
+a person may appoint another — anyone else gets 403.
 
 A line can belong to a parent project. Each line has at most one designated
 manager attachment. The role belongs to that attachment's identity, not its
 handle or model: two processes named `reviewer` on different lines remain
 separate participants.
 
-Humans use the line menu's **management** dialog to choose the parent line.
-Appointing a manager is agentic: a person says "B takes the lead" in chat and an
-agent on the line appoints it through the API. With no live manager, any machine
-on that line may appoint one; re-pointing a live manager still requires the
-manager or an ancestor lead. Granting a manager delegates control of work beneath that line. Ordinary
+Humans use the line menu's **management** dialog to appoint the captain and to
+choose the parent line. Appointment is deterministic and never inferred from
+chat: a person, the line's captain, or an ancestor captain appoints through
+`POST /lead`, and anyone else gets 403 — a line with no captain waits for a
+person. Granting a captain delegates control of work beneath that line. Ordinary
 participants keep access to their own line; a manager can create child lines,
 attach participants, assign work, and inspect descendant progress. Unrelated
 lines remain outside that machine credential's scope. Removing the manager role
@@ -45,8 +52,15 @@ line reads — where things are, the budget, the gates, the acceptance criterion
 Both are announced on the child line so the hand-off is on the record. A
 captain cannot read its parent's line, so what is not in the brief it does not
 know; the manager pack asks for both fields every time a slice is split off.
-The appointed manager receives the manager pack on its next wake regardless of
-which line it sits on, so a captain is briefed the same way its root was.
+The appointed manager is rung the moment it is appointed, with a private
+notice that carries the manager pack in its digest, so a process that appoints
+itself mid-turn reads the pack before it acts further — the first live root
+otherwise staffed its own line before the pack reached it. A captain is briefed
+the same way its root was.
+
+A handle written as `name:` at the start of a line is an address too, when a
+live process on that line bears it: `worker: take the review` rings worker.
+Weak models drop the sigil constantly; a label that names nobody rings nobody.
 
 ## The goal
 

@@ -91,11 +91,9 @@ def allows(db: Db, principal: Principal, conv_id: str, capability: Capability) -
     if capability in ("archive", "link_parent"):
         return False
     if capability == "appoint_lead":
-        if _home_lead_tree(db, principal, conv_id):
-            return True
-        # Handoff after a manager detaches: any machine on the line may appoint
-        # a replacement while no live manager holds the role.
-        return principal.conv_id == conv_id and _live_lead(db, conv_id) is None
+        # Deterministic only: a person, or a captain over this line. There is no
+        # natural-language handoff — a line with no captain waits for a person.
+        return _home_lead_tree(db, principal, conv_id)
     if capability == "create_child":
         return principal.is_lead and conv_id == home
     if capability in ("report", "notify"):

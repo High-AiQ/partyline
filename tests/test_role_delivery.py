@@ -20,21 +20,21 @@ class RoleDeliveryTests(unittest.TestCase):
             self.assertEqual(att["role_briefing"], "")
             self.assertEqual(att["digest_rider"](), "task board")
             role.return_value = manager
-            self.assertIn("Manager tools", att["digest_rider"]())
-            self.assertEqual(att["digest_rider"](), "task board\n(you manage — delegate to a "
-                             "captain, review, decide; you do not implement)")
+            self.assertIn("Captain pack", att["digest_rider"]())
+            self.assertEqual(att["digest_rider"](), "task board\n(you are the captain — delegate to a "
+                             "sub-captain, review, decide; you do not implement)")
             role.return_value = ordinary
             self.assertIn("ordinary participant", att["digest_rider"]())
             self.assertEqual(att["digest_rider"](), "task board")
 
-    def test_participant_learns_the_handoff_when_the_manager_detaches(self):
+    def test_a_detached_captain_teaches_nobody_a_handoff(self):
         ordinary = RoleState("implementer", "line", None, ("read", "write"))
         handoff = RoleState("implementer", "line", None, ("read", "write", "appoint_lead"))
         att = {"id": "worker", "digest_rider": lambda: "task board"}
         with patch("partyline.role_delivery.current_role", return_value=ordinary) as role:
             bind_role_delivery(NO_GOAL, att)
             role.return_value = handoff
-            self.assertIn("Manager handoff", att["digest_rider"]())
+            self.assertNotIn("handoff", att["digest_rider"]().lower())
 
     def test_resumed_manager_learns_tools_without_a_new_joining_briefing(self):
         manager = RoleState("lead", "line", "parent", ("create_child", "report"))
@@ -44,4 +44,4 @@ class RoleDeliveryTests(unittest.TestCase):
             first = att["digest_rider"]()
             self.assertIn("helper command", first)
             self.assertIn("by @mention from this line", first)
-            self.assertTrue(att["digest_rider"]().startswith("helper command\n(you manage"))
+            self.assertTrue(att["digest_rider"]().startswith("helper command\n(you are the captain"))
