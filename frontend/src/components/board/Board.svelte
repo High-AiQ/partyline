@@ -3,6 +3,7 @@
   import JackCard from "./JackCard.svelte";
   import AttachForm from "./AttachForm.svelte";
   import { canResumeJack, latestJacks } from "../../lib/attachments";
+  import { hierarchyApi } from "../../lib/hierarchy-api";
   import { room } from "../../state/room.svelte.js";
   import { session } from "../../state/session.svelte.js";
 
@@ -13,6 +14,24 @@
   let { onmention }: Props = $props();
 
   const jacks = $derived(latestJacks(room.attachments));
+  let captainRequest = 0;
+  const captainId = $derived(room.captains[room.conversation?.id ?? ""] ?? null);
+
+  $effect(() => {
+    const conversationId = room.conversation?.id;
+    if (!conversationId) return;
+    room.setCaptain(conversationId, null);
+    captainRequest += 1;
+    const requestId = captainRequest;
+    void hierarchyApi
+      .lead(conversationId)
+      .then((lead) => {
+        if (requestId === captainRequest) room.setCaptain(conversationId, lead.attachment_id);
+      })
+      .catch(() => {
+        if (requestId === captainRequest) room.setCaptain(conversationId, null);
+      });
+  });
   // This describes the registry now, not the adapter class used when an
   // already-running jack was created; reload can change one without the other.
   const overridesBundled = (adapterId: string): boolean =>
@@ -30,6 +49,7 @@
           {attachment}
           resumable={canResumeJack(session.adapters, attachment)}
           overridesBundled={overridesBundled(attachment.adapter)}
+          captain={attachment.id === captainId}
           {onmention}
         />
       {/each}

@@ -2,6 +2,7 @@
   /** One task, with the same controls in its open and completed states. */
   import type { Task } from "../../lib/contracts";
   import { taskView } from "../../lib/task-view";
+  import { tooltip } from "../../lib/tooltip";
 
   interface Props {
     task: Task;
@@ -23,7 +24,7 @@
   <button
     class="grid h-[26px] w-[26px] flex-none place-items-center p-0 text-green"
     type="button"
-    title={done ? "reopen" : "mark done"}
+    use:tooltip={{ label: done ? "reopen" : "mark done" }}
     aria-label="{done ? 'reopen' : 'mark done'} task: {view.summary}"
     onclick={() => onupdate(task, { status: done ? "open" : "done" })}
   >
@@ -34,7 +35,7 @@
     {#if view.doneWhen && !done}
       <p
         class="done-when mt-[2px] text-[10.5px] wrap-anywhere line-clamp-2 text-cream-faint"
-        title={view.doneWhen}
+        use:tooltip={{ label: view.doneWhen }}
       >
         ⤷ {view.doneWhen}
       </p>
@@ -57,9 +58,9 @@
     {/if}
   </div>
   <button
-    class="h-[26px] w-[26px] flex-none border-0 bg-transparent p-0 hover:bg-transparent hover:text-red"
+    class="h-[26px] w-[26px] flex-none border-0 bg-transparent p-0 hover:bg-red hover:text-ink"
     type="button"
-    title="delete task"
+    use:tooltip={{ label: "delete task" }}
     aria-label="delete task: {view.summary}"
     onclick={() => onremove(task)}>✕</button
   >

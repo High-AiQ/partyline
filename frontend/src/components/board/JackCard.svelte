@@ -1,6 +1,7 @@
 <script lang="ts">
   /** One process on the line; a process stopped on a dialog rings until someone peeks. */
   import { hue } from "../../lib/markdown";
+  import { tooltip } from "../../lib/tooltip";
   import { isLive, overrideExplanation } from "../../lib/attachments";
   import { ApiError, api } from "../../lib/api";
   import type { Attachment } from "../../lib/contracts";
@@ -18,10 +19,11 @@
     attachment: Attachment;
     resumable: boolean;
     overridesBundled: boolean;
+    captain?: boolean;
     onmention: (_name: string) => void;
   }
 
-  let { attachment, resumable, overridesBundled, onmention }: Props = $props();
+  let { attachment, resumable, overridesBundled, captain = false, onmention }: Props = $props();
 
   let resuming = $state(false);
 
@@ -89,7 +91,7 @@
       class="name cursor-pointer border-0 bg-transparent p-0 text-inherit [font-size:inherit] font-semibold hover:bg-transparent hover:text-copper-hot!"
       type="button"
       style:color="hsl({hue(attachment.name.toLowerCase())} 55% 68%)"
-      title="insert @{attachment.name}"
+      use:tooltip={{ label: `insert @${attachment.name}` }}
       onclick={() => {
         onmention(attachment.name);
       }}>{attachment.name}</button
@@ -98,29 +100,35 @@
       class="tag rounded-[3px] border border-copper/35 px-[5px] text-[9.5px] tracking-[0.05em] text-copper"
       >{attachment.adapter}</span
     >
+    {#if captain}
+      <span
+        class="captain-badge inline-flex flex-none items-center gap-1 rounded-[3px] border border-copper-hot/80 bg-copper-hot/15 px-[5px] py-px text-[9px] font-semibold tracking-[0.05em] text-copper-hot"
+        aria-label="captain for this line">★ captain</span
+      >
+    {/if}
     {#if entry}
       <WorkingBadge {entry} />
     {/if}
     {#if overridesBundled}
       <span
         class="override-badge"
-        title={overrideExplanation(attachment.adapter)}
+        use:tooltip={{ label: overrideExplanation(attachment.adapter) }}
         aria-label={overrideExplanation(attachment.adapter)}>imported</span
       >
     {/if}
     {#if live}
       <button
-        class="x absolute right-2 top-1.5 cursor-pointer border-0 bg-transparent p-0.5 text-[12px] text-cream-faint hover:bg-transparent hover:text-red"
+        class="x absolute right-2 top-1.5 cursor-pointer border-0 bg-transparent p-0.5 text-[12px] text-cream-faint hover:bg-red hover:text-ink"
         type="button"
-        title="detach"
+        use:tooltip={{ label: "detach" }}
         aria-label="detach {attachment.name}"
         onclick={detach}>✕</button
       >
     {:else}
       <button
-        class="x remove-btn absolute right-2 top-1.5 cursor-pointer border-0 bg-transparent p-0.5 text-[12px] text-cream-faint hover:bg-transparent hover:text-red"
+        class="x remove-btn absolute right-2 top-1.5 cursor-pointer border-0 bg-transparent p-0.5 text-[12px] text-cream-faint hover:bg-red hover:text-ink"
         type="button"
-        title="remove from roster (stops tracking this session)"
+        use:tooltip={{ label: "remove from roster (stops tracking this session)" }}
         aria-label="remove {attachment.name} from roster"
         onclick={remove}>⌫</button
       >
@@ -133,14 +141,14 @@
       class:dirty={attachment.cwd_git.dirty}
       class:text-green={!attachment.cwd_git.dirty}
       class:text-copper-hot={attachment.cwd_git.dirty}
-      title="{attachment.cwd} · git {attachment.cwd_git.sha} · {attachment.cwd_git.dirty
-        ? 'dirty working tree'
-        : 'clean working tree'}"
+      use:tooltip={{
+        label: `${attachment.cwd} · git ${attachment.cwd_git.sha} · ${attachment.cwd_git.dirty ? "dirty working tree" : "clean working tree"}`,
+      }}
     >
       git {attachment.cwd_git.sha} · {attachment.cwd_git.dirty ? "dirty" : "clean"}
     </div>
   {/if}
-  <div class="cmd mt-0.5 truncate text-[10.5px] text-cream-faint" title={attachment.cwd}>
+  <div class="cmd mt-0.5 truncate text-[10.5px] text-cream-faint" use:tooltip={{ label: attachment.cwd }}>
     {attachment.command.join(" ")} · {attachment.status}
   </div>
 
@@ -150,7 +158,7 @@
         ? 'text-ink bg-copper border-copper-hot origin-[50%_80%]'
         : 'text-green border-green/40 hover:border-green hover:bg-green hover:text-ink'}"
       type="button"
-      title="live view of this agent's terminal"
+      use:tooltip={{ label: "live view of this agent's terminal" }}
       onclick={peek}
     >
       {needsYou ? "⏸ answer" : "⌗ peek"}
@@ -160,7 +168,7 @@
     <button
       class="resume mt-1.5 px-[9px] py-0.5 text-[10px] text-green border-green/40 hover:border-green hover:bg-green hover:text-ink"
       type="button"
-      title="respawn with full session context"
+      use:tooltip={{ label: "respawn with full session context" }}
       disabled={resuming}
       onclick={resume}
     >
@@ -171,7 +179,7 @@
     <button
       class="resume fresh-btn mt-1.5 ml-[5px] px-[9px] py-0.5 text-[10px] text-green border-green/40 hover:border-green hover:bg-green hover:text-ink"
       type="button"
-      title="new session, same handle — no earlier chat is replayed"
+      use:tooltip={{ label: "new session, same handle — no earlier chat is replayed" }}
       onclick={fresh}
     >
       ✦ start fresh
@@ -179,7 +187,7 @@
     <button
       class="resume edit-btn mt-1.5 ml-[5px] px-[9px] py-0.5 text-[10px] text-copper border-copper/40 hover:border-copper hover:bg-copper hover:text-ink"
       type="button"
-      title="change the command used on next resume"
+      use:tooltip={{ label: "change the command used on next resume" }}
       onclick={edit}
     >
       ✎ edit command

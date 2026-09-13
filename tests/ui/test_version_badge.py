@@ -71,7 +71,10 @@ def tab_build(page):
     runtime for a test to ask about. The tooltip is the only place the value is
     actually observable — which is the point of putting it there.
     """
-    title = page.locator("#ver").get_attribute("title") or ""
+    page.locator("#ver").hover()
+    tooltip = page.locator(".app-tooltip:not([hidden])").last
+    tooltip.wait_for(state="visible")
+    title = tooltip.inner_text()
     _, _, tail = title.partition("build ")
     return tail.strip() or None
 
@@ -106,9 +109,12 @@ class VersionBadgeTest(unittest.TestCase):
         with ui_session(LINES, handle="operator") as ui:
             page = ui.page
             open_line(ui)
-            tooltip = page.locator("#ver").get_attribute("title")
-            self.assertIn("server v", tooltip)
-            self.assertTrue("build " in tooltip or "dev build" in tooltip, tooltip)
+            page.locator("#ver").hover()
+            tooltip = page.locator(".app-tooltip:not([hidden])").last
+            tooltip.wait_for(state="visible")
+            text = tooltip.inner_text()
+            self.assertIn("server v", text)
+            self.assertTrue("build " in text or "dev build" in text, text)
 
     def test_an_unreadable_same_build_hello_is_a_contract_failure_not_an_outage(self):
         """The control that matters. A required field the server omits used to

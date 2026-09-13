@@ -50,11 +50,10 @@ class Room {
   conversations = $state<Conversation[]>([]);
   archived = $state<Conversation[]>([]);
   archiveOpen = $state(false);
-
   conversation = $state<Conversation | null>(null);
   attachments = $state<Attachment[]>([]);
+  captains = $state<Record<string, string | null>>({});
   reattachOffer = $state<ReattachOfferEvent | null>(null);
-
   history = new MessageHistory(() => session.handle);
   /** Attachments blocked on a dialog, which the board rings until someone peeks. */
   attention = new SvelteSet<string>();
@@ -318,6 +317,9 @@ class Room {
     this.attention.delete(attachmentId);
   }
 
+  setCaptain(conversationId: string, attachmentId: string | null): void {
+    this.captains[conversationId] = attachmentId;
+  }
   /** Add a message once and remember its human sender for autocomplete. */
   #absorb(message: ChatMessage): void {
     this.history.merge([message]);

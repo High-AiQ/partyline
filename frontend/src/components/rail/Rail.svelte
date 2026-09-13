@@ -15,6 +15,7 @@
   import StopServerDialog from "../dialogs/StopServerDialog.svelte";
   import ClaimsDialog from "../dialogs/ClaimsDialog.svelte";
   import CloseProcessesDialog from "../dialogs/CloseProcessesDialog.svelte";
+  import { tooltip } from "../../lib/tooltip";
 
   let newLineName = $state("");
 
@@ -65,8 +66,9 @@
       {#if session.version}<span
           id="ver"
           class="rounded-[3px] border border-copper/30 px-[5px] align-[1px] text-[9px] tracking-[0.08em] text-copper"
-          title="server v{session.version} · this tab: {describeBuild(__PARTYLINE_BUILD__)}"
-          >v{session.version}</span
+          use:tooltip={{
+            label: `server v${session.version} · this tab: ${describeBuild(__PARTYLINE_BUILD__)}`,
+          }}>v{session.version}</span
         >{/if}
     </p>
   </div>
@@ -104,7 +106,7 @@
         id="stopServer"
         type="button"
         class="ml-1.5 border-line px-2 py-0.5 text-[10px] text-cream-faint hover:border-red hover:bg-red hover:text-cream"
-        title="stop the partyline server"
+        use:tooltip={{ label: "stop the partyline server" }}
         onclick={() => {
           dialogs.open(StopServerDialog);
         }}>stop</button
