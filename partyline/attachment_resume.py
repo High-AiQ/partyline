@@ -22,8 +22,6 @@ from .hierarchy import tree_live_name_conflict
 from .role_delivery import bind_role_delivery
 from .reattach import ResumedAttachment, adapter_can_resume
 from .transcript_delivery import TranscriptDeliveryRecord
-from . import turn_marker
-from .mention_relay import post_private
 
 
 @dataclass(frozen=True)
@@ -209,9 +207,4 @@ async def resume_adapter(
         f"@{att['name']} resumed with full context · "
         f"session {att.get('cli_session') or att_id}",
     )
-    if turn_marker.was_interrupted(runtime.db, att_id):
-        # The mark is cleared first so a failed post cannot ring twice.
-        turn_marker.clear(runtime.db, att_id)
-        await post_private(runtime, att["conv_id"], "system", "system",
-                           turn_marker.continue_notice(att["name"]), audience=att_id)
     return ResumedAttachment(adapter, startup_staged)
