@@ -33,6 +33,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from . import turn_marker
 from .mentions import addresses
 from .presence_contracts import WorkingEvent
 from .presence_queue import DeliveryQueue
@@ -129,6 +130,7 @@ class Presence:
     async def _announce(self, conv_id: str, att_id: str, phase: str) -> None:
         revision = self.revisions.get(att_id, 0) + 1
         self.revisions[att_id] = revision
+        turn_marker.note_phase(getattr(self.runtime, "db", None), att_id, phase)
         open_turn = self.turns.get(att_id)
         await self.runtime.broadcast(
             conv_id,
