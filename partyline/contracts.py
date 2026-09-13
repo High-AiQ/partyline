@@ -25,7 +25,6 @@ class AttachIn(BaseModel):
     update: bool = False
 
 
-# No sender field: who changed a topic or name comes from the authenticated principal.
 class TopicIn(BaseModel):
     topic: str = ""
 
@@ -88,6 +87,7 @@ class ConversationResponse(BaseModel):
     created_at: float
     topic: str = ""
     goal: str = ""
+    cwd: str | None = None
     archived_at: float | None = None
     live_count: int = Field(default=0, ge=0)
     parent_id: str | None = None

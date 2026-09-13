@@ -13,6 +13,7 @@ from .auth_guard import request_principal
 from .auth_store import handle_taken
 from .claim_routes import purge_claims
 from .hierarchy import tree_live_name_conflict
+from .line_worktree import line_cwd, remove_for_line
 from .contracts import (
     ArchiveResponse,
     AttachIn,
@@ -30,6 +31,7 @@ from .contracts import (
 from .machine_scope import (
     deny_archive_if_children,
     deny_purge_if_parent_refs,
+    deny_sideways_attach,
     deny_unless,
     is_human,
     visible_conversation_ids,
@@ -43,6 +45,19 @@ from .runtime import NAME_RE, RESERVED_NAMES
 def _server():
     from . import server
     return server
+
+
+def unique_handle(db, conv_id: str, name: str) -> str:
+    """The handle itself, or the first ``name-N`` no live process in the tree bears.
+
+    Presets are named by handle, so the same preset used twice in one tree
+    collided with a 409 that a captain read as "cannot staff this line".
+    """
+    candidate, n = name, 1
+    while tree_live_name_conflict(db, conv_id, candidate) or handle_taken(db, candidate):
+        n += 1
+        candidate = f"{name[: 32 - len(str(n)) - 1]}-{n}"
+    return candidate
 
 
 def register_conversation_routes(
@@ -167,6 +182,7 @@ def register_conversation_routes(
         purge_claims(runtime.db, conv_id)
         s.tasks.purge(conv_id)
         purge_reports(db, conv_id)
+        remove_for_line(conv)
         db.delete_conversation(conv_id)
         runtime.sockets.pop(conv_id, None)
         await runtime.broadcast_all(ConversationsChangedEvent())
@@ -180,10 +196,12 @@ def register_conversation_routes(
         s = _server()
         runtime = s.runtime
         db = runtime.db
-        deny_unless(db, request_principal(request), conv_id, "attach")
+        principal = request_principal(request)
+        deny_unless(db, principal, conv_id, "attach")
         conv = db.get_conversation(conv_id)
         if conv["archived_at"]:
             raise HTTPException(409, "restore the line before attaching to it")
+        deny_sideways_attach(db, principal, conv_id)
         if not NAME_RE.match(body.name):
             raise HTTPException(
                 400, "name must be alphanumeric ([A-Za-z0-9_.-], max 32)"
@@ -192,11 +210,7 @@ def register_conversation_routes(
             raise HTTPException(400, f"'{body.name}' is a reserved handle")
         if handle_taken(runtime.db, body.name):
             raise HTTPException(409, f"'{body.name}' is registered to a human account")
-        conflict = tree_live_name_conflict(db, conv_id, body.name)
-        if conflict is not None:
-            other = db.get_conversation(conflict["conv_id"])
-            place = "" if other["id"] == conv_id else f" on '{other['name']}'"
-            raise HTTPException(409, f"'{body.name}' is already attached{place}")
+        name = unique_handle(db, conv_id, body.name)
         try:
             command = validated_attachment_command(
                 body.adapter, body.command, s.ADAPTERS, s.ADAPTER_METADATA
@@ -206,7 +220,10 @@ def register_conversation_routes(
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        cwd = os.path.abspath(os.path.expanduser(body.cwd.strip() or os.getcwd()))
+        # A machine works where its line works; a person may choose.
+        chosen = "" if not is_human(principal) else body.cwd.strip()
+        cwd = os.path.abspath(os.path.expanduser(
+            chosen or line_cwd(db, conv_id) or os.getcwd()))
         if not os.path.isdir(cwd):
             raise HTTPException(400, f"cwd does not exist: {cwd}")
         att_id = str(uuid.uuid4())
@@ -214,7 +231,7 @@ def register_conversation_routes(
         att = db.add_attachment(
             att_id,
             conv_id,
-            body.name,
+            name,
             body.adapter,
             command,
             cwd,
@@ -222,7 +239,7 @@ def register_conversation_routes(
             start_after_history=True,
         )
         if update_argv:
-            await apply_update(runtime.post_message, conv_id, body.name, update_argv)
+            await apply_update(runtime.post_message, conv_id, name, update_argv)
         return await s._start_attachment(att)
 
     globals().update(

@@ -36,6 +36,7 @@ from .hierarchy_contracts import (
     Report,
     ReportIn,
 )
+from .line_worktree import describe, place_child
 from .machine_scope import capability_state, deny_unless, is_human
 from .reports import (
     ReportError,
@@ -166,6 +167,10 @@ def hierarchy_router(runtime) -> APIRouter:
             conv = create_child_conversation(db, conv_id, str(uuid.uuid4()), name)
         except HierarchyError as exc:
             raise _http(exc) from exc
+        placed = place_child(db, conv_id, conv["id"])
+        if where := describe(placed):
+            await runtime.post_message(conv["id"], "system", "system", where)
+        conv = db.get_conversation(conv["id"])
         goal, topic = body.goal.strip(), body.topic.strip()
         if goal or topic:
             # Born briefed: the goal rides the child manager's wakes, the topic

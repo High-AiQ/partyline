@@ -13,7 +13,7 @@ NO_GOAL = SimpleNamespace(get_conversation=lambda conv_id: {"goal": ""})
 class RoleDeliveryTests(unittest.TestCase):
     def test_live_grant_and_revocation_are_seen_once_per_change(self):
         ordinary = RoleState("implementer", "line", None, ("read", "write"))
-        manager = RoleState("lead", "line", None, ("read", "write", "create_child"))
+        manager = RoleState("lead", "line", None, ("read", "write", "assign", "create_child"))
         att = {"id": "worker", "digest_rider": lambda: "task board"}
         with patch("partyline.role_delivery.current_role", return_value=ordinary) as role:
             bind_role_delivery(NO_GOAL, att)
@@ -37,7 +37,7 @@ class RoleDeliveryTests(unittest.TestCase):
             self.assertNotIn("handoff", att["digest_rider"]().lower())
 
     def test_resumed_manager_learns_tools_without_a_new_joining_briefing(self):
-        manager = RoleState("lead", "line", "parent", ("create_child", "report"))
+        manager = RoleState("lead", "line", "parent", ("assign", "create_child", "report"))
         att = {"id": "worker", "resume": True, "digest_rider": lambda: "helper command"}
         with patch("partyline.role_delivery.current_role", return_value=manager):
             bind_role_delivery(NO_GOAL, att)

@@ -839,7 +839,7 @@ class StatusTest(HeartbeatFixture):
 
 class BriefingTest(unittest.TestCase):
     def test_only_a_root_manager_is_told_about_the_heartbeat(self):
-        actions = ["create_child", "read_reports", "report"]
+        actions = ["assign", "create_child", "read_reports", "report"]
 
         root = role_instructions(actions, ROOT, None)
         self.assertIn("POST /api/heartbeat", root)

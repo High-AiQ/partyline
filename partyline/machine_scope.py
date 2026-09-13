@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from .auth_guard import Principal
 from .db import Db
 from .hierarchy import child_ids, descendants, lead_attachment, parent_id_of
+from .line_depth import MAX_CAPTAIN_DEPTH, depth, may_create_children, sideways_attach_reason
 
 Capability = Literal[
     "read",
@@ -95,7 +96,8 @@ def allows(db: Db, principal: Principal, conv_id: str, capability: Capability) -
         # natural-language handoff — a line with no captain waits for a person.
         return _home_lead_tree(db, principal, conv_id)
     if capability == "create_child":
-        return principal.is_lead and conv_id == home
+        # People are never boxed by the depth cap; machines stop at it.
+        return principal.is_lead and conv_id == home and may_create_children(db, home)
     if capability in ("report", "notify"):
         return principal.is_lead and conv_id == home and bool(parent_id_of(conv))
     if capability == "read_reports":
@@ -150,6 +152,15 @@ def deny_unless(
         raise HTTPException(403, "this credential cannot act on that line")
 
 
+def deny_sideways_attach(db: Db, principal: Principal, conv_id: str) -> None:
+    """A machine staffs child lines, not a line that already has them."""
+    if is_human(principal):
+        return
+    reason = sideways_attach_reason(db, conv_id)
+    if reason:
+        raise HTTPException(403, reason)
+
+
 def deny_archive_if_children(db: Db, conv_id: str) -> None:
     if child_ids(db, conv_id):
         raise HTTPException(409, "unlink or archive child lines first")
@@ -194,4 +205,6 @@ def capability_state(db: Db, principal: Principal, conv_id: str | None = None) -
         "parent_id": parent_id_of(home),
         "target_conv_id": target,
         "actions": actions,
+        "depth": depth(db, target) if target and db.get_conversation(target) else 0,
+        "max_depth": MAX_CAPTAIN_DEPTH,
     }
