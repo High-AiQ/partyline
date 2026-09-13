@@ -44,7 +44,6 @@ class LifecycleTest(unittest.TestCase):
             statusing=lambda conv, ident, callback, name: callback,
             watch=lambda adapter, *args: adapter,
         )
-        self.tasks = SimpleNamespace(rider=lambda _: "current tasks")
         self.hook_url = lambda ident, owner: f"hook/{ident}/{owner}"
         app = FastAPI()
         install_auth_guard(app, self.db)
@@ -103,7 +102,7 @@ class LifecycleTest(unittest.TestCase):
 
     async def start(self, att, **kwargs):
         return await start_attachment(
-            att, runtime=self.runtime, presence=self.presence, tasks=self.tasks,
+            att, runtime=self.runtime, presence=self.presence,
             make_adapter=self.factory, hook_url=self.hook_url,
             **kwargs,
         )
@@ -127,7 +126,7 @@ class LifecycleTest(unittest.TestCase):
         adapter = self.adapters[-1]
         self.assertNotEqual(adapter.att["api_token"], self.old_token)
         self.assertNotIn("resume", adapter.att)
-        self.assertEqual(adapter.att["digest_rider"](), "current tasks")
+        self.assertEqual(adapter.att["digest_rider"](), "")
         self.assertIn(old_message, self.db.list_messages("line"))
         events = [call.args[1].model_dump() for call in self.runtime.broadcast.call_args_list]
         self.assertIn({"type": "attachment_removed", "attachment_id": "old",

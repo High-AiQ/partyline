@@ -4,7 +4,7 @@ Three fleet trials in, the only state a root manager ever had to hold in its
 head was the goal — and the heartbeat's whole failure was that it reminded
 the manager of the clock instead. The goal is recorded once, by the person
 or by the manager when the person states it, and rides the manager's digest
-rider next to the open tasks until it is cleared. Ordinary participants do
+rider until it is cleared. Ordinary participants do
 not receive it: the line's topic is the standing context for everyone, the
 goal is the manager's charge.
 """

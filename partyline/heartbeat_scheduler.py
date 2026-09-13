@@ -163,19 +163,9 @@ def _stay_quiet(runtime, row: dict, now: float) -> bool:
     if heartbeat_snapshot.is_actionable(snapshot):
         return False
     digest = heartbeat_snapshot.canonical_hash(snapshot)
-    unchanged = digest == row["snapshot_hash"]
-    # The stall test comes *before* the skip is recorded. Recording it first
-    # would move `next_due_at` into the future, and the post that this very
-    # branch is deciding to allow would then be refused as not yet due — the
-    # alarm could never fire.
-    if (
-        unchanged
-        and row["quiet_wakes"] + 1 >= heartbeat_snapshot.STALL_AFTER_QUIET
-        and heartbeat_snapshot.stalled_lines(snapshot)
-    ):
-        return False
-    # Changed but not actionable, or unchanged and not yet stalled: record the
-    # digest so an identical state stays quiet, and spend no turn.
+    # Changed but not actionable, or unchanged: record the digest so an
+    # identical state stays quiet, and spend no turn. (The old stall alarm
+    # keyed on open tasks; the return path now reports a stopped worker.)
     heartbeat_wake.record_quiet_skip(runtime.db, _next_due(row, now), digest)
     return True
 

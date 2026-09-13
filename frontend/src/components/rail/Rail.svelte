@@ -13,7 +13,6 @@
   import DeleteLineDialog from "../dialogs/DeleteLineDialog.svelte";
   import PurgeLineDialog from "../dialogs/PurgeLineDialog.svelte";
   import StopServerDialog from "../dialogs/StopServerDialog.svelte";
-  import ClaimsDialog from "../dialogs/ClaimsDialog.svelte";
   import CloseProcessesDialog from "../dialogs/CloseProcessesDialog.svelte";
   import { tooltip } from "../../lib/tooltip";
 
@@ -47,10 +46,6 @@
     dialogs.open(CloseProcessesDialog, { conversation });
   }
 
-  function showClaims(conversation: Conversation): void {
-    dialogs.open(ClaimsDialog, { conversation });
-  }
-
   function purgeLine(conversation: Conversation): void {
     dialogs.open(PurgeLineDialog, { conversation });
   }
@@ -76,7 +71,6 @@
   <ConversationList
     onmanagement={manageLine}
     onrename={renameLine}
-    onclaims={showClaims}
     oncloseprocesses={closeProcesses}
     ondelete={deleteLine}
   />

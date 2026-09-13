@@ -20,8 +20,6 @@ from partyline.hierarchy_routes import hierarchy_router
 from partyline.media import MediaStore
 from partyline.media_routes import media_router
 from partyline.runtime import ChatRuntime
-from partyline.task_routes import task_router
-from partyline.tasks import TaskStore
 from partyline.conversation_routes import register_conversation_routes
 
 
@@ -39,19 +37,17 @@ class HierarchyApiTest(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.db = Db(f"{self.directory.name}/partyline.db")
         self.runtime = ChatRuntime(self.db)
-        self.store = TaskStore(self.db)
         self.media = MediaStore(self.db, self.directory.name + "/media")
         app = FastAPI()
         install_auth_guard(app, self.db)
         app.include_router(hierarchy_router(self.runtime))
-        app.include_router(task_router(self.runtime, self.store))
         app.include_router(media_router(self.runtime, self.media))
 
         async def fake_start(att, **kwargs):
             return {"id": att["id"], "name": att["name"], "status": att["status"]}
 
         register_conversation_routes(
-            app, self.runtime, self.media, None, self.store, {}, {}, fake_start
+            app, self.runtime, self.media, None, {}, {}, fake_start
         )
         self.client = TestClient(app)
         self.parent = self.db.create_conversation("parent", "Parent")
@@ -219,7 +215,7 @@ class HierarchyApiTest(unittest.TestCase):
             "/api/conversations/parent/lead", json={"attachment_id": None}
         )
         denied = self.client.get(
-            f"/api/conversations/{child_id}/tasks", headers=self.lead
+            f"/api/conversations/{child_id}", headers=self.lead
         )
         self.assertEqual(denied.status_code, 403)
 
@@ -240,16 +236,6 @@ class HierarchyApiTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 201)
         self.assertEqual(ws.sent, [{"type": "conversations_changed"}])
-
-    def test_implementer_cannot_use_another_line_task_id(self):
-        other = self.db.create_conversation("other", "Other")
-        task = self.store.add(other["id"], "secret")
-        patched = self.client.patch(
-            f"/api/tasks/{task['id']}",
-            json={"status": "done"},
-            headers=self.impl,
-        )
-        self.assertEqual(patched.status_code, 403)
 
     def test_implementer_cannot_post_media_on_an_unrelated_line(self):
         self.db.create_conversation("other", "Other")
@@ -921,12 +907,12 @@ class HierarchyApiTest(unittest.TestCase):
         self.assertEqual(listed.json()[0]["id"], created["id"])
         self.assertEqual(
             self.client.get(
-                f"/api/conversations/{created['id']}/tasks", headers=self.lead
+                f"/api/conversations/{created['id']}", headers=self.lead
             ).status_code,
             200,
         )
         hidden = self.client.get(
-            f"/api/conversations/{created['id']}/tasks", headers=self.impl
+            f"/api/conversations/{created['id']}", headers=self.impl
         )
         self.assertEqual(hidden.status_code, 403)
 

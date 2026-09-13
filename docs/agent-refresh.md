@@ -36,8 +36,8 @@ Use the attachment's delivery cursor as a candidate checkpoint boundary only aft
 all delivered messages. Do not substitute the conversation's newest message id: it can include
 instructions the outgoing agent has never received.
 
-The task board currently identifies assignees by handle; record the replacement attachment id in
-its checkpoint/claim receipt rather than assuming that reusing a handle proves process identity.
+Record the replacement attachment id in its checkpoint receipt rather than assuming that
+reusing a handle proves process identity.
 
 ## HTTP contract
 

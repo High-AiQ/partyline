@@ -1185,22 +1185,6 @@ class QuietSnapshotTest(HeartbeatFixture):
         ]
         self.assertIn("first", [agent["attachment_id"] for agent in listed])
 
-    async def test_a_silent_line_holding_open_work_eventually_raises_an_alarm(self):
-        from partyline.hierarchy import create_child_conversation
-        from partyline.tasks import TaskStore
-
-        self.enable()
-        create_child_conversation(self.db, ROOT, "child", "Child")
-        TaskStore(self.db).add("child", "render the covers", owner="worker")
-
-        posted = None
-        for _ in range(heartbeat_snapshot.STALL_AFTER_QUIET + 1):
-            posted = posted or await self.tick(heartbeat.DEFAULT_INTERVAL)
-
-        self.assertIsNotNone(posted, "silence with assigned work is the stall")
-        self.assertEqual(
-            heartbeat.status(self.db)["quiet_wakes"], 0, "the counter reset"
-        )
 
     async def test_a_silent_line_with_no_open_work_never_alarms(self):
         from partyline.hierarchy import create_child_conversation
@@ -1208,7 +1192,7 @@ class QuietSnapshotTest(HeartbeatFixture):
         self.enable()
         create_child_conversation(self.db, ROOT, "child", "Child")
 
-        for _ in range(heartbeat_snapshot.STALL_AFTER_QUIET * 3):
+        for _ in range(18):  # long past any former stall threshold
             self.assertIsNone(await self.tick(heartbeat.DEFAULT_INTERVAL))
 
     async def test_quiet_can_be_switched_off(self):

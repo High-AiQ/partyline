@@ -18,7 +18,7 @@ def note_phase(db, att_id: str, phase: str) -> None:
     a process that exits mid-turn is announced idle too, and an orderly
     shutdown announced every live process idle a second before killing it —
     which wiped the very mark the resume needed. Only `ended` clears."""
-    if db is not None and phase in WORKING_PHASES:
+    if hasattr(db, "_exec") and phase in WORKING_PHASES:
         db._exec("UPDATE attachments SET turn_open=1 WHERE id=?", (att_id,))
 
 
@@ -29,8 +29,8 @@ def was_interrupted(db, att_id: str) -> bool:
 
 def clear(db, att_id: str) -> None:
     """The harness reported the turn ended, or a resume consumed the mark."""
-    if db is None:
-        return
+    if not hasattr(db, "_exec"):
+        return  # a test double without a database has no mark to keep
     db._exec("UPDATE attachments SET turn_open=0 WHERE id=?", (att_id,))
 
 
