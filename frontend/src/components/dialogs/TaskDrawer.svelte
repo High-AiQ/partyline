@@ -7,6 +7,7 @@
   import { room } from "../../state/room.svelte.js";
   import { session } from "../../state/session.svelte.js";
   import TaskCard from "./TaskCard.svelte";
+  import { tooltip } from "../../lib/tooltip";
 
   interface Props {
     close: () => void;
@@ -126,9 +127,9 @@
         <h2 class="font-serif text-[24px] leading-[1.1] font-normal italic text-cream">line tasks</h2>
       </div>
       <button
-        class="h-[44px] w-[44px] border-0 bg-transparent p-0 hover:bg-transparent hover:text-red"
+        class="h-[44px] w-[44px] border-0 bg-transparent p-0 hover:bg-red hover:text-ink"
         type="button"
-        title="close"
+        use:tooltip={{ label: "close" }}
         aria-label="close tasks"
         onclick={close}>✕</button
       >

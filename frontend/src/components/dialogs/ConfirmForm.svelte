@@ -19,6 +19,8 @@
     oncancel: () => void;
   }
 
+  import { tooltip } from "../../lib/tooltip";
+
   let { phrase = null, label, prompt, busyLabel = "working…", onconfirm, oncancel }: Props = $props();
 
   let typed = $state("");
@@ -52,6 +54,12 @@
   {/if}
   <div class="line-actions">
     <button type="button" onclick={oncancel}>cancel</button>
-    <button class="danger" type="submit" disabled={!armed || busy}>{busy ? busyLabel : label}</button>
+    <button
+      class="danger"
+      type="submit"
+      disabled={!armed || busy}
+      use:tooltip={{ label: armed ? label : `type ${phrase ?? "the required text"} exactly to continue` }}
+      >{busy ? busyLabel : label}</button
+    >
   </div>
 </form>

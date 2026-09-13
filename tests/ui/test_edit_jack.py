@@ -33,7 +33,7 @@ class EditJackTest(unittest.TestCase):
             jack = page.locator(".jack").filter(has_text="worker")
             jack.wait_for(state="visible")
 
-            edit = jack.locator("button[title='change the command used on next resume']")
+            edit = jack.locator(".edit-btn")
             self.assertEqual(edit.count(), 0, "a live jack must not offer command editing")
 
             detached = page.request.delete(

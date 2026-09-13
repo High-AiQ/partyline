@@ -8,6 +8,7 @@
    * clock so decay re-evaluates without wire traffic.
    */
   import { badgeTreatment } from "../../lib/presence-badge";
+  import { tooltip } from "../../lib/tooltip";
   import type { PresenceEntry } from "../../state/presence.svelte.js";
 
   interface Props {
@@ -35,7 +36,7 @@
     class:text-green={badge.tone !== "copper"}
     class:text-copper={badge.tone === "copper"}
     role="status"
-    title={badge.tooltip || undefined}
+    use:tooltip={{ label: badge.tooltip || undefined }}
     ><span
       class={badge.dot === "hollow"
         ? "h-[5px] w-[5px] rounded-full bg-transparent border border-current shadow-none"

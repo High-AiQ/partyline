@@ -2,6 +2,7 @@
   /** Compact authenticated-user controls that stay reachable on mobile. */
   import { dialogs } from "../../state/dialogs.svelte.js";
   import { session } from "../../state/session.svelte.js";
+  import { tooltip } from "../../lib/tooltip";
   import ChangeHandleDialog from "../dialogs/ChangeHandleDialog.svelte";
 </script>
 
@@ -9,7 +10,7 @@
   <button
     class="handle max-w-[150px] truncate px-[9px] py-0 text-copper-hot min-h-[34px]"
     type="button"
-    title="change handle"
+    use:tooltip={{ label: "change handle" }}
     aria-label="change handle, currently {session.handle}"
     onclick={() => dialogs.open(ChangeHandleDialog)}>@{session.handle}</button
   >

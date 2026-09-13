@@ -9,6 +9,7 @@
    */
   import LineMenu from "./LineMenu.svelte";
   import { orderedLines } from "../../lib/line-hierarchy";
+  import { tooltip } from "../../lib/tooltip";
   import type { Conversation } from "../../lib/contracts";
   import { room } from "../../state/room.svelte";
 
@@ -53,7 +54,7 @@
           : 'bg-transparent text-cream-dim group-hover:bg-ink-3 group-hover:text-cream group-focus-within:bg-ink-3 group-focus-within:text-cream group-[.menu-open]:bg-ink-3 group-[.menu-open]:text-cream'}"
         class:active={room.conversation?.id === conversation.id}
         style:padding-left="{20 + Math.min(depth, 4) * 16}px"
-        title={conversation.topic || undefined}
+        use:tooltip={{ label: conversation.topic || `open line ${conversation.name}` }}
         onclick={() => room.open(conversation)}
       >
         {#if depth > 0}<span class="text-cream-faint" aria-label="child line">↳</span>{/if}
@@ -61,7 +62,7 @@
         {#if conversation.live_count > 0}
           <span
             class="line-live inline-flex flex-none"
-            title="{conversation.live_count} live"
+            use:tooltip={{ label: `${String(conversation.live_count)} live` }}
             aria-label="{conversation.live_count} live"
             ><span class="led running" aria-hidden="true"></span></span
           >
@@ -71,9 +72,9 @@
         class="conv-actions absolute top-1/2 right-2 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto group-[.menu-open]:opacity-100 group-[.menu-open]:pointer-events-auto"
       >
         <button
-          class="conv-more size-11 bg-ink-2 p-0 text-[16px] leading-none text-cream-faint hover:bg-copper hover:text-ink aria-expanded:bg-copper aria-expanded:text-ink"
+          class="conv-more size-8 bg-ink-2 p-0 text-[15px] leading-none text-cream-faint hover:bg-copper hover:text-ink aria-expanded:bg-copper aria-expanded:text-ink"
           type="button"
-          title="line actions"
+          use:tooltip={{ label: "line actions" }}
           aria-label="line actions for {conversation.name}"
           aria-expanded={open}
           onclick={(event) => {

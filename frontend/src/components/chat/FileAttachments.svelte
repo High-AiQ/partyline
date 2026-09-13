@@ -8,6 +8,7 @@
   import { downloadFile, fileLabel, humanSize } from "../../lib/files";
   import { authenticatedResourceUrl } from "../../lib/socket-auth";
   import type { FileRef } from "../../lib/contracts";
+  import { tooltip } from "../../lib/tooltip";
 
   interface Props {
     files: FileRef[];
@@ -64,7 +65,7 @@
         class="card grid items-center gap-2.5 overflow-hidden rounded-md border border-line bg-ink-2 px-2.5 py-2 [grid-template-columns:24px_minmax(0,1fr)_auto_auto]"
       >
         <span class="text-center text-[15px]" aria-hidden="true">📎</span>
-        <span class="truncate text-xs text-cream" title={fileLabel(file, index)}
+        <span class="truncate text-xs text-cream" use:tooltip={{ label: fileLabel(file, index) }}
           >{fileLabel(file, index)}</span
         >
         <span class="truncate text-[10px] text-cream-faint">{file.mime} · {humanSize(file.bytes)}</span>
