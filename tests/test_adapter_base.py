@@ -15,7 +15,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-os.environ.setdefault("PARTYLINE_DB", "/tmp/partyline-test-adapter-base.db")
 
 from partyline.adapters.base import Adapter
 from partyline.adapters.briefing import child_env

@@ -1,11 +1,9 @@
 """Lifecycle coverage for lines that have been archived."""
 
 import asyncio
-import os
 import tempfile
 import unittest
 
-os.environ.setdefault("PARTYLINE_DB", "/tmp/partyline-test-import.db")
 
 from fastapi import WebSocketDisconnect
 
