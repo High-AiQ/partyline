@@ -276,6 +276,24 @@ class HierarchyApiTest(unittest.TestCase):
         archived = self.client.delete("/api/conversations/parent")
         self.assertEqual(archived.status_code, 409)
 
+    def test_a_person_can_archive_the_whole_tree_deepest_first(self):
+        kid = self.client.post("/api/conversations/parent/children", json={"name": "Kid"},
+                               headers=self.lead).json()["conversation"]
+        grandkid = self.client.post(f"/api/conversations/{kid['id']}/children",
+                                    json={"name": "Grandkid"}).json()["conversation"]
+        self.db.add_attachment("gk-att", grandkid["id"], "luna", "fake", ["fake"], "/tmp")
+        self.runtime.live["gk-att"] = SimpleNamespace(stop=self._noop)
+        archived = self.client.delete("/api/conversations/parent?include_children=true")
+        self.assertEqual(archived.status_code, 200, archived.text)
+        body = archived.json()
+        self.assertEqual(body["archived_ids"], [grandkid["id"], kid["id"], "parent"])
+        self.assertEqual(body["stopped"], ["luna"])
+        for line_id in body["archived_ids"]:
+            self.assertIsNotNone(self.db.get_conversation(line_id)["archived_at"])
+
+    async def _noop(self):
+        return None
+
     def test_reports_do_not_wake_and_are_parent_pulled(self):
         child = self.client.post(
             "/api/conversations/parent/children",

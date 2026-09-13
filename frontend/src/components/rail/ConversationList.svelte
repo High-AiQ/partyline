@@ -54,7 +54,7 @@
           : 'bg-transparent text-cream-dim group-hover:bg-ink-3 group-hover:text-cream group-focus-within:bg-ink-3 group-focus-within:text-cream group-[.menu-open]:bg-ink-3 group-[.menu-open]:text-cream'}"
         class:active={room.conversation?.id === conversation.id}
         style:padding-left="{20 + Math.min(depth, 4) * 16}px"
-        use:tooltip={{ label: conversation.topic || `open line ${conversation.name}` }}
+        use:tooltip={{ label: conversation.name }}
         onclick={() => room.open(conversation)}
       >
         {#if depth > 0}<span class="text-cream-faint" aria-label="child line">↳</span>{/if}

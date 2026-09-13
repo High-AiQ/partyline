@@ -11,6 +11,7 @@
   import { ApiError, api } from "../../lib/api";
   import { isLive } from "../../lib/attachments";
   import type { Attachment, Conversation } from "../../lib/contracts";
+  import { descendantLineIds } from "../../lib/line-hierarchy";
   import { room } from "../../state/room.svelte.js";
 
   interface Props {
@@ -27,12 +28,16 @@
   let warning = $state(false);
   let warned = $state(false);
   let warnError = $state("");
+  // Child lines cannot be left behind by an archived parent, so a root with
+  // children offers the whole tree in one checkbox instead of a refusal.
+  const childIds = $derived(descendantLineIds(conversation.id, room.conversations));
+  let includeChildren = $state<boolean>(false);
 
   $effect(() => {
-    api
-      .conversation(conversation.id)
-      .then((detail) => {
-        live = detail.attachments.filter(isLive);
+    const targetIds = includeChildren ? [conversation.id, ...childIds] : [conversation.id];
+    Promise.all(targetIds.map((id) => api.conversation(id)))
+      .then((details) => {
+        live = details.flatMap((detail) => detail.attachments.filter(isLive));
       })
       .catch(() => {
         failed = true;
@@ -59,7 +64,7 @@
   }
 
   async function remove() {
-    await api.archiveConversation(conversation.id);
+    await api.archiveConversation(conversation.id, includeChildren);
     close();
     if (room.conversation?.id === conversation.id) room.leave();
     await room.loadConversations();
@@ -76,6 +81,16 @@
     <p class="dialog-text">
       Deleting this line removes it from the sidebar and stops its attached processes.
     </p>
+
+    {#if childIds.length}
+      <label class="dialog-check">
+        <input type="checkbox" bind:checked={includeChildren} />
+        also delete its {childIds.length} child line{childIds.length === 1 ? "" : "s"} and stop their processes
+      </label>
+      {#if !includeChildren}
+        <div class="dialog-note">child lines must be deleted or unlinked first</div>
+      {/if}
+    {/if}
 
     <div class="live-list">
       {#if live.length}

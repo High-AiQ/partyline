@@ -243,6 +243,17 @@
   .dialog-text {
     color: var(--color-cream-dim);
   }
+  .dialog-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--color-cream-dim);
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .dialog-check input {
+    accent-color: var(--color-copper);
+  }
 
   .override-badge {
     flex: none;
