@@ -54,8 +54,9 @@ def register_goal_route(app: FastAPI, runtime) -> None:
     async def put_goal(request: Request, conv_id: str, body: GoalIn):
         db = runtime.db
         principal = request_principal(request)
-        # Managers own the goal of their line; a person may set any line's.
-        deny_unless(db, principal, conv_id, "create_child")
+        # The line's captain, a captain above it, or a person. Not create_child:
+        # a leaf captain has no children to create and still owns its goal.
+        deny_unless(db, principal, conv_id, "assign")
         conv = db.get_conversation(conv_id)
         if conv is None:
             raise HTTPException(404)

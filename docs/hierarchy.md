@@ -62,6 +62,12 @@ inherits the parent's directory. A machine attaching a process to a line cannot
 choose another directory: the process works where the line works. A person may.
 Purging a line drops its worktree; the branch stays.
 
+A parent line whose directory is not a repository gets one initialized (one empty root
+commit) before its first child is placed, so a project started in a blank directory still
+gives every child its own worktree. A file attached to a message that is relayed to a
+process is readable by that process, and only that one, even though the file lives on the
+line it was posted to; a captain briefed with a document does not need it copied to disk.
+
 Work goes down, not sideways. Once a line has a child, a machine may no longer
 attach processes to that line: the root captain that could not staff a child
 otherwise hands the job to a sibling on the root line, in the checkout the

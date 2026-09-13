@@ -63,6 +63,7 @@ from __future__ import annotations
 
 import asyncio
 
+from .hierarchy import descendants
 from .mention_relay import LIVE, is_foreign, post_private, reaches_a_process, speaker_attachment
 from .mentions import addressees, line_addressed, mentioned_names
 
@@ -221,7 +222,10 @@ class ReturnPath:
         if finisher["conv_id"] != on_line:
             line = self.runtime.db.get_conversation(finisher["conv_id"]) or {}
             where = f" on line «{line.get('name', '?')}»"
-            if since_id is not None:  # everything since the wake, in one call
+            # A child captain rung from above cannot read the parent line; a
+            # pointer it will only get 403 from is worse than none.
+            readable = finisher["conv_id"] in descendants(self.runtime.db, on_line)
+            if since_id is not None and readable:  # everything since the wake, in one call
                 pointer = (f". Read it all: GET /api/conversations/{finisher['conv_id']}"
                            f"/messages?after_id={since_id - 1}")
         tail = f"; last said: «{excerpt(said)}»"
