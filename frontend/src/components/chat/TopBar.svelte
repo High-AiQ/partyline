@@ -15,6 +15,7 @@
   import TaskDrawer from "../dialogs/TaskDrawer.svelte";
   import AccountMenu from "./AccountMenu.svelte";
   import ColumnToggle from "./ColumnToggle.svelte";
+  import { tooltip } from "../../lib/tooltip";
 
   const topic = $derived((room.conversation?.topic ?? "").trim());
   /** Live jacks only: the badge answers "is anything running", not "how many
@@ -28,7 +29,7 @@
   <button
     class="drawer-toggle lines hidden"
     type="button"
-    title="lines"
+    use:tooltip={{ label: "lines" }}
     aria-label="show lines"
     aria-expanded={layout.drawer === "rail"}
     onclick={() => {
@@ -50,9 +51,11 @@
         : 'text-cream-faint'}"
       class:unset={!topic}
       type="button"
-      title={topic
-        ? `${topic}\n\n(click to edit)`
-        : "give this line a topic — agents get it in their briefing"}
+      use:tooltip={{
+        label: topic
+          ? `${topic}\n\n(click to edit)`
+          : "give this line a topic — agents get it in their briefing",
+      }}
       onclick={() => dialogs.open(TopicDialog)}>{topic || "set a topic…"}</button
     >
   {/if}
@@ -61,7 +64,7 @@
     <button
       class="task-toggle inline-flex h-[34px] flex-none items-center gap-1.5 px-2.5"
       type="button"
-      title="shared line tasks"
+      use:tooltip={{ label: "shared line tasks" }}
       aria-label="open shared line tasks"
       onclick={() => dialogs.open(TaskDrawer)}
     >
@@ -80,7 +83,7 @@
   <button
     class="drawer-toggle jacks hidden"
     type="button"
-    title="processes on this line"
+    use:tooltip={{ label: "processes on this line" }}
     aria-label="show processes on this line"
     aria-expanded={layout.drawer === "board"}
     onclick={() => {

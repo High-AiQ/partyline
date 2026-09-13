@@ -8,6 +8,7 @@
   import { ApiError, api } from "../../lib/api";
   import type { Conversation } from "../../lib/contracts";
   import { room } from "../../state/room.svelte";
+  import { tooltip } from "../../lib/tooltip";
 
   interface Props {
     onpurge: (conversation: Conversation) => void;
@@ -80,14 +81,14 @@
         <div
           class="archive-row mb-[3px] flex items-center gap-[7px] rounded border border-cream-faint/45 p-[5px] px-2 text-cream-faint"
         >
-          <span class="name min-w-0 flex-1 truncate text-[10.5px]" title={conversation.name}
+          <span class="name min-w-0 flex-1 truncate text-[10.5px]" use:tooltip={{ label: conversation.name }}
             >{conversation.name}</span
           >
           <div class="archive-actions flex shrink-0 gap-1">
             <button
               type="button"
               class="restore border-green/35 px-1.5 py-1 text-[9.5px] text-green"
-              title="restore this line"
+              use:tooltip={{ label: "restore this line" }}
               disabled={restoring === conversation.id}
               onclick={() => restore(conversation)}
               >{restoring === conversation.id ? "restoring…" : "restore"}</button
@@ -95,7 +96,7 @@
             <button
               type="button"
               class="purge border-red/35 px-1.5 py-1 text-[9.5px] text-red"
-              title="permanently delete this line"
+              use:tooltip={{ label: "permanently delete this line" }}
               onclick={() => {
                 onpurge(conversation);
               }}>delete forever</button

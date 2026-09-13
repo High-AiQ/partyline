@@ -2,6 +2,7 @@
   /** A desktop side-column control that remains in the line when its panel leaves. */
   import { layout } from "../../state/layout.svelte.js";
   import type { DrawerName } from "../../state/layout.svelte.js";
+  import { tooltip } from "../../lib/tooltip";
 
   interface Props {
     side: DrawerName;
@@ -17,7 +18,7 @@
 <button
   class="column-toggle flex h-[34px] flex-none items-center justify-center gap-1.5 bg-ink-2 px-[9px] {toggleClass}"
   type="button"
-  title={collapsed ? `show ${noun}` : `hide ${noun}`}
+  use:tooltip={{ label: collapsed ? `show ${noun}` : `hide ${noun}` }}
   aria-label={collapsed ? `show ${noun}` : `hide ${noun}`}
   aria-controls={side}
   aria-expanded={!collapsed}

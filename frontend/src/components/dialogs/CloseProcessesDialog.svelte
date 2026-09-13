@@ -69,7 +69,7 @@
     </div>
 
     <ConfirmForm
-      phrase={live.length ? conversation.name : null}
+      phrase={conversation.name}
       prompt="type the line name to confirm"
       label="close processes"
       busyLabel="closing…"

@@ -5,6 +5,7 @@
    * behave alike without three people keeping them in step.
    */
   import type { Snippet } from "svelte";
+  import { tooltip } from "../lib/tooltip";
 
   interface Props {
     title: string;
@@ -45,9 +46,9 @@
     >
       <h2 class="font-serif text-[20px] font-normal text-cream italic">{title}</h2>
       <button
-        class="close size-11 cursor-pointer border-0 bg-transparent p-0 text-[14px] text-cream-faint hover:bg-transparent hover:text-red"
+        class="close size-11 cursor-pointer border-0 bg-transparent p-0 text-[14px] text-cream-faint hover:bg-red hover:text-ink"
         type="button"
-        title="close"
+        use:tooltip={{ label: "close" }}
         aria-label="close"
         onclick={close}>✕</button
       >
