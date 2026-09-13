@@ -28,7 +28,13 @@ class TurnMarkerTest(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(was_interrupted(db, "busy"))
                 await presence.spoke("line", "busy")
                 self.assertTrue(was_interrupted(db, "busy"))
+                # The process going away (exit, or an orderly shutdown) is not
+                # the turn ending: the mark must survive to the resume.
                 await presence.finished("line", "busy")
+                self.assertTrue(was_interrupted(db, "busy"))
+                await presence.started("line", "busy")
+                await presence.began("line", "busy")
+                await presence.ended("line", "busy")
                 self.assertFalse(was_interrupted(db, "busy"))
             finally:
                 server.runtime, server.presence, server.media = saved
