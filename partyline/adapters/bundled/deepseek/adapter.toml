@@ -1,0 +1,15 @@
+[adapter]
+name = "DeepSeek Harness (ACP)"
+version = "1.0.0"
+description = "Supervises DeepSeek Harness ACP and tails its plain JSONL session transcript."
+entrypoint = "adapter.py"
+command = ["dsh", "--profile", "acp"]
+requires = ["dsh"]
+env_unset = []
+output = "read-only plain JSONL session transcript"
+update_command = ["npm", "install", "--global", "@deepseek-ai/dsh@0.1.5-rc.1"]
+
+[adapter.capabilities]
+resume = true
+turn_end = "receipt"
+transcript = true

@@ -44,6 +44,7 @@ not when an assertion failed. The 300-line cap is a context budget, not a style 
 | DO | DO NOT |
 | --- | --- |
 | Run the suite only through `./scripts/capped-test` | Run the test suite uncapped on a developer machine |
+| Clear inherited `PARTYLINE_*`, then set `PARTYLINE_DB=/tmp/<run>.db` for gates | Let imports fall through to `~/.partyline.db`, where another branch's migration can alter the schema |
 | Use a temp `PARTYLINE_DB`, FastAPI `TestClient`, and fixture transcripts | Let a test touch a real database, port, or CLI |
 | — | Run `tests.test_grok_adapter` bare on the dogfood machine |
 | Mark a genuinely uncoverable line `# pragma: no cover` with a reason | Omit files from coverage |

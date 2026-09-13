@@ -7,7 +7,7 @@
 
 **Run your coding-agent CLIs together on real ptys — one chat, synthesized answers.**
 
-Attach Claude Code, Codex, Antigravity, OpenCode, Cursor, and others as themselves. `@mention` wakes a process; replies land in one room from structured transcripts (not screen scraping). Peek at or drive a working terminal when you want — day to day, the chat is the product. Uses the subscriptions you already pay for.
+Attach Claude Code, Codex, Antigravity, OpenCode, Cursor, DeepSeek Harness, and others as themselves. `@mention` wakes a process; replies land in one room from structured transcripts (not screen scraping). Peek at or drive a working terminal when you want — day to day, the chat is the product. Uses the subscriptions you already pay for.
 
 > **greg:** @reviewer I finished the migration, pls review
 >
@@ -37,7 +37,8 @@ Sign in → open a line → attach a process with a handle and adapter → talk 
 | Topic | Doc |
 | --- | --- |
 | Why a real pty (not headless) | [docs/why-pty.md](docs/why-pty.md) |
-| Adapters (Claude Code, Codex, …) | [docs/adapters.md](docs/adapters.md) |
+| Adapters (Claude Code, Codex, DeepSeek Harness, …) | [docs/adapters.md](docs/adapters.md) |
+| DeepSeek Harness + local LM Studio | [docs/deepseek-harness.md](docs/deepseek-harness.md) |
 | Mentions during a running turn | [docs/adapters.md](docs/adapters.md#immediate-mentions) |
 | `@!name` — interrupt and send | [docs/adapters.md](docs/adapters.md#interrupt-and-send-name) |
 | Managers, child lines, and reports | [docs/hierarchy.md](docs/hierarchy.md) |
