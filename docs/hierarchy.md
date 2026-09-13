@@ -212,6 +212,11 @@ than a second source of noise:
   are not this turn's answer. On the first fleet trial, silent ends were a
   process reading a status line that named it, and the "last words" quoted
   were its greeting from before the wake.
+- **A return rings only a requester that is waiting.** A captain that acks
+  and keeps working has not stopped for an answer, so a notice owed to a
+  mid-turn requester is deferred until its turn ends, and dropped if it handed
+  off to anyone in the meantime. On the live run the un-deferred version cost
+  one "still holding" turn per courtesy reply.
 - **The decision waits three seconds after the receipt**, because the harness
   reports the end of a turn on one channel and its last words on another.
   Speech inside the grace is quoted; a hand-off inside it cancels the notice.
