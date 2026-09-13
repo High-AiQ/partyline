@@ -26,15 +26,17 @@ MAX_PIXELS = 50_000_000
 MAX_TITLE = 200
 MAX_DESCRIPTION = 2000
 
-# The two derived tiers, both webp: one codec family for everything derived,
-# ~25-35% smaller than jpeg at the same perceptual quality, and alpha survives
-# — a transparent PNG would need a matte colour invented for it under jpeg.
+# The two derived tiers are jpeg, or png when the source has alpha. They were
+# webp — smaller at equal quality — until a local vision model's server (LM
+# Studio) refused a webp data URL outright: a process fetched the thumb, as
+# the briefing tells it to, and could not show it to its own model. Every
+# vision endpoint accepts jpeg and png; the bytes saved were not worth an
+# image a model cannot read.
 THUMB_MAX_EDGE = 512
 SLIM_MAX_EDGE = 1600
-DERIVED_QUALITY = 80
-DERIVED_MIME = "image/webp"
-THUMB_SUFFIX = "_thumb.webp"
-SLIM_SUFFIX = "_slim.webp"
+DERIVED_QUALITY = 85
+THUMB_SUFFIX = "_thumb"
+SLIM_SUFFIX = "_slim"
 
 FORMATS = {
     "PNG": ("image/png", "png"),
@@ -61,6 +63,7 @@ class Derived:
     width: int
     height: int
     suffix: str
+    mime: str
 
     @property
     def bytes(self) -> int:
@@ -105,12 +108,17 @@ def derived(image: Image.Image, max_edge: int, suffix: str) -> Derived:
     A 400px original yields a 400px thumbnail rather than a blurry 512px one:
     upscaling spends bytes to add nothing a reader can see.
     """
-    mode = "RGBA" if image.mode in ("RGBA", "LA", "PA", "P") else "RGB"
-    small = image.convert(mode)
+    alpha = image.mode in ("RGBA", "LA", "PA") or (
+        image.mode == "P" and "transparency" in image.info
+    )
+    small = image.convert("RGBA" if alpha else "RGB")
     small.thumbnail((max_edge, max_edge))  # Pillow never enlarges here
     buffer = BytesIO()
-    small.save(buffer, format="WEBP", quality=DERIVED_QUALITY, method=4)
-    return Derived(buffer.getvalue(), small.width, small.height, suffix)
+    if alpha:
+        small.save(buffer, format="PNG", optimize=True)
+        return Derived(buffer.getvalue(), small.width, small.height, suffix + ".png", "image/png")
+    small.save(buffer, format="JPEG", quality=DERIVED_QUALITY, optimize=True)
+    return Derived(buffer.getvalue(), small.width, small.height, suffix + ".jpg", "image/jpeg")
 
 
 def prepared_image(data: bytes) -> PreparedImage:

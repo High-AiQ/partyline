@@ -36,6 +36,12 @@ def png(width=8, height=8, color=(200, 30, 30)) -> bytes:
     return buffer.getvalue()
 
 
+def transparent_png(width=8, height=8) -> bytes:
+    buffer = BytesIO()
+    Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 def gif(width=8, height=8) -> bytes:
     buffer = BytesIO()
     Image.new("P", (width, height)).save(buffer, format="GIF")
@@ -119,7 +125,7 @@ class PreparationTest(unittest.TestCase):
         prepared = images.prepared_image(png(40, 20))
         self.assertEqual((prepared.width, prepared.height), (40, 20))
         for variant in (prepared.thumb, prepared.slim):
-            self.assertEqual(Image.open(BytesIO(variant.data)).format, "WEBP")
+            self.assertEqual(Image.open(BytesIO(variant.data)).format, "JPEG")
             self.assertEqual(variant.bytes, len(variant.data))
 
     def test_a_small_original_is_never_upscaled(self):
@@ -253,8 +259,8 @@ class ImageApiTest(unittest.TestCase):
         image = payload["files"][0]
         self.assertEqual(image["title"], "A chart")
         self.assertEqual(image["mime"], "image/png")
-        self.assertEqual(image["thumb"]["mime"], "image/webp")
-        self.assertEqual(image["slim"]["mime"], "image/webp")
+        self.assertEqual(image["thumb"]["mime"], "image/jpeg")
+        self.assertEqual(image["slim"]["mime"], "image/jpeg")
         self.assertGreater(image["thumb"]["bytes"], 0)
         self.assertTrue(image["urls"]["original"].startswith("http://"))
         self.assertEqual(payload["message"]["sender_type"], "human")
@@ -307,10 +313,10 @@ class ImageApiTest(unittest.TestCase):
     def test_a_large_image_gets_a_thumbnail_of_its_own(self):
         response = self.post(files=[("file", ("big.png", png(2000, 1000), "image/png"))])
         image = response.json()["files"][0]
-        self.assertEqual(image["thumb"]["mime"], "image/webp")
+        self.assertEqual(image["thumb"]["mime"], "image/jpeg")
         self.assertEqual(image["thumb"]["width"], images.THUMB_MAX_EDGE)
         served = self.client.get(f"/api/media/{image['id']}/thumb")
-        self.assertEqual(served.headers["content-type"], "image/webp")
+        self.assertEqual(served.headers["content-type"], "image/jpeg")
         self.assertEqual(Image.open(BytesIO(served.content)).width, images.THUMB_MAX_EDGE)
 
     def test_every_tier_is_served_as_its_own_file(self):
@@ -321,7 +327,7 @@ class ImageApiTest(unittest.TestCase):
         }
         self.assertEqual(served["original"].headers["content-type"], "image/png")
         for tier in ("thumb", "slim"):
-            self.assertEqual(served[tier].headers["content-type"], "image/webp")
+            self.assertEqual(served[tier].headers["content-type"], "image/jpeg")
             self.assertNotEqual(served[tier].content, served["original"].content)
             self.assertIn("immutable", served[tier].headers["cache-control"])
 
@@ -329,7 +335,7 @@ class ImageApiTest(unittest.TestCase):
         image = self.post().json()["files"][0]
         names = sorted(path.name for path in (self.root / "line").iterdir())
         self.assertEqual(names, sorted([
-            f"{image['id']}.png", f"{image['id']}_slim.webp", f"{image['id']}_thumb.webp",
+            f"{image['id']}.png", f"{image['id']}_slim.jpg", f"{image['id']}_thumb.jpg",
         ]))
 
     def test_the_digest_line_offers_all_three_tiers(self):
@@ -474,7 +480,7 @@ class ImageApiTest(unittest.TestCase):
             self.db.conn.commit()
         legacy = self.store.for_message(self.db.list_messages("line")[-1]["id"])[0]
         self.assertIsNone(legacy.thumb.bytes)
-        self.assertEqual(legacy.thumb.mime, "image/webp")
+        self.assertEqual(legacy.thumb.mime, "image/jpeg")
         self.assertEqual(
             self.client.get(f"/api/media/{image['id']}/thumb").status_code, 200
         )
@@ -573,3 +579,15 @@ class ServerWiringTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DerivedFormatTest(unittest.TestCase):
+    def test_opaque_sources_derive_jpeg_and_transparent_ones_png(self):
+        from partyline.media_images import prepared_image
+
+        opaque = prepared_image(png(600, 600))
+        self.assertEqual((opaque.thumb.mime, opaque.thumb.suffix), ("image/jpeg", "_thumb.jpg"))
+        self.assertEqual(Image.open(BytesIO(opaque.slim.data)).format, "JPEG")
+        clear = prepared_image(transparent_png(600, 600))
+        self.assertEqual((clear.thumb.mime, clear.thumb.suffix), ("image/png", "_thumb.png"))
+        self.assertEqual(Image.open(BytesIO(clear.thumb.data)).mode, "RGBA")
