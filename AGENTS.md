@@ -71,7 +71,10 @@ uv run --locked partyline                                                  # def
 PARTYLINE_DB=/tmp/<you>.db PARTYLINE_PORT=864x uv run --locked partyline   # throwaway
 ```
 
-`pkill -f partyline` matches the instance hosting your own conversation and your own shell.
+Killing by pattern-matching the word partyline across every command line (the full-cmdline
+form of pkill) matches the instance hosting your own conversation and your own shell. The
+literal command is deliberately not written here: Grok's shell guard refuses any script that
+quotes it, including a captain's brief that copied this rule.
 Find the pid that owns the port instead:
 
 ```bash
@@ -83,7 +86,7 @@ kill NNNNN
 | --- | --- |
 | Test against a throwaway database and port — one per person | Point anything at a real local database |
 | Keep secrets in `.env` | Put secrets in shell profiles, source, or commits |
-| Kill the pid that owns the port | Ever run `pkill -f partyline` |
+| Kill the pid that owns the port | Ever kill by matching the word partyline across all command lines |
 
 ## Working on partyline from inside partyline
 
