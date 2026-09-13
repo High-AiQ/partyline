@@ -19,7 +19,7 @@ from partyline.conversation_routes import register_conversation_routes
 from partyline.db import Db
 from partyline.goal import goal_rider
 from partyline.hierarchy_routes import hierarchy_router
-from partyline.line_worktree import WORKTREES_DIR, place_child, remove_for_line
+from partyline.line_worktree import WORKTREES_DIR, line_cwd, place_child, remove_for_line
 from partyline.media import MediaStore
 from partyline.runtime import ChatRuntime
 from partyline.tasks import TaskStore
@@ -161,6 +161,28 @@ class GuardrailTest(unittest.TestCase):
         remove_for_line(self.db.get_conversation("kid"))
         self.assertFalse(os.path.exists(placed["cwd"]))
         self.assertIn("line/kid", _git("branch", "--list", "line/kid", cwd=repo).stdout)
+
+    def test_an_unplaced_child_is_placed_on_its_first_machine_attach(self):
+        repo = self._repo()
+        self.db._exec("UPDATE attachments SET cwd=? WHERE id='root-lead'", (repo,))
+        self.db.create_conversation("old-kid", "old kid")  # born before placement existed
+        self.db._exec("UPDATE conversations SET parent_id='root' WHERE id='old-kid'")
+        att = self.client.post("/api/conversations/old-kid/attachments",
+                               json={"name": "grok", "adapter": "raw", "command": "sh"},
+                               headers=self.machine("root-lead"))
+        self.assertEqual(att.status_code, 200, att.text)
+        expected = os.path.join(repo, WORKTREES_DIR, "old-kid")
+        self.assertEqual(self.db.get_attachment(att.json()["id"])["cwd"], expected)
+        self.assertEqual(self.db.get_conversation("old-kid")["cwd"], expected)
+        self.assertIn("git worktree", self.db.list_messages("old-kid")[0]["body"])
+
+    def test_an_unplaced_grandchild_falls_back_to_its_ancestors_not_the_server(self):
+        self.db.create_conversation("kid", "kid")
+        self.db._exec("UPDATE conversations SET parent_id='root' WHERE id='kid'")
+        self.db.create_conversation("grandkid", "grandkid")
+        self.db._exec("UPDATE conversations SET parent_id='kid' WHERE id='grandkid'")
+        self.db.add_attachment("kid-x", "kid", "x", "fake", ["fake"], self.directory.name)
+        self.assertEqual(line_cwd(self.db, "grandkid"), self.directory.name)
 
     def test_a_child_of_a_plain_directory_inherits_it(self):
         child = self.child("root", "scratch")

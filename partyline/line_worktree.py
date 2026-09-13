@@ -18,7 +18,7 @@ import os
 import re
 import subprocess
 
-from .hierarchy import lead_attachment
+from .hierarchy import lead_attachment, parent_id_of
 
 WORKTREES_DIR = ".partyline-worktrees"
 _GIT_TIMEOUT = 30
@@ -41,7 +41,10 @@ def repo_root(path: str | None) -> str | None:
 
 
 def line_cwd(db, conv_id: str) -> str | None:
-    """Where a line works: its own directory, else its captain's, else any process's."""
+    """Where a line works: its own directory, else its captain's, else any
+    process's, else its parent line's. Never the server's own directory: a
+    child born before placement existed put its first workers in the deployed
+    checkout that way."""
     conv = db.get_conversation(conv_id) or {}
     if conv.get("cwd"):
         return conv["cwd"]
@@ -53,7 +56,18 @@ def line_cwd(db, conv_id: str) -> str | None:
     for att in live + rows:
         if att.get("cwd"):
             return att["cwd"]
-    return None
+    parent = parent_id_of(conv)
+    return line_cwd(db, parent) if parent else None
+
+
+def ensure_placed(db, conv_id: str) -> dict | None:
+    """Place a child line that was born before placement existed, on its
+    first machine attach; returns the placement when one was made."""
+    conv = db.get_conversation(conv_id) or {}
+    parent = parent_id_of(conv)
+    if conv.get("cwd") or not parent or db.list_attachments(conv_id):
+        return None
+    return place_child(db, parent, conv_id)
 
 
 def slug(name: str) -> str:
