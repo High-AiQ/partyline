@@ -369,6 +369,40 @@ class HierarchyApiTest(unittest.TestCase):
         self.assertEqual(notice["audience_attachment_id"], "impl-att")
         self.assertEqual([m["body"] for batch in deliveries for m in batch][-1], notice["body"])
 
+    def test_reappointing_the_sitting_captain_is_a_no_op(self):
+        deliveries = []
+
+        async def capture(messages):
+            deliveries.append(messages)
+
+        self.db.set_attachment_status("impl-att", "running", None)
+        self.runtime.live["impl-att"] = SimpleNamespace(deliver=capture, att={})
+        for _ in range(3):
+            self.assertEqual(self.client.post(
+                "/api/conversations/parent/lead", json={"attachment_id": "impl-att"}).status_code, 200)
+
+        rings = [m for m in self.db.list_messages("parent")
+                 if "@grok is now this line's captain" in m["body"]]
+        self.assertEqual(len(rings), 1)
+
+    def test_a_replaced_captain_is_told_at_once(self):
+        told = []
+
+        async def capture(messages):
+            told.extend(m["body"] for m in messages)
+
+        self.db.set_attachment_status("lead-att", "running", None)
+        self.runtime.live["lead-att"] = SimpleNamespace(deliver=capture, att={})
+        appointed = self.client.post(
+            "/api/conversations/parent/lead", json={"attachment_id": "impl-att"})
+        self.assertEqual(appointed.status_code, 200)
+        [notice] = [m for m in self.db.list_messages("parent")
+                    if "no longer this line's captain" in m["body"]]
+        self.assertEqual(notice["audience_attachment_id"], "lead-att")
+        self.assertIn("@grok is now", notice["body"])
+        self.assertIn(notice["body"], told)
+        self.assertFalse(self.db.get_attachment("lead-att")["is_lead"])
+
     def test_appointing_a_manager_that_is_not_live_is_silent(self):
         self.db.set_attachment_status("impl-att", "exited", None)
         appointed = self.client.post(
