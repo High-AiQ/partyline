@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from partyline.role_delivery import RoleState, bind_role_delivery
 
-NO_GOAL = SimpleNamespace(get_conversation=lambda conv_id: {"goal": ""})
+NO_GOAL = SimpleNamespace(get_conversation=lambda conv_id: {"goal": ""}, list_presets=lambda: [])
 
 
 class RoleDeliveryTests(unittest.TestCase):

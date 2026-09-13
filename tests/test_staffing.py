@@ -111,3 +111,33 @@ class StaffingApiTest(unittest.TestCase):
         self.assertIsNone(astra["traits"])
         self.assertEqual(len(body["presets"]), 1)
         self.assertFalse(body["presets_in_use"])
+
+
+class StaffingLineTest(unittest.TestCase):
+    def test_the_wake_line_names_who_is_busy_and_which_presets_are_free(self):
+        from partyline.db import Db
+        from partyline.staffing import staffing_line
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        db = Db(f"{directory.name}/partyline.db")
+        self.addCleanup(db.close)
+        self.assertEqual(staffing_line(db, "root"), "")  # no presets: nothing to say
+        db.create_conversation("root", "Root")
+        db.create_conversation("kid", "Kid")
+        for name, adapter, traits in (
+            ("opus", "claude", {"can_manage": True, "implements": False}),
+            ("astra", "codex", {"can_manage": True, "implements": False}),
+            ("luna", "codex", {"can_manage": False, "implements": True}),
+            ("glm-flash", "opencode", {"can_manage": False, "implements": True}),
+        ):
+            db.save_preset(name, name, name, adapter, f"{adapter} --x", reads_images=False, **traits)
+        db.add_attachment("a1", "kid", "opus", "claude", ["claude", "--x"], "/tmp")
+        db._exec("UPDATE attachments SET status='running', is_lead=1 WHERE id='a1'")
+        db.add_attachment("a2", "kid", "luna", "codex", ["codex", "--x"], "/tmp")
+        db._exec("UPDATE attachments SET status='running' WHERE id='a2'")
+        line = staffing_line(db, "root")
+        self.assertEqual(
+            line,
+            "(staffing — in use: opus «Kid» captain; luna «Kid». "
+            "free captains: astra. free workers: glm-flash)",
+        )
