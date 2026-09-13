@@ -70,6 +70,8 @@ BRIEFING = (
     "| --- | --- |\n"
     "| Send the Authorization header on every call — the token identifies you | Share "
     "the token on the line |\n"
+    "| Use the API for files, tasks, the goal, and other lines | POST a chat message to "
+    "your own line — everything you write in your terminal is already posted here |\n"
     "\n"
     "## Sharing and reading files\n"
     "To share a file of any type, POST it: `curl -H \"Authorization: Bearer "

@@ -67,6 +67,12 @@ replaced them:
   `mention_relay.py` lets a manager's mention cross lines as a private copy so "@lead" from a
   sub-manager means something. Control: `tests/test_return_path.py` fails against the old
   behaviour — a silent turn end used to produce no message anywhere.
+- **A process posting through the API and then saying the same thing is two messages.** Codex
+  leads used the authenticated helper to `POST /messages` on their own line and then said the
+  same words in the terminal; the rollout held each message once, the room twice. The tailed
+  twin of a recent API post by the same process is now dropped (`partyline/speech_echo.py`),
+  and the briefing says the API is for files, tasks, the goal, and other lines — never a chat
+  message to your own line.
 - **Every mention is a request.** The first fleet trial of the return path (a root manager,
   two sub-lines with a manager and worker each) finished its goal in four minutes, but the
   rooms filled with `↩` notices about turns nobody had asked for: a manager's status line
