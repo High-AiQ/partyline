@@ -16,5 +16,5 @@ import tempfile
 
 _SANDBOX = tempfile.mkdtemp(prefix="partyline-tests-")
 os.environ["PARTYLINE_DB"] = os.path.join(_SANDBOX, "partyline.db")
-os.environ["PARTYLINE_MEDIA_DIR"] = os.path.join(_SANDBOX, "media")
+# The media directory follows the database path, so it lands in the sandbox too.
 atexit.register(shutil.rmtree, _SANDBOX, True)

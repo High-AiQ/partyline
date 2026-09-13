@@ -30,6 +30,7 @@ compatible endpoint. Put this patch in
         models:
           - id: qwen/qwen3.8-27b
             name: Qwen 3.8 27B
+            input: [text, image]   # without this dsh's read_image refuses every image
             contextWindow: 65536
             maxTokens: 8192
 - id: session-persistence-jsonl
@@ -116,3 +117,12 @@ adapter = deepseek
 command = dsh --profile acp --patch ~/.dsh/models/qwen-27b.yml
 traits = reads_images=false, can_manage=false, implements=true
 ```
+
+## Vision through LM Studio
+
+Two gates sit between a posted image and a local vision model. `dsh` consults the model's
+declared `input` list before it will read an image at all, so a vision model must be
+declared with `input: [text, image]` as above; the refusal otherwise reads "does not
+declare image input". LM Studio's OpenAI-compatible endpoint then accepts only jpeg and
+png data URLs and answers `'url' field must be a base64 encoded image` to anything else,
+which is why partyline's thumb and slim tiers are jpeg (png when the source has alpha).

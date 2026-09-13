@@ -218,9 +218,8 @@ class Adapter(pty_io.PtyWriter):
         """Receive bytes from the pty. Transcript adapters can ignore this."""
 
     async def deliver(self, messages: list[dict]):
-        # Being woken ends post-resume silence — but only once the wake has
-        # reached the pty. Clearing it first lets a tail release held speech
-        # mid-write, before a delivery watcher has recorded the turn.
+        # Being woken ends post-resume silence — only once the wake reached the pty:
+        # clearing first lets a tail release held speech before the turn is recorded.
         text = self.format_digest(messages)
         if text.strip():
             await self.send_keys(text)
@@ -252,7 +251,8 @@ class Adapter(pty_io.PtyWriter):
     # The digest's shape lives in briefing.py; cwd git and the task rider are
     # live delivery-time state, never staged.
     def format_digest(self, messages: list[dict]) -> str:
-        return format_digest(messages, safe_rider(self.att), str(self.att.get("cwd", "")))
+        return format_digest(messages, safe_rider(self.att), str(self.att.get("cwd", "")),
+                             api=child_env({}, self.att)["PARTYLINE_API"])
 
     async def send_keys(self, text: str):
         await self._write_all(b"\x1b[200~" + text.encode() + b"\x1b[201~")
