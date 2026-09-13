@@ -200,6 +200,7 @@ class Presence:
             return
         open_turn.open = max(0, open_turn.open - 1)
         if open_turn.open == 0:
+            turn_marker.clear(getattr(self.runtime, "db", None), att_id)
             await self.finished(conv_id, att_id)
             await self.runtime.broadcast_attachment(conv_id, att_id)
             await self.returns.turn_ended(att_id)
