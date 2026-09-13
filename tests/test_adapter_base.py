@@ -748,3 +748,16 @@ async def _noop_status(status):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LocalMediaUrlTest(unittest.TestCase):
+    def test_a_digest_points_media_at_the_process_own_api_origin(self):
+        from partyline.adapters.briefing import local_media_urls
+
+        messages = [{"body": "📷 image · thumb: https://chat.example.lan/api/media/abc/thumb "
+                             "· original: https://chat.example.lan/api/media/abc/original"},
+                    {"body": "see https://chat.example.lan/docs — not media"}]
+        out = local_media_urls(messages, "http://127.0.0.1:8643/")
+        self.assertEqual(out[0]["body"], "📷 image · thumb: http://127.0.0.1:8643/api/media/abc/thumb "
+                                         "· original: http://127.0.0.1:8643/api/media/abc/original")
+        self.assertIs(out[1], messages[1])  # untouched: no media link, same object
