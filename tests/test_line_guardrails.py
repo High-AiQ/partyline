@@ -153,6 +153,16 @@ class GuardrailTest(unittest.TestCase):
         self.assertEqual(_git("rev-parse", "--abbrev-ref", "HEAD", cwd=again["cwd"]).stdout.strip(),
                          "line/frontend-polish-2")
 
+    def test_a_grandchild_worktree_lives_under_the_top_level_repository(self):
+        repo = self._repo()
+        self.db._exec("UPDATE attachments SET cwd=? WHERE id='root-lead'", (repo,))
+        mid = self.child("root", "mid", self.machine("root-lead"))
+        self.assertEqual(mid["cwd"], os.path.join(repo, WORKTREES_DIR, "mid"))
+        leaf = self.child(mid["id"], "leaf", self.captain(mid["id"], "sol"))
+        self.assertEqual(leaf["cwd"], os.path.join(repo, WORKTREES_DIR, "leaf"))
+        self.assertEqual(_git("rev-parse", "--abbrev-ref", "HEAD", cwd=leaf["cwd"]).stdout.strip(),
+                         "line/leaf")
+
     def test_a_purged_line_drops_its_worktree_but_keeps_the_branch(self):
         repo = self._repo()
         self.db._exec("UPDATE attachments SET cwd=? WHERE id='root-lead'", (repo,))
