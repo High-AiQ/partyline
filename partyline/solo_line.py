@@ -35,6 +35,9 @@ def implied_addressee(db, message: dict) -> str | None:
 
 def addressed(db, att: dict, messages: list[dict]) -> bool:
     """An @mention, a colon-address, or a person's plain word on a solo line."""
+    att_id = att.get("id")
+    if att_id and any(m.get("audience_attachment_id") == att_id for m in messages):
+        return True
     name = str(att.get("name") or "")
     if addresses(name, messages):
         return True
