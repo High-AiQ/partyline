@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { insertNewline } from "./composer";
+import { composerPlaceholder, insertNewline } from "./composer";
+
+describe("composerPlaceholder", () => {
+  it("shortens the prompt on the narrow layout", () => {
+    expect(composerPlaceholder(true)).toBe("say something…");
+  });
+
+  it("keeps the addressing hint on the desktop layout", () => {
+    expect(composerPlaceholder(false)).toBe("say something… @name to ring an agent");
+  });
+});
 
 describe("insertNewline", () => {
   it("inserts a newline at a caret in the middle of text", () => {

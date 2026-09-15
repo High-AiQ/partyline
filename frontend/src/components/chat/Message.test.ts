@@ -27,6 +27,15 @@ function agentMessage(body: string): ChatMessage {
   };
 }
 
+function humanMessage(body: string): ChatMessage {
+  return {
+    ...agentMessage(body),
+    id: 3,
+    sender: "greg",
+    sender_type: "human",
+  };
+}
+
 function setClipboard(clipboard: unknown): void {
   Object.defineProperty(navigator, "clipboard", { value: clipboard, configurable: true });
 }
@@ -50,6 +59,59 @@ describe("system message", () => {
     });
     try {
       expect(document.querySelector(".body")?.classList.contains("whitespace-pre-wrap")).toBe(true);
+    } finally {
+      await unmount(message);
+    }
+  });
+
+  it("has no copy, reaction, or chip controls", async () => {
+    const message = mount(Message, {
+      target: document.body,
+      props: { message: systemMessage("☺ greg reacted ✅ to your notice") },
+    });
+    try {
+      expect(document.querySelector("button.copy")).toBeNull();
+      expect(document.querySelector("button.reaction-add")).toBeNull();
+      expect(document.querySelector(".reaction-chips")).toBeNull();
+    } finally {
+      await unmount(message);
+    }
+  });
+});
+
+describe("reaction affordance", () => {
+  it("puts a keyboard-reachable smiley beside the header copy control", async () => {
+    const message = mount(Message, {
+      target: document.body,
+      props: { message: agentMessage("ready") },
+    });
+    try {
+      const header = document.querySelector(".head");
+      expect(header?.querySelector("button.reaction-add")).not.toBeNull();
+      expect(header?.querySelector("button.copy")).not.toBeNull();
+      expect(document.querySelector(".reaction-chips")).toBeNull();
+      expect(document.querySelector(".reaction-row")).toBeNull();
+    } finally {
+      await unmount(message);
+    }
+  });
+
+  it("shows the same header affordance for a human and chips below reactions", async () => {
+    const message = mount(Message, {
+      target: document.body,
+      props: {
+        message: {
+          ...humanMessage("looks good"),
+          reactions: [{ emoji: "✅", reactors: ["greg", "sol"], mine: true }],
+        },
+      },
+    });
+    try {
+      expect(document.querySelector(".head button.reaction-add")).not.toBeNull();
+      const chips = document.querySelector(".reaction-chips");
+      expect(chips).not.toBeNull();
+      expect(chips?.previousElementSibling?.classList.contains("body")).toBe(true);
+      expect(chips?.textContent).toContain("2");
     } finally {
       await unmount(message);
     }
