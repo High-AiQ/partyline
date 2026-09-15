@@ -88,6 +88,11 @@ class GoalRiderTest(unittest.TestCase):
         set_lead(self.db, "line", "lead")
 
     def test_the_rider_carries_the_rule_alone_without_a_goal_and_both_with(self):
+        # A live worker on the line: the rider says to assign it, not to split.
+        self.assertEqual(goal_rider(self.db, "line"), "(you are the captain — the workers on "
+                         "this line are yours: assign them, review, decide; no sub-captains "
+                         "while they are here; you do not implement)")
+        self.db.set_attachment_status("worker", "exited", "own")
         self.assertEqual(goal_rider(self.db, "line"), "(you are the captain — delegate to a "
                          "sub-captain, review, decide; you do not implement)")
         self.db._exec("UPDATE conversations SET goal=? WHERE id=?", ("finish  the\nbook", "line"))

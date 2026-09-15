@@ -9,7 +9,9 @@ from fastapi import HTTPException
 from .auth_guard import Principal
 from .db import Db
 from .hierarchy import child_ids, descendants, lead_attachment, parent_id_of
-from .line_depth import MAX_CAPTAIN_DEPTH, depth, may_create_children, sideways_attach_reason
+from .line_depth import (
+    MAX_CAPTAIN_DEPTH, depth, may_split, sideways_attach_reason, staffed_split_reason,
+)
 
 Capability = Literal[
     "read",
@@ -96,8 +98,9 @@ def allows(db: Db, principal: Principal, conv_id: str, capability: Capability) -
         # natural-language handoff — a line with no captain waits for a person.
         return _home_lead_tree(db, principal, conv_id)
     if capability == "create_child":
-        # People are never boxed by the depth cap; machines stop at it.
-        return principal.is_lead and conv_id == home and may_create_children(db, home)
+        # People are never boxed by the depth cap; machines stop at it, and a
+        # machine whose line already carries workers assigns them instead.
+        return principal.is_lead and conv_id == home and may_split(db, home)
     if capability in ("report", "notify"):
         return principal.is_lead and conv_id == home and bool(parent_id_of(conv))
     if capability == "read_reports":
@@ -157,6 +160,15 @@ def deny_sideways_attach(db: Db, principal: Principal, conv_id: str) -> None:
     if is_human(principal):
         return
     reason = sideways_attach_reason(db, conv_id)
+    if reason:
+        raise HTTPException(403, reason)
+
+
+def deny_staffed_split(db: Db, principal: Principal, conv_id: str) -> None:
+    """A machine assigns the workers on its line; it does not split around them."""
+    if is_human(principal):
+        return
+    reason = staffed_split_reason(db, conv_id)
     if reason:
         raise HTTPException(403, reason)
 

@@ -16,7 +16,8 @@ from .line_depth import MAX_CAPTAIN_DEPTH
 ROLE = (
     "### You are the captain; you do not implement\n"
     "A captain is a shot-caller. You do not write code, run renders, or make paid calls "
-    "yourself, and you do not hand out file-by-file ownership lists. When work is needed, "
+    "yourself, and you do not hand out file-by-file ownership lists. Workers already on your "
+    "line are yours: assign them. When work is needed and nobody on your line can do it, "
     "spin up a sub-line with a captain, tell that captain what is needed at a high level "
     "with the context it needs — budget, gates, acceptance, where things are — and let it run "
     "the work with its own worker. You decide, review, accept or reject, and report. Review "
@@ -106,6 +107,15 @@ LEAF = (
     "implement."
 )
 
+STAFFED = (
+    "**This line is staffed** (depth {depth} of {max_depth}): whoever put you here also "
+    "attached workers, and they are your implementers — GET {root}/staffing lists them. "
+    "Assign to one of them with the acceptance criterion, review the work, and report up. "
+    "While workers are attached here you cannot create child lines or appoint sub-captains; "
+    "a slice that truly needs its own line waits until the person moves them. You still do "
+    "not implement."
+)
+
 CHILD_MANAGER = (
     "You are also a child manager. Your parent line's manager reaches you here; you reach "
     "them the same way, by @mention from this line, for a result, a question, or a blocker "
@@ -125,18 +135,23 @@ HEARTBEAT = (
 
 
 def role_instructions(
-    actions: Collection[str], conv_id: str, parent_id: str | None, depth: int = 0
+    actions: Collection[str], conv_id: str, parent_id: str | None, depth: int = 0,
+    staffed: bool = False,
 ) -> str:
     """Render knowledge for the capabilities actually granted on this line.
 
     Gated on being captain (``assign`` is a captain's power on its own line),
     not on ``create_child``: a leaf captain cannot create children and still
     needs the pack — without it, it would look like an ordinary participant.
+    ``staffed`` means live workers sit on this line: the captain is told to
+    assign them, whatever its depth, instead of the split procedure.
     """
     if "assign" not in actions:
         return ""  # captains are appointed by a person or a captain, never inferred from chat
     root = f"/api/conversations/{conv_id}"
-    if "create_child" in actions:
+    if staffed:
+        staffing = STAFFED.format(root=root, depth=depth, max_depth=MAX_CAPTAIN_DEPTH)
+    elif "create_child" in actions:
         left = MAX_CAPTAIN_DEPTH - depth - 1
         below = ("; a child of yours may split once more" if left > 0
                  else "; a child of yours is a leaf and staffs its own workers")

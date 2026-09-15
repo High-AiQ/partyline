@@ -76,6 +76,14 @@ used twice in one tree used to collide with a 409 that read as "cannot staff";
 the server now suffixes the handle (`grok-2`) and the agent helper prints the
 server's reason on every failed request.
 
+The rule is symmetric. A line that already carries live workers — attached by
+its parent captain or by a person — cannot be split by its captain: `POST
+…/children` is refused with the workers' names, `create_child` leaves its
+capabilities, and its pack and every goal rider say "the workers on this line
+are yours: assign them". Before this, a captain handed a worker read "spin up a
+sub-line" in its pack and did exactly that, staffing a second copy of the same
+preset on the grandchild while the first sat idle.
+
 ## The hand-off contract
 
 A child line is born briefed. `POST /api/conversations/<parent>/children` takes

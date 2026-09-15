@@ -53,6 +53,9 @@ class HierarchyApiTest(unittest.TestCase):
         self.parent = self.db.create_conversation("parent", "Parent")
         self.db.add_attachment("lead-att", "parent", "astra", "fake", ["fake"], "/tmp")
         self.db.add_attachment("impl-att", "parent", "grok", "fake", ["fake"], "/tmp")
+        # Not live: a captain whose line carries a live worker assigns it rather
+        # than splitting, and most of these tests have the captain create children.
+        self.db.set_attachment_status("impl-att", "detached", None)
         user = auth_store.create_user(
             self.db, "greg@example.com", "greg",
             auth_tokens.hash_password("hunter2222"),

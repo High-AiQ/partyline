@@ -45,6 +45,8 @@ class ManagerWorkflowTest(unittest.TestCase):
         self.db.create_conversation("root", "Root")
         self.db.add_attachment("root-mgr", "root", "astra", "fake", ["fake"], "/tmp")
         self.db.add_attachment("root-impl", "root", "grok", "fake", ["fake"], "/tmp")
+        # Not live: a line carrying a live worker is assigned, not split.
+        self.db.set_attachment_status("root-impl", "detached", None)
         user = auth_store.create_user(
             self.db, "greg@example.com", "greg",
             auth_tokens.hash_password("hunter2222"),
