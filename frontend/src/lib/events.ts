@@ -8,6 +8,7 @@ import {
   PresenceCompletionSchema,
   PresencePhaseSchema,
   ReattachCandidateSchema,
+  RestartRequestSchema,
 } from "./contracts";
 
 export const HelloEventSchema = z.object({
@@ -127,6 +128,15 @@ export type ReattachDecisionEvent = z.infer<typeof ReattachDecisionEventSchema>;
 export const ConversationsChangedEventSchema = z.object({
   type: z.literal("conversations_changed"),
 });
+
+export const RestartRequestEventSchema = z.object({
+  type: z.literal("restart_request"),
+  request: z
+    .lazy(() => RestartRequestSchema)
+    .nullable()
+    .default(null),
+});
+export type RestartRequestEvent = z.infer<typeof RestartRequestEventSchema>;
 export type ConversationsChangedEvent = z.infer<typeof ConversationsChangedEventSchema>;
 
 const CurrentWireEventSchema = z.discriminatedUnion("type", [
@@ -145,6 +155,7 @@ const CurrentWireEventSchema = z.discriminatedUnion("type", [
   ShutdownEventSchema,
   ReattachOfferEventSchema,
   ReattachDecisionEventSchema,
+  RestartRequestEventSchema,
 ]);
 
 /** Normalize the boolean-only presence frame emitted by older servers. */
