@@ -57,8 +57,8 @@ async def _wake_process(runtime, item: dict, principal: Principal, emoji: str) -
     await post_private(
         runtime,
         target["conv_id"],
-        principal.name,
-        "human",
+        "system",
+        "system",
         body,
         audience=target["id"],
         route=True,
