@@ -12,15 +12,17 @@ from partyline.adapters import Adapter
 from partyline.adapters.bundled.cursor.parse import (
     chat_dir,
     fingerprint,
+    user_text,
     parse_record,
     resync_fingerprints,
     resync_positional,
     transcript_path,
 )
-from partyline.adapters.receipts import BEGAN, receipt
+from partyline.adapters.bundled.cursor.wakes import WakeSettlement
+from partyline.adapters.receipts import BEGAN, ENDED, receipt
 
 
-class PartylineAdapter(Adapter):
+class PartylineAdapter(WakeSettlement, Adapter):
     kind = "cursor"
 
     _CLAIMED: set[str] = set()
@@ -40,6 +42,7 @@ class PartylineAdapter(Adapter):
         # valid-JSONL states; counting those as one failure sequence can skip
         # the new user record and leading assistant speech.
         self._failed_snapshot: tuple[str, ...] | None = None
+        self._wakes_init()
 
     async def stop(self):
         self._CLAIMED.discard(getattr(self, "_session_id", "") or "")
@@ -164,13 +167,6 @@ class PartylineAdapter(Adapter):
             return False
         return isinstance(record, dict) and record.get("type") == "turn_ended"
 
-    async def deliver(self, messages: list[dict]):
-        """Arm presence when input reaches a CLI that writes only at turn end."""
-        text = self.format_digest(messages)
-        await super().deliver(messages)
-        if text.strip():
-            await receipt(self.att, BEGAN)
-
     async def _tail_transcript(self, path: Path) -> None:
         seen_fps: list[str] = []
         self._sentinel_fps = set()
@@ -240,6 +236,10 @@ class PartylineAdapter(Adapter):
                         if record.get("type") == "turn_ended":
                             self._sentinel_fps.add(fp)
                         event, text = parse_record(record)
+                        if event == BEGAN:
+                            await self._note_user_input(user_text(record))
+                        elif event == ENDED:
+                            self._note_turn_ended()
                         if event:
                             await receipt(self.att, event)
                         if text:

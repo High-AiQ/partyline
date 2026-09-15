@@ -140,7 +140,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
         adapter.send_keys = AsyncMock()
 
         with patch(
-            "partyline.adapters.bundled.cursor.adapter.receipt", new=AsyncMock()
+            "partyline.adapters.bundled.cursor.wakes.receipt", new=AsyncMock()
         ) as receipt_mock:
             messages = [{"sender": "greg", "sender_type": "human", "body": "go"}]
             await adapter.deliver(messages)
@@ -1641,3 +1641,100 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WakeSettlementTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.messages: list[tuple[str, str, str]] = []
+        PartylineAdapter._CLAIMED.clear()
+        self.addCleanup(PartylineAdapter._CLAIMED.clear)
+
+    async def post(self, sender: str, sender_type: str, body: str) -> None:
+        self.messages.append((sender, sender_type, body))
+
+    async def status(self, value: str) -> None:
+        pass
+
+    def make_adapter(self, **att_extra) -> PartylineAdapter:
+        adapter = PartylineAdapter(attachment(**att_extra), self.post, self.status)
+        adapter.INITIAL_DELAY = 0
+        adapter.POLL_SECONDS = 0.01
+        return adapter
+
+    def _wake(self, adapter, ids, body="@cursor-auto do it"):
+        adapter.format_digest = lambda messages: "\n".join(m["body"] for m in messages)
+        adapter.send_keys = AsyncMock()
+        return [{"id": i, "body": body} for i in ids]
+
+    async def test_a_paste_is_unproven_until_a_user_record_contains_it(self):
+        adapter = self.make_adapter()
+        confirmed = []
+        adapter.att["confirm_delivery_ids"] = AsyncMock(side_effect=lambda ids: confirmed.append(ids))
+        with patch("partyline.adapters.bundled.cursor.wakes.receipt", new=AsyncMock()) as began:
+            self.assertIs(await adapter.deliver(self._wake(adapter, [7])), False)
+            began.assert_awaited_once()
+        self.assertEqual(len(adapter._outstanding), 1)
+        await adapter._note_user_input(
+            "<timestamp>x</timestamp>\n<user_query>\n@cursor-auto do it\n(reminder: …)")
+        self.assertEqual(confirmed, [[7]])
+        self.assertEqual(adapter._outstanding, [])
+
+    async def test_a_paste_into_a_busy_cli_claims_no_turn_and_is_repooled_at_turn_end(self):
+        adapter = self.make_adapter()
+        adapter.alive = lambda: True
+        adapter._turn_open = True
+        adapter.write_terminal = lambda data: None
+        repooled = []
+        adapter.att["repool_message_ids"] = AsyncMock(side_effect=lambda ids: repooled.append(ids))
+        with patch("partyline.adapters.bundled.cursor.wakes.receipt", new=AsyncMock()) as began, \
+             patch("partyline.adapters.bundled.cursor.wakes.REPOOL_GRACE", 0), \
+             patch("partyline.adapters.bundled.cursor.wakes.STEER_SUBMIT_DELAY", 0):
+            self.assertIs(await adapter.deliver(self._wake(adapter, [8, 9], "@cursor-auto STOP")), False)
+            began.assert_not_awaited()
+            adapter._note_turn_ended()
+            await adapter._settle_task
+        self.assertEqual(repooled, [[8, 9]])
+        self.assertIn("never reached the model", self.messages[-1][2])
+        self.assertEqual(adapter._outstanding, [])
+
+    async def test_a_mid_turn_paste_gets_the_second_enter_that_submits_the_steer(self):
+        adapter = self.make_adapter()
+        adapter.alive = lambda: True
+        adapter._turn_open = True
+        writes = []
+        adapter.write_terminal = writes.append
+        with patch("partyline.adapters.bundled.cursor.wakes.STEER_SUBMIT_DELAY", 0), \
+             patch("partyline.adapters.bundled.cursor.wakes.receipt", new=AsyncMock()):
+            await adapter.deliver(self._wake(adapter, [5], "@cursor-auto halt"))
+        adapter.send_keys.assert_awaited_once()
+        self.assertEqual(writes, [b"\r"])
+
+    async def test_an_idle_paste_gets_no_second_enter(self):
+        adapter = self.make_adapter()
+        adapter.alive = lambda: True
+        writes = []
+        adapter.write_terminal = writes.append
+        with patch("partyline.adapters.bundled.cursor.wakes.receipt", new=AsyncMock()):
+            await adapter.deliver(self._wake(adapter, [6]))
+        self.assertEqual(writes, [])
+
+    async def test_interrupt_is_one_ctrl_c_confirmed_by_the_turn_end_record(self):
+        adapter = self.make_adapter()
+        adapter.alive = lambda: True
+        writes = []
+        adapter.write_terminal = writes.append
+        self.assertEqual(await adapter.interrupt(), "idle")
+        adapter._turn_open = True
+
+        async def press_then_end():
+            status = adapter.interrupt()
+            task = asyncio.ensure_future(status)
+            await asyncio.sleep(0)
+            adapter._note_turn_ended()
+            return await task
+
+        self.assertEqual(await press_then_end(), "interrupted")
+        self.assertEqual(writes, [b"\x03"])
+        adapter._turn_open = True
+        self.assertEqual(await adapter.interrupt(), "unconfirmed")  # inside the exit window
+        self.assertEqual(writes, [b"\x03"])  # and no second Ctrl+C was sent
