@@ -54,6 +54,8 @@
         label: topic
           ? `${topic}\n\n(click to edit)`
           : "give this line a topic — agents get it in their briefing",
+        placement: "below",
+        followCursor: true,
       }}
       onclick={() => dialogs.open(TopicDialog)}>{topic || "set a topic…"}</button
     >
