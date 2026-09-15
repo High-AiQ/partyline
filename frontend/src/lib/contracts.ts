@@ -208,6 +208,20 @@ export const RestartPlanSchema = z.object({
 });
 export type RestartPlan = z.infer<typeof RestartPlanSchema>;
 
+export const RestartRequestSchema = z.object({
+  id: z.string(),
+  conversation_id: z.string(),
+  requester: z.string(),
+  reason: z.string(),
+  created_at: z.number(),
+});
+export type RestartRequest = z.infer<typeof RestartRequestSchema>;
+
+export const PendingRestartSchema = z.object({
+  request: RestartRequestSchema.nullable().default(null),
+});
+export type PendingRestart = z.infer<typeof PendingRestartSchema>;
+
 export const ShutdownRequestSchema = z.object({
   reattach: RestartPlanRequestSchema.optional(),
 });

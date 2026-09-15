@@ -53,9 +53,12 @@ STAFFING_TRAITS = (
 
 ASK_FIRST = (
     "### Ask the person first\n"
-    "Commits or pushes to shared branches, deploys and restarts, paid calls beyond a stated "
-    "budget, deleting data, changing presets, and anything else that cannot be undone. Do "
-    "not start a paid wave or restart processes merely because an endpoint is available."
+    "Commits or pushes to shared branches, deploys, paid calls beyond a stated budget, "
+    "deleting data, changing presets, and anything else that cannot be undone. A service "
+    "restart is asked for, never planned: once the change is merged and pulled, POST "
+    '{root}/restart-request with {{"reason":"..."}} — a person approves it in the UI and '
+    "every process is resumed with its context. Do not start a paid wave merely because "
+    "an endpoint is available."
 )
 
 EXAMPLE = (
@@ -147,7 +150,7 @@ def role_instructions(
         ROLE,
         PROCEDURE.format(root=root, staffing=staffing),
         STAFFING_TRAITS.format(root=root),
-        ASK_FIRST,
+        ASK_FIRST.format(root=root),
         EXAMPLE,
     ]
     if "read_reports" in actions:
