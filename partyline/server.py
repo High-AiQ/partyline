@@ -39,6 +39,7 @@ from .machine_scope import (
 from .bind import (BindConfig, apply_server_config, load_bind_config, load_dotenv,
                    parse_bind_args, uvicorn_config)
 from .compact_routes import register_compact_route
+from . import features
 from .adapters import (
     ADAPTERS,
     ADAPTER_METADATA,
@@ -54,6 +55,7 @@ from .contracts import (
     AttachmentEvent,
     AttachmentPatchRequest,
     AttachmentResponse,
+    FeatureFlagResponse,
     KeyIn,
     LoadedResponse,
     OkResponse,
@@ -128,12 +130,15 @@ async def lifespan(app):
     app.state.automatic_reattach_task = automatic_task
     # The monitor's state is in the database, so a restart resumes whatever the
     # lead had configured — including an unsettled wake, which stays unsettled.
-    heartbeat_task = asyncio.create_task(heartbeat_scheduler.run(runtime))
-    app.state.heartbeat_task = heartbeat_task
+    # Behind the `heartbeat` flag (off by default since 1.23.0): a switched-off
+    # server neither ticks nor answers the routes.
+    tasks = [automatic_task]
+    if features.enabled("heartbeat"):
+        tasks.append(asyncio.create_task(heartbeat_scheduler.run(runtime)))
     try:
         yield
     finally:
-        for task in (automatic_task, heartbeat_task):
+        for task in tasks:
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
@@ -283,6 +288,12 @@ async def shutdown(request: Request, body: ShutdownRequest | None = None):
         payload.model_dump(exclude_none=True),
         background=BackgroundTask(request_exit),
     )
+
+
+@app.get("/api/features", response_model=list[FeatureFlagResponse])
+def list_features():
+    """Which flags this server runs with, so a client or a captain can tell."""
+    return features.current().describe()
 
 
 @app.get("/api/adapters", response_model=list[AdapterMetadataResponse])

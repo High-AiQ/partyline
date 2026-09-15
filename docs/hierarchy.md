@@ -299,6 +299,11 @@ manifest) have no return path; every bundled coding-agent adapter reports one.
 
 ## The root manager's heartbeat
 
+**Deprecated and off by default since 1.23.0**, behind the `heartbeat` feature flag
+([configuration](configuration.md#feature-flags)). The return path and the goal riders
+proved to be the wake signal; everything below describes the timer as it runs when the
+flag is on.
+
 A stalled tree looks exactly like a healthy one. Children file reports, nobody
 pulls them, and every process sits idle and correct. The heartbeat is the
 optional timer a root manager straps on itself for a goal it means to finish.
