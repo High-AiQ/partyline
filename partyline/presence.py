@@ -34,7 +34,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from . import turn_marker
-from .mentions import addresses
+from .solo_line import addressed
 from .presence_contracts import WorkingEvent
 from .presence_queue import DeliveryQueue
 from .speech_echo import is_api_echo
@@ -259,7 +259,7 @@ class Presence:
 
         async def delivering(messages):
             holding = self.completions.get(att_id) == RECEIPT and self.is_working(att_id)
-            if holding and not addresses(str(att.get("name") or ""), messages):
+            if holding and not addressed(getattr(self.runtime, "db", None), att, messages):
                 self.queue.hold(att_id, messages)
                 await self._announce(conv_id, att_id, self.phase(att_id))
                 return False
