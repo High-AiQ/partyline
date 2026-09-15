@@ -132,3 +132,26 @@ class ReactionRoutesTest(unittest.TestCase):
         self.client.post(f"/api/messages/{message['id']}/reactions", json={"emoji": "👀"})
         page = self.client.get("/api/conversations/line/messages")
         self.assertEqual(page.json()["messages"][-1]["reactions"][0]["mine"], True)
+
+    def test_delete_removes_only_caller_and_validates_access(self):
+        _, token = self._machine(name="sol")
+        message = self.db.add_message("line", "greg", "human", "ship it")
+        self.client.post(f"/api/messages/{message['id']}/reactions", json={"emoji": "🎉"})
+        self.client.headers["Authorization"] = f"Bearer {token}"
+        self.client.post(f"/api/messages/{message['id']}/reactions", json={"emoji": "🎉"})
+
+        self.client.headers["Authorization"] = f"Bearer {self.tokens['greg']}"
+        removed = self.client.delete(f"/api/messages/{message['id']}/reactions/🎉")
+        self.assertEqual(removed.status_code, 200)
+        self.assertEqual(removed.json()["reactions"], [{
+            "emoji": "🎉", "reactors": ["sol"], "mine": False,
+        }])
+        self.assertEqual(
+            self.client.delete(f"/api/messages/{message['id']}/reactions/🔥").status_code,
+            400,
+        )
+
+        _, other_token = self._machine("other", "worker")
+        self.client.headers["Authorization"] = f"Bearer {other_token}"
+        forbidden = self.client.delete(f"/api/messages/{message['id']}/reactions/🎉")
+        self.assertEqual(forbidden.status_code, 403)
