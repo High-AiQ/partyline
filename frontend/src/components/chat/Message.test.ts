@@ -1,5 +1,5 @@
 import { mount, unmount } from "svelte";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import Message from "./Message.svelte";
 import type { ChatMessage } from "../../lib/contracts";
 
@@ -26,6 +26,21 @@ function agentMessage(body: string): ChatMessage {
     files: [],
   };
 }
+
+function setClipboard(clipboard: unknown): void {
+  Object.defineProperty(navigator, "clipboard", { value: clipboard, configurable: true });
+}
+
+function copyButton(): HTMLButtonElement {
+  const button = document.querySelector<HTMLButtonElement>("button.copy");
+  if (!button) throw new Error("copy button not rendered");
+  return button;
+}
+
+afterEach(() => {
+  setClipboard(undefined);
+  document.body.replaceChildren();
+});
 
 describe("system message", () => {
   it("preserves newlines and repeated spaces in operational notices", async () => {
@@ -85,6 +100,64 @@ describe("cross-line message", () => {
       expect(document.querySelector(".direct")).toBeNull();
     } finally {
       await unmount(message);
+    }
+  });
+});
+
+describe("copy control", () => {
+  it("is absent on system messages", async () => {
+    const message = mount(Message, {
+      target: document.body,
+      props: { message: systemMessage("operational notice") },
+    });
+    try {
+      expect(document.querySelector("button.copy")).toBeNull();
+    } finally {
+      await unmount(message);
+    }
+  });
+
+  it("copies the wire markdown, not the rendered html", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    setClipboard({ writeText });
+    const body = "**bold** `code`\n\n\\(E=mc^2\\)";
+    const message = mount(Message, { target: document.body, props: { message: agentMessage(body) } });
+    try {
+      copyButton().click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(writeText).toHaveBeenCalledTimes(1);
+      expect(writeText).toHaveBeenCalledWith(body);
+      expect(document.querySelector(".body")?.innerHTML).toContain("<strong>");
+    } finally {
+      await unmount(message);
+    }
+  });
+
+  it("shows the copied confirmation for about 1.5s, then reverts", async () => {
+    vi.useFakeTimers();
+    try {
+      setClipboard({ writeText: vi.fn().mockResolvedValue(undefined) });
+      const message = mount(Message, {
+        target: document.body,
+        props: { message: agentMessage("hello") },
+      });
+      try {
+        const button = copyButton();
+        button.click();
+        await vi.advanceTimersByTimeAsync(0);
+        button.dispatchEvent(new MouseEvent("mouseenter"));
+        expect(document.querySelector(".app-tooltip")?.textContent).toBe("Copied");
+        await vi.advanceTimersByTimeAsync(1500);
+        button.dispatchEvent(new MouseEvent("mouseleave"));
+        button.dispatchEvent(new MouseEvent("mouseenter"));
+        expect(document.querySelector(".app-tooltip")?.textContent).toBe("copy message");
+      } finally {
+        await unmount(message);
+      }
+    } finally {
+      vi.useRealTimers();
     }
   });
 });
