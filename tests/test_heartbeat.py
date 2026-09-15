@@ -738,6 +738,31 @@ class TwoRootLinesTest(HeartbeatFixture):
             self.client.get("/api/heartbeat").json()["attachment_id"], "other-lead"
         )
 
+    async def test_a_switched_off_monitor_may_be_claimed_by_the_other_root_lead(self):
+        self.as_attachment(OWNER)
+        self.client.post("/api/heartbeat", json={"goal": "mine"})
+        self.assertFalse(self.client.delete("/api/heartbeat").json()["enabled"])
+
+        self.as_attachment("other-lead")
+        self.assertEqual(self.client.get("/api/heartbeat").status_code, 200)
+        claimed = self.client.post("/api/heartbeat", json={"goal": "theirs"})
+        self.assertEqual(claimed.status_code, 200, claimed.text)
+        self.assertEqual(claimed.json()["attachment_id"], "other-lead")
+
+    async def test_a_monitor_whose_owner_is_gone_may_be_claimed(self):
+        # The dogfood shape: the row pointed at an attachment that had been
+        # deleted from an archived root line, and every new root captain got 403.
+        self.as_attachment(OWNER)
+        self.client.post("/api/heartbeat", json={"goal": "mine"})
+        self.db._exec("DELETE FROM attachments WHERE id=?", (OWNER,))
+
+        self.as_attachment("other-lead")
+        self.assertEqual(self.client.get("/api/heartbeat").status_code, 200)
+        self.assertEqual(self.client.post("/api/heartbeat", json={}).status_code, 200)
+        self.assertEqual(
+            self.client.get("/api/heartbeat").json()["attachment_id"], "other-lead"
+        )
+
     async def test_a_person_may_still_switch_off_a_monitor_they_do_not_own(self):
         self.as_attachment(OWNER)
         self.client.post("/api/heartbeat", json={})
