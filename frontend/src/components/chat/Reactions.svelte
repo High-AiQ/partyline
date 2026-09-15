@@ -8,15 +8,30 @@
   }
 
   let { messageId, reactions, onToggle }: Props = $props();
+  let row = $state<HTMLDivElement | null>(null);
   let pickerOpen = $state(false);
   let busy = $state<ReactionEmoji | null>(null);
   const palette = REACTION_PALETTE;
+
+  function closePicker(): void {
+    pickerOpen = false;
+  }
+
+  function onWindowPointerDown(event: PointerEvent): void {
+    const target = event.target;
+    if (pickerOpen && (!(target instanceof Node) || !row?.contains(target))) closePicker();
+  }
+
+  function onWindowKeydown(event: KeyboardEvent): void {
+    if (event.key === "Escape") closePicker();
+  }
 
   async function toggle(emoji: ReactionEmoji): Promise<void> {
     if (busy) return;
     busy = emoji;
     try {
       await onToggle(emoji);
+      closePicker();
     } finally {
       busy = null;
     }
@@ -28,7 +43,10 @@
   }
 </script>
 
+<svelte:window onpointerdown={onWindowPointerDown} onkeydown={onWindowKeydown} />
+
 <div
+  bind:this={row}
   class="reaction-row group relative mt-2 flex min-h-7 flex-wrap items-center gap-1.5"
   data-message-id={String(messageId)}
 >
@@ -42,7 +60,7 @@
     +
   </button>
   <div
-    class="reaction-picker flex items-center gap-0.5 rounded border border-panel-line bg-panel px-1 py-0.5 shadow-lg opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
+    class="reaction-picker flex items-center gap-0.5 rounded border border-panel-line bg-panel px-1 py-0.5 shadow-lg transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
     class:picker-open={pickerOpen}
     aria-label="Reaction picker"
   >
@@ -76,8 +94,20 @@
 </div>
 
 <style>
+  /* Touch screens have no hover to reveal the add control, so give it a
+     persistent, finger-sized target while preserving pointer hover behavior. */
+  @media (hover: none) {
+    .reaction-add {
+      opacity: 1;
+      pointer-events: auto;
+      min-width: 44px;
+      min-height: 44px;
+    }
+  }
+
   .reaction-picker {
     pointer-events: none;
+    opacity: 0;
   }
 
   .reaction-picker.picker-open {
