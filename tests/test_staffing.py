@@ -27,6 +27,8 @@ class StaffingApiTest(unittest.TestCase):
         self.db.create_conversation("parent", "Parent")
         self.db.add_attachment("lead-att", "parent", "astra", "fake", ["run"], "/tmp")
         self.db.add_attachment("impl-att", "parent", "grok", "fake", ["run"], "/tmp")
+        # Not live: a line carrying a live worker is assigned, not split.
+        self.db.set_attachment_status("impl-att", "detached", None)
         user = auth_store.create_user(
             self.db, "greg@example.com", "greg",
             auth_tokens.hash_password("hunter2222"),

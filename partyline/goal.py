@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from .auth_guard import request_principal
 from .contracts import ConversationEvent, ConversationResponse
-from .line_depth import may_create_children
+from .line_depth import may_create_children, staffed_split_reason
 from .machine_scope import deny_unless
 
 MAX_GOAL = 3000
@@ -36,6 +36,14 @@ def set_goal(db, conv_id: str, goal: str) -> dict:
 MANAGER_REMINDER = "you are the captain — delegate to a sub-captain, review, decide; you do not implement"
 LEAF_REMINDER = ("you are the leaf captain — staff workers on this line, review, decide; "
                  "no sub-captains; you do not implement")
+STAFFED_REMINDER = ("you are the captain — the workers on this line are yours: assign them, "
+                    "review, decide; no sub-captains while they are here; you do not implement")
+
+
+def captain_rule(db, conv_id: str) -> str:
+    if staffed_split_reason(db, conv_id):
+        return STAFFED_REMINDER
+    return MANAGER_REMINDER if may_create_children(db, conv_id) else LEAF_REMINDER
 
 
 def goal_rider(db, conv_id: str) -> str:
@@ -43,7 +51,7 @@ def goal_rider(db, conv_id: str) -> str:
     rule alone when no goal is recorded."""
     conv = db.get_conversation(conv_id) or {}
     goal = " ".join(str(conv.get("goal") or "").split())
-    rule = MANAGER_REMINDER if may_create_children(db, conv_id) else LEAF_REMINDER
+    rule = captain_rule(db, conv_id)
     if not goal:
         return f"({rule})"
     return f"(goal you are seeing through: {goal}; {rule})"

@@ -37,7 +37,7 @@ from .hierarchy_contracts import (
     ReportIn,
 )
 from .line_worktree import describe, place_child
-from .machine_scope import capability_state, deny_unless, is_human
+from .machine_scope import capability_state, deny_staffed_split, deny_unless, is_human
 from .reports import (
     ReportError,
     acknowledge,
@@ -161,6 +161,7 @@ def hierarchy_router(runtime) -> APIRouter:
         status_code=201,
     )
     async def create_child(request: Request, conv_id: str, body: ChildIn):
+        deny_staffed_split(db, request_principal(request), conv_id)  # the loud reason first
         deny_unless(db, request_principal(request), conv_id, "create_child")
         name = body.name.strip() or "untitled"
         try:
