@@ -184,6 +184,21 @@ def owns(row: dict | None, conv_id: str | None, attachment_id: str | None) -> bo
     return row["conv_id"] == conv_id and row["attachment_id"] == attachment_id
 
 
+def held(db: Db, row: dict | None) -> bool:
+    """Is that row still somebody's monitor?
+
+    A row outlives its owner on purpose (`disable` keeps it so the interval
+    and goal survive), but a disabled row, or one whose attachment is no
+    longer the root manager of its line, guards nothing. Treating it as
+    owned locked every later root captain out of the endpoint with "belongs
+    to another line's manager" — for a monitor that was off, on a line whose
+    process had long since been deleted.
+    """
+    if row is None or not row["enabled"]:
+        return False
+    return is_root_lead(db, row["conv_id"], row["attachment_id"])
+
+
 def status(db: Db, *, now: float | None = None) -> dict:
     row = get(db)
     if row is None:
