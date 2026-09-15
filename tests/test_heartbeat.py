@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from partyline import (auth_store, auth_tokens, heartbeat, heartbeat_scheduler,
+from partyline import (auth_store, auth_tokens, features, heartbeat, heartbeat_scheduler,
                        heartbeat_files, heartbeat_snapshot, heartbeat_wake)
 from partyline.auth_guard import install_auth_guard
 from partyline.auth_store import ensure_api_token
@@ -54,6 +54,9 @@ class HeartbeatFixture(unittest.IsolatedAsyncioTestCase):
     """A root line with a live, appointed manager — the only eligible shape."""
 
     def setUp(self):
+        flag = features.overridden(heartbeat=True)  # the feature under test is off by default
+        flag.__enter__()
+        self.addCleanup(flag.__exit__, None, None, None)
         self.directory = tempfile.TemporaryDirectory()
         self.db = Db(Path(self.directory.name) / "partyline.db")
         self.runtime = ChatRuntime(self.db)
@@ -866,6 +869,9 @@ class BriefingTest(unittest.TestCase):
     def test_only_a_root_manager_is_told_about_the_heartbeat(self):
         actions = ["assign", "create_child", "read_reports", "report"]
 
+        flag = features.overridden(heartbeat=True)
+        flag.__enter__()
+        self.addCleanup(flag.__exit__, None, None, None)
         root = role_instructions(actions, ROOT, None)
         self.assertIn("POST /api/heartbeat", root)
         self.assertIn("DELETE /api/heartbeat", root)

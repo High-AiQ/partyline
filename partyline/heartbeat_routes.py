@@ -8,10 +8,10 @@ off a timer whose owner is wedged — but a human has no attachment to own one.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
-from . import heartbeat, heartbeat_files, heartbeat_snapshot
+from . import features, heartbeat, heartbeat_files, heartbeat_snapshot
 from .auth_guard import request_principal
 
 
@@ -40,7 +40,9 @@ class HeartbeatStatus(BaseModel):
 
 
 def heartbeat_router(runtime) -> APIRouter:
-    router = APIRouter()
+    # Every route here is behind the `heartbeat` flag; off means 404 with the
+    # way to switch it on, decided per request because routers bind at import.
+    router = APIRouter(dependencies=[Depends(lambda: features.require("heartbeat"))])
     db = runtime.db
 
     def _caller(request: Request):

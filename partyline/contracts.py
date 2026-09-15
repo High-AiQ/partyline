@@ -64,6 +64,14 @@ class RunningProcessResponse(BaseModel):
     conversation: str
 
 
+class FeatureFlagResponse(BaseModel):
+    name: str
+    enabled: bool
+    default: bool
+    status: str
+    summary: str
+
+
 class AdapterMetadataResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 

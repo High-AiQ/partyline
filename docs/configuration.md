@@ -76,6 +76,23 @@ Only `image/*` (except SVG), `audio/*`, `video/*`, `application/pdf`, and `text/
 served `inline`; everything else — including HTML, XHTML, SVG, and XML — is
 `Content-Disposition: attachment`, so user documents are never executed from partyline's origin.
 
+## Feature flags
+
+A flag is a named boolean with a registered default in `partyline/features.py`; the registry
+is the complete list, and a name outside it is refused at startup rather than silently
+enabling nothing. Resolution is environment over config file over default — the same layers as
+the bind address, minus a command-line option, because a flag is a deployment decision written
+down rather than a run's mood. `GET /api/features` reports what the server runs with.
+
+```toml
+[features]
+heartbeat = true   # off by default since 1.23.0
+```
+
+| flag | default | status | what it switches |
+|---|---|---|---|
+| `heartbeat` | off | deprecated | the root captain's self-timer (`/api/heartbeat`, the scheduler, and the pack paragraph that teaches it). The return path and goal riders made a tree ring its captain on every event that matters, so the timer stopped earning its wake-ups. Off means the routes answer 404 with the way to switch it on and nothing ticks; the code stays whole in case a fleet shows a gap. |
+
 ## Environment and config file
 
 | env var | default | notes |
@@ -86,6 +103,7 @@ served `inline`; everything else — including HTML, XHTML, SVG, and XML — is
 | `PARTYLINE_DB` | `~/.partyline.db` | conversations, messages, attachments, presets. One file per running server — do not share it across processes |
 | `PARTYLINE_MEDIA_DIR` | `<PARTYLINE_DB stem>/media` | uploaded files, one subdirectory per line |
 | `PARTYLINE_ADAPTERS_DIR` | `~/.partyline/adapters` | where imported adapter repos are checked out |
+| `PARTYLINE_FEATURE_<NAME>` | registry default | switch one feature flag on or off (`1/true/on` or `0/false/off`); see [Feature flags](#feature-flags) |
 | `PARTYLINE_FORWARDED_ALLOW_IPS` | `127.0.0.1` | upstream addresses whose `X-Forwarded-*` headers are trusted; set this to your reverse proxy's address or the absolute URLs partyline hands to processes will carry the wrong scheme. See [Behind a reverse proxy](#behind-a-reverse-proxy) |
 
 The optional server config file uses `[server] host` and `port`, plus optional `[instance] name`; see
