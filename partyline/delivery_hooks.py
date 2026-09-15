@@ -15,14 +15,22 @@ def delivery_hooks(runtime, conv_id: str, att_id: str):
         async with runtime.db.reserve_attachment_delivery(att_id, runtime_owner) as reserved:
             if not reserved:
                 return False
-            messages = runtime.db.messages_by_ids(conv_id, message_ids)
+            att = runtime.db.get_attachment(att_id) or {}
+            last_seen = att.get("last_seen", 0)
+            persisted = set(runtime.db.queued_delivery_ids(att_id))
+            deliverable_ids = [
+                mid for mid in message_ids if mid in persisted or mid > last_seen
+            ]
+            runtime.db.clear_queued_delivery_ids(att_id, message_ids)
+            if not deliverable_ids:
+                return True
+            messages = runtime.db.messages_by_ids(conv_id, deliverable_ids)
             if messages and await live.deliver(messages) is False:
                 return False
             if messages and not runtime.db.set_last_seen(
                 att_id, messages[-1]["id"], runtime_owner
             ):
                 raise RuntimeError("attachment ownership changed during held delivery")
-            runtime.db.clear_queued_delivery_ids(att_id, message_ids)
         return True
 
     async def persist_ids(message_ids: list[int]) -> bool:
