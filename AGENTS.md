@@ -18,7 +18,7 @@ changes are new idempotent entries in `partyline/db_schema.py`.
 
 **Read next:** adapters `docs/adapters.md` + `skills/add-process-adapter/`; frontend
 `docs/frontend.md`; captains and lines `docs/hierarchy.md`; restarting the copy you are
-running inside `docs/dogfooding.md`; lessons from incidents `docs/lessons.md`; reviews
+running inside `docs/restart.md`; lessons from incidents `docs/lessons.md`; reviews
 `skills/adversarial-review/`; visual changes `skills/verify-visual-change/`.
 
 **Kill by pid** (`ss -ltnp | grep 864x`), never by matching the word partyline across

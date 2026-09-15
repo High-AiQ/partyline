@@ -69,4 +69,4 @@ inspect them before choosing which session to keep.
 the detach gap and startup: only messages after the checkpoint boundary reach the replacement,
 and a second delivery does not repeat them. It also checks new credentials, no resumed session,
 spawn failure recovery, concurrent resume exclusion, stopped-only removal, and preserved chat.
-Tests use a temporary database and fake adapters, never a live coding CLI or the cockpit database.
+Tests use a temporary database and fake adapters, never a live coding CLI or a running instance's database.

@@ -214,7 +214,7 @@ class BindConfigTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "non-empty"):
             bind.resolve_instance_name([], {}, {"instance": {"name": " "}})
         with self.assertRaisesRegex(ValueError, "table"):
-            bind.resolve_instance_name([], {}, {"instance": "Cockpit"})
+            bind.resolve_instance_name([], {}, {"instance": "LAN"})
 
     def test_load_bind_config_reads_toml(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -875,7 +875,7 @@ class ServerTest(unittest.TestCase):
             token=self.user_token("greg"),
         )
         old_name = getattr(server.app.state, "instance_name", None)
-        server.app.state.instance_name = "Cockpit"
+        server.app.state.instance_name = "LAN"
         try:
             self.arun(server.ws_endpoint(socket, "line"))
         finally:
@@ -883,7 +883,7 @@ class ServerTest(unittest.TestCase):
         self.assertEqual([event["type"] for event in socket.sent], ["error", "hello", "message"])
         self.assertEqual(socket.sent[1]["build"], frontend_build.FRONTEND_BUILD)
         self.assertEqual(socket.sent[1]["version"], server.__version__)
-        self.assertEqual(socket.sent[1]["instance_name"], "Cockpit")
+        self.assertEqual(socket.sent[1]["instance_name"], "LAN")
         # The handle comes from the account, never the hello or message fields.
         self.assertEqual(socket.sent[1]["handle"], "greg")
         posted = server.runtime.db.list_messages("line")[-1]
@@ -1526,7 +1526,7 @@ class ShutdownTest(ServerTest):
         self.arun(exercise())
 
         bodies = [message["body"] for message in server.runtime.db.list_messages("line")]
-        self.assertTrue(any("trusted cockpit plan started automatic" in body for body in bodies))
+        self.assertTrue(any("restart plan started automatic" in body for body in bodies))
 
     def test_running_processes_lists_live_attachments_with_their_line(self):
         server.runtime.db.add_attachment("a1", "line", "worker", "fake", ["fake"], "/tmp")
@@ -1610,7 +1610,7 @@ class ShutdownTest(ServerTest):
             server.plan_restart(
                 machine,
                 server.RestartPlanRequest(
-                    conversation_id="line", debrief="cockpit planner token"
+                    conversation_id="line", debrief="restart planner token"
                 ),
             )
         )

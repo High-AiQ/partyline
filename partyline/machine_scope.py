@@ -121,9 +121,9 @@ def allows_restart_plan(
 ) -> bool:
     """Host-local plan create: humans, or a machine whose home is the owner line.
 
-    Cockpit ``plan LINE`` authenticates with ``PARTYLINE_TOKEN`` on loopback.
-    That token may name only its own line as plan owner — no other admin
-    surface, no descendant grant. Loopback is checked by the route.
+    A machine authenticates with ``PARTYLINE_TOKEN`` on loopback to plan its
+    own line. That token may name only its own line as plan owner — no other
+    admin surface, no descendant grant. Loopback is checked by the route.
     """
     if is_human(principal):
         return True

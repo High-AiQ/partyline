@@ -190,7 +190,7 @@ class ReattachCoordinator:
         return None
 
     async def run_automatic(self) -> ReattachResult | None:
-        """Run a trusted cockpit plan under recoverable, exclusive ownership."""
+        """Run a trusted automatic plan under recoverable, exclusive ownership."""
         async def operation(plan: RestartPlan, guard: Callable[[], None]) -> ReattachResult:
             result = await self.run(plan, None, guard)
             if result.unconfirmed:
@@ -228,7 +228,7 @@ class ReattachCoordinator:
         start = (
             f"@{accepted_by} accepted sequential reattachment"
             if accepted_by is not None
-            else "the trusted cockpit plan started automatic sequential reattachment"
+            else "the restart plan started automatic sequential reattachment"
         )
         attachment_ids = plan["attachment_ids"]
         if ensure_owned is not None:

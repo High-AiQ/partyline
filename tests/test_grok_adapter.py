@@ -940,7 +940,7 @@ class ResumeWatermarkTest(unittest.IsolatedAsyncioTestCase):
 
             # 2026-08-19: this writer was unbounded and `_run()` had no
             # timeout. A regression that made `_run()` not return turned the
-            # pair into the 31 GB climb that OOM-killed the cockpit twice
+            # pair into the 31 GB climb that OOM-killed the instance twice
             # (crash_report.md). The cap bounds the bomb; the assertion below
             # proves the cap was never the reason the writer stopped.
             writer_cap = 50_000
