@@ -84,6 +84,19 @@ are yours: assign them". Before this, a captain handed a worker read "spin up a
 sub-line" in its pack and did exactly that, staffing a second copy of the same
 preset on the grandchild while the first sat idle.
 
+## The checkout a line works in
+
+A captain once planned a whole book from a checkout whose `main` was 102 commits
+behind `origin/main` and carried an old, uncommitted plan document; every child
+it spawned was cut from the same base. So the line now hears a `☏ checkout:`
+line — short SHA, branch, ahead/behind its upstream after a fetch, modified and
+untracked counts — when a captain is appointed, and a child line hears its
+`☏ base checkout:` when it is born. A machine cannot create a child from a
+checkout that is behind its upstream (409 says why); a person can. The
+per-message `(cwd git: …)` tag adds `N behind upstream` against the last fetch.
+Nothing in this path pulls, resets or stashes: the pack tells the captain to
+ask, and the person brings the checkout up to date.
+
 ## The hand-off contract
 
 A child line is born briefed. `POST /api/conversations/<parent>/children` takes
