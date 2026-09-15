@@ -27,10 +27,19 @@ def implied_addressee(db, message: dict) -> str | None:
     if message.get("sender_type") != "human" or message.get("audience_attachment_id"):
         return None
     body = str(message.get("body") or "")
-    if mentioned_names(body) or line_addressed(body):
+    if mentioned_names(body):
         return None
     alone = solo_process(db, message["conv_id"])
-    return alone["name"].lower() if alone else None
+    if alone is None:
+        return None
+    # ``name:`` is how a weak model addresses a colleague when it forgets the
+    # sigil, so ``Also, ...`` begins a line with a word and a comma like one.
+    # The guess only counts against a handle live on this line — the same
+    # filter ``route_message`` applies — or a person's ordinary prose would
+    # silently disable the shortcut and reach nobody.
+    if alone["name"].lower() in line_addressed(body):
+        return None
+    return alone["name"].lower()
 
 
 def addressed(db, att: dict, messages: list[dict]) -> bool:

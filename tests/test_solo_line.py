@@ -18,6 +18,21 @@ class Recorder:
         self.delivered.extend(messages)
 
 
+# The shape greg's text-plus-image post actually had: a second paragraph that
+# begins a line with "Also,", which the colon-address guess reads as a handle.
+ATTACHMENT_CAPTION = (
+    "Couple things:\n\n"
+    "The plus box is too big, it’s out of place too. Why not a faded happy "
+    "face or something.\n\n"
+    "Also, look at the placeholder text for the input area when I’m in mobile "
+    "view, it’s cut off at the bottom\n"
+    "📷 image · 1320×2868 · thumb: https://partyline.example/api/media/"
+    "be81cde2/thumb · slim: https://partyline.example/api/media/"
+    "be81cde2/slim · original: https://partyline.example/api/media/"
+    "be81cde2/original"
+)
+
+
 class SoloLineTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -79,3 +94,31 @@ class SoloLineTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(implied_addressee(self.db, {
             "conv_id": "line", "sender_type": "human", "body": "plain",
             "audience_attachment_id": "someone-else"}))
+
+    async def test_an_attachment_post_with_an_also_comma_line_wakes_now(self):
+        # Regression: the attachment's caption was routed but reached nobody
+        # because "Also," on its own line read as a colon-address to no one.
+        await self.say(ATTACHMENT_CAPTION)
+        self.assertEqual(self.fable.wakes, 1)
+        self.assertEqual([m["body"] for m in self.fable.delivered],
+                         [ATTACHMENT_CAPTION])
+
+    async def test_a_plain_message_after_the_attachment_also_wakes_now(self):
+        await self.say(ATTACHMENT_CAPTION)
+        self.fable.delivered.clear()
+        self.fable.wakes = 0
+        await self.say("Hello?")
+        self.assertEqual(self.fable.wakes, 1)
+        self.assertEqual([m["body"] for m in self.fable.delivered], ["Hello?"])
+
+    def test_prose_that_matches_no_live_handle_is_not_an_address(self):
+        self.assertEqual(implied_addressee(self.db, {
+            "conv_id": "line", "sender_type": "human",
+            "body": "Also, look at the placeholder", "audience_attachment_id": None,
+        }), "fable")
+
+    def test_a_colon_address_to_a_live_handle_is_still_an_address(self):
+        self.assertIsNone(implied_addressee(self.db, {
+            "conv_id": "line", "sender_type": "human",
+            "body": "fable, please look", "audience_attachment_id": None,
+        }))
