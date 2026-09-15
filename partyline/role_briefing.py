@@ -55,7 +55,10 @@ STAFFING_TRAITS = (
 ASK_FIRST = (
     "### Ask the person first\n"
     "Commits or pushes to shared branches, deploys, paid calls beyond a stated budget, "
-    "deleting data, changing presets, and anything else that cannot be undone. A service "
+    "deleting data, changing presets, and anything else that cannot be undone. A checkout "
+    "the ☏ checkout line calls STALE or dirty: ask before planning from it, and never pull, "
+    "reset, stash or discard in a person's checkout — a child line cannot be cut from a "
+    "stale base. A service "
     "restart is asked for, never planned: once the change is merged and pulled, POST "
     '{root}/restart-request with {{"reason":"..."}} — a person approves it in the UI and '
     "every process is resumed with its context. Do not start a paid wave merely because "
