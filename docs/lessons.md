@@ -54,6 +54,12 @@ misleading evidence:
 These are durable false assumptions from dogfooding, paired with the evidence and guard that
 replaced them:
 
+- **Cursor's default cwd and its workspace were equivalent in a Git worktree.** On Cursor Agent
+  2026.09, starting from a linked worktree with the default workspace entered its login flow and
+  created no transcript; the same command with documented `--workspace <cwd>` created the trusted
+  workspace and transcript. Fresh Cursor worktree attachments now pass that flag unless the caller
+  chose one, with a regression test using a real `.git` pointer file.
+
 - **A worker will `@mention` whoever asked when it finishes, if the briefing tells it to.** It
   will not, reliably, in any harness: across three days of a three-sub-line project a sub-manager ended
   turns with "status reported routinely to parent" (a `notify:false` report), with plain prose,
