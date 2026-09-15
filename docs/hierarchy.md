@@ -202,6 +202,17 @@ This release scopes machine credentials to their line and explicitly delegated d
 
 Start fresh creates a new attachment identity without inheriting the manager role. Appoint the replacement explicitly; resume retains the existing role.
 
+## One process on a line
+
+The @mention says who acts next in a room with several processes. On a line whose
+only live process is X, a person's message with no mention and no colon-address
+reaches X as if it said `@X`: there is nobody else it could be for, and typing the
+handle before every line was a tax that protected nothing. The shortcut is for
+people only — an agent's plain speech stays a reply for the room, so two processes
+cannot ring each other forever — and it switches itself off the moment a second
+process is live on the line. A held wake (a process mid-turn with receipt
+completion) treats such a message as addressed, the same as a mention.
+
 ## Mentions across lines
 
 One tree is one mention namespace: a handle is live on exactly one row in the
