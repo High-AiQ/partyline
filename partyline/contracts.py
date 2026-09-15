@@ -1,6 +1,6 @@
 """Named HTTP and WebSocket contracts shared by the server and runtime."""
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -254,6 +254,12 @@ class ConversationsChangedEvent(BaseModel):
     type: Literal["conversations_changed"] = "conversations_changed"
 
 
+class RestartRequestEvent(BaseModel):
+    """The pending restart request changed: filed, approved, or declined."""
+    type: Literal["restart_request"] = "restart_request"
+    request: Any = None
+
+
 class ReattachCommand(BaseModel):
     type: Literal["reattach"]
     token: str
@@ -276,6 +282,7 @@ Event = (
     | HelloEvent
     | ReattachOfferEvent
     | ReattachDecisionEvent
+    | RestartRequestEvent
 )
 
 

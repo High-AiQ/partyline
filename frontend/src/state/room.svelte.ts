@@ -19,6 +19,7 @@ import type {
 import { session } from "./session.svelte.js";
 import { sendOffLine } from "../lib/offline-wire";
 import type { WireIdentity } from "../lib/wire-commands";
+import { restart } from "./restart.svelte.js";
 import { wire } from "./wire.svelte.js";
 import type { WireContext } from "./wire.svelte.js";
 import { clearConversationRoute, routedConversationId, setConversationRoute } from "../lib/routing";
@@ -83,6 +84,7 @@ class Room {
   // ── the list ───────────────────────────────────────────────────────────
   async loadConversations(): Promise<void> {
     this.conversations = await api.conversations();
+    void restart.load().catch(ignoreBackgroundFailure);
     // Arriving on a deep link: the route named a line before the list existed.
     const routedId = routedConversationId();
     if (!routedId) return;
@@ -150,18 +152,11 @@ class Room {
   }
 
   /**
-   * Catch up with the server after the wire came back.
-   *
-   * Events are only delivered to a connected socket, so an outage is a hole in
-   * this tab's knowledge that nothing else fills — `open()` is the only other
-   * thing that fetches, and it runs on line changes, not on recovery. A server
-   * restart lands squarely in that hole: it rewrites every attachment status
-   * with no sockets to tell. The symptom was a process shown as dead while it
-   * was running, cleared only by a manual refresh.
-   *
-   * Attachments are replaced outright because the server is authoritative about
-   * them. Messages are merged, since `#absorb` already dedupes by id and the
-   * feed must not lose anything said while we were away.
+   * Catch up with the server after the wire came back. An outage is a hole in
+   * this tab's knowledge nothing else fills (`open()` runs on line changes, not
+   * recovery); a restart rewrites every attachment status into that hole, and
+   * showed a live process as dead until a manual refresh. Attachments are
+   * replaced (the server is authoritative); messages merge via `#absorb`.
    */
   async resync(): Promise<void> {
     const conversation = this.conversation;
@@ -280,6 +275,10 @@ class Room {
         this.refreshArchiveIfOpen();
         break;
 
+      case "restart_request":
+        restart.apply(event.request);
+        break;
+
       case "error":
         if (event.conversation_id === convId) handleWireError(this, event, context);
         break;
@@ -292,14 +291,10 @@ class Room {
   }
 
   /**
-   * Record an attachment, whether it arrived over the socket or as the answer
-   * to our own POST.
-   *
-   * Keyed by id and therefore idempotent, which is what lets both paths call
-   * it. Both need to: the socket is the normal route, but if it happens to be
-   * reconnecting when the attach succeeds, the REST response is the only news
-   * we get — and a process running with no jack on the board is worse than a
-   * jack that arrives twice.
+   * Record an attachment from the socket or from our own POST's answer. Keyed
+   * by id, so idempotent: if the socket is reconnecting when the attach lands,
+   * the REST response is the only news, and a running process with no jack is
+   * worse than a jack that arrives twice.
    */
   upsertAttachment(attachment: Attachment): void {
     if (this.#removed.has(attachment.id)) return; // a late echo of a forgotten jack
