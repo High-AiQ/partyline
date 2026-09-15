@@ -21,9 +21,11 @@ from partyline.adapters.bundled.cursor.parse import (
     cwd_md5,
     cwd_slug,
     fingerprint,
+    is_git_worktree,
     parse_record,
     resync_fingerprints,
     transcript_path,
+    workspace_command,
 )
 from partyline.adapters.receipts import BEGAN, ENDED
 
@@ -134,6 +136,55 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             cli_session="3ebd57db-5810-460b",
         )
         self.assertEqual(short_r.build_command(), ["agent", "-r", "3ebd57db-5810-460b"])
+
+    def test_fresh_worktree_explicitly_selects_its_workspace(self):
+        with tempfile.TemporaryDirectory() as root:
+            worktree = Path(root) / "child"
+            worktree.mkdir()
+            (worktree / ".git").write_text(
+                "gitdir: /repo/.git/worktrees/child\n", encoding="utf-8"
+            )
+            adapter = self.make_adapter(cwd=str(worktree))
+
+            self.assertTrue(is_git_worktree(str(worktree)))
+            self.assertEqual(
+                adapter.build_command(),
+                ["agent", "--yolo", "--trust", "--workspace", str(worktree)],
+            )
+            resumed = self.make_adapter(
+                cwd=str(worktree), resume=True, cli_session="session-123"
+            )
+            self.assertEqual(
+                resumed.build_command(),
+                ["agent", "--yolo", "--trust", "--resume", "session-123"],
+            )
+
+    def test_explicit_cursor_workspace_is_not_replaced(self):
+        with tempfile.TemporaryDirectory() as root:
+            worktree = Path(root) / "child"
+            worktree.mkdir()
+            (worktree / ".git").write_text("gitdir: /repo/.git/worktrees/child\n")
+            adapter = self.make_adapter(
+                cwd=str(worktree), command=["agent", "--workspace", "/other"]
+            )
+
+            self.assertEqual(adapter.build_command(), ["agent", "--workspace", "/other"])
+
+            self.assertEqual(
+                workspace_command(["agent", "--workspace=/other"], str(worktree), False),
+                ["agent", "--workspace=/other"],
+            )
+
+    def test_repository_directory_keeps_cursor_default_workspace(self):
+        with tempfile.TemporaryDirectory() as root:
+            repository = Path(root) / "repository"
+            (repository / ".git").mkdir(parents=True)
+
+            self.assertFalse(is_git_worktree(str(repository)))
+            self.assertEqual(
+                workspace_command(["agent", "--yolo"], str(repository), False),
+                ["agent", "--yolo"],
+            )
 
     async def test_delivery_arms_presence_only_for_a_nonempty_digest(self):
         adapter = self.make_adapter(hook_url="http://hook.local")

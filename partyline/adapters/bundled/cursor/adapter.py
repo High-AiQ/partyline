@@ -17,6 +17,7 @@ from partyline.adapters.bundled.cursor.parse import (
     resync_fingerprints,
     resync_positional,
     transcript_path,
+    workspace_command,
 )
 from partyline.adapters.bundled.cursor.wakes import WakeSettlement
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
@@ -50,6 +51,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
 
     def build_command(self) -> list[str]:
         cmd = list(self.att.get("command") or []) or ["agent", "--yolo", "--trust"]
+        cmd = workspace_command(cmd, self.att["cwd"], self.resume)
         if self.resume:
             session_id = str(self.att.get("cli_session") or "").strip()
             if session_id and "--resume" not in cmd and "-r" not in cmd:
