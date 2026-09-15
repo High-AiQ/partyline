@@ -9,6 +9,8 @@
   import { renderMessage, senderColor } from "../../lib/markdown";
   import { enhanceMarkdown } from "../../lib/message-enhancers";
   import { visibleMessageBody } from "../../lib/files";
+  import { copyText } from "../../lib/clipboard";
+  import { tooltip } from "../../lib/tooltip";
   import ImageGrid from "./ImageGrid.svelte";
   import FileAttachments from "./FileAttachments.svelte";
   import type { ChatMessage } from "../../lib/contracts";
@@ -18,6 +20,25 @@
   }
 
   let { message }: Props = $props();
+
+  // The control copies the wire markdown (`message.body`) verbatim — exactly
+  // what another line or an archive would want — never the rendered HTML.
+  let copied = $state(false);
+  let revertTimer: ReturnType<typeof setTimeout> | undefined;
+
+  async function copy(): Promise<void> {
+    if (await copyText(message.body)) {
+      copied = true;
+      clearTimeout(revertTimer);
+      revertTimer = setTimeout(() => {
+        copied = false;
+      }, 1500);
+    }
+  }
+
+  $effect(() => () => {
+    clearTimeout(revertTimer);
+  });
 
   const isSystem = $derived(message.sender_type === "system");
   const body = $derived(renderMessage(visibleMessageBody(message), message.sender_type === "agent"));
@@ -44,8 +65,30 @@
   const isPrivate = $derived(Boolean(message.audience_attachment_id));
 </script>
 
-<div class="msg animate-[arrive_0.28s_ease_both] {rootClass}">
+<div class="msg group relative animate-[arrive_0.28s_ease_both] {rootClass}">
   {#if !isSystem}
+    <button
+      class="copy absolute top-0 right-0 z-10 grid size-7 place-items-center rounded border border-line bg-ink-2 p-0 text-[13px] leading-none text-cream-faint opacity-0 transition-opacity pointer-events-none hover:bg-copper hover:text-ink group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
+      type="button"
+      use:tooltip={{ label: copied ? "Copied" : "copy message" }}
+      aria-label="copy message"
+      onclick={copy}
+    >
+      {#if copied}
+        <svg
+          class="size-[13px] fill-none stroke-current stroke-2 [stroke-linecap:round] [stroke-linejoin:round]"
+          viewBox="0 0 24 24"
+          aria-hidden="true"><path d="m5 13 4 4L19 7" /></svg
+        >
+      {:else}
+        <svg
+          class="size-[13px] fill-none stroke-current stroke-2 [stroke-linecap:round] [stroke-linejoin:round]"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+          ><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg
+        >
+      {/if}
+    </button>
     <div class="head mb-0.5 flex items-baseline gap-2.5">
       <span
         class="who font-semibold text-[12.5px] {message.sender_type}"
@@ -75,6 +118,15 @@
 </div>
 
 <style>
+  /* A touch screen has no hover to reveal the copy control with, and Tailwind
+     has no `(hover: none)` media-query variant. */
+  @media (hover: none) {
+    .copy {
+      opacity: 1;
+      pointer-events: auto;
+    }
+  }
+
   /* A process gets a patch-cable arrow, so the eye can sort people from
        machines without reading a single name. */
   .who.agent::before {
