@@ -912,3 +912,21 @@ outright: tables dropped, routes, dialogs, contracts and prose gone.
 | DO | DO NOT |
 | --- | --- |
 | Measure a coordination feature by writes from processes, not by reads the briefing mandates | Keep a surface because it is "harmless" — every process reads its prose |
+
+## A paste into a busy Cursor is a queued steer, not a delivery
+
+Cursor's `agent` accepts a paste while a tool runs and parks it in a steer
+queue. The adapter credited the paste and fired a "turn began" receipt, so a
+captain's halt order plus two follow-ups read as delivered while the worker
+ran an eighteen-minute GPU sweep to completion and relaunched it after every
+kill; its transcript never contained any of them. Two probes fixed the facts:
+one Enter queues a steer for as long as the tool runs; a second bare Enter
+submits it immediately as a new user record with the tool backgrounded; one
+Ctrl+C ends the turn (`turn_ended` record) and leaves the CLI alive, a second
+exits it; Escape cancels the queued steer, not the turn.
+
+| DO | DO NOT |
+| --- | --- |
+| Credit a wake only when the transcript's user record contains it | Advance the cursor because bytes reached the pty |
+| Send the second Enter for a mid-turn paste; one Ctrl+C for `@!`, confirmed by `turn_ended` | Fire a "turn began" receipt for a paste into a busy CLI |
+| Guard the Ctrl+C exit window | Send two Ctrl+C within five seconds |
