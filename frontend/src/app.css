@@ -26,33 +26,6 @@
   --animate-pulse-led: pulse-led 2.2s infinite;
 }
 
-:root {
-  color-scheme: dark;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    color-scheme: light;
-    --color-ink: #f7f5ef;
-    --color-ink-2: #fffdf8;
-    --color-ink-3: #ede9df;
-    --color-line: #d6d0c4;
-    --color-panel: #fffdf8;
-    --color-panel-line: #c2bbad;
-    --color-copper: #9a5b20;
-    --color-copper-hot: #7c4212;
-    --color-cream: #1f2520;
-    --color-cream-dim: #4d574f;
-    --color-cream-faint: #667067;
-    --color-green: #326f2d;
-    --color-red: #9b3e2e;
-  }
-
-  body::after {
-    opacity: 0.025;
-  }
-}
-
 @keyframes arrive {
   from {
     opacity: 0;
