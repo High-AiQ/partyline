@@ -47,6 +47,7 @@ Sign in → open a line → attach a process with a handle and adapter → talk 
 | Credentials for attached processes | [docs/credentials.md](docs/credentials.md) |
 | Security & caveats | [docs/security.md](docs/security.md) |
 | Agent refresh / checkpoints | [docs/agent-refresh.md](docs/agent-refresh.md) |
+| Restarting a running instance | [docs/restart.md](docs/restart.md) |
 | Config, bind address, reverse proxy | [docs/configuration.md](docs/configuration.md) |
 | Development & tests | [docs/development.md](docs/development.md) |
 | Agent contract (contributors) | [AGENTS.md](AGENTS.md) |

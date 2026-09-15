@@ -7,7 +7,7 @@ refusal is right, and it left the last step manual for the person. This is
 the hand-off: the captain files a request with a reason, every open tab
 shows it, and a person approves it in a confirmation dialog. Approval
 persists an automatic reattach plan for every live process (the same plan
-the cockpit's arm procedure uses), warns every tab, and restarts the unit;
+the automatic recovery plan uses), warns every tab, and restarts the unit;
 the new process resumes everyone and rings whoever was mid-turn.
 """
 

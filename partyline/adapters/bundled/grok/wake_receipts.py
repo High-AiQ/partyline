@@ -25,7 +25,7 @@ from .transcript import user_input
 # partyline logger up in production.
 #
 # The check runs when a tracker is constructed, not at import: the supported
-# way to set this is a line in the cockpit checkout's `.env`, and `load_dotenv()`
+# way to set this is a line in the deployment checkout's `.env`, and `load_dotenv()`
 # runs after this module has already been imported. Configuring at import time
 # would read the environment before the file that sets it had been loaded.
 logger = logging.getLogger(__name__)
