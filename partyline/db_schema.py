@@ -251,4 +251,13 @@ MIGRATIONS = [
     "ALTER TABLE presets ADD COLUMN reads_images INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE presets ADD COLUMN can_manage INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE presets ADD COLUMN implements INTEGER NOT NULL DEFAULT 1",
+    """CREATE TABLE IF NOT EXISTS reactions(
+        message_id INTEGER NOT NULL,
+        reactor TEXT NOT NULL,
+        reactor_type TEXT NOT NULL CHECK(reactor_type IN ('human', 'agent')),
+        emoji TEXT NOT NULL,
+        created_at REAL NOT NULL,
+        UNIQUE(message_id, reactor, emoji)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id, emoji)",
 ]
