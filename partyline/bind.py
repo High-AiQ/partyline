@@ -10,6 +10,8 @@ from pathlib import Path
 
 import uvicorn
 
+from . import features
+
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8642
@@ -112,6 +114,7 @@ def apply_server_config(state, args, env, config_dict) -> tuple[str, int]:
     host, port = resolve_bind(args, env, config_dict)
     state.bind = BindConfig(host, port)
     state.instance_name = resolve_instance_name(args, env, config_dict)
+    features.install(features.resolve(env, config_dict))
     return host, port
 
 

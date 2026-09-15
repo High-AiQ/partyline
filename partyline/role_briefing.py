@@ -10,6 +10,8 @@ listed as the things to ask first.
 
 from collections.abc import Collection
 
+from . import features
+
 from .line_depth import MAX_CAPTAIN_DEPTH
 
 
@@ -179,6 +181,6 @@ def role_instructions(
         )
     if parent_id and "report" in actions:
         blocks.append(CHILD_MANAGER.format(root=root))
-    if parent_id is None:
+    if parent_id is None and features.enabled("heartbeat"):
         blocks.append(HEARTBEAT)
     return "\n\n## Captain pack\n" + "\n\n".join(blocks)

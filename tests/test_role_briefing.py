@@ -2,6 +2,7 @@
 
 import unittest
 
+from partyline import features
 from partyline.role_briefing import role_instructions
 
 
@@ -25,7 +26,10 @@ class RoleBriefingTests(unittest.TestCase):
         self.assertIn("### The loop you run", text)
         self.assertIn("### Ask the person first", text)
         self.assertIn("### Worked example", text)
-        self.assertIn("/api/heartbeat", text)
+        self.assertNotIn("/api/heartbeat", text)  # off by default since 1.23.0
+        with features.overridden(heartbeat=True):
+            on = role_instructions(["assign", "create_child", "read_reports"], "root", None)
+        self.assertIn("/api/heartbeat", on)
         self.assertNotIn('"notify":true', text)
         self.assertNotIn("also a child manager", text)
 
