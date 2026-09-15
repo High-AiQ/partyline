@@ -70,28 +70,6 @@
 
 <div class="msg group relative animate-[arrive_0.28s_ease_both] {rootClass}">
   {#if !isSystem}
-    <button
-      class="copy absolute top-0 right-0 z-10 grid size-7 place-items-center rounded border border-line bg-ink-2 p-0 text-[13px] leading-none text-cream-faint opacity-0 transition-opacity pointer-events-none hover:bg-copper hover:text-ink group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
-      type="button"
-      use:tooltip={{ label: copied ? "Copied" : "copy message" }}
-      aria-label="copy message"
-      onclick={copy}
-    >
-      {#if copied}
-        <svg
-          class="size-[13px] fill-none stroke-current stroke-2 [stroke-linecap:round] [stroke-linejoin:round]"
-          viewBox="0 0 24 24"
-          aria-hidden="true"><path d="m5 13 4 4L19 7" /></svg
-        >
-      {:else}
-        <svg
-          class="size-[13px] fill-none stroke-current stroke-2 [stroke-linecap:round] [stroke-linejoin:round]"
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-          ><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg
-        >
-      {/if}
-    </button>
     <div class="head mb-0.5 flex items-baseline gap-2.5">
       <span
         class="who font-semibold text-[12.5px] {message.sender_type}"
@@ -106,23 +84,56 @@
       {#if isPrivate}
         <span class="direct text-[10px] text-cream-faint">· direct</span>
       {/if}
+      <span class="message-actions ml-auto flex items-center gap-1">
+        <Reactions
+          messageId={message.id}
+          reactions={message.reactions ?? []}
+          showChips={false}
+          onToggle={(emoji: ReactionEmoji) => room.toggleReaction(message.id, emoji)}
+        />
+        <button
+          class="copy grid size-7 place-items-center rounded border border-line bg-ink-2 p-0 text-[13px] leading-none text-cream-faint opacity-0 pointer-events-none transition-opacity hover:bg-copper hover:text-ink group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
+          type="button"
+          use:tooltip={{ label: copied ? "Copied" : "copy message" }}
+          aria-label="copy message"
+          onclick={copy}
+        >
+          {#if copied}
+            <svg
+              class="size-[13px] fill-none stroke-current stroke-2 [stroke-linecap:round] [stroke-linejoin:round]"
+              viewBox="0 0 24 24"
+              aria-hidden="true"><path d="m5 13 4 4L19 7" /></svg
+            >
+          {:else}
+            <svg
+              class="size-[13px] fill-none stroke-current stroke-2 [stroke-linecap:round] [stroke-linejoin:round]"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+              ><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg
+            >
+          {/if}
+        </button>
+      </span>
     </div>
   {/if}
   <div class="body {bodyClass}" use:enhanceMarkdown={body}>
     <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised in renderMessage -->
     {@html body}
   </div>
+  {#if !isSystem}
+    <Reactions
+      messageId={message.id}
+      reactions={message.reactions ?? []}
+      showControl={false}
+      onToggle={(emoji: ReactionEmoji) => room.toggleReaction(message.id, emoji)}
+    />
+  {/if}
   {#if images.length}
     <ImageGrid {images} />
   {/if}
   {#if otherFiles.length}
     <FileAttachments files={otherFiles} />
   {/if}
-  <Reactions
-    messageId={message.id}
-    reactions={message.reactions ?? []}
-    onToggle={(emoji: ReactionEmoji) => room.toggleReaction(message.id, emoji)}
-  />
 </div>
 
 <style>

@@ -110,7 +110,10 @@ class ReactionRoutesTest(unittest.TestCase):
             recorder.delivered[-1]["body"],
             "☺ greg reacted ✅ to your «" + "x" * 80 + "…»",
         )
-        self.assertEqual(self.db.list_messages("line")[-1]["body"], recorder.delivered[-1]["body"])
+        wake = self.db.list_messages("line")[-1]
+        self.assertEqual(wake["body"], recorder.delivered[-1]["body"])
+        self.assertEqual(wake["sender_type"], "system")
+        self.assertEqual(wake["audience_attachment_id"], attachment["id"])
 
     def test_process_reaction_broadcasts_without_posting_chat(self):
         attachment, token = self._machine()

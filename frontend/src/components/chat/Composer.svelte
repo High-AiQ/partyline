@@ -15,7 +15,7 @@
   import { draft } from "../../state/draft.svelte.js";
   import { layout } from "../../state/layout.svelte.js";
   import { session } from "../../state/session.svelte.js";
-  import { insertNewline } from "../../lib/composer";
+  import { composerPlaceholder, insertNewline } from "../../lib/composer";
   import { api } from "../../lib/api";
   import type { FileIntake, PendingFiles } from "../../lib/files";
   import { applyMention, mentionCandidates, mentionToken } from "../../lib/mentions";
@@ -49,6 +49,7 @@
     token ? mentionCandidates(token.prefix, room.attachments, room.history.humans, session.adapters) : [],
   );
   const popoverOpen = $derived(Boolean(token) && candidates.length > 0);
+  const placeholder = $derived(composerPlaceholder(layout.narrow));
 
   /** Grow with the text, up to a point; past that it scrolls. */
   const MAX_HEIGHT = 180;
@@ -206,11 +207,11 @@
     </button>
     <textarea
       id="input"
-      class="max-h-[180px] min-h-[22px] flex-1 resize-none border-0 bg-transparent text-cream outline-0 [font-family:inherit]"
+      class="max-h-[180px] min-h-7 flex-1 resize-none border-0 bg-transparent text-cream outline-0 [font-family:inherit]"
       bind:this={box}
       bind:value={draft.text}
       rows="1"
-      placeholder="say something… @name to ring an agent"
+      {placeholder}
       aria-label="message"
       onkeydown={onKeydown}
       oninput={() => {
