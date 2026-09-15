@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stderr
+from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.error import HTTPError
 
@@ -152,6 +153,49 @@ class GuardrailTest(unittest.TestCase):
         _git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q",
              "--allow-empty", "-m", "root", cwd=repo)
         return repo
+
+    def _tracked_repo(self):
+        """A clone whose main tracks origin/main, plus a second clone to move origin."""
+        origin = os.path.join(self.directory.name, "origin.git")
+        _git("init", "-q", "--bare", "-b", "main", origin, cwd=self.directory.name)
+        repo = os.path.join(self.directory.name, "repo")
+        _git("clone", "-q", origin, repo, cwd=self.directory.name)
+        _git("checkout", "-q", "-b", "main", cwd=repo)
+        _git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q",
+             "--allow-empty", "-m", "root", cwd=repo)
+        _git("push", "-q", "-u", "origin", "main", cwd=repo)
+        other = os.path.join(self.directory.name, "other")
+        _git("clone", "-q", origin, other, cwd=self.directory.name)
+        return repo, other
+
+    def test_a_captain_hears_the_checkout_state_and_a_stale_base_cuts_no_child(self):
+        repo, other = self._tracked_repo()
+        self.db._exec("UPDATE attachments SET cwd=? WHERE id='root-lead'", (repo,))
+        current = self.child("root", "fresh", self.machine("root-lead"))
+        self.assertIn("☏ base checkout:", self.db.list_messages(current["id"])[1]["body"])
+        self.assertIn("up to date with origin/main", self.db.list_messages(current["id"])[1]["body"])
+        _git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q",
+             "--allow-empty", "-m", "upstream moved", cwd=other)
+        _git("push", "-q", cwd=other)
+        stale = self.client.post("/api/conversations/root/children", json={"name": "late"},
+                                 headers=self.machine("root-lead"))
+        self.assertEqual(stale.status_code, 409, stale.text)
+        self.assertIn("1 commit behind origin/main", stale.json()["detail"])
+        self.assertIn("ask the person to bring main up to date", stale.json()["detail"])
+        # A person may still cut it, and the child hears that its base is stale.
+        by_person = self.child("root", "late")
+        self.assertIn("STALE", self.db.list_messages(by_person["id"])[1]["body"])
+        # Appointing a captain tells the whole line where the checkout stands.
+        self.db.add_attachment("root-2", "root", "sol", "fake", ["fake"], repo)
+        self.db._exec("UPDATE attachments SET status='running' WHERE id='root-2'")
+        async def capture(messages):
+            pass
+
+        self.runtime.live["root-2"] = SimpleNamespace(deliver=capture, att={})
+        self.assertEqual(self.client.post("/api/conversations/root/lead",
+                                          json={"attachment_id": "root-2"}).status_code, 200)
+        bodies = [m["body"] for m in self.db.list_messages("root")]
+        self.assertTrue(any(b.startswith("☏ checkout: ") and "STALE" in b for b in bodies), bodies)
 
     def test_a_child_of_a_git_line_is_born_in_its_own_worktree(self):
         repo = self._repo()

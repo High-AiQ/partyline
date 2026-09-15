@@ -56,4 +56,15 @@ def cwd_git_digest(cwd: str) -> str:
     if state is None:
         return ""
     cleanliness = "dirty" if state.dirty else "clean"
-    return f"(cwd git: {state.sha} {cleanliness})"
+    behind = _behind_upstream(cwd)
+    stale = f", {behind} behind upstream" if behind else ""
+    return f"(cwd git: {state.sha} {cleanliness}{stale})"
+
+
+def _behind_upstream(cwd: str) -> int:
+    """Commits on the tracked upstream (as last fetched) missing from HEAD."""
+    try:
+        done = _git(cwd, "rev-list", "--count", "HEAD..@{upstream}")
+    except (OSError, subprocess.TimeoutExpired):
+        return 0
+    return int(done.stdout.strip() or 0) if not done.returncode else 0
