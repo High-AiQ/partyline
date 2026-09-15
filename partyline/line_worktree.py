@@ -32,13 +32,20 @@ def _git(*args: str, cwd: str) -> subprocess.CompletedProcess:
 
 
 def repo_root(path: str | None) -> str | None:
+    """The repository's main working tree, even when ``path`` is inside one of
+    its linked worktrees. Children of a child line otherwise nested their
+    worktrees inside the parent's — ``.partyline-worktrees/a/.partyline-worktrees/b``
+    — and a long project grew a directory for every generation."""
     if not path or not os.path.isdir(path):
         return None
     try:
-        done = _git("rev-parse", "--show-toplevel", cwd=path)
+        done = _git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=path)
     except (OSError, subprocess.SubprocessError):
         return None
-    return done.stdout.strip() or None if done.returncode == 0 else None
+    if done.returncode != 0 or not done.stdout.strip():
+        return None
+    common = done.stdout.strip()
+    return os.path.dirname(common) if os.path.basename(common) == ".git" else common
 
 
 def line_cwd(db, conv_id: str) -> str | None:
