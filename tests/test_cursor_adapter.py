@@ -1738,3 +1738,22 @@ class WakeSettlementTest(unittest.IsolatedAsyncioTestCase):
         adapter._turn_open = True
         self.assertEqual(await adapter.interrupt(), "unconfirmed")  # inside the exit window
         self.assertEqual(writes, [b"\x03"])  # and no second Ctrl+C was sent
+
+    async def test_a_resume_continuation_waits_for_the_transcript_to_carry_it(self):
+        """A delivery that returns 'unproven' must also let the caller wait for the
+        proof; the coordinator otherwise abandons a healthy process."""
+        adapter = self.make_adapter()
+        adapter.alive = lambda: True
+        with patch("partyline.adapters.bundled.cursor.wakes.receipt", new=AsyncMock()):
+            self.assertIs(await adapter.deliver(self._wake(adapter, [21], "@cursor-auto go")), False)
+        adapter.prepare_delivery_receipt([21])
+        waiter = asyncio.ensure_future(adapter.wait_delivery_received([21]))
+        await asyncio.sleep(0)
+        self.assertFalse(waiter.done())
+        await adapter._note_user_input("<user_query>\n@cursor-auto go\n</user_query>")
+        self.assertTrue(await asyncio.wait_for(waiter, timeout=2))
+
+    async def test_a_dead_process_fails_the_receipt_wait(self):
+        adapter = self.make_adapter()
+        adapter.alive = lambda: False
+        self.assertFalse(await adapter.wait_delivery_received([1]))
