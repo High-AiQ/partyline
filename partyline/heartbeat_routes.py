@@ -58,7 +58,7 @@ def heartbeat_router(runtime) -> APIRouter:
         if not heartbeat.is_root_lead(db, principal.conv_id, principal.attachment_id):
             raise HTTPException(403, "only the root manager may use the heartbeat")
         row = heartbeat.get(db)
-        if row is not None and not heartbeat.owns(
+        if heartbeat.held(db, row) and not heartbeat.owns(
             row, principal.conv_id, principal.attachment_id
         ):
             raise HTTPException(403, "this heartbeat belongs to another line's manager")
