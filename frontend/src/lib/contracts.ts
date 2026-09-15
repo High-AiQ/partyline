@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { AttachmentSchema } from "./attachment-contracts";
+import { ReactionResponseSchema } from "./reaction-contracts";
 
 export { AttachmentSchema, AttachmentStatusSchema, CwdGitStateSchema } from "./attachment-contracts";
 export type { Attachment, AttachmentStatus, CwdGitState } from "./attachment-contracts";
@@ -73,8 +74,10 @@ export const ChatMessageSchema = z.object({
   source_conv_id: z.string().nullable().optional(), // said on another line, relayed here
   source_conv_name: z.string().nullable().optional(),
   audience_attachment_id: z.string().nullable().optional(), // a private copy for one process
+  reactions: z.array(ReactionResponseSchema).optional(),
 });
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
+export type { ReactionResponse } from "./reaction-contracts";
 
 export const FileUploadResponseSchema = z.object({
   message: ChatMessageSchema,

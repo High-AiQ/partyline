@@ -85,7 +85,7 @@ def register_conversation_routes(
         s = _server()
         deny_unless(s.runtime.db, request_principal(request), conv_id, "read")
         return await conversation_detail_response(
-            s.runtime, s.presence, s.media, conv_id
+            s.runtime, s.presence, s.media, conv_id, request_principal(request)
         )
 
     @app.put("/api/conversations/{conv_id}/topic", response_model=ConversationResponse)

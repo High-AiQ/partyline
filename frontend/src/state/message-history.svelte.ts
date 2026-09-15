@@ -2,7 +2,7 @@
 
 import { SvelteSet } from "svelte/reactivity";
 import { api } from "../lib/api";
-import type { ChatMessage } from "../lib/contracts";
+import type { ChatMessage, ReactionResponse } from "../lib/contracts";
 
 const PAGE_SIZE = 20;
 
@@ -63,6 +63,15 @@ export class MessageHistory {
     }
     this.messages = [...this.messages, ...fresh].sort((left, right) => left.id - right.id);
     return fresh.length;
+  }
+
+  updateReactions(messageId: number, reactions: ReactionResponse[]): void {
+    const index = this.messages.findIndex((message) => message.id === messageId);
+    if (index < 0) return;
+    const message = this.messages[index];
+    if (!message) return;
+    this.messages[index] = { ...message, reactions };
+    this.messages = [...this.messages];
   }
 
   async loadOlder(conversationId: string): Promise<number> {

@@ -100,18 +100,6 @@
     #convmeta {
       display: none;
     }
-    .task-toggle span {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      overflow: hidden;
-      clip: rect(0 0 0 0);
-    }
-    .task-toggle {
-      width: 34px;
-      padding: 0;
-      justify-content: center;
-    }
   }
 
   @media (max-width: 899px) {
@@ -153,19 +141,6 @@
     }
     .jacks {
       font-size: 12px;
-    }
-    .task-toggle {
-      width: 44px;
-      height: 44px;
-      padding: 0;
-      justify-content: center;
-    }
-    .task-toggle span {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      overflow: hidden;
-      clip: rect(0 0 0 0);
     }
     .jacks .led {
       width: 6px;

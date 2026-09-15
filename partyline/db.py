@@ -194,6 +194,10 @@ class Db:
             query = "DELETE FROM {} WHERE attachment_id IN (SELECT id FROM attachments WHERE conv_id=?)"
             for table in ("queued_delivery_messages", "transcript_delivery_records"):
                 self.conn.execute(query.format(table), (conv_id,))
+            self.conn.execute(
+                "DELETE FROM reactions WHERE message_id IN "
+                "(SELECT id FROM messages WHERE conv_id=?)", (conv_id,)
+            )
             self.conn.execute("DELETE FROM messages WHERE conv_id=?", (conv_id,))
             self.conn.execute("DELETE FROM attachments WHERE conv_id=?", (conv_id,))
             self.conn.execute("DELETE FROM conversations WHERE id=?", (conv_id,))
