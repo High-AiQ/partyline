@@ -68,6 +68,12 @@ class WakeSettlement:
         self._settle_task = None
         self._last_ctrl_c = 0.0
         self.turn_ended_event = asyncio.Event()
+        # Message ids a transcript user record has proven, for the resume
+        # path's receipt wait: a delivery that returns "unproven" owes the
+        # caller a way to wait for the proof, or the coordinator reads the
+        # missing method as the process having died and abandons it.
+        self._confirmed: set[int] = set()
+        self._confirm_event = asyncio.Event()
 
     async def deliver(self, messages: list[dict]):
         digest = self.format_digest(messages)
@@ -101,6 +107,8 @@ class WakeSettlement:
                 confirm = self.att.get("confirm_delivery_ids")  # type: ignore[attr-defined]
                 if confirm is not None:
                     await confirm(list(ids))
+                self._confirmed.update(ids)
+                self._confirm_event.set()
                 continue
             kept.append(wake)
         self._outstanding = kept
@@ -110,6 +118,22 @@ class WakeSettlement:
         self.turn_ended_event.set()
         if self._outstanding and (self._settle_task is None or self._settle_task.done()):
             self._settle_task = asyncio.create_task(self._settle_turn_end())
+
+    def prepare_delivery_receipt(self, message_ids: list[int]) -> None:
+        self._confirm_event.clear()
+
+    async def wait_delivery_received(self, message_ids: list[int]) -> bool:
+        """True once a transcript user record has carried every one of these ids."""
+        wanted = set(message_ids)
+        while not wanted <= self._confirmed:
+            if not self.alive():  # type: ignore[attr-defined]
+                return False
+            self._confirm_event.clear()
+            try:
+                await asyncio.wait_for(self._confirm_event.wait(), timeout=1.0)
+            except TimeoutError:
+                continue
+        return True
 
     async def interrupt(self) -> InterruptStatus:
         """One Ctrl+C, confirmed by the transcript's turn-end record."""
