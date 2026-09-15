@@ -459,7 +459,7 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.ready, ("sol",))
         self.assertIsNone(self.db.get_restart_plan())
         bodies = [message["body"] for message in self.db.list_messages("line")]
-        self.assertTrue(any("trusted cockpit plan started automatic" in body for body in bodies))
+        self.assertTrue(any("restart plan started automatic" in body for body in bodies))
         self.assertNotEqual(automatic["token"], self.plan["token"])
 
     async def test_automatic_plan_survives_an_unexpected_coordinator_failure(self):

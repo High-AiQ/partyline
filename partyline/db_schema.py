@@ -68,7 +68,7 @@ MIGRATIONS = [
     # Pre-token plans were never offered by a server route, so discard them.
     "ALTER TABLE restart_plan ADD COLUMN token TEXT",
     "DELETE FROM restart_plan WHERE token IS NULL",
-    # Cockpit plans are trusted, hands-off recovery; ordinary UI plans remain
+    # Automatic plans are trusted, hands-off recovery; ordinary UI plans remain
     # manual offers. Existing plans must keep the safe manual behaviour.
     "ALTER TABLE restart_plan ADD COLUMN mode TEXT NOT NULL DEFAULT 'offer'",
     # A lease prevents two server lifespans from resuming the same automatic
@@ -93,9 +93,9 @@ MIGRATIONS = [
     )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(lower(email))",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_handle ON users(lower(handle))",
-    # One JWT signing secret per instance, generated on first run. Two
-    # instances (cockpit and workbench) have separate databases, so they get
-    # distinct secrets for free; there is deliberately no env fallback.
+    # One JWT signing secret per instance, generated on first run. Separate
+    # instances have separate databases, so they get distinct secrets for
+    # free; there is deliberately no env fallback.
     """CREATE TABLE IF NOT EXISTS auth_secret(
         singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
         secret TEXT NOT NULL,

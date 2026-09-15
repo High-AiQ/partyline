@@ -2,7 +2,7 @@
 
 2026-08-19: kimi's presence-stack split the tail into ``tail.py`` while tests
 still patched ``adapter.asyncio.sleep``. The loop never yielded; a
-``keep_growing`` writer filled ~31 GB; WSL OOM-killed the cockpit twice.
+``keep_growing`` writer filled ~31 GB; WSL OOM-killed the instance twice.
 Do not reproduce that by running ``tests.test_grok_adapter`` on this machine.
 """
 

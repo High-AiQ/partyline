@@ -97,9 +97,9 @@ class ContractTest(unittest.TestCase):
                 conversation_id="line",
                 handle="greg",
                 version="0.21.4",
-                instance_name="Cockpit",
+                instance_name="LAN",
             ).model_dump(exclude_none=True)["instance_name"],
-            "Cockpit",
+            "LAN",
         )
 
     def test_hello_requires_release_version(self):

@@ -150,9 +150,12 @@ relay it was a second wake for the same news.
 
 Parent/child relationships do not replace the restart plan. A restart affects
 all attached processes, including independent lines. Use the fleet planning and
-recovery procedure in [dogfooding.md](dogfooding.md), obtain explicit clearance
-from every affected participant, and verify each line's recovery. Book teams
-must drain provider calls and reconcile spend before clearing a restart.
+recovery procedure in [restart.md](restart.md), and verify each line's recovery
+afterward. A mid-turn process is resumed and privately rung to continue
+automatically ([restart.md](restart.md#what-happens-to-a-process-mid-turn)); it
+is not a reason to delay approval. Book teams must still drain provider calls
+and reconcile spend before a restart lands — the automatic plan resumes the
+conversation, not an in-flight billing transaction.
 
 Each line keeps its own transcript, tasks, and checkpoints. A shared plan must
 resume each process against its own line's pending history.
@@ -161,7 +164,7 @@ resume each process against its own line's pending history.
 
 A trusted local operator can apply an explicit mapping when the running server
 predates hierarchy support. This does not mint or borrow a human API credential.
-It uses the operator's existing access to the instance database, like the cockpit
+It uses the operator's existing access to the instance database, like other
 maintenance commands. API callers remain subject to their normal scope checks.
 
 Prepare a JSON file containing `lines`, each with `conversation_id`, nullable
@@ -186,8 +189,8 @@ uv run --locked python -m scripts.line_management \
 Apply validates the whole graph before writing, performs a second state check
 inside the transaction, and refuses a stale preview. It runs the normal schema
 migrations and changes only the mapped parent and manager assignments. It does
-not stop, resume, or message any process. Follow the restart clearance procedure
-separately before replacing the running server.
+not stop, resume, or message any process. Follow the restart-request procedure
+in [restart.md](restart.md) separately before replacing the running server.
 
 ## Report acknowledgment contract
 

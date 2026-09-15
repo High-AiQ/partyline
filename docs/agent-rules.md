@@ -20,7 +20,7 @@ through ptys. The pty and transcript-tailing design are load-bearing. Read `READ
 - `partyline/db.py` + `partyline/db_schema.py` — SQLite queries, schema, and migrations
 - `frontend/` — TypeScript web client: Vite + Svelte 5 + Tailwind (`docs/frontend.md`)
 - `partyline/static/` — build output, committed
-- `docs/` — depth: `frontend.md`, `dogfooding.md`, `adapters.md`, `lessons.md`, `releases.md`
+- `docs/` — depth: `frontend.md`, `restart.md`, `adapters.md`, `lessons.md`, `releases.md`
 - `skills/` — procedures: `add-process-adapter/`, `adversarial-review/`, `verify-visual-change/`
 
 | DO | DO NOT |
@@ -92,15 +92,15 @@ kill NNNNN
 ## Working on partyline from inside partyline
 
 This project is developed through a running copy of itself, and a careless restart drops every
-participant including you. The procedure is `docs/dogfooding.md` — read it before any cockpit
-deploy or restart.
+participant including you. The procedure is `docs/restart.md` — read it before filing a restart
+request.
 
 | DO | DO NOT |
 | --- | --- |
-| Run the *cockpit* from its own clone and edit the *workbench* | Host the conversation from the checkout being edited |
-| Deploy only via `scripts.cockpit check → deploy → plan → arm` | Use any restart trigger other than `arm` |
-| Arm only after preflight is green, every planned participant has explicitly cleared, and no known finding remains | Restart without deploying — that only starts the old code again |
-| Prove recovery afterward: identity, continuation receipts, live attachment state | Let anyone be mid-turn when the restart lands, including yourself |
+| Merge, pull the deployment checkout, and `uv sync --locked` before requesting a restart | Request a restart to "pick up" a commit the deployed checkout does not have |
+| File a restart-request with a clear reason and wait for a person to approve it | Restart the service by any path other than the approved request |
+| Trust the automatic mid-turn mark and private continue notice to resume interrupted work | Delay approval waiting for every participant to go idle first |
+| Prove recovery afterward: identity, continuation receipts, live attachment state | Report success without checking `/api/running` |
 
 ## Self-learning
 

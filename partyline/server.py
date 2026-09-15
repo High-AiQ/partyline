@@ -114,7 +114,7 @@ presence = Presence(runtime)
 
 
 async def _run_automatic_reattachment() -> None:
-    """Run a trusted cockpit plan at startup without depending on a browser."""
+    """Run a trusted automatic plan at startup without depending on a browser."""
     try:
         await ReattachCoordinator(runtime, _resume_adapter).run_automatic()
     except Exception:
@@ -246,7 +246,7 @@ async def running(request: Request):
 async def plan_restart(request: Request, body: RestartPlanRequest):
     """Persist a restart plan. Loopback, and machines only for their home line.
 
-    The cockpit planner uses ``PARTYLINE_TOKEN`` against the line that owns
+    A machine authenticates with ``PARTYLINE_TOKEN`` against the line that owns
     the plan. A machine on another line is 403. ``allows()`` still governs
     conversation, attachment, and report routes; this is not one of them.
     """
