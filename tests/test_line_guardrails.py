@@ -100,10 +100,9 @@ class GuardrailTest(unittest.TestCase):
 
     def test_a_captain_cannot_attach_to_its_own_line_once_it_has_a_child(self):
         payload = {"name": "grok", "adapter": "raw", "command": "sh"}
-        before = self.client.post("/api/conversations/root/attachments", json=payload,
-                                  headers=self.machine("root-lead"))
-        self.assertEqual(before.status_code, 200, before.text)
         mid = self.child("root", "mid", self.machine("root-lead"))
+        person = self.client.post("/api/conversations/root/attachments", json=payload)
+        self.assertEqual(person.status_code, 200, person.text)
         sideways = self.client.post("/api/conversations/root/attachments",
                                     json={**payload, "name": "grok2"},
                                     headers=self.machine("root-lead"))
@@ -116,6 +115,33 @@ class GuardrailTest(unittest.TestCase):
         person = self.client.post("/api/conversations/root/attachments",
                                   json={**payload, "name": "grok3"})
         self.assertEqual(person.status_code, 200, person.text)
+
+    def test_a_captain_handed_workers_assigns_them_instead_of_splitting(self):
+        # The princess-book incident: grok staffed «delivery» with sol as captain
+        # and gemini-flash as worker; sol's pack said "spin up a sub-line", so it
+        # made a grandchild and staffed a second gemini-flash there.
+        mid = self.child("root", "delivery", self.machine("root-lead"))
+        sol = self.captain(mid["id"], "sol")
+        worker = self.client.post(f"/api/conversations/{mid['id']}/attachments",
+                                  json={"name": "gemini-flash", "adapter": "raw", "command": "sh"},
+                                  headers=self.machine("root-lead"))
+        self.assertEqual(worker.status_code, 200, worker.text)
+        self.db._exec("UPDATE attachments SET status='running' WHERE name='gemini-flash'")
+        split = self.client.post(f"/api/conversations/{mid['id']}/children",
+                                 json={"name": "gate1"}, headers=sol)
+        self.assertEqual(split.status_code, 403, split.text)
+        self.assertIn("already has workers (@gemini-flash)", split.json()["detail"])
+        self.assertIn("assign them, do not split", split.json()["detail"])
+        caps = self.client.get("/api/capabilities", headers=sol).json()
+        self.assertNotIn("create_child", caps["actions"])
+        self.assertIn("assign", caps["actions"])
+        self.assertIn("the workers on this line are yours", goal_rider(self.db, mid["id"]))
+        # A person may still split it, and once the worker is gone so may the captain.
+        self.assertEqual(self.child(mid["id"], "by-a-person")["parent_id"], mid["id"])
+        self.db._exec("UPDATE attachments SET status='exited' WHERE name='gemini-flash'")
+        self.assertIn("delegate to a sub-captain", goal_rider(self.db, mid["id"]))
+        self.assertIn("create_child",
+                      self.client.get("/api/capabilities", headers=sol).json()["actions"])
 
     # -- worktrees ---------------------------------------------------------------
 

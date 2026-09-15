@@ -52,6 +52,16 @@ class RoleBriefingTests(unittest.TestCase):
         self.assertNotIn("/children", text)
         self.assertIn("also a child manager", text)
 
+    def test_a_staffed_captain_is_told_to_assign_its_workers_at_any_depth(self):
+        text = role_instructions(["assign", "report"], "mid", "root", 1, staffed=True)
+        self.assertIn("### You are the captain; you do not implement", text)
+        self.assertIn("Workers already on your line are yours: assign them.", text)
+        self.assertIn("**This line is staffed** (depth 1 of 2)", text)
+        self.assertIn("/api/conversations/mid/staffing", text)
+        self.assertNotIn("/children", text)
+        self.assertNotIn("This line is a leaf", text)
+        self.assertIn("also a child manager", text)
+
     def test_missing_report_capability_does_not_advertise_report_tools(self):
         text = role_instructions(["assign", "create_child"], "child", "root", 1)
         self.assertNotIn("/reports", text)
