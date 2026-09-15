@@ -122,7 +122,7 @@
 
     <main
       id="main"
-      class="flex min-w-0 flex-col overflow-hidden bg-[radial-gradient(1200px_500px_at_50%_-200px,#171b18_0%,var(--color-ink)_60%)]"
+      class="flex min-w-0 flex-col overflow-hidden bg-[radial-gradient(1200px_500px_at_50%_-200px,var(--color-ink-3)_0%,var(--color-ink)_60%)]"
     >
       {#if session.instanceName}
         <InstanceBanner name={session.instanceName} />
