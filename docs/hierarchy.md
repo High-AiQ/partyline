@@ -68,6 +68,20 @@ gives every child its own worktree. A file attached to a message that is relayed
 process is readable by that process, and only that one, even though the file lives on the
 line it was posted to; a captain briefed with a document does not need it copied to disk.
 
+Archiving a line also removes its worktree, when it is **SAFE** to: the working tree is
+clean, and every commit on `line/<name>` is reachable from the parent line's branch or the
+repository's default branch — nothing sits only in the worktree about to disappear. When it
+is not SAFE the worktree stays, the branch always stays, and the archive response's
+`worktree_kept_reason` says why (`unmerged commits` or `uncommitted changes`); a person can
+see this in the delete dialog. Purge keeps removing a line's worktree unconditionally, as
+before. A captain may also retire a child line of its own tree with `DELETE
+/api/conversations/<child-id>` — never its own line — when that child has no live processes,
+its goal is cleared, and the SAFE test passes; anything else is a 409 with the reason. When
+you have accepted a child's branch and its captain is done, retire the child: its worktree
+goes with it. On startup the server sweeps `.partyline-worktrees` in every repository it
+knows about and removes any worktree whose line no longer exists in the database, unless it
+is dirty; a worktree belonging to a live or archived line is never touched.
+
 Work goes down, not sideways. Once a line has a child, a machine may no longer
 attach processes to that line: the root captain that could not staff a child
 otherwise hands the job to a sibling on the root line, in the checkout the

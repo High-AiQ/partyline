@@ -20,7 +20,8 @@ from partyline.conversation_routes import register_conversation_routes
 from partyline.db import Db
 from partyline.goal import goal_rider, register_goal_route
 from partyline.hierarchy_routes import hierarchy_router
-from partyline.line_worktree import WORKTREES_DIR, line_cwd, place_child, remove_for_line
+from partyline.line_worktree import WORKTREES_DIR, line_cwd, place_child
+from partyline.worktree_lifecycle import remove_for_line
 from partyline.media import MediaStore
 from partyline.runtime import ChatRuntime
 

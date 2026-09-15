@@ -248,6 +248,8 @@ export const ArchiveResultSchema = z.object({
   archived: z.literal(true),
   stopped: z.array(z.string()),
   archived_ids: z.array(z.string()).default([]),
+  worktree_removed: z.boolean().default(false),
+  worktree_kept_reason: z.string().nullable().default(null),
   conversation: ConversationSchema,
 });
 export type ArchiveResult = z.infer<typeof ArchiveResultSchema>;
