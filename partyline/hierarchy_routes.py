@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -36,7 +37,8 @@ from .hierarchy_contracts import (
     Report,
     ReportIn,
 )
-from .line_worktree import describe, place_child
+from . import checkout_health
+from .line_worktree import describe, line_cwd, place_child
 from .machine_scope import capability_state, deny_staffed_split, deny_unless, is_human
 from .reports import (
     ReportError,
@@ -137,6 +139,10 @@ def hierarchy_router(runtime) -> APIRouter:
                 audience=before["id"],
             )
         if live(att):
+            # Everyone hears where the line stands before the captain plans from it.
+            health = await asyncio.to_thread(checkout_health.inspect, line_cwd(db, conv_id))
+            if state := checkout_health.describe(health):
+                await runtime.post_message(conv_id, "system", "system", state)
             await post_private(
                 runtime, conv_id, "system", "system",
                 f"☏ @{att['name']} is now this line's captain — the captain pack rides this "
@@ -161,8 +167,13 @@ def hierarchy_router(runtime) -> APIRouter:
         status_code=201,
     )
     async def create_child(request: Request, conv_id: str, body: ChildIn):
-        deny_staffed_split(db, request_principal(request), conv_id)  # the loud reason first
-        deny_unless(db, request_principal(request), conv_id, "create_child")
+        principal = request_principal(request)
+        deny_staffed_split(db, principal, conv_id)  # the loud reason first
+        deny_unless(db, principal, conv_id, "create_child")
+        # Cut from HEAD: a base behind its upstream starts the child in the past.
+        health = await asyncio.to_thread(checkout_health.inspect, line_cwd(db, conv_id))
+        if not is_human(principal) and (stale := checkout_health.stale_base_reason(health)):
+            raise HTTPException(409, stale)
         name = body.name.strip() or "untitled"
         try:
             conv = create_child_conversation(db, conv_id, str(uuid.uuid4()), name)
@@ -171,6 +182,9 @@ def hierarchy_router(runtime) -> APIRouter:
         placed = place_child(db, conv_id, conv["id"])
         if where := describe(placed):
             await runtime.post_message(conv["id"], "system", "system", where)
+        if placed.get("branch") and (base := checkout_health.describe(health)):
+            base = base.replace("☏ checkout:", "☏ base checkout:", 1)
+            await runtime.post_message(conv["id"], "system", "system", base)
         conv = db.get_conversation(conv["id"])
         goal, topic = body.goal.strip(), body.topic.strip()
         if goal or topic:
