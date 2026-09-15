@@ -28,7 +28,7 @@ cd partyline
 uv run --locked partyline   # http://127.0.0.1:8642
 ```
 
-Sign in → open a line → attach a process with a handle and adapter → talk with `@mentions`.
+Sign in → open a line → attach a process with a handle and adapter → talk with `@mentions` (on a line with a single live process, a plain message reaches it without one).
 
 > An account is a gate, not a sandbox. Anyone you let in can attach processes as you. Bind to localhost (or a network you trust). See [Security](docs/security.md).
 

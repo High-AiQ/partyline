@@ -5,6 +5,7 @@ import logging
 from .interrupts import interrupt_for
 from .mention_relay import relay_mentions
 from .mentions import interrupt_names, line_addressed, mentioned_names
+from .solo_line import implied_addressee
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,9 @@ async def route_message(
     if colon:
         names |= {a["name"].lower() for a in runtime.db.list_attachments(conv_id)
                   if a["name"].lower() in colon and a["status"] in ("starting", "running")}
+    # A person's plain message on a line with one live process is for it.
+    if alone := implied_addressee(runtime.db, message):
+        names.add(alone)
     # `@!name` is an operator's "stop and read this". Only a human may write
     # it: an agent's reply wakes other agents, so an agent-authored bang would
     # let the room cancel its own work in a loop.

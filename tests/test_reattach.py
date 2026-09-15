@@ -3,6 +3,7 @@ from contextlib import contextmanager
 import tempfile
 import threading
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from partyline.db import Db
@@ -566,6 +567,9 @@ class FleetPlanTest(unittest.IsolatedAsyncioTestCase):
         self.order = []
         for conv_id, name in (("owner", "Owner line"), ("other", "Other line")):
             self.db.create_conversation(conv_id, name)
+        async def swallow(messages):
+            return None
+
         for ident, conv_id, name in (
             ("one", "owner", "sol"), ("two", "other", "terra")
         ):
@@ -573,7 +577,9 @@ class FleetPlanTest(unittest.IsolatedAsyncioTestCase):
                 ident, conv_id, name, "fake", ["fake"], self.directory.name
             )
             self.db.set_attachment_status(ident, "running", None)
-            self.runtime.live[ident] = object()
+            # Each line's only live process: a person's plain post now reaches
+            # it, so the stand-in must take a delivery.
+            self.runtime.live[ident] = SimpleNamespace(att={}, deliver=swallow)
 
     async def asyncTearDown(self):
         self.db.close()
@@ -627,8 +633,10 @@ class FleetPlanTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.status_code, 409)
 
     async def test_recovery_reaches_both_lines_and_reads_each_ones_own_history(self):
-        await self.runtime.post_message("owner", "greg", "human", "owner side news")
-        await self.runtime.post_message("other", "greg", "human", "other side news")
+        # Unread history: written past routing, since a person's plain post on a
+        # line with one live process would otherwise be delivered on the spot.
+        self.db.add_message("owner", "greg", "human", "owner side news")
+        self.db.add_message("other", "greg", "human", "other side news")
         plan = self.db.save_restart_plan("owner", ["one", "two"], "Continue.")
         seen = {}
 
