@@ -109,23 +109,19 @@ class Presence:
 
     def snapshot(self, conv_id: str) -> list[dict]:
         """Every attachment's presence on this line, open turns and finished."""
-        states = []
-        for att_id, line in sorted(self.lines.items()):
-            if line != conv_id:
-                continue
-            turn = self.turns.get(att_id)
-            states.append(
-                {
-                    "id": att_id,
-                    "phase": turn.phase if turn else IDLE,
-                    "completion": self.completion(att_id),
-                    "since": turn.since if turn else 0.0,
-                    "turn": self.counts.get(att_id, 0),
-                    "revision": self.revisions.get(att_id, 0),
-                    "held": self.queue.held_count(att_id),
-                }
-            )
-        return states
+        return [
+            {
+                "id": att_id,
+                "phase": turn.phase if (turn := self.turns.get(att_id)) else IDLE,
+                "completion": self.completion(att_id),
+                "since": turn.since if turn else 0.0,
+                "turn": self.counts.get(att_id, 0),
+                "revision": self.revisions.get(att_id, 0),
+                "held": self.queue.held_count(att_id),
+            }
+            for att_id, line in sorted(self.lines.items())
+            if line == conv_id
+        ]
 
     async def _announce(self, conv_id: str, att_id: str, phase: str) -> None:
         revision = self.revisions.get(att_id, 0) + 1
@@ -227,11 +223,8 @@ class Presence:
 
     def forget(self, att_id: str) -> None:
         """Drop state without broadcasting — for a line that is going away."""
-        self.turns.pop(att_id, None)
-        self.lines.pop(att_id, None)
-        self.completions.pop(att_id, None)
-        self.revisions.pop(att_id, None)
-        self.counts.pop(att_id, None)
+        for table in (self.turns, self.lines, self.completions, self.revisions, self.counts):
+            table.pop(att_id, None)
         self.queue.unregister(att_id)
         self.returns.forget(att_id)
 
@@ -245,6 +238,7 @@ class Presence:
         """Wrap deliver so a receipt fires only after the digest reaches the pty."""
         deliver = adapter.deliver
         att = getattr(adapter, "att", None) or {}
+        att.setdefault("id", att_id)
         owner = att.get("runtime_owner")
         self.register(att_id, completion)
         self.queue.register_deliver(

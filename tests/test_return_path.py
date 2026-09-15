@@ -12,6 +12,7 @@ import unittest
 from partyline.adapters.briefing import format_digest
 from partyline.db import Db
 from partyline.hierarchy import create_child_conversation, set_lead
+from partyline.mention_relay import post_private
 from partyline.presence import Presence
 from partyline.runtime import ChatRuntime
 from partyline.turn_return import excerpt
@@ -56,6 +57,8 @@ class Tree(unittest.IsolatedAsyncioTestCase):
         self.db.add_attachment(att_id, line, att_id, "fake", ["fake"], self.tmp.name, "own")
         self.db.set_attachment_status(att_id, "running", "own")
         adapter = Recorder("own")
+        adapter.att["id"] = att_id
+        adapter.att["name"] = att_id
         self.runtime.live[att_id] = self.presence.watch(
             adapter, line, att_id, "receipt", *self.runtime.held_wake_hooks(line, att_id, att_id)
         )
@@ -279,6 +282,57 @@ class ReturnPathTest(Tree):
 
         self.assertEqual(len([b for b in self.adapters["sub"].bodies() if b.startswith("↩")]), 1)
 
+    async def test_undeliverable_closing_mention_wakes_line_captain_once(self):
+        """A closing mention that reaches no live process rings the line captain once,
+        even if the captain never asked, and leaves the warning notice unforced on the line."""
+        await self.turn("builder", "@lead page one rendered")
+
+        # Warning notice is posted on child line:
+        notices = self.notices("child")
+        self.assertTrue(any("only a line's captain talks to other lines" in n for n in notices))
+        # Captain is woken ONCE with the return notice:
+        self.assertEqual(len(self.adapters["sub"].delivered), 1)
+        [notice] = [b for b in self.adapters["sub"].bodies() if b.startswith("↩")]
+        self.assertIn("@sub — builder ended its turn without handing off to any process", notice)
+        self.assertIn("last said: «＠lead page one rendered»", notice)
+
+    async def test_unattached_closing_mention_wakes_line_captain_once(self):
+        """A closing mention of an unattached handle rings the line captain once."""
+        await self.turn("builder", "@nobody page one rendered")
+
+        self.assertEqual(len(self.adapters["sub"].delivered), 1)
+        [notice] = [b for b in self.adapters["sub"].bodies() if b.startswith("↩")]
+        self.assertIn("@sub — builder ended its turn without handing off to any process", notice)
+
+    async def test_deliverable_closing_mention_does_not_fire_return_notice(self):
+        """When the closing mention reaches a process, normal hand-off occurs without a return notice."""
+        await self.turn("builder", "@sub page one rendered")
+
+        # Captain was woken by the message itself, not a return notice:
+        self.assertEqual(self.adapters["sub"].bodies(), ["@sub page one rendered"])
+        self.assertEqual([b for b in self.adapters["sub"].bodies() if b.startswith("↩")], [])
+
+    async def test_mid_turn_deliverable_with_undeliverable_closing_wakes_captain(self):
+        """A deliverable mention mid-turn does not prevent an undeliverable closing mention
+        from ringing the line captain with the return notice."""
+        await self.turn("builder", "@sub started rendering", "@nobody finished rendering")
+
+        # First message woke sub directly, closing message woke sub via return notice:
+        bodies = self.adapters["sub"].bodies()
+        self.assertIn("@sub started rendering", bodies)
+        return_notices = [b for b in bodies if b.startswith("↩")]
+        self.assertEqual(len(return_notices), 1)
+        self.assertIn("last said: «＠nobody finished rendering»", return_notices[0])
+
+    async def test_mid_turn_undeliverable_with_deliverable_closing_settles_normally(self):
+        """An undeliverable mention mid-turn does not cause a return notice if the closing mention
+        reaches a live process."""
+        await self.turn("builder", "@nobody started rendering", "@sub finished rendering")
+
+        bodies = self.adapters["sub"].bodies()
+        self.assertIn("@sub finished rendering", bodies)
+        self.assertEqual([b for b in bodies if b.startswith("↩")], [])
+
     async def test_same_line_delegation_returns_to_the_requester(self):
         await self.say("lead", "@worker run the suite")
         await self.turn("worker", "Suite green, 120 tests.")
@@ -463,6 +517,33 @@ class DeferredReturnTest(ReturnPathTest):
         self.presence.forget("sub")
 
         self.assertEqual(self.runtime.returns.deferred, {})
+
+    async def test_private_return_notice_is_delivered_to_captain_exactly_once(self):
+        await self.presence.began("parent", "lead")
+        notice = await post_private(
+            self.runtime,
+            "parent",
+            "system",
+            "system",
+            "↩ @lead — sub on line «Child» ended its turn without handing off",
+            audience="lead",
+            source=("sub", "child"),
+        )
+        self.presence.queue.hold("lead", [notice])
+        assignment = await self.human("parent", "@lead assigning next task")
+        await self.runtime.deliver_pending(
+            "parent", self.db.get_attachment("lead"), self.runtime.live["lead"]
+        )
+        lead_seen = self.db.get_attachment("lead")["last_seen"]
+        self.assertGreaterEqual(lead_seen, assignment["id"])
+
+        await self.say("lead", "Acknowledged assignment.")
+        await self.presence.ended("parent", "lead")
+        await self.runtime.returns.drain()
+
+        notices = [b for b in self.adapters["lead"].bodies() if b.startswith("↩")]
+        self.assertEqual(len(notices), 1)
+        self.assertEqual(self.presence.queue.held_count("lead"), 0)
 
 
 class ApiEchoTest(Tree):
