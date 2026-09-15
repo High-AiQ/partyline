@@ -8,10 +8,10 @@ from .attachment_contracts import AttachmentResponse
 from .media_contracts import FileRef
 from .line_process_contracts import LineLiveEvent
 from .presence_contracts import WorkingEvent
+from .reaction_contracts import ReactionEvent, ReactionResponse
 
 RestartPlanMode = Literal["offer", "automatic"]
 RestartPlanScope = Literal["line", "all"]
-
 
 class ConvIn(BaseModel):
     name: str
@@ -104,8 +104,9 @@ class MessageResponse(BaseModel):
     files: list[FileRef] = Field(default_factory=list)
     source_attachment_id: str | None = None
     source_conv_id: str | None = None
-    source_conv_name: str | None = None  # the line it was said on, when another
-    audience_attachment_id: str | None = None  # a private copy: one process sees it
+    source_conv_name: str | None = None
+    audience_attachment_id: str | None = None
+    reactions: list[ReactionResponse] = Field(default_factory=list)
 
 
 class FileUploadResponse(BaseModel):
@@ -273,7 +274,6 @@ class ReattachCommand(BaseModel):
     token: str
     action: Literal["accept", "cancel"]
 
-
 Event = (
     ShutdownEvent
     | MessageEvent
@@ -290,7 +290,7 @@ Event = (
     | HelloEvent
     | ReattachOfferEvent
     | ReattachDecisionEvent
-    | RestartRequestEvent
+    | RestartRequestEvent | ReactionEvent
 )
 
 

@@ -73,6 +73,7 @@ from .frontend_build import current_frontend_build
 from .hook_routes import hook_url, hooks_router
 from .line_process_routes import detach_attachment, register_line_process_routes
 from .message_routes import message_router
+from .reaction_routes import reaction_router
 from .goal import register_goal_route
 from .presence import Presence
 from .media import MediaStore, media_root
@@ -158,6 +159,7 @@ register_restart_request_routes(app, runtime, ADAPTER_METADATA, lambda: request_
 app.include_router(auth_router(runtime.db, on_handle_change=user_sockets.close_all))
 app.include_router(media_router(runtime, media))
 app.include_router(message_router(runtime, media))
+app.include_router(reaction_router(runtime))
 app.include_router(hierarchy_router(runtime))
 app.include_router(heartbeat_router(runtime))
 app.include_router(hooks_router(runtime, presence))

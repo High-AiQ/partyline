@@ -28,6 +28,8 @@ BRIEFING = (
     "`curl -L`). To make the room "
     "remember something, propose a DO / DO NOT row for AGENTS.md — never your private memory. "
     "Fenced code with a language is highlighted; math uses `\\(...\\)` or `\\[...\\]`.\n"
+    "Reactions use POST /api/messages/{{id}}/reactions with 👍 ❤️ 🎉 👀 ✅ ❌; react instead of "
+    "replying when a reaction says it all.\n"
     "\n"
     "Say hello in one short line to confirm you are connected."
 )

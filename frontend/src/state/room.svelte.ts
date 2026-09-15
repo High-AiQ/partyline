@@ -8,6 +8,7 @@
 
 import { SvelteSet } from "svelte/reactivity";
 import { api } from "../lib/api";
+import { toggleReaction } from "../lib/reaction-api";
 import type {
   Attachment,
   ChatMessage,
@@ -56,13 +57,9 @@ class Room {
   captains = $state<Record<string, string | null>>({});
   reattachOffer = $state<ReattachOfferEvent | null>(null);
   history = new MessageHistory(() => session.handle);
-  /** Attachments blocked on a dialog, which the board rings until someone peeks. */
   attention = new SvelteSet<string>();
-  /** Jacks forgotten on this line: a state event that was in flight when the
-   *  record went must not put the card back. */
   #removed = new Set<string>();
 
-  /** A transient toast, distinct from the wire banner: this one goes away. */
   notice = $state<RoomNotice | null>(null);
 
   #epoch = 0;
@@ -142,7 +139,7 @@ class Room {
       if (epoch === this.#epoch) this.leave();
       return;
     }
-    if (epoch !== this.#epoch) return; // a newer line won the race
+    if (epoch !== this.#epoch) return;
 
     this.conversation = detail.conversation;
     this.attachments = withoutForgotten(detail.attachments, this.#removed);
@@ -151,26 +148,28 @@ class Room {
     void this.loadConversations().catch(ignoreBackgroundFailure);
   }
 
-  /**
-   * Catch up with the server after the wire came back. An outage is a hole in
-   * this tab's knowledge nothing else fills (`open()` runs on line changes, not
-   * recovery); a restart rewrites every attachment status into that hole, and
-   * showed a live process as dead until a manual refresh. Attachments are
-   * replaced (the server is authoritative); messages merge via `#absorb`.
-   */
   async resync(): Promise<void> {
     const conversation = this.conversation;
     if (!conversation) return;
     const epoch = this.#epoch;
     const afterId = this.history.newestId;
     const [detail, presenceFetch] = await presenceSync.fetch(api.conversation(conversation.id));
-    if (epoch !== this.#epoch) return; // the line changed under the fetch
+    if (epoch !== this.#epoch) return;
 
     this.conversation = detail.conversation;
     this.attachments = withoutForgotten(detail.attachments, this.#removed);
     presenceSync.finish(presenceFetch, detail.presence, detail.working);
     this.history.merge(detail.messages);
     await this.history.catchUp(conversation.id, afterId);
+  }
+
+  async toggleReaction(messageId: number, emoji: string): Promise<void> {
+    try {
+      const message = await toggleReaction(messageId, emoji);
+      this.history.updateReactions(message.id, message.reactions ?? []);
+    } catch (failure: unknown) {
+      this.showNotice(failure instanceof Error ? failure.message : "could not toggle reaction", "error");
+    }
   }
 
   loadOlderMessages(): Promise<number> {
@@ -229,6 +228,9 @@ class Room {
     switch (event.type) {
       case "message":
         this.#absorb(event.message);
+        break;
+      case "reaction":
+        this.history.updateReactions(event.message_id, event.reactions);
         break;
       case "attachment":
         this.upsertAttachment(event.attachment);
@@ -315,7 +317,6 @@ class Room {
   setCaptain(conversationId: string, attachmentId: string | null): void {
     this.captains[conversationId] = attachmentId;
   }
-  /** Add a message once and remember its human sender for autocomplete. */
   #absorb(message: ChatMessage): void {
     this.history.merge([message]);
   }

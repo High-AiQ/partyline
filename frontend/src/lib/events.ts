@@ -10,6 +10,7 @@ import {
   ReattachCandidateSchema,
   RestartRequestSchema,
 } from "./contracts";
+import { ReactionResponseSchema } from "./reaction-contracts";
 
 export const HelloEventSchema = z.object({
   type: z.literal("hello"),
@@ -35,6 +36,13 @@ export const MessageEventSchema = z.object({
   message: z.lazy(() => ChatMessageSchema),
 });
 export type MessageEvent = z.infer<typeof MessageEventSchema>;
+
+export const ReactionEventSchema = z.object({
+  type: z.literal("reaction"),
+  message_id: z.number().int(),
+  reactions: z.array(ReactionResponseSchema),
+});
+export type ReactionEvent = z.infer<typeof ReactionEventSchema>;
 
 export const AttachmentEventSchema = z.object({
   type: z.literal("attachment"),
@@ -142,6 +150,7 @@ export type ConversationsChangedEvent = z.infer<typeof ConversationsChangedEvent
 const CurrentWireEventSchema = z.discriminatedUnion("type", [
   HelloEventSchema,
   MessageEventSchema,
+  ReactionEventSchema,
   AttachmentEventSchema,
   AttachmentRemovedEventSchema,
   LineLiveEventSchema,
