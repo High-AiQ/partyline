@@ -301,11 +301,11 @@
     line-height: 1.35;
     letter-spacing: 0.02em;
     pointer-events: none;
-    transform: translate(-50%, -100%);
+    transform: translateY(-100%);
     overflow-wrap: anywhere;
     white-space: normal;
   }
   .app-tooltip-below {
-    transform: translate(-50%, 0);
+    transform: none;
   }
 }
