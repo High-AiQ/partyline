@@ -117,7 +117,7 @@ class WireStateTest(unittest.TestCase):
         a tab stays open — and a Python-only release deliberately reloads no
         tab, so mount-time state would otherwise be the only state a document
         ever has. A dropdown missing an adapter the server has offered for an
-        hour is this staleness, observed on a live cockpit."""
+        hour is this staleness, observed on a live instance."""
         with ui_session(["alpha line"]) as ui:
             page = ui.page
             page.locator(".conv-row .conv").first.click()

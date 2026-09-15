@@ -45,9 +45,9 @@ describe("wire events with server-omitted null fields", () => {
       conversation_id: "line",
       handle: "greg",
       version: "0.39.0",
-      instance_name: "Cockpit",
+      instance_name: "LAN",
     });
-    expect(hello.type === "hello" && hello.instance_name).toBe("Cockpit");
+    expect(hello.type === "hello" && hello.instance_name).toBe("LAN");
   });
 
   it("accepts the unforgeable working event shape", () => {

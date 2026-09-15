@@ -2,8 +2,8 @@
 
 Partyline can run as a **plain service**: a server process with no restart continuation plan.
 Restarting such an instance stops every attached process, and nothing resumes them for you. That
-is a different situation from the cockpit, whose planned restart persists a plan and recovers its
-attachments ([dogfooding.md](dogfooding.md)).
+is a different situation from an approved restart-request, whose planned restart persists a plan
+and recovers its attachments ([restart.md](restart.md)).
 
 Use [agent-refresh.md](agent-refresh.md) to bring a single process back with context; this file
 covers refreshing and recovering the whole plain instance.

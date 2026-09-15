@@ -4,7 +4,7 @@
 Twice now a Python test process has taken this machine down rather than
 failing: a `coverage` run reached 19 GB on 2026-08-14, and `unittest` reached
 30.6 GB and then 31.0 GB on 2026-08-19, at which point the OOM killer took
-the cockpit, every attached CLI, and finally systemd's boot. Both times the
+the instance, every attached CLI, and finally systemd's boot. Both times the
 loop was ordinary — a poll whose sleep had been patched in the wrong module,
 plus a writer feeding it — and both times the first symptom a human saw was
 the whole VM going away.

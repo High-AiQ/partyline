@@ -218,7 +218,7 @@ replaced them:
 - **Advancing the cockpit meant a git pull.** The coordinator twice advised manual
   `git pull` + Ctrl-C restarts while `scripts.cockpit check/deploy/plan/arm` existed, was
   documented, and did the fast-forward itself — and a deploy that is not promptly followed by a
-  restart leaves new tabs reload-looping against the old server. `docs/dogfooding.md` is the only
+  restart leaves new tabs reload-looping against the old server. `docs/restart.md` is the only
   deploy path; read it before giving restart instructions rather than reconstructing the procedure
   from memory of the last manual recovery.
 

@@ -32,7 +32,7 @@ def transcript(*records) -> Path:
 
 def delivery(text):
     """The coordinator's actual wording, which every real wake carries."""
-    return f"\u260f the trusted cockpit plan started automatic sequential " \
+    return f"\u260f the restart plan started automatic sequential " \
            f"reattachment after the dogfood restart\n\nContinuation debrief: {text}"
 
 
@@ -65,7 +65,7 @@ def room_chat(text):
 
 def tool_call(text):
     """An agent *running* a command containing the text — e.g. the very
-    `cockpit plan --debrief "…"` that created the plan."""
+    restart-request reason that created the plan."""
     return {"payload": {"type": "custom_tool_call", "name": "exec", "input": text}}
 
 

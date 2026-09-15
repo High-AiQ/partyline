@@ -6,12 +6,12 @@ describe("InstanceBanner", () => {
   it("names the configured instance in visible and accessible text", async () => {
     const banner = mount(InstanceBanner, {
       target: document.body,
-      props: { name: "Cockpit" },
+      props: { name: "LAN" },
     });
     try {
       const status = document.querySelector('[role="status"]');
-      expect(status?.textContent).toContain("Cockpit");
-      expect(status?.getAttribute("aria-label")).toBe("Partyline instance: Cockpit");
+      expect(status?.textContent).toContain("LAN");
+      expect(status?.getAttribute("aria-label")).toBe("Partyline instance: LAN");
     } finally {
       await unmount(banner);
     }
