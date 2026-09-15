@@ -72,6 +72,7 @@ from .db import Db
 from .frontend_build import current_frontend_build
 from .hook_routes import hook_url, hooks_router
 from .line_process_routes import detach_attachment, register_line_process_routes
+from .worktree_lifecycle import sweep_orphaned_worktrees
 from .message_routes import message_router
 from .reaction_routes import reaction_router
 from .goal import register_goal_route
@@ -127,6 +128,7 @@ async def _run_automatic_reattachment() -> None:
 @asynccontextmanager
 async def lifespan(app):
     runtime.db.mark_stale_attachments()
+    await asyncio.to_thread(sweep_orphaned_worktrees, runtime.db)
     automatic_task = asyncio.create_task(_run_automatic_reattachment())
     app.state.automatic_reattach_task = automatic_task
     # The monitor's state is in the database, so a restart resumes whatever the

@@ -36,7 +36,6 @@ class RenameIn(BaseModel):
 class KeyIn(BaseModel):
     key: str
 
-
 class CompactResponse(BaseModel):
     ok: Literal[True] = True
     queued: bool
@@ -173,8 +172,9 @@ class ArchiveResponse(BaseModel):
     archived: bool
     stopped: list[str]
     archived_ids: list[str] = []
+    worktree_removed: bool = False
+    worktree_kept_reason: str | None = None
     conversation: ConversationResponse
-
 
 class PurgeResponse(BaseModel):
     ok: bool
