@@ -40,4 +40,47 @@ describe("message reactions", () => {
       await unmount(component);
     }
   });
+
+  it("keeps the touch picker open until a choice, outside tap, or Escape", async () => {
+    const onToggle = vi.fn().mockResolvedValue(undefined);
+    const component = mount(Reactions, {
+      target: document.body,
+      props: { messageId: 7, reactions: [], onToggle },
+    });
+    try {
+      const add = document.querySelector<HTMLButtonElement>(".reaction-add");
+      const picker = document.querySelector<HTMLElement>(".reaction-picker");
+      expect(add).not.toBeNull();
+      expect(picker).not.toBeNull();
+
+      add?.click();
+      await vi.waitFor(() => {
+        expect(picker?.classList.contains("picker-open")).toBe(true);
+      });
+
+      document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      await vi.waitFor(() => {
+        expect(picker?.classList.contains("picker-open")).toBe(false);
+      });
+
+      add?.click();
+      await vi.waitFor(() => {
+        expect(picker?.classList.contains("picker-open")).toBe(true);
+      });
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      await vi.waitFor(() => {
+        expect(picker?.classList.contains("picker-open")).toBe(false);
+      });
+
+      add?.click();
+      const choice = document.querySelector<HTMLButtonElement>('[aria-label="React with ✅"]');
+      choice?.click();
+      await vi.waitFor(() => {
+        expect(onToggle).toHaveBeenCalledWith("✅");
+        expect(picker?.classList.contains("picker-open")).toBe(false);
+      });
+    } finally {
+      await unmount(component);
+    }
+  });
 });
