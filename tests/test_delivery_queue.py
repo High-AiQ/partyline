@@ -196,6 +196,38 @@ class DurableDeliveryQueueTest(unittest.IsolatedAsyncioTestCase):
             finally:
                 second_db.close()
 
+    async def test_held_message_already_seen_does_not_deliver_again_on_ended(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Db(f"{directory}/partyline.db")
+            try:
+                db.create_conversation("line", "Line")
+                db.add_attachment(
+                    "att", "line", "composer", "fake", ["fake"], directory, "owner"
+                )
+                db.set_attachment_status("att", "running", "owner")
+                runtime = ChatRuntime(db)
+                presence = Presence(runtime)
+                adapter = RecordingAdapter("owner")
+                watched = presence.watch(
+                    adapter,
+                    "line",
+                    "att",
+                    "receipt",
+                    *runtime.held_wake_hooks("line", "att", "composer"),
+                )
+                runtime.live["att"] = watched
+                msg1 = db.add_message("line", "alice", "human", "hello")
+                msg2 = db.add_message("line", "bob", "human", "world")
+                await presence.began("line", "att", owner="owner")
+                presence.queue.hold("att", [msg1])
+                db.set_last_seen("att", msg2["id"], "owner")
+
+                await presence.ended("line", "att", owner="owner")
+                self.assertEqual(adapter.deliveries, [])
+                self.assertEqual(presence.queue.held_count("att"), 0)
+            finally:
+                db.close()
+
 
 if __name__ == "__main__":
     unittest.main()

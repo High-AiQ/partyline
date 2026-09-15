@@ -49,7 +49,7 @@ async def route_message(
         if audience and attachment["id"] != audience:
             continue  # a private copy rings the one process it exists for
         directly_addressed = (
-            (audience is not None and force)
+            bool(audience)
             or ring_all
             or attachment["name"].lower() in names
         )

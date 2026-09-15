@@ -63,7 +63,7 @@ from __future__ import annotations
 
 import asyncio
 
-from .hierarchy import descendants
+from .hierarchy import descendants, lead_attachment
 from .mention_relay import LIVE, is_foreign, post_private, reaches_a_process, speaker_attachment
 from .mentions import addressees, line_addressed, mentioned_names
 
@@ -84,6 +84,12 @@ def excerpt(body: str | None) -> str:
         return ""
     text = " ".join(body.split()).replace("@", "＠")
     return text if len(text) <= EXCERPT else text[: EXCERPT - 1].rstrip() + "…"
+
+
+def is_undeliverable_closing(db, finisher: dict, body: str) -> bool:
+    """Whether a turn's closing words addressed only names that reach no process."""
+    names = mentioned_names(body)
+    return bool(names and not reaches_a_process(db, finisher, names))
 
 
 class ReturnPath:
@@ -154,8 +160,13 @@ class ReturnPath:
     async def turn_ended(self, att_id: str) -> None:
         """The harness closed the turn: deliver what was deferred for this process,
         then settle its own return once the grace is up."""
+        finisher = self._row(att_id)
         owed = self.deferred.pop(att_id, [])
-        handed_off = att_id in self.addressed
+        said = self.last_said.get(att_id) or ""
+        undeliverable = bool(
+            finisher and said and is_undeliverable_closing(self.runtime.db, finisher, said)
+        )
+        handed_off = att_id in self.addressed and not undeliverable
         if handed_off:
             owed = []  # it handed off during the turn; the stale notices are superseded
         for line_id, body, source_att in owed:
@@ -164,7 +175,15 @@ class ReturnPath:
                                audience=att_id, source=(source_att, source.get("conv_id")))
         if att_id in self.pending:
             return
-        if handed_off or not (self.requesters.get(att_id) or self.askers.get(att_id)):
+        manager = lead_attachment(self.runtime.db, finisher["conv_id"]) if finisher else None
+        captain_owed = bool(
+            undeliverable
+            and manager
+            and manager["status"] in LIVE
+            and manager["id"] != att_id
+            and not finisher.get("is_lead")
+        )
+        if handed_off or not (self.requesters.get(att_id) or self.askers.get(att_id) or captain_owed):
             self._clear(att_id)  # the turn is over either way; nothing carries into the next
             return
         self.pending[att_id] = asyncio.create_task(self._settle(att_id))
@@ -193,6 +212,14 @@ class ReturnPath:
         finisher = self._row(att_id)
         if finisher is None or not said:
             return []
+        if is_undeliverable_closing(self.runtime.db, finisher, said) and not finisher.get("is_lead"):
+            manager = lead_attachment(self.runtime.db, finisher["conv_id"])
+            if manager and manager["status"] in LIVE and manager["id"] != att_id:
+                if manager["id"] not in requesters:
+                    requesters[manager["id"]] = {
+                        **manager,
+                        "since_id": finisher.get("last_seen") or None,
+                    }
         posted = []
         for requester in requesters.values():
             current = self.runtime.db.get_attachment(requester["id"])
@@ -201,7 +228,7 @@ class ReturnPath:
             if finisher.get("is_lead") and not current.get("is_lead"):
                 continue
             body = self._notice(
-                current["name"], finisher, current["conv_id"], said, requester["since_id"]
+                current["name"], finisher, current["conv_id"], said, requester.get("since_id")
             )
             if self._working(current["id"]):
                 self.deferred.setdefault(current["id"], []).append((current["conv_id"], body, att_id))
