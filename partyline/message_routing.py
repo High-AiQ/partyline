@@ -48,7 +48,11 @@ async def route_message(
     for attachment in runtime.db.list_attachments(conv_id):
         if audience and attachment["id"] != audience:
             continue  # a private copy rings the one process it exists for
-        directly_addressed = ring_all or attachment["name"].lower() in names
+        directly_addressed = (
+            (audience is not None and force)
+            or ring_all
+            or attachment["name"].lower() in names
+        )
         source = message.get("source_attachment_id")
         same_speaker = (
             source == attachment["id"]

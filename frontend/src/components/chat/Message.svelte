@@ -13,6 +13,9 @@
   import { tooltip } from "../../lib/tooltip";
   import ImageGrid from "./ImageGrid.svelte";
   import FileAttachments from "./FileAttachments.svelte";
+  import Reactions from "./Reactions.svelte";
+  import { room } from "../../state/room.svelte.js";
+  import type { ReactionEmoji } from "../../lib/reaction-contracts";
   import type { ChatMessage } from "../../lib/contracts";
 
   interface Props {
@@ -115,6 +118,11 @@
   {#if otherFiles.length}
     <FileAttachments files={otherFiles} />
   {/if}
+  <Reactions
+    messageId={message.id}
+    reactions={message.reactions ?? []}
+    onToggle={(emoji: ReactionEmoji) => room.toggleReaction(message.id, emoji)}
+  />
 </div>
 
 <style>
