@@ -58,6 +58,19 @@ def fingerprint(record: dict | str) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def user_text(record: dict) -> str:
+    """The text a user record carries — the pasted wake, timestamp tag and all."""
+    msg = record.get("message")
+    content = (msg.get("content") if isinstance(msg, dict) else None) or record.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"
+        )
+    return ""
+
+
 def parse_record(record: dict) -> tuple[str | None, str | None]:
     """Parse one JSONL record into turn receipts and assistant chat speech.
 
