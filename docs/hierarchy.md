@@ -38,6 +38,20 @@ receive it. A role change is reflected in the next wake's instructions; hiding
 instructions is a context optimization, while the server's authorization checks
 enforce the boundary.
 
+Two more rules ride the pack. Before accepting handed-up work — a child line's
+branch and report, or a same-line worker's commit — the captain ensures an
+adversarial review at the exact SHA has been completed in a throwaway worktree:
+the whole diff from its intended base, the gates run, hunting what the report
+omits (`skills/adversarial-review/SKILL.md`). The captain may run that review or
+delegate it, but must hold its findings; a bare delegate's "done" is not a
+review. A report is receipt, not acceptance, and the bar is the same on both
+paths. And on a captained line the captain is the only one who pushes: a worker
+commits locally and hands up the SHA, and the captain pushes after that review.
+A line with no captain keeps the old behaviour. The worker's half of the push
+rule is its own short block, gated on a live captain, so a worker briefed while
+a captain sits on the line is told not to push, is re-briefed when one is
+appointed, and loses the block when the captain goes.
+
 What stays with the person is the goal, acceptance, budget and spend gates,
 which presets may be used, and anything irreversible; the pack tells a manager
 to ask before those rather than guess. Team shape is a default, not a rule: the
@@ -124,7 +138,10 @@ The appointed manager is rung the moment it is appointed, with a private
 notice that carries the manager pack in its digest, so a process that appoints
 itself mid-turn reads the pack before it acts further — the first live root
 otherwise staffed its own line before the pack reached it. A captain is briefed
-the same way its root was.
+the same way its root was. A worker attached to a line whose captain is already
+live is born knowing its half of the push rule — commit locally, hand the
+captain the SHA, do not push — and hears it again whenever the captain appears
+or leaves.
 
 A handle written as `name:` at the start of a line is an address too, when a
 live process on that line bears it: `worker: take the review` rings worker.
