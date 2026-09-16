@@ -355,6 +355,7 @@ from .contracts import AttachIn, RenameIn, TopicIn  # noqa: F401,E402
 archive_conversation = _conversation_routes.archive_conversation
 restore_conversation = _conversation_routes.restore_conversation
 purge_conversation = _conversation_routes.purge_conversation
+purge_all_archived = _conversation_routes.purge_all_archived
 attach = _conversation_routes.attach
 set_topic = _conversation_routes.set_topic
 rename_conversation = _conversation_routes.rename_conversation
