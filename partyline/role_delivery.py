@@ -3,8 +3,8 @@
 from typing import NamedTuple
 
 from .goal import goal_rider
-from .line_depth import depth as line_depth, staffed_split_reason
-from .role_briefing import role_instructions
+from .line_depth import depth as line_depth, has_captain, staffed_split_reason
+from .role_briefing import role_instructions, worker_instructions
 from .staffing import staffing_line
 
 
@@ -15,6 +15,7 @@ class RoleState(NamedTuple):
     actions: tuple[str, ...]
     depth: int = 0
     staffed: bool = False
+    captained: bool = False
 
 
 def current_role(db, attachment_id: str) -> RoleState:
@@ -30,13 +31,20 @@ def current_role(db, attachment_id: str) -> RoleState:
     state = CapabilityState.model_validate(capability_state(db, principal))
     return RoleState(state.role, att["conv_id"], state.parent_id, tuple(state.actions),
                      line_depth(db, att["conv_id"]),
-                     staffed_split_reason(db, att["conv_id"]) is not None)
+                     staffed_split_reason(db, att["conv_id"]) is not None,
+                     has_captain(db, att["conv_id"]))
+
+
+def _instructions(state: RoleState) -> str:
+    """The pack for a state: the captain's, else the worker's when a captain is live."""
+    return role_instructions(
+        state.actions, state.conv_id, state.parent_id, state.depth, state.staffed
+    ) or worker_instructions(state.captained)
 
 
 def bind_role_delivery(db, att: dict) -> None:
     initial = current_role(db, att["id"])
-    att["role_briefing"] = role_instructions(
-        initial.actions, initial.conv_id, initial.parent_id, initial.depth, initial.staffed)
+    att["role_briefing"] = _instructions(initial)
     original_rider = att["digest_rider"]
     previous = None if att.get("resume") else initial
 
@@ -45,11 +53,13 @@ def bind_role_delivery(db, att: dict) -> None:
         current = current_role(db, att["id"])
         update = ""
         if current != previous:
+            demoted = previous is not None and previous.role == "lead" and current.role != "lead"
             previous = current
-            update = role_instructions(
-                current.actions, current.conv_id, current.parent_id, current.depth,
-                current.staffed)
-            if not update:
+            update = _instructions(current)
+            if demoted and update:
+                update += ("\nYour current role is ordinary participant, not captain. "
+                           "Use only your own line's tools.")
+            elif not update:
                 update = ("Your current role is ordinary participant, not captain. "
                           "Use only your own line's tools.")
         goal = staffing = ""

@@ -37,6 +37,39 @@ class RoleDeliveryTests(unittest.TestCase):
             role.return_value = handoff
             self.assertNotIn("handoff", att["digest_rider"]().lower())
 
+    def test_a_worker_briefed_under_a_live_captain_is_told_not_to_push(self):
+        captained = RoleState("implementer", "line", None, ("read", "write"), captained=True)
+        att = {"id": "worker", "digest_rider": lambda: "task board"}
+        with patch("partyline.role_delivery.current_role", return_value=captained):
+            bind_role_delivery(NO_GOAL, att)
+        self.assertIn("## Worker pack", att["role_briefing"])
+        self.assertIn("Commit locally", att["role_briefing"])
+        self.assertNotIn("## Captain pack", att["role_briefing"])
+
+    def test_a_worker_rider_rebriefs_when_a_captain_appears_and_goes(self):
+        worker = RoleState("implementer", "line", None, ("read", "write"))
+        captained = RoleState("implementer", "line", None, ("read", "write"), captained=True)
+        att = {"id": "worker", "digest_rider": lambda: "task board"}
+        with patch("partyline.role_delivery.current_role", return_value=worker) as role:
+            bind_role_delivery(NO_GOAL, att)
+            self.assertEqual(att["role_briefing"], "")
+            self.assertNotIn("Worker pack", att["digest_rider"]())
+            role.return_value = captained
+            self.assertIn("Worker pack", att["digest_rider"]())
+            role.return_value = worker
+            self.assertIn("ordinary participant", att["digest_rider"]())
+
+    def test_a_demoted_captain_keeps_the_scope_warning_next_to_the_worker_pack(self):
+        captain = RoleState("lead", "line", None, ("assign", "create_child"))
+        worker = RoleState("implementer", "line", None, ("read", "write"), captained=True)
+        att = {"id": "worker", "digest_rider": lambda: "task board"}
+        with patch("partyline.role_delivery.current_role", return_value=captain) as role:
+            bind_role_delivery(NO_GOAL, att)
+            role.return_value = worker
+            rider = att["digest_rider"]()
+        self.assertIn("## Worker pack", rider)
+        self.assertIn("Your current role is ordinary participant, not captain", rider)
+
     def test_resumed_manager_learns_tools_without_a_new_joining_briefing(self):
         manager = RoleState("lead", "line", "parent", ("assign", "create_child", "report"))
         att = {"id": "worker", "resume": True, "digest_rider": lambda: "helper command"}

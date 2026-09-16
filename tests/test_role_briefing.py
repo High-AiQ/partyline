@@ -3,7 +3,7 @@
 import unittest
 
 from partyline import features
-from partyline.role_briefing import role_instructions
+from partyline.role_briefing import role_instructions, worker_instructions
 
 
 class RoleBriefingTests(unittest.TestCase):
@@ -69,3 +69,45 @@ class RoleBriefingTests(unittest.TestCase):
     def test_missing_report_capability_does_not_advertise_report_tools(self):
         text = role_instructions(["assign", "create_child"], "child", "root", 1)
         self.assertNotIn("/reports", text)
+
+    def test_the_acceptance_step_requires_a_completed_review_before_reporting(self):
+        text = role_instructions(["assign"], "root", None)
+        review = text.index("skills/adversarial-review/SKILL.md")
+        self.assertLess(review, text.index("Tell the person once"))
+        self.assertIn("Receipt is not acceptance", text)
+        self.assertIn("a child line's branch/report and a same-line worker's hand-off", text)
+        self.assertIn("Run it or delegate it", text)
+        step = text[text.index("Ensure an adversarial review"):text.index("Tell the person once")]
+        self.assertNotIn("personally", step)
+        self.assertNotIn("yourself", step)
+
+    def test_every_captain_variant_carries_both_the_review_and_push_rules(self):
+        packs = {
+            "splitting": role_instructions(
+                ["assign", "create_child", "read_reports"], "root", None),
+            "leaf": role_instructions(["assign", "report"], "leaf", "mid", 2),
+            "staffed": role_instructions(
+                ["assign", "report"], "mid", "root", 1, staffed=True),
+        }
+        for label, text in packs.items():
+            with self.subTest(label):
+                self.assertIn("skills/adversarial-review/SKILL.md", text)
+                self.assertIn("only you push", text)
+                self.assertNotIn("## Worker pack", text)
+
+    def test_the_read_reports_block_turns_receipt_into_a_review_at_the_sha(self):
+        text = role_instructions(["assign", "create_child", "read_reports"], "root", None)
+        self.assertIn("/api/conversations/root/reports", text)
+        self.assertIn("have the child's work reviewed at its exact SHA", text)
+
+    def test_a_worker_on_a_captained_line_commits_locally_and_hands_the_sha_up(self):
+        text = worker_instructions(captained=True)
+        self.assertIn("## Worker pack", text)
+        self.assertIn("Commit locally", text)
+        self.assertIn("hand the captain the commit SHA", text)
+        self.assertIn("do not push", text)
+        self.assertNotIn("## Captain pack", text)
+        self.assertNotIn("You are the captain", text)
+
+    def test_a_worker_on_an_uncaptained_line_is_told_nothing_new(self):
+        self.assertEqual(worker_instructions(captained=False), "")
