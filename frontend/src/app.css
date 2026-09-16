@@ -28,9 +28,13 @@
 
 :root {
   color-scheme: dark;
+  --grain-opacity: 0.05;
 }
 
 @media (prefers-color-scheme: light) {
+  /* Only when nothing has been chosen — `theme.svelte.ts` never sets
+     `data-theme` for that case, so the system preference alone must render
+     the right theme with no JS involved, before this module even runs. */
   :root {
     color-scheme: light;
     --color-ink: #f7f5ef;
@@ -46,11 +50,47 @@
     --color-cream-faint: #667067;
     --color-green: #326f2d;
     --color-red: #9b3e2e;
+    --grain-opacity: 0.025;
   }
+}
 
-  body::after {
-    opacity: 0.025;
-  }
+/* An explicit choice from the theme toggle. `[data-theme]` on `<html>` beats
+   the media query above on specificity alone (an attribute selector always
+   outranks a bare `:root`), so these apply regardless of the system setting. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-ink: #f7f5ef;
+  --color-ink-2: #fffdf8;
+  --color-ink-3: #ede9df;
+  --color-line: #d6d0c4;
+  --color-panel: #fffdf8;
+  --color-panel-line: #c2bbad;
+  --color-copper: #9a5b20;
+  --color-copper-hot: #7c4212;
+  --color-cream: #1f2520;
+  --color-cream-dim: #4d574f;
+  --color-cream-faint: #667067;
+  --color-green: #326f2d;
+  --color-red: #9b3e2e;
+  --grain-opacity: 0.025;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-ink: #0e100f;
+  --color-ink-2: #141715;
+  --color-ink-3: #1b1f1c;
+  --color-line: #2a2f2b;
+  --color-panel: #20251f;
+  --color-panel-line: #3a423b;
+  --color-copper: #d98e4a;
+  --color-copper-hot: #f2b06b;
+  --color-cream: #e9e2d4;
+  --color-cream-dim: #9a968a;
+  --color-cream-faint: #5d5b52;
+  --color-green: #7fb069;
+  --color-red: #c96f5a;
+  --grain-opacity: 0.05;
 }
 
 @keyframes arrive {
@@ -113,7 +153,7 @@
     inset: 0;
     pointer-events: none;
     z-index: 99;
-    opacity: 0.05;
+    opacity: var(--grain-opacity);
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
   }
 
