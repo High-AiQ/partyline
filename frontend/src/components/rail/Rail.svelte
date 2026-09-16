@@ -12,6 +12,7 @@
   import RenameLineDialog from "../dialogs/RenameLineDialog.svelte";
   import DeleteLineDialog from "../dialogs/DeleteLineDialog.svelte";
   import PurgeLineDialog from "../dialogs/PurgeLineDialog.svelte";
+  import PurgeAllDialog from "../dialogs/PurgeAllDialog.svelte";
   import StopServerDialog from "../dialogs/StopServerDialog.svelte";
   import CloseProcessesDialog from "../dialogs/CloseProcessesDialog.svelte";
   import { tooltip } from "../../lib/tooltip";
@@ -48,6 +49,10 @@
 
   function purgeLine(conversation: Conversation): void {
     dialogs.open(PurgeLineDialog, { conversation });
+  }
+
+  function purgeAll(): void {
+    dialogs.open(PurgeAllDialog, { conversations: room.archived });
   }
 </script>
 
@@ -88,7 +93,7 @@
     <button type="submit" aria-label="open a new line">+</button>
   </form>
 
-  <ArchiveSection onpurge={purgeLine} />
+  <ArchiveSection onpurge={purgeLine} onpurgeall={purgeAll} />
 
   <div
     id="me"

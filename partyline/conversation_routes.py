@@ -15,30 +15,19 @@ from .auth_store import handle_taken
 from .hierarchy import tree_live_name_conflict
 from .line_subtree import archive_line, archive_subtree
 from .line_worktree import describe, ensure_placed, line_cwd
-from .worktree_lifecycle import archive_worktree_if_safe, remove_for_line, worktree_removal_reason
+from .worktree_lifecycle import archive_worktree_if_safe, worktree_removal_reason
+from .conversation_contracts import PurgeAllResponse
+from .conversation_purge import execute_purge, execute_purge_all_archived
 from .contracts import (
-    ArchiveResponse,
-    AttachIn,
-    AttachmentResponse,
-    ConvIn,
-    ConversationEvent,
-    ConversationResponse,
-    ConversationsChangedEvent,
-    PurgeResponse,
-    RenameIn,
-    TopicIn,
+    ArchiveResponse, AttachIn, AttachmentResponse, ConvIn, ConversationEvent,
+    ConversationResponse, ConversationsChangedEvent, PurgeResponse, RenameIn, TopicIn,
 )
 from .machine_scope import (
-    deny_archive_if_children,
-    deny_purge_if_parent_refs,
-    deny_sideways_attach,
-    deny_unless,
-    is_human,
-    visible_conversation_ids,
+    deny_archive_if_children, deny_sideways_attach,
+    deny_unless, is_human, visible_conversation_ids,
 )
 from .message_contracts import ConversationDetailResponse
 from .message_routes import conversation_detail_response
-from .reports import purge_conversation as purge_reports
 from .runtime import NAME_RE, RESERVED_NAMES
 
 
@@ -148,6 +137,13 @@ def register_conversation_routes(
         await runtime.broadcast_all(ConversationsChangedEvent())
         return conv
 
+    @app.delete("/api/conversations/archived", response_model=PurgeAllResponse)
+    async def purge_all_archived(request: Request):
+        s = _server()
+        if not is_human(request_principal(request)):
+            raise HTTPException(403, "only a human can purge all archived lines")
+        return await execute_purge_all_archived(s.runtime, s.media, s.runtime.db)
+
     @app.delete("/api/conversations/{conv_id}", response_model=ArchiveResponse)
     async def archive_conversation(
         request: Request, conv_id: str, include_children: bool = False
@@ -202,13 +198,7 @@ def register_conversation_routes(
         conv = db.get_conversation(conv_id)
         if not conv["archived_at"]:
             raise HTTPException(409, "archive the line before purging it")
-        deny_purge_if_parent_refs(db, conv_id)
-        await runtime.stop_attachments(conv_id)
-        s.media.delete_conversation(conv_id)
-        purge_reports(db, conv_id)
-        remove_for_line(conv)
-        db.delete_conversation(conv_id)
-        runtime.sockets.pop(conv_id, None)
+        await execute_purge(runtime, s.media, db, conv)
         await runtime.broadcast_all(ConversationsChangedEvent())
         return {"ok": True, "purged": True}
 
@@ -268,16 +258,10 @@ def register_conversation_routes(
             await apply_update(runtime.post_message, conv_id, name, update_argv)
         return await s._start_attachment(att)
 
-    globals().update(
-        {
-            "conversations": conversations,
-            "create_conversation": create_conversation,
-            "conversation_detail": conversation_detail,
-            "set_topic": set_topic,
-            "rename_conversation": rename_conversation,
-            "archive_conversation": archive_conversation,
-            "restore_conversation": restore_conversation,
-            "purge_conversation": purge_conversation,
-            "attach": attach,
-        }
-    )
+    globals().update({
+        "conversations": conversations, "create_conversation": create_conversation,
+        "conversation_detail": conversation_detail, "set_topic": set_topic,
+        "rename_conversation": rename_conversation, "archive_conversation": archive_conversation,
+        "restore_conversation": restore_conversation, "purge_conversation": purge_conversation,
+        "purge_all_archived": purge_all_archived, "attach": attach,
+    })

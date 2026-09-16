@@ -11,6 +11,7 @@ import {
   OkResultSchema,
   CompactResultSchema,
   PresetSchema,
+  PurgeAllResponseSchema,
   PurgeResultSchema,
   RunningProcessSchema,
   ScreenResultSchema,
@@ -37,6 +38,7 @@ import type {
   OkResult,
   CompactResult,
   Preset,
+  PurgeAllResponse,
   PurgeResult,
   RunningProcess,
   ScreenResult,
@@ -102,6 +104,7 @@ export interface PartylineApi {
   closeProcesses(id: string, includeChildren?: boolean): Promise<CloseProcessesResult>;
   restoreConversation(id: string): Promise<Conversation>;
   purgeConversation(id: string): Promise<PurgeResult>;
+  purgeArchivedConversations(): Promise<PurgeAllResponse>;
   uploadFiles(conversationId: string, upload: FileUpload): Promise<FileUploadResponse>;
   attach(conversationId: string, payload: AttachPayload): Promise<Attachment>;
   editAttachmentCommand(attachmentId: string, payload: AttachmentCommandPayload): Promise<Attachment>;
@@ -212,6 +215,12 @@ export const api: PartylineApi = {
       method: "DELETE",
       fallback: "could not delete forever",
     }),
+  purgeArchivedConversations: () =>
+    request("/api/conversations/archived", {
+      schema: PurgeAllResponseSchema,
+      method: "DELETE",
+      fallback: "could not purge archived lines",
+    }),
   uploadFiles: (conversationId, upload) => {
     const form = new FormData();
     for (const file of upload.files) form.append("file", file);
@@ -273,19 +282,12 @@ export const api: PartylineApi = {
 
   presets: () => request("/api/presets", { schema: PresetSchema.array() }),
   savePreset: (preset) =>
-    preset.id
-      ? request(`/api/presets/${preset.id}`, {
-          schema: PresetSchema,
-          method: "PUT",
-          body: preset,
-          fallback: "save failed",
-        })
-      : request("/api/presets", {
-          schema: PresetSchema,
-          method: "POST",
-          body: preset,
-          fallback: "save failed",
-        }),
+    request(preset.id ? `/api/presets/${preset.id}` : "/api/presets", {
+      schema: PresetSchema,
+      method: preset.id ? "PUT" : "POST",
+      body: preset,
+      fallback: "save failed",
+    }),
   deletePreset: (id) =>
     request(`/api/presets/${id}`, {
       schema: OkResultSchema,
