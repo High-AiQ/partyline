@@ -28,19 +28,6 @@ def chat_dir(cwd: str) -> Path:
     return Path.home() / ".cursor" / "chats" / cwd_md5(cwd)
 
 
-def is_git_worktree(cwd: str) -> bool:
-    """Whether ``cwd`` is a linked Git worktree rather than a repository root."""
-    return Path(cwd, ".git").is_file()
-
-
-def workspace_command(cmd: list[str], cwd: str, resume: bool) -> list[str]:
-    """Select a linked worktree explicitly for Cursor's fresh-session CLI."""
-    explicit = any(arg == "--workspace" or arg.startswith("--workspace=") for arg in cmd)
-    if not resume and is_git_worktree(cwd) and not explicit:
-        return [*cmd, "--workspace", cwd]
-    return cmd
-
-
 def transcript_path(cwd: str, session_id: str) -> Path:
     """Return full path to the primary agent JSONL transcript for a session."""
     slug = cwd_slug(cwd)

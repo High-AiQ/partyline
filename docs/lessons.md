@@ -54,11 +54,16 @@ misleading evidence:
 These are durable false assumptions from dogfooding, paired with the evidence and guard that
 replaced them:
 
-- **Cursor's default cwd and its workspace were equivalent in a Git worktree.** On Cursor Agent
-  2026.09, starting from a linked worktree with the default workspace entered its login flow and
-  created no transcript; the same command with documented `--workspace <cwd>` created the trusted
-  workspace and transcript. Fresh Cursor worktree attachments now pass that flag unless the caller
-  chose one, with a regression test using a real `.git` pointer file.
+- **One timeout screen observation proved Cursor's linked-worktree startup path was wrong.** A
+  2026.09 Cursor attachment showed login and created no transcript, but its actual child argv and
+  startup environment were not retained. Fresh PTY probes, including the real adapter beneath
+  `.partyline-worktrees/<name>`, later claimed a session and completed a transcript turn with the
+  same preset and `--workspace <cwd>`. The diagnosis was therefore unproven, not a reason to
+  pre-write an undocumented global trust record. Cursor's no-session timeout now emits bounded,
+  terminal-control-stripped, secret-redacted diagnostics of its actual argv, cwd, linked-worktree
+  predicate, workspace, trust-record presence, and initial terminal state, then sends TERM with a
+  bounded KILL escalation so the normal watcher records an explicit exit. The regression controls pin the diagnostic and its
+  lifecycle handoff.
 
 - **A worker will `@mention` whoever asked when it finishes, if the briefing tells it to.** It
   will not, reliably, in any harness: across three days of a three-sub-line project a sub-manager ended
