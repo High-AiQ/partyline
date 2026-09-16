@@ -14,6 +14,7 @@
   import TopicDialog from "../dialogs/TopicDialog.svelte";
   import AccountMenu from "./AccountMenu.svelte";
   import ColumnToggle from "./ColumnToggle.svelte";
+  import ThemeToggle from "./ThemeToggle.svelte";
   import { tooltip } from "../../lib/tooltip";
 
   const topic = $derived((room.conversation?.topic ?? "").trim());
@@ -61,6 +62,7 @@
     >
   {/if}
 
+  <ThemeToggle />
   <AccountMenu />
   <ColumnToggle side="board" count={liveJacks} />
 

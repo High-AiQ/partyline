@@ -18,8 +18,10 @@
   import { dialogs } from "./state/dialogs.svelte.js";
   import { draft } from "./state/draft.svelte.js";
   import { layout } from "./state/layout.svelte.js";
+  import { theme } from "./state/theme.svelte.js";
 
   $effect(() => layout.watch());
+  $effect(() => theme.watch());
 
   /**
    * Arriving on a narrow screen with no line open: show the lines.
