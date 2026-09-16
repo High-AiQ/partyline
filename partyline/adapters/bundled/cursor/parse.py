@@ -71,7 +71,26 @@ def user_text(record: dict) -> str:
     return ""
 
 
-def parse_record(record: dict) -> tuple[str | None, str | None]:
+def _clean_text(text: str) -> str:
+    """Remove provider redactions from one Cursor text block."""
+    return text.replace("[REDACTED]", "").strip()
+
+
+def _strip_sender_prefix(text: str, sender_name: str | None) -> str:
+    """Remove Cursor's echoed outer sender label from an assembled reply."""
+    cleaned = text.strip()
+    if sender_name:
+        prefix = f"[{sender_name}]:"
+        if cleaned[: len(prefix)].casefold() == prefix.casefold():
+            remainder = cleaned[len(prefix) :]
+            if not remainder or remainder[0].isspace():
+                cleaned = remainder.lstrip()
+    return cleaned
+
+
+def parse_record(
+    record: dict, sender_name: str | None = None
+) -> tuple[str | None, str | None]:
     """Parse one JSONL record into turn receipts and assistant chat speech.
 
     Returns ``(event, text)`` where:
@@ -103,24 +122,25 @@ def parse_record(record: dict) -> tuple[str | None, str | None]:
             ):
                 return None, None
             texts = [
-                block.get("text", "").replace("[REDACTED]", "").strip()
+                _clean_text(block.get("text", ""))
                 for block in content
                 if isinstance(block, dict) and block.get("type") == "text"
             ]
             body = "\n\n".join(t for t in texts if t)
+            body = _strip_sender_prefix(body, sender_name)
             return None, body.strip() if body.strip() else None
         if isinstance(content, str):
-            cleaned = content.replace("[REDACTED]", "").strip()
+            cleaned = _strip_sender_prefix(_clean_text(content), sender_name)
             return None, cleaned if cleaned else None
         if record.get("type") == "text" and isinstance(record.get("text"), str):
-            cleaned = record["text"].replace("[REDACTED]", "").strip()
+            cleaned = _strip_sender_prefix(_clean_text(record["text"]), sender_name)
             return None, cleaned if cleaned else None
         return None, None
 
     if record.get("type") == "text" and not role:
         text = record.get("text")
         if isinstance(text, str):
-            cleaned = text.replace("[REDACTED]", "").strip()
+            cleaned = _strip_sender_prefix(_clean_text(text), sender_name)
             if cleaned:
                 return None, cleaned
 
