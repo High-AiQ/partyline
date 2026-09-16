@@ -100,7 +100,8 @@ SPLIT = (
     "captain. You are at depth {depth} of {max_depth}{below}. Work goes down, not sideways: "
     "once this line has a child, no process may be attached here, and the processes already "
     "here are not your implementers. A goal that does not split stays on this line only while "
-    "it has no children."
+    "it has no children. When you have accepted a child's branch and its captain is done, "
+    "retire the child: DELETE /api/conversations/<child-id>; its worktree goes with it."
 )
 
 LEAF = (

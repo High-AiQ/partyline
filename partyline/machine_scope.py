@@ -91,7 +91,12 @@ def allows(db: Db, principal: Principal, conv_id: str, capability: Capability) -
     conv = db.get_conversation(conv_id)
     if conv is None:
         return False
-    if capability in ("archive", "link_parent"):
+    if capability == "archive":
+        # A captain may retire a descendant line it accepted, never itself or
+        # a line outside its tree: `deny_unless` and the route's situational
+        # checks (no live processes, goal cleared, worktree SAFE) gate the rest.
+        return conv_id != home and _home_lead_tree(db, principal, conv_id)
+    if capability == "link_parent":
         return False
     if capability == "appoint_lead":
         # Deterministic only: a person, or a captain over this line. There is no

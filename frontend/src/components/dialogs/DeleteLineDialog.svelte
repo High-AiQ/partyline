@@ -64,11 +64,15 @@
   }
 
   async function remove() {
-    await api.archiveConversation(conversation.id, includeChildren);
+    const result = await api.archiveConversation(conversation.id, includeChildren);
     close();
     if (room.conversation?.id === conversation.id) room.leave();
     await room.loadConversations();
     room.refreshArchiveIfOpen();
+    let message = "line deleted";
+    if (result.worktree_kept_reason) message += `; its worktree was kept (${result.worktree_kept_reason})`;
+    else if (result.worktree_removed) message += "; its worktree was removed";
+    room.showNotice(message);
   }
 </script>
 
