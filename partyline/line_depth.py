@@ -40,6 +40,12 @@ def live_workers(db, conv_id: str) -> list[dict]:
             if not att.get("is_lead") and att["status"] in ("starting", "running")]
 
 
+def has_captain(db, conv_id: str) -> bool:
+    """Whether a live attachment on this line currently holds the captain role."""
+    return any(att.get("is_lead") and att["status"] in ("starting", "running")
+               for att in db.list_attachments(conv_id))
+
+
 def staffed_split_reason(db, conv_id: str) -> str | None:
     """Why a machine may not create a child of this line, or None."""
     workers = live_workers(db, conv_id)
