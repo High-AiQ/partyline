@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 
@@ -13,7 +14,8 @@ from .auth_guard import request_principal
 from .auth_store import handle_taken
 from .hierarchy import tree_live_name_conflict
 from .line_subtree import archive_line, archive_subtree
-from .line_worktree import describe, ensure_placed, line_cwd, remove_for_line
+from .line_worktree import describe, ensure_placed, line_cwd
+from .worktree_lifecycle import archive_worktree_if_safe, remove_for_line, worktree_removal_reason
 from .contracts import (
     ArchiveResponse,
     AttachIn,
@@ -43,6 +45,22 @@ from .runtime import NAME_RE, RESERVED_NAMES
 def _server():
     from . import server
     return server
+
+
+def _captain_archive_block(db, conv_id: str) -> str | None:
+    """Why a captain may not retire this descendant line yet, or None.
+
+    `allows()` already limits this to a strict descendant of the captain's
+    home line; these are the situational checks a person is never held to.
+    """
+    live = [att for att in db.list_attachments(conv_id) if att["status"] in ("starting", "running")]
+    if live:
+        names = ", ".join("@" + att["name"] for att in live)
+        return f"this line still has live processes ({names}); stop them first"
+    conv = db.get_conversation(conv_id) or {}
+    if conv.get("goal"):
+        return "this line's goal is not cleared; clear it before retiring the line"
+    return worktree_removal_reason(db, conv)
 
 
 def unique_handle(db, conv_id: str, name: str) -> str:
@@ -136,18 +154,29 @@ def register_conversation_routes(
     ):
         runtime = _server().runtime
         db = runtime.db
-        deny_unless(db, request_principal(request), conv_id, "archive")
+        principal = request_principal(request)
+        deny_unless(db, principal, conv_id, "archive")
         conv = db.get_conversation(conv_id)
         if conv["archived_at"]:
             raise HTTPException(409, "line is already archived")
+        if not is_human(principal):
+            if reason := await asyncio.to_thread(_captain_archive_block, db, conv_id):
+                raise HTTPException(409, reason)
         if include_children:
             stopped, archived = await archive_subtree(runtime, conv_id)
         else:
             deny_archive_if_children(db, conv_id)
             stopped, archived = await archive_line(runtime, conv_id), [conv_id]
+        removed, kept_reason = False, None
+        for line_id in archived:
+            line_removed, reason = await asyncio.to_thread(archive_worktree_if_safe, db, line_id)
+            if line_id == conv_id:
+                removed, kept_reason = line_removed, reason
         await runtime.broadcast_all(ConversationsChangedEvent())
         return {"ok": True, "archived": True, "stopped": stopped,
-                "archived_ids": archived, "conversation": db.get_conversation(conv_id)}
+                "archived_ids": archived, "worktree_removed": removed,
+                "worktree_kept_reason": kept_reason,
+                "conversation": db.get_conversation(conv_id)}
 
     @app.post("/api/conversations/{conv_id}/restore", response_model=ConversationResponse)
     async def restore_conversation(request: Request, conv_id: str):

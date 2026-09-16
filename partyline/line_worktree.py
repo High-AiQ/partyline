@@ -171,14 +171,3 @@ def describe(placed: dict) -> str | None:
                   "line works here, and the branch is what the parent accepts")
     return where
 
-
-def remove_for_line(conv: dict | None) -> None:
-    """Drop the worktree a purged line was placed in; its branch stays."""
-    cwd = (conv or {}).get("cwd") or ""
-    if f"/{WORKTREES_DIR}/" not in cwd or not os.path.isdir(cwd):
-        return
-    root = cwd.split(f"/{WORKTREES_DIR}/")[0]
-    try:
-        _git("worktree", "remove", "--force", cwd, cwd=root)
-    except (OSError, subprocess.SubprocessError):
-        pass
