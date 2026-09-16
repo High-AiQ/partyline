@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import os
 from pathlib import Path
 
@@ -17,11 +18,16 @@ from partyline.adapters.bundled.cursor.parse import (
     resync_fingerprints,
     resync_positional,
     transcript_path,
-    workspace_command,
+)
+from partyline.adapters.bundled.cursor.startup import (
+    cursor_command,
+    startup_diagnostics,
+    terminate_process,
 )
 from partyline.adapters.bundled.cursor.wakes import WakeSettlement
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
 
+logger = logging.getLogger(__name__)
 
 class PartylineAdapter(WakeSettlement, Adapter):
     kind = "cursor"
@@ -31,42 +37,30 @@ class PartylineAdapter(WakeSettlement, Adapter):
     INITIAL_DELAY = 3.0
     POLL_SECONDS = 0.5
     DISCOVERY_TIMEOUT = 45.0
+    STARTUP_OUTPUT_LIMIT = 4096
+    TERMINATE_GRACE = 0.5
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Fingerprints of every turn_ended sentinel this process has observed,
-        # so a resync can recognize the watermark's tail as a sentinel after
-        # Cursor deletes it from the file at the next turn's start.
         self._sentinel_fps: set[str] = set()
-        # A rewrite earns positional-fallback strikes only while the same
-        # complete snapshot persists. Cursor renders through several distinct
-        # valid-JSONL states; counting those as one failure sequence can skip
-        # the new user record and leading assistant speech.
         self._failed_snapshot: tuple[str, ...] | None = None
+        self._startup_output = bytearray()
         self._wakes_init()
-
     async def stop(self):
         self._CLAIMED.discard(getattr(self, "_session_id", "") or "")
         await super().stop()
-
     def build_command(self) -> list[str]:
-        cmd = list(self.att.get("command") or []) or ["agent", "--yolo", "--trust"]
-        cmd = workspace_command(cmd, self.att["cwd"], self.resume)
-        if self.resume:
-            session_id = str(self.att.get("cli_session") or "").strip()
-            if session_id and "--resume" not in cmd and "-r" not in cmd:
-                cmd = [*cmd, "--resume", session_id]
-        return cmd
-
+        return cursor_command(
+            list(self.att.get("command") or []), self.att["cwd"], self.resume,
+            str(self.att.get("cli_session") or "").strip(),
+        )
     def _find_chat(self) -> str | None:
         if self.resume and (session_id := self.att.get("cli_session")):
             sid = str(session_id).strip()
             return sid if sid not in self._CLAIMED else None
-
         chats = chat_dir(self.att["cwd"])
         if not chats.is_dir():
             return None
-
         candidates: list[tuple[float, str]] = []
         try:
             for item in chats.iterdir():
@@ -85,6 +79,10 @@ class PartylineAdapter(WakeSettlement, Adapter):
             return candidates[0][1]
         return None
 
+    async def on_output(self, data: bytes):
+        remaining = self.STARTUP_OUTPUT_LIMIT - len(self._startup_output)
+        if remaining > 0:
+            self._startup_output.extend(data[:remaining])
     def _is_replaced(self, fh, path: Path, open_mtime_ns: int) -> bool:
         try:
             st = path.stat()
@@ -95,7 +93,6 @@ class PartylineAdapter(WakeSettlement, Adapter):
             return False
         except OSError:
             return True
-
     async def _handle_resync(
         self, path: Path, seen_fps: list[str], failures: int
     ) -> tuple[list[str], int]:
@@ -154,12 +151,10 @@ class PartylineAdapter(WakeSettlement, Adapter):
             return seen_fps, failures
         self._failed_snapshot = None
         return resynced, 0
-
     @staticmethod
     def _has_complete_jsonl_tail(lines: list[str]) -> bool:
         """Whether a nonempty rewrite ends at a complete JSONL boundary."""
         return bool(lines) and lines[-1].endswith("\n")
-
     @staticmethod
     def _tail_is_turn_ended(lines: list[str]) -> bool:
         """Whether the complete tail record is Cursor's turn sentinel."""
@@ -168,7 +163,6 @@ class PartylineAdapter(WakeSettlement, Adapter):
         except (IndexError, json.JSONDecodeError):
             return False
         return isinstance(record, dict) and record.get("type") == "turn_ended"
-
     async def _tail_transcript(self, path: Path) -> None:
         seen_fps: list[str] = []
         self._sentinel_fps = set()
@@ -273,13 +267,21 @@ class PartylineAdapter(WakeSettlement, Adapter):
                 if (11.9 <= waited <= 12.1 or 23.9 <= waited <= 24.1) and not self.resume:
                     await self.send_keys(self.briefing())
                 elif waited > self.DISCOVERY_TIMEOUT:
-                    await self.post(
-                        "system",
-                        "system",
-                        f"{self.att['name']}: no Cursor session appeared after "
-                        f"{int(self.DISCOVERY_TIMEOUT)}s — run `agent` manually once in "
-                        f"{self.att['cwd']}, then re-attach.",
+                    diagnostic = startup_diagnostics(
+                        getattr(self, "spawn_argv", self.build_command()),
+                        self.att["cwd"], self._startup_output.decode(errors="replace"),
                     )
+                    logger.warning("%s", diagnostic)
+                    try:
+                        await self.post(
+                            "system",
+                            "system",
+                            f"{self.att['name']}: no Cursor session appeared after "
+                            f"{int(self.DISCOVERY_TIMEOUT)}s — run `agent` manually once in "
+                            f"{self.att['cwd']}, then re-attach. {diagnostic}",
+                        )
+                    finally:
+                        await terminate_process(self.proc, self.TERMINATE_GRACE)
                     return
 
         if not session_id or not self.alive():

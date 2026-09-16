@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import signal
 import tempfile
 import time
 import unittest
@@ -21,10 +22,14 @@ from partyline.adapters.bundled.cursor.parse import (
     cwd_md5,
     cwd_slug,
     fingerprint,
-    is_git_worktree,
     parse_record,
     resync_fingerprints,
     transcript_path,
+)
+from partyline.adapters.bundled.cursor.startup import (
+    is_git_worktree,
+    startup_diagnostics,
+    terminate_process,
     workspace_command,
 )
 from partyline.adapters.receipts import BEGAN, ENDED
@@ -39,6 +44,10 @@ class Process:
 
     def stop(self):
         self.returncode = 0
+
+
+class LiveProcess(Process):
+    pid = 4321
 
 
 def attachment(name="agent", *, cwd="/test/project", command=None, **extra):
@@ -723,22 +732,113 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(resync_fingerprints(path, seen), seen)
 
     async def test_run_discovery_timeout_and_retries(self):
-        adapter = self.make_adapter()
-        adapter.proc = Process()
-        adapter.send_keys = AsyncMock()
-        adapter._find_chat = lambda: None
-        adapter.DISCOVERY_TIMEOUT = 0.05
-        adapter.POLL_SECONDS = 0.01
+        with tempfile.TemporaryDirectory() as root:
+            worktree = Path(root) / "child"
+            worktree.mkdir()
+            (worktree / ".git").write_text("gitdir: /repo/.git/worktrees/child\n")
+            adapter = self.make_adapter(cwd=str(worktree))
+            adapter.proc = Process()
+            adapter.send_keys = AsyncMock()
+            adapter._find_chat = lambda: None
+            adapter.spawn_argv = ["agent", "--api-key", "secret", "--workspace", str(worktree)]
+            await adapter.on_output(b"\x1b[31mAuthorization: Bearer leaked\x1b[0m")
+            adapter.DISCOVERY_TIMEOUT = 0.05
+            adapter.POLL_SECONDS = 0.01
 
-        await adapter._run()
+            with patch(
+                "partyline.adapters.bundled.cursor.adapter.terminate_process"
+            ) as terminate, patch(
+                "partyline.adapters.bundled.cursor.adapter.logger.warning"
+            ) as warning:
+                terminate.return_value = None
+                await adapter._run()
+
+        notice = self.messages[-1]
         self.assertIn("no Cursor session appeared", self.messages[-1][2])
         self.assertTrue(self.messages[-1][2].startswith("agent: no Cursor session"))
+        self.assertEqual(notice[:2], ("system", "system"))
+        self.assertIn("Cursor startup diagnostics", notice[2])
+        self.assertIn("linked_worktree=True", notice[2])
+        self.assertIn("workspace=", notice[2])
+        self.assertIn("trust_record=", notice[2])
+        self.assertNotIn("secret", notice[2])
+        self.assertNotIn("leaked", notice[2])
+        self.assertNotIn("\x1b", notice[2])
+        terminate.assert_awaited_once_with(adapter.proc, adapter.TERMINATE_GRACE)
+        warning.assert_called_once()
 
         # Process death before discovery
         dead_adapter = self.make_adapter()
         dead_adapter.proc = Process()
         dead_adapter.proc.stop()
         await dead_adapter._run()
+
+    def test_startup_diagnostics_bounds_and_redacts_terminal_output(self):
+        diagnostic = startup_diagnostics(
+            ["agent", "--header", "Authorization: Bearer secret", "--api-key=also-secret"],
+            "/project",
+            "\x1b[31mTOKEN=terminal-secret\x1b[0m " + ("x" * 700),
+        )
+
+        self.assertIn("--header '[REDACTED]'", diagnostic)
+        self.assertIn("--api-key=[REDACTED]", diagnostic)
+        self.assertNotIn("secret", diagnostic)
+        self.assertNotIn("\x1b", diagnostic)
+        self.assertLessEqual(len(diagnostic.split("initial_cursor_output=", 1)[1]), 602)
+
+        other_workspace = startup_diagnostics(
+            ["agent", "--workspace", "/other/workspace"], "/project", ""
+        )
+        self.assertIn("workspace='/other/workspace'", other_workspace)
+        self.assertIn("projects/other-workspace/.workspace-trusted", other_workspace)
+
+    async def test_startup_timeout_termination_leaves_exit_to_the_watcher(self):
+        process = LiveProcess()
+        with patch("partyline.adapters.bundled.cursor.startup.os.killpg") as killpg:
+            await terminate_process(process, grace=0)
+
+        self.assertEqual(killpg.call_args_list[0].args, (4321, signal.SIGTERM))
+        self.assertEqual(killpg.call_args_list[1].args, (4321, signal.SIGKILL))
+        self.assertIsNone(process.returncode)
+
+    async def test_timeout_escalates_and_watcher_reports_exited(self):
+        with tempfile.TemporaryDirectory() as cwd:
+            adapter = self.make_adapter(
+                cwd=cwd,
+                command=["sh", "-c", "trap '' TERM; while :; do sleep 1; done"],
+            )
+            adapter.INITIAL_DELAY = 0
+            adapter.DISCOVERY_TIMEOUT = 0.01
+            adapter.POLL_SECONDS = 0.01
+            adapter.TERMINATE_GRACE = 0.01
+            adapter._find_chat = lambda: None
+            await adapter.start()
+            try:
+                for _ in range(100):
+                    if "exited" in self.statuses:
+                        break
+                    await asyncio.sleep(0.01)
+                self.assertIn("exited", self.statuses)
+                self.assertFalse(await adapter.wait_ready())
+                self.assertIn("exited (code", self.messages[-1][2])
+            finally:
+                await adapter.stop()
+
+    async def test_timeout_terminates_when_diagnostic_notice_fails(self):
+        adapter = self.make_adapter()
+        adapter.proc = Process()
+        adapter._find_chat = lambda: None
+        adapter.send_keys = AsyncMock()
+        adapter.DISCOVERY_TIMEOUT = 0.01
+        adapter.POLL_SECONDS = 0.01
+        adapter.post = AsyncMock(side_effect=RuntimeError("post failed"))
+        with patch(
+            "partyline.adapters.bundled.cursor.adapter.terminate_process"
+        ) as terminate:
+            terminate.return_value = None
+            with self.assertRaisesRegex(RuntimeError, "post failed"):
+                await adapter._run()
+        terminate.assert_awaited_once_with(adapter.proc, adapter.TERMINATE_GRACE)
 
     async def test_run_success_fresh_flow(self):
         with tempfile.TemporaryDirectory() as tmpdir:

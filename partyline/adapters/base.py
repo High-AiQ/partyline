@@ -91,7 +91,6 @@ class Adapter(pty_io.PtyWriter):
 
     def build_command(self) -> list[str]:
         return list(self.att["command"])
-
     async def start(self):
         master, slave = os.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
@@ -111,8 +110,9 @@ class Adapter(pty_io.PtyWriter):
             fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 
         self.spawned_at = time.time()
+        self.spawn_argv = self.build_command()
         self.proc = subprocess.Popen(
-            self.build_command(), stdin=slave, stdout=slave, stderr=slave,
+            self.spawn_argv, stdin=slave, stdout=slave, stderr=slave,
             cwd=self.att["cwd"], env=env, preexec_fn=preexec,
         )
         os.close(slave)
