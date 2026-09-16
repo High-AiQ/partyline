@@ -393,6 +393,46 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             (None, "isolated  text"),
         )
 
+        # Cursor can echo Partyline's outer sender label in structured
+        # assistant text. Strip only this attachment's leading label.
+        own = {"role": "assistant", "content": "[Agent]: @terra finished"}
+        self.assertEqual(parse_record(own, "agent"), (None, "@terra finished"))
+        self.assertEqual(
+            parse_record(
+                {"role": "assistant", "content": "[terra]: @agent finished"},
+                "agent",
+            ),
+            (None, "[terra]: @agent finished"),
+        )
+        self.assertEqual(
+            parse_record(
+                {"role": "assistant", "content": '"[agent]: quoted" and @agent'},
+                "agent",
+            ),
+            (None, '"[agent]: quoted" and @agent'),
+        )
+        self.assertEqual(
+            parse_record(
+                {"role": "assistant", "content": "[agent]:x is a label"}, "agent"
+            ),
+            (None, "[agent]:x is a label"),
+        )
+        self.assertEqual(
+            parse_record(
+                {
+                    "role": "assistant",
+                    "message": {
+                        "content": [
+                            {"type": "text", "text": "Example transcript:"},
+                            {"type": "text", "text": "[agent]: quoted message"},
+                        ]
+                    },
+                },
+                "agent",
+            ),
+            (None, "Example transcript:\n\n[agent]: quoted message"),
+        )
+
         # Unrelated record
         self.assertEqual(
             parse_record({"type": "progress", "percent": 50}), (None, None)
@@ -1122,6 +1162,30 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                     "Connected and listening — standing by for @grok to assign; "
                     "not picking up #81 unless you hand it to me.",
                 ),
+            ],
+        )
+
+    async def test_tail_transcript_strips_only_its_own_sender_prefix(self):
+        fixture_path = Path(__file__).parent / "fixtures" / "cursor_sender_prefix.jsonl"
+        adapter = self.make_adapter()
+        adapter.proc = Process()
+
+        with patch(
+            "partyline.adapters.bundled.cursor.adapter.receipt", new=AsyncMock()
+        ):
+            task = asyncio.create_task(adapter._tail_transcript(fixture_path))
+            await asyncio.sleep(0.05)
+            adapter.proc.stop()
+            await task
+
+        self.assertEqual(
+            self.messages,
+            [
+                ("agent", "agent", "Hello from Cursor — see @terra."),
+                ("agent", "agent", "[terra]: a legitimate sender label and @agent."),
+                ("agent", "agent", 'A quote: "[agent]: keep this"; mention @agent.'),
+                ("agent", "agent", "[agent]:x is a literal label."),
+                ("agent", "agent", "Example transcript:\n\n[agent]: quoted message"),
             ],
         )
 

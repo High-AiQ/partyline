@@ -1,0 +1,7 @@
+{"role":"user","message":{"content":[{"type":"text","text":"Say hello."}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"[agent]: Hello from Cursor — see @terra."}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"[terra]: a legitimate sender label and @agent."}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"A quote: \"[agent]: keep this\"; mention @agent."}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"[agent]:x is a literal label."}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"Example transcript:"},{"type":"text","text":"[agent]: quoted message"}]}}
+{"type":"turn_ended","status":"success"}

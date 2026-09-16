@@ -231,7 +231,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
                             continue
                         if record.get("type") == "turn_ended":
                             self._sentinel_fps.add(fp)
-                        event, text = parse_record(record)
+                        event, text = parse_record(record, self.att["name"])
                         if event == BEGAN:
                             await self._note_user_input(user_text(record))
                         elif event == ENDED:
