@@ -289,3 +289,4 @@ export type ApiErrorBody = z.infer<typeof ApiErrorBodySchema>;
 // Keep the import surface stable while wire-only contracts live in `events.ts`,
 // whose lazy entity schemas make this intentional re-export cycle safe at runtime.
 export * from "./events";
+export * from "./conversation-contracts";

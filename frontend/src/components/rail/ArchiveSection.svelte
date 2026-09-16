@@ -12,9 +12,10 @@
 
   interface Props {
     onpurge: (conversation: Conversation) => void;
+    onpurgeall?: () => void;
   }
 
-  let { onpurge }: Props = $props();
+  let { onpurge, onpurgeall }: Props = $props();
 
   let loading = $state(false);
   let failed = $state(false);
@@ -68,6 +69,16 @@
     >
   </summary>
   <nav id="archivedConvs" class="px-3 pb-2" aria-label="archived lines">
+    <div class="archive-bulk mb-1.5 flex items-center justify-end px-1">
+      <button
+        type="button"
+        id="purgeAllArchived"
+        class="border border-red/35 px-1.5 py-1 text-[9.5px] text-red hover:border-red hover:text-cream disabled:cursor-not-allowed disabled:opacity-40"
+        use:tooltip={{ label: "permanently delete all archived lines" }}
+        disabled={loading || room.archived.length === 0}
+        onclick={() => onpurgeall?.()}>purge all</button
+      >
+    </div>
     {#if loading}
       <div class="archive-note px-2 pb-1.5 text-[10px] italic text-cream-faint">loading…</div>
     {:else if failed}
