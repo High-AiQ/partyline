@@ -114,18 +114,22 @@ class PurgeAllArchivedTest(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json(), {"purged": [], "skipped": []})
 
-    def test_skip_with_reason(self):
-        self.db.create_conversation("kid", "Kid")
-        self.db._exec("UPDATE conversations SET parent_id='root' WHERE id='kid'")
-        self.db.archive_conversation("kid")
+    def test_purges_archived_children_of_live_parent(self):
+        for index in range(10):
+            child_id = f"kid-{index}"
+            self.db.create_conversation(child_id, f"Kid {index}")
+            self.db._exec(
+                "UPDATE conversations SET parent_id='root' WHERE id=?", (child_id,)
+            )
+            self.db.archive_conversation(child_id)
 
         res = self.client.delete("/api/conversations/archived", headers=self.human)
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(
-            res.json(),
-            {"purged": [], "skipped": [{"id": "kid", "reason": "parent is not archived"}]},
-        )
-        self.assertIsNotNone(self.db.get_conversation("kid"))
+        data = res.json()
+        self.assertEqual(set(data["purged"]), {f"kid-{index}" for index in range(10)})
+        self.assertEqual(data["skipped"], [])
+        for index in range(10):
+            self.assertIsNone(self.db.get_conversation(f"kid-{index}"))
 
     def test_ordering(self):
         self.db.create_conversation("tree_root", "Tree Root")
@@ -147,7 +151,7 @@ class PurgeAllArchivedTest(unittest.TestCase):
         self.assertIsNone(self.db.get_conversation("tree_child"))
         self.assertIsNone(self.db.get_conversation("tree_root"))
 
-    def test_skip_descendants_when_ancestor_unarchived(self):
+    def test_purges_archived_descendants_when_ancestor_unarchived(self):
         # root is active (not archived)
         # kid is archived, parent = root
         # grandkid is archived, parent = kid
@@ -161,13 +165,10 @@ class PurgeAllArchivedTest(unittest.TestCase):
         res = self.client.delete("/api/conversations/archived", headers=self.human)
         self.assertEqual(res.status_code, 200)
         data = res.json()
-        self.assertEqual(data["purged"], [])
-        skipped_ids = {item["id"] for item in data["skipped"]}
-        self.assertEqual(skipped_ids, {"kid", "grandkid"})
-        for item in data["skipped"]:
-            self.assertEqual(item["reason"], "parent is not archived")
-        self.assertIsNotNone(self.db.get_conversation("kid"))
-        self.assertIsNotNone(self.db.get_conversation("grandkid"))
+        self.assertEqual(data["purged"], ["grandkid", "kid"])
+        self.assertEqual(data["skipped"], [])
+        self.assertIsNone(self.db.get_conversation("kid"))
+        self.assertIsNone(self.db.get_conversation("grandkid"))
 
     def test_archived_parent_with_restored_child(self):
         self.db.create_conversation("parent_line", "Parent")
@@ -220,6 +221,4 @@ class PurgeAllArchivedTest(unittest.TestCase):
         child = self.db.get_conversation("c")
         self.assertIsNotNone(child)
         self.assertIsNone(child["archived_at"])
-
-
 

@@ -26,26 +26,9 @@ async def execute_purge_all_archived(runtime, media, db) -> dict:
         return {"purged": [], "skipped": []}
 
     skipped: list[dict[str, str]] = []
-    skipped_ids: set[str] = set()
     to_purge: dict[str, dict] = {}
     for conv in archived:
-        parent_id = conv.get("parent_id")
-        parent = db.get_conversation(parent_id) if parent_id else None
-        if parent and not parent.get("archived_at"):
-            skipped.append({"id": conv["id"], "reason": "parent is not archived"})
-            skipped_ids.add(conv["id"])
-        else:
-            to_purge[conv["id"]] = conv
-
-    changed = True
-    while changed:
-        changed = False
-        for cid, conv in list(to_purge.items()):
-            if conv.get("parent_id") in skipped_ids:
-                del to_purge[cid]
-                skipped.append({"id": cid, "reason": "parent is not archived"})
-                skipped_ids.add(cid)
-                changed = True
+        to_purge[conv["id"]] = conv
 
     changed = True
     while changed:

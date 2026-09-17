@@ -80,7 +80,7 @@ describe("PurgeAllDialog", () => {
     const close = vi.fn();
     vi.spyOn(api, "purgeArchivedConversations").mockResolvedValue({
       purged: ["c1"],
-      skipped: [{ id: "c2", reason: "parent is not archived" }],
+      skipped: [{ id: "c2", reason: "line has a child that is not archived" }],
     });
     vi.spyOn(room, "loadArchived").mockResolvedValue();
     const noticeSpy = vi.spyOn(room, "showNotice").mockReturnValue();
