@@ -153,6 +153,21 @@ class RoleBriefingTests(unittest.TestCase):
         text = worker_instructions(captained=True)
         self.assertIn("name the SHA and the gates you actually ran", text)
 
+    def test_dogfooding_requires_the_checkout_refreshed_before_any_planning(self):
+        packs = {
+            "splitting": role_instructions(["assign", "create_child"], "root", None),
+            "leaf": role_instructions(["assign", "report"], "leaf", "parent", 2),
+            "staffed": role_instructions(["assign", "report"], "line", "parent", 1, staffed=True),
+        }
+        for label, text in packs.items():
+            with self.subTest(label):
+                self.assertIn("behind or STALE", text)
+                self.assertIn("the service runs ahead of it", text)
+                self.assertIn("Refresh the checkout before planning any work from it", text)
+                self.assertIn("ask right away", text)
+                self.assertIn("a person pulls", text)
+                self.assertIn("Never plan dogfooding from a stale base", text)
+
     def test_evidence_reuse_is_permitted_not_mandated_at_every_level(self):
         packs = {
             "splitting": role_instructions(["assign", "create_child"], "root", None),
