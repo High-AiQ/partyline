@@ -52,6 +52,22 @@ rule is its own short block, gated on a live captain, so a worker briefed while
 a captain sits on the line is told not to push, is re-briefed when one is
 appointed, and loses the block when the captain goes.
 
+Work that pops up a level is reviewed again, not countersigned. Five rules keep
+that honest. **Fresh scrutiny at every hand-off:** work reviewed and accepted
+below still gets its own review when it reaches a captain — a lower captain's
+acceptance is input, never a substitute. **Scope differs by level:** a captain
+with children checks whether the assignment it gave was fulfilled and whether the
+piece integrates; a captain with same-line workers checks implementation
+correctness; a root captain also checks the whole user request and shipping
+readiness. **Inspection delegable, acceptance not:** a captain may commission the
+inspection, but the acceptance decision is its own and cannot be delegated or
+inherited. **Evidence reuse is SHA-bound and optional:** recorded gate and test
+evidence carries only at the same unchanged exact SHA — a new SHA voids it — but a
+captain may always re-run any gate a finding warrants; reuse is permitted, never
+mandated. **Acceptance records three things:** the independent checks this
+captain ran, the evidence it reused with that SHA, and the rationale for
+accepting at its scope.
+
 What stays with the person is the goal, acceptance, budget and spend gates,
 which presets may be used, and anything irreversible; the pack tells a manager
 to ask before those rather than guess. Team shape is a default, not a rule: the
