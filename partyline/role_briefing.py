@@ -45,7 +45,14 @@ PROCEDURE = (
     "worker's hand-off: the exact SHA reviewed in a throwaway worktree, whole diff from its "
     "intended base, gates run, hunting what the report omits "
     "(skills/adversarial-review/SKILL.md). Run it or delegate it, but hold its findings; "
-    "never accept on a bare 'done'.\n"
+    "never accept on a bare 'done'. Work accepted below still gets fresh scrutiny here, at "
+    "your own scope: a lower captain's acceptance is input, never a substitute. Commission "
+    "the inspection if you like, but the acceptance decision is yours and cannot be "
+    "delegated or inherited. Recorded gate and test evidence carries only at the same "
+    "unchanged exact SHA — a new SHA voids it — but reuse is permitted, never mandated: "
+    "re-run any gate a finding warrants. State your acceptance: "
+    "the independent checks you ran, the evidence you reused with its SHA, and why it clears "
+    "your scope.{top}\n"
     "6. **Tell the person once, with evidence**, then clear the goal. Ordinary participants "
     "cannot reach other lines; a child manager reaches you by @mention and nobody else above."
 )
@@ -107,7 +114,9 @@ SPLIT = (
     "{max_depth}{below}. Work goes down, not sideways: "
     "once this line has a child, no process may be attached here, and the processes already "
     "here are not your implementers. A goal that does not split stays on this line only while "
-    "it has no children. When you have accepted a child's branch and its captain is done, "
+    "it has no children. When its work returns, your scope is whether the assignment you gave "
+    "was fulfilled and whether the piece integrates. When you have accepted a child's branch "
+    "and its captain is done, "
     "retire the child: DELETE /api/conversations/<child-id>; its worktree goes with it."
 )
 
@@ -117,14 +126,16 @@ LEAF = (
     "/api/presets, POST {root}/attachments with the preset's name, adapter and command as-is "
     "(the handle is made unique and the working directory is this line's) — assign to that "
     "worker with the acceptance criterion, ensure the work gets an adversarial review at its "
-    "exact SHA before accepting it, and report up. You still do not implement."
+    "exact SHA, at your scope of implementation correctness, before accepting it, and report "
+    "up. You still do not implement."
 )
 
 STAFFED = (
     "**This line is staffed** (depth {depth} of {max_depth}): whoever put you here also "
     "attached workers, and they are your implementers — GET {root}/staffing lists them. "
     "Assign to one of them with the acceptance criterion, ensure the work gets an adversarial "
-    "review at its exact SHA before accepting it, and report up. "
+    "review at its exact SHA, at your scope of implementation correctness, before accepting "
+    "it, and report up. "
     "While workers are attached here you cannot create child lines or appoint sub-captains; "
     "a slice that truly needs its own line waits until the person moves them. You still do "
     "not implement."
@@ -152,7 +163,8 @@ WORKER = (
     "### On a captained line you do not push\n"
     "This line has a captain, who owns the push. Commit locally and hand the captain the "
     "commit SHA; do not push. Expect your commit to get an adversarial review at that exact "
-    "SHA before it is accepted — a report is receipt, not acceptance."
+    "SHA before it is accepted — a report is receipt, not acceptance. In your hand-off name "
+    "the SHA and the gates you actually ran, so the captain can reuse that evidence there."
 )
 
 
@@ -178,6 +190,8 @@ def role_instructions(
     if "assign" not in actions:
         return ""  # captains are appointed by a person or a captain, never inferred from chat
     root = f"/api/conversations/{conv_id}"
+    top = (" At the root that scope is the whole user request and shipping readiness."
+           if parent_id is None else "")
     if staffed:
         staffing = STAFFED.format(root=root, depth=depth, max_depth=MAX_CAPTAIN_DEPTH)
     elif "create_child" in actions:
@@ -192,7 +206,7 @@ def role_instructions(
         "helper from your briefing; `request GET /api/capabilities` shows your permissions, "
         "depth and the depth cap.",
         ROLE,
-        PROCEDURE.format(root=root, staffing=staffing),
+        PROCEDURE.format(root=root, staffing=staffing, top=top),
         STAFFING_TRAITS.format(root=root),
         ASK_FIRST.format(root=root),
         EXAMPLE,
@@ -202,7 +216,8 @@ def role_instructions(
             f"Child reports wait in GET {root}/reports; acknowledge one with POST "
             f'{root}/reports/<report-id>/ack and JSON {{"revision":N}} after reading it. '
             "Receipt is not acceptance: have the child's work reviewed at its exact SHA "
-            "before accepting it."
+            "before accepting it — its report and acceptance are input to your review, not a "
+            "substitute for it."
         )
     if parent_id and "report" in actions:
         blocks.append(CHILD_MANAGER.format(root=root))

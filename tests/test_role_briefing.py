@@ -111,3 +111,56 @@ class RoleBriefingTests(unittest.TestCase):
 
     def test_a_worker_on_an_uncaptained_line_is_told_nothing_new(self):
         self.assertEqual(worker_instructions(captained=False), "")
+
+    def test_scope_differs_by_level(self):
+        root = role_instructions(["assign", "create_child"], "root", None)
+        self.assertIn("whether the assignment you gave was fulfilled and whether the piece "
+                      "integrates", root)
+        self.assertIn("whole user request and shipping readiness", root)
+
+        child = role_instructions(["assign", "create_child"], "child", "parent", 1)
+        self.assertIn("whether the assignment you gave was fulfilled", child)
+        self.assertNotIn("whole user request and shipping readiness", child)
+
+        leaf = role_instructions(["assign", "report"], "leaf", "parent", 2)
+        self.assertIn("implementation correctness", leaf)
+        self.assertNotIn("whole user request and shipping readiness", leaf)
+
+        staffed = role_instructions(["assign", "report"], "line", "parent", 1, staffed=True)
+        self.assertIn("implementation correctness", staffed)
+        self.assertNotIn("whole user request and shipping readiness", staffed)
+
+    def test_every_captain_variant_requires_sha_bound_reuse_and_a_recorded_acceptance(self):
+        packs = {
+            "splitting": role_instructions(
+                ["assign", "create_child", "read_reports"], "root", None),
+            "leaf": role_instructions(["assign", "report"], "leaf", "parent", 2),
+            "staffed": role_instructions(["assign", "report"], "line", "parent", 1, staffed=True),
+        }
+        for label, text in packs.items():
+            with self.subTest(label):
+                self.assertIn("same unchanged exact SHA", text)
+                self.assertIn("new SHA voids it", text)
+                self.assertIn("independent checks you ran", text)
+                self.assertIn("evidence you reused with its SHA", text)
+                self.assertIn("clears your scope", text)
+
+    def test_the_read_reports_block_treats_a_child_acceptance_as_input_not_proof(self):
+        text = role_instructions(["assign", "create_child", "read_reports"], "root", None)
+        self.assertIn("input to your review, not a substitute", text)
+
+    def test_a_worker_hand_off_names_the_sha_and_the_gates_actually_run(self):
+        text = worker_instructions(captained=True)
+        self.assertIn("name the SHA and the gates you actually ran", text)
+
+    def test_evidence_reuse_is_permitted_not_mandated_at_every_level(self):
+        packs = {
+            "splitting": role_instructions(["assign", "create_child"], "root", None),
+            "leaf": role_instructions(["assign", "report"], "leaf", "parent", 2),
+            "staffed": role_instructions(["assign", "report"], "line", "parent", 1, staffed=True),
+        }
+        for label, text in packs.items():
+            with self.subTest(label):
+                self.assertIn("reuse is permitted, never mandated", text)
+                self.assertIn("re-run any gate a finding warrants", text)
+                self.assertNotIn("no gate is re-run at every level", text)
