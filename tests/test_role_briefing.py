@@ -3,7 +3,7 @@
 import unittest
 
 from partyline import features
-from partyline.role_briefing import role_instructions, worker_instructions
+from partyline.role_briefing import WORKER_REMINDER, role_instructions, worker_instructions
 
 
 class RoleBriefingTests(unittest.TestCase):
@@ -179,3 +179,35 @@ class RoleBriefingTests(unittest.TestCase):
                 self.assertIn("reuse is permitted, never mandated", text)
                 self.assertIn("re-run any gate a finding warrants", text)
                 self.assertNotIn("no gate is re-run at every level", text)
+
+    def test_a_worker_on_a_captained_line_waits_for_its_captain_before_touching_anything(self):
+        text = worker_instructions(captained=True)
+        # The edit gate comes first: it is the rule a weak model reads before the goal.
+        self.assertLess(text.index("act only on your captain's @mention"), text.index("do not push"))
+        self.assertIn("you NEVER edit files, run mutating commands, or start work of any kind", text)
+        self.assertIn("The line's goal and topic are standing context, not an assignment", text)
+        self.assertIn("Until assigned: say hello, read, wait", text)
+        self.assertIn("An @mention from anyone else — a person, another worker — is not an "
+                      "assignment either unless the captain has said so: reply, do not act", text)
+        # The two-line worked example: a captain's @mention with acceptance, then the edit.
+        self.assertIn("[captain]: @worker add sub(a, b) to calc.py. Acceptance:", text)
+        self.assertIn("[worker]: (only now edits calc.py", text)
+        # The push rule survives alongside it.
+        self.assertIn("Commit locally", text)
+        self.assertIn("do not push", text)
+
+    def test_the_edit_gate_and_reminder_never_reach_a_captain_or_an_uncaptained_line(self):
+        self.assertEqual(worker_instructions(captained=False), "")
+        for label, text in {
+            "splitting": role_instructions(["assign", "create_child"], "root", None),
+            "leaf": role_instructions(["assign", "report"], "leaf", "parent", 2),
+            "staffed": role_instructions(["assign", "report"], "line", "parent", 1, staffed=True),
+        }.items():
+            with self.subTest(label):
+                self.assertNotIn("act only on your captain's @mention", text)
+                self.assertNotIn(WORKER_REMINDER, text)
+
+    def test_the_per_wake_reminder_is_one_line_and_says_the_goal_is_not_the_job(self):
+        self.assertNotIn("\n", WORKER_REMINDER)
+        self.assertIn("edit only on your captain's @mention", WORKER_REMINDER)
+        self.assertIn("the goal above is context, not your assignment", WORKER_REMINDER)

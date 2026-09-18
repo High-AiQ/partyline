@@ -392,6 +392,61 @@ class HierarchyApiTest(unittest.TestCase):
         self.assertEqual(notice["audience_attachment_id"], "impl-att")
         self.assertEqual([m["body"] for batch in deliveries for m in batch][-1], notice["body"])
 
+    def test_appointing_a_captain_wakes_the_workers_already_on_the_line_with_their_pack(self):
+        from partyline.role_delivery import bind_role_delivery
+
+        woken = {}
+
+        def adapter_for(att_id):
+            async def capture(messages):
+                woken.setdefault(att_id, []).extend(m["body"] for m in messages)
+            return SimpleNamespace(deliver=capture, att={})
+
+        # Two workers joined before any captain existed: no worker pack at join.
+        self.db.add_attachment("w2-att", "parent", "sol", "fake", ["fake"], "/tmp")
+        self.db.set_attachment_status("w2-att", "running", None)
+        self.db.set_attachment_status("lead-att", "running", None)
+        self.client.post("/api/conversations/parent/lead", json={"attachment_id": None})
+        self.db.set_attachment_status("impl-att", "running", None)
+        for att_id in ("lead-att", "impl-att", "w2-att"):
+            self.runtime.live[att_id] = adapter_for(att_id)
+        worker = {"id": "w2-att", "digest_rider": lambda: ""}
+        bind_role_delivery(self.db, worker)
+        self.assertEqual(worker["role_briefing"], "")  # nothing to brief: no captain yet
+
+        appointed = self.client.post(
+            "/api/conversations/parent/lead", json={"attachment_id": "lead-att"})
+        self.assertEqual(appointed.status_code, 200)
+        [notice] = [m for m in self.db.list_messages("parent")
+                    if m["body"].startswith("☏ workers @")]
+        self.assertIn("astra is now this line's captain", notice["body"])
+        self.assertIsNone(notice["audience_attachment_id"])  # public: it names every worker
+        self.assertIn("@grok", notice["body"])
+        self.assertIn("@sol", notice["body"])
+        self.assertIn("wait for your captain's @mention before editing anything", notice["body"])
+        self.assertIn(notice["body"], woken["impl-att"])
+        self.assertIn(notice["body"], woken["w2-att"])
+        self.assertNotIn(notice["body"], woken.get("lead-att", []))  # the captain is not a worker
+        # The rider computes `captained` fresh, so this wake carries the worker pack.
+        digest = worker["digest_rider"]()
+        self.assertIn("## Worker pack", digest)
+        self.assertIn("act only on your captain's @mention", digest)
+        self.assertIn("you are a worker on a captained line", digest)
+
+    def test_appointing_a_captain_with_no_live_workers_posts_no_worker_notice(self):
+        self.db.set_attachment_status("lead-att", "running", None)
+        self.client.post("/api/conversations/parent/lead", json={"attachment_id": None})
+
+        async def capture(messages):
+            pass
+
+        self.runtime.live["lead-att"] = SimpleNamespace(deliver=capture, att={})
+        appointed = self.client.post(
+            "/api/conversations/parent/lead", json={"attachment_id": "lead-att"})
+        self.assertEqual(appointed.status_code, 200)
+        self.assertEqual([m for m in self.db.list_messages("parent")
+                          if m["body"].startswith("☏ workers @")], [])
+
     def test_reappointing_the_sitting_captain_is_a_no_op(self):
         deliveries = []
 

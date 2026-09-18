@@ -14,7 +14,7 @@ from .contracts import (
     MessageEvent,
     MessageResponse,
 )
-from .mention_relay import post_private
+from .mention_relay import post_private, ring_workers
 from .hierarchy import (
     HierarchyError,
     child_ids,
@@ -125,11 +125,10 @@ def hierarchy_router(runtime) -> APIRouter:
         def live(row):
             return row is not None and row["status"] == "running" and row["id"] in runtime.live
 
-        # Ring both sides now rather than on their next wake. A process that
-        # appoints itself mid-turn otherwise keeps acting on the ordinary
-        # briefing; a replaced captain otherwise keeps acting as captain until
-        # something else wakes it. The digest rider carries the pack, or the
-        # "ordinary participant" correction, on these deliveries.
+        # Ring both sides now rather than on their next wake: a process that appoints
+        # itself mid-turn otherwise keeps acting on the ordinary briefing; a replaced
+        # captain otherwise keeps acting as captain until something else wakes it. The
+        # digest rider carries the pack, or the "ordinary participant" correction.
         if live(before) and before["id"] != (att["id"] if att else None):
             successor = f"@{att['name']} is" if att else "nobody is"
             await post_private(
@@ -149,6 +148,7 @@ def hierarchy_router(runtime) -> APIRouter:
                 "wake; read it before acting further",
                 audience=att["id"],
             )
+            await ring_workers(runtime, conv_id, att)  # workers learn their pack now, not later
         return LeadOut(attachment_id=body.attachment_id)
 
     @router.put("/api/conversations/{conv_id}/parent", response_model=ConversationResponse)
