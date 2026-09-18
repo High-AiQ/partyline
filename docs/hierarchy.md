@@ -47,10 +47,17 @@ delegate it, but must hold its findings; a bare delegate's "done" is not a
 review. A report is receipt, not acceptance, and the bar is the same on both
 paths. And on a captained line the captain is the only one who pushes: a worker
 commits locally and hands up the SHA, and the captain pushes after that review.
-A line with no captain keeps the old behaviour. The worker's half of the push
-rule is its own short block, gated on a live captain, so a worker briefed while
-a captain sits on the line is told not to push, is re-briefed when one is
-appointed, and loses the block when the captain goes.
+A line with no captain keeps the old behaviour. The worker pack is its own short
+block, gated on a live captain. Its first rule is the edit gate: a worker on a
+captained line never edits files, runs mutating commands, or starts work of any
+kind until its captain @mentions it with an explicit assignment — the line's
+goal and topic are standing context, not an assignment, and an @mention from a
+person or another worker is answered, not acted on, unless the captain said so.
+Then the push rule: commit locally, hand up the SHA, do not push. A worker
+briefed while a captain sits on the line gets the pack at join, is re-briefed
+when one is appointed, and loses the block when the captain goes; every wake of
+a captained worker also carries a one-line reminder that the goal is context
+and the captain's @mention is the job.
 
 Work that pops up a level is reviewed again, not countersigned. Five rules keep
 that honest. **Fresh scrutiny at every hand-off:** work reviewed and accepted
@@ -155,9 +162,15 @@ notice that carries the manager pack in its digest, so a process that appoints
 itself mid-turn reads the pack before it acts further — the first live root
 otherwise staffed its own line before the pack reached it. A captain is briefed
 the same way its root was. A worker attached to a line whose captain is already
-live is born knowing its half of the push rule — commit locally, hand the
-captain the SHA, do not push — and hears it again whenever the captain appears
-or leaves.
+live is born knowing the worker pack — wait for the captain's @mention, commit
+locally, hand the captain the SHA, do not push — and hears it again whenever the
+captain appears or leaves. Workers attached *before* the captain is appointed
+had no pack at join, and the rider only carries it on their next wake, which
+used to be whatever they decided to do with the goal. Appointing a captain now
+also posts `☏ workers @a @b: <captain> is now this line's captain — wait for
+your captain's @mention before editing anything` and routes it, so every live
+worker wakes once with the pack in that digest; the captain is named bare there
+because every `@` rings.
 
 A handle written as `name:` at the start of a line is an address too, when a
 live process on that line bears it: `worker: take the review` rings worker.
