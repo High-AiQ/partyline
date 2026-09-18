@@ -79,3 +79,39 @@ class RoleDeliveryTests(unittest.TestCase):
             self.assertIn("helper command", first)
             self.assertIn("by @mention from this line", first)
             self.assertTrue(att["digest_rider"]().startswith("helper command\n(you are the captain"))
+
+    def test_a_captained_worker_is_reminded_every_wake_that_the_goal_is_not_its_assignment(self):
+        captained = RoleState("implementer", "line", None, ("read", "write"), captained=True)
+        att = {"id": "worker", "digest_rider": lambda: "task board"}
+        with patch("partyline.role_delivery.current_role", return_value=captained):
+            bind_role_delivery(NO_GOAL, att)
+            first = att["digest_rider"]()
+            again = att["digest_rider"]()
+        self.assertTrue(first.startswith("task board\n(you are a worker on a captained line: "
+                                         "edit only on your captain's @mention"))
+        self.assertIn("the goal above is context, not your assignment", first)
+        self.assertEqual(again, first)  # rides every wake, not only the one that carries the pack
+
+    def test_the_worker_reminder_never_rides_a_captain_or_an_uncaptained_process(self):
+        captain = RoleState("lead", "line", None, ("read", "write", "assign", "create_child"))
+        uncaptained = RoleState("implementer", "line", None, ("read", "write"))
+        for label, state in {"captain": captain, "uncaptained": uncaptained}.items():
+            with self.subTest(label):
+                att = {"id": "p", "digest_rider": lambda: "task board"}
+                with patch("partyline.role_delivery.current_role", return_value=state):
+                    bind_role_delivery(NO_GOAL, att)
+                    rider = att["digest_rider"]()
+                self.assertNotIn("you are a worker on a captained line", rider)
+
+    def test_a_worker_woken_after_a_late_captain_gets_the_pack_and_the_reminder_together(self):
+        worker = RoleState("implementer", "line", None, ("read", "write"))
+        captained = RoleState("implementer", "line", None, ("read", "write"), captained=True)
+        att = {"id": "worker", "digest_rider": lambda: "task board"}
+        with patch("partyline.role_delivery.current_role", return_value=worker) as role:
+            bind_role_delivery(NO_GOAL, att)
+            self.assertEqual(att["digest_rider"](), "task board")
+            role.return_value = captained
+            rider = att["digest_rider"]()
+        self.assertIn("## Worker pack", rider)
+        self.assertIn("act only on your captain's @mention", rider)
+        self.assertIn("you are a worker on a captained line", rider)
