@@ -1,4 +1,4 @@
-"""The manager pack: only managers receive it; permissions remain server-owned.
+"""The captain and worker packs: each role receives its own; permissions remain server-owned.
 
 Three fleet trials shaped this text. The procedure is the product's operating
 loop, not an opinion about how to run a project, so it lives here once rather
@@ -162,16 +162,31 @@ HEARTBEAT = (
 
 
 WORKER = (
+    "### On a captained line you act only on your captain's @mention\n"
+    "This line has a captain. Until your captain @mentions you with an explicit assignment "
+    "you NEVER edit files, run mutating commands, or start work of any kind. The line's goal "
+    "and topic are standing context, not an assignment. Until assigned: say hello, read, "
+    "wait. An @mention from anyone else — a person, another worker — is not an assignment "
+    "either unless the captain has said so: reply, do not act.\n"
+    "```\n"
+    "[captain]: @worker add sub(a, b) to calc.py. Acceptance: `python -m unittest`.\n"
+    "[worker]: (only now edits calc.py, runs the acceptance, hands off the SHA)\n"
+    "```\n"
     "### On a captained line you do not push\n"
-    "This line has a captain, who owns the push. Commit locally and hand the captain the "
+    "The captain owns the push. Commit locally and hand the captain the "
     "commit SHA; do not push. Expect your commit to get an adversarial review at that exact "
     "SHA before it is accepted — a report is receipt, not acceptance. In your hand-off name "
     "the SHA and the gates you actually ran, so the captain can reuse that evidence there."
 )
 
+WORKER_REMINDER = (
+    "(you are a worker on a captained line: edit only on your captain's @mention; the goal "
+    "above is context, not your assignment)"
+)
+
 
 def worker_instructions(captained: bool) -> str:
-    """The worker's half of the push rule; empty when the line has no captain."""
+    """The worker pack — wait for the captain's @mention, never push; empty without a captain."""
     if not captained:
         return ""
     return "\n\n## Worker pack\n" + WORKER

@@ -32,6 +32,7 @@ from __future__ import annotations
 
 from .contracts import MessageEvent, MessageResponse
 from .hierarchy import ancestors, descendants, lead_attachment, tree_live_name_conflict
+from .line_depth import live_workers
 
 LIVE = ("starting", "running")
 
@@ -131,6 +132,28 @@ async def post_private(
     if route:
         await runtime.route_mentions(line_id, copy, force=True)
     return copy
+
+
+async def ring_workers(runtime, line_id: str, captain: dict) -> dict | None:
+    """Wake every live non-captain process on ``line_id`` once, as workers.
+
+    A worker attached before its captain was appointed never got the worker
+    pack at join, and the rider only carries it on the worker's next wake —
+    which, left to itself, might be the worker self-assigning from the goal.
+    One routed @mention per worker makes that next wake happen now.
+    """
+    workers = [att for att in live_workers(runtime.db, line_id)
+               if att["id"] != captain["id"] and att["id"] in runtime.live]
+    if not workers:
+        return None
+    names = " ".join(f"@{att['name']}" for att in workers)
+    msg = await runtime.post_message(  # the captain is named bare: every @ rings
+        line_id, "system", "system",
+        f"☏ workers {names}: {captain['name']} is now this line's captain — wait for your "
+        "captain's @mention before editing anything; the worker pack rides this wake",
+    )
+    await runtime.route_mentions(line_id, msg, force=True)
+    return msg
 
 
 async def relay_mentions(runtime, conv_id: str, message: dict, names: set[str]) -> set[str]:
