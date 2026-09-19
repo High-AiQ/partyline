@@ -195,6 +195,25 @@ each descendant line's `accepted_sha`. Anyone else who wants to record a
 hand-off gets 403 — a captain higher up reviews the work again at its own
 scope, so nobody accepts across two levels.
 
+## Review worktrees
+
+An adversarial review needs a checkout of the exact SHA, and sub-captains used
+to run `git worktree add /tmp/...` for it — around thirty times in one program,
+and nothing pruned them. A review worktree is partyline's instead: `POST
+/api/conversations/<id>/review-worktrees` with JSON `{"sha":"..."}` (anyone
+with `read` on the line — a person, its captain, the parent's captain — or the
+documented CLI form, `python -m scripts.review_worktree create --database
+<db> --conversation <id> --sha <sha>`) checks the SHA out detached at
+`<repo>/.review/<full sha>`, records it on the line, and announces it there.
+`GET .../review-worktrees` lists a line's recorded reviews. The records drive
+the cleanup: every review worktree of a line is pruned when the line is
+retired, archived, or purged, and when its SHA is accepted, so a finished
+review never lingers. At startup the sweep also drops `.review` directories
+whose line is gone or that no record claims — only full-SHA directories, since
+partyline owns the directory but nothing else in a repository's `.review`.
+Review checkouts are disposable by contract: pruning is forced, and the SHAs
+themselves stay in the repository, so no reviewed work is ever lost.
+
 ## The goal
 
 A line carries a `goal`: what its manager is seeing through. A person or the

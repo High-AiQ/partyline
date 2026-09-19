@@ -42,8 +42,12 @@ PROCEDURE = (
     "(the notice carries N). Redirect with one @mention, or accept.\n"
     "5. **Ensure an adversarial review of returned work before accepting it.** Receipt is "
     "not acceptance — the bar is the same for a child line's branch/report and a same-line "
-    "worker's hand-off: the exact SHA reviewed in a throwaway worktree, whole diff from its "
-    "intended base, gates run, hunting what the report omits "
+    "worker's hand-off: the exact SHA reviewed in a throwaway worktree — create it through "
+    "partyline, never a raw `git worktree add`: POST {root}/review-worktrees with "
+    '{{"sha":"<full sha>"}}, or `python -m scripts.review_worktree create --database <db> '
+    '--conversation <line-id> --sha <sha>`, which checks it out at <repo>/.review/<sha>, '
+    "records it on the line, and prunes it when the line retires or the SHA is accepted — "
+    "whole diff from its intended base, gates run, hunting what the report omits "
     "(skills/adversarial-review/SKILL.md). Run it or delegate it, but hold its findings; "
     "never accept on a bare 'done'. Work accepted below still gets fresh scrutiny here, at "
     "your own scope: a lower captain's acceptance is input, never a substitute. Commission "

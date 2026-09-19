@@ -9,10 +9,25 @@ Review the artifact that could merge, not a mutable branch or another participan
 
 ## Pin the review
 
+Create the review checkout through partyline, never a raw `git worktree add` — partyline
+records it on the line and prunes it when the work is accepted or the line retires:
+
 ```bash
-git fetch origin
-git worktree add /tmp/<reviewer>-r<pr> <full-sha>
-cd /tmp/<reviewer>-r<pr>
+# API (a credential with read on the line):
+curl -X POST "$PARTYLINE_API/api/conversations/<line-id>/review-worktrees" \
+  -H "Authorization: Bearer $PARTYLINE_TOKEN" -H "Content-Type: application/json" \
+  -d '{"sha": "<full-sha>"}'
+
+# CLI (shell access, no credential for that line):
+uv run --locked python -m scripts.review_worktree \
+  --database /absolute/path/instance.db create \
+  --conversation <line-id> --sha <full-sha>
+```
+
+Both answer with the checkout path, `<repo>/.review/<full-sha>`, detached at the exact SHA:
+
+```bash
+cd <repo>/.review/<full-sha>
 ```
 
 | DO | DO NOT |
@@ -42,4 +57,4 @@ A clear verdict means the exact reviewed SHA satisfies the stated bar.
 | Cite the exact reviewed SHA and the throwaway worktree used | — |
 | List the commands actually run and their results | — |
 | Give each blocker its failing path or invariant, or an explicit clear/approve result | — |
-| Remove the worktree (`git worktree remove /tmp/<reviewer>-r<pr>`) once no artifact is needed | Leave disposable worktrees behind |
+| Leave the managed checkout to partyline — it is pruned when the line retires or the SHA is accepted (or `... prune --conversation <line-id>` via the CLI) | Leave disposable worktrees behind |

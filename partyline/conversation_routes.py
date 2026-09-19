@@ -16,6 +16,7 @@ from .hierarchy import tree_live_name_conflict
 from .line_subtree import archive_line, archive_subtree
 from .line_worktree import describe, ensure_placed, line_cwd
 from .worktree_lifecycle import archive_worktree_if_safe, worktree_removal_reason
+from .review_worktrees import prune_review_worktrees
 from .conversation_contracts import PurgeAllResponse
 from .conversation_purge import execute_purge, execute_purge_all_archived
 from .contracts import (
@@ -166,6 +167,7 @@ def register_conversation_routes(
         removed, kept_reason = False, None
         for line_id in archived:
             line_removed, reason = await asyncio.to_thread(archive_worktree_if_safe, db, line_id)
+            await asyncio.to_thread(prune_review_worktrees, db, line_id)
             if line_id == conv_id:
                 removed, kept_reason = line_removed, reason
         await runtime.broadcast_all(ConversationsChangedEvent())

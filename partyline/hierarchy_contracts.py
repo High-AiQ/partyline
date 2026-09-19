@@ -38,6 +38,17 @@ class AcceptResponse(BaseModel):
     moved: bool  # False when the branch already pointed at it
 
 
+class ReviewWorktreeIn(BaseModel):
+    sha: str = Field(min_length=4, max_length=64)
+
+
+class ReviewWorktreeOut(BaseModel):
+    conv_id: str
+    sha: str
+    path: str
+    created_at: float
+
+
 class ReportIn(BaseModel):
     body: str = Field(min_length=1, max_length=MAX_REPORT_BODY)
     notify: bool = False

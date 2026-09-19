@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from partyline import accept_sha as accept_sha_module
 from partyline import auth_store, auth_tokens, server
+from partyline import line_worktree as line_worktree_module
 from partyline.accept_sha import AcceptError, accept_sha, accepted_note, register_accept_route
 from partyline.auth_guard import install_auth_guard
 from partyline.conversation_routes import register_conversation_routes
@@ -256,7 +257,7 @@ class AcceptShaTest(unittest.TestCase):
         self.assertEqual(self.branch_head("main"), sha)
 
     def test_git_failures_surface_as_409(self):
-        original = accept_sha_module._git
+        original = line_worktree_module._git
 
         def no_merge_base(*args, cwd):
             if args[0] == "merge-base":
@@ -269,13 +270,15 @@ class AcceptShaTest(unittest.TestCase):
             return original(*args, cwd=cwd)
 
         sha = self.commit_side("parked on a side branch")
-        with patch.object(accept_sha_module, "_git", side_effect=no_merge_base):
+        with patch.object(accept_sha_module, "_git", side_effect=no_merge_base), \
+                patch.object(line_worktree_module, "_git", side_effect=no_merge_base):
             response = self.accept(sha)
         self.assertEqual(response.status_code, 409, response.text)
         self.assertIn("no history", response.json()["detail"])
 
         self.db._exec("UPDATE conversations SET accepted_sha=NULL WHERE id=?", (self.kid["id"],))
-        with patch.object(accept_sha_module, "_git", side_effect=branch_refuses):
+        with patch.object(accept_sha_module, "_git", side_effect=branch_refuses), \
+                patch.object(line_worktree_module, "_git", side_effect=branch_refuses):
             response = self.accept(sha)
         self.assertEqual(response.status_code, 409, response.text)
         self.assertIn("cannot move line/kid", response.json()["detail"])
