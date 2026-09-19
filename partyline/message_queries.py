@@ -1,5 +1,7 @@
 """Bounded human-history reads; process delivery keeps its own cursor query."""
 
+from .message_visibility import REACTION_NOTICE_LIKE, hide_reaction_notices_clause
+
 
 # Every read joins the line a message was said on, so a cross-line copy can
 # be attributed ("via «Princess»") without a second query per message.
@@ -23,15 +25,22 @@ def select_message_page(execute, conv_id, before_id=None, after_id=None, limit=2
         raise ValueError("choose before_id or after_id, not both")
     if after_id is not None:
         rows = execute(
-            MESSAGE_SELECT + " WHERE m.conv_id=? AND m.id>? ORDER BY m.id LIMIT ?",
-            (conv_id, after_id, limit + 1),
+            MESSAGE_SELECT + " WHERE m.conv_id=? AND m.id>? "
+            + hide_reaction_notices_clause() + " ORDER BY m.id LIMIT ?",
+            (conv_id, after_id, REACTION_NOTICE_LIKE, limit + 1),
         ).fetchall()
         return [as_message(row) for row in rows[:limit]], len(rows) > limit
 
     where = "m.conv_id=?" if before_id is None else "m.conv_id=? AND m.id<?"
-    args = (conv_id, limit + 1) if before_id is None else (conv_id, before_id, limit + 1)
+    if before_id is None:
+        args = (conv_id, REACTION_NOTICE_LIKE, limit + 1)
+    else:
+        args = (conv_id, before_id, REACTION_NOTICE_LIKE, limit + 1)
     rows = execute(
-        f"{MESSAGE_SELECT} WHERE {where} ORDER BY m.id DESC LIMIT ?", args
+        f"{MESSAGE_SELECT} WHERE {where} "
+        + hide_reaction_notices_clause()
+        + " ORDER BY m.id DESC LIMIT ?",
+        args,
     ).fetchall()
     page = [as_message(row) for row in rows[:limit]]
     page.reverse()
