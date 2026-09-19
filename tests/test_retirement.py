@@ -124,6 +124,34 @@ class RetirementTest(unittest.TestCase):
                       [blocker["code"] for blocker in resp.json()["blockers"]])
         self.assertTrue(os.path.isdir(mid["cwd"]))
 
+    def test_detached_head_commits_count_as_unmerged_and_survive_discard(self):
+        mid = self.child()
+        _git("checkout", "-q", "--detach", cwd=mid["cwd"])
+        with open(os.path.join(mid["cwd"], "detached.txt"), "w") as fh:
+            fh.write("lost work\n")
+        _git("add", "-A", cwd=mid["cwd"])
+        _git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q",
+             "-m", "detached work", cwd=mid["cwd"])
+        self.assertFalse(worktree_state(self.db, mid)["merged"])
+
+        resp = self.retire(mid["id"], discard=True)
+
+        self.assertEqual(resp.status_code, 409, resp.text)
+        self.assertIn("unmerged_commits",
+                      [blocker["code"] for blocker in resp.json()["blockers"]])
+        self.assertTrue(os.path.isfile(os.path.join(mid["cwd"], "detached.txt")))
+
+    def test_a_detached_head_at_a_merged_commit_still_retires(self):
+        mid = self.child()
+        _git("checkout", "-q", "--detach", cwd=mid["cwd"])
+        self.assertTrue(worktree_state(self.db, mid)["merged"])
+
+        resp = self.retire(mid["id"], discard=True)
+
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertTrue(resp.json()["worktree_removed"])
+        self.assertFalse(os.path.exists(mid["cwd"]))
+
     def test_a_person_may_discard_a_merged_dirty_worktree(self):
         mid = self.child()
         self.dirty(mid["cwd"])

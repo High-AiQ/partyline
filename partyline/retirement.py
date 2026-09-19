@@ -55,8 +55,9 @@ def archive_blockers(
         if not state["merged"] and (strict or discard):
             blockers.append(_blocker(
                 "unmerged_commits",
-                "unmerged commits: this line's branch has commits reachable only from its "
-                "worktree; merge it, and never discard it",
+                "unmerged commits: this line's branch or worktree HEAD has commits not "
+                "reachable from the parent branch or the repository default; merge it, and "
+                "never discard it",
             ))
         waives_dirty = discard and state["merged"]
         if strict and not state["clean"] and not waives_dirty:

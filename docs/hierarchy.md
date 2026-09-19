@@ -115,8 +115,9 @@ process is readable by that process, and only that one, even though the file liv
 line it was posted to; a captain briefed with a document does not need it copied to disk.
 
 Archiving a line also removes its worktree, when it is **SAFE** to: the working tree is
-clean, and every commit on `line/<name>` is reachable from the parent line's branch or the
-repository's default branch — nothing sits only in the worktree about to disappear. When it
+clean, and every commit reachable from the worktree's HEAD — its branch `line/<name>`, or a
+detached tip that lives on no branch — is reachable from the parent line's branch or the
+repository's default branch; nothing sits only in the worktree about to disappear. When it
 is not SAFE the worktree stays, the branch always stays, and the archive response's
 `worktree_kept_reason` says why (`unmerged commits` or `uncommitted changes`); a person can
 see this in the delete dialog. Purge keeps removing a line's worktree unconditionally, as
