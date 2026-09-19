@@ -10,11 +10,14 @@ from __future__ import annotations
 
 from io import BytesIO
 from pathlib import Path
+import logging
 import shutil
 import subprocess
 import tempfile
 
 from PIL import Image
+
+logger = logging.getLogger(__name__)
 
 # A modest pixel ceiling refuses a decompression bomb before Pillow ever
 # allocates the full raster for it.
@@ -37,6 +40,18 @@ _HEIF_BRANDS = frozenset({"mif1", "msf1", "mif2", "heim", "heis", "hevm", "hevs"
 # kept and marked rather than refused: the file is real, the machine just
 # cannot see it yet.
 EXTERNAL_FORMATS = frozenset({"AVIF", "HEIC", "HEIF", "JXL"})
+
+# The codec each external format needs an ffmpeg decoder for. ``ffmpeg
+# -decoders`` names every decoder's codec in trailing parentheses, so one
+# listing answers capability for every build without probing per file.
+_FORMAT_CODECS = {"AVIF": "av1", "HEIC": "hevc", "HEIF": "hevc", "JXL": "jpegxl"}
+
+# ffmpeg rejects an argv it does not understand outright; those markers in
+# its stderr mean the build predates an option we pass, not that the file
+# is undecodable — worth an error line, never a silent None.
+_ARGV_REJECTION = ("unrecognized option", "option not found")
+
+_decoders_listing: str | None = None
 
 
 class MediaError(Exception):
@@ -77,38 +92,85 @@ def sniffed_format(data: bytes) -> tuple[str, str, str] | None:
     return None
 
 
-def _ffmpeg_png(data: bytes) -> bytes | None:
+def reset_decoder_probe() -> None:
+    """Forget the cached ffmpeg capability listing (tests re-probe on new PATHs)."""
+    global _decoders_listing
+    _decoders_listing = None
+
+
+def ffmpeg_decoders() -> str:
+    """The ``ffmpeg -decoders`` listing, probed once; ``''`` when unusable."""
+    global _decoders_listing
+    if _decoders_listing is None:
+        try:
+            result = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-decoders"],
+                capture_output=True, timeout=60, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            _decoders_listing = ""
+        else:
+            _decoders_listing = (
+                result.stdout.decode("utf-8", "replace") if result.returncode == 0 else ""
+            )
+    return _decoders_listing
+
+
+def decodes(format_name: str) -> bool:
+    """Whether a local ffmpeg can decode this upload format at all."""
+    codec = _FORMAT_CODECS.get(format_name)
+    return codec is not None and f"(codec {codec})" in ffmpeg_decoders()
+
+
+def _ffmpeg_png(data: bytes, format_name: str) -> bytes | None:
     """One PNG frame decoded by ffmpeg, for formats Pillow cannot open.
 
-    ffmpeg is a fallback, not a dependency: absent, failing, or slow, the
-    upload falls through to whatever handles a missing decoder. The pixel
-    cap is part of the argv, not an afterthought: an adversarial file must
-    be refused by the decoder itself, before the raster exists.
+    ffmpeg is a fallback, not a dependency: absent or lacking a decoder for
+    the format, the upload falls through to whatever handles a missing
+    decoder. The pixel cap is part of the argv, not an afterthought: an
+    adversarial file must be refused by the decoder itself, before the raster
+    exists. A build that rejects the argv outright is a broken rescue path —
+    that is logged as an error rather than returned as an anonymous None,
+    which once read on CI as "no decoder here" and hid the real cause.
     """
     if not shutil.which("ffmpeg"):
+        logger.info("ffmpeg not on PATH; %s upload kept without a readable tier", format_name)
+        return None
+    if not decodes(format_name):
+        logger.info("ffmpeg has no %s decoder; upload kept without a readable tier", format_name)
         return None
     with tempfile.TemporaryDirectory() as tmp:
         source, target = Path(tmp) / "upload", Path(tmp) / "readable.png"
         source.write_bytes(data)
         try:
-            subprocess.run(
+            result = subprocess.run(
                 ["ffmpeg", "-y", "-loglevel", "error",
                  "-max_pixels", str(MAX_PIXELS), "-i", str(source),
                  "-frames:v", "1", str(target)],
                 capture_output=True, timeout=60, check=False,
             )
-        except (OSError, subprocess.TimeoutExpired):
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            logger.error("ffmpeg %s decode failed: %s", format_name, exc)
             return None
         if target.is_file():
             return target.read_bytes()
-    return None
+        stderr = result.stderr.decode("utf-8", "replace").strip().splitlines()
+        reason = stderr[-1] if stderr else f"exit {result.returncode}"
+        if any(marker in reason.lower() for marker in _ARGV_REJECTION):
+            logger.error(
+                "ffmpeg rejected the decode argv for a %s upload (build predates "
+                "-max_pixels?): %s", format_name, reason,
+            )
+        else:
+            logger.warning("ffmpeg could not decode the %s upload: %s", format_name, reason)
+        return None
 
 
 def rescued(data: bytes, sniff: tuple[str, str, str] | None) -> Image.Image | None:
     """Decode bytes Pillow refused, via ffmpeg, when the format is known."""
     if sniff is None or sniff[0] not in EXTERNAL_FORMATS:
         return None
-    png = _ffmpeg_png(data)
+    png = _ffmpeg_png(data, sniff[0])
     if png is None:
         return None
     try:

@@ -7,6 +7,9 @@ statement about that file rather than about the pipeline.
 
 from io import BytesIO
 from pathlib import Path
+import base64
+import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -56,6 +59,16 @@ def heic_signature_bytes() -> bytes:
 
 
 HAS_AVIF = features.check("avif")
+
+
+def ffmpeg_decodes_avif() -> bool:
+    """Whether the real ffmpeg on PATH can actually decode AV1 here."""
+    return shutil.which("ffmpeg") is not None and formats.decodes("AVIF")
+
+
+def avif_signature_bytes() -> bytes:
+    """AVIF magic without needing an encoder: enough for the sniff layer."""
+    return b"\x00\x00\x00\x20ftypavif\x00\x00\x00\x00avifmif1" + b"\x00" * 8
 
 
 class SignatureTest(unittest.TestCase):
@@ -135,10 +148,10 @@ class FfmpegArgvTest(unittest.TestCase):
             Path(argv[-1]).write_bytes(b"png")
             return subprocess.CompletedProcess(argv, 0)
 
-        with mock.patch.object(
+        with mock.patch.object(formats, "decodes", return_value=True), mock.patch.object(
             formats.shutil, "which", return_value="/usr/bin/ffmpeg"
         ), mock.patch.object(formats.subprocess, "run", side_effect=fake_run):
-            produced = formats._ffmpeg_png(b"junk")
+            produced = formats._ffmpeg_png(b"junk", "AVIF")
         self.assertEqual(produced, b"png")
         self.assertIn("-max_pixels", captured["argv"])
         self.assertEqual(
@@ -147,8 +160,35 @@ class FfmpegArgvTest(unittest.TestCase):
         )
 
 
+def stub_ffmpeg_script() -> str:
+    """A fake ffmpeg: answers ``-decoders``, transcodes to a real PNG.
+
+    The listing line ends in ``(codec av1)`` exactly like the real tool's,
+    so the capability probe reads it the same way it reads ffmpeg itself.
+    """
+    buffer = BytesIO()
+    Image.new("RGB", (4, 2), (1, 2, 3)).save(buffer, format="PNG")
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return f"""#!/usr/bin/env python3
+import base64, os, sys
+args = sys.argv[1:]
+if "-decoders" in args:
+    marker = os.environ.get("FAKE_FFMPEG_PROBE_FILE")
+    if marker:
+        with open(marker, "a") as tally:
+            tally.write("probe\\n")
+    print(" V....D fake-av1            fake AV1 decoder (codec av1)")
+    sys.exit(0)
+with open(args[-1], "wb") as out:
+    out.write(base64.b64decode({encoded!r}))
+"""
+
+
 @unittest.skipUnless(HAS_AVIF, "no AVIF fixture without a decoder")
 class FfmpegFallbackTest(unittest.TestCase):
+    @unittest.skipUnless(
+        ffmpeg_decodes_avif(), "ffmpeg on this machine cannot decode AV1 (absent or no decoder)"
+    )
     def test_pillow_without_a_decoder_falls_back_to_ffmpeg(self):
         original = avif_bytes()
         real_open = images._open
@@ -173,11 +213,96 @@ class FfmpegFallbackTest(unittest.TestCase):
 
         stalled = subprocess.TimeoutExpired(cmd="ffmpeg", timeout=60)
         with mock.patch.object(images, "_open", side_effect=nothing_opens), mock.patch.object(
-            formats.subprocess, "run", side_effect=stalled
-        ):
+            formats, "decodes", return_value=True
+        ), mock.patch.object(formats.subprocess, "run", side_effect=stalled):
             prepared = images.prepared_image(avif_bytes())
         self.assertIsNone(prepared.readable)
         self.assertEqual(prepared.format, "AVIF")
+
+
+class FakeFfmpegTest(unittest.TestCase):
+    """The fallback logic with a stub ffmpeg on PATH: no real tool required."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.bin = Path(self.directory.name) / "bin"
+        self.bin.mkdir()
+        self.install_stub(stub_ffmpeg_script())
+        self.original_path = os.environ["PATH"]
+        os.environ["PATH"] = f"{self.bin}{os.pathsep}{self.original_path}"
+        formats.reset_decoder_probe()
+
+    def tearDown(self):
+        os.environ["PATH"] = self.original_path
+        os.environ.pop("FAKE_FFMPEG_PROBE_FILE", None)
+        formats.reset_decoder_probe()
+        self.directory.cleanup()
+
+    def install_stub(self, script: str) -> None:
+        stub = self.bin / "ffmpeg"
+        stub.write_text(script)
+        stub.chmod(0o755)
+
+    def test_a_stub_ffmpeg_on_path_rescues_the_upload(self):
+        image = formats.rescued(avif_signature_bytes(), ("AVIF", "image/avif", "avif"))
+        self.assertIsNotNone(image)
+        self.assertEqual((image.width, image.height), (4, 2))
+
+    def test_the_capability_probe_runs_once_per_process(self):
+        marker = self.bin / "probes"
+        os.environ["FAKE_FFMPEG_PROBE_FILE"] = str(marker)
+        self.assertTrue(formats.decodes("AVIF"))
+        self.assertTrue(formats.decodes("AVIF"))
+        self.assertEqual(marker.read_text(), "probe\n")
+
+    def test_an_argv_rejecting_ffmpeg_is_a_logged_error_not_silence(self):
+        self.install_stub(
+            "#!/bin/sh\n"
+            'if [ "$1" = "-hide_banner" ]; then\n'
+            "  echo ' V....D fake-av1            fake AV1 decoder (codec av1)'\n"
+            "  exit 0\n"
+            "fi\n"
+            "echo \"Unrecognized option 'max_pixels'.\" 'Error splitting the argument list: "
+            "Option not found' >&2\n"
+            "exit 2\n"
+        )
+        formats.reset_decoder_probe()
+        with self.assertLogs("partyline.media_formats", level="ERROR") as seen:
+            self.assertIsNone(formats._ffmpeg_png(avif_signature_bytes(), "AVIF"))
+        self.assertIn("max_pixels", seen.output[0])
+
+    def test_a_ffmpeg_that_fails_to_probe_reports_no_decoder(self):
+        with mock.patch.object(formats.subprocess, "run", side_effect=OSError("gone")):
+            self.assertFalse(formats.decodes("AVIF"))
+        self.assertEqual(formats.ffmpeg_decoders(), "")
+
+    def test_a_failing_probe_run_also_reports_no_decoder(self):
+        with mock.patch.object(
+            formats.subprocess, "run", return_value=subprocess.CompletedProcess([], 1)
+        ):
+            self.assertFalse(formats.decodes("AVIF"))
+
+    def test_a_listing_without_the_codec_reports_no_decoder(self):
+        listing = subprocess.CompletedProcess([], 0)
+        listing.stdout = b" V....D fake-mpeg4            fake (codec mpeg4)\n"
+        with mock.patch.object(formats.subprocess, "run", return_value=listing):
+            self.assertFalse(formats.decodes("AVIF"))
+            self.assertFalse(formats.decodes("HEIC"))
+
+    def test_an_absent_ffmpeg_is_logged_and_not_a_rescue(self):
+        with mock.patch.object(formats.shutil, "which", return_value=None):
+            with self.assertLogs("partyline.media_formats", level="INFO") as seen:
+                self.assertIsNone(formats._ffmpeg_png(b"junk", "AVIF"))
+        self.assertIn("not on PATH", seen.output[0])
+
+    def test_an_unsupported_format_is_logged_and_not_a_rescue(self):
+        with mock.patch.object(formats, "decodes", return_value=False):
+            with self.assertLogs("partyline.media_formats", level="INFO") as seen:
+                self.assertIsNone(formats._ffmpeg_png(b"junk", "JXL"))
+        self.assertIn("no JXL decoder", seen.output[0])
+
+    def test_a_format_ffmpeg_has_no_business_with_is_not_probed(self):
+        self.assertFalse(formats.decodes("PNG"))
 
 
 @unittest.skipUnless(HAS_AVIF, "no AVIF fixture without a decoder")
