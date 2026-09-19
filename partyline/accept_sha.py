@@ -131,18 +131,17 @@ def accepted_note(db, conv_id: str) -> str:
 def handoff_rider(db, conv_id: str) -> str:
     """One line for a captain's wake: the recorded hand-off(s) and where work lives.
 
-    Present facts only. The line's own accepted SHA and worktree path lead; a
-    descendant appears once it has an accepted SHA. A captain waking into a
-    tree with no hand-offs sees nothing, so the rider never scrolls.
+    Present facts only, and only hand-offs: the line's part appears once a SHA
+    is accepted (with its worktree path), a descendant once it has an accepted
+    SHA. A tree with no accepted hand-offs sees nothing, so the rider never
+    scrolls and never dresses a mere worktree up as a hand-off.
     """
     parts = []
     conv = db.get_conversation(conv_id) or {}
-    own = []
     if conv.get("accepted_sha"):
-        own.append(f"accepted {conv['accepted_sha'][:12]}")
-    if conv.get("cwd"):
-        own.append(f"worktree {conv['cwd']}")
-    if own:
+        own = [f"accepted {conv['accepted_sha'][:12]}"]
+        if conv.get("cwd"):
+            own.append(f"worktree {conv['cwd']}")
         parts.append(" ".join(own))
     try:
         children = descendants(db, conv_id)

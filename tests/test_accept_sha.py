@@ -222,6 +222,11 @@ class AcceptShaTest(unittest.TestCase):
         self.assertIn("«loose» accepted aaaaaaaaaaaa", rider)
         self.assertNotIn("worktree", rider.split("«loose»")[1])  # no cwd: no path claimed
 
+    def test_a_worktree_alone_is_not_a_hand_off(self):
+        # the kid is placed but nothing is accepted: no rider, here or above
+        self.assertEqual(handoff_rider(self.db, self.kid["id"]), "")
+        self.assertEqual(handoff_rider(self.db, "root"), "")
+
     def test_the_rider_rides_a_captain_wake(self):
         from partyline.role_delivery import RoleState, bind_role_delivery
 
