@@ -52,6 +52,25 @@ def _current_branch(cwd: str) -> str | None:
     return done.stdout.strip() if done.returncode == 0 and done.stdout.strip() else None
 
 
+def _base_ref(cwd: str | None) -> str | None:
+    """A merge base for the SAFE test: the checkout's branch, or its commit.
+
+    Never the literal ``HEAD``: as a ``rev-list --not`` base inside a child
+    worktree it would resolve to that child's own tip and prove every commit
+    merged, so a detached checkout contributes its resolved commit instead.
+    """
+    if not cwd:
+        return None
+    branch = _current_branch(cwd)
+    if branch and branch != "HEAD":
+        return branch
+    try:
+        done = _git("rev-parse", "HEAD", cwd=cwd)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout.strip() or None
+
+
 def _default_branch(root: str) -> str | None:
     """The repository's real default branch, not whatever the main checkout
     happens to have live right now — a root left on a feature branch must
@@ -62,7 +81,7 @@ def _default_branch(root: str) -> str | None:
         done = None
     if done is not None and done.returncode == 0 and done.stdout.strip():
         return done.stdout.strip()
-    return _current_branch(root)
+    return _base_ref(root)
 
 
 def _is_clean(cwd: str) -> bool:
@@ -105,8 +124,7 @@ def worktree_state(db, conv: dict | None) -> dict | None:
         return None
     branch = _current_branch(cwd)
     parent_cwd = line_cwd(db, parent_id_of(conv)) if parent_id_of(conv) else None
-    bases = [b for b in (_current_branch(parent_cwd) if parent_cwd else None,
-                         _default_branch(root)) if b]
+    bases = [b for b in (_base_ref(parent_cwd), _default_branch(root)) if b]
     tips = [tip for tip in dict.fromkeys((branch, "HEAD")) if tip]
     merged = bool(bases) and bool(tips) and all(_in_history(cwd, t, bases) for t in tips)
     return {"clean": _is_clean(cwd), "merged": merged}
