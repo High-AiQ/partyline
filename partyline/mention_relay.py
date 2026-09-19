@@ -33,6 +33,7 @@ from __future__ import annotations
 from .contracts import MessageEvent, MessageResponse
 from .hierarchy import ancestors, descendants, lead_attachment, tree_live_name_conflict
 from .line_depth import live_workers
+from .message_visibility import is_reaction_notice
 
 LIVE = ("starting", "running")
 
@@ -146,7 +147,11 @@ async def post_private(
         source_conv_name=origin["name"] if origin else None,
         audience_attachment_id=audience,
     )
-    await runtime.broadcast(line_id, MessageEvent(message=MessageResponse.model_validate(copy)))
+    # A reaction notice is one process's mail: browsers already see the
+    # reaction itself on the message, so the fan-out skips the copy while the
+    # addressed process still receives it through forced routing below.
+    if not is_reaction_notice(copy):
+        await runtime.broadcast(line_id, MessageEvent(message=MessageResponse.model_validate(copy)))
     if route:
         await runtime.route_mentions(line_id, copy, force=True)
     return copy

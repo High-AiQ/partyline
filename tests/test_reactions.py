@@ -26,6 +26,14 @@ class Recorder:
         self.delivered.extend(messages)
 
 
+class FakeSocket:
+    def __init__(self):
+        self.sent = []
+
+    async def send_json(self, payload):
+        self.sent.append(payload)
+
+
 class ReactionRoutesTest(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -65,6 +73,17 @@ class ReactionRoutesTest(unittest.TestCase):
         token = auth_store.ensure_api_token(self.db, att["id"])
         return att, token
 
+    def _live_process(self, name="sol"):
+        attachment, _ = self._machine(name=name)
+        recorder = Recorder(self.db.get_attachment(attachment["id"]))
+        self.runtime.live[attachment["id"]] = recorder
+        return attachment, recorder
+
+    def _react(self, message, emoji="✅"):
+        return self.client.post(
+            f"/api/messages/{message['id']}/reactions", json={"emoji": emoji}
+        )
+
     def test_toggle_response_history_and_uniqueness(self):
         message = self.db.add_message("line", "sol", "agent", "found the answer")
         added = self.client.post(
@@ -97,11 +116,20 @@ class ReactionRoutesTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 403)
 
+    def _stored_lines(self):
+        """Every stored row, including copies the human transcript now hides."""
+        return [
+            dict(row)
+            for row in self.db._exec(
+                "SELECT * FROM messages WHERE conv_id='line' ORDER BY id"
+            ).fetchall()
+        ]
+
     def _system_lines(self):
         """Every stored line, with whether it is addressed to one process."""
         return [
             (m["body"], m["sender_type"], m["audience_attachment_id"])
-            for m in self.db.list_messages("line")
+            for m in self._stored_lines()
         ]
 
     def test_person_reaction_wakes_the_process_with_an_addressed_private_copy(self):
@@ -120,11 +148,65 @@ class ReactionRoutesTest(unittest.TestCase):
         )
         # The copy is stored addressed to that process alone: never a public
         # (unaddressed) system line in the room transcript.
-        wake = self.db.list_messages("line")[-1]
+        wake = self._stored_lines()[-1]
         self.assertEqual(wake["sender_type"], "system")
         self.assertEqual(wake["audience_attachment_id"], attachment["id"])
         for _body, sender_type, audience in self._system_lines():
             self.assertNotEqual((sender_type, audience), ("system", None))
+
+    def test_human_transcript_excludes_the_reaction_notice(self):
+        attachment, recorder = self._live_process()
+        message = self.db.add_message("line", "sol", "agent", "found the answer")
+        response = self._react(message)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(recorder.delivered), 1)  # the process got its copy
+        page = self.client.get("/api/conversations/line/messages").json()
+        self.assertEqual([m["body"] for m in page["messages"]], ["found the answer"])
+        # The reaction itself is still on the message for humans.
+        self.assertEqual(page["messages"][0]["reactions"][0]["emoji"], "✅")
+
+    def test_human_transcript_page_after_excludes_the_reaction_notice(self):
+        attachment, _ = self._live_process()
+        message = self.db.add_message("line", "sol", "agent", "found the answer")
+        self._react(message, "👀")
+        page = self.client.get(
+            f"/api/conversations/line/messages?after_id={message['id']}"
+        ).json()
+        self.assertEqual(page["messages"], [])
+
+    def test_process_digest_includes_the_reaction_notice(self):
+        attachment, _ = self._live_process()
+        message = self.db.add_message("line", "sol", "agent", "found the answer")
+        self._react(message)
+        pending = self.db.messages_after("line", message["id"], "sol", attachment["id"])
+        self.assertEqual(
+            [m["body"] for m in pending],
+            ["☺ greg reacted ✅ to your «found the answer»"],
+        )
+        other, _ = self._machine(name="kimi")
+        self.assertEqual(
+            self.db.messages_after("line", message["id"], "kimi", other["id"]), []
+        )
+
+    def test_browser_broadcast_excludes_the_reaction_notice(self):
+        attachment, _ = self._live_process()
+        message = self.db.add_message("line", "sol", "agent", "found the answer")
+        socket = FakeSocket()
+        self.runtime.sockets["line"] = {socket}
+        self._react(message)
+        kinds = [payload.get("type") for payload in socket.sent]
+        self.assertNotIn("message", kinds)
+        self.assertIn("reaction", kinds)
+
+    def test_private_copies_that_are_not_reaction_notices_stay_human_visible(self):
+        attachment, _ = self._machine()
+        copy = self.db.add_message("line", "system", "system", "☏ sol went quiet")
+        self.db._exec(
+            "UPDATE messages SET audience_attachment_id=? WHERE id=?",
+            (attachment["id"], copy["id"]),
+        )
+        page = self.client.get("/api/conversations/line/messages").json()
+        self.assertIn("☏ sol went quiet", [m["body"] for m in page["messages"]])
 
     def test_a_reaction_to_a_stopped_process_wakes_and_posts_nothing(self):
         attachment, _ = self._machine()
