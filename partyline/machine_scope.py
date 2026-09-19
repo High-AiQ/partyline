@@ -19,6 +19,7 @@ Capability = Literal[
     "assign",
     "attach",
     "close",
+    "accept",
     "create_child",
     "report",
     "notify",
@@ -34,6 +35,7 @@ ALL_CAPABILITIES: tuple[Capability, ...] = (
     "assign",
     "attach",
     "close",
+    "accept",
     "create_child",
     "report",
     "notify",
@@ -96,6 +98,13 @@ def allows(db: Db, principal: Principal, conv_id: str, capability: Capability) -
         # a line outside its tree: `deny_unless` and the route's situational
         # checks (no live processes, goal cleared, worktree SAFE) gate the rest.
         return conv_id != home and _home_lead_tree(db, principal, conv_id)
+    if capability == "accept":
+        # Recording a hand-off: the parent's captain accepting a child's work,
+        # or the line's own captain marking hand-off. A captain higher up
+        # reviews the work again at its own scope; nobody accepts across two
+        # levels, and a captain cannot accept its parent's branch either.
+        parent = parent_id_of(conv)
+        return principal.is_lead and home in (conv_id, parent or "")
     if capability == "link_parent":
         return False
     if capability == "appoint_lead":

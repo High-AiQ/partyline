@@ -38,6 +38,7 @@ from .hierarchy_contracts import (
     ReportIn,
 )
 from . import checkout_health
+from .accept_sha import accepted_note
 from .line_worktree import describe, line_cwd, place_child
 from .machine_scope import capability_state, deny_staffed_split, deny_unless, is_human
 from .reports import (
@@ -74,11 +75,7 @@ def _live_manager(runtime, conv_id: str) -> dict | None:
 
 
 def _report_model(row: dict) -> dict:
-    return {
-        **row,
-        "notify": bool(row.get("notify")),
-        "revision": int(row.get("revision") or 1),
-    }
+    return {**row, "notify": bool(row.get("notify")), "revision": int(row.get("revision") or 1)}
 
 
 async def _post_identified(runtime, conv_id, principal, body: str):
@@ -140,8 +137,8 @@ def hierarchy_router(runtime) -> APIRouter:
         if live(att):
             # Everyone hears where the line stands before the captain plans from it.
             health = await asyncio.to_thread(checkout_health.inspect, line_cwd(db, conv_id))
-            if state := checkout_health.describe(health):
-                await runtime.post_message(conv_id, "system", "system", state)
+            if text := (checkout_health.describe(health) or "") + accepted_note(db, conv_id):
+                await runtime.post_message(conv_id, "system", "system", text)
             await post_private(
                 runtime, conv_id, "system", "system",
                 f"☏ @{att['name']} is now this line's captain — the captain pack rides this "

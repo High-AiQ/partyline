@@ -75,6 +75,7 @@ from .line_process_routes import detach_attachment, register_line_process_routes
 from .worktree_lifecycle import sweep_orphaned_worktrees
 from .message_routes import message_router
 from .reaction_routes import reaction_router
+from .accept_sha import register_accept_route
 from .goal import register_goal_route
 from .presence import Presence
 from .media import MediaStore, media_root
@@ -154,6 +155,7 @@ user_sockets = UserSocketRegistry()
 install_auth_guard(app, runtime.db)
 install_static_cache(app)
 register_terminal_route(app, runtime)
+register_accept_route(app, runtime)
 register_compact_route(app, runtime, presence)
 register_line_process_routes(app, runtime)
 register_goal_route(app, runtime)
