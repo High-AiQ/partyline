@@ -3,9 +3,10 @@
 A worktree a line was placed in is not removed unconditionally the way purge
 removes it — archive and a captain's own retirement both need to know
 whether removing it would lose real work first. SAFE means the working tree
-is clean and every commit on the line's own branch is reachable from the
-parent line's branch or the repository's default branch: nothing sits only
-in the worktree about to disappear. Anything git cannot verify reads as
+is clean and every commit reachable from the worktree's HEAD — its branch,
+or a detached tip that lives on no branch — is reachable from the parent
+line's branch or the repository's default branch: nothing sits only in the
+worktree about to disappear. Anything git cannot verify reads as
 unsafe, never as SAFE by default — a repository that a git command cannot
 inspect is not evidence that nothing would be lost.
 """
@@ -72,15 +73,30 @@ def _is_clean(cwd: str) -> bool:
     return done.returncode == 0 and not done.stdout.strip()
 
 
+def _in_history(cwd: str, tip: str, bases: list[str]) -> bool:
+    """True when every commit reachable from ``tip`` is reachable from ``bases``.
+
+    Run in the worktree, not the main repository: ``HEAD`` there means the
+    worktree's own checkout, so a detached tip's commits are counted instead
+    of resolving to whatever the main checkout happens to have live.
+    """
+    try:
+        done = _git("rev-list", tip, "--not", *bases, cwd=cwd)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0 and not done.stdout.strip()
+
+
 def worktree_state(db, conv: dict | None) -> dict | None:
     """The line's own worktree as ``{"clean": bool, "merged": bool}``.
 
     ``None`` when the line has no worktree of its own (a shared or inherited
     directory has nothing to keep). ``merged`` is False whenever git cannot
-    prove every commit on the branch is reachable from the parent line's
-    branch or the repository default — an unverifiable state never reads as
-    merged, exactly as the SAFE test never reads an uninspectable repository
-    as safe.
+    prove every commit reachable from the worktree's HEAD — its branch, or a
+    detached tip that lives on no branch — is reachable from the parent
+    line's branch or the repository default. An unverifiable state never
+    reads as merged, exactly as the SAFE test never reads an uninspectable
+    repository as safe.
     """
     conv = conv or {}
     cwd = conv.get("cwd") or ""
@@ -91,13 +107,8 @@ def worktree_state(db, conv: dict | None) -> dict | None:
     parent_cwd = line_cwd(db, parent_id_of(conv)) if parent_id_of(conv) else None
     bases = [b for b in (_current_branch(parent_cwd) if parent_cwd else None,
                          _default_branch(root)) if b]
-    merged = False
-    if branch and bases:
-        try:
-            done = _git("rev-list", branch, "--not", *bases, cwd=root)
-        except (OSError, subprocess.SubprocessError):
-            done = None
-        merged = done is not None and done.returncode == 0 and not done.stdout.strip()
+    tips = [tip for tip in dict.fromkeys((branch, "HEAD")) if tip]
+    merged = bool(bases) and bool(tips) and all(_in_history(cwd, t, bases) for t in tips)
     return {"clean": _is_clean(cwd), "merged": merged}
 
 
