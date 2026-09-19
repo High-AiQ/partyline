@@ -34,6 +34,8 @@ PROCEDURE = (
     "string once the person has the result. Ask before anything on the ask-first list.\n"
     "2. {staffing}\n"
     "3. **Assign to one process per message**, with the acceptance criterion in the message. "
+    "Post assignments from your own credential: a message sent through a worker's token "
+    "@mentioning that same worker wakes nobody and is refused. "
     "A manager's @mention crosses lines and lands on that process's line as a private copy "
     "tagged `via «your line»`; name anyone else without the @, because every @ rings.\n"
     "4. **Wait for the return.** Your cue is a manager's @mention or a notice like "

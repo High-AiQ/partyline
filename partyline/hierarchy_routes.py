@@ -10,11 +10,11 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from .auth_guard import request_principal
 from .contracts import (
     ConversationResponse,
-    ConversationsChangedEvent,
-    MessageEvent,
     MessageResponse,
+    ConversationsChangedEvent,
 )
 from .mention_relay import live_manager, post_private, ring_workers
+from .message_routing import post_identified
 from .hierarchy import (
     HierarchyError,
     child_ids,
@@ -23,7 +23,6 @@ from .hierarchy import (
     parent_id_of,
     set_lead,
     set_parent,
-    stamp_source,
 )
 from .hierarchy_contracts import (
     AckIn,
@@ -58,21 +57,6 @@ def _http(exc: HierarchyError | ReportError) -> HTTPException:
 
 def _report_model(row: dict) -> dict:
     return {**row, "notify": bool(row.get("notify")), "revision": int(row.get("revision") or 1)}
-
-
-async def _post_identified(runtime, conv_id, principal, body: str):
-    kind = "agent" if principal.kind == "machine" else "human"
-    stored = runtime.db.add_message(conv_id, principal.name, kind, body)
-    stored = {**stored, **stamp_source(runtime.db, stored["id"], principal)}
-    if kind == "agent" and (returns := getattr(runtime, "returns", None)) is not None:
-        # An API post is the process speaking: a hand-off here settles its turn
-        # exactly as one said through its own pty would.
-        returns.note_spoke(principal.attachment_id, body)
-    await runtime.broadcast(
-        conv_id, MessageEvent(message=MessageResponse.model_validate(stored))
-    )
-    await runtime.route_mentions(conv_id, stored)
-    return stored
 
 
 def hierarchy_router(runtime) -> APIRouter:
@@ -253,7 +237,7 @@ def hierarchy_router(runtime) -> APIRouter:
                 row = release_wake_claim(db, row["id"], claim)
             else:
                 try:
-                    await _post_identified(
+                    await post_identified(
                         runtime,
                         parent,
                         principal,
@@ -291,6 +275,6 @@ def hierarchy_router(runtime) -> APIRouter:
             "write" if principal.conv_id == conv_id or is_human(principal) else "assign"
         )
         deny_unless(db, principal, conv_id, capability)
-        return await _post_identified(runtime, conv_id, principal, body.body)
+        return await post_identified(runtime, conv_id, principal, body.body)
 
     return router
