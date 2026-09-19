@@ -21,11 +21,18 @@ def staffing_report(db, conv_id: str) -> dict:
         for preset in presets
     ]
     processes = []
+    lines = []
     matched_any = False
     for line_id in [conv_id, *descendants(db, conv_id)]:
         conv = db.get_conversation(line_id)
         if conv is None:
             continue
+        if conv.get("accepted_sha"):
+            lines.append({
+                "id": line_id,
+                "name": conv["name"],
+                "accepted_sha": conv["accepted_sha"],
+            })
         for att in db.list_attachments(line_id):
             if att["status"] not in LIVE:
                 continue
@@ -45,7 +52,12 @@ def staffing_report(db, conv_id: str) -> dict:
                 },
                 "traits": None if matched is None else coerce_traits(matched),
             })
-    return {"presets_in_use": matched_any, "presets": catalog, "processes": processes}
+    return {
+        "presets_in_use": matched_any,
+        "presets": catalog,
+        "processes": processes,
+        "lines": lines,
+    }
 
 
 def staffing_line(db, conv_id: str) -> str:

@@ -51,12 +51,6 @@ class AdapterImportIn(BaseModel):
     ref: str | None = None
 
 
-class VersionResponse(BaseModel):
-    version: str
-    build: str
-    instance_name: str | None = None
-
-
 class RunningProcessResponse(BaseModel):
     name: str
     adapter: str

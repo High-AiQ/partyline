@@ -6,6 +6,7 @@ from .contracts import ConversationsChangedEvent
 from .hierarchy import ancestors, child_ids
 from .machine_scope import deny_purge_if_parent_refs
 from .reports import purge_conversation as purge_reports
+from .review_worktrees import prune_review_worktrees
 from .worktree_lifecycle import remove_for_line
 
 
@@ -16,6 +17,7 @@ async def execute_purge(runtime, media, db, conv: dict) -> None:
     media.delete_conversation(conv_id)
     purge_reports(db, conv_id)
     remove_for_line(conv)
+    prune_review_worktrees(db, conv_id)
     db.delete_conversation(conv_id)
     runtime.sockets.pop(conv_id, None)
 

@@ -2,12 +2,83 @@
 
 import logging
 
+from fastapi import HTTPException
+
+from .contracts import MessageEvent, MessageResponse
+from .hierarchy import stamp_source, tree_conversation_ids
 from .interrupts import interrupt_for
 from .mention_relay import relay_mentions
-from .mentions import interrupt_names, line_addressed, mentioned_names
+from .mentions import (
+    addressees,
+    interrupt_names,
+    line_addressed,
+    mentioned_names,
+)
 from .solo_line import implied_addressee
 
 logger = logging.getLogger(__name__)
+
+
+def self_mention_reason(db, principal, conv_id: str, body: str) -> str | None:
+    """Why a machine's message is refused as a self-mention wake, or None.
+
+    A captain that posts an assignment through a worker's credential and
+    @mentions that same worker rings itself: the only mention resolves to the
+    sender, nobody is woken, and the sender reads its own assignment as if it
+    had arrived.     Refused at the API so the mistake shows at once — either
+    every resolvable mention is the sender, or the message opens by
+    addressing its own credential and nothing else. ``@all`` rings the room
+    and a human handle means a person reads it, so neither can be a silent
+    self-wake.
+    """
+    if getattr(principal, "kind", "") != "machine" or not principal.attachment_id:
+        return None
+    if "all" in mentioned_names(body):
+        return None
+    att = db.get_attachment(principal.attachment_id)
+    if att is None:
+        return None
+    own = att["name"].lower()
+    names = mentioned_names(body) | line_addressed(body)
+    names.discard("all")
+    if own not in names:
+        return None
+    handles: set[str] = set()
+    for line_id in tree_conversation_ids(db, conv_id):
+        for row in db.list_attachments(line_id):
+            if row["status"] in ("starting", "running"):
+                handles.add(row["name"].lower())
+    human_handles = {row["handle"].lower() for row in db._exec("SELECT handle FROM users")}
+    if {name for name in names if name in handles or name in human_handles} == {own}:
+        return (
+            "self-mention wakes nobody: every @mention resolves to this message's own "
+            f"credential (@{att['name']}) — post assignments from your own credential"
+        )
+    for_self = {name.lower() for name in addressees(body)} & names
+    if own in for_self and for_self <= {own}:
+        return (
+            "self-mention wakes nobody: this message opens by addressing its own "
+            f"credential (@{att['name']}) — post assignments from your own credential"
+        )
+    return None
+
+
+async def post_identified(runtime, conv_id, principal, body: str) -> dict:
+    """A machine or person speaking through the API, mentions routed."""
+    if (reason := self_mention_reason(runtime.db, principal, conv_id, body)) is not None:
+        raise HTTPException(422, reason)
+    kind = "agent" if principal.kind == "machine" else "human"
+    stored = runtime.db.add_message(conv_id, principal.name, kind, body)
+    stored = {**stored, **stamp_source(runtime.db, stored["id"], principal)}
+    if kind == "agent" and (returns := getattr(runtime, "returns", None)) is not None:
+        # An API post is the process speaking: a hand-off here settles its turn
+        # exactly as one said through its own pty would.
+        returns.note_spoke(principal.attachment_id, body)
+    await runtime.broadcast(
+        conv_id, MessageEvent(message=MessageResponse.model_validate(stored))
+    )
+    await runtime.route_mentions(conv_id, stored)
+    return stored
 
 
 async def route_message(

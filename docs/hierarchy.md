@@ -94,10 +94,19 @@ and `max_depth`. People are never boxed by the cap.
 A child line is placed when it is born. If the parent line works inside a git
 repository, the child gets `<repo>/.partyline-worktrees/<slug>` on branch
 `line/<slug>` (kept out of `git status` through `.git/info/exclude`), and the
-line hears "☏ working directory: … a git worktree on branch …". Otherwise it
-inherits the parent's directory. A machine attaching a process to a line cannot
-choose another directory: the process works where the line works. A person may.
-Purging a line drops its worktree; the branch stays.
+line hears "☏ working directory: … a git worktree on branch …". A birth may
+also target another repository this machine has: `POST …/children` accepts an
+optional `repository` — an absolute path anywhere inside a git repository —
+and the child is placed under *that* repository's `.partyline-worktrees`,
+with the same capability checks and the same branch naming. This is for work
+that belongs to another project entirely (a partyline-improvement line while
+the parent captains a book project); the birth notice names the directory, so
+everyone can see the child does not live in the parent's checkout. An
+explicit `repository` is never git-initialised and never created: a relative
+path or a directory outside any repository is refused with 400. Otherwise it
+inherits the parent's directory. A machine attaching a process to a line
+cannot choose another directory: the process works where the line works. A
+person may. Purging a line drops its worktree; the branch stays.
 
 A parent line whose directory is not a repository gets one initialized (one empty root
 commit) before its first child is placed, so a project started in a blank directory still
@@ -106,18 +115,29 @@ process is readable by that process, and only that one, even though the file liv
 line it was posted to; a captain briefed with a document does not need it copied to disk.
 
 Archiving a line also removes its worktree, when it is **SAFE** to: the working tree is
-clean, and every commit on `line/<name>` is reachable from the parent line's branch or the
-repository's default branch — nothing sits only in the worktree about to disappear. When it
+clean, and every commit reachable from the worktree's HEAD — its branch `line/<name>`, or a
+detached tip that lives on no branch — is reachable from the parent line's branch or the
+repository's default branch; nothing sits only in the worktree about to disappear. When it
 is not SAFE the worktree stays, the branch always stays, and the archive response's
 `worktree_kept_reason` says why (`unmerged commits` or `uncommitted changes`); a person can
 see this in the delete dialog. Purge keeps removing a line's worktree unconditionally, as
 before. A captain may also retire a child line of its own tree with `DELETE
 /api/conversations/<child-id>` — never its own line — when that child has no live processes,
-its goal is cleared, and the SAFE test passes; anything else is a 409 with the reason. When
-you have accepted a child's branch and its captain is done, retire the child: its worktree
-goes with it. On startup the server sweeps `.partyline-worktrees` in every repository it
-knows about and removes any worktree whose line no longer exists in the database, unless it
-is dirty; a worktree belonging to a live or archived line is never touched.
+its goal is cleared, and the SAFE test passes.
+
+A refused retirement answers with **every** blocker at once instead of one per round trip:
+`409` body `{"detail": "…", "blockers": [{"code": "live_processes" | "goal_not_cleared" |
+"child_lines" | "unmerged_commits" | "uncommitted_changes", "message": "…"}]}`. A person is
+held only to child lines; a machine captain is held to all of them. The one explicit relief
+is `DELETE /api/conversations/<child-id>?discard=true`: it throws away a **merged** branch's
+uncommitted worktree so the line can retire, and it is refused outright when the branch is
+not merged — those commits exist only in the worktree and a discard must never destroy them.
+`include_children=true` still retires the whole subtree and supersedes the child-lines
+blocker. When you have accepted a child's branch and its captain is done, retire the child:
+its worktree goes with it. On startup the server sweeps `.partyline-worktrees` in every
+repository it knows about and removes any worktree whose line no longer exists in the
+database, unless it is dirty; a worktree belonging to a live or archived line is never
+touched.
 
 Work goes down, not sideways. Once a line has a child, a machine may no longer
 attach processes to that line: the root captain that could not staff a child
@@ -137,6 +157,14 @@ preset on the grandchild while the first sat idle.
 
 ## The checkout a line works in
 
+A line owns exactly one branch. Partyline creates the worktree and the branch
+`line/<slug>` when the line is born, and nothing else a worker creates there
+counts: the parent accepts the branch — its accepted SHA is recorded by
+`POST …/accept` — never a side branch or a detached tip a worker happened to
+make. An attachment placed outside the line's worktree (a person's choice;
+machines always work where the line works) hears a warning on the line that
+commits there land off the line's branch.
+
 A captain once planned a whole book from a checkout whose `main` was 102 commits
 behind `origin/main` and carried an old, uncommitted plan document; every child
 it spawned was cut from the same base. So the line now hears a `☏ checkout:`
@@ -147,6 +175,16 @@ checkout that is behind its upstream (409 says why); a person can. The
 per-message `(cwd git: …)` tag adds `N behind upstream` against the last fetch.
 Nothing in this path pulls, resets or stashes: the pack tells the captain to
 ask, and the person brings the checkout up to date.
+
+When the checkout is behind anyway and the next child cannot wait, the birth
+itself can be made safe: `POST /api/conversations/<id>/children` takes
+`"base":"upstream"`. Partyline resolves the repository's configured upstream
+default (`origin/HEAD`, else the current branch's upstream), fetches it, and
+branches the child from that ref — the child starts at what the upstream
+already has, never in the past, and the birth notice names the ref it was cut
+from. The default stays `base:"checkout"`: the child branches from the parent
+checkout's HEAD, exactly as before. The stale-checkout refusal for machines
+applies only to the default; a person may cut from either base.
 
 ## The hand-off contract
 
@@ -175,6 +213,51 @@ because every `@` rings.
 A handle written as `name:` at the start of a line is an address too, when a
 live process on that line bears it: `worker: take the review` rings worker.
 Weak models drop the sigil constantly; a label that names nobody rings nobody.
+
+## The accepted SHA
+
+The hand-off is the SHA on the line's branch; nothing else counts. Work used to
+come back on detached refs and side branches while the line's own branch stayed
+at an early commit, and a parent relaying the SHA from a report once pushed the
+wrong commit. A captain of the parent — or the line's own captain, marking
+hand-off — records it with `POST /api/conversations/<id>/accept` and JSON
+`{"sha":"..."}`. The server verifies the SHA exists, verifies the line's branch
+can fast-forward to it, moves the branch, records it on the line, and announces
+it there. Accepting only fast-forwards: a branch that carries commits the SHA
+does not include, or a SHA from an unrelated history, is refused with 409
+rather than merged or rebased, so accepting never orphans a commit. Nothing is
+pushed; the captain still pushes after its own review, as before. The recorded
+SHA rides the ☏ checkout line a captain hears on appointment, the staffing
+board (`GET /api/conversations/<id>/staffing`) returns a `lines` list naming
+each descendant line's `accepted_sha`, and every captain wake carries a
+`(hand-off: …)` digest rider — the line's accepted SHA and worktree path, plus
+each descendant that has an accepted SHA — so a captain planning from a wake
+sees the hand-off without asking. A tree with no hand-offs carries no rider.
+Anyone else who wants to record a
+hand-off gets 403 — a captain higher up reviews the work again at its own
+scope, so nobody accepts across two levels.
+
+## Review worktrees
+
+An adversarial review needs a checkout of the exact SHA, and sub-captains used
+to run `git worktree add /tmp/...` for it — around thirty times in one program,
+and nothing pruned them. A review worktree is partyline's instead: `POST
+/api/conversations/<id>/review-worktrees` with JSON `{"sha":"..."}` — creation
+writes into the repository, so it needs `write` on the line (a person, its
+captain, the parent's captain) — or the documented CLI form, `python -m
+scripts.review_worktree --database <db> create --conversation <id>
+--sha <sha>`. Either checks the SHA out detached at
+`<repo>/.review/<full sha>`, records it on the line, and announces it there.
+`GET .../review-worktrees` lists a line's recorded reviews. The records drive
+the cleanup: every review worktree of a line is pruned when the line is
+retired, archived, or purged, and the accepted SHA's review goes when that SHA
+is accepted (reviews of other SHAs stay until the line retires — they may
+still be mid-review), so a finished
+review never lingers. At startup the sweep also drops `.review` directories
+whose line is gone or that no record claims — only full-SHA directories, since
+partyline owns the directory but nothing else in a repository's `.review`.
+Review checkouts are disposable by contract: pruning is forced, and the SHAs
+themselves stay in the repository, so no reviewed work is ever lost.
 
 ## The goal
 

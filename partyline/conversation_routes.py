@@ -7,6 +7,7 @@ import os
 import uuid
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from .adapter_update import apply_update, requested_update_argv
 from .attachment_commands import validated_attachment_command
@@ -14,17 +15,18 @@ from .auth_guard import request_principal
 from .auth_store import handle_taken
 from .hierarchy import tree_live_name_conflict
 from .line_subtree import archive_line, archive_subtree
-from .line_worktree import describe, ensure_placed, line_cwd
-from .worktree_lifecycle import archive_worktree_if_safe, worktree_removal_reason
-from .conversation_contracts import PurgeAllResponse
+from .line_worktree import describe, ensure_placed, line_cwd, outside_worktree_note
+from .retirement import archive_blockers
+from .worktree_lifecycle import archive_worktree_if_safe, discard_worktree
+from .review_worktrees import prune_review_worktrees
+from .conversation_contracts import BlockedArchiveResponse, PurgeAllResponse
 from .conversation_purge import execute_purge, execute_purge_all_archived
 from .contracts import (
     ArchiveResponse, AttachIn, AttachmentResponse, ConvIn, ConversationEvent,
     ConversationResponse, ConversationsChangedEvent, PurgeResponse, RenameIn, TopicIn,
 )
 from .machine_scope import (
-    deny_archive_if_children, deny_sideways_attach,
-    deny_unless, is_human, visible_conversation_ids,
+    deny_sideways_attach, deny_unless, is_human, visible_conversation_ids,
 )
 from .message_contracts import ConversationDetailResponse
 from .message_routes import conversation_detail_response
@@ -34,22 +36,6 @@ from .runtime import NAME_RE, RESERVED_NAMES
 def _server():
     from . import server
     return server
-
-
-def _captain_archive_block(db, conv_id: str) -> str | None:
-    """Why a captain may not retire this descendant line yet, or None.
-
-    `allows()` already limits this to a strict descendant of the captain's
-    home line; these are the situational checks a person is never held to.
-    """
-    live = [att for att in db.list_attachments(conv_id) if att["status"] in ("starting", "running")]
-    if live:
-        names = ", ".join("@" + att["name"] for att in live)
-        return f"this line still has live processes ({names}); stop them first"
-    conv = db.get_conversation(conv_id) or {}
-    if conv.get("goal"):
-        return "this line's goal is not cleared; clear it before retiring the line"
-    return worktree_removal_reason(db, conv)
 
 
 def unique_handle(db, conv_id: str, name: str) -> str:
@@ -144,9 +130,13 @@ def register_conversation_routes(
             raise HTTPException(403, "only a human can purge all archived lines")
         return await execute_purge_all_archived(s.runtime, s.media, s.runtime.db)
 
-    @app.delete("/api/conversations/{conv_id}", response_model=ArchiveResponse)
+    @app.delete(
+        "/api/conversations/{conv_id}",
+        response_model=ArchiveResponse,
+        responses={409: {"model": BlockedArchiveResponse}},
+    )
     async def archive_conversation(
-        request: Request, conv_id: str, include_children: bool = False
+        request: Request, conv_id: str, include_children: bool = False, discard: bool = False
     ):
         runtime = _server().runtime
         db = runtime.db
@@ -155,17 +145,32 @@ def register_conversation_routes(
         conv = db.get_conversation(conv_id)
         if conv["archived_at"]:
             raise HTTPException(409, "line is already archived")
-        if not is_human(principal):
-            if reason := await asyncio.to_thread(_captain_archive_block, db, conv_id):
-                raise HTTPException(409, reason)
+        # Every blocker in one answer, so a captain fixes them in one pass
+        # instead of learning the next one on each round trip.
+        blockers = await asyncio.to_thread(
+            archive_blockers, db, conv_id,
+            include_children=include_children, discard=discard,
+            strict=not is_human(principal),
+        )
+        if blockers:
+            summary = "; ".join(blocker["message"] for blocker in blockers)
+            return JSONResponse(
+                status_code=409, content={"detail": summary, "blockers": blockers}
+            )
         if include_children:
             stopped, archived = await archive_subtree(runtime, conv_id)
         else:
-            deny_archive_if_children(db, conv_id)
             stopped, archived = await archive_line(runtime, conv_id), [conv_id]
         removed, kept_reason = False, None
         for line_id in archived:
-            line_removed, reason = await asyncio.to_thread(archive_worktree_if_safe, db, line_id)
+            if discard and line_id == conv_id:
+                # The explicit discard: a merged branch's dirty worktree goes.
+                line_removed = await asyncio.to_thread(discard_worktree, db, line_id)
+                reason = None
+            else:
+                line_removed, reason = await asyncio.to_thread(
+                    archive_worktree_if_safe, db, line_id)
+            await asyncio.to_thread(prune_review_worktrees, db, line_id)
             if line_id == conv_id:
                 removed, kept_reason = line_removed, reason
         await runtime.broadcast_all(ConversationsChangedEvent())
@@ -242,6 +247,8 @@ def register_conversation_routes(
             chosen or line_cwd(db, conv_id) or os.getcwd()))
         if not os.path.isdir(cwd):
             raise HTTPException(400, f"cwd does not exist: {cwd}")
+        if warning := outside_worktree_note(db, conv_id, cwd):
+            await runtime.post_message(conv_id, "system", "system", warning)
         att_id = str(uuid.uuid4())
         runtime_owner = str(uuid.uuid4())
         att = db.add_attachment(

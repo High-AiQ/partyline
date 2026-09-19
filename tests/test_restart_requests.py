@@ -7,7 +7,7 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from partyline import auth_store, auth_tokens
+from partyline import auth_store, auth_tokens, deployment
 from partyline.auth_guard import install_auth_guard
 from partyline.db import Db
 from partyline.restart_requests import register_restart_request_routes, service_unit
@@ -40,6 +40,10 @@ class RestartRequestTest(unittest.TestCase):
             auth_tokens.signing_secret(self.db), user["id"])}
         self.captain = {"Authorization": "Bearer " + auth_store.ensure_api_token(self.db, "cap")}
         self.worker = {"Authorization": "Bearer " + auth_store.ensure_api_token(self.db, "wrk")}
+        # These tests exercise the filing flow, not the deployment guard: the
+        # running checkout (this worktree) has not moved since import, which
+        # would otherwise refuse every request here with nothing-to-deploy.
+        self.enterContext(patch.object(deployment, "_STARTUP", (None, None)))
 
     def file(self, headers, reason="1.19.1 is merged and pulled"):
         return self.client.post("/api/conversations/line/restart-request",

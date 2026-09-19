@@ -7,7 +7,8 @@ request that a person approves, not through a manual `git pull` + Ctrl-C or an u
 | DO | DO NOT |
 | --- | --- |
 | Merge, pull the deployment checkout, and `uv sync --locked` before requesting a restart | Request a restart to "pick up" a commit the deployed checkout does not have |
-| File a restart-request with a clear reason and wait for a person to approve it | Restart the service by any path other than the approved request |
+| Read `checkout_path` and `git_head` from `/api/version` to know which checkout the service serves | Assume the checkout you pulled is the one the service runs from |
+| File a restart request with a clear reason and wait for a person to approve it | Restart the service by any path other than the approved request |
 | Trust the automatic mid-turn mark and private continue notice to resume interrupted work | Delay approval waiting for every participant to go idle first |
 | Prove recovery afterward: identity, continuation receipts, live attachment state | Report success without checking `/api/running` |
 | Find the pid that owns the port and kill that pid | Ever kill by matching the word partyline across every process's command line — it matches the room you are standing in |
@@ -29,7 +30,12 @@ safety contract; the failure modes that shaped it are recorded in [lessons.md](l
 
    Filing requires the line's `assign` capability — a captain or a person, never any attached
    process for an arbitrary line. Only one request may be pending instance-wide; a second file
-   attempt is refused until the first is approved or declined.
+   attempt is refused until the first is approved or declined. What a restart would deploy is
+   not a guess: `/api/version` reports the served `checkout_path` and the `git_head` the
+   process started on, and a request whose checkout HEAD has not moved since startup is
+   refused as **nothing to deploy** — the single most confusing restart is the one that
+   restarts the same code. An intended no-code restart files with `"confirm_no_deploy": true`;
+   the filed reason then carries a loud warning the approving person sees.
 3. **A person decides.** Every open tab shows the pending request in `RestartApprovalDialog`,
    listing the reason and every currently live process fleet-wide. A person approves or declines
    it; a machine credential can never approve its own restart. There is no requirement to wait for
