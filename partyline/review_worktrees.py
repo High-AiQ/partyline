@@ -44,6 +44,17 @@ def _repo_of(db, conv_id: str) -> str:
     return root
 
 
+def _registered(root: str, path: str) -> bool:
+    """The path is a worktree git actually knows about in this repository."""
+    done = _git("worktree", "list", "--porcelain", cwd=root)
+    return done.returncode == 0 and f"worktree {path}\n" in done.stdout
+
+
+def _pinned_at(root: str, path: str, full: str) -> bool:
+    """The registered worktree at path is checked out at exactly the requested commit."""
+    return _registered(root, path) and rev(path, "rev-parse", "HEAD") == full
+
+
 def create_review_worktree(db, conv_id: str, sha: str) -> dict:
     """Check a SHA out at ``<repo>/.review/<sha>`` and record it on the line.
 
@@ -64,11 +75,22 @@ def create_review_worktree(db, conv_id: str, sha: str) -> dict:
     existing = db._exec(
         "SELECT sha, created_at FROM review_worktrees WHERE path=?", (path,)
     ).fetchone()
-    if existing and os.path.isdir(path):
+    if existing and os.path.isdir(path) and _pinned_at(root, path, full):
         return {"conv_id": conv_id, "sha": existing["sha"],
                 "path": path, "created_at": existing["created_at"]}
     os.makedirs(os.path.join(root, REVIEW_DIR), exist_ok=True)
     _exclude(root, REVIEW_DIR)
+    if os.path.isdir(path) and not _registered(root, path):
+        # A directory git does not know is not a review checkout — it may be
+        # a crashed or hand-made tree, and adopting it would seat a reviewer
+        # somewhere the exact SHA is not checked out. Under .review it is
+        # partyline's: replace it, never adopt it.
+        shutil.rmtree(path, ignore_errors=True)
+    elif os.path.isdir(path) and not _pinned_at(root, path, full):
+        if not remove_review_path(path):
+            raise ReviewError(
+                409, f"a stale review checkout occupies {path} and git will not release it"
+            )
     if not os.path.isdir(path):
         _git("worktree", "prune", cwd=root)  # a hand-deleted checkout leaves a stale registration
         done = _git("worktree", "add", "--detach", path, full, cwd=root)
@@ -80,7 +102,8 @@ def create_review_worktree(db, conv_id: str, sha: str) -> dict:
     created_at = time.time()
     db._exec(
         "INSERT INTO review_worktrees(conv_id,sha,path,created_at) VALUES(?,?,?,?) "
-        "ON CONFLICT(path) DO UPDATE SET conv_id=excluded.conv_id, sha=excluded.sha",
+        "ON CONFLICT(path) DO UPDATE SET conv_id=excluded.conv_id, sha=excluded.sha, "
+        "created_at=excluded.created_at",
         (conv_id, full, path, created_at),
     )
     return {"conv_id": conv_id, "sha": full, "path": path, "created_at": created_at}

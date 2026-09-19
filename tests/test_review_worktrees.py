@@ -279,6 +279,38 @@ class ReviewWorktreesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 409, response.text)
         self.assertIn("cannot create the review worktree", response.json()["detail"])
 
+    def test_create_replaces_an_unregistered_directory_instead_of_adopting_it(self):
+        sha = self.commit_detached("work under review")
+        fake = self.review_dir(sha)
+        os.makedirs(fake)
+        with open(os.path.join(fake, "junk.txt"), "w") as fh:
+            fh.write("not a checkout")
+        response = self.create(sha)
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertFalse(os.path.exists(os.path.join(fake, "junk.txt")))
+        self.assertEqual(_git("rev-parse", "HEAD", cwd=fake).stdout.strip(), sha)
+        self.assertIn(f"worktree {fake}",
+                      _git("worktree", "list", "--porcelain", cwd=self.repo).stdout)
+
+    def test_create_recreates_a_registered_checkout_left_at_the_wrong_commit(self):
+        first = self.commit_detached("first candidate")
+        made = create_review_worktree(self.db, self.kid["id"], first)
+        second = self.commit_detached("a later commit")
+        _git("checkout", "-q", "--detach", second, cwd=made["path"])  # drifted off the pin
+        response = self.create(first)
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertEqual(_git("rev-parse", "HEAD", cwd=made["path"]).stdout.strip(), first)
+
+    def test_a_stale_checkout_git_will_not_release_is_a_409(self):
+        first = self.commit_detached("first candidate")
+        made = create_review_worktree(self.db, self.kid["id"], first)
+        second = self.commit_detached("a later commit")
+        _git("checkout", "-q", "--detach", second, cwd=made["path"])
+        with patch.object(review_worktrees_module, "remove_review_path", return_value=False):
+            response = self.create(first)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("occupies", response.json()["detail"])
+
     # -- the documented CLI form --------------------------------------------------
 
     def _cli(self, *args):
