@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 
@@ -84,7 +86,10 @@ def media_router(runtime, store: MediaStore) -> APIRouter:
         deny_unless(runtime.db, principal, conv_id, "write")
         who = principal.name
         try:
-            prepared = prepared_files(await _uploads(file))
+            # Preparation decodes bytes and may fall back to an ffmpeg
+            # subprocess with a minute-long timeout — none of that may run
+            # on the event loop every wake and WebSocket depends on.
+            prepared = await asyncio.to_thread(prepared_files, await _uploads(file))
             title, description = validated_metadata(title, description)
         except MediaError as exc:
             raise _http(exc) from exc

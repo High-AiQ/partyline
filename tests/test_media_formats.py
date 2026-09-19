@@ -126,6 +126,27 @@ class OtherFormatTranscodeTest(unittest.TestCase):
         self.assertIsNotNone(prepared.slim)
 
 
+class FfmpegArgvTest(unittest.TestCase):
+    def test_the_decoder_is_capped_at_the_pixel_ceiling(self):
+        captured = {}
+
+        def fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            Path(argv[-1]).write_bytes(b"png")
+            return subprocess.CompletedProcess(argv, 0)
+
+        with mock.patch.object(
+            formats.shutil, "which", return_value="/usr/bin/ffmpeg"
+        ), mock.patch.object(formats.subprocess, "run", side_effect=fake_run):
+            produced = formats._ffmpeg_png(b"junk")
+        self.assertEqual(produced, b"png")
+        self.assertIn("-max_pixels", captured["argv"])
+        self.assertEqual(
+            captured["argv"][captured["argv"].index("-max_pixels") + 1],
+            str(formats.MAX_PIXELS),
+        )
+
+
 @unittest.skipUnless(HAS_AVIF, "no AVIF fixture without a decoder")
 class FfmpegFallbackTest(unittest.TestCase):
     def test_pillow_without_a_decoder_falls_back_to_ffmpeg(self):
