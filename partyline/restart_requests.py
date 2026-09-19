@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 
 from .auth_guard import request_principal
 from .contracts import RestartPlanRequest, RestartRequestEvent, ShutdownEvent
+from . import deployment
 from .machine_scope import deny_unless, is_human
 from .reattach import RestartPlanError, create_restart_plan
 
@@ -34,6 +35,10 @@ RESTART_DELAY_SECONDS = 2
 
 class RestartRequestIn(BaseModel):
     reason: str = Field(min_length=1, max_length=2000)
+    # A restart with nothing new to deploy is refused: it bounces every
+    # process for no change. This flag is the explicit override, and the
+    # filed reason carries a loud warning so the approving person sees it.
+    confirm_no_deploy: bool = False
 
 
 class RestartRequest(BaseModel):
@@ -97,9 +102,23 @@ def register_restart_request_routes(app: FastAPI, runtime, adapter_metadata, req
         deny_unless(runtime.db, principal, conv_id, "assign")  # the line's captain, or a person
         if runtime.restart_request is not None:
             raise HTTPException(409, "a restart request is already waiting for a person")
+        reason = body.reason.strip()
+        checkout, started = deployment.startup_path(), deployment.startup_head()
+        if checkout is not None and started is not None:
+            head = deployment.git_head(checkout)
+            if head is not None and head == started and not body.confirm_no_deploy:
+                raise HTTPException(
+                    409,
+                    f"nothing to deploy: the deployment checkout HEAD ({head[:12]}) is the "
+                    "build already running — merge and pull first, or file again with "
+                    "confirm_no_deploy:true if a restart with no code change is really wanted",
+                )
+            if head is not None and head == started:
+                reason = ("⚠ confirmed no code to deploy: the checkout matches the running "
+                          "build; this restart resumes processes and deploys nothing. " + reason)
         runtime.restart_request = RestartRequest(
             id=uuid.uuid4().hex[:12], conversation_id=conv_id, requester=principal.name,
-            reason=body.reason.strip(), created_at=time.time(),
+            reason=reason, created_at=time.time(),
         )
         await announce(conv_id, f"☏ @{principal.name} asks a person to restart partyline: "
                                 f"{runtime.restart_request.reason} — approve or decline from the banner")

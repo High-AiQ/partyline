@@ -83,7 +83,8 @@ ASK_FIRST = (
     "Dirty: ask too. A service "
     "restart is asked for, never planned: once the change is merged and pulled, POST "
     '{root}/restart-request with {{"reason":"..."}} — a person approves it in the UI and '
-    "every process is resumed with its context. Do not start a paid wave merely because "
+    "every process is resumed with its context; a request whose checkout has nothing new "
+    "to deploy is refused, so pull before asking. Do not start a paid wave merely because "
     "an endpoint is available."
 )
 

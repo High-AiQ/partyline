@@ -66,8 +66,9 @@ from .contracts import (
     ShutdownEvent,
     ShutdownRequest,
     ShutdownResponse,
-    VersionResponse,
 )
+from .handshake import VersionResponse
+from . import deployment
 from .db import Db
 from .frontend_build import current_frontend_build
 from .hook_routes import hook_url, hooks_router
@@ -197,7 +198,9 @@ app.mount("/assets", StaticFiles(directory=ASSETS_DIR), name="assets")
 @app.get("/api/version", response_model=VersionResponse)
 async def version():
     return {"version": __version__, "build": current_frontend_build(),
-            "instance_name": getattr(app.state, "instance_name", None)}
+            "instance_name": getattr(app.state, "instance_name", None),
+            "checkout_path": deployment.startup_path(),
+            "git_head": deployment.startup_head()}
 
 
 LOOPBACK = {"127.0.0.1", "::1", "localhost"}
