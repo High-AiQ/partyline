@@ -71,7 +71,7 @@ def create_review_worktree(db, conv_id: str, sha: str) -> dict:
     full = rev(root, "rev-parse", "--verify", "--quiet", f"{name}^{{commit}}")
     if full is None:
         raise ReviewError(400, f"no commit {name} in this repository")
-    path = os.path.join(root, REVIEW_DIR, full)
+    path = os.path.realpath(os.path.join(root, REVIEW_DIR, full))
     existing = db._exec(
         "SELECT sha, created_at FROM review_worktrees WHERE path=?", (path,)
     ).fetchone()

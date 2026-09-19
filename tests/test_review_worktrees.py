@@ -265,6 +265,24 @@ class ReviewWorktreesTest(unittest.TestCase):
             create_review_worktree(self.db, "missing", sha)
         self.assertEqual(raised.exception.status_code, 404)
 
+    def test_a_symlinked_repo_root_does_not_confuse_the_review_records(self):
+        sha = self.commit_detached("work under review")
+        link = os.path.join(self.directory.name, "repo-link")
+        os.symlink(self.repo, link)
+        self.db._exec(
+            "UPDATE conversations SET cwd=? WHERE id=?",
+            (os.path.join(link, WORKTREES_DIR, "kid"), self.kid["id"]),
+        )
+        response = self.create(sha)
+        self.assertEqual(response.status_code, 201, response.text)
+        recorded = response.json()["path"]
+        self.assertTrue(os.path.isdir(recorded))
+        self.assertIn(f"worktree {recorded}",
+                      _git("worktree", "list", "--porcelain", cwd=self.repo).stdout)
+        self.assertEqual(prune_review_worktrees(self.db, self.kid["id"]),
+                         {"removed": 1, "kept": 0})
+        self.assertFalse(os.path.isdir(recorded))
+
     def test_a_failed_checkout_is_a_409(self):
         sha = self.commit_detached("work under review")
         original = review_worktrees_module._git

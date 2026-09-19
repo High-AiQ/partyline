@@ -155,6 +155,8 @@ class ChildBaseTest(unittest.TestCase):
         self.assertEqual(made.status_code, 409, made.text)
         self.assertIn("could not be created", made.json()["detail"])
         self.assertEqual(self.client.get("/api/conversations/root/children").json(), [])
+        self.assertFalse(os.path.isdir(os.path.join(self.repo, ".partyline-worktrees")),
+                         "the failed placement left its directory behind")
         adopted = self.child("kid")  # default base keeps its behaviour (a person may cut stale)
         self.assertEqual(adopted.status_code, 201, adopted.text)
 

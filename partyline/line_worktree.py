@@ -125,12 +125,37 @@ def _exclude(root: str, name: str = WORKTREES_DIR) -> None:
     try:
         os.makedirs(info, exist_ok=True)
         exclude = os.path.join(info, "exclude")
-        existing = open(exclude).read() if os.path.exists(exclude) else ""
+        existing = ""
+        if os.path.exists(exclude):
+            with open(exclude) as fh:
+                existing = fh.read()
         if f"{name}/" not in existing:
             with open(exclude, "a") as fh:
                 fh.write(f"\n{name}/\n")
     except OSError:
         pass  # a bare or read-only .git: status noise is not worth failing for
+
+
+def _forget_worktrees_dir(root: str) -> None:
+    """Undo a failed placement's directory and status exclusion.
+
+    The directory only goes when empty — other lines' worktrees keep it and
+    keep the exclusion line with it.
+    """
+    try:
+        os.rmdir(os.path.join(root, WORKTREES_DIR))
+    except OSError:
+        return
+    exclude = os.path.join(root, ".git", "info", "exclude")
+    try:
+        if os.path.exists(exclude):
+            with open(exclude) as fh:
+                lines = [line for line in fh.read().splitlines()
+                         if line.strip() != f"{WORKTREES_DIR}/"]
+            with open(exclude, "w") as fh:
+                fh.write("\n".join(lines) + "\n")
+    except OSError:
+        pass
 
 
 def project_directory(path: str) -> bool:
@@ -217,6 +242,7 @@ def place_child(
                 # the child on the old tip would report a base that was never
                 # used, so the placement fails and the caller rolls the birth
                 # back — never a fresh worktree on stale history.
+                _forget_worktrees_dir(root)
                 placed = {"cwd": parent_cwd, "branch": None, "base": None}
                 return placed
         else:
