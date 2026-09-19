@@ -46,6 +46,10 @@ function copyButton(): HTMLButtonElement {
   return button;
 }
 
+function copyTip(): HTMLElement | null {
+  return document.getElementById(copyButton().getAttribute("aria-describedby") ?? "");
+}
+
 afterEach(() => {
   setClipboard(undefined);
   document.body.replaceChildren();
@@ -210,11 +214,11 @@ describe("copy control", () => {
         button.click();
         await vi.advanceTimersByTimeAsync(0);
         button.dispatchEvent(new MouseEvent("mouseenter"));
-        expect(document.querySelector(".app-tooltip")?.textContent).toBe("Copied");
+        expect(copyTip()?.textContent).toBe("Copied");
         await vi.advanceTimersByTimeAsync(1500);
         button.dispatchEvent(new MouseEvent("mouseleave"));
         button.dispatchEvent(new MouseEvent("mouseenter"));
-        expect(document.querySelector(".app-tooltip")?.textContent).toBe("copy message");
+        expect(copyTip()?.textContent).toBe("copy message");
       } finally {
         await unmount(message);
       }
