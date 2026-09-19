@@ -212,10 +212,17 @@ def place_child(
         _exclude(root)
         if base:
             done = _git("worktree", "add", "-b", branch, path, base, cwd=root)
+            if done.returncode != 0:
+                # The branch already exists (branches survive purge). Seating
+                # the child on the old tip would report a base that was never
+                # used, so the placement fails and the caller rolls the birth
+                # back — never a fresh worktree on stale history.
+                placed = {"cwd": parent_cwd, "branch": None, "base": None}
+                return placed
         else:
             done = _git("worktree", "add", "-b", branch, path, cwd=root)
-        if done.returncode != 0:  # the branch exists: put the worktree on it
-            done = _git("worktree", "add", path, branch, cwd=root)
+            if done.returncode != 0:  # the branch exists: put the worktree on it
+                done = _git("worktree", "add", path, branch, cwd=root)
         if done.returncode == 0:
             placed = {"cwd": path, "branch": branch, "base": base}
     if placed["cwd"]:

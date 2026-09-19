@@ -145,6 +145,19 @@ class ChildBaseTest(unittest.TestCase):
         self.assertEqual(made.status_code, 409, made.text)
         self.assertIn("no upstream to cut from", made.json()["detail"])
 
+    def test_a_stale_branch_never_poses_as_the_requested_base(self):
+        # Fable's B2: line/kid survived an earlier purge; the upstream base
+        # cannot be honoured on the existing branch, so the birth fails and
+        # rolls back instead of seating the child on the old tip.
+        self.advance_origin()
+        _git("branch", "line/kid", "main", cwd=self.repo)
+        made = self.child("kid", headers=self.captain, base="upstream")
+        self.assertEqual(made.status_code, 409, made.text)
+        self.assertIn("could not be created", made.json()["detail"])
+        self.assertEqual(self.client.get("/api/conversations/root/children").json(), [])
+        adopted = self.child("kid")  # default base keeps its behaviour (a person may cut stale)
+        self.assertEqual(adopted.status_code, 201, adopted.text)
+
     def test_an_unknown_base_value_is_rejected(self):
         made = self.child("kid", base="origin/HEAD")
         self.assertEqual(made.status_code, 422, made.text)
