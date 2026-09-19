@@ -157,6 +157,14 @@ preset on the grandchild while the first sat idle.
 
 ## The checkout a line works in
 
+A line owns exactly one branch. Partyline creates the worktree and the branch
+`line/<slug>` when the line is born, and nothing else a worker creates there
+counts: the parent accepts the branch — its accepted SHA is recorded by
+`POST …/accept` — never a side branch or a detached tip a worker happened to
+make. An attachment placed outside the line's worktree (a person's choice;
+machines always work where the line works) hears a warning on the line that
+commits there land off the line's branch.
+
 A captain once planned a whole book from a checkout whose `main` was 102 commits
 behind `origin/main` and carried an old, uncommitted plan document; every child
 it spawned was cut from the same base. So the line now hears a `☏ checkout:`
