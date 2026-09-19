@@ -10,11 +10,11 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from .auth_guard import request_principal
 from .contracts import (
     ConversationResponse,
-    ConversationsChangedEvent,
-    MessageEvent,
     MessageResponse,
+    ConversationsChangedEvent,
 )
-from .mention_relay import post_private, ring_workers
+from .mention_relay import live_manager, post_private, ring_workers
+from .message_routing import post_identified
 from .hierarchy import (
     HierarchyError,
     child_ids,
@@ -23,7 +23,6 @@ from .hierarchy import (
     parent_id_of,
     set_lead,
     set_parent,
-    stamp_source,
 )
 from .hierarchy_contracts import (
     AckIn,
@@ -38,7 +37,8 @@ from .hierarchy_contracts import (
     ReportIn,
 )
 from . import checkout_health
-from .line_worktree import describe, line_cwd, place_child
+from .accept_sha import accepted_note
+from .line_worktree import describe, line_cwd, place_child, placement_root
 from .machine_scope import capability_state, deny_staffed_split, deny_unless, is_human
 from .reports import (
     ReportError,
@@ -55,45 +55,8 @@ def _http(exc: HierarchyError | ReportError) -> HTTPException:
     return HTTPException(exc.status_code, exc.detail)
 
 
-def _live_manager(runtime, conv_id: str) -> dict | None:
-    """The parent's manager, only if a message could actually reach it.
-
-    The same three conditions `message_routing` uses, deliberately: status
-    exactly ``running``, a live adapter, and an activation that still matches.
-    A ``starting`` or superseded manager is not delivery — posting at one
-    would mark the report notified while nobody was woken, which is the
-    silence this whole path exists to avoid.
-    """
-    lead = lead_attachment(runtime.db, conv_id)
-    if lead is None or lead["status"] != "running":
-        return None
-    adapter = runtime.live.get(lead["id"])
-    if adapter is None or not runtime.activation_matches(adapter, lead):
-        return None
-    return lead
-
-
 def _report_model(row: dict) -> dict:
-    return {
-        **row,
-        "notify": bool(row.get("notify")),
-        "revision": int(row.get("revision") or 1),
-    }
-
-
-async def _post_identified(runtime, conv_id, principal, body: str):
-    kind = "agent" if principal.kind == "machine" else "human"
-    stored = runtime.db.add_message(conv_id, principal.name, kind, body)
-    stored = {**stored, **stamp_source(runtime.db, stored["id"], principal)}
-    if kind == "agent" and (returns := getattr(runtime, "returns", None)) is not None:
-        # An API post is the process speaking: a hand-off here settles its turn
-        # exactly as one said through its own pty would.
-        returns.note_spoke(principal.attachment_id, body)
-    await runtime.broadcast(
-        conv_id, MessageEvent(message=MessageResponse.model_validate(stored))
-    )
-    await runtime.route_mentions(conv_id, stored)
-    return stored
+    return {**row, "notify": bool(row.get("notify")), "revision": int(row.get("revision") or 1)}
 
 
 def hierarchy_router(runtime) -> APIRouter:
@@ -140,8 +103,8 @@ def hierarchy_router(runtime) -> APIRouter:
         if live(att):
             # Everyone hears where the line stands before the captain plans from it.
             health = await asyncio.to_thread(checkout_health.inspect, line_cwd(db, conv_id))
-            if state := checkout_health.describe(health):
-                await runtime.post_message(conv_id, "system", "system", state)
+            if text := (checkout_health.describe(health) or "") + accepted_note(db, conv_id):
+                await runtime.post_message(conv_id, "system", "system", text)
             await post_private(
                 runtime, conv_id, "system", "system",
                 f"☏ @{att['name']} is now this line's captain — the captain pack rides this "
@@ -170,21 +133,38 @@ def hierarchy_router(runtime) -> APIRouter:
         principal = request_principal(request)
         deny_staffed_split(db, principal, conv_id)  # the loud reason first
         deny_unless(db, principal, conv_id, "create_child")
-        # Cut from HEAD: a base behind its upstream starts the child in the past.
-        health = await asyncio.to_thread(checkout_health.inspect, line_cwd(db, conv_id))
-        if not is_human(principal) and (stale := checkout_health.stale_base_reason(health)):
-            raise HTTPException(409, stale)
+        cwd = line_cwd(db, conv_id)
+        target, target_error = await asyncio.to_thread(placement_root, body.repository)
+        if target_error:
+            raise HTTPException(400, target_error)
+        # The stale-base guard reads the parent's checkout, or the target's when placed there.
+        base_health = await asyncio.to_thread(
+            checkout_health.inspect, cwd if target is None else target)
+        base_ref, base_error = await asyncio.to_thread(
+            checkout_health.child_base_ref, target or cwd, body.base == "upstream",
+            is_human(principal), base_health)
+        if base_error:
+            raise HTTPException(409, base_error)
         name = body.name.strip() or "untitled"
         try:
             conv = create_child_conversation(db, conv_id, str(uuid.uuid4()), name)
         except HierarchyError as exc:
             raise _http(exc) from exc
-        placed = place_child(db, conv_id, conv["id"])
+        placed = place_child(db, conv_id, conv["id"], base=base_ref, root=target)
+        if (base_ref or target) and not placed.get("branch"):
+            # A failed placement must not silently inherit the parent checkout — not
+            # for an explicit upstream base, not for an explicit repository — so the
+            # line is rolled back and the caller is told instead of left seated there.
+            db.delete_conversation(conv["id"])
+            raise HTTPException(
+                409, f"the child worktree could not be created on {base_ref or target}")
         if where := describe(placed):
             await runtime.post_message(conv["id"], "system", "system", where)
-        if placed.get("branch") and (base := checkout_health.describe(health)):
-            base = base.replace("☏ checkout:", "☏ base checkout:", 1)
-            await runtime.post_message(conv["id"], "system", "system", base)
+        if placed.get("branch"):
+            # The base notice describes the checkout the child actually starts from.
+            if notice := checkout_health.describe(base_health):
+                notice = notice.replace("☏ checkout:", "☏ base checkout:", 1)
+                await runtime.post_message(conv["id"], "system", "system", notice)
         conv = db.get_conversation(conv["id"])
         goal, topic = body.goal.strip(), body.topic.strip()
         if goal or topic:
@@ -252,12 +232,12 @@ def hierarchy_router(runtime) -> APIRouter:
             # manager appointed, or if delivery raises, the row stays
             # undelivered so the next escalation from this child retries it
             # rather than coalescing into a silence nobody asked for.
-            lead = _live_manager(runtime, parent)
+            lead = live_manager(runtime, parent)
             if lead is None:
                 row = release_wake_claim(db, row["id"], claim)
             else:
                 try:
-                    await _post_identified(
+                    await post_identified(
                         runtime,
                         parent,
                         principal,
@@ -295,6 +275,6 @@ def hierarchy_router(runtime) -> APIRouter:
             "write" if principal.conv_id == conv_id or is_human(principal) else "assign"
         )
         deny_unless(db, principal, conv_id, capability)
-        return await _post_identified(runtime, conv_id, principal, body.body)
+        return await post_identified(runtime, conv_id, principal, body.body)
 
     return router

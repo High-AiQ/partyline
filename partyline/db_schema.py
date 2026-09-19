@@ -260,4 +260,17 @@ MIGRATIONS = [
         UNIQUE(message_id, reactor, emoji)
     )""",
     "CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id, emoji)",
+    # accepted_sha: the hand-off recorded with POST .../accept — the SHA the
+    # line's own branch was fast-forwarded to, and the only thing a parent
+    # should treat as the line's work.
+    "ALTER TABLE conversations ADD COLUMN accepted_sha TEXT",
+    # Review worktrees a line is having adversarially reviewed, keyed by path
+    # so two lines can never claim one directory. Records let accept, retire,
+    # and the startup sweep prune them; the SHAs themselves stay in the repo.
+    """CREATE TABLE IF NOT EXISTS review_worktrees(
+        path TEXT PRIMARY KEY,
+        conv_id TEXT NOT NULL,
+        sha TEXT NOT NULL,
+        created_at REAL NOT NULL
+    )""",
 ]

@@ -1,5 +1,7 @@
 """Wire contracts for line hierarchy, leads, reports, and machine messages."""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from .contracts import ConversationResponse
@@ -20,11 +22,42 @@ class ChildIn(BaseModel):
     context every process on the child line reads — where things are, the
     budget, the gates, the acceptance criterion. Both are optional so a
     scratch line still costs one field, but the manager pack asks for both.
+    ``base`` chooses the start point: the parent checkout's HEAD (default) or
+    the repository's fetched upstream default, the deliberate cut for a
+    checkout left behind.
     """
 
     name: str = Field(min_length=1, max_length=120)
     goal: str = Field(default="", max_length=3000)
     topic: str = Field(default="", max_length=3000)
+    base: Literal["checkout", "upstream"] = "checkout"
+    # Absolute path to a git repository this machine has: the child's worktree
+    # is placed under that repository's .partyline-worktrees instead of the
+    # parent's, for work that lives in another project. Optional; the default
+    # stays the parent line's own repository.
+    repository: str = Field(default="", max_length=4096)
+
+
+class AcceptIn(BaseModel):
+    sha: str = Field(min_length=4, max_length=64)
+
+
+class AcceptResponse(BaseModel):
+    conv_id: str
+    branch: str
+    sha: str  # the full SHA recorded on the line
+    moved: bool  # False when the branch already pointed at it
+
+
+class ReviewWorktreeIn(BaseModel):
+    sha: str = Field(min_length=4, max_length=64)
+
+
+class ReviewWorktreeOut(BaseModel):
+    conv_id: str
+    sha: str
+    path: str
+    created_at: float
 
 
 class ReportIn(BaseModel):

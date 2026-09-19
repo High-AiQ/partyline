@@ -3,9 +3,10 @@
 A worktree a line was placed in is not removed unconditionally the way purge
 removes it — archive and a captain's own retirement both need to know
 whether removing it would lose real work first. SAFE means the working tree
-is clean and every commit on the line's own branch is reachable from the
-parent line's branch or the repository's default branch: nothing sits only
-in the worktree about to disappear. Anything git cannot verify reads as
+is clean and every commit reachable from the worktree's HEAD — its branch,
+or a detached tip that lives on no branch — is reachable from the parent
+line's branch or the repository's default branch: nothing sits only in the
+worktree about to disappear. Anything git cannot verify reads as
 unsafe, never as SAFE by default — a repository that a git command cannot
 inspect is not evidence that nothing would be lost.
 """
@@ -18,6 +19,7 @@ import subprocess
 
 from .hierarchy import parent_id_of
 from .line_worktree import WORKTREES_DIR, _git, line_cwd, repo_root
+from .review_worktrees import sweep_review_worktrees
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,25 @@ def _current_branch(cwd: str) -> str | None:
     return done.stdout.strip() if done.returncode == 0 and done.stdout.strip() else None
 
 
+def _base_ref(cwd: str | None) -> str | None:
+    """A merge base for the SAFE test: the checkout's branch, or its commit.
+
+    Never the literal ``HEAD``: as a ``rev-list --not`` base inside a child
+    worktree it would resolve to that child's own tip and prove every commit
+    merged, so a detached checkout contributes its resolved commit instead.
+    """
+    if not cwd:
+        return None
+    branch = _current_branch(cwd)
+    if branch and branch != "HEAD":
+        return branch
+    try:
+        done = _git("rev-parse", "HEAD", cwd=cwd)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout.strip() or None
+
+
 def _default_branch(root: str) -> str | None:
     """The repository's real default branch, not whatever the main checkout
     happens to have live right now — a root left on a feature branch must
@@ -60,7 +81,7 @@ def _default_branch(root: str) -> str | None:
         done = None
     if done is not None and done.returncode == 0 and done.stdout.strip():
         return done.stdout.strip()
-    return _current_branch(root)
+    return _base_ref(root)
 
 
 def _is_clean(cwd: str) -> bool:
@@ -71,32 +92,73 @@ def _is_clean(cwd: str) -> bool:
     return done.returncode == 0 and not done.stdout.strip()
 
 
-def worktree_removal_reason(db, conv: dict | None) -> str | None:
-    """Why a line's worktree cannot be removed right now, or None when SAFE.
+def _in_history(cwd: str, tip: str, bases: list[str]) -> bool:
+    """True when every commit reachable from ``tip`` is reachable from ``bases``.
 
-    A line with no worktree of its own (a shared or inherited directory) has
-    nothing to keep, so it reads as SAFE too.
+    Run in the worktree, not the main repository: ``HEAD`` there means the
+    worktree's own checkout, so a detached tip's commits are counted instead
+    of resolving to whatever the main checkout happens to have live.
+    """
+    try:
+        done = _git("rev-list", tip, "--not", *bases, cwd=cwd)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0 and not done.stdout.strip()
+
+
+def worktree_state(db, conv: dict | None) -> dict | None:
+    """The line's own worktree as ``{"clean": bool, "merged": bool}``.
+
+    ``None`` when the line has no worktree of its own (a shared or inherited
+    directory has nothing to keep). ``merged`` is False whenever git cannot
+    prove every commit reachable from the worktree's HEAD — its branch, or a
+    detached tip that lives on no branch — is reachable from the parent
+    line's branch or the repository default. An unverifiable state never
+    reads as merged, exactly as the SAFE test never reads an uninspectable
+    repository as safe.
     """
     conv = conv or {}
     cwd = conv.get("cwd") or ""
     root = _worktree_root(cwd)
     if root is None:
         return None
-    if not _is_clean(cwd):
-        return "uncommitted changes"
     branch = _current_branch(cwd)
     parent_cwd = line_cwd(db, parent_id_of(conv)) if parent_id_of(conv) else None
-    bases = [b for b in (_current_branch(parent_cwd) if parent_cwd else None,
-                         _default_branch(root)) if b]
-    if not branch or not bases:
-        return "unmerged commits"  # cannot verify safety: never read as SAFE by default
-    try:
-        done = _git("rev-list", branch, "--not", *bases, cwd=root)
-    except (OSError, subprocess.SubprocessError):
-        return "unmerged commits"
-    if done.returncode != 0 or done.stdout.strip():
+    bases = [b for b in (_base_ref(parent_cwd), _default_branch(root)) if b]
+    tips = [tip for tip in dict.fromkeys((branch, "HEAD")) if tip]
+    merged = bool(bases) and bool(tips) and all(_in_history(cwd, t, bases) for t in tips)
+    return {"clean": _is_clean(cwd), "merged": merged}
+
+
+def worktree_removal_reason(db, conv: dict | None) -> str | None:
+    """Why a line's worktree cannot be removed right now, or None when SAFE.
+
+    A line with no worktree of its own (a shared or inherited directory) has
+    nothing to keep, so it reads as SAFE too.
+    """
+    state = worktree_state(db, conv)
+    if state is None:
+        return None
+    if not state["clean"]:
+        return "uncommitted changes"
+    if not state["merged"]:
         return "unmerged commits"
     return None
+
+
+def discard_worktree(db, conv_id: str) -> bool:
+    """Force-remove a merged line's worktree, discarding uncommitted changes.
+
+    The explicit ``discard`` path a person or captain passes when the branch
+    is already merged. It refuses an unmerged branch outright: those commits
+    exist only in the worktree, and a discard must never destroy them.
+    """
+    conv = db.get_conversation(conv_id) or {}
+    state = worktree_state(db, conv)
+    if state is None or not state["merged"]:
+        return False
+    remove_for_line(conv)
+    return not os.path.isdir(conv.get("cwd") or "")
 
 
 def archive_worktree_if_safe(db, conv_id: str) -> tuple[bool, str | None]:
@@ -142,6 +204,7 @@ def sweep_orphaned_worktrees(db) -> None:
     roots = {root for cwd in known_cwds if (root := repo_root(cwd))}
     for root in sorted(roots):
         _sweep_repo(root, known_cwds)
+        sweep_review_worktrees(db, root)
 
 
 def _sweep_repo(root: str, known_cwds: set[str]) -> None:

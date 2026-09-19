@@ -22,6 +22,7 @@ import tempfile
 from .hierarchy import lead_attachment, parent_id_of
 
 WORKTREES_DIR = ".partyline-worktrees"
+REVIEW_DIR = ".review"
 _GIT_TIMEOUT = 30
 
 
@@ -29,6 +30,33 @@ def _git(*args: str, cwd: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", *args], cwd=cwd, capture_output=True, text=True, timeout=_GIT_TIMEOUT
     )
+
+
+def rev(cwd: str, *args: str) -> str | None:
+    """Run git read-only and return its stripped stdout, or None on any failure."""
+    try:
+        done = _git(*args, cwd=cwd)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout.strip() if done.returncode == 0 and done.stdout.strip() else None
+
+
+def repo_and_worktree(cwd: str) -> tuple[str | None, str | None]:
+    """The repository root and the line's worktree, when that still exists.
+
+    A placed line is recognised by its worktree path, so a worktree removed
+    after an archive still names both sides; a line in a shared checkout is
+    its own worktree.
+    """
+    cwd = (cwd or "").rstrip("/")
+    if f"/{WORKTREES_DIR}/" in cwd:
+        root = cwd.split(f"/{WORKTREES_DIR}/", 1)[0]
+        if not os.path.isdir(root):
+            return None, None
+        return root, cwd if os.path.isdir(cwd) else None
+    if not cwd or not os.path.isdir(cwd):
+        return None, None
+    return repo_root(cwd), cwd
 
 
 def repo_root(path: str | None) -> str | None:
@@ -83,26 +111,43 @@ def slug(name: str) -> str:
     return text[:48] or "line"
 
 
-def _free_path(base: str) -> str:
-    path, n = base, 1
-    while os.path.exists(path):
-        n += 1
-        path = f"{base}-{n}"
-    return path
-
-
-def _exclude(root: str) -> None:
-    """Keep the worktree directory out of the repository's status output."""
+def _exclude(root: str, name: str = WORKTREES_DIR) -> None:
+    """Keep a partyline-managed directory out of the repository's status output."""
     info = os.path.join(root, ".git", "info")
     try:
         os.makedirs(info, exist_ok=True)
         exclude = os.path.join(info, "exclude")
-        existing = open(exclude).read() if os.path.exists(exclude) else ""
-        if f"{WORKTREES_DIR}/" not in existing:
+        existing = ""
+        if os.path.exists(exclude):
+            with open(exclude) as fh:
+                existing = fh.read()
+        if f"{name}/" not in existing:
             with open(exclude, "a") as fh:
-                fh.write(f"\n{WORKTREES_DIR}/\n")
+                fh.write(f"\n{name}/\n")
     except OSError:
         pass  # a bare or read-only .git: status noise is not worth failing for
+
+
+def _forget_worktrees_dir(root: str) -> None:
+    """Undo a failed placement's directory and status exclusion.
+
+    The directory only goes when empty — other lines' worktrees keep it and
+    keep the exclusion line with it.
+    """
+    try:
+        os.rmdir(os.path.join(root, WORKTREES_DIR))
+    except OSError:
+        return
+    exclude = os.path.join(root, ".git", "info", "exclude")
+    try:
+        if os.path.exists(exclude):
+            with open(exclude) as fh:
+                lines = [line for line in fh.read().splitlines()
+                         if line.strip() != f"{WORKTREES_DIR}/"]
+            with open(exclude, "w") as fh:
+                fh.write("\n".join(lines) + "\n")
+    except OSError:
+        pass
 
 
 def project_directory(path: str) -> bool:
@@ -137,29 +182,108 @@ def init_repo(path: str | None) -> str | None:
         return None
 
 
-def place_child(db, parent_id: str, child_id: str) -> dict:
+def placement_root(repository: str | None) -> tuple[str | None, str | None]:
+    """The repository root a child is placed into, and why it may not be.
+
+    An explicit ``repository`` — an absolute path anywhere inside a git
+    repository this machine has — sends the child to that repository's
+    ``.partyline-worktrees``; work that belongs to another project is placed
+    there instead of being born in whatever checkout the parent line happens
+    to sit in. The default — no ``repository`` — is ``(None, None)``: the
+    caller falls back to the parent line's own repository, which a plain
+    directory is initialised into as before. An explicit repository is never
+    initialised: a path that is not inside a git repository is refused.
+    """
+    if not repository:
+        return None, None
+    repo = repository.strip()
+    if not os.path.isabs(repo):
+        return None, "repository must be an absolute path to a git repository"
+    root = repo_root(repo)
+    if root is None:
+        return None, f"{repo} is not inside a git repository"
+    return root, None
+
+
+def _branch_taken(root: str, name: str) -> bool:
+    done = _git("rev-parse", "--verify", "--quiet", name, cwd=root)
+    return done.returncode == 0
+
+
+def place_child(
+    db, parent_id: str, child_id: str, base: str | None = None, root: str | None = None,
+) -> dict:
     """Give a new child line its working directory; record and describe it.
 
-    Returns ``{"cwd": path or None, "branch": name or None}``.
+    Returns ``{"cwd": path or None, "branch": name or None, "base": ref or None}``.
+    ``base`` is an explicit start point (an upstream ref) for a deliberate cut
+    from a checkout left behind; the default stays the repository's HEAD.
+    ``root`` overrides the repository the worktree is placed in. The branch
+    travels with the path: a slug whose branch survived an earlier purge moves
+    to a fresh suffix, so ``branch == line/<worktree name>`` always holds.
     """
     parent_cwd = line_cwd(db, parent_id)
-    root = repo_root(parent_cwd) or init_repo(parent_cwd)
-    placed = {"cwd": parent_cwd, "branch": None}
+    if root is None:
+        root = repo_root(parent_cwd) or init_repo(parent_cwd)
+    placed = {"cwd": parent_cwd, "branch": None, "base": None}
     if root is not None:
         child = db.get_conversation(child_id) or {}
         name = slug(child.get("name") or child_id)
-        path = _free_path(os.path.join(root, WORKTREES_DIR, name))
+        path = os.path.join(root, WORKTREES_DIR, name)
+        n = 1
+        while os.path.exists(path) or _branch_taken(root, f"line/{os.path.basename(path)}"):
+            n += 1
+            path = f"{os.path.join(root, WORKTREES_DIR, name)}-{n}"
         branch = f"line/{os.path.basename(path)}"
         os.makedirs(os.path.dirname(path), exist_ok=True)
         _exclude(root)
-        done = _git("worktree", "add", "-b", branch, path, cwd=root)
-        if done.returncode != 0:  # the branch exists: put the worktree on it
-            done = _git("worktree", "add", path, branch, cwd=root)
+        if base:
+            done = _git("worktree", "add", "-b", branch, path, base, cwd=root)
+            if done.returncode != 0:
+                # Belt and braces: a fresh branch should always add cleanly; if
+                # git still refuses, fail — the caller rolls the birth back.
+                _forget_worktrees_dir(root)
+                placed = {"cwd": parent_cwd, "branch": None, "base": None}
+                return placed
+        else:
+            done = _git("worktree", "add", "-b", branch, path, cwd=root)
+            if done.returncode != 0:  # belt and braces: adopt the branch as a last resort
+                done = _git("worktree", "add", path, branch, cwd=root)
         if done.returncode == 0:
-            placed = {"cwd": path, "branch": branch}
+            placed = {"cwd": path, "branch": branch, "base": base}
     if placed["cwd"]:
         db._exec("UPDATE conversations SET cwd=? WHERE id=?", (placed["cwd"], child_id))
     return placed
+
+
+def outside_worktree_note(db, conv_id: str, cwd: str) -> str | None:
+    """A warning for an attachment placed outside the line's own worktree.
+
+    A line owns exactly one branch, created with its worktree at birth — that
+    is what the parent accepts. A process working anywhere else commits onto
+    some other history, and the hand-off contract never sees that work. A
+    subdirectory of the worktree is still the worktree: commits there land on
+    the line's branch, so only paths outside it are warned.
+    """
+    line_dir = line_cwd(db, conv_id)
+    if not cwd or not line_dir:
+        return None
+    cwd_real = os.path.realpath(cwd)
+    line_real = os.path.realpath(line_dir)
+    if cwd_real == line_real:
+        return None
+    try:
+        inside = os.path.commonpath((cwd_real, line_real)) == line_real
+    except ValueError:  # no shared ancestor (e.g. different roots): outside
+        inside = False
+    if inside:
+        return None
+    if f"/{WORKTREES_DIR}/" in line_dir:
+        branch = f"line/{os.path.basename(line_dir.rstrip('/'))}"
+        return (f"⚠ attached outside this line's worktree: {cwd} — this line owns exactly one "
+                f"branch ({branch}) and the parent accepts only that; commits here land off it")
+    return (f"⚠ attached outside this line's working directory: {cwd} — commits there do not "
+            "land on the line's branch")
 
 
 def describe(placed: dict) -> str | None:
@@ -168,6 +292,9 @@ def describe(placed: dict) -> str | None:
     where = f"☏ working directory: {placed['cwd']}"
     if placed.get("branch"):
         where += (f" — a git worktree on branch {placed['branch']}; every process on this "
-                  "line works here, and the branch is what the parent accepts")
+                  "line works here, this line owns exactly one branch, and the branch is "
+                  "what the parent accepts")
+    if placed.get("base"):
+        where += f"; cut from {placed['base']} after a fetch, not from the parent's checkout"
     return where
 

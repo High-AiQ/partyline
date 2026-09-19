@@ -66,8 +66,9 @@ from .contracts import (
     ShutdownEvent,
     ShutdownRequest,
     ShutdownResponse,
-    VersionResponse,
 )
+from .handshake import VersionResponse
+from . import deployment
 from .db import Db
 from .frontend_build import current_frontend_build
 from .hook_routes import hook_url, hooks_router
@@ -75,6 +76,8 @@ from .line_process_routes import detach_attachment, register_line_process_routes
 from .worktree_lifecycle import sweep_orphaned_worktrees
 from .message_routes import message_router
 from .reaction_routes import reaction_router
+from .accept_sha import register_accept_route
+from .review_worktrees import register_review_routes
 from .goal import register_goal_route
 from .presence import Presence
 from .media import MediaStore, media_root
@@ -127,6 +130,7 @@ async def _run_automatic_reattachment() -> None:
 
 @asynccontextmanager
 async def lifespan(app):
+    deployment.prime()  # pin the served checkout's HEAD to this boot, before any pull
     runtime.db.mark_stale_attachments()
     await asyncio.to_thread(sweep_orphaned_worktrees, runtime.db)
     automatic_task = asyncio.create_task(_run_automatic_reattachment())
@@ -154,6 +158,8 @@ user_sockets = UserSocketRegistry()
 install_auth_guard(app, runtime.db)
 install_static_cache(app)
 register_terminal_route(app, runtime)
+register_accept_route(app, runtime)
+register_review_routes(app, runtime)
 register_compact_route(app, runtime, presence)
 register_line_process_routes(app, runtime)
 register_goal_route(app, runtime)
@@ -193,7 +199,9 @@ app.mount("/assets", StaticFiles(directory=ASSETS_DIR), name="assets")
 @app.get("/api/version", response_model=VersionResponse)
 async def version():
     return {"version": __version__, "build": current_frontend_build(),
-            "instance_name": getattr(app.state, "instance_name", None)}
+            "instance_name": getattr(app.state, "instance_name", None),
+            "checkout_path": deployment.startup_path(),
+            "git_head": deployment.startup_head()}
 
 
 LOOPBACK = {"127.0.0.1", "::1", "localhost"}
