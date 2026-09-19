@@ -61,11 +61,6 @@ def heic_signature_bytes() -> bytes:
 HAS_AVIF = features.check("avif")
 
 
-def ffmpeg_decodes_avif() -> bool:
-    """Whether the real ffmpeg on PATH can actually decode AV1 here."""
-    return shutil.which("ffmpeg") is not None and formats.decodes("AVIF")
-
-
 def avif_signature_bytes() -> bytes:
     """AVIF magic without needing an encoder: enough for the sniff layer."""
     return b"\x00\x00\x00\x20ftypavif\x00\x00\x00\x00avifmif1" + b"\x00" * 8
@@ -186,9 +181,28 @@ with open(args[-1], "wb") as out:
 
 @unittest.skipUnless(HAS_AVIF, "no AVIF fixture without a decoder")
 class FfmpegFallbackTest(unittest.TestCase):
-    @unittest.skipUnless(
-        ffmpeg_decodes_avif(), "ffmpeg on this machine cannot decode AV1 (absent or no decoder)"
-    )
+    """The real ffmpeg on this machine, probed by actually rescuing once."""
+
+    rescue_works = False
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        # A capability listing alone proved insufficient: a machine can list
+        # an AV1 decoder yet still fail to demux AVIF or reject -max_pixels,
+        # and the test then errored on a None readable exactly the way CI
+        # once did. Probe by running the real rescue once; when it cannot
+        # produce a PNG, ffmpeg's own error is in the warning logged here.
+        if HAS_AVIF and shutil.which("ffmpeg") and formats.decodes("AVIF"):
+            cls.rescue_works = formats._ffmpeg_png(avif_bytes(), "AVIF") is not None
+
+    def setUp(self):
+        if not self.rescue_works:
+            self.skipTest(
+                "the setUpClass rescue probe produced no PNG — ffmpeg's reason "
+                "is in the warning it logged just above"
+            )
+
     def test_pillow_without_a_decoder_falls_back_to_ffmpeg(self):
         original = avif_bytes()
         real_open = images._open
@@ -204,20 +218,9 @@ class FfmpegFallbackTest(unittest.TestCase):
             prepared = images.prepared_image(original)
         self.assertEqual(prepared.format, "AVIF")
         self.assertEqual(prepared.mime, "image/avif")
+        self.assertIsNotNone(prepared.readable)
         self.assertEqual(Image.open(BytesIO(prepared.readable.data)).format, "PNG")
         self.assertEqual(prepared.data, original)
-
-    def test_a_stalled_ffmpeg_is_a_missing_decoder(self):
-        def nothing_opens(data):
-            raise images.UnidentifiedImageError("unidentified")
-
-        stalled = subprocess.TimeoutExpired(cmd="ffmpeg", timeout=60)
-        with mock.patch.object(images, "_open", side_effect=nothing_opens), mock.patch.object(
-            formats, "decodes", return_value=True
-        ), mock.patch.object(formats.subprocess, "run", side_effect=stalled):
-            prepared = images.prepared_image(avif_bytes())
-        self.assertIsNone(prepared.readable)
-        self.assertEqual(prepared.format, "AVIF")
 
 
 class FakeFfmpegTest(unittest.TestCase):
@@ -247,6 +250,18 @@ class FakeFfmpegTest(unittest.TestCase):
         image = formats.rescued(avif_signature_bytes(), ("AVIF", "image/avif", "avif"))
         self.assertIsNotNone(image)
         self.assertEqual((image.width, image.height), (4, 2))
+
+    def test_a_stalled_ffmpeg_is_a_missing_decoder(self):
+        def nothing_opens(data):
+            raise images.UnidentifiedImageError("unidentified")
+
+        stalled = subprocess.TimeoutExpired(cmd="ffmpeg", timeout=60)
+        with mock.patch.object(images, "_open", side_effect=nothing_opens), mock.patch.object(
+            formats, "decodes", return_value=True
+        ), mock.patch.object(formats.subprocess, "run", side_effect=stalled):
+            prepared = images.prepared_image(avif_signature_bytes())
+        self.assertIsNone(prepared.readable)
+        self.assertEqual(prepared.format, "AVIF")
 
     def test_the_capability_probe_runs_once_per_process(self):
         marker = self.bin / "probes"
@@ -282,6 +297,19 @@ class FakeFfmpegTest(unittest.TestCase):
         ):
             self.assertFalse(formats.decodes("AVIF"))
 
+    def test_a_listing_of_native_decoders_reads_capable_by_name(self):
+        listing = subprocess.CompletedProcess([], 0)
+        listing.stdout = (
+            b"Decoders:\n"
+            b" V....D av1                  Alliance for Open Media AV1\n"
+            b" V....D hevc                 native HEVC (native)\n"
+            b" A....D opus                 Opus (codec opus)\n"
+            b" -------\n"
+        )
+        with mock.patch.object(formats.subprocess, "run", return_value=listing):
+            self.assertTrue(formats.decodes("AVIF"))
+            self.assertTrue(formats.decodes("HEIC"))
+
     def test_a_listing_without_the_codec_reports_no_decoder(self):
         listing = subprocess.CompletedProcess([], 0)
         listing.stdout = b" V....D fake-mpeg4            fake (codec mpeg4)\n"
@@ -305,7 +333,6 @@ class FakeFfmpegTest(unittest.TestCase):
         self.assertFalse(formats.decodes("PNG"))
 
 
-@unittest.skipUnless(HAS_AVIF, "no AVIF fixture without a decoder")
 class UndecodableTest(unittest.TestCase):
     def test_an_upload_no_decoder_can_open_is_kept_and_marked(self):
         def nothing_opens(data):
@@ -314,7 +341,7 @@ class UndecodableTest(unittest.TestCase):
         with mock.patch.object(images, "_open", side_effect=nothing_opens), mock.patch.object(
             formats, "_ffmpeg_png", return_value=None
         ):
-            prepared = images.prepared_image(avif_bytes())
+            prepared = images.prepared_image(avif_signature_bytes())
         self.assertEqual(prepared.mime, "image/avif")
         self.assertEqual(prepared.format, "AVIF")
         self.assertIsNone(prepared.readable)

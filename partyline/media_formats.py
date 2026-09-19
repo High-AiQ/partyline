@@ -99,7 +99,12 @@ def reset_decoder_probe() -> None:
 
 
 def ffmpeg_decoders() -> str:
-    """The ``ffmpeg -decoders`` listing, probed once; ``''`` when unusable."""
+    """The ``ffmpeg -decoders`` listing, probed once; ``''`` when unusable.
+
+    The listing — including an unusable or absent ffmpeg — is cached for the
+    process lifetime: installing or upgrading ffmpeg mid-process is seen only
+    after a restart.
+    """
     global _decoders_listing
     if _decoders_listing is None:
         try:
@@ -117,9 +122,23 @@ def ffmpeg_decoders() -> str:
 
 
 def decodes(format_name: str) -> bool:
-    """Whether a local ffmpeg can decode this upload format at all."""
+    """Whether a local ffmpeg can decode this upload format at all.
+
+    A decoder line names its codec two ways: the leading name column (the
+    native ``av1`` and ``hevc`` decoders) or a trailing ``(codec X)`` suffix
+    (wrappers like ``libdav1d``). ffmpeg prints that suffix only when the
+    name differs from the codec, so a build with only the native decoder
+    must be read by name — matching the suffix alone would silently disable
+    the rescue path there.
+    """
     codec = _FORMAT_CODECS.get(format_name)
-    return codec is not None and f"(codec {codec})" in ffmpeg_decoders()
+    if codec is None:
+        return False
+    for line in ffmpeg_decoders().splitlines():
+        name = line[8:].split(" ", 1)[0] if len(line) > 8 else ""
+        if name == codec or line.endswith(f"(codec {codec})"):
+            return True
+    return False
 
 
 def _ffmpeg_png(data: bytes, format_name: str) -> bytes | None:
