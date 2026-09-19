@@ -1,5 +1,6 @@
 <script lang="ts">
   import { REACTION_PALETTE, type ReactionEmoji, type ReactionResponse } from "../../lib/reaction-contracts";
+  import { tooltip } from "../../lib/tooltip";
 
   interface Props {
     messageId: number;
@@ -59,7 +60,7 @@
       <button
         class="reaction-add grid size-7 cursor-pointer place-items-center rounded border border-line bg-ink-2 p-0 text-cream-faint opacity-0 transition-opacity duration-150 pointer-events-none hover:bg-copper hover:text-ink group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
         type="button"
-        title="react to this"
+        use:tooltip={{ label: "react to this" }}
         aria-label="react to this"
         aria-expanded={pickerOpen}
         onclick={() => (pickerOpen = !pickerOpen)}
@@ -101,7 +102,7 @@
           type="button"
           aria-label={label(reaction)}
           aria-pressed={reaction.mine}
-          title={reaction.reactors.join(", ")}
+          use:tooltip={{ label: reaction.reactors.join(", ") }}
           disabled={busy !== null}
           onclick={() => void toggle(reaction.emoji)}
         >
