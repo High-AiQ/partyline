@@ -25,11 +25,15 @@ def self_mention_reason(db, principal, conv_id: str, body: str) -> str | None:
     A captain that posts an assignment through a worker's credential and
     @mentions that same worker rings itself: the only mention resolves to the
     sender, nobody is woken, and the sender reads its own assignment as if it
-    had arrived. Refused at the API so the mistake shows at once — either
+    had arrived.     Refused at the API so the mistake shows at once — either
     every resolvable mention is the sender, or the message opens by
-    addressing its own credential and nothing else.
+    addressing its own credential and nothing else. ``@all`` rings the room
+    and a human handle means a person reads it, so neither can be a silent
+    self-wake.
     """
     if getattr(principal, "kind", "") != "machine" or not principal.attachment_id:
+        return None
+    if "all" in mentioned_names(body):
         return None
     att = db.get_attachment(principal.attachment_id)
     if att is None:
@@ -44,7 +48,8 @@ def self_mention_reason(db, principal, conv_id: str, body: str) -> str | None:
         for row in db.list_attachments(line_id):
             if row["status"] in ("starting", "running"):
                 handles.add(row["name"].lower())
-    if {name for name in names if name in handles} == {own}:
+    human_handles = {row["handle"].lower() for row in db._exec("SELECT handle FROM users")}
+    if {name for name in names if name in handles or name in human_handles} == {own}:
         return (
             "self-mention wakes nobody: every @mention resolves to this message's own "
             f"credential (@{att['name']}) — post assignments from your own credential"

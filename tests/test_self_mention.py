@@ -94,6 +94,16 @@ class SelfMentionTest(unittest.TestCase):
         made = self.post("@terra hello", headers=self.human)
         self.assertEqual(made.status_code, 200, made.text)
 
+    def test_all_rings_the_room_so_it_is_never_a_silent_self_wake(self):
+        made = self.post("@all hands — @terra noting the deploy")
+        self.assertEqual(made.status_code, 200, made.text)
+
+    def test_a_human_handle_counts_as_someone_waking(self):
+        auth_store.create_user(
+            self.db, "greg@example.com", "greg", auth_tokens.hash_password("hunter2222"))
+        made = self.post("@greg fyi, @terra will pause the line")
+        self.assertEqual(made.status_code, 200, made.text)
+
     def test_the_reason_is_mechanical_not_prose_matching(self):
         from types import SimpleNamespace
 
