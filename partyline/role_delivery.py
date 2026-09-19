@@ -3,6 +3,7 @@
 from typing import NamedTuple
 
 from .goal import goal_rider
+from .accept_sha import handoff_rider
 from .line_depth import depth as line_depth, has_captain, staffed_split_reason
 from .role_briefing import WORKER_REMINDER, role_instructions, worker_instructions
 from .staffing import staffing_line
@@ -62,12 +63,14 @@ def bind_role_delivery(db, att: dict) -> None:
             elif not update:
                 update = ("Your current role is ordinary participant, not captain. "
                           "Use only your own line's tools.")
-        goal = staffing = ""
+        goal = staffing = handoff = ""
         if current.role == "lead":
             goal = goal_rider(db, current.conv_id)
             staffing = staffing_line(db, current.conv_id)
+            handoff = handoff_rider(db, current.conv_id)
         elif current.captained:
             goal = WORKER_REMINDER  # every wake: the goal is context, the @mention is the job
-        return "\n".join(part for part in (original_rider(), goal, staffing, update) if part)
+        return "\n".join(
+            part for part in (original_rider(), goal, staffing, handoff, update) if part)
 
     att["digest_rider"] = rider

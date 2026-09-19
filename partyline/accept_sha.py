@@ -19,6 +19,7 @@ import re
 from fastapi import HTTPException, Request
 
 from .auth_guard import request_principal
+from .hierarchy import descendants
 from .hierarchy_contracts import AcceptIn, AcceptResponse
 from .line_worktree import WORKTREES_DIR, _git, line_cwd, repo_and_worktree, rev
 from .machine_scope import deny_unless
@@ -111,6 +112,38 @@ def accepted_note(db, conv_id: str) -> str:
     conv = db.get_conversation(conv_id) or {}
     sha = conv.get("accepted_sha") or ""
     return f" — accepted hand-off: {sha[:12]}" if sha else ""
+
+
+def handoff_rider(db, conv_id: str) -> str:
+    """One line for a captain's wake: the recorded hand-off(s) and where work lives.
+
+    Present facts only. The line's own accepted SHA and worktree path lead; a
+    descendant appears once it has an accepted SHA. A captain waking into a
+    tree with no hand-offs sees nothing, so the rider never scrolls.
+    """
+    parts = []
+    conv = db.get_conversation(conv_id) or {}
+    own = []
+    if conv.get("accepted_sha"):
+        own.append(f"accepted {conv['accepted_sha'][:12]}")
+    if conv.get("cwd"):
+        own.append(f"worktree {conv['cwd']}")
+    if own:
+        parts.append(" ".join(own))
+    try:
+        children = descendants(db, conv_id)
+    except AttributeError:
+        children = []  # a minimal db without the tree query: own facts only
+    for child_id in children:
+        child = db.get_conversation(child_id) or {}
+        if not child.get("accepted_sha"):
+            continue
+        where = f" · worktree {child['cwd']}" if child.get("cwd") else ""
+        parts.append(f"«{child.get('name') or child_id}» "
+                     f"accepted {child['accepted_sha'][:12]}{where}")
+    if not parts:
+        return ""
+    return "(hand-off: " + "; ".join(parts) + ")"
 
 
 def register_accept_route(app, runtime) -> None:
