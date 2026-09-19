@@ -115,8 +115,33 @@ class FileRoutesTest(unittest.TestCase):
 
     def test_briefing_teaches_any_file_type_and_how_to_read_a_pdf(self):
         self.assertIn("$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/files", BRIEFING)
-        self.assertIn("thumb, slim and original URLs", BRIEFING)
+        self.assertIn("thumb, slim, readable and original URLs", BRIEFING)
+        self.assertIn("when listed, readable is a PNG", BRIEFING)
         self.assertIn('Authorization: Bearer $PARTYLINE_TOKEN', BRIEFING)
+
+    def test_upload_preparation_runs_off_the_event_loop(self):
+        import asyncio
+
+        from partyline.media_files import PreparedFile
+
+        seen = {}
+
+        def prepare(uploads):
+            # to_thread workers have no event loop; a stalled ffmpeg in here
+            # must never be able to freeze one.
+            try:
+                asyncio.get_running_loop()
+                seen["off_loop"] = False
+            except RuntimeError:
+                seen["off_loop"] = True
+            return [PreparedFile(b"hello", "file", "notes.txt", "text/plain", "txt")]
+
+        with mock.patch(
+            "partyline.media_routes.prepared_files", side_effect=prepare
+        ):
+            response = self.post(files=[("file", ("notes.txt", b"hello", "text/plain"))])
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(seen["off_loop"])
 
     def test_briefing_formats_cleanly_despite_table_syntax(self):
         """The attach-time .format() must never trip on a stray brace."""

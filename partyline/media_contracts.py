@@ -29,23 +29,28 @@ class ImageVariant(BaseModel):
 
 
 class ImageUrls(BaseModel):
-    """Where the three tiers are served from.
+    """Where the tiers are served from.
 
     Relative in broadcast events (the browser already knows its origin) and
     absolute in the upload response and the agent digest, where the reader is
-    a process holding only an API base URL.
+    a process holding only an API base URL. ``readable`` always resolves: for
+    an upload with no transcoded tier it serves the original bytes.
     """
 
     original: str
     thumb: str
     slim: str
+    readable: str
 
 
 class FileRef(BaseModel):
     """One stored file, as it rides along with the message that posted it.
 
-    Images derive ``thumb`` and ``slim`` tiers. Other kinds have only an
-    original, but all three URLs still resolve so readers see one shape.
+    Images derive ``thumb``, ``slim``, and — when the original is in an
+    encoding agents cannot decode — a full-size PNG ``readable`` tier.
+    ``format`` is the encoding the magic bytes named, not what the uploader
+    declared. Other kinds have only an original, but every URL still resolves
+    so readers see one shape.
     """
 
     id: str
@@ -55,8 +60,10 @@ class FileRef(BaseModel):
     description: str | None = None
     mime: str
     bytes: int
+    format: str | None = None
     width: int | None = None
     height: int | None = None
     thumb: ImageVariant | None = None
     slim: ImageVariant | None = None
+    readable: ImageVariant | None = None
     urls: ImageUrls

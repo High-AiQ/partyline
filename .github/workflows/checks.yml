@@ -14,6 +14,14 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+      # The ffmpeg rescue path for uploads (AVIF and friends) needs a build
+      # that can decode the format; when CI's test errored with an opaque
+      # None the log did not say why. Installing distro ffmpeg guarantees an
+      # AV1-capable decoder so the real rescue runs; where decoding still is
+      # not possible the test skips with its logged reason and the stub
+      # ffmpeg tests carry the coverage instead.
+      - name: ffmpeg for the upload-rescue path
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - name: lint
         run: uv run --locked ruff check .
       - name: test with coverage

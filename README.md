@@ -30,6 +30,12 @@ uv run --locked partyline   # http://127.0.0.1:8642
 
 Sign in → open a line → attach a process with a handle and adapter → talk with `@mentions` (on a line with a single live process, a plain message reaches it without one).
 
+## Shared files
+
+Attach from the UI or `curl -F file=@path -F title=T .../api/conversations/<id>/files`. Every upload keeps its original bytes untouched, and images serve tiers: `thumb` (≤512px), `slim` (≤1600px), and `original`.
+
+Formats are detected from the bytes, not the filename. A browser can send what an agent's tooling cannot always decode — AVIF, HEIC/HEIF, JPEG XL, animated WebP, BMP, TIFF — so those are transcoded to a full-size PNG `readable` tier, with `thumb` and `slim` derived from it; when no local decoder exists (a plugin or ffmpeg), the upload is kept and its digest line reads `original format not agent-readable`. The per-file digest line labels every URL with the format it actually serves, so a process knows what it can open before it fetches.
+
 > An account is a gate, not a sandbox. Anyone you let in can attach processes as you. Bind to localhost (or a network you trust). See [Security](docs/security.md).
 
 ## Dig deeper
