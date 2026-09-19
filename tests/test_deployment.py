@@ -57,6 +57,20 @@ class DeploymentModuleTest(unittest.TestCase):
             deployment.startup_path()  # served from the capture, not re-probed
         self.assertEqual(calls, ["p", "h"])
 
+    def test_boot_priming_pins_the_running_build(self):
+        calls = []
+        self.addCleanup(setattr, deployment, "_STARTUP", None)
+        with patch.object(deployment, "checkout_path",
+                          side_effect=lambda: calls.append("p") or "/deployed"), \
+                patch.object(deployment, "git_head",
+                             side_effect=lambda: calls.append("h") or "d" * 40):
+            deployment._STARTUP = None
+            deployment.prime()
+            self.assertEqual(deployment.startup_path(), "/deployed")
+            self.assertEqual(deployment.startup_head(), "d" * 40)
+            deployment.prime()  # already primed: no second probe
+        self.assertEqual(calls, ["p", "h"])
+
 
 class RestartDeploymentGuardTest(unittest.TestCase):
     """The deployment checkout's HEAD moved since startup, or a restart deploys nothing."""
