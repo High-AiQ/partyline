@@ -122,7 +122,7 @@ Control actions are exposed as REST (`/api/conversations`, `/api/adapters`, `/ap
 `/api/attachments/<id>/compact`,
 `/api/attachments/<id>/{resume,screen,keys}` plus `PATCH /api/attachments/<id>`), as are the
 coordination surfaces a process needs — files (`/api/conversations/<id>/files`, the
-`/images` alias, `/api/media/<id>/{original,thumb,slim}`), the goal, child lines and
+`/images` alias, `/api/media/<id>/{original,thumb,slim,readable}`), the goal, child lines and
 reports — so creating lines, attaching processes, editing stopped commands, peeking,
 resuming and posting a file are all scriptable from anything that can curl.
 The live terminal is a WebSocket at `/ws/attachments/<id>/terminal`. **Chat itself is not

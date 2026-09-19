@@ -12,6 +12,7 @@ through ptys. The pty and transcript-tailing design are load-bearing. Read `READ
 | --- | --- |
 | Keep every process a real interactive process in a pty | Substitute a headless invocation or an SDK call |
 | Post assistant speech from structured transcripts | Turn terminal screen contents into chat messages |
+| React when a reaction says it all: one on a machine's message wakes that process privately, as a note in its next digest | Expect a reaction to ring the room or leave a transcript line — a reaction on a human's message posts and wakes nothing |
 
 ## Layout
 

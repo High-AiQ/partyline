@@ -59,7 +59,8 @@
       <button
         class="reaction-add grid size-7 cursor-pointer place-items-center rounded border border-line bg-ink-2 p-0 text-cream-faint opacity-0 transition-opacity duration-150 pointer-events-none hover:bg-copper hover:text-ink group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
         type="button"
-        aria-label="Add reaction"
+        title="react to this"
+        aria-label="react to this"
         aria-expanded={pickerOpen}
         onclick={() => (pickerOpen = !pickerOpen)}
       >

@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from io import BytesIO
 import mimetypes
 from pathlib import Path
 import re
 
-from PIL import Image, UnidentifiedImageError
-
 from .media_contracts import FileKind
-from .media_images import Derived, FORMATS, MediaError, prepared_image
+from .media_images import Derived, MediaError, prepared_image, sniffed_format
 
 MAX_FILES_PER_POST = 6
 MAX_FILE_BYTES = 100 * 1024 * 1024
@@ -30,6 +27,8 @@ class PreparedFile:
     height: int | None = None
     thumb: Derived | None = None
     slim: Derived | None = None
+    readable: Derived | None = None
+    format: str | None = None
 
 
 def sanitized_filename(filename: str | None) -> str | None:
@@ -65,11 +64,13 @@ def _extension(filename: str | None, mime: str) -> str:
 
 
 def _looks_like_supported_image(data: bytes) -> bool:
-    try:
-        with Image.open(BytesIO(data)) as image:
-            return image.format in FORMATS
-    except (UnidentifiedImageError, OSError, ValueError):
-        return False
+    """Whether the magic bytes name an image we store as an image.
+
+    Signature, not decodability: an AVIF no local plugin can open is still an
+    image — it is kept, served, and marked rather than reclassified as an
+    opaque file.
+    """
+    return sniffed_format(data) is not None
 
 
 def _non_image(
@@ -119,6 +120,8 @@ def prepared_file(
                 image.height,
                 image.thumb,
                 image.slim,
+                image.readable,
+                image.format,
             )
     return _non_image(data, filename, content_type)
 
