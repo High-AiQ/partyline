@@ -228,10 +228,22 @@ def outside_worktree_note(db, conv_id: str, cwd: str) -> str | None:
 
     A line owns exactly one branch, created with its worktree at birth — that
     is what the parent accepts. A process working anywhere else commits onto
-    some other history, and the hand-off contract never sees that work.
+    some other history, and the hand-off contract never sees that work. A
+    subdirectory of the worktree is still the worktree: commits there land on
+    the line's branch, so only paths outside it are warned.
     """
     line_dir = line_cwd(db, conv_id)
-    if not cwd or not line_dir or os.path.abspath(cwd) == os.path.abspath(line_dir):
+    if not cwd or not line_dir:
+        return None
+    cwd_real = os.path.realpath(cwd)
+    line_real = os.path.realpath(line_dir)
+    if cwd_real == line_real:
+        return None
+    try:
+        inside = os.path.commonpath((cwd_real, line_real)) == line_real
+    except ValueError:  # no shared ancestor (e.g. different roots): outside
+        inside = False
+    if inside:
         return None
     if f"/{WORKTREES_DIR}/" in line_dir:
         branch = f"line/{os.path.basename(line_dir.rstrip('/'))}"
