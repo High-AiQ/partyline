@@ -153,12 +153,16 @@ def hierarchy_router(runtime) -> APIRouter:
         target, target_error = await asyncio.to_thread(placement_root, body.repository)
         if target_error:
             raise HTTPException(400, target_error)
-        health = await asyncio.to_thread(checkout_health.inspect, cwd)
-        # A machine never cuts a child from a stale checkout; base:"upstream" fetches the
-        # default instead. A cross-repo child does not start from this checkout at all.
+        cwd = line_cwd(db, conv_id)
+        target, target_error = await asyncio.to_thread(placement_root, body.repository)
+        if target_error:
+            raise HTTPException(400, target_error)
+        # The stale-base guard reads the parent's checkout, or the target's when placed there.
+        base_health = await asyncio.to_thread(
+            checkout_health.inspect, cwd if target is None else target)
         base_ref, base_error = await asyncio.to_thread(
             checkout_health.child_base_ref, target or cwd, body.base == "upstream",
-            is_human(principal), None if target else health)
+            is_human(principal), base_health)
         if base_error:
             raise HTTPException(409, base_error)
         name = body.name.strip() or "untitled"
@@ -177,12 +181,8 @@ def hierarchy_router(runtime) -> APIRouter:
         if where := describe(placed):
             await runtime.post_message(conv["id"], "system", "system", where)
         if placed.get("branch"):
-            # The base notice describes the checkout the child actually starts
-            # from: the parent's for a normal birth, the target repo's when
-            # the child was placed elsewhere.
-            notice_health = health if target is None else await asyncio.to_thread(
-                checkout_health.inspect, target, fetch=False)
-            if notice := checkout_health.describe(notice_health):
+            # The base notice describes the checkout the child actually starts from.
+            if notice := checkout_health.describe(base_health):
                 notice = notice.replace("☏ checkout:", "☏ base checkout:", 1)
                 await runtime.post_message(conv["id"], "system", "system", notice)
         conv = db.get_conversation(conv["id"])

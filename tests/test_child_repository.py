@@ -147,6 +147,33 @@ class ChildRepositoryTest(unittest.TestCase):
         self.assertNotEqual(_git("rev-parse", "HEAD", cwd=conversation["cwd"]).stdout.strip(),
                             self.other_head())
 
+    def test_the_stale_base_guard_applies_to_the_target_repository(self):
+        # S3: the target repo's own upstream moves ahead; a machine cannot cut
+        # a default-base child from it there either.
+        origin = os.path.join(self.directory.name, "other-origin.git")
+        _git("init", "-q", "--bare", "-b", "main", origin, cwd=self.directory.name)
+        _git("remote", "add", "origin", origin, cwd=self.other_repo)
+        _git("push", "-q", "-u", "origin", "main", cwd=self.other_repo)
+        _git("remote", "set-head", "origin", "-a", cwd=self.other_repo)
+        pusher = os.path.join(self.directory.name, "pusher")
+        _git("clone", "-q", origin, pusher, cwd=self.directory.name)
+        with open(os.path.join(pusher, "new.txt"), "w") as fh:
+            fh.write("later work\n")
+        _git("add", "-A", cwd=pusher)
+        _identity("commit", "-q", "-m", "later work", cwd=pusher)
+        _git("push", "-q", "origin", "main", cwd=pusher)
+        origin_main = _git("rev-parse", "main", cwd=origin).stdout.strip()
+
+        made = self.child("fix", repository=self.other_repo)
+        self.assertEqual(made.status_code, 409, made.text)
+        self.assertIn("behind", made.json()["detail"])
+
+        upstream = self.child("fix", repository=self.other_repo, base="upstream")
+        self.assertEqual(upstream.status_code, 201, upstream.text)
+        self.assertEqual(
+            _git("rev-parse", "HEAD", cwd=upstream.json()["conversation"]["cwd"]).stdout.strip(),
+            origin_main)
+
     def test_the_default_still_places_into_the_parents_repository(self):
         made = self.child("kid")
         self.assertEqual(made.status_code, 201, made.text)
