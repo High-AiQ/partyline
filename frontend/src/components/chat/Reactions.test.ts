@@ -1,9 +1,27 @@
-import { mount, unmount } from "svelte";
-import { describe, expect, it, vi } from "vitest";
+import { flushSync, mount, unmount } from "svelte";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import Reactions from "./Reactions.svelte";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+function allowTooltips(): void {
+  vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
+}
 
 describe("message reactions", () => {
   it("renders the picker and existing chips with accessible controls", async () => {
+    allowTooltips();
     const onToggle = vi.fn().mockResolvedValue(undefined);
     const component = mount(Reactions, {
       target: document.body,
@@ -13,25 +31,40 @@ describe("message reactions", () => {
         onToggle,
       },
     });
+    flushSync();
     try {
       expect(document.querySelector('[aria-label="Reaction picker"]')).not.toBeNull();
       const choices = Array.from(document.querySelectorAll<HTMLButtonElement>(".reaction-choice"));
       expect(choices.some((button) => button.getAttribute("aria-label") === "React with 👍")).toBe(true);
       expect(document.querySelector('[aria-label*="Toggle ✅ reaction"]')?.textContent).toContain("2");
+      const chip = document.querySelector<HTMLButtonElement>(".reaction-chip");
+      const chipTip = document.getElementById(chip?.getAttribute("aria-describedby") ?? "");
+      chip?.dispatchEvent(new MouseEvent("mouseenter"));
+      expect(chipTip?.hidden).toBe(false);
+      expect(chipTip?.textContent).toBe("greg, sol");
     } finally {
       await unmount(component);
     }
   });
 
-  it("titles the trigger as react to this", async () => {
+  it("labels the trigger through the tooltip action, not a native title", async () => {
+    allowTooltips();
     const component = mount(Reactions, {
       target: document.body,
       props: { messageId: 7, reactions: [], onToggle: vi.fn().mockResolvedValue(undefined) },
     });
+    flushSync();
     try {
       const trigger = document.querySelector<HTMLButtonElement>(".reaction-add");
-      expect(trigger?.getAttribute("title")).toBe("react to this");
+      expect(trigger?.getAttribute("title")).toBeNull();
       expect(trigger?.getAttribute("aria-label")).toBe("react to this");
+      trigger?.dispatchEvent(new FocusEvent("focus"));
+      const tip = document.getElementById(trigger?.getAttribute("aria-describedby") ?? "");
+      expect(tip?.hidden).toBe(false);
+      expect(tip?.textContent).toBe("react to this");
+      expect(tip?.getAttribute("role")).toBe("tooltip");
+      trigger?.dispatchEvent(new FocusEvent("blur"));
+      expect(tip?.hidden).toBe(true);
     } finally {
       await unmount(component);
     }
