@@ -223,13 +223,32 @@ def place_child(
     return placed
 
 
+def outside_worktree_note(db, conv_id: str, cwd: str) -> str | None:
+    """A warning for an attachment placed outside the line's own worktree.
+
+    A line owns exactly one branch, created with its worktree at birth — that
+    is what the parent accepts. A process working anywhere else commits onto
+    some other history, and the hand-off contract never sees that work.
+    """
+    line_dir = line_cwd(db, conv_id)
+    if not cwd or not line_dir or os.path.abspath(cwd) == os.path.abspath(line_dir):
+        return None
+    if f"/{WORKTREES_DIR}/" in line_dir:
+        branch = f"line/{os.path.basename(line_dir.rstrip('/'))}"
+        return (f"⚠ attached outside this line's worktree: {cwd} — this line owns exactly one "
+                f"branch ({branch}) and the parent accepts only that; commits here land off it")
+    return (f"⚠ attached outside this line's working directory: {cwd} — commits there do not "
+            "land on the line's branch")
+
+
 def describe(placed: dict) -> str | None:
     if not placed.get("cwd"):
         return None
     where = f"☏ working directory: {placed['cwd']}"
     if placed.get("branch"):
         where += (f" — a git worktree on branch {placed['branch']}; every process on this "
-                  "line works here, and the branch is what the parent accepts")
+                  "line works here, this line owns exactly one branch, and the branch is "
+                  "what the parent accepts")
     if placed.get("base"):
         where += f"; cut from {placed['base']} after a fetch, not from the parent's checkout"
     return where

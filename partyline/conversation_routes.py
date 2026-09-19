@@ -15,7 +15,7 @@ from .auth_guard import request_principal
 from .auth_store import handle_taken
 from .hierarchy import tree_live_name_conflict
 from .line_subtree import archive_line, archive_subtree
-from .line_worktree import describe, ensure_placed, line_cwd
+from .line_worktree import describe, ensure_placed, line_cwd, outside_worktree_note
 from .retirement import archive_blockers
 from .worktree_lifecycle import archive_worktree_if_safe, discard_worktree
 from .review_worktrees import prune_review_worktrees
@@ -247,6 +247,8 @@ def register_conversation_routes(
             chosen or line_cwd(db, conv_id) or os.getcwd()))
         if not os.path.isdir(cwd):
             raise HTTPException(400, f"cwd does not exist: {cwd}")
+        if warning := outside_worktree_note(db, conv_id, cwd):
+            await runtime.post_message(conv_id, "system", "system", warning)
         att_id = str(uuid.uuid4())
         runtime_owner = str(uuid.uuid4())
         att = db.add_attachment(
