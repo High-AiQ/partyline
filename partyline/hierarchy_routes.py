@@ -167,16 +167,19 @@ def hierarchy_router(runtime) -> APIRouter:
         principal = request_principal(request)
         deny_staffed_split(db, principal, conv_id)  # the loud reason first
         deny_unless(db, principal, conv_id, "create_child")
-        # Cut from HEAD: a base behind its upstream starts the child in the past.
-        health = await asyncio.to_thread(checkout_health.inspect, line_cwd(db, conv_id))
-        if not is_human(principal) and (stale := checkout_health.stale_base_reason(health)):
-            raise HTTPException(409, stale)
+        cwd = line_cwd(db, conv_id)
+        health = await asyncio.to_thread(checkout_health.inspect, cwd)
+        # A machine never cuts a child from a stale checkout; base:"upstream" fetches the default instead.
+        base_ref, base_error = await asyncio.to_thread(
+            checkout_health.child_base_ref, cwd, body.base == "upstream", is_human(principal), health)
+        if base_error:
+            raise HTTPException(409, base_error)
         name = body.name.strip() or "untitled"
         try:
             conv = create_child_conversation(db, conv_id, str(uuid.uuid4()), name)
         except HierarchyError as exc:
             raise _http(exc) from exc
-        placed = place_child(db, conv_id, conv["id"])
+        placed = place_child(db, conv_id, conv["id"], base=base_ref)
         if where := describe(placed):
             await runtime.post_message(conv["id"], "system", "system", where)
         if placed.get("branch") and (base := checkout_health.describe(health)):
