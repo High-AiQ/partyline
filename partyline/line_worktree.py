@@ -111,14 +111,6 @@ def slug(name: str) -> str:
     return text[:48] or "line"
 
 
-def _free_path(base: str) -> str:
-    path, n = base, 1
-    while os.path.exists(path):
-        n += 1
-        path = f"{base}-{n}"
-    return path
-
-
 def _exclude(root: str, name: str = WORKTREES_DIR) -> None:
     """Keep a partyline-managed directory out of the repository's status output."""
     info = os.path.join(root, ".git", "info")
@@ -213,6 +205,11 @@ def placement_root(repository: str | None) -> tuple[str | None, str | None]:
     return root, None
 
 
+def _branch_taken(root: str, name: str) -> bool:
+    done = _git("rev-parse", "--verify", "--quiet", name, cwd=root)
+    return done.returncode == 0
+
+
 def place_child(
     db, parent_id: str, child_id: str, base: str | None = None, root: str | None = None,
 ) -> dict:
@@ -221,8 +218,9 @@ def place_child(
     Returns ``{"cwd": path or None, "branch": name or None, "base": ref or None}``.
     ``base`` is an explicit start point (an upstream ref) for a deliberate cut
     from a checkout left behind; the default stays the repository's HEAD.
-    ``root`` overrides the repository the worktree is placed in (another
-    project on this machine); the default is the parent line's repository.
+    ``root`` overrides the repository the worktree is placed in. The branch
+    travels with the path: a slug whose branch survived an earlier purge moves
+    to a fresh suffix, so ``branch == line/<worktree name>`` always holds.
     """
     parent_cwd = line_cwd(db, parent_id)
     if root is None:
@@ -231,23 +229,25 @@ def place_child(
     if root is not None:
         child = db.get_conversation(child_id) or {}
         name = slug(child.get("name") or child_id)
-        path = _free_path(os.path.join(root, WORKTREES_DIR, name))
+        path = os.path.join(root, WORKTREES_DIR, name)
+        n = 1
+        while os.path.exists(path) or _branch_taken(root, f"line/{os.path.basename(path)}"):
+            n += 1
+            path = f"{os.path.join(root, WORKTREES_DIR, name)}-{n}"
         branch = f"line/{os.path.basename(path)}"
         os.makedirs(os.path.dirname(path), exist_ok=True)
         _exclude(root)
         if base:
             done = _git("worktree", "add", "-b", branch, path, base, cwd=root)
             if done.returncode != 0:
-                # The branch already exists (branches survive purge). Seating
-                # the child on the old tip would report a base that was never
-                # used, so the placement fails and the caller rolls the birth
-                # back — never a fresh worktree on stale history.
+                # Belt and braces: a fresh branch should always add cleanly; if
+                # git still refuses, fail — the caller rolls the birth back.
                 _forget_worktrees_dir(root)
                 placed = {"cwd": parent_cwd, "branch": None, "base": None}
                 return placed
         else:
             done = _git("worktree", "add", "-b", branch, path, cwd=root)
-            if done.returncode != 0:  # the branch exists: put the worktree on it
+            if done.returncode != 0:  # belt and braces: adopt the branch as a last resort
                 done = _git("worktree", "add", path, branch, cwd=root)
         if done.returncode == 0:
             placed = {"cwd": path, "branch": branch, "base": base}

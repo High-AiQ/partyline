@@ -145,20 +145,37 @@ class ChildBaseTest(unittest.TestCase):
         self.assertEqual(made.status_code, 409, made.text)
         self.assertIn("no upstream to cut from", made.json()["detail"])
 
-    def test_a_stale_branch_never_poses_as_the_requested_base(self):
-        # Fable's B2: line/kid survived an earlier purge; the upstream base
-        # cannot be honoured on the existing branch, so the birth fails and
-        # rolls back instead of seating the child on the old tip.
+    def test_a_stale_branch_gets_a_truthful_fresh_name_for_an_explicit_base(self):
+        # item 4: a slug whose branch survived an earlier purge is served by a
+        # fresh suffix — the birth is cut from the requested base, never from
+        # the stale tip, and neither the old branch nor its tip is touched.
         self.advance_origin()
+        stale = self.local_main()
         _git("branch", "line/kid", "main", cwd=self.repo)
         made = self.child("kid", headers=self.captain, base="upstream")
-        self.assertEqual(made.status_code, 409, made.text)
-        self.assertIn("could not be created", made.json()["detail"])
-        self.assertEqual(self.client.get("/api/conversations/root/children").json(), [])
-        self.assertFalse(os.path.isdir(os.path.join(self.repo, ".partyline-worktrees")),
-                         "the failed placement left its directory behind")
+        self.assertEqual(made.status_code, 201, made.text)
+        conversation = made.json()["conversation"]
+        self.assertTrue(conversation["cwd"].endswith(".partyline-worktrees/kid-2"))
+        self.assertEqual(self.child_head(conversation), self.origin_main())
+        self.assertEqual(_git("rev-parse", "line/kid-2", cwd=self.repo).stdout.strip(),
+                         self.origin_main())
+        self.assertEqual(_git("rev-parse", "line/kid", cwd=self.repo).stdout.strip(), stale)
         adopted = self.child("kid")  # default base keeps its behaviour (a person may cut stale)
         self.assertEqual(adopted.status_code, 201, adopted.text)
+
+    def test_a_surviving_branch_gets_a_truthful_fresh_name(self):
+        # a purged line's branch lives on; a new birth must not seat on it
+        stale = self.local_main()
+        _git("branch", "line/kid", "main", cwd=self.repo)
+        made = self.child("kid")
+        self.assertEqual(made.status_code, 201, made.text)
+        conversation = made.json()["conversation"]
+        self.assertTrue(conversation["cwd"].endswith(".partyline-worktrees/kid-2"))
+        self.assertEqual(self.child_head(conversation), self.local_main())
+        self.assertEqual(_git("rev-parse", "line/kid-2", cwd=self.repo).stdout.strip(),
+                         self.local_main())
+        self.assertEqual(_git("rev-parse", "line/kid", cwd=self.repo).stdout.strip(),
+                         stale)  # the old branch is untouched
 
     def test_an_unknown_base_value_is_rejected(self):
         made = self.child("kid", base="origin/HEAD")
