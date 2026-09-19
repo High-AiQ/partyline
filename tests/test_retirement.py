@@ -197,6 +197,26 @@ class RetirementTest(unittest.TestCase):
     def test_worktree_state_is_none_without_a_worktree_of_its_own(self):
         self.assertIsNone(worktree_state(self.db, self.db.get_conversation("root")))
 
+    def test_a_detached_parent_checkout_is_still_a_real_merge_base(self):
+        # Fable's B1: the parent checkout is detached, so its "branch" is the
+        # literal HEAD; as a rev-list base inside the child worktree that
+        # resolved to the child's own tip and proved everything merged.
+        mid = self.child()
+        self.unmerged(mid["cwd"])
+        self.dirty(mid["cwd"])
+        _git("checkout", "-q", "--detach", cwd=self.repo)
+        self.addCleanup(_git, "checkout", "-q", "main", cwd=self.repo)
+
+        state = worktree_state(self.db, self.db.get_conversation(mid["id"]))
+        self.assertEqual(state["merged"], False)
+
+        resp = self.retire(mid["id"], discard=True)
+        self.assertEqual(resp.status_code, 409, resp.text)
+        self.assertIn("unmerged_commits",
+                      [b["code"] for b in resp.json()["blockers"]])
+        self.assertTrue(os.path.exists(os.path.join(mid["cwd"], "scratch.txt")))
+        self.assertTrue(os.path.exists(mid["cwd"]))
+
 
 if __name__ == "__main__":
     unittest.main()
