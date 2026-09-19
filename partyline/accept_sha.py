@@ -105,15 +105,17 @@ def accept_sha(db, conv_id: str, sha: str) -> dict:
                 409,
                 f"accepting only fast-forwards: {branch}{count} the accepted SHA does not include",
             )
-        # Descent from the line's branch point with its parent: the accepted
-        # work sits on this line's line of descent, not merely somewhere the
-        # branch can reach.
+        # Descent from the branch point: a branch still sitting exactly at its
+        # merge-base with the parent carries no work of its own, so any other
+        # SHA belongs to some other line's descent. Land the work on the
+        # branch first — the hand-off is the SHA on the line's branch.
         parent_tip = _base_ref(line_cwd(db, parent_id_of(conv)) if parent_id_of(conv) else None)
         lineage = rev(root, "merge-base", branch, parent_tip) if parent_tip else None
-        if lineage and rev(root, "merge-base", lineage, full) != lineage:
+        if lineage == head:
             raise AcceptError(
                 409,
-                f"{name} is not on this line's descent from its branch point with the parent",
+                f"{branch} has no commits of its own — it sits at its branch point with the "
+                f"parent, so {name} is not this line's work; land the work on the branch first",
             )
         _move_branch(root, worktree, branch, full)
     db._exec("UPDATE conversations SET accepted_sha=? WHERE id=?", (full, conv_id))

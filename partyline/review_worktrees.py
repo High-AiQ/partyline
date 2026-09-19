@@ -210,7 +210,8 @@ def register_review_routes(app, runtime) -> None:
     )
     async def create(request: Request, conv_id: str, body: ReviewWorktreeIn):
         db = runtime.db
-        deny_unless(db, request_principal(request), conv_id, "read")
+        # Creation writes into the line's repository: a mutating act, not a read.
+        deny_unless(db, request_principal(request), conv_id, "write")
         try:
             done = create_review_worktree(db, conv_id, body.sha)
         except ReviewError as exc:
