@@ -62,3 +62,14 @@ def startup_path() -> str | None:
 def startup_head() -> str | None:
     """The commit the running process was started on."""
     return _startup()[1]
+
+
+def prime() -> None:
+    """Probe the served checkout once, at boot.
+
+    Priming at startup pins the recorded HEAD to the build the process
+    actually started on: without it, the first probe could happen after a
+    pull and mistake the pulled checkout for the running build, refusing a
+    restart that really would deploy something.
+    """
+    _startup()

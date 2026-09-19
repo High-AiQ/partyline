@@ -130,6 +130,7 @@ async def _run_automatic_reattachment() -> None:
 
 @asynccontextmanager
 async def lifespan(app):
+    deployment.prime()  # pin the served checkout's HEAD to this boot, before any pull
     runtime.db.mark_stale_attachments()
     await asyncio.to_thread(sweep_orphaned_worktrees, runtime.db)
     automatic_task = asyncio.create_task(_run_automatic_reattachment())
