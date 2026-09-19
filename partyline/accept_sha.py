@@ -107,15 +107,18 @@ def accept_sha(db, conv_id: str, sha: str) -> dict:
             )
         # Descent from the branch point: a branch still sitting exactly at its
         # merge-base with the parent carries no work of its own, so any other
-        # SHA belongs to some other line's descent. Land the work on the
+        # SHA belongs to some other line's descent — unless the parent has
+        # already landed that SHA, which makes it this line's work by
+        # definition. Land the work on the
         # branch first — the hand-off is the SHA on the line's branch.
         parent_tip = _base_ref(line_cwd(db, parent_id_of(conv)) if parent_id_of(conv) else None)
         lineage = rev(root, "merge-base", branch, parent_tip) if parent_tip else None
-        if lineage == head:
+        landed = bool(parent_tip) and rev(root, "merge-base", parent_tip, full) == full
+        if lineage == head and not landed:
             raise AcceptError(
                 409,
                 f"{branch} has no commits of its own — it sits at its branch point with the "
-                f"parent, so {name} is not this line's work; land the work on the branch first",
+                f"parent, and {name} has not landed there; land the work on the branch first",
             )
         _move_branch(root, worktree, branch, full)
     db._exec("UPDATE conversations SET accepted_sha=? WHERE id=?", (full, conv_id))

@@ -284,6 +284,16 @@ class AcceptShaTest(unittest.TestCase):
         self.assertIn("fast-forwards", response.json()["detail"])
         self.assertNotEqual(self.branch_head(), sibling_sha)
 
+    def test_accepting_work_the_parent_already_landed(self):
+        # the parent fast-forwarded its own branch to the child's tip: the SHA
+        # is this line's work by definition, even though the branch never moved
+        sha = self.commit_detached("the real work")
+        _git("merge", "--ff-only", sha, cwd=self.repo)
+        self.assertEqual(self.branch_head("main"), sha)
+        response = self.accept(sha)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.branch_head(), sha)
+
     def test_a_line_with_no_commits_of_its_own_refuses_a_foreign_sha(self):
         # S2, the zero-own-commit case: kid sits exactly at its branch point
         # with the parent, so a sibling's SHA is not this line's work — land
