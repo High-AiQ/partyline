@@ -72,32 +72,64 @@ def _is_clean(cwd: str) -> bool:
     return done.returncode == 0 and not done.stdout.strip()
 
 
-def worktree_removal_reason(db, conv: dict | None) -> str | None:
-    """Why a line's worktree cannot be removed right now, or None when SAFE.
+def worktree_state(db, conv: dict | None) -> dict | None:
+    """The line's own worktree as ``{"clean": bool, "merged": bool}``.
 
-    A line with no worktree of its own (a shared or inherited directory) has
-    nothing to keep, so it reads as SAFE too.
+    ``None`` when the line has no worktree of its own (a shared or inherited
+    directory has nothing to keep). ``merged`` is False whenever git cannot
+    prove every commit on the branch is reachable from the parent line's
+    branch or the repository default — an unverifiable state never reads as
+    merged, exactly as the SAFE test never reads an uninspectable repository
+    as safe.
     """
     conv = conv or {}
     cwd = conv.get("cwd") or ""
     root = _worktree_root(cwd)
     if root is None:
         return None
-    if not _is_clean(cwd):
-        return "uncommitted changes"
     branch = _current_branch(cwd)
     parent_cwd = line_cwd(db, parent_id_of(conv)) if parent_id_of(conv) else None
     bases = [b for b in (_current_branch(parent_cwd) if parent_cwd else None,
                          _default_branch(root)) if b]
-    if not branch or not bases:
-        return "unmerged commits"  # cannot verify safety: never read as SAFE by default
-    try:
-        done = _git("rev-list", branch, "--not", *bases, cwd=root)
-    except (OSError, subprocess.SubprocessError):
-        return "unmerged commits"
-    if done.returncode != 0 or done.stdout.strip():
+    merged = False
+    if branch and bases:
+        try:
+            done = _git("rev-list", branch, "--not", *bases, cwd=root)
+        except (OSError, subprocess.SubprocessError):
+            done = None
+        merged = done is not None and done.returncode == 0 and not done.stdout.strip()
+    return {"clean": _is_clean(cwd), "merged": merged}
+
+
+def worktree_removal_reason(db, conv: dict | None) -> str | None:
+    """Why a line's worktree cannot be removed right now, or None when SAFE.
+
+    A line with no worktree of its own (a shared or inherited directory) has
+    nothing to keep, so it reads as SAFE too.
+    """
+    state = worktree_state(db, conv)
+    if state is None:
+        return None
+    if not state["clean"]:
+        return "uncommitted changes"
+    if not state["merged"]:
         return "unmerged commits"
     return None
+
+
+def discard_worktree(db, conv_id: str) -> bool:
+    """Force-remove a merged line's worktree, discarding uncommitted changes.
+
+    The explicit ``discard`` path a person or captain passes when the branch
+    is already merged. It refuses an unmerged branch outright: those commits
+    exist only in the worktree, and a discard must never destroy them.
+    """
+    conv = db.get_conversation(conv_id) or {}
+    state = worktree_state(db, conv)
+    if state is None or not state["merged"]:
+        return False
+    remove_for_line(conv)
+    return not os.path.isdir(conv.get("cwd") or "")
 
 
 def archive_worktree_if_safe(db, conv_id: str) -> tuple[bool, str | None]:
