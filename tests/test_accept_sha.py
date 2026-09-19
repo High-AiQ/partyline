@@ -12,7 +12,13 @@ from fastapi.testclient import TestClient
 from partyline import accept_sha as accept_sha_module
 from partyline import auth_store, auth_tokens, server
 from partyline import line_worktree as line_worktree_module
-from partyline.accept_sha import AcceptError, accept_sha, accepted_note, register_accept_route
+from partyline.accept_sha import (
+    AcceptError,
+    accept_sha,
+    accepted_note,
+    handoff_rider,
+    register_accept_route,
+)
 from partyline.auth_guard import install_auth_guard
 from partyline.conversation_routes import register_conversation_routes
 from partyline.db import Db
@@ -191,6 +197,43 @@ class AcceptShaTest(unittest.TestCase):
         self.accept(sha)
         self.assertEqual(accepted_note(self.db, self.kid["id"]),
                          f" — accepted hand-off: {sha[:12]}")
+
+    # -- the captain wake rider ------------------------------------------------
+
+    def test_the_handoff_rider_surfaces_accepted_shas_and_worktrees(self):
+        self.assertEqual(handoff_rider(self.db, "root"), "")  # no hand-off anywhere yet
+        sha = self.commit_detached("the real work")
+        self.accept(sha)
+        rider = handoff_rider(self.db, "root")
+        self.assertIn("(hand-off: ", rider)
+        self.assertIn(f"«kid» accepted {sha[:12]}", rider)
+        self.assertIn(self.worktree, rider)
+        own = handoff_rider(self.db, self.kid["id"])
+        self.assertIn(f"accepted {sha[:12]}", own)
+        self.assertIn(f"worktree {self.worktree}", own)
+
+    def test_the_rider_omits_absent_values(self):
+        self.db.create_conversation("loose", "loose")
+        self.db._exec(
+            "UPDATE conversations SET parent_id='root', accepted_sha=? WHERE id='loose'",
+            ("a" * 40,),
+        )
+        rider = handoff_rider(self.db, "root")
+        self.assertIn("«loose» accepted aaaaaaaaaaaa", rider)
+        self.assertNotIn("worktree", rider.split("«loose»")[1])  # no cwd: no path claimed
+
+    def test_the_rider_rides_a_captain_wake(self):
+        from partyline.role_delivery import RoleState, bind_role_delivery
+
+        sha = self.commit_detached("the real work")
+        self.accept(sha)
+        att = {"id": "root-lead", "digest_rider": lambda: "board"}
+        lead = RoleState("lead", "root", None, ("read", "write", "assign", "create_child"))
+        with patch("partyline.role_delivery.current_role", return_value=lead):
+            bind_role_delivery(self.db, att)
+            rider = att["digest_rider"]()
+        self.assertIn("(hand-off: ", rider)
+        self.assertIn(f"accepted {sha[:12]}", rider)
 
     # -- refusals ------------------------------------------------------------
 

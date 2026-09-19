@@ -227,9 +227,13 @@ it there. Accepting only fast-forwards: a branch that carries commits the SHA
 does not include, or a SHA from an unrelated history, is refused with 409
 rather than merged or rebased, so accepting never orphans a commit. Nothing is
 pushed; the captain still pushes after its own review, as before. The recorded
-SHA rides the ☏ checkout line a captain hears on appointment, and the staffing
+SHA rides the ☏ checkout line a captain hears on appointment, the staffing
 board (`GET /api/conversations/<id>/staffing`) returns a `lines` list naming
-each descendant line's `accepted_sha`. Anyone else who wants to record a
+each descendant line's `accepted_sha`, and every captain wake carries a
+`(hand-off: …)` digest rider — the line's accepted SHA and worktree path, plus
+each descendant that has an accepted SHA — so a captain planning from a wake
+sees the hand-off without asking. A tree with no hand-offs carries no rider.
+Anyone else who wants to record a
 hand-off gets 403 — a captain higher up reviews the work again at its own
 scope, so nobody accepts across two levels.
 
