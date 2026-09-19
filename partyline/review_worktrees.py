@@ -138,6 +138,23 @@ def remove_review_path(path: str) -> bool:
     return not os.path.isdir(path)
 
 
+def prune_accepted_review(db, conv_id: str, sha: str) -> int:
+    """Remove the accepted SHA's review worktrees of one line.
+
+    Reviews of other SHAs stay until the line retires: they may still be
+    mid-review, and only the accepted hand-off is settled.
+    """
+    removed = 0
+    rows = db._exec(
+        "SELECT path FROM review_worktrees WHERE conv_id=? AND sha=?", (conv_id, sha)
+    ).fetchall()
+    for row in rows:
+        if remove_review_path(row["path"]):
+            db._exec("DELETE FROM review_worktrees WHERE path=?", (row["path"],))
+            removed += 1
+    return removed
+
+
 def prune_review_worktrees(db, conv_id: str) -> dict:
     """Drop every review worktree recorded for the line. The SHAs stay in the repo.
 

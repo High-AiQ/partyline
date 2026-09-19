@@ -244,12 +244,14 @@ to run `git worktree add /tmp/...` for it — around thirty times in one program
 and nothing pruned them. A review worktree is partyline's instead: `POST
 /api/conversations/<id>/review-worktrees` with JSON `{"sha":"..."}` (anyone
 with `read` on the line — a person, its captain, the parent's captain — or the
-documented CLI form, `python -m scripts.review_worktree create --database
-<db> --conversation <id> --sha <sha>`) checks the SHA out detached at
+documented CLI form, `python -m scripts.review_worktree --database
+<db> create --conversation <id> --sha <sha>`) checks the SHA out detached at
 `<repo>/.review/<full sha>`, records it on the line, and announces it there.
 `GET .../review-worktrees` lists a line's recorded reviews. The records drive
 the cleanup: every review worktree of a line is pruned when the line is
-retired, archived, or purged, and when its SHA is accepted, so a finished
+retired, archived, or purged, and the accepted SHA's review goes when that SHA
+is accepted (reviews of other SHAs stay until the line retires — they may
+still be mid-review), so a finished
 review never lingers. At startup the sweep also drops `.review` directories
 whose line is gone or that no record claims — only full-SHA directories, since
 partyline owns the directory but nothing else in a repository's `.review`.

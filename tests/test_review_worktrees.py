@@ -166,7 +166,7 @@ class ReviewWorktreesTest(unittest.TestCase):
 
     # -- pruning at the lifecycle points ----------------------------------------
 
-    def test_accept_prunes_every_review_worktree_of_the_line(self):
+    def test_accept_prunes_the_accepted_sha_s_reviews_and_leaves_others(self):
         first = self.commit_detached("first candidate")
         second = self.commit_detached("second candidate")
         self.create(first)
@@ -177,10 +177,10 @@ class ReviewWorktreesTest(unittest.TestCase):
             json={"sha": first}, headers=self.root_captain())
         self.assertEqual(accepted.status_code, 200, accepted.text)
         self.assertFalse(os.path.isdir(self.review_dir(first)))
-        self.assertFalse(os.path.isdir(self.review_dir(second)))  # all of the line's reviews go
+        self.assertTrue(os.path.isdir(self.review_dir(second)))  # still possibly mid-review
         listed = self.client.get(
             f"/api/conversations/{self.kid['id']}/review-worktrees", headers=self.root_captain())
-        self.assertEqual(listed.json(), [])
+        self.assertEqual([row["sha"] for row in listed.json()], [second])
 
     def test_retiring_the_line_prunes_its_review_worktrees(self):
         sha = self.commit_detached("work under review")

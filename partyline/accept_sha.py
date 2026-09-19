@@ -23,7 +23,7 @@ from .hierarchy import descendants, parent_id_of
 from .hierarchy_contracts import AcceptIn, AcceptResponse
 from .line_worktree import WORKTREES_DIR, _git, line_cwd, repo_and_worktree, rev
 from .machine_scope import deny_unless
-from .review_worktrees import prune_review_worktrees
+from .review_worktrees import prune_accepted_review
 from .worktree_lifecycle import _base_ref
 
 _SHA = re.compile(r"[0-9a-f]{4,64}")
@@ -117,7 +117,7 @@ def accept_sha(db, conv_id: str, sha: str) -> dict:
             )
         _move_branch(root, worktree, branch, full)
     db._exec("UPDATE conversations SET accepted_sha=? WHERE id=?", (full, conv_id))
-    pruned = prune_review_worktrees(db, conv_id)
+    pruned = prune_accepted_review(db, conv_id, full)
     return {"branch": branch, "sha": full, "moved": moved, "pruned_reviews": pruned}
 
 
