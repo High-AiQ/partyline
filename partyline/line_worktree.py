@@ -22,6 +22,7 @@ import tempfile
 from .hierarchy import lead_attachment, parent_id_of
 
 WORKTREES_DIR = ".partyline-worktrees"
+REVIEW_DIR = ".review"
 _GIT_TIMEOUT = 30
 
 
@@ -29,6 +30,33 @@ def _git(*args: str, cwd: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", *args], cwd=cwd, capture_output=True, text=True, timeout=_GIT_TIMEOUT
     )
+
+
+def rev(cwd: str, *args: str) -> str | None:
+    """Run git read-only and return its stripped stdout, or None on any failure."""
+    try:
+        done = _git(*args, cwd=cwd)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout.strip() if done.returncode == 0 and done.stdout.strip() else None
+
+
+def repo_and_worktree(cwd: str) -> tuple[str | None, str | None]:
+    """The repository root and the line's worktree, when that still exists.
+
+    A placed line is recognised by its worktree path, so a worktree removed
+    after an archive still names both sides; a line in a shared checkout is
+    its own worktree.
+    """
+    cwd = (cwd or "").rstrip("/")
+    if f"/{WORKTREES_DIR}/" in cwd:
+        root = cwd.split(f"/{WORKTREES_DIR}/", 1)[0]
+        if not os.path.isdir(root):
+            return None, None
+        return root, cwd if os.path.isdir(cwd) else None
+    if not cwd or not os.path.isdir(cwd):
+        return None, None
+    return repo_root(cwd), cwd
 
 
 def repo_root(path: str | None) -> str | None:
@@ -91,16 +119,16 @@ def _free_path(base: str) -> str:
     return path
 
 
-def _exclude(root: str) -> None:
-    """Keep the worktree directory out of the repository's status output."""
+def _exclude(root: str, name: str = WORKTREES_DIR) -> None:
+    """Keep a partyline-managed directory out of the repository's status output."""
     info = os.path.join(root, ".git", "info")
     try:
         os.makedirs(info, exist_ok=True)
         exclude = os.path.join(info, "exclude")
         existing = open(exclude).read() if os.path.exists(exclude) else ""
-        if f"{WORKTREES_DIR}/" not in existing:
+        if f"{name}/" not in existing:
             with open(exclude, "a") as fh:
-                fh.write(f"\n{WORKTREES_DIR}/\n")
+                fh.write(f"\n{name}/\n")
     except OSError:
         pass  # a bare or read-only .git: status noise is not worth failing for
 
