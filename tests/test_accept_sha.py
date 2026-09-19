@@ -259,6 +259,32 @@ class AcceptShaTest(unittest.TestCase):
         self.assertEqual(response.status_code, 409, response.text)
         self.assertIn("no history", response.json()["detail"])
 
+    def test_a_sibling_line_s_commit_is_refused(self):
+        # S2: the accepted SHA must sit on this line's own line of descent.
+        self.commit("kid's own work")
+        sib = self.client.post("/api/conversations/root/children", json={"name": "sib"})
+        sib_wt = sib.json()["conversation"]["cwd"]
+        _git("checkout", "-q", "-b", "side", cwd=sib_wt)
+        with open(os.path.join(sib_wt, "s.txt"), "w") as fh:
+            fh.write("sibling work\n")
+        _git("add", "-A", cwd=sib_wt)
+        _identity("commit", "-q", "-m", "sibling work", cwd=sib_wt)
+        sibling_sha = _git("rev-parse", "HEAD", cwd=sib_wt).stdout.strip()
+        response = self.accept(sibling_sha)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("fast-forwards", response.json()["detail"])
+        self.assertNotEqual(self.branch_head(), sibling_sha)
+
+    def test_a_parent_checkout_that_moved_ahead_does_not_block_the_line_s_own_work(self):
+        sha = self.commit_detached("the real work")
+        _git("checkout", "-q", "main", cwd=self.repo)
+        with open(os.path.join(self.repo, "main-moved.txt"), "w") as fh:
+            fh.write("moved\n")
+        _git("add", "-A", cwd=self.repo)
+        _identity("commit", "-q", "-m", "main moved", cwd=self.repo)
+        response = self.accept(sha)
+        self.assertEqual(response.status_code, 200, response.text)
+
     def test_a_dirty_worktree_refuses_the_fast_forward_and_keeps_the_changes(self):
         self.commit("first")
         accepted = self.commit_detached("changes code.txt")
@@ -271,12 +297,13 @@ class AcceptShaTest(unittest.TestCase):
         self.assertNotEqual(self.branch_head(), accepted)
 
     def test_a_line_outside_a_repository_is_refused(self):
+        # a plain directory is neither a placed worktree nor a repository
         self.db.create_conversation("loose", "loose")
         self.db._exec("UPDATE conversations SET parent_id='root', cwd=? WHERE id='loose'",
                       (self.directory.name,))
         response = self.accept(self.commit_detached("work"), conv_id="loose")
         self.assertEqual(response.status_code, 409, response.text)
-        self.assertIn("git repository", response.json()["detail"])
+        self.assertIn("placed line worktree", response.json()["detail"])
 
     def test_a_line_whose_directory_is_gone_is_refused(self):
         self.db.create_conversation("ghost", "ghost")
@@ -290,14 +317,6 @@ class AcceptShaTest(unittest.TestCase):
         sha = "abcdef0123456789"
         self.assertEqual(self.accept(sha, conv_id="ghost").status_code, 409)
         self.assertEqual(self.accept(sha, conv_id="gone").status_code, 409)
-
-    def test_a_root_line_accepts_onto_the_shared_checkout_branch(self):
-        sha = self.commit_side("work handed up on the root line")
-        response = self.accept(sha, conv_id="root")
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["branch"], "main")
-        self.assertTrue(response.json()["moved"])
-        self.assertEqual(self.branch_head("main"), sha)
 
     def test_git_failures_surface_as_409(self):
         original = line_worktree_module._git
@@ -327,15 +346,22 @@ class AcceptShaTest(unittest.TestCase):
         self.assertIn("cannot move line/kid", response.json()["detail"])
         self.assertNotEqual(self.branch_head(), sha)
 
-    def test_a_shared_checkout_on_a_detached_head_has_no_branch_to_move(self):
-        _git("checkout", "-q", "--detach", cwd=self.repo)
-        self.addCleanup(_git, "checkout", "-q", "main", cwd=self.repo)
+    def test_accept_is_confined_to_placed_line_worktrees(self):
+        # S1: a shared checkout's branch belongs to the person; partyline
+        # never fast-forwards it.
         self.db.create_conversation("det", "det")
         self.db._exec("UPDATE conversations SET parent_id='root', cwd=? WHERE id='det'",
                       (self.repo,))
+        main_before = _git("rev-parse", "main", cwd=self.repo).stdout.strip()
         response = self.accept(self.commit_detached("work"), conv_id="det")
         self.assertEqual(response.status_code, 409, response.text)
-        self.assertIn("detached HEAD", response.json()["detail"])
+        self.assertIn("placed line worktree", response.json()["detail"])
+        self.assertEqual(_git("rev-parse", "main", cwd=self.repo).stdout.strip(), main_before)
+
+    def test_a_root_line_in_a_shared_checkout_cannot_accept(self):
+        response = self.accept(self.commit_detached("work"), conv_id="root")
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("placed line worktree", response.json()["detail"])
 
     def test_a_missing_branch_is_refused(self):
         sha = self.commit_detached("work")

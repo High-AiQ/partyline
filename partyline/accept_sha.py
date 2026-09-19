@@ -19,11 +19,12 @@ import re
 from fastapi import HTTPException, Request
 
 from .auth_guard import request_principal
-from .hierarchy import descendants
+from .hierarchy import descendants, parent_id_of
 from .hierarchy_contracts import AcceptIn, AcceptResponse
 from .line_worktree import WORKTREES_DIR, _git, line_cwd, repo_and_worktree, rev
 from .machine_scope import deny_unless
 from .review_worktrees import prune_review_worktrees
+from .worktree_lifecycle import _base_ref
 
 _SHA = re.compile(r"[0-9a-f]{4,64}")
 
@@ -36,14 +37,13 @@ class AcceptError(Exception):
 
 
 def _branch_name(cwd: str) -> str:
-    """The one branch the hand-off lands on: ``line/<worktree name>``, or the
-    branch a shared checkout is on right now."""
-    if f"/{WORKTREES_DIR}/" in cwd:
-        return f"line/{os.path.basename(cwd)}"
-    branch = rev(cwd, "rev-parse", "--abbrev-ref", "HEAD") or ""
-    if not branch or branch == "HEAD":
-        raise AcceptError(409, "this checkout is on a detached HEAD; there is no line branch to move")
-    return branch
+    """The one branch the hand-off lands on: the line worktree's ``line/<name>``.
+
+    Accept is confined to placed line worktrees: a shared checkout's branch
+    belongs to the person whose checkout it is, and partyline never
+    fast-forwards it.
+    """
+    return f"line/{os.path.basename(cwd.rstrip('/'))}"
 
 
 def _git_failure(done, fallback: str) -> AcceptError:
@@ -76,8 +76,12 @@ def accept_sha(db, conv_id: str, sha: str) -> dict:
         raise AcceptError(404, "line not found")
     cwd = line_cwd(db, conv_id) or ""
     root, worktree = repo_and_worktree(cwd)
-    if root is None:
-        raise AcceptError(409, "this line does not work inside a git repository")
+    if root is None or f"/{WORKTREES_DIR}/" not in cwd:
+        raise AcceptError(
+            409,
+            "accept is for a placed line worktree: this line works in a shared checkout, "
+            "whose branch belongs to the person",
+        )
     name = sha.strip().lower()
     if not _SHA.fullmatch(name):
         raise AcceptError(400, "pass the commit SHA (hex) to accept")
@@ -100,6 +104,16 @@ def accept_sha(db, conv_id: str, sha: str) -> dict:
             raise AcceptError(
                 409,
                 f"accepting only fast-forwards: {branch}{count} the accepted SHA does not include",
+            )
+        # Descent from the line's branch point with its parent: the accepted
+        # work sits on this line's line of descent, not merely somewhere the
+        # branch can reach.
+        parent_tip = _base_ref(line_cwd(db, parent_id_of(conv)) if parent_id_of(conv) else None)
+        lineage = rev(root, "merge-base", branch, parent_tip) if parent_tip else None
+        if lineage and rev(root, "merge-base", lineage, full) != lineage:
+            raise AcceptError(
+                409,
+                f"{name} is not on this line's descent from its branch point with the parent",
             )
         _move_branch(root, worktree, branch, full)
     db._exec("UPDATE conversations SET accepted_sha=? WHERE id=?", (full, conv_id))
