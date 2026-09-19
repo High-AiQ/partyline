@@ -14,7 +14,7 @@ from .contracts import (
     MessageEvent,
     MessageResponse,
 )
-from .mention_relay import post_private, ring_workers
+from .mention_relay import live_manager, post_private, ring_workers
 from .hierarchy import (
     HierarchyError,
     child_ids,
@@ -39,7 +39,7 @@ from .hierarchy_contracts import (
 )
 from . import checkout_health
 from .accept_sha import accepted_note
-from .line_worktree import describe, line_cwd, place_child
+from .line_worktree import describe, line_cwd, place_child, placement_root
 from .machine_scope import capability_state, deny_staffed_split, deny_unless, is_human
 from .reports import (
     ReportError,
@@ -54,24 +54,6 @@ from .reports import (
 
 def _http(exc: HierarchyError | ReportError) -> HTTPException:
     return HTTPException(exc.status_code, exc.detail)
-
-
-def _live_manager(runtime, conv_id: str) -> dict | None:
-    """The parent's manager, only if a message could actually reach it.
-
-    The same three conditions `message_routing` uses, deliberately: status
-    exactly ``running``, a live adapter, and an activation that still matches.
-    A ``starting`` or superseded manager is not delivery — posting at one
-    would mark the report notified while nobody was woken, which is the
-    silence this whole path exists to avoid.
-    """
-    lead = lead_attachment(runtime.db, conv_id)
-    if lead is None or lead["status"] != "running":
-        return None
-    adapter = runtime.live.get(lead["id"])
-    if adapter is None or not runtime.activation_matches(adapter, lead):
-        return None
-    return lead
 
 
 def _report_model(row: dict) -> dict:
@@ -168,10 +150,15 @@ def hierarchy_router(runtime) -> APIRouter:
         deny_staffed_split(db, principal, conv_id)  # the loud reason first
         deny_unless(db, principal, conv_id, "create_child")
         cwd = line_cwd(db, conv_id)
+        target, target_error = await asyncio.to_thread(placement_root, body.repository, cwd)
+        if target_error:
+            raise HTTPException(400, target_error)
         health = await asyncio.to_thread(checkout_health.inspect, cwd)
-        # A machine never cuts a child from a stale checkout; base:"upstream" fetches the default instead.
+        # A machine never cuts a child from a stale checkout; base:"upstream" fetches the
+        # default instead. A cross-repo child does not start from this checkout at all.
         base_ref, base_error = await asyncio.to_thread(
-            checkout_health.child_base_ref, cwd, body.base == "upstream", is_human(principal), health)
+            checkout_health.child_base_ref, target or cwd, body.base == "upstream",
+            is_human(principal), None if target else health)
         if base_error:
             raise HTTPException(409, base_error)
         name = body.name.strip() or "untitled"
@@ -179,12 +166,18 @@ def hierarchy_router(runtime) -> APIRouter:
             conv = create_child_conversation(db, conv_id, str(uuid.uuid4()), name)
         except HierarchyError as exc:
             raise _http(exc) from exc
-        placed = place_child(db, conv_id, conv["id"], base=base_ref)
+        placed = place_child(db, conv_id, conv["id"], base=base_ref, root=target)
         if where := describe(placed):
             await runtime.post_message(conv["id"], "system", "system", where)
-        if placed.get("branch") and (base := checkout_health.describe(health)):
-            base = base.replace("☏ checkout:", "☏ base checkout:", 1)
-            await runtime.post_message(conv["id"], "system", "system", base)
+        if placed.get("branch"):
+            # The base notice describes the checkout the child actually starts
+            # from: the parent's for a normal birth, the target repo's when
+            # the child was placed elsewhere.
+            notice_health = health if target is None else await asyncio.to_thread(
+                checkout_health.inspect, target, fetch=False)
+            if notice := checkout_health.describe(notice_health):
+                notice = notice.replace("☏ checkout:", "☏ base checkout:", 1)
+                await runtime.post_message(conv["id"], "system", "system", notice)
         conv = db.get_conversation(conv["id"])
         goal, topic = body.goal.strip(), body.topic.strip()
         if goal or topic:
@@ -252,7 +245,7 @@ def hierarchy_router(runtime) -> APIRouter:
             # manager appointed, or if delivery raises, the row stays
             # undelivered so the next escalation from this child retries it
             # rather than coalescing into a silence nobody asked for.
-            lead = _live_manager(runtime, parent)
+            lead = live_manager(runtime, parent)
             if lead is None:
                 row = release_wake_claim(db, row["id"], claim)
             else:

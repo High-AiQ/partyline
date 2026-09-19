@@ -94,10 +94,19 @@ and `max_depth`. People are never boxed by the cap.
 A child line is placed when it is born. If the parent line works inside a git
 repository, the child gets `<repo>/.partyline-worktrees/<slug>` on branch
 `line/<slug>` (kept out of `git status` through `.git/info/exclude`), and the
-line hears "☏ working directory: … a git worktree on branch …". Otherwise it
-inherits the parent's directory. A machine attaching a process to a line cannot
-choose another directory: the process works where the line works. A person may.
-Purging a line drops its worktree; the branch stays.
+line hears "☏ working directory: … a git worktree on branch …". A birth may
+also target another repository this machine has: `POST …/children` accepts an
+optional `repository` — an absolute path anywhere inside a git repository —
+and the child is placed under *that* repository's `.partyline-worktrees`,
+with the same capability checks and the same branch naming. This is for work
+that belongs to another project entirely (a partyline-improvement line while
+the parent captains a book project); the birth notice names the directory, so
+everyone can see the child does not live in the parent's checkout. An
+explicit `repository` is never git-initialised and never created: a relative
+path or a directory outside any repository is refused with 400. Otherwise it
+inherits the parent's directory. A machine attaching a process to a line
+cannot choose another directory: the process works where the line works. A
+person may. Purging a line drops its worktree; the branch stays.
 
 A parent line whose directory is not a repository gets one initialized (one empty root
 commit) before its first child is placed, so a project started in a blank directory still
