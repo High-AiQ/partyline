@@ -165,15 +165,43 @@ def init_repo(path: str | None) -> str | None:
         return None
 
 
-def place_child(db, parent_id: str, child_id: str, base: str | None = None) -> dict:
+def placement_root(repository: str | None, parent_cwd: str | None) -> tuple[str | None, str | None]:
+    """The repository root a child is placed into, and why it may not be.
+
+    An explicit ``repository`` — an absolute path anywhere inside a git
+    repository this machine has — sends the child to that repository's
+    ``.partyline-worktrees``; work that belongs to another project is placed
+    there instead of being born in whatever checkout the parent line happens
+    to sit in. The default — no ``repository`` — is ``(None, None)``: the
+    caller falls back to the parent line's own repository, which a plain
+    directory is initialised into as before. An explicit repository is never
+    initialised: a path that is not inside a git repository is refused.
+    """
+    if not repository:
+        return None, None
+    repo = repository.strip()
+    if not os.path.isabs(repo):
+        return None, "repository must be an absolute path to a git repository"
+    root = repo_root(repo)
+    if root is None:
+        return None, f"{repo} is not inside a git repository"
+    return root, None
+
+
+def place_child(
+    db, parent_id: str, child_id: str, base: str | None = None, root: str | None = None,
+) -> dict:
     """Give a new child line its working directory; record and describe it.
 
     Returns ``{"cwd": path or None, "branch": name or None, "base": ref or None}``.
     ``base`` is an explicit start point (an upstream ref) for a deliberate cut
     from a checkout left behind; the default stays the repository's HEAD.
+    ``root`` overrides the repository the worktree is placed in (another
+    project on this machine); the default is the parent line's repository.
     """
     parent_cwd = line_cwd(db, parent_id)
-    root = repo_root(parent_cwd) or init_repo(parent_cwd)
+    if root is None:
+        root = repo_root(parent_cwd) or init_repo(parent_cwd)
     placed = {"cwd": parent_cwd, "branch": None, "base": None}
     if root is not None:
         child = db.get_conversation(child_id) or {}

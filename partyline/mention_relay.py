@@ -37,6 +37,24 @@ from .line_depth import live_workers
 LIVE = ("starting", "running")
 
 
+def live_manager(runtime, conv_id: str) -> dict | None:
+    """The line's manager, only if a message could actually reach it.
+
+    The same three conditions `message_routing` uses, deliberately: status
+    exactly ``running``, a live adapter, and an activation that still matches.
+    A ``starting`` or superseded manager is not delivery — posting at one
+    would mark the report notified while nobody was woken, which is the
+    silence this whole path exists to avoid.
+    """
+    lead = lead_attachment(runtime.db, conv_id)
+    if lead is None or lead["status"] != "running":
+        return None
+    adapter = runtime.live.get(lead["id"])
+    if adapter is None or not runtime.activation_matches(adapter, lead):
+        return None
+    return lead
+
+
 def is_foreign(message: dict) -> bool:
     """Said on another line: an API assignment from a parent, or a relay copy."""
     source = message.get("source_conv_id")

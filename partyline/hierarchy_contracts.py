@@ -31,6 +31,11 @@ class ChildIn(BaseModel):
     goal: str = Field(default="", max_length=3000)
     topic: str = Field(default="", max_length=3000)
     base: Literal["checkout", "upstream"] = "checkout"
+    # Absolute path to a git repository this machine has: the child's worktree
+    # is placed under that repository's .partyline-worktrees instead of the
+    # parent's, for work that lives in another project. Optional; the default
+    # stays the parent line's own repository.
+    repository: str = Field(default="", max_length=4096)
 
 
 class AcceptIn(BaseModel):
