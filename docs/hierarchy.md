@@ -176,6 +176,25 @@ A handle written as `name:` at the start of a line is an address too, when a
 live process on that line bears it: `worker: take the review` rings worker.
 Weak models drop the sigil constantly; a label that names nobody rings nobody.
 
+## The accepted SHA
+
+The hand-off is the SHA on the line's branch; nothing else counts. Work used to
+come back on detached refs and side branches while the line's own branch stayed
+at an early commit, and a parent relaying the SHA from a report once pushed the
+wrong commit. A captain of the parent — or the line's own captain, marking
+hand-off — records it with `POST /api/conversations/<id>/accept` and JSON
+`{"sha":"..."}`. The server verifies the SHA exists, verifies the line's branch
+can fast-forward to it, moves the branch, records it on the line, and announces
+it there. Accepting only fast-forwards: a branch that carries commits the SHA
+does not include, or a SHA from an unrelated history, is refused with 409
+rather than merged or rebased, so accepting never orphans a commit. Nothing is
+pushed; the captain still pushes after its own review, as before. The recorded
+SHA rides the ☏ checkout line a captain hears on appointment, and the staffing
+board (`GET /api/conversations/<id>/staffing`) returns a `lines` list naming
+each descendant line's `accepted_sha`. Anyone else who wants to record a
+hand-off gets 403 — a captain higher up reviews the work again at its own
+scope, so nobody accepts across two levels.
+
 ## The goal
 
 A line carries a `goal`: what its manager is seeing through. A person or the

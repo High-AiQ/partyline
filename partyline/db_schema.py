@@ -260,4 +260,8 @@ MIGRATIONS = [
         UNIQUE(message_id, reactor, emoji)
     )""",
     "CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id, emoji)",
+    # accepted_sha: the hand-off recorded with POST .../accept — the SHA the
+    # line's own branch was fast-forwarded to, and the only thing a parent
+    # should treat as the line's work.
+    "ALTER TABLE conversations ADD COLUMN accepted_sha TEXT",
 ]

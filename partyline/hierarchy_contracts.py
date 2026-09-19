@@ -27,6 +27,17 @@ class ChildIn(BaseModel):
     topic: str = Field(default="", max_length=3000)
 
 
+class AcceptIn(BaseModel):
+    sha: str = Field(min_length=4, max_length=64)
+
+
+class AcceptResponse(BaseModel):
+    conv_id: str
+    branch: str
+    sha: str  # the full SHA recorded on the line
+    moved: bool  # False when the branch already pointed at it
+
+
 class ReportIn(BaseModel):
     body: str = Field(min_length=1, max_length=MAX_REPORT_BODY)
     notify: bool = False

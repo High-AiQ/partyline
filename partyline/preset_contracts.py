@@ -54,7 +54,14 @@ class StaffingProcess(BaseModel):
     traits: StaffingTraits | None = None
 
 
+class StaffingLine(BaseModel):
+    id: str
+    name: str
+    accepted_sha: str
+
+
 class StaffingResponse(BaseModel):
     presets_in_use: bool
     presets: list[StaffingPreset] = Field(default_factory=list)
     processes: list[StaffingProcess] = Field(default_factory=list)
+    lines: list[StaffingLine] = Field(default_factory=list)

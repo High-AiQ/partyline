@@ -117,8 +117,12 @@ SPLIT = (
     "once this line has a child, no process may be attached here, and the processes already "
     "here are not your implementers. A goal that does not split stays on this line only while "
     "it has no children. When its work returns, your scope is whether the assignment you gave "
-    "was fulfilled and whether the piece integrates. When you have accepted a child's branch "
-    "and its captain is done, "
+    "was fulfilled and whether the piece integrates. When you accept the work, record the "
+    "hand-off: POST /api/conversations/<child-id>/accept with {{\"sha\":\"<full sha>\"}} — "
+    "partyline verifies the SHA exists and fast-forwards the child's branch to it, and the "
+    "hand-off is the SHA on the line's branch; nothing else counts. Accepting only "
+    "fast-forwards: a side-branch or detached tip the branch cannot reach is refused, never "
+    "merged in. Once the branch carries the accepted SHA and the child's captain is done, "
     "retire the child: DELETE /api/conversations/<child-id>; its worktree goes with it."
 )
 
