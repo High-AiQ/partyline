@@ -89,13 +89,16 @@ class ReviewWorktreesTest(unittest.TestCase):
 
     def commit_detached(self, message):
         _git("checkout", "-q", "--detach", cwd=self.worktree)
+        sha = self.commit_branch(message)
+        _git("checkout", "-q", "line/kid", cwd=self.worktree)
+        return sha
+
+    def commit_branch(self, message):
         with open(os.path.join(self.worktree, "code.txt"), "a") as fh:
             fh.write(message + "\n")
         _git("add", "-A", cwd=self.worktree)
         _identity("commit", "-q", "-m", message, cwd=self.worktree)
-        sha = _git("rev-parse", "HEAD", cwd=self.worktree).stdout.strip()
-        _git("checkout", "-q", "line/kid", cwd=self.worktree)
-        return sha
+        return _git("rev-parse", "HEAD", cwd=self.worktree).stdout.strip()
 
     def create(self, sha, conv_id=None, headers=None):
         return self.client.post(
@@ -155,18 +158,19 @@ class ReviewWorktreesTest(unittest.TestCase):
                       (self.directory.name,))
         self.assertEqual(self.create(sha, conv_id=loose).status_code, 409)
 
-    def test_read_scopes_who_may_create(self):
+    def test_creation_needs_write_on_the_line(self):
         sha = self.commit_detached("work under review")
         self.db.add_attachment("kid-worker", self.kid["id"], "dig", "fake", ["fake"], self.repo)
         kid_worker = self.machine("kid-worker")
-        self.assertEqual(self.create(sha, headers=kid_worker).status_code, 201)  # own line: read
+        self.assertEqual(self.create(sha, headers=kid_worker).status_code, 201)  # own line: write
         self.db.add_attachment("root-worker", "root", "dor", "fake", ["fake"], self.repo)
-        outsider = self.machine("root-worker")  # a worker on the parent: no read on the child
+        outsider = self.machine("root-worker")  # a worker on the parent: no write on the child
         self.assertEqual(self.create(sha, headers=outsider).status_code, 403)
 
     # -- pruning at the lifecycle points ----------------------------------------
 
     def test_accept_prunes_the_accepted_sha_s_reviews_and_leaves_others(self):
+        self.commit_branch("first")  # the line has work of its own before the hand-off
         first = self.commit_detached("first candidate")
         second = self.commit_detached("second candidate")
         self.create(first)

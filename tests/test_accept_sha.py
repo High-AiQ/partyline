@@ -180,6 +180,7 @@ class AcceptShaTest(unittest.TestCase):
     # -- the record ----------------------------------------------------------
 
     def test_the_accepted_sha_is_on_the_staffing_board(self):
+        self.commit("first")
         sha = self.commit_detached("the real work")
         self.accept(sha)
         report = staffing_report(self.db, "root")
@@ -192,6 +193,7 @@ class AcceptShaTest(unittest.TestCase):
         self.assertEqual(seen.json()["lines"][0]["accepted_sha"], sha)
 
     def test_the_accepted_sha_rides_the_checkout_line(self):
+        self.commit("first")
         self.assertEqual(accepted_note(self.db, self.kid["id"]), "")
         sha = self.commit_detached("the real work")
         self.accept(sha)
@@ -201,6 +203,7 @@ class AcceptShaTest(unittest.TestCase):
     # -- the captain wake rider ------------------------------------------------
 
     def test_the_handoff_rider_surfaces_accepted_shas_and_worktrees(self):
+        self.commit("first")
         self.assertEqual(handoff_rider(self.db, "root"), "")  # no hand-off anywhere yet
         sha = self.commit_detached("the real work")
         self.accept(sha)
@@ -228,6 +231,7 @@ class AcceptShaTest(unittest.TestCase):
         self.assertEqual(handoff_rider(self.db, "root"), "")
 
     def test_the_rider_rides_a_captain_wake(self):
+        self.commit("first")
         from partyline.role_delivery import RoleState, bind_role_delivery
 
         sha = self.commit_detached("the real work")
@@ -280,7 +284,27 @@ class AcceptShaTest(unittest.TestCase):
         self.assertIn("fast-forwards", response.json()["detail"])
         self.assertNotEqual(self.branch_head(), sibling_sha)
 
+    def test_a_line_with_no_commits_of_its_own_refuses_a_foreign_sha(self):
+        # S2, the zero-own-commit case: kid sits exactly at its branch point
+        # with the parent, so a sibling's SHA is not this line's work — land
+        # the line's own work on the branch first.
+        sib = self.client.post("/api/conversations/root/children", json={"name": "sib"})
+        sib_wt = sib.json()["conversation"]["cwd"]
+        _git("checkout", "-q", "-b", "side", cwd=sib_wt)
+        with open(os.path.join(sib_wt, "s.txt"), "w") as fh:
+            fh.write("sibling work\n")
+        _git("add", "-A", cwd=sib_wt)
+        _identity("commit", "-q", "-m", "sibling work", cwd=sib_wt)
+        sibling_sha = _git("rev-parse", "HEAD", cwd=sib_wt).stdout.strip()
+        response = self.accept(sibling_sha)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("no commits of its own", response.json()["detail"])
+        self.assertNotEqual(self.branch_head(), sibling_sha)
+        own = self.commit("kid's first work")  # the remedy: land this line's work
+        self.assertEqual(self.accept(own).status_code, 200)
+
     def test_a_parent_checkout_that_moved_ahead_does_not_block_the_line_s_own_work(self):
+        self.commit("kid's own work")
         sha = self.commit_detached("the real work")
         _git("checkout", "-q", "main", cwd=self.repo)
         with open(os.path.join(self.repo, "main-moved.txt"), "w") as fh:
@@ -324,6 +348,7 @@ class AcceptShaTest(unittest.TestCase):
         self.assertEqual(self.accept(sha, conv_id="gone").status_code, 409)
 
     def test_git_failures_surface_as_409(self):
+        self.commit("first")
         original = line_worktree_module._git
 
         def no_merge_base(*args, cwd):
@@ -384,6 +409,7 @@ class AcceptShaTest(unittest.TestCase):
     # -- authorization ---------------------------------------------------------
 
     def test_only_the_parent_captain_or_the_line_captain_may_accept(self):
+        self.commit("first")
         sha = self.commit_detached("the real work")
         kid_captain = self.machine(self.captain(self.kid["id"], "sol"))
         self.assertEqual(self.accept(sha, headers=kid_captain).status_code, 200)
@@ -398,10 +424,12 @@ class AcceptShaTest(unittest.TestCase):
         self.assertEqual(self.accept(sha, headers=self.machine("root-worker")).status_code, 403)
 
     def test_nobody_accepts_across_two_levels(self):
+        self.commit("kid's own work")  # grand is based on kid's tip, not the parent's
         grand = self.client.post(
             f"/api/conversations/{self.kid['id']}/children", json={"name": "grand"})
         self.assertEqual(grand.status_code, 201, grand.text)
         grand_worktree = grand.json()["conversation"]["cwd"]
+        _git("merge", "--ff-only", "line/kid", cwd=grand_worktree)
         _git("checkout", "-q", "-b", "side", cwd=grand_worktree)
         with open(os.path.join(grand_worktree, "g.txt"), "w") as fh:
             fh.write("grand work\n")

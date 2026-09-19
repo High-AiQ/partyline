@@ -153,10 +153,6 @@ def hierarchy_router(runtime) -> APIRouter:
         target, target_error = await asyncio.to_thread(placement_root, body.repository)
         if target_error:
             raise HTTPException(400, target_error)
-        cwd = line_cwd(db, conv_id)
-        target, target_error = await asyncio.to_thread(placement_root, body.repository)
-        if target_error:
-            raise HTTPException(400, target_error)
         # The stale-base guard reads the parent's checkout, or the target's when placed there.
         base_health = await asyncio.to_thread(
             checkout_health.inspect, cwd if target is None else target)

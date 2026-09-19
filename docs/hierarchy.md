@@ -242,10 +242,11 @@ scope, so nobody accepts across two levels.
 An adversarial review needs a checkout of the exact SHA, and sub-captains used
 to run `git worktree add /tmp/...` for it — around thirty times in one program,
 and nothing pruned them. A review worktree is partyline's instead: `POST
-/api/conversations/<id>/review-worktrees` with JSON `{"sha":"..."}` (anyone
-with `read` on the line — a person, its captain, the parent's captain — or the
-documented CLI form, `python -m scripts.review_worktree --database
-<db> create --conversation <id> --sha <sha>`) checks the SHA out detached at
+/api/conversations/<id>/review-worktrees` with JSON `{"sha":"..."}` — creation
+writes into the repository, so it needs `write` on the line (a person, its
+captain, the parent's captain) — or the documented CLI form, `python -m
+scripts.review_worktree --database <db> create --conversation <id>
+--sha <sha>`. Either checks the SHA out detached at
 `<repo>/.review/<full sha>`, records it on the line, and announces it there.
 `GET .../review-worktrees` lists a line's recorded reviews. The records drive
 the cleanup: every review worktree of a line is pruned when the line is
