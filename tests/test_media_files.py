@@ -106,10 +106,15 @@ class FilePreparationTest(unittest.TestCase):
         prepared = files.prepared_file((damaged, "broken.png", "image/png"))
         self.assertEqual(prepared.kind, "file")
 
-    def test_pillow_format_outside_the_supported_set_is_a_file(self):
-        prepared = files.prepared_file((image_bytes("TIFF"), "scan.tiff", None))
+    def test_signature_bytes_that_decode_as_nothing_are_still_a_file(self):
+        prepared = files.prepared_file((b"BM not really a bitmap", "thing.bmp", "image/bmp"))
         self.assertEqual(prepared.kind, "file")
-        self.assertEqual(prepared.mime, "image/tiff")
+        self.assertEqual(prepared.mime, "image/bmp")
+
+    def test_a_tiff_signature_is_an_image_even_before_decoding(self):
+        prepared = files.prepared_file((image_bytes("TIFF"), "scan.tiff", None))
+        self.assertEqual(prepared.kind, "image")
+        self.assertEqual(prepared.format, "TIFF")
 
     def test_size_formatting_is_human_readable(self):
         self.assertEqual(files.formatted_size(0), "0 B")

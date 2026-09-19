@@ -37,7 +37,8 @@ CREATE INDEX IF NOT EXISTS idx_images_conv ON images(conv_id, id);
 # Rows written before the three-tier change have no slim columns and may have
 # no thumb at all. They are not rewritten: the database is the index, the files
 # on disk keep their old names, and a variant that was never derived is served
-# as the original. New uploads always populate every column.
+# as the original. New uploads always populate every column. The readable
+# columns and the detected ``format`` arrived later still, on the same terms.
 MIGRATIONS = [
     "ALTER TABLE images ADD COLUMN thumb_bytes INTEGER",
     "ALTER TABLE images ADD COLUMN slim_path TEXT",
@@ -47,16 +48,23 @@ MIGRATIONS = [
     "ALTER TABLE images ADD COLUMN slim_bytes INTEGER",
     "ALTER TABLE images ADD COLUMN kind TEXT",
     "ALTER TABLE images ADD COLUMN filename TEXT",
+    "ALTER TABLE images ADD COLUMN format TEXT",
+    "ALTER TABLE images ADD COLUMN readable_path TEXT",
+    "ALTER TABLE images ADD COLUMN readable_mime TEXT",
+    "ALTER TABLE images ADD COLUMN readable_width INTEGER",
+    "ALTER TABLE images ADD COLUMN readable_height INTEGER",
+    "ALTER TABLE images ADD COLUMN readable_bytes INTEGER",
 ]
 
 COLUMNS = (
     "id,conv_id,message_id,position,title,description,mime,width,height,bytes,path,"
     "thumb_path,thumb_mime,thumb_width,thumb_height,thumb_bytes,"
-    "slim_path,slim_mime,slim_width,slim_height,slim_bytes,created_at,kind,filename"
+    "slim_path,slim_mime,slim_width,slim_height,slim_bytes,created_at,kind,filename,"
+    "format,readable_path,readable_mime,readable_width,readable_height,readable_bytes"
 )
 INSERT = f"INSERT INTO images({COLUMNS}) VALUES({','.join('?' * len(COLUMNS.split(',')))})"
 
-VARIANTS = ("original", "thumb", "slim")
+VARIANTS = ("original", "thumb", "slim", "readable")
 
 
 def _variant(row, prefix: str) -> ImageVariant | None:
@@ -74,9 +82,9 @@ def _variant(row, prefix: str) -> ImageVariant | None:
 def ref_from_row(row, base: str = "") -> FileRef:
     """Build the wire contract for one stored file row.
 
-    All three URLs are always present. A reader picking a tier should never
-    have to ask whether that tier exists — only whether it wants the cheap one,
-    the readable one, or the bytes exactly as uploaded.
+    Every URL is always present. A reader picking a tier should never have to
+    ask whether that tier exists — only whether it wants the cheap one, the
+    readable one, or the bytes exactly as uploaded.
     """
     kind = row["kind"] or ("image" if row["width"] else "file")
     is_image = kind == "image"
@@ -87,14 +95,17 @@ def ref_from_row(row, base: str = "") -> FileRef:
         title=row["title"],
         description=row["description"],
         mime=row["mime"],
-        width=row["width"] if is_image else None,
-        height=row["height"] if is_image else None,
         bytes=row["bytes"],
+        format=row["format"],
+        width=(row["width"] or None) if is_image else None,
+        height=(row["height"] or None) if is_image else None,
         thumb=_variant(row, "thumb") if is_image else None,
         slim=_variant(row, "slim") if is_image else None,
+        readable=_variant(row, "readable") if is_image else None,
         urls=ImageUrls(
             original=f"{base}/api/media/{row['id']}/original",
             thumb=f"{base}/api/media/{row['id']}/thumb",
             slim=f"{base}/api/media/{row['id']}/slim",
+            readable=f"{base}/api/media/{row['id']}/readable",
         ),
     )

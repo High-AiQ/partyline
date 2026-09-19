@@ -121,7 +121,9 @@ class MediaStore:
                 file_id = str(uuid.uuid4())
                 names = {"": f"{file_id}.{item.ext}"}
                 variants = tuple(
-                    variant for variant in (item.thumb, item.slim) if variant is not None
+                    variant
+                    for variant in (item.thumb, item.slim, item.readable)
+                    if variant is not None
                 )
                 for variant in variants:
                     names[variant.suffix] = f"{file_id}{variant.suffix}"
@@ -135,6 +137,9 @@ class MediaStore:
                     f"{conv_id}/{names[item.thumb.suffix]}" if item.thumb else None
                 )
                 slim_path = f"{conv_id}/{names[item.slim.suffix]}" if item.slim else None
+                readable_path = (
+                    f"{conv_id}/{names[item.readable.suffix]}" if item.readable else None
+                )
                 rows.append((
                     file_id, conv_id, message_id, position, title, description,
                     item.mime, item.width or 0, item.height or 0, len(item.data),
@@ -148,6 +153,11 @@ class MediaStore:
                     item.slim.height if item.slim else None,
                     item.slim.bytes if item.slim else None,
                     created_at, item.kind, item.filename,
+                    item.format,
+                    readable_path, item.readable.mime if item.readable else None,
+                    item.readable.width if item.readable else None,
+                    item.readable.height if item.readable else None,
+                    item.readable.bytes if item.readable else None,
                 ))
             with self.db.lock:
                 self.db.conn.executemany(INSERT, rows)

@@ -1,4 +1,4 @@
-"""Message reaction persistence, authorization, events, and process wakes."""
+"""Message reaction persistence, authorization, events, and private delivery."""
 
 from pathlib import Path
 import tempfile
@@ -97,7 +97,14 @@ class ReactionRoutesTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 403)
 
-    def test_person_reaction_wakes_process_with_private_one_line_message(self):
+    def _system_lines(self):
+        """Every stored line, with whether it is addressed to one process."""
+        return [
+            (m["body"], m["sender_type"], m["audience_attachment_id"])
+            for m in self.db.list_messages("line")
+        ]
+
+    def test_person_reaction_wakes_the_process_with_an_addressed_private_copy(self):
         attachment, _ = self._machine()
         recorder = Recorder(self.db.get_attachment(attachment["id"]))
         self.runtime.live[attachment["id"]] = recorder
@@ -106,14 +113,57 @@ class ReactionRoutesTest(unittest.TestCase):
             f"/api/messages/{message['id']}/reactions", json={"emoji": "✅"}
         )
         self.assertEqual(response.status_code, 200)
+        # The target is woken at once — a reaction may be the whole answer.
         self.assertEqual(
             recorder.delivered[-1]["body"],
             "☺ greg reacted ✅ to your «" + "x" * 80 + "…»",
         )
+        # The copy is stored addressed to that process alone: never a public
+        # (unaddressed) system line in the room transcript.
         wake = self.db.list_messages("line")[-1]
-        self.assertEqual(wake["body"], recorder.delivered[-1]["body"])
         self.assertEqual(wake["sender_type"], "system")
         self.assertEqual(wake["audience_attachment_id"], attachment["id"])
+        for _body, sender_type, audience in self._system_lines():
+            self.assertNotEqual((sender_type, audience), ("system", None))
+
+    def test_a_reaction_to_a_stopped_process_wakes_and_posts_nothing(self):
+        attachment, _ = self._machine()
+        self.db.set_attachment_status(attachment["id"], "exited", attachment["runtime_owner"])
+        message = self.db.add_message("line", "sol", "agent", "queued work")
+        response = self.client.post(
+            f"/api/messages/{message['id']}/reactions", json={"emoji": "👀"}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [(body, sender) for body, sender, _ in self._system_lines()],
+            [("queued work", "agent")],
+        )
+
+    def test_a_reaction_on_a_human_message_posts_and_wakes_nothing(self):
+        attachment, _ = self._machine()
+        recorder = Recorder(self.db.get_attachment(attachment["id"]))
+        self.runtime.live[attachment["id"]] = recorder
+        message = self.db.add_message("line", "greg", "human", "ship it")
+        before = self._system_lines()
+        response = self.client.post(
+            f"/api/messages/{message['id']}/reactions", json={"emoji": "🎉"}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self._system_lines(), before)
+        self.assertEqual(recorder.delivered, [])
+
+    def test_an_agent_reaction_wakes_and_posts_nothing(self):
+        attachment, token = self._machine(name="sol")
+        _, other_token = self._machine(name="kimi")
+        recorder = Recorder(self.db.get_attachment(attachment["id"]))
+        self.runtime.live[attachment["id"]] = recorder
+        message = self.db.add_message("line", "sol", "agent", "my work")
+        before = self._system_lines()
+        self.client.headers["Authorization"] = f"Bearer {other_token}"
+        self.client.post(f"/api/messages/{message['id']}/reactions", json={"emoji": "✅"})
+        self.assertEqual(self._system_lines(), before)
+        self.assertEqual(recorder.delivered, [])
+        self.client.headers["Authorization"] = f"Bearer {token}"
 
     def test_process_reaction_broadcasts_without_posting_chat(self):
         attachment, token = self._machine()
