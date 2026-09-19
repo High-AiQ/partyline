@@ -167,6 +167,12 @@ def hierarchy_router(runtime) -> APIRouter:
         except HierarchyError as exc:
             raise _http(exc) from exc
         placed = place_child(db, conv_id, conv["id"], base=base_ref, root=target)
+        if base_ref and not placed.get("branch"):
+            # A failed placement must not inherit the parent checkout — the one
+            # thing an explicit base exists to avoid — so the line is rolled
+            # back and the caller is told, never left seated in the past.
+            db.delete_conversation(conv["id"])
+            raise HTTPException(409, f"the child worktree could not be created on {base_ref}")
         if where := describe(placed):
             await runtime.post_message(conv["id"], "system", "system", where)
         if placed.get("branch"):

@@ -4,11 +4,14 @@ import os
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from partyline import auth_store, auth_tokens, server
+from partyline import checkout_health as checkout_health_module
+from partyline import line_worktree as line_worktree_module
 from partyline.auth_guard import install_auth_guard
 from partyline.conversation_routes import register_conversation_routes
 from partyline.db import Db
@@ -145,6 +148,37 @@ class ChildBaseTest(unittest.TestCase):
     def test_an_unknown_base_value_is_rejected(self):
         made = self.child("kid", base="origin/HEAD")
         self.assertEqual(made.status_code, 422, made.text)
+
+    def test_a_failed_upstream_placement_fails_the_create_rolled_back(self):
+        self.advance_origin()
+        original = line_worktree_module._git
+
+        def add_fails(*args, cwd):
+            if args[:2] == ("worktree", "add"):
+                return subprocess.CompletedProcess(args, 128, "", "fatal: cannot create")
+            return original(*args, cwd=cwd)
+
+        with patch.object(line_worktree_module, "_git", side_effect=add_fails):
+            made = self.child("kid", headers=self.captain, base="upstream")
+        self.assertEqual(made.status_code, 409, made.text)
+        self.assertIn("could not be created", made.json()["detail"])
+        # no orphan line seated in the stale checkout the feature exists to avoid
+        self.assertEqual(self.client.get("/api/conversations/root/children").json(), [])
+
+    def test_an_unfetchable_upstream_is_a_409(self):
+        self.advance_origin()
+        original = checkout_health_module._git
+
+        def fetch_fails(cwd, *args, timeout=5):
+            if args[:1] == ("fetch",):
+                return subprocess.CompletedProcess(args, 128, "", "fatal: could not read")
+            return original(cwd, *args, timeout=timeout)
+
+        with patch.object(checkout_health_module, "_git", side_effect=fetch_fails):
+            made = self.child("kid", headers=self.captain, base="upstream")
+        self.assertEqual(made.status_code, 409, made.text)
+        self.assertIn("could not be fetched", made.json()["detail"])
+        self.assertEqual(self.client.get("/api/conversations/root/children").json(), [])
 
     def test_the_upstream_base_rides_the_birth_notice_of_placed_records(self):
         placed = place_child(self.db, "root",
