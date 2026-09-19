@@ -155,10 +155,11 @@ class PreparationTest(unittest.TestCase):
             images.prepared_image(b"#!/bin/sh\nrm -rf /\n")
         self.assertEqual(raised.exception.status_code, 400)
 
-    def test_an_unsupported_image_format_is_refused_by_name(self):
-        with self.assertRaises(MediaError) as raised:
-            images.prepared_image(tiff())
-        self.assertIn("TIFF", raised.exception.detail)
+    def test_a_tiff_is_an_image_with_a_readable_png_now(self):
+        prepared = images.prepared_image(tiff())
+        self.assertEqual(prepared.mime, "image/tiff")
+        self.assertEqual(prepared.format, "TIFF")
+        self.assertEqual(Image.open(BytesIO(prepared.readable.data)).format, "PNG")
 
     def test_oversized_bytes_are_refused_with_413(self):
         with self.assertRaises(MediaError) as raised:
@@ -338,16 +339,16 @@ class ImageApiTest(unittest.TestCase):
             f"{image['id']}.png", f"{image['id']}_slim.jpg", f"{image['id']}_thumb.jpg",
         ]))
 
-    def test_the_digest_line_offers_all_three_tiers(self):
+    def test_the_digest_line_offers_every_tier_with_its_format(self):
         self.post(title="A chart")
         line = self.db.list_messages("line")[-1]["body"].splitlines()[-1]
         image = self.client.get("/api/conversations/line/images").json()[0]
         self.assertEqual(
             line,
             f"📷 A chart · 8×8"
-            f" · thumb: {image['urls']['thumb']}"
-            f" · slim: {image['urls']['slim']}"
-            f" · original: {image['urls']['original']}",
+            f" · thumb: {image['urls']['thumb']} (JPEG)"
+            f" · slim: {image['urls']['slim']} (JPEG)"
+            f" · original: {image['urls']['original']} (PNG)",
         )
 
     def test_six_images_are_allowed_and_seven_are_not(self):
@@ -484,6 +485,17 @@ class ImageApiTest(unittest.TestCase):
         self.assertEqual(
             self.client.get(f"/api/media/{image['id']}/thumb").status_code, 200
         )
+
+    def test_a_legacy_row_serves_readable_as_the_original(self):
+        """Rows from before the readable tier still answer its URL."""
+        image = self.post().json()["files"][0]
+        listed = self.client.get("/api/conversations/line/images").json()[0]
+        self.assertIsNone(listed["readable"])
+        self.assertIsNotNone(listed["urls"]["readable"])
+        served = self.client.get(f"/api/media/{image['id']}/readable")
+        self.assertEqual(served.status_code, 200)
+        self.assertEqual(served.headers["content-type"], "image/png")
+        self.assertEqual(served.content, png())
 
     def test_attach_of_nothing_is_nothing(self):
         self.assertEqual(self.store.attach([]), [])

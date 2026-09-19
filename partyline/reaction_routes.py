@@ -45,6 +45,14 @@ def _target(db, item: dict) -> dict | None:
 
 
 async def _wake_process(runtime, item: dict, principal: Principal, emoji: str) -> None:
+    """Tell the machine whose message was reacted to, and wake it now.
+
+    A human's reaction may be their entire answer — approval, intent — so it
+    is delivered as a private copy addressed to that process alone, the way
+    return-path notices are: shown to the humans and stamped on the message,
+    but never a public line addressed to the room, and never sent for a
+    reaction on a human's message, which is conversation between people.
+    """
     if principal.kind != "user" or item["sender_type"] != "agent":
         return
     target = _target(runtime.db, item)
@@ -85,7 +93,7 @@ def reaction_router(runtime) -> APIRouter:
             item["conv_id"],
             ReactionEvent(message_id=message_id, reactions=updated["reactions"]),
         )
-        if add and any(
+        if any(
             reaction["emoji"] == emoji and reaction["mine"]
             for reaction in updated["reactions"]
         ):

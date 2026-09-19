@@ -23,6 +23,20 @@ describe("message reactions", () => {
     }
   });
 
+  it("titles the trigger as react to this", async () => {
+    const component = mount(Reactions, {
+      target: document.body,
+      props: { messageId: 7, reactions: [], onToggle: vi.fn().mockResolvedValue(undefined) },
+    });
+    try {
+      const trigger = document.querySelector<HTMLButtonElement>(".reaction-add");
+      expect(trigger?.getAttribute("title")).toBe("react to this");
+      expect(trigger?.getAttribute("aria-label")).toBe("react to this");
+    } finally {
+      await unmount(component);
+    }
+  });
+
   it("toggles a reaction from a keyboard-reachable picker button", async () => {
     const onToggle = vi.fn().mockResolvedValue(undefined);
     const component = mount(Reactions, {
