@@ -148,6 +148,16 @@ per-message `(cwd git: …)` tag adds `N behind upstream` against the last fetch
 Nothing in this path pulls, resets or stashes: the pack tells the captain to
 ask, and the person brings the checkout up to date.
 
+When the checkout is behind anyway and the next child cannot wait, the birth
+itself can be made safe: `POST /api/conversations/<id>/children` takes
+`"base":"upstream"`. Partyline resolves the repository's configured upstream
+default (`origin/HEAD`, else the current branch's upstream), fetches it, and
+branches the child from that ref — the child starts at what the upstream
+already has, never in the past, and the birth notice names the ref it was cut
+from. The default stays `base:"checkout"`: the child branches from the parent
+checkout's HEAD, exactly as before. The stale-checkout refusal for machines
+applies only to the default; a person may cut from either base.
+
 ## The hand-off contract
 
 A child line is born briefed. `POST /api/conversations/<parent>/children` takes

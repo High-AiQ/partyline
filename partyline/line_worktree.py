@@ -165,14 +165,16 @@ def init_repo(path: str | None) -> str | None:
         return None
 
 
-def place_child(db, parent_id: str, child_id: str) -> dict:
+def place_child(db, parent_id: str, child_id: str, base: str | None = None) -> dict:
     """Give a new child line its working directory; record and describe it.
 
-    Returns ``{"cwd": path or None, "branch": name or None}``.
+    Returns ``{"cwd": path or None, "branch": name or None, "base": ref or None}``.
+    ``base`` is an explicit start point (an upstream ref) for a deliberate cut
+    from a checkout left behind; the default stays the repository's HEAD.
     """
     parent_cwd = line_cwd(db, parent_id)
     root = repo_root(parent_cwd) or init_repo(parent_cwd)
-    placed = {"cwd": parent_cwd, "branch": None}
+    placed = {"cwd": parent_cwd, "branch": None, "base": None}
     if root is not None:
         child = db.get_conversation(child_id) or {}
         name = slug(child.get("name") or child_id)
@@ -180,11 +182,14 @@ def place_child(db, parent_id: str, child_id: str) -> dict:
         branch = f"line/{os.path.basename(path)}"
         os.makedirs(os.path.dirname(path), exist_ok=True)
         _exclude(root)
-        done = _git("worktree", "add", "-b", branch, path, cwd=root)
+        if base:
+            done = _git("worktree", "add", "-b", branch, path, base, cwd=root)
+        else:
+            done = _git("worktree", "add", "-b", branch, path, cwd=root)
         if done.returncode != 0:  # the branch exists: put the worktree on it
             done = _git("worktree", "add", path, branch, cwd=root)
         if done.returncode == 0:
-            placed = {"cwd": path, "branch": branch}
+            placed = {"cwd": path, "branch": branch, "base": base}
     if placed["cwd"]:
         db._exec("UPDATE conversations SET cwd=? WHERE id=?", (placed["cwd"], child_id))
     return placed
@@ -197,5 +202,7 @@ def describe(placed: dict) -> str | None:
     if placed.get("branch"):
         where += (f" — a git worktree on branch {placed['branch']}; every process on this "
                   "line works here, and the branch is what the parent accepts")
+    if placed.get("base"):
+        where += f"; cut from {placed['base']} after a fetch, not from the parent's checkout"
     return where
 

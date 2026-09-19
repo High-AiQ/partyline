@@ -131,4 +131,45 @@ def stale_base_reason(health: CheckoutHealth | None) -> str | None:
         return None
     return (f"this checkout is {_plural(health.behind, 'commit')} behind {health.upstream}; a "
             "child line cut from it would start in the past — ask the person to bring "
-            f"{health.branch} up to date, then create the child")
+            f"{health.branch} up to date, or create the child with base:\"upstream\"")
+
+
+def default_upstream(path: str | None) -> str | None:
+    """The repository's configured upstream default: ``origin/HEAD`` when the
+    clone sets it, else the current branch's upstream. None when the checkout
+    has neither — there is nothing fetched to cut from."""
+    if not path or not os.path.isdir(path):
+        return None
+    head = _git(path, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+    if head.returncode == 0 and head.stdout.strip():
+        return head.stdout.strip()
+    tracked = _git(path, "rev-parse", "--abbrev-ref", "@{upstream}")
+    if tracked.returncode == 0 and tracked.stdout.strip():
+        return tracked.stdout.strip()
+    return None
+
+
+def child_base_ref(
+    path: str | None, want_upstream: bool, human: bool, health: CheckoutHealth | None,
+) -> tuple[str | None, str | None]:
+    """Where a new child line branches from, and why it may not.
+
+    ``(None, None)`` is today's default: the parent checkout's HEAD. With
+    ``want_upstream`` — the deliberate cut for a checkout left behind — the
+    default upstream is fetched and returned as the start point instead, so
+    the stale-checkout refusal does not apply: the child starts at what the
+    upstream already has, never in the past.
+    """
+    if not want_upstream:
+        if not human and (reason := stale_base_reason(health)):
+            return None, reason
+        return None, None
+    ref = default_upstream(path)
+    if ref is None:
+        return None, ("no upstream to cut from: the repository has neither an origin/HEAD "
+                      "nor an upstream on its current branch")
+    remote = ref.split("/", 1)[0]
+    fetched = _git(path, "fetch", "--quiet", remote, timeout=FETCH_TIMEOUT)
+    if fetched.returncode != 0:
+        return None, f"the upstream {ref} could not be fetched from {remote}"
+    return ref, None
