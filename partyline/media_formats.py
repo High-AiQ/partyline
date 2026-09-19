@@ -81,7 +81,9 @@ def _ffmpeg_png(data: bytes) -> bytes | None:
     """One PNG frame decoded by ffmpeg, for formats Pillow cannot open.
 
     ffmpeg is a fallback, not a dependency: absent, failing, or slow, the
-    upload falls through to whatever handles a missing decoder.
+    upload falls through to whatever handles a missing decoder. The pixel
+    cap is part of the argv, not an afterthought: an adversarial file must
+    be refused by the decoder itself, before the raster exists.
     """
     if not shutil.which("ffmpeg"):
         return None
@@ -90,7 +92,8 @@ def _ffmpeg_png(data: bytes) -> bytes | None:
         source.write_bytes(data)
         try:
             subprocess.run(
-                ["ffmpeg", "-y", "-loglevel", "error", "-i", str(source),
+                ["ffmpeg", "-y", "-loglevel", "error",
+                 "-max_pixels", str(MAX_PIXELS), "-i", str(source),
                  "-frames:v", "1", str(target)],
                 capture_output=True, timeout=60, check=False,
             )

@@ -25,8 +25,8 @@ BRIEFING = (
     '`curl -H "Authorization: Bearer $PARTYLINE_TOKEN" -F file=@PATH -F title=T '
     "$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/files` (images get thumb, slim, "
     "readable and original URLs; fetch the smallest that answers; the digest labels the "
-    "format of each URL, and `readable` is a PNG a process can always open; media URLs "
-    "redirect, so always `curl -L`). To make the room "
+    "format of each URL, and when listed, readable is a PNG a process can always open; "
+    "media URLs redirect, so always `curl -L`). To make the room "
     "remember something, propose a DO / DO NOT row for AGENTS.md — never your private memory. "
     "Fenced code with a language is highlighted; math uses `\\(...\\)` or `\\[...\\]`.\n"
     "Reactions use POST /api/messages/{{id}}/reactions with 👍 ❤️ 🎉 👀 ✅ ❌; react instead of "
