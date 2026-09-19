@@ -150,7 +150,7 @@ def hierarchy_router(runtime) -> APIRouter:
         deny_staffed_split(db, principal, conv_id)  # the loud reason first
         deny_unless(db, principal, conv_id, "create_child")
         cwd = line_cwd(db, conv_id)
-        target, target_error = await asyncio.to_thread(placement_root, body.repository, cwd)
+        target, target_error = await asyncio.to_thread(placement_root, body.repository)
         if target_error:
             raise HTTPException(400, target_error)
         health = await asyncio.to_thread(checkout_health.inspect, cwd)
@@ -167,12 +167,13 @@ def hierarchy_router(runtime) -> APIRouter:
         except HierarchyError as exc:
             raise _http(exc) from exc
         placed = place_child(db, conv_id, conv["id"], base=base_ref, root=target)
-        if base_ref and not placed.get("branch"):
-            # A failed placement must not inherit the parent checkout — the one
-            # thing an explicit base exists to avoid — so the line is rolled
-            # back and the caller is told, never left seated in the past.
+        if (base_ref or target) and not placed.get("branch"):
+            # A failed placement must not silently inherit the parent checkout — not
+            # for an explicit upstream base, not for an explicit repository — so the
+            # line is rolled back and the caller is told instead of left seated there.
             db.delete_conversation(conv["id"])
-            raise HTTPException(409, f"the child worktree could not be created on {base_ref}")
+            raise HTTPException(
+                409, f"the child worktree could not be created on {base_ref or target}")
         if where := describe(placed):
             await runtime.post_message(conv["id"], "system", "system", where)
         if placed.get("branch"):

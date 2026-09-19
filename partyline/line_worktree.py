@@ -165,7 +165,7 @@ def init_repo(path: str | None) -> str | None:
         return None
 
 
-def placement_root(repository: str | None, parent_cwd: str | None) -> tuple[str | None, str | None]:
+def placement_root(repository: str | None) -> tuple[str | None, str | None]:
     """The repository root a child is placed into, and why it may not be.
 
     An explicit ``repository`` — an absolute path anywhere inside a git

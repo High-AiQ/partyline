@@ -4,11 +4,13 @@ import os
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from partyline import auth_store, auth_tokens, server
+from partyline import line_worktree as line_worktree_module
 from partyline.auth_guard import install_auth_guard
 from partyline.conversation_routes import register_conversation_routes
 from partyline.db import Db
@@ -158,6 +160,23 @@ class ChildRepositoryTest(unittest.TestCase):
         made = self.child("fix", headers=worker, repository=self.other_repo)
         self.assertEqual(made.status_code, 403, made.text)
         self.assertFalse(os.path.isdir(os.path.join(self.other_repo, WORKTREES_DIR)))
+
+    def test_a_failed_explicit_repository_placement_fails_and_rolls_back(self):
+        original = line_worktree_module._git
+
+        def add_fails(*args, cwd):
+            if args[:2] == ("worktree", "add"):
+                return subprocess.CompletedProcess(args, 128, "", "fatal: cannot create")
+            return original(*args, cwd=cwd)
+
+        with patch.object(line_worktree_module, "_git", side_effect=add_fails):
+            made = self.child("fix", repository=self.other_repo)
+        self.assertEqual(made.status_code, 409, made.text)
+        self.assertIn("could not be created", made.json()["detail"])
+        # no orphan line quietly seated in the parent's checkout instead
+        self.assertEqual(self.client.get("/api/conversations/root/children").json(), [])
+        self.assertFalse(
+            os.path.isdir(os.path.join(self.other_repo, WORKTREES_DIR, "fix")))
 
 
 if __name__ == "__main__":

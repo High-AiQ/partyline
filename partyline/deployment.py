@@ -1,8 +1,8 @@
 """Which checkout the running process serves from — what a restart would deploy.
 
-A captain once pulled ~/code/partyline while the service ran from
-~/partyline-lan-cockpit, filed a restart, and a restart deployed nothing: the
-running process's own checkout had never moved, and nothing said so. This
+A captain once pulled the project checkout while the service ran from a
+different directory entirely, filed a restart, and a restart deployed nothing:
+the running process's own checkout had never moved, and nothing said so. This
 module captures the served path and its HEAD once, when the process starts, so
 ``/api/version`` can name the served checkout and a restart request can tell
 "nothing changed since this process started" — refused as nothing to deploy —
