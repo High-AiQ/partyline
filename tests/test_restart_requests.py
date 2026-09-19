@@ -43,8 +43,7 @@ class RestartRequestTest(unittest.TestCase):
         # These tests exercise the filing flow, not the deployment guard: the
         # running checkout (this worktree) has not moved since import, which
         # would otherwise refuse every request here with nothing-to-deploy.
-        self.enterContext(patch.object(deployment, "_STARTUP_PATH", None))
-        self.enterContext(patch.object(deployment, "_STARTUP_HEAD", None))
+        self.enterContext(patch.object(deployment, "_STARTUP", (None, None)))
 
     def file(self, headers, reason="1.19.1 is merged and pulled"):
         return self.client.post("/api/conversations/line/restart-request",

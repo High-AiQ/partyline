@@ -42,15 +42,23 @@ def git_head(path: str | None = None) -> str | None:
     return _git(path, "rev-parse", "HEAD")
 
 
-_STARTUP_PATH = checkout_path()
-_STARTUP_HEAD = git_head()
+_STARTUP: tuple[str | None, str | None] | None = None
+
+
+def _startup() -> tuple[str | None, str | None]:
+    """The served path and HEAD, captured once on first use rather than at
+    import, so a pathological git environment cannot stall the import."""
+    global _STARTUP
+    if _STARTUP is None:
+        _STARTUP = (checkout_path(), git_head())
+    return _STARTUP
 
 
 def startup_path() -> str | None:
-    """The checkout the running process was started from, captured at import."""
-    return _STARTUP_PATH
+    """The checkout the running process serves from."""
+    return _startup()[0]
 
 
 def startup_head() -> str | None:
-    """The commit the running process was started on, captured at import."""
-    return _STARTUP_HEAD
+    """The commit the running process was started on."""
+    return _startup()[1]

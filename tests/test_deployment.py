@@ -44,11 +44,18 @@ class DeploymentModuleTest(unittest.TestCase):
         self.assertIsNone(deployment.checkout_path(self.plain))
         self.assertIsNone(deployment.git_head(self.plain))
 
-    def test_startup_facts_are_captured_at_import(self):
-        self.assertTrue(deployment.startup_path() is None
-                        or os.path.isdir(deployment.startup_path()))
-        head = deployment.startup_head()
-        self.assertTrue(head is None or len(head) == 40)
+    def test_startup_facts_are_captured_once_not_at_import(self):
+        calls = []
+        self.addCleanup(setattr, deployment, "_STARTUP", None)
+        with patch.object(deployment, "checkout_path",
+                          side_effect=lambda: calls.append("p") or "/x"), \
+                patch.object(deployment, "git_head",
+                             side_effect=lambda: calls.append("h") or "c" * 40):
+            deployment._STARTUP = None
+            self.assertEqual(deployment.startup_path(), "/x")
+            self.assertEqual(deployment.startup_head(), "c" * 40)
+            deployment.startup_path()  # served from the capture, not re-probed
+        self.assertEqual(calls, ["p", "h"])
 
 
 class RestartDeploymentGuardTest(unittest.TestCase):
@@ -77,8 +84,7 @@ class RestartDeploymentGuardTest(unittest.TestCase):
         auth_store.create_user(
             self.db, "person@example.com", "person", auth_tokens.hash_password("hunter2222"))
         self.captain = {"Authorization": "Bearer " + auth_store.ensure_api_token(self.db, "cap")}
-        self.enterContext(patch.object(deployment, "_STARTUP_PATH", self.checkout))
-        self.enterContext(patch.object(deployment, "_STARTUP_HEAD", self.head))
+        self.enterContext(patch.object(deployment, "_STARTUP", (self.checkout, self.head)))
 
     def file(self, **fields):
         body = {"reason": "deploy the reviewed change", **fields}
@@ -111,8 +117,7 @@ class RestartDeploymentGuardTest(unittest.TestCase):
         self.assertNotIn("nothing to deploy", made.json()["reason"])
 
     def test_an_unknown_checkout_never_blocks_the_request(self):
-        self.enterContext(patch.object(deployment, "_STARTUP_PATH", None))
-        self.enterContext(patch.object(deployment, "_STARTUP_HEAD", None))
+        self.enterContext(patch.object(deployment, "_STARTUP", (None, None)))
         made = self.file()
         self.assertEqual(made.status_code, 200, made.text)
         self.assertNotIn("nothing to deploy", made.json()["reason"])
@@ -120,8 +125,7 @@ class RestartDeploymentGuardTest(unittest.TestCase):
 
 class VersionCheckoutTest(unittest.TestCase):
     def test_the_version_names_the_served_checkout_and_head(self):
-        with patch.object(deployment, "_STARTUP_PATH", "/some/deployment"), \
-                patch.object(deployment, "_STARTUP_HEAD", "b" * 40):
+        with patch.object(deployment, "_STARTUP", ("/some/deployment", "b" * 40)):
             client = TestClient(server.app)
             payload = client.get("/api/version").json()
         self.assertEqual(payload["checkout_path"], "/some/deployment")
