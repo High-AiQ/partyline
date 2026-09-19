@@ -187,11 +187,6 @@ def deny_staffed_split(db: Db, principal: Principal, conv_id: str) -> None:
         raise HTTPException(403, reason)
 
 
-def deny_archive_if_children(db: Db, conv_id: str) -> None:
-    if child_ids(db, conv_id):
-        raise HTTPException(409, "unlink or archive child lines first")
-
-
 def deny_purge_if_parent_refs(db: Db, conv_id: str) -> None:
     if child_ids(db, conv_id):
         raise HTTPException(409, "unlink or purge child lines first")

@@ -122,11 +122,21 @@ is not SAFE the worktree stays, the branch always stays, and the archive respons
 see this in the delete dialog. Purge keeps removing a line's worktree unconditionally, as
 before. A captain may also retire a child line of its own tree with `DELETE
 /api/conversations/<child-id>` — never its own line — when that child has no live processes,
-its goal is cleared, and the SAFE test passes; anything else is a 409 with the reason. When
-you have accepted a child's branch and its captain is done, retire the child: its worktree
-goes with it. On startup the server sweeps `.partyline-worktrees` in every repository it
-knows about and removes any worktree whose line no longer exists in the database, unless it
-is dirty; a worktree belonging to a live or archived line is never touched.
+its goal is cleared, and the SAFE test passes.
+
+A refused retirement answers with **every** blocker at once instead of one per round trip:
+`409` body `{"detail": "…", "blockers": [{"code": "live_processes" | "goal_not_cleared" |
+"child_lines" | "unmerged_commits" | "uncommitted_changes", "message": "…"}]}`. A person is
+held only to child lines; a machine captain is held to all of them. The one explicit relief
+is `DELETE /api/conversations/<child-id>?discard=true`: it throws away a **merged** branch's
+uncommitted worktree so the line can retire, and it is refused outright when the branch is
+not merged — those commits exist only in the worktree and a discard must never destroy them.
+`include_children=true` still retires the whole subtree and supersedes the child-lines
+blocker. When you have accepted a child's branch and its captain is done, retire the child:
+its worktree goes with it. On startup the server sweeps `.partyline-worktrees` in every
+repository it knows about and removes any worktree whose line no longer exists in the
+database, unless it is dirty; a worktree belonging to a live or archived line is never
+touched.
 
 Work goes down, not sideways. Once a line has a child, a machine may no longer
 attach processes to that line: the root captain that could not staff a child

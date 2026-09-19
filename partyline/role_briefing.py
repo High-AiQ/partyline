@@ -137,7 +137,11 @@ SPLIT = (
     "hand-off is the SHA on the line's branch; nothing else counts. Accepting only "
     "fast-forwards: a side-branch or detached tip the branch cannot reach is refused, never "
     "merged in. Once the branch carries the accepted SHA and the child's captain is done, "
-    "retire the child: DELETE /api/conversations/<child-id>; its worktree goes with it."
+    "retire the child: DELETE /api/conversations/<child-id>; its worktree goes with it. A "
+    "refused retirement answers with every blocker at once (live processes, an uncleared "
+    "goal, child lines, unmerged commits, uncommitted changes) so you fix them in one pass. "
+    "A merged branch's dirty worktree is the one you may throw away: pass ?discard=true with "
+    "the DELETE; partyline refuses it for an unmerged branch, whose commits live only there."
 )
 
 LEAF = (
