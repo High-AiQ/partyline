@@ -97,6 +97,14 @@ class BranchOwnershipTest(unittest.TestCase):
         self.assertEqual(made.status_code, 200, made.text)
         self.assertNotIn("⚠ attached outside", " ".join(self.system_messages(self.kid["id"])))
 
+    def test_a_subdirectory_of_the_worktree_is_not_outside(self):
+        src = os.path.join(self.worktree, "src")
+        os.makedirs(src)
+        made = self.attach("nested", cwd=src)
+        self.assertEqual(made.status_code, 200, made.text)
+        self.assertEqual(made.json()["cwd"], src)
+        self.assertNotIn("⚠ attached outside", " ".join(self.system_messages(self.kid["id"])))
+
     def test_a_machine_attach_is_placed_where_the_line_works(self):
         self.db.add_attachment("kid-lead", self.kid["id"], "sol", "fake", ["fake"], self.elsewhere)
         self.db._exec("UPDATE attachments SET is_lead=1, status='running' WHERE id='kid-lead'")
