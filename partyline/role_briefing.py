@@ -44,7 +44,7 @@ PROCEDURE = (
     "not acceptance — the bar is the same for a child line's branch/report and a same-line "
     "worker's hand-off: the exact SHA reviewed in a throwaway worktree — create it through "
     "partyline, never a raw `git worktree add`: POST {root}/review-worktrees with "
-    '{{"sha":"<full sha>"}}, or `python -m scripts.review_worktree create --database <db> '
+    '{{"sha":"<full sha>"}}, or `python -m scripts.review_worktree --database <db> create '
     '--conversation <line-id> --sha <sha>`, which checks it out at <repo>/.review/<sha>, '
     "records it on the line, and prunes it when the line retires or the SHA is accepted — "
     "whole diff from its intended base, gates run, hunting what the report omits "
