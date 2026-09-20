@@ -215,6 +215,13 @@ class AcceptShaTest(unittest.TestCase):
         self.assertIn(f"accepted {sha[:12]}", own)
         self.assertIn(f"worktree {self.worktree}", own)
 
+    def test_the_handoff_rider_omits_retired_descendants(self):
+        self.commit("first")
+        sha = self.commit_detached("the real work")
+        self.accept(sha)
+        self.db.archive_conversation(self.kid["id"])
+        self.assertEqual(handoff_rider(self.db, "root"), "")
+
     def test_the_rider_omits_absent_values(self):
         self.db.create_conversation("loose", "loose")
         self.db._exec(
