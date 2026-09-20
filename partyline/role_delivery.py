@@ -43,34 +43,69 @@ def _instructions(state: RoleState) -> str:
     ) or worker_instructions(state.captained)
 
 
+def briefing_pointer(conv_id: str) -> str:
+    return f"(captain pack: GET /api/conversations/{conv_id}/briefing)"
+
+
 def bind_role_delivery(db, att: dict) -> None:
     initial = current_role(db, att["id"])
     att["role_briefing"] = _instructions(initial)
     original_rider = att["digest_rider"]
     previous = None if att.get("resume") else initial
+    last_goal = last_staffing = last_handoff = None
+    worker_reminder_sent = False
 
     def rider() -> str:
-        nonlocal previous
+        nonlocal previous, last_goal, last_staffing, last_handoff, worker_reminder_sent
         current = current_role(db, att["id"])
         update = ""
+        captain_transition = previous is None or (
+            (previous.role == "lead") != (current.role == "lead")
+        )
+        worker_transition = previous is None or previous.captained != current.captained
+        worker_now = current.role != "lead" and current.captained
+        worker_was = previous is not None and previous.role != "lead" and previous.captained
+        if current.role != "lead":
+            last_goal = last_staffing = last_handoff = None
         if current != previous:
             demoted = previous is not None and previous.role == "lead" and current.role != "lead"
             previous = current
-            update = _instructions(current)
+            if captain_transition or (worker_now and worker_transition):
+                update = _instructions(current)
             if demoted and update:
                 update += ("\nYour current role is ordinary participant, not captain. "
                            "Use only your own line's tools.")
-            elif not update:
+            elif not update and (demoted or (worker_was and not worker_now)):
                 update = ("Your current role is ordinary participant, not captain. "
                           "Use only your own line's tools.")
-        goal = staffing = handoff = ""
+        goal = staffing = handoff = worker = pointer = ""
         if current.role == "lead":
-            goal = goal_rider(db, current.conv_id)
-            staffing = staffing_line(db, current.conv_id)
-            handoff = handoff_rider(db, current.conv_id)
+            current_goal = goal_rider(db, current.conv_id)
+            current_staffing = staffing_line(db, current.conv_id)
+            current_handoff = handoff_rider(db, current.conv_id)
+            goal = _delta(current_goal, last_goal, "goal")
+            staffing = _delta(current_staffing, last_staffing, "staffing")
+            handoff = _delta(current_handoff, last_handoff, "hand-offs")
+            last_goal, last_staffing, last_handoff = (
+                current_goal, current_staffing, current_handoff)
+            if not captain_transition:
+                pointer = briefing_pointer(current.conv_id)
         elif current.captained:
-            goal = WORKER_REMINDER  # every wake: the goal is context, the @mention is the job
+            if not worker_reminder_sent or (worker_now and not worker_was):
+                worker = WORKER_REMINDER
+            worker_reminder_sent = True
+        else:
+            worker_reminder_sent = False
         return "\n".join(
-            part for part in (original_rider(), goal, staffing, handoff, update) if part)
+            part for part in (original_rider(), goal, staffing, handoff, update, worker, pointer)
+            if part)
 
     att["digest_rider"] = rider
+
+
+def _delta(value: str, previous: str | None, label: str) -> str:
+    if value == previous:
+        return ""
+    if value:
+        return value
+    return f"({label} cleared)" if previous else ""

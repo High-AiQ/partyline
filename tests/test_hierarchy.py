@@ -94,6 +94,13 @@ class HierarchyApiTest(unittest.TestCase):
         self.assertEqual(principal.attachment_id, "lead-att")
         self.assertTrue(principal.is_lead)
 
+    def test_a_captain_can_fetch_its_current_pack_but_a_worker_cannot(self):
+        briefing = self.client.get("/api/conversations/parent/briefing", headers=self.lead)
+        self.assertEqual(briefing.status_code, 200, briefing.text)
+        self.assertIn("## Captain pack", briefing.json()["briefing"])
+        denied = self.client.get("/api/conversations/parent/briefing", headers=self.impl)
+        self.assertEqual(denied.status_code, 403)
+
     def fake_spawn(self, calls):
         """Route attaches must not spawn real processes; stub the server hook."""
         original = server._start_attachment
