@@ -19,7 +19,7 @@ import re
 from fastapi import HTTPException, Request
 
 from .auth_guard import request_principal
-from .hierarchy import descendants, parent_id_of
+from .hierarchy import ancestors, descendants, parent_id_of
 from .hierarchy_contracts import AcceptIn, AcceptResponse
 from .line_worktree import WORKTREES_DIR, _git, line_cwd, repo_and_worktree, rev
 from .machine_scope import deny_unless
@@ -154,6 +154,11 @@ def handoff_rider(db, conv_id: str) -> str:
         children = []  # a minimal db without the tree query: own facts only
     for child_id in children:
         child = db.get_conversation(child_id) or {}
+        if child.get("archived_at") or any(
+            (db.get_conversation(ancestor) or {}).get("archived_at")
+            for ancestor in ancestors(db, child_id)
+        ):
+            continue
         if not child.get("accepted_sha"):
             continue
         where = f" · worktree {child['cwd']}" if child.get("cwd") else ""

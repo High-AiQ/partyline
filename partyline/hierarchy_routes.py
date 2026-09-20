@@ -67,6 +67,19 @@ def hierarchy_router(runtime) -> APIRouter:
     def get_capabilities(request: Request, conv_id: str | None = Query(default=None)):
         return capability_state(db, request_principal(request), conv_id)
 
+    @router.get("/api/conversations/{conv_id}/briefing")
+    def get_briefing(request: Request, conv_id: str):
+        principal = request_principal(request)
+        deny_unless(db, principal, conv_id, "read")
+        if principal.kind != "machine" or principal.conv_id != conv_id:
+            raise HTTPException(403, "the captain pack is attachment-specific")
+        from .role_delivery import _instructions, current_role
+
+        state = current_role(db, principal.attachment_id)
+        if state.role != "lead":
+            raise HTTPException(403, "the captain pack is only available to captains")
+        return {"briefing": _instructions(state)}
+
     @router.get("/api/conversations/{conv_id}/lead", response_model=LeadOut)
     def get_lead(request: Request, conv_id: str):
         deny_unless(db, request_principal(request), conv_id, "read")
