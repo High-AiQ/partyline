@@ -108,7 +108,7 @@ class GoalRiderTest(unittest.TestCase):
         worker = {"id": "worker", "digest_rider": lambda: "tasks"}
         bind_role_delivery(self.db, lead)
         bind_role_delivery(self.db, worker)
-        lead["digest_rider"]()  # the first wake carries the pack; the goal rides every wake
-
-        self.assertIn("(goal you are seeing through: finish the book;", lead["digest_rider"]())
+        first = lead["digest_rider"]()  # the first wake carries the current goal
+        self.assertIn("(goal you are seeing through: finish the book;", first)
+        self.assertIn("captain pack: GET /api/conversations/line/briefing", lead["digest_rider"]())
         self.assertNotIn("you do not implement", worker["digest_rider"]())
