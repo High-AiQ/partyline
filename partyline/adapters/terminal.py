@@ -10,7 +10,8 @@ BACKGROUND = b"rgb:ffff/ffff/ffff"
 MAX_QUERY_TAIL = 128
 KEYS = {
     "enter": b"\r", "esc": b"\x1b", "tab": b"\t", "space": b" ",
-    "up": b"\x1b[A", "down": b"\x1b[B", "left": b"\x1b[D", "right": b"\x1b[C",
+    "up": b"\x1b[A", "down": b"\x1b[B", "page-up": b"\x1b[5~", "page-down": b"\x1b[6~",
+    "left": b"\x1b[D", "right": b"\x1b[C",
     "y": b"y", "n": b"n", "1": b"1", "2": b"2", "3": b"3", "4": b"4",
 }
 

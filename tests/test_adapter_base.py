@@ -13,7 +13,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, call, patch
 
 
 from partyline.adapters.base import Adapter
@@ -355,6 +355,15 @@ class AdapterKeystrokeTest(unittest.IsolatedAsyncioTestCase):
 
         adapter.send_key("y")
         await until(lambda: adapter.saw("y"), what="the keystroke to echo")
+
+        with patch("partyline.adapters.base.os.write") as write:
+            adapter.send_key("page-up")
+            adapter.send_key("page-down")
+
+        self.assertEqual(write.call_args_list, [
+            call(adapter.master, b"\x1b[5~"),
+            call(adapter.master, b"\x1b[6~"),
+        ])
 
         with self.assertRaises(ValueError) as caught:
             adapter.send_key("f13")
