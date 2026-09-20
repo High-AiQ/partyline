@@ -36,7 +36,20 @@
 
   let { attachment, compactable, close }: Props = $props();
 
-  const KEYS = ["enter", "esc", "up", "down", "tab", "y", "n", "1", "2", "3"];
+  const KEYS = [
+    { key: "enter", label: "enter" },
+    { key: "esc", label: "esc" },
+    { key: "up", label: "up" },
+    { key: "down", label: "down" },
+    { key: "page-up", label: "page up" },
+    { key: "page-down", label: "page down" },
+    { key: "tab", label: "tab" },
+    { key: "y", label: "y" },
+    { key: "n", label: "n" },
+    { key: "1", label: "1" },
+    { key: "2", label: "2" },
+    { key: "3", label: "3" },
+  ] as const;
 
   const stream = new TerminalStream();
   let host = $state<HTMLDivElement | null>(null);
@@ -214,8 +227,10 @@
   </div>
   <div class="flex flex-wrap items-center gap-1.5">
     <span class="mr-1 text-[10px] text-cream-faint">send key:</span>
-    {#each KEYS as key (key)}
-      <button type="button" class="px-2.5 py-1 text-[10.5px]" onclick={() => press(key)}>{key}</button>
+    {#each KEYS as key (key.key)}
+      <button type="button" class="px-2.5 py-1 text-[10.5px]" onclick={() => press(key.key)}
+        >{key.label}</button
+      >
     {/each}
     {#if keypadError}
       <span class="text-[10.5px] text-cream-faint">{keypadError}</span>
