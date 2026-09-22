@@ -20,6 +20,7 @@ import time
 from fastapi import HTTPException, Request
 
 from .auth_guard import request_principal
+from .system_notice import post_system_notice
 from .hierarchy_contracts import ReviewWorktreeIn, ReviewWorktreeOut
 from .line_worktree import REVIEW_DIR, _exclude, _git, line_cwd, repo_and_worktree, rev
 from .machine_scope import deny_unless
@@ -212,14 +213,17 @@ def register_review_routes(app, runtime) -> None:
         db = runtime.db
         # Creation writes into the line's repository: a mutating act, not a read.
         deny_unless(db, request_principal(request), conv_id, "write")
+        principal = request_principal(request)
         try:
             done = create_review_worktree(db, conv_id, body.sha)
         except ReviewError as exc:
             raise HTTPException(exc.status_code, exc.detail) from exc
-        await runtime.post_message(
-            conv_id, "system", "system",
+        await post_system_notice(
+            runtime,
+            conv_id,
             f"☏ review worktree: {done['path']} — detached at {done['sha'][:12]} for the "
             "adversarial review; partyline prunes it when the line retires or the SHA is accepted",
+            actor=principal,
         )
         return done
 

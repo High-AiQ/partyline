@@ -35,6 +35,18 @@ class DbTest(unittest.TestCase):
         self.db.restore_conversation("first")
         self.assertIsNone(self.db.get_conversation("first")["archived_at"])
 
+    def test_a_system_notice_stamped_to_one_process_is_hidden_only_from_that_process(self):
+        self.db.create_conversation("line", "Line")
+        self.db.add_attachment("lead", "line", "lead", "fake", ["fake"], "/tmp")
+        notice = self.db.add_message("line", "system", "system", "☏ goal set by @lead: ship")
+        self.db._exec(
+            "UPDATE messages SET source_attachment_id=? WHERE id=?", ("lead", notice["id"])
+        )
+        self.assertEqual(self.db.messages_after("line", 0, "lead", "lead"), [])
+        self.assertEqual(self.db.messages_after("line", 0, "worker", "worker")[0]["id"],
+                         notice["id"])
+        self.assertEqual(self.db.list_messages("line")[0]["id"], notice["id"])
+
     def test_attachments_sessions_and_stale_marking(self):
         self.db.create_conversation("line", "Line")
         attachment = self.db.add_attachment("att", "line", "terra", "fake", ["fake"], "/tmp")

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .hierarchy import descendants
+from .hierarchy import descendants, subtree_conversation_ids
 from .preset_traits import coerce_preset, coerce_traits, match_preset
 
 LIVE = ("starting", "running")
@@ -61,7 +61,7 @@ def staffing_report(db, conv_id: str) -> dict:
 
 
 def staffing_line(db, conv_id: str) -> str:
-    """One line for a captain's wake: who is in use anywhere, and which presets are free.
+    """One line for a captain's wake: subtree use and globally free presets.
 
     Rides every captain wake next to the goal, unconditionally: the endpoint
     is advice a captain has to remember to call, and a captain choosing its
@@ -72,6 +72,7 @@ def staffing_line(db, conv_id: str) -> str:
         return ""
     in_use: list[str] = []
     used_ids: set[str] = set()
+    subtree = set(subtree_conversation_ids(db, conv_id))
     for conv in db.list_conversations():
         for att in db.list_attachments(conv["id"]):
             if att["status"] not in LIVE:
@@ -79,6 +80,8 @@ def staffing_line(db, conv_id: str) -> str:
             matched = match_preset(att, presets)
             if matched is not None:
                 used_ids.add(matched["id"])
+            if conv["id"] not in subtree:
+                continue
             role = " captain" if att.get("is_lead") else ""
             in_use.append(f"{att['name']} «{conv['name']}»{role}")
     free = [p for p in presets if p["id"] not in used_ids]

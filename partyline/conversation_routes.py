@@ -32,6 +32,7 @@ from .machine_scope import (
 from .message_contracts import ConversationDetailResponse
 from .message_routes import conversation_detail_response
 from .runtime import NAME_RE, RESERVED_NAMES
+from .system_notice import post_system_notice
 
 
 def _server():
@@ -86,7 +87,8 @@ def register_conversation_routes(
     async def set_topic(request: Request, conv_id: str, body: TopicIn):
         runtime = _server().runtime
         db = runtime.db
-        deny_unless(db, request_principal(request), conv_id, "write")
+        principal = request_principal(request)
+        deny_unless(db, principal, conv_id, "write")
         conv = db.get_conversation(conv_id)
         topic = body.topic.strip()
         if len(topic) > 3000:
@@ -94,9 +96,9 @@ def register_conversation_routes(
         if topic == conv["topic"]:
             return conv
         conv = db.set_topic(conv_id, topic)
-        who = f" by @{request_principal(request).name}"
+        who = f" by @{principal.name}"
         notice = f"☏ topic set{who}: {topic}" if topic else f"☏ topic cleared{who}"
-        await runtime.post_message(conv_id, "system", "system", notice)
+        await post_system_notice(runtime, conv_id, notice, actor=principal)
         await runtime.broadcast(conv_id, ConversationEvent(conversation=conv))
         await runtime.broadcast_all(ConversationsChangedEvent())
         return conv
@@ -105,7 +107,8 @@ def register_conversation_routes(
     async def rename_conversation(request: Request, conv_id: str, body: RenameIn):
         runtime = _server().runtime
         db = runtime.db
-        deny_unless(db, request_principal(request), conv_id, "write")
+        principal = request_principal(request)
+        deny_unless(db, principal, conv_id, "write")
         conv = db.get_conversation(conv_id)
         name = body.name.strip()
         if not name:
@@ -116,9 +119,9 @@ def register_conversation_routes(
             return conv
         was = conv["name"]
         conv = db.rename_conversation(conv_id, name)
-        who = f" by @{request_principal(request).name}"
-        await runtime.post_message(
-            conv_id, "system", "system", f"☏ line renamed{who}: {was} → {name}"
+        who = f" by @{principal.name}"
+        await post_system_notice(
+            runtime, conv_id, f"☏ line renamed{who}: {was} → {name}", actor=principal
         )
         await runtime.broadcast(conv_id, ConversationEvent(conversation=conv))
         await runtime.broadcast_all(ConversationsChangedEvent())
@@ -196,14 +199,14 @@ def register_conversation_routes(
     async def restore_conversation(request: Request, conv_id: str):
         runtime = _server().runtime
         db = runtime.db
-        deny_unless(db, request_principal(request), conv_id, "archive")
+        principal = request_principal(request)
+        deny_unless(db, principal, conv_id, "archive")
         conv = db.get_conversation(conv_id)
         if not conv["archived_at"]:
             raise HTTPException(409, "line is not archived")
         conv = db.restore_conversation(conv_id)
-        await runtime.post_message(
-            conv_id, "system", "system", "☏ line restored from the archive"
-        )
+        await post_system_notice(
+            runtime, conv_id, "☏ line restored from the archive", actor=principal)
         await runtime.broadcast_all(ConversationsChangedEvent())
         return conv
 
