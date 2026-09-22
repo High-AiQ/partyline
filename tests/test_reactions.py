@@ -144,7 +144,8 @@ class ReactionRoutesTest(unittest.TestCase):
         # The target is woken at once — a reaction may be the whole answer.
         self.assertEqual(
             recorder.delivered[-1]["body"],
-            "☺ greg reacted ✅ to your «" + "x" * 80 + "…»",
+            "☺ greg reacted ✅ to your «" + "x" * 80
+            + "…» — no reply needed unless this raises something new",
         )
         # The copy is stored addressed to that process alone: never a public
         # (unaddressed) system line in the room transcript.
@@ -181,7 +182,8 @@ class ReactionRoutesTest(unittest.TestCase):
         pending = self.db.messages_after("line", message["id"], "sol", attachment["id"])
         self.assertEqual(
             [m["body"] for m in pending],
-            ["☺ greg reacted ✅ to your «found the answer»"],
+            ["☺ greg reacted ✅ to your «found the answer» — "
+             "no reply needed unless this raises something new"],
         )
         other, _ = self._machine(name="kimi")
         self.assertEqual(

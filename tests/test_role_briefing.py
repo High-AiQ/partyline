@@ -3,6 +3,7 @@
 import unittest
 
 from partyline import features
+from partyline.adapters.briefing import BRIEFING
 from partyline.role_briefing import WORKER_REMINDER, role_instructions, worker_instructions
 
 
@@ -40,6 +41,9 @@ class RoleBriefingTests(unittest.TestCase):
         self.assertIn("by @mention from this line", text)
         self.assertIn("without waking anyone", text)
         self.assertNotIn('"notify":true', text)
+
+    def test_reactions_need_no_reply_unless_they_raise_something_new(self):
+        self.assertIn("a reaction needs no reply unless it raises something new", BRIEFING)
 
     def test_a_captain_is_told_its_depth_and_what_a_child_may_do(self):
         root = role_instructions(["assign", "create_child"], "root", None, 0)

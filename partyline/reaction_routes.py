@@ -61,7 +61,8 @@ async def _wake_process(runtime, item: dict, principal: Principal, emoji: str) -
     adapter = runtime.live.get(target["id"])
     if adapter is None or not runtime.activation_matches(adapter, target):
         return
-    body = f"☺ {principal.name} reacted {emoji} to your «{_snippet(item['body'])}»"
+    body = (f"☺ {principal.name} reacted {emoji} to your «{_snippet(item['body'])}» — "
+            "no reply needed unless this raises something new")
     await post_private(
         runtime,
         target["conv_id"],

@@ -149,9 +149,10 @@ async def post_private(
         source_conv_name=origin["name"] if origin else None,
         audience_attachment_id=audience,
     )
-    # A reaction notice is one process's mail: browsers already see the
-    # reaction itself on the message, so the fan-out skips the copy while the
-    # addressed process still receives it through forced routing below.
+    # A reaction notice is one process's mail: no reply is needed unless it
+    # raises something new. Browsers already see the reaction itself on the
+    # message, so the fan-out skips the copy while forced routing still wakes
+    # the addressed process.
     if not is_reaction_notice(copy):
         await runtime.broadcast(line_id, MessageEvent(message=MessageResponse.model_validate(copy)))
     if route:
