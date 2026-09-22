@@ -513,6 +513,10 @@ class HierarchyApiTest(unittest.TestCase):
             "☏ topic set by @astra: cwd /tmp/book; budget $1; no upscale",
             "☏ goal set by @astra: render spreads 1-3",
         ])
+        self.assertEqual(
+            [m["source_attachment_id"] for m in self.db.list_messages(child["id"])],
+            ["lead-att", "lead-att", "lead-att"],
+        )
 
     def test_a_child_without_a_brief_hears_only_where_it_works(self):
         created = self.client.post(

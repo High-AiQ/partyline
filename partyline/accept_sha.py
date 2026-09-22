@@ -24,6 +24,7 @@ from .hierarchy_contracts import AcceptIn, AcceptResponse
 from .line_worktree import WORKTREES_DIR, _git, line_cwd, repo_and_worktree, rev
 from .machine_scope import deny_unless
 from .review_worktrees import prune_accepted_review
+from .system_notice import post_system_notice
 from .worktree_lifecycle import _base_ref
 
 _SHA = re.compile(r"[0-9a-f]{4,64}")
@@ -180,10 +181,12 @@ def register_accept_route(app, runtime) -> None:
         except AcceptError as exc:
             raise HTTPException(exc.status_code, exc.detail) from exc
         state = "already at" if not done["moved"] else "moved to"
-        await runtime.post_message(
-            conv_id, "system", "system",
+        await post_system_notice(
+            runtime,
+            conv_id,
             f"☏ hand-off accepted by @{principal.name}: {done['branch']} {state} "
             f"{done['sha'][:12]} — the hand-off is the SHA on the line's branch",
+            actor=principal,
         )
         return AcceptResponse(
             conv_id=conv_id, branch=done["branch"], sha=done["sha"], moved=done["moved"]

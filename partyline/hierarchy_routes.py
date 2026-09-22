@@ -49,6 +49,7 @@ from .reports import (
     release_wake_claim,
     wake_message,
 )
+from .system_notice import post_system_notice
 
 
 def _http(exc: HierarchyError | ReportError) -> HTTPException:
@@ -88,7 +89,8 @@ def hierarchy_router(runtime) -> APIRouter:
 
     @router.post("/api/conversations/{conv_id}/lead", response_model=LeadOut)
     async def appoint_lead(request: Request, conv_id: str, body: LeadIn):
-        deny_unless(db, request_principal(request), conv_id, "appoint_lead")
+        principal = request_principal(request)
+        deny_unless(db, principal, conv_id, "appoint_lead")
         before = lead_attachment(db, conv_id)
         if (before["id"] if before else None) == body.attachment_id:
             return LeadOut(attachment_id=body.attachment_id)  # already so: no second ring
@@ -112,17 +114,19 @@ def hierarchy_router(runtime) -> APIRouter:
                 f"☏ @{before['name']} is no longer this line's captain — {successor} now. Stop "
                 "assigning, appointing, and crossing lines; finish as an ordinary participant",
                 audience=before["id"],
+                actor=principal,
             )
         if live(att):
             # Everyone hears where the line stands before the captain plans from it.
             health = await asyncio.to_thread(checkout_health.inspect, line_cwd(db, conv_id))
             if text := (checkout_health.describe(health) or "") + accepted_note(db, conv_id):
-                await runtime.post_message(conv_id, "system", "system", text)
+                await post_system_notice(runtime, conv_id, text, actor=principal)
             await post_private(
                 runtime, conv_id, "system", "system",
                 f"☏ @{att['name']} is now this line's captain — the captain pack rides this "
                 "wake; read it before acting further",
                 audience=att["id"],
+                actor=principal,
             )
             await ring_workers(runtime, conv_id, att)  # workers learn their pack now, not later
         return LeadOut(attachment_id=body.attachment_id)
@@ -172,12 +176,12 @@ def hierarchy_router(runtime) -> APIRouter:
             raise HTTPException(
                 409, f"the child worktree could not be created on {base_ref or target}")
         if where := describe(placed):
-            await runtime.post_message(conv["id"], "system", "system", where)
+            await post_system_notice(runtime, conv["id"], where, actor=principal)
         if placed.get("branch"):
             # The base notice describes the checkout the child actually starts from.
             if notice := checkout_health.describe(base_health):
                 notice = notice.replace("☏ checkout:", "☏ base checkout:", 1)
-                await runtime.post_message(conv["id"], "system", "system", notice)
+                await post_system_notice(runtime, conv["id"], notice, actor=principal)
         conv = db.get_conversation(conv["id"])
         goal, topic = body.goal.strip(), body.topic.strip()
         if goal or topic:
@@ -186,13 +190,13 @@ def hierarchy_router(runtime) -> APIRouter:
             # announced there so the hand-off is on the record.
             db._exec("UPDATE conversations SET goal=?, topic=? WHERE id=?", (goal, topic, conv["id"]))
             conv = db.get_conversation(conv["id"])
-            who = f"@{request_principal(request).name}"
+            who = f"@{principal.name}"
             if topic:
-                await runtime.post_message(conv["id"], "system", "system",
-                                           f"☏ topic set by {who}: {topic}")
+                await post_system_notice(
+                    runtime, conv["id"], f"☏ topic set by {who}: {topic}", actor=principal)
             if goal:
-                await runtime.post_message(conv["id"], "system", "system",
-                                           f"☏ goal set by {who}: {goal}")
+                await post_system_notice(
+                    runtime, conv["id"], f"☏ goal set by {who}: {goal}", actor=principal)
         await runtime.broadcast_all(ConversationsChangedEvent())
         return ChildCreatedResponse(
             conversation=ConversationResponse.model_validate(conv)
