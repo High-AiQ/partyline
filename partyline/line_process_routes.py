@@ -22,6 +22,21 @@ def live_attachments(db, conv_id: str, include_children: bool) -> list[dict]:
     ]
 
 
+def mid_turn_blocker(live: list[dict], presence) -> dict | None:
+    """Describe a live process that cannot be stopped without interrupting work."""
+    if presence is None:
+        return None
+    working = [att for att in live if presence.is_working(att["id"])]
+    if not working:
+        return None
+    names = ", ".join("@" + att["name"] for att in working)
+    return {
+        "code": "process_mid_turn",
+        "message": f"processes mid-turn: {names}; wait for them to finish before "
+        "using stop_processes=true",
+    }
+
+
 async def detach_attachment(runtime, att_id: str) -> dict:
     """Run the one-jack detach transaction used by both REST commands."""
     att = runtime.db.get_attachment(att_id)

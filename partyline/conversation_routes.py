@@ -14,7 +14,7 @@ from .attachment_commands import validated_attachment_command
 from .auth_guard import request_principal
 from .auth_store import handle_taken
 from .hierarchy import tree_live_name_conflict
-from .line_process_routes import detach_attachment, live_attachments
+from .line_process_routes import detach_attachment, live_attachments, mid_turn_blocker
 from .line_subtree import archive_line, archive_subtree
 from .line_worktree import describe, ensure_placed, line_cwd, outside_worktree_note
 from .retirement import archive_blockers
@@ -148,39 +148,27 @@ def register_conversation_routes(
         if conv["archived_at"]:
             raise HTTPException(409, "line is already archived")
         pre_stopped: list[str] = []
+        live: list[dict] = []
         if stop_processes:
             live = live_attachments(db, conv_id, include_children)
             working_presence = getattr(runtime, "presence", None) or presence
-            mid_turn = [
-                att for att in live
-                if working_presence is not None and working_presence.is_working(att["id"])
-            ]
-            if mid_turn:
-                names = ", ".join("@" + att["name"] for att in mid_turn)
-                blocker = {
-                    "code": "process_mid_turn",
-                    "message": f"processes mid-turn: {names}; wait for them to finish before "
-                    "using stop_processes=true",
-                }
-                return JSONResponse(
-                    status_code=409,
-                    content={"detail": blocker["message"], "blockers": [blocker]},
-                )
-            for attachment in live:
-                await detach_attachment(runtime, attachment["id"])
-                pre_stopped.append(attachment["name"])
         # Every blocker in one answer, so a captain fixes them in one pass
         # instead of learning the next one on each round trip.
         blockers = await asyncio.to_thread(
             archive_blockers, db, conv_id,
             include_children=include_children, discard=discard,
-            strict=not is_human(principal),
+            strict=not is_human(principal), ignore_live_processes=stop_processes,
         )
+        if stop_processes and (blocker := mid_turn_blocker(live, working_presence)):
+            blockers.append(blocker)
         if blockers:
             summary = "; ".join(blocker["message"] for blocker in blockers)
             return JSONResponse(
                 status_code=409, content={"detail": summary, "blockers": blockers}
             )
+        for attachment in live:
+            await detach_attachment(runtime, attachment["id"])
+            pre_stopped.append(attachment["name"])
         if include_children:
             stopped, archived = await archive_subtree(runtime, conv_id)
         else:
