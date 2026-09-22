@@ -12,6 +12,7 @@ The build-id reload had been hiding the gap: every earlier restart changed the
 bundle, so tabs reloaded and re-fetched by accident rather than by design.
 """
 
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -19,6 +20,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.uishot import ui_session  # noqa: E402
+
+# Exactly the line-detail fetch: `/lead` and other conversation sub-resources
+# also live under /api/conversations/ and must not be counted as detail reads.
+DETAIL_FETCH = re.compile(r"/api/conversations/[0-9a-f-]{36}$")
 
 LINES = ["alpha line", "beta line"]
 
@@ -83,7 +88,8 @@ class ResyncTest(unittest.TestCase):
             page.on(
                 "response",
                 lambda response: page.evaluate("() => { window.__detailFetches++; }")
-                if "/api/conversations/" in response.url and response.request.method == "GET"
+                if DETAIL_FETCH.search(response.url.split("?", 1)[0])
+                and response.request.method == "GET"
                 else None,
             )
 
@@ -92,6 +98,34 @@ class ResyncTest(unittest.TestCase):
 
             # Exactly the one fetch `open()` performs, with no handshake echo.
             self.assertEqual(page.evaluate("() => window.__detailFetches"), 1)
+
+    def test_a_restart_request_filed_during_an_outage_shows_its_banner_on_reconnect(self):
+        """The banner is event-carried state, exactly like attachment status.
+
+        Filed while this tab is deaf, the restart_request frame reaches no
+        socket; the reconnect must re-read the pending request or the banner
+        stays hidden until a manual refresh — the person sees the ☏ notice in
+        the caught-up feed with nothing to act on.
+        """
+        with ui_session(LINES, handle="operator") as ui:
+            page = ui.page
+            open_first_line(ui)
+            conversation_id = page.evaluate("() => window.partyline.room.conversation.id")
+
+            page.evaluate(DROP_SOCKET)
+            page.wait_for_function("() => window.partyline.wire.ready === false", timeout=5000)
+
+            filed = page.request.post(
+                f"{ui.base_url}/api/conversations/{conversation_id}/restart-request",
+                data={"reason": "new build", "confirm_no_deploy": True},
+                headers=ui.auth_headers,
+            )
+            self.assertTrue(filed.ok, filed.text())
+
+            page.wait_for_function("() => window.partyline.wire.ready === true", timeout=15000)
+            page.locator("#restartRequest").wait_for(state="visible", timeout=5000)
+            self.assertIn(
+                "asks to restart partyline", page.locator("#restartRequest").inner_text())
 
     def test_messages_missed_during_an_outage_arrive_on_reconnect(self):
         """An outage swallows message events too, and the feed must not keep the
