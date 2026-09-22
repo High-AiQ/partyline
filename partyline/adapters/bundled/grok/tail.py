@@ -56,6 +56,7 @@ async def tail_grok_transcript(adapter, path: Path, handle) -> None:
                         record = json.loads(line)
                     except json.JSONDecodeError:
                         continue
+                    adapter.observe_claim(line)
                     await adapter._note_user_record(record)
                     if not adapter._is_assistant_record(record):
                         continue

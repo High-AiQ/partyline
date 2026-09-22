@@ -19,7 +19,7 @@ class CodexCommandTest(unittest.IsolatedAsyncioTestCase):
             Path(__file__).parent.parent / "partyline" / "adapters" / "bundled" / "codex" / "adapter.toml"
         ).read_text(encoding="utf-8")
 
-        self.assertIn('version = "1.1.0"', manifest)
+        self.assertIn('version = "1.2.0"', manifest)
         self.assertIn('update_command = ["codex", "update"]', manifest)
 
     def make_adapter(
@@ -449,21 +449,15 @@ class CodexCommandTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(posted2, [])
 
 class CodexDiscoveryTest(unittest.IsolatedAsyncioTestCase):
-    def setUp(self):
-        # reset claimed set between tests
-        from partyline.adapters.bundled.codex.adapter import PartylineAdapter as CodexAdapter
-
-        CodexAdapter._CLAIMED.clear()
-        self.addCleanup(CodexAdapter._CLAIMED.clear)
-
     def make_adapter(self, **extra):
         import asyncio
 
         adapter = PartylineAdapter.__new__(PartylineAdapter)
-        adapter.att = {"cwd": "/work", "cli_session": "session-1", "id": "att-1", **extra}
+        adapter.att = {"cwd": "/work", "cli_session": "session-1", "id": "att-1",
+                       "adapter_metadata": {"capabilities": {"transcript": True}}, **extra}
         adapter.spawned_at = 1000.0
         adapter.resume = False
-        adapter._CLAIMED = PartylineAdapter._CLAIMED
+        adapter._home = "/tmp/codex-home"
         adapter._ready_result = None
         adapter._ready = asyncio.Event()
         adapter._tail_task = None
@@ -486,178 +480,142 @@ class CodexDiscoveryTest(unittest.IsolatedAsyncioTestCase):
         adapter._tasks = []
         return adapter
 
-    def test_find_rollout_matches_cwd_and_claims(self):
-        import json
-        import tempfile
-        from pathlib import Path
-        from unittest.mock import patch
+    @staticmethod
+    def write_rollout(path: str, meta: dict, lines=()) -> str:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"type": "session_meta", "payload": meta}) + "\n")
+            for line in lines:
+                fh.write(line if line.endswith("\n") else line + "\n")
+        return path
 
-        from partyline.adapters.bundled.codex.adapter import PartylineAdapter
-
+    def test_fresh_rollout_is_claimed_only_when_it_records_our_token(self):
+        """Identity is content: recency and cwd merely bound the scan."""
         with tempfile.TemporaryDirectory() as tmp:
-            rollout = Path(tmp) / "rollout-1.jsonl"
-            rollout.write_text(
-                json.dumps(
-                    {"type": "session_meta", "payload": {"id": "sess-1", "cwd": "/work", "source": {}}}
-                )
-                + "\n",
-                encoding="utf-8",
-            )
+            rollout = self.write_rollout(
+                os.path.join(tmp, "rollout-tokenless.jsonl"),
+                {"id": "sess-1", "cwd": "/work", "source": {}})
             adapter = self.make_adapter()
             with (
-                patch(
-                    "partyline.adapters.bundled.codex.adapter.glob.glob",
-                    return_value=[str(rollout)],
-                ),
-                patch(
-                    "partyline.adapters.bundled.codex.adapter.os.path.getmtime",
-                    return_value=999.9,
-                ),
+                patch("partyline.adapters.bundled.codex.adapter.glob.glob",
+                      return_value=[rollout]),
+                patch("partyline.adapters.bundled.codex.adapter.os.path.getmtime",
+                      return_value=999.9)):
+                self.assertIsNone(adapter._find_rollout())
+
+            self.write_rollout(rollout, {"id": "sess-1", "cwd": "/work", "source": {}},
+                               [json.dumps({"payload": {"type": "user_message",
+                                                       "message": adapter._claim_token}})])
+            with (
+                patch("partyline.adapters.bundled.codex.adapter.glob.glob",
+                      return_value=[rollout]),
+                patch("partyline.adapters.bundled.codex.adapter.os.path.getmtime",
+                      return_value=999.9),
             ):
-                found = adapter._find_rollout()
-            self.assertEqual(found, str(rollout))
-            self.assertIn(str(rollout), PartylineAdapter._CLAIMED)
+                self.assertEqual(adapter._find_rollout(), rollout)
 
-    def test_find_rollout_skips_claimed_and_stale(self):
-        import json
-        import tempfile
-        from pathlib import Path
-        from unittest.mock import patch
-
-        from partyline.adapters.bundled.codex.adapter import PartylineAdapter
-
+    def test_stale_mtime_is_skipped(self):
         with tempfile.TemporaryDirectory() as tmp:
-            rollout = Path(tmp) / "rollout-2.jsonl"
-            rollout.write_text(
-                json.dumps({"type": "session_meta", "payload": {"id": "sess-2", "cwd": "/work"}}) + "\n",
-                encoding="utf-8",
-            )
-            PartylineAdapter._CLAIMED.add(str(rollout))
+            rollout = self.write_rollout(
+                os.path.join(tmp, "rollout-stale.jsonl"), {"id": "sess-2", "cwd": "/work"},
+                [json.dumps({"message": self.make_adapter()._claim_token})])
             adapter = self.make_adapter()
-            # claimed path should be skipped -> None
             with (
-                patch(
-                    "partyline.adapters.bundled.codex.adapter.glob.glob",
-                    return_value=[str(rollout)],
-                ),
-                patch(
-                    "partyline.adapters.bundled.codex.adapter.os.path.getmtime",
-                    return_value=999.9,
-                ),
+                patch("partyline.adapters.bundled.codex.adapter.glob.glob",
+                      return_value=[rollout]),
+                patch("partyline.adapters.bundled.codex.adapter.os.path.getmtime",
+                      return_value=900.0),
             ):
                 self.assertIsNone(adapter._find_rollout())
-            PartylineAdapter._CLAIMED.clear()
-            # stale mtime should be skipped
-            with (
-                patch(
-                    "partyline.adapters.bundled.codex.adapter.glob.glob",
-                    return_value=[str(rollout)],
-                ),
-                patch(
-                    "partyline.adapters.bundled.codex.adapter.os.path.getmtime",
-                    return_value=900.0,
-                ),
-            ):
-                self.assertIsNone(adapter._find_rollout())
+
+    def test_a_foreign_marked_rollout_is_never_adopted(self):
+        """The write-fence defect as a control: another attachment's marker
+        disqualifies a candidate even when it is the newest cwd match."""
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = self.make_adapter()
+            sessions = os.path.join(tmp, "sessions", "2026", "09", "22")
+            foreign = self.write_rollout(
+                os.path.join(sessions, "rollout-foreign.jsonl"), {"id": "sess-x", "cwd": "/work"},
+                [json.dumps({"message": "[partyline-claim: other-att/deadbeef123]"})])
+            ours = self.write_rollout(
+                os.path.join(sessions, "rollout-ours.jsonl"), {"id": "sess-y", "cwd": "/work"},
+                [json.dumps({"message": adapter._claim_token})])
+            now = time.time()
+            os.utime(ours, (now - 5, now - 5))
+            os.utime(foreign, (now, now))
+            adapter._home = tmp
+
+            self.assertEqual(adapter._find_rollout(), ours)
 
     def test_find_rollout_filters_by_source_and_resume(self):
-        import json
-        import tempfile
-        from pathlib import Path
-        from unittest.mock import mock_open, patch
-
-
-        def fake_open(path, *args, **kwargs):
-            payloads = {
-                "bad-type": {"type": "other", "payload": {"id": "x", "cwd": "/work"}},
-                "subagent": {
-                    "type": "session_meta",
-                    "payload": {"id": "x", "cwd": "/work", "source": {"subagent": True}},
-                },
-                "resume-mismatch": {
-                    "type": "session_meta",
-                    "payload": {"id": "other", "cwd": "/work", "forked_from_id": "other"},
-                },
-                "resume-match": {
-                    "type": "session_meta",
-                    "payload": {"id": "new", "forked_from_id": "session-1", "cwd": "/work"},
-                },
-                "cwd-mismatch": {
-                    "type": "session_meta",
-                    "payload": {"id": "x", "cwd": "/other"},
-                },
-            }
-            key = Path(path).stem
-            data = payloads.get(key, payloads["bad-type"])
-            m = mock_open(read_data=json.dumps(data) + "\n")
-            return m(path, *args, **kwargs)
-
         with tempfile.TemporaryDirectory() as tmp:
-            paths = [
-                str(Path(tmp) / "bad-type.jsonl"),
-                str(Path(tmp) / "subagent.jsonl"),
-                str(Path(tmp) / "cwd-mismatch.jsonl"),
-            ]
+            sessions = os.path.join(tmp, "sessions", "2026", "09", "22")
             adapter = self.make_adapter()
+            token = adapter._claim_token
+            bad_type = self.write_rollout(
+                os.path.join(sessions, "rollout-bad-type.jsonl"), {"id": "x", "cwd": "/other"},
+                [json.dumps({"message": token})])
+            # rewrite as the wrong record type with our token present
+            with open(bad_type, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps({"type": "other", "payload": {"id": "x", "cwd": "/work"}}) + "\n")
+                fh.write(json.dumps({"message": token}) + "\n")
+            self.write_rollout(
+                os.path.join(sessions, "rollout-subagent.jsonl"),
+                {"id": "x", "cwd": "/work", "source": {"subagent": True}},
+                [json.dumps({"message": token})])
+            self.write_rollout(
+                os.path.join(sessions, "rollout-cwd-mismatch.jsonl"), {"id": "x", "cwd": "/other"},
+                [json.dumps({"message": token})])
+            adapter._home = tmp
             with patch(
-                "partyline.adapters.bundled.codex.adapter.glob.glob", return_value=paths
-            ), patch(
                 "partyline.adapters.bundled.codex.adapter.os.path.getmtime", return_value=999.9
-            ), patch(
-                "partyline.adapters.bundled.codex.adapter.open", side_effect=fake_open
             ):
                 self.assertIsNone(adapter._find_rollout())
-            # resume match should succeed
-            paths2 = [str(Path(tmp) / "resume-match.jsonl"), str(Path(tmp) / "resume-mismatch.jsonl")]
-            adapter2 = self.make_adapter()
-            adapter2.resume = True
+
+            resume_match = self.write_rollout(
+                os.path.join(sessions, "rollout-resume-match.jsonl"),
+                {"id": "new", "forked_from_id": "session-1", "cwd": "/work"})
+            self.write_rollout(
+                os.path.join(sessions, "rollout-resume-mismatch.jsonl"),
+                {"id": "other", "cwd": "/work", "forked_from_id": "other"})
+            resumed = self.make_adapter()
+            resumed.resume = True
+            resumed._home = tmp
             with patch(
-                "partyline.adapters.bundled.codex.adapter.glob.glob", return_value=paths2
-            ), patch(
                 "partyline.adapters.bundled.codex.adapter.os.path.getmtime", return_value=999.9
-            ), patch(
-                "partyline.adapters.bundled.codex.adapter.open", side_effect=fake_open
             ):
-                found = adapter2._find_rollout()
-                self.assertEqual(found, str(Path(tmp) / "resume-match.jsonl"))
+                # Lineage is exact content, so a resume needs no token.
+                self.assertEqual(resumed._find_rollout(), resume_match)
+            os.unlink(resume_match)
+            with patch(
+                "partyline.adapters.bundled.codex.adapter.os.path.getmtime", return_value=999.9
+            ):
+                # A resume with neither lineage nor token has nothing to claim.
+                self.assertIsNone(resumed._find_rollout())
 
     def test_find_rollout_handles_os_and_json_errors(self):
-        from unittest.mock import patch
-
         adapter = self.make_adapter()
-
-        def bad_open(path, *args, **kwargs):
-            raise OSError("no read")
-
-        with patch(
-            "partyline.adapters.bundled.codex.adapter.glob.glob", return_value=["/tmp/bad.jsonl"]
-        ), patch(
-            "partyline.adapters.bundled.codex.adapter.os.path.getmtime", return_value=999.9
-        ), patch("partyline.adapters.bundled.codex.adapter.open", side_effect=bad_open):
+        with (
+            patch("partyline.adapters.bundled.codex.adapter.glob.glob",
+                  return_value=["/tmp/codex-missing.jsonl"]),
+            patch("partyline.adapters.bundled.codex.adapter.os.path.getmtime",
+                  return_value=999.9),
+        ):
             self.assertIsNone(adapter._find_rollout())
 
-        def json_error_open(path, *args, **kwargs):
-            from unittest.mock import mock_open
-
-            m = mock_open(read_data="not json\n")
-            return m(path, *args, **kwargs)
-
-        with patch(
-            "partyline.adapters.bundled.codex.adapter.glob.glob", return_value=["/tmp/bad2.jsonl"]
-        ), patch(
-            "partyline.adapters.bundled.codex.adapter.os.path.getmtime", return_value=999.9
-        ), patch("partyline.adapters.bundled.codex.adapter.open", side_effect=json_error_open):
-            self.assertIsNone(adapter._find_rollout())
-
-    async def test_stop_releases_claimed_rollout(self):
-        from partyline.adapters.bundled.codex.adapter import PartylineAdapter
-
-        adapter = self.make_adapter()
-        fake_path = "/tmp/fake-rollout.jsonl"
-        PartylineAdapter._CLAIMED.add(fake_path)
-        adapter._rollout = fake_path
-        await adapter.stop()
-        self.assertNotIn(fake_path, PartylineAdapter._CLAIMED)
+        with tempfile.TemporaryDirectory() as tmp:
+            broken = self.write_rollout(
+                os.path.join(tmp, "not-json.jsonl"), {})
+            with open(broken, "w", encoding="utf-8") as fh:
+                fh.write("not json\n")
+                fh.write(json.dumps({"message": adapter._claim_token}) + "\n")
+            with (
+                patch("partyline.adapters.bundled.codex.adapter.glob.glob",
+                      return_value=[broken]),
+                patch("partyline.adapters.bundled.codex.adapter.os.path.getmtime",
+                      return_value=999.9),
+            ):
+                self.assertIsNone(adapter._find_rollout())
 
 
 class CodexHomeTest(unittest.IsolatedAsyncioTestCase):
@@ -690,7 +648,8 @@ class CodexHomeTest(unittest.IsolatedAsyncioTestCase):
 
         adapter = PartylineAdapter(
             {"command": ["codex"], "cwd": cwd, "id": att_id, "name": att_id,
-             "resume": resume, "cli_session": session},
+             "resume": resume, "cli_session": session,
+             "adapter_metadata": {"capabilities": {"transcript": True}}},
             post,
             on_status,
         )
@@ -776,18 +735,52 @@ class CodexHomeTest(unittest.IsolatedAsyncioTestCase):
         """
         cwd = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, cwd, True)
-        adapters, homes, rollouts = [], [], []
+        adapters, rollouts = [], []
         for att_id in ("att-sol", "att-luna"):
             adapter = self.make(att_id=att_id, cwd=cwd)
-            home = adapter.codex_home()
-            adapter._home = home
+            adapter._home = adapter.codex_home()
+            # The rollout records the paste only that pty received.
             rollouts.append(self.write_rollout(
-                os.path.join(home, "sessions", "2026", "09", "22",
+                os.path.join(adapter._home, "sessions", "2026", "09", "22",
                              f"rollout-2026-09-22T23-09-12-{att_id}.jsonl"),
-                cwd=cwd, session=att_id))
+                cwd=cwd, session=att_id,
+                records=[{"type": "event_msg",
+                          "payload": {"type": "user_message",
+                                      "message": adapter._claim_token}}]))
             adapters.append(adapter)
-            homes.append(home)
         # Same second on the clock, luna's flush the newer of the two.
+        now = time.time()
+        for adapter in adapters:
+            adapter.spawned_at = now - 0.5
+        os.utime(rollouts[0], (now - 0.4, now - 0.4))
+        os.utime(rollouts[1], (now, now))
+
+        self.assertEqual(adapters[0]._find_rollout(), rollouts[0])
+        self.assertEqual(adapters[1]._find_rollout(), rollouts[1])
+
+    async def test_two_same_second_attachments_pair_by_content_even_in_one_home(self):
+        """If isolation ever fails, the token still pairs 1:1 by content.
+
+        Both rollouts sit in one sessions directory — the shape the
+        incident actually ran on — and the newest file belongs to the
+        second attachment. Scan order must not decide identity: each
+        adapter claims the rollout that recorded its own paste.
+        """
+        cwd = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, cwd, True)
+        shared_home = os.path.join(self.root.name, "collided")
+        rollouts, adapters = [], []
+        for att_id in ("att-sol", "att-luna"):
+            adapter = self.make(att_id=att_id, cwd=cwd)
+            adapter._home = shared_home
+            rollouts.append(self.write_rollout(
+                os.path.join(shared_home, "sessions", "2026", "09", "22",
+                             f"rollout-2026-09-22T23-09-12-{att_id}.jsonl"),
+                cwd=cwd, session=att_id,
+                records=[{"type": "event_msg",
+                          "payload": {"type": "user_message",
+                                      "message": adapter._claim_token}}]))
+            adapters.append(adapter)
         now = time.time()
         for adapter in adapters:
             adapter.spawned_at = now - 0.5

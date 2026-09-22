@@ -161,6 +161,7 @@ class PartylineAdapter(Adapter):
             ).fetchall()
             for row in rows:
                 last_id = max(last_id, int(row["id"]))
+                self.observe_claim(row["content"])
                 if body := self._assistant_text(row):
                     await self.post(self.att["name"], "agent", body)
             await asyncio.sleep(self.POLL_SECONDS)
