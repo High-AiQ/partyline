@@ -38,7 +38,8 @@ def archive_blockers(
         names = ", ".join("@" + att["name"] for att in live)
         blockers.append(_blocker(
             "live_processes",
-            f"live processes: this line still has live processes ({names}); stop them first",
+            f"live processes: this line still has live processes ({names}); stop them first "
+            f"with POST /api/conversations/{{id}}/attachments/close",
         ))
     if strict and conv.get("goal"):
         blockers.append(_blocker(
@@ -57,7 +58,8 @@ def archive_blockers(
                 "unmerged_commits",
                 "unmerged commits: this line's branch or worktree HEAD has commits not "
                 "reachable from the parent branch or the repository default; merge it, and "
-                "never discard it",
+                "never discard it. A person may retire from the UI, while a machine captain "
+                "must merge first",
             ))
         waives_dirty = discard and state["merged"]
         if strict and not state["clean"] and not waives_dirty:
