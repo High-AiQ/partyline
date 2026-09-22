@@ -126,6 +126,8 @@ class StaffingLineTest(unittest.TestCase):
         self.assertEqual(staffing_line(db, "root"), "")  # no presets: nothing to say
         db.create_conversation("root", "Root")
         db.create_conversation("kid", "Kid")
+        db.create_conversation("other", "Other")
+        db._exec("UPDATE conversations SET parent_id=? WHERE id=?", ("root", "kid"))
         for name, adapter, traits in (
             ("opus", "claude", {"can_manage": True, "implements": False}),
             ("astra", "codex", {"can_manage": True, "implements": False}),
@@ -137,9 +139,13 @@ class StaffingLineTest(unittest.TestCase):
         db._exec("UPDATE attachments SET status='running', is_lead=1 WHERE id='a1'")
         db.add_attachment("a2", "kid", "luna", "codex", ["codex", "--x"], "/tmp")
         db._exec("UPDATE attachments SET status='running' WHERE id='a2'")
+        db.add_attachment("a3", "other", "glm-flash", "opencode", ["opencode", "--x"], "/tmp")
+        db._exec("UPDATE attachments SET status='running' WHERE id='a3'")
         line = staffing_line(db, "root")
+        self.assertNotIn("glm-flash «Other»", line)
+        self.assertNotIn("free workers: glm-flash", line)
         self.assertEqual(
             line,
             "(staffing — in use: opus «Kid» captain; luna «Kid». "
-            "free captains: astra. free workers: glm-flash)",
+            "free captains: astra. free workers: none)",
         )
