@@ -78,9 +78,8 @@ class RoleDeliveryTests(unittest.TestCase):
             bind_role_delivery(NO_GOAL, att)
             first = att["digest_rider"]()
             self.assertIn("helper command", first)
-            self.assertIn("by @mention from this line", first)
-            self.assertIn("captain pack: GET /api/conversations/line/briefing",
-                          att["digest_rider"]())
+            self.assertNotIn("## Captain pack", first)
+            self.assertIn("captain pack: GET /api/conversations/line/briefing", first)
 
     def test_a_captained_worker_gets_the_reminder_once_per_role_state(self):
         captained = RoleState("implementer", "line", None, ("read", "write"), captained=True)
