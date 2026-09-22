@@ -51,7 +51,10 @@ def bind_role_delivery(db, att: dict) -> None:
     initial = current_role(db, att["id"])
     att["role_briefing"] = _instructions(initial)
     original_rider = att["digest_rider"]
-    previous = None if att.get("resume") else initial
+    # The startup briefing already carries the pack for both fresh and resumed
+    # attachments.  A resume therefore starts at the current role just like a
+    # fresh attachment; a later role change still produces a new pack.
+    previous = initial
     last_goal = last_staffing = last_handoff = None
     worker_reminder_sent = False
 
