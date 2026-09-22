@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { room } from "./room.svelte.js";
+import { restart } from "./restart.svelte.js";
 import { session } from "./session.svelte.js";
 import { wire } from "./wire.svelte.js";
 import type { WireEventHandler } from "./wire.svelte.js";
@@ -78,6 +79,26 @@ describe("room roster snapshots that were in flight during a removal", () => {
     await resync;
 
     expect(room.attachments).toEqual([]);
+  });
+});
+
+describe("resync after a reconnect", () => {
+  it("re-reads the pending restart request the outage may have missed", async () => {
+    room.conversation = conversation;
+    vi.spyOn(api, "conversation").mockResolvedValue({
+      conversation,
+      messages: [],
+      has_more_messages: false,
+      attachments: [],
+      working: [],
+      presence: null,
+    });
+    vi.spyOn(room.history, "catchUp").mockResolvedValue(undefined);
+    const load = vi.spyOn(restart, "load").mockResolvedValue(undefined);
+
+    await room.resync();
+
+    expect(load).toHaveBeenCalledTimes(1);
   });
 });
 
