@@ -8,6 +8,19 @@ from .hierarchy import descendants
 from .line_process_contracts import CloseProcessesResponse
 from .machine_scope import deny_unless
 
+LIVE = ("starting", "running")
+
+
+def live_attachments(db, conv_id: str, include_children: bool) -> list[dict]:
+    """Return live attachments on a line and, optionally, its descendants."""
+    line_ids = [conv_id, *descendants(db, conv_id)] if include_children else [conv_id]
+    return [
+        att
+        for line_id in line_ids
+        for att in db.list_attachments(line_id)
+        if att["status"] in LIVE
+    ]
+
 
 async def detach_attachment(runtime, att_id: str) -> dict:
     """Run the one-jack detach transaction used by both REST commands."""
@@ -48,14 +61,7 @@ def register_line_process_routes(app: FastAPI, runtime) -> None:
         deny_unless(runtime.db, request_principal(request), conv_id, "close")
         if conversation["archived_at"] is not None:
             raise HTTPException(409, "restore the line before closing its processes")
-        below = descendants(runtime.db, conv_id) if include_children else []
-        target_ids = [conv_id, *below]
-        live = [
-            att
-            for target_id in target_ids
-            for att in runtime.db.list_attachments(target_id)
-            if att["status"] in ("starting", "running")
-        ]
+        live = live_attachments(runtime.db, conv_id, include_children)
         for attachment in live:
             await detach_attachment(runtime, attachment["id"])
         return {"ok": True, "stopped": [attachment["name"] for attachment in live]}

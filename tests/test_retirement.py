@@ -35,6 +35,9 @@ class RetirementTest(unittest.TestCase):
         self.db = Db(f"{self.directory.name}/partyline.db")
         self.addCleanup(self.db.close)
         self.runtime = ChatRuntime(self.db)
+        self.runtime.presence = type(
+            "Presence", (), {"is_working": lambda _self, att_id: False}
+        )()
         app = FastAPI()
         install_auth_guard(app, self.db)
         app.include_router(hierarchy_router(self.runtime))
@@ -101,6 +104,52 @@ class RetirementTest(unittest.TestCase):
         self.assertIn("goal", resp.json()["detail"])
         self.assertIn("uncommitted changes", resp.json()["detail"])
         self.assertIn("POST /api/conversations/{id}/attachments/close", resp.json()["detail"])
+
+    def test_stop_processes_detaches_the_line_and_descendants_before_retiring(self):
+        mid = self.child()
+        grand = self.child("grand", parent=mid["id"])
+        for conv_id, att_id in ((mid["id"], "mid-worker"), (grand["id"], "grand-worker")):
+            owner = f"owner-{att_id}"
+            self.db.add_attachment(
+                att_id, conv_id, att_id, "fake", ["fake"], self.repo, owner
+            )
+            self.db.set_attachment_status(att_id, "running", owner)
+
+            class Adapter:
+                def __init__(adapter_self, adapter_id, adapter_owner):
+                    adapter_self.att = {"runtime_owner": adapter_owner}
+                    adapter_self.adapter_id = adapter_id
+                    adapter_self.adapter_owner = adapter_owner
+
+                async def stop(adapter_self):
+                    self.db.set_attachment_status(
+                        adapter_self.adapter_id, "detached", adapter_self.adapter_owner
+                    )
+
+            self.runtime.live[att_id] = Adapter(att_id, owner)
+
+        resp = self.retire(mid["id"], include_children=True, stop_processes=True)
+
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(set(resp.json()["stopped"]), {"mid-worker", "grand-worker"})
+        self.assertEqual(self.db.get_attachment("mid-worker")["status"], "detached")
+        self.assertEqual(self.db.get_attachment("grand-worker")["status"], "detached")
+
+    def test_stop_processes_refuses_only_a_live_process_mid_turn(self):
+        mid = self.child()
+        self.db.add_attachment(
+            "mid-worker", mid["id"], "worker", "fake", ["fake"], self.repo, "owner-worker"
+        )
+        self.db.set_attachment_status("mid-worker", "running", "owner-worker")
+        self.runtime.presence = type(
+            "Presence", (), {"is_working": lambda _self, att_id: att_id == "mid-worker"}
+        )()
+
+        resp = self.retire(mid["id"], stop_processes=True)
+
+        self.assertEqual(resp.status_code, 409, resp.text)
+        self.assertEqual([b["code"] for b in resp.json()["blockers"]], ["process_mid_turn"])
+        self.assertEqual(self.db.get_attachment("mid-worker")["status"], "running")
 
     def test_machine_unmerged_blocker_names_merge_and_person_asymmetry(self):
         mid = self.child()

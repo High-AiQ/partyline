@@ -21,6 +21,7 @@ class RoleBriefingTests(unittest.TestCase):
         self.assertIn("PUT /api/conversations/root/goal", text)
         self.assertIn("### Staffing", text)
         self.assertIn("/api/conversations/root/staffing", text)
+        self.assertIn("DELETE /api/conversations/<child-id>?stop_processes=true", text)
         self.assertIn("can_manage captains", text)
         self.assertIn("### You are the captain; you do not implement", text)
         self.assertIn("### The loop you run", text)
