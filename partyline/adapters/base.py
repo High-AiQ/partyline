@@ -20,7 +20,7 @@ from collections.abc import Awaitable, Callable
 
 import pyte
 
-from partyline.adapters import pty_io
+from partyline.adapters import activation, pty_io
 from partyline.adapters.task_logging import log_task_deaths
 from partyline.adapters.briefing import (
     fresh_checkpoint_briefing, connection_briefing,
@@ -38,7 +38,7 @@ Post = Callable[[str, str, str], Awaitable[None]]
 Status = Callable[[str], Awaitable[None]]
 
 
-class Adapter(pty_io.PtyWriter):
+class Adapter(activation.Activation, pty_io.PtyWriter):
     """Base class for a process connected through a pseudo-terminal."""
 
     kind = "process"
@@ -95,6 +95,7 @@ class Adapter(pty_io.PtyWriter):
         master, slave = os.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
         env = dict(child_env(os.environ, self.att), TERM="xterm-256color")
+        env.update(self.spawn_env())
         # Adapters declare what to strip so a spawned CLI doesn't mistake itself
         # for a nested harness. A trailing "*" clears a whole prefix.
         for key in self.att.get("adapter_metadata", {}).get("env_unset", []):
@@ -237,17 +238,6 @@ class Adapter(pty_io.PtyWriter):
         """
         return False
 
-    def mark_startup_delivery_received(self) -> None:
-        """A staged startup digest appeared as structured process input."""
-        if self._startup_delivery_result is None and not self._stopping:
-            self._startup_delivery_result = True
-            self._startup_delivery.set()
-
-    async def wait_startup_delivery_received(self) -> bool:
-        """Wait for structured receipt, or for the process to exit first."""
-        await self._startup_delivery.wait()
-        return self._startup_delivery_result is True
-
     # The digest's shape lives in briefing.py; cwd git and the task rider are
     # live delivery-time state, never staged.
     def format_digest(self, messages: list[dict]) -> str:
@@ -291,19 +281,6 @@ class Adapter(pty_io.PtyWriter):
 
     def alive(self) -> bool:
         return self.proc is not None and self.proc.poll() is None
-
-    def _fresh(self, iso_ts) -> bool:
-        """Return whether a transcript record belongs to this running process."""
-        if not self.att.get("resume"):
-            return True
-        if not iso_ts:
-            return False
-        try:
-            from datetime import datetime
-            timestamp = datetime.fromisoformat(str(iso_ts).replace("Z", "+00:00")).timestamp()
-        except ValueError:
-            return False
-        return timestamp >= self.spawned_at - 5
 
     async def _tail_jsonl(self, path: str, handle_line):
         """Follow a JSONL transcript, ignoring incomplete or invalid records."""

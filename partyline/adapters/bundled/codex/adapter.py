@@ -1,12 +1,15 @@
 """Private Codex adapter; tails matching rollout JSONL events.
 
-The rollout file is created lazily, on the first turn's flush rather than at TUI
-boot, and it carries no id we chose — so a fresh attachment has to find it by
-working directory and start time. Two TUIs launched in one directory seconds
-apart are indistinguishable that way, so discovery is serialized by _DISCOVERY
-and every resolved rollout is claimed in _CLAIMED. Without that, the second
-attachment latches onto the first one's transcript and reposts its messages
-under the wrong handle.
+Each attachment runs Codex with a ``CODEX_HOME`` of its own under
+``~/.partyline/sessions/codex/<attachment-id>``, seeded with the user's
+auth and config: the CLI creates every other file it needs there (verified
+against codex-cli 0.156), and its rollouts land in a directory no other
+attachment writes. Two TUIs launched in one directory seconds apart are
+therefore invisible to each other, and the working-directory match below
+cannot find a neighbour's session — the same-directory adoption that
+crossed two attachments' speech on 2026-09-22. A resume links the prior
+activation's rollout into the same home so ``codex resume <id>`` resolves
+it there.
 """
 
 import asyncio
@@ -18,6 +21,13 @@ import os
 from partyline.adapters.base import Adapter as BaseAdapter
 from partyline.adapters.compaction import is_compaction_record
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
+
+HOME_ROOT = os.path.expanduser("~/.partyline/sessions/codex")
+SHARED_HOME = os.path.expanduser("~/.codex")
+# Read-mostly entries shared from the user's own codex home. Everything
+# else — sessions, history, the sqlite state — is created per attachment,
+# so concurrent CLIs never write one file or share one wal.
+SHARED = ("auth.json", "config.toml", "plugins", "skills")
 
 
 def _item_text(item: dict) -> str:
@@ -35,6 +45,49 @@ class PartylineAdapter(BaseAdapter):
     async def stop(self):
         self._CLAIMED.discard(getattr(self, "_rollout", "") or "")
         await super().stop()
+
+    def codex_home(self) -> str:
+        """This attachment's private CODEX_HOME, created and seeded."""
+        home = os.path.join(HOME_ROOT, self.att["id"])
+        os.makedirs(os.path.join(home, "sessions"), exist_ok=True)
+        for name in SHARED:
+            link = os.path.join(home, name)
+            if os.path.lexists(link):
+                continue
+            try:
+                os.symlink(os.path.join(SHARED_HOME, name), link)
+            except OSError:
+                pass  # an entry the user does not have is not ours to invent
+        if prior := self.att.get("cli_session"):
+            self._link_prior_session(home, prior)
+        return home
+
+    def _link_prior_session(self, home: str, prior: str) -> None:
+        """Make the recorded session resolvable inside this home.
+
+        Sessions recorded before per-attachment homes still live in the
+        shared tree; a symlink lets ``codex resume <id>`` find them while
+        every new write stays inside this home.
+        """
+        shared_sessions = os.path.join(SHARED_HOME, "sessions")
+        pattern = os.path.join(shared_sessions, "**", f"rollout-*{prior}.jsonl")
+        for source in glob.glob(pattern, recursive=True):
+            target = os.path.join(home, "sessions",
+                                  os.path.relpath(source, shared_sessions))
+            if os.path.lexists(target):
+                continue
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            try:
+                os.symlink(source, target)
+            except OSError:
+                pass
+
+    def spawn_env(self) -> dict[str, str]:
+        return {"CODEX_HOME": getattr(self, "_home", "") or self.codex_home()}
+
+    async def start(self):
+        self._home = self.codex_home()
+        await super().start()
 
     def build_command(self) -> list[str]:
         cmd = list(self.att["command"]) or ["codex"]
@@ -63,9 +116,19 @@ class PartylineAdapter(BaseAdapter):
         return True
 
     def _find_rollout(self) -> str | None:
-        pattern = os.path.expanduser("~/.codex/sessions/**/rollout-*.jsonl")
-        candidates = [path for path in glob.glob(pattern, recursive=True)
-                      if os.path.getmtime(path) >= self.spawned_at - 2]
+        home = getattr(self, "_home", "") or self.codex_home()
+        pattern = os.path.join(home, "sessions", "**", "rollout-*.jsonl")
+        candidates = []
+        for path in glob.glob(pattern, recursive=True):
+            # A resumed activation's linked prior session predates this
+            # spawn; its lineage match below is exact, so the mtime bound
+            # applies only to fresh attachments, where it bounds the scan.
+            try:
+                recent = self.resume or os.path.getmtime(path) >= self.spawned_at - 2
+            except OSError:
+                continue
+            if recent:
+                candidates.append(path)
         for path in sorted(candidates, key=os.path.getmtime, reverse=True):
             if path in self._CLAIMED:
                 continue  # another live attachment is already tailing it

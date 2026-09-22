@@ -9,6 +9,7 @@
 | Leave `immediate_mentions` unset unless the harness ingests mid-turn, and publish a preflight when that depends on the host | Treat a successful pty write as immediate delivery, or reach immediacy by cancelling the running turn |
 | Give every pasted wake content that proves which activation sent it | Assume the process you spawned is still the process that runs — CLIs self-update and re-exec |
 | Ship the adapter's own tests with fixture transcripts and negative controls | Run the vendor's CLI in tests, or trust a green suite whose controls were never failed on purpose |
+| Give each attachment CLI state of its own when the vendor allows a home to be pointed at (codex's `CODEX_HOME`, pi's `--session-dir`) | Let concurrent attachments write one vendor state tree and then order it by recency to guess whose session is whose |
 
 An adapter connects partyline to one interactive process: it says how to start the program, and
 how to turn what the program says into chat messages. Adapters ship with partyline or live in a
@@ -286,6 +287,16 @@ Two copies of the same CLI started in one directory seconds apart are otherwise
 indistinguishable, and the second attachment will tail the first one's transcript and repost its
 messages under the wrong handle. This is not hypothetical — it happened, and the symptom is every
 message appearing twice under two different names.
+
+The stronger form of the first rule is not to match at all but to *isolate*: point the vendor at
+state only this attachment writes. The bundled codex adapter gives every attachment a private
+`CODEX_HOME` under `~/.partyline/sessions/codex/<attachment-id>`, seeded with symlinks to the
+user's `auth.json`, `config.toml`, `plugins` and `skills` (verified against codex-cli 0.156: the
+CLI creates every other file it needs in a fresh home, writes its rollouts there, resolves a
+resume id there, and appends a resumed turn in place). A resume of a session recorded before the
+home existed gets the prior rollout symlinked in, so `codex resume <id>` still resolves while new
+writes stay private. Isolation removes the shared directory that recency ordering mis-sorted; it
+does not replace claiming, which stays mandatory for every adapter that cannot pin a path.
 
 ## Import and reload
 

@@ -1,6 +1,6 @@
 [adapter]
 name = "Codex"
-version = "1.0.3"
+version = "1.1.0"
 description = "Interactive Codex terminal with rollout transcript tailing."
 entrypoint = "adapter.py"
 class = "PartylineAdapter"
