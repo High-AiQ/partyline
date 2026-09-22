@@ -151,6 +151,33 @@ class RetirementTest(unittest.TestCase):
         self.assertEqual([b["code"] for b in resp.json()["blockers"]], ["process_mid_turn"])
         self.assertEqual(self.db.get_attachment("mid-worker")["status"], "running")
 
+    def test_stop_processes_does_not_detach_when_another_blocker_remains(self):
+        mid = self.child()
+        self.unmerged(mid["cwd"])
+        owner = "owner-worker"
+        self.db.add_attachment(
+            "mid-worker", mid["id"], "worker", "fake", ["fake"], self.repo, owner
+        )
+        self.db.set_attachment_status("mid-worker", "running", owner)
+
+        class Adapter:
+            def __init__(adapter_self):
+                adapter_self.att = {"runtime_owner": owner}
+                adapter_self.stopped = False
+
+            async def stop(adapter_self):
+                adapter_self.stopped = True
+                self.db.set_attachment_status("mid-worker", "detached", owner)
+
+        adapter = Adapter()
+        self.runtime.live["mid-worker"] = adapter
+        resp = self.retire(mid["id"], stop_processes=True)
+
+        self.assertEqual(resp.status_code, 409, resp.text)
+        self.assertIn("unmerged_commits", [b["code"] for b in resp.json()["blockers"]])
+        self.assertFalse(adapter.stopped)
+        self.assertEqual(self.db.get_attachment("mid-worker")["status"], "running")
+
     def test_machine_unmerged_blocker_names_merge_and_person_asymmetry(self):
         mid = self.child()
         self.unmerged(mid["cwd"])

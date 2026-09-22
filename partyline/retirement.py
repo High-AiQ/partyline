@@ -21,7 +21,8 @@ def _blocker(code: str, message: str) -> dict:
 
 
 def archive_blockers(
-    db, conv_id: str, *, include_children: bool, discard: bool, strict: bool
+    db, conv_id: str, *, include_children: bool, discard: bool, strict: bool,
+    ignore_live_processes: bool = False,
 ) -> list[dict]:
     """Every reason this retirement would be refused, in one list.
 
@@ -29,12 +30,14 @@ def archive_blockers(
     uncleared goal as well, and to the SAFE test for both unmerged commits and
     uncommitted changes. A person is held only to child lines — and to the
     explicit ``discard``, which is refused outright when the branch is not
-    merged, because those commits exist nowhere else.
+    merged, because those commits exist nowhere else. ``ignore_live_processes``
+    is only for an archive preflight that has already checked those processes
+    and will stop them atomically after every other blocker clears.
     """
     conv = db.get_conversation(conv_id) or {}
     blockers: list[dict] = []
     live = [att for att in db.list_attachments(conv_id) if att["status"] in LIVE]
-    if strict and live:
+    if strict and live and not ignore_live_processes:
         names = ", ".join("@" + att["name"] for att in live)
         blockers.append(_blocker(
             "live_processes",
