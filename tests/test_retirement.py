@@ -100,6 +100,22 @@ class RetirementTest(unittest.TestCase):
         self.assertIn("live processes", resp.json()["detail"])
         self.assertIn("goal", resp.json()["detail"])
         self.assertIn("uncommitted changes", resp.json()["detail"])
+        self.assertIn("POST /api/conversations/{id}/attachments/close", resp.json()["detail"])
+
+    def test_machine_unmerged_blocker_names_merge_and_person_asymmetry(self):
+        mid = self.child()
+        self.unmerged(mid["cwd"])
+
+        machine = self.retire(mid["id"])
+        self.assertEqual(machine.status_code, 409, machine.text)
+        machine_blocker = next(
+            b for b in machine.json()["blockers"] if b["code"] == "unmerged_commits"
+        )
+        self.assertIn("person may retire from the UI", machine_blocker["message"])
+        self.assertIn("machine captain must merge first", machine_blocker["message"])
+
+        person = self.retire(mid["id"], headers=self.human)
+        self.assertEqual(person.status_code, 200, person.text)
 
     def test_discard_removes_a_merged_dirty_worktree(self):
         mid = self.child()
