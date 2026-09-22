@@ -48,13 +48,12 @@ def captain_rule(db, conv_id: str) -> str:
 
 
 def goal_rider(db, conv_id: str) -> str:
-    """The goal line of a manager's wake digest, with the standing rule; the
-    rule alone when no goal is recorded."""
+    """The goal line of a manager's wake digest."""
     conv = db.get_conversation(conv_id) or {}
     goal = " ".join(str(conv.get("goal") or "").split())
-    rule = captain_rule(db, conv_id)
     if not goal:
-        return f"({rule})"
+        return ""
+    rule = captain_rule(db, conv_id)
     return f"(goal you are seeing through: {goal}; {rule})"
 
 

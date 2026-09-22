@@ -95,8 +95,8 @@ class GuardrailTest(unittest.TestCase):
         caps = self.client.get("/api/capabilities", headers=self.machine(f"{leaf['id']}-lead"))
         self.assertEqual((caps.json()["depth"], caps.json()["max_depth"]), (2, 2))
         self.assertNotIn("create_child", caps.json()["actions"])
-        self.assertIn("leaf captain", goal_rider(self.db, leaf["id"]))
-        self.assertIn("delegate to a sub-captain", goal_rider(self.db, mid["id"]))
+        self.assertEqual(goal_rider(self.db, leaf["id"]), "")
+        self.assertEqual(goal_rider(self.db, mid["id"]), "")
 
     # -- sideways staffing -------------------------------------------------------
 
@@ -137,11 +137,11 @@ class GuardrailTest(unittest.TestCase):
         caps = self.client.get("/api/capabilities", headers=sol).json()
         self.assertNotIn("create_child", caps["actions"])
         self.assertIn("assign", caps["actions"])
-        self.assertIn("the workers on this line are yours", goal_rider(self.db, mid["id"]))
+        self.assertEqual(goal_rider(self.db, mid["id"]), "")
         # A person may still split it, and once the worker is gone so may the captain.
         self.assertEqual(self.child(mid["id"], "by-a-person")["parent_id"], mid["id"])
         self.db._exec("UPDATE attachments SET status='exited' WHERE name='gemini-flash'")
-        self.assertIn("delegate to a sub-captain", goal_rider(self.db, mid["id"]))
+        self.assertEqual(goal_rider(self.db, mid["id"]), "")
         self.assertIn("create_child",
                       self.client.get("/api/capabilities", headers=sol).json()["actions"])
 
