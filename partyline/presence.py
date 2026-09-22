@@ -73,6 +73,7 @@ class Presence:
 
     def __init__(self, runtime):
         self.runtime = runtime
+        runtime.presence = self
         # attachment id -> its open turn, on its line: a tab on one line must
         # never light a jack belonging to another.
         self.turns: dict[str, Turn] = {}

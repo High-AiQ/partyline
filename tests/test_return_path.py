@@ -296,6 +296,13 @@ class ReturnPathTest(Tree):
         self.assertIn("@sub — builder ended its turn without handing off to any process", notice)
         self.assertIn("last said: «＠lead page one rendered»", notice)
 
+    async def test_a_process_cannot_wake_itself_from_its_own_closing_mention(self):
+        await self.turn("builder", "@builder finished")
+
+        self.assertEqual(self.adapters["builder"].delivered, [])
+        self.assertEqual(self.line("parent"), [])  # no cross-line self relay
+        self.assertEqual(self.adapters["sub"].delivered, [])  # no return wake
+
     async def test_unattached_closing_mention_wakes_line_captain_once(self):
         """A closing mention of an unattached handle rings the line captain once."""
         await self.turn("builder", "@nobody page one rendered")
@@ -444,6 +451,11 @@ class ReturnPathTest(Tree):
 class ExcerptTest(unittest.TestCase):
     def test_a_quoted_mention_cannot_ring_anyone(self):
         self.assertEqual(excerpt("@person  PR is\nup"), "＠person PR is up")
+
+    def test_a_fullwidth_mention_is_not_a_wake(self):
+        from partyline.mentions import mentioned_names
+
+        self.assertEqual(mentioned_names("＠person please review"), set())
 
     def test_long_speech_is_cut_with_an_ellipsis(self):
         text = excerpt("word " * 100)
