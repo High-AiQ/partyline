@@ -89,6 +89,7 @@ def excerpt(body: str | None) -> str:
 def is_undeliverable_closing(db, finisher: dict, body: str) -> bool:
     """Whether a turn's closing words addressed only names that reach no process."""
     names = mentioned_names(body)
+    names.discard(finisher["name"].lower())
     return bool(names and not reaches_a_process(db, finisher, names))
 
 
@@ -222,6 +223,8 @@ class ReturnPath:
                     }
         posted = []
         for requester in requesters.values():
+            if requester["id"] == att_id:
+                continue
             current = self.runtime.db.get_attachment(requester["id"])
             if current is None or current["status"] not in LIVE:
                 continue

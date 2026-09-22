@@ -188,6 +188,8 @@ async def relay_mentions(runtime, conv_id: str, message: dict, names: set[str]) 
     if message.get("sender_type") == "system":
         return set()
     speaker = speaker_attachment(runtime.db, conv_id, message)
+    if speaker is not None:
+        names = names - {speaker["name"].lower()}
     crossing = may_cross(message, speaker)
     reached, withheld = resolve_elsewhere(runtime.db, conv_id, names, crossing=crossing)
     if is_foreign(message):
