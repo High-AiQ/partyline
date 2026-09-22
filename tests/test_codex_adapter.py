@@ -1,5 +1,10 @@
 """Startup-delivery contract for the private Codex adapter."""
 
+import json
+import os
+import shutil
+import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -14,7 +19,7 @@ class CodexCommandTest(unittest.IsolatedAsyncioTestCase):
             Path(__file__).parent.parent / "partyline" / "adapters" / "bundled" / "codex" / "adapter.toml"
         ).read_text(encoding="utf-8")
 
-        self.assertIn('version = "1.0.3"', manifest)
+        self.assertIn('version = "1.1.0"', manifest)
         self.assertIn('update_command = ["codex", "update"]', manifest)
 
     def make_adapter(
@@ -653,6 +658,144 @@ class CodexDiscoveryTest(unittest.IsolatedAsyncioTestCase):
         adapter._rollout = fake_path
         await adapter.stop()
         self.assertNotIn(fake_path, PartylineAdapter._CLAIMED)
+
+
+class CodexHomeTest(unittest.IsolatedAsyncioTestCase):
+    """Per-attachment CODEX_HOME isolation."""
+
+    def setUp(self):
+        from partyline.adapters.bundled.codex import adapter as codex
+
+        self.codex = codex
+        self.root = tempfile.TemporaryDirectory()
+        self.shared = tempfile.TemporaryDirectory()
+        self.old_roots = (codex.HOME_ROOT, codex.SHARED_HOME)
+        self.codex.HOME_ROOT = os.path.join(self.root.name, "homes")
+        codex.SHARED_HOME = self.shared.name
+        for name in self.codex.SHARED:
+            os.makedirs(os.path.join(self.shared.name, name), exist_ok=True)
+
+    def tearDown(self):
+        self.codex.HOME_ROOT, self.codex.SHARED_HOME = self.old_roots
+        self.root.cleanup()
+        self.shared.cleanup()
+
+    def make(self, *, att_id: str, resume: bool = False, session: str | None = None,
+             cwd: str = "/work") -> PartylineAdapter:
+        async def post(sender, sender_type, body):
+            return None
+
+        async def on_status(status):
+            return None
+
+        adapter = PartylineAdapter(
+            {"command": ["codex"], "cwd": cwd, "id": att_id, "name": att_id,
+             "resume": resume, "cli_session": session},
+            post,
+            on_status,
+        )
+        adapter.spawned_at = time.time()
+        return adapter
+
+    @staticmethod
+    def write_rollout(path: str, *, cwd: str, session: str, records=()) -> str:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(
+                {"type": "session_meta", "payload": {"id": session, "cwd": cwd}}) + "\n")
+            for record in records:
+                fh.write(json.dumps(record) + "\n")
+        return path
+
+    def test_home_is_per_attachment_and_seeds_shared_entries(self):
+        adapter = self.make(att_id="att-1")
+
+        home = adapter.codex_home()
+
+        self.assertEqual(home, os.path.join(self.codex.HOME_ROOT, "att-1"))
+        self.assertTrue(os.path.isdir(os.path.join(home, "sessions")))
+        for name in self.codex.SHARED:
+            self.assertEqual(os.path.realpath(os.path.join(home, name)),
+                             os.path.join(self.shared.name, name), name)
+        # The one directory that must stay private is never a link.
+        sessions = os.path.join(home, "sessions")
+        self.assertFalse(os.path.islink(sessions), "sessions must belong to this attachment")
+
+    def test_a_second_prepare_leaves_existing_links_alone(self):
+        adapter = self.make(att_id="att-1")
+        home = adapter.codex_home()
+        marker = os.path.join(home, "sessions", "kept.jsonl")
+        open(marker, "w", encoding="utf-8").close()
+
+        adapter.codex_home()
+
+        self.assertTrue(os.path.exists(marker))
+        self.assertEqual(len(os.listdir(os.path.join(home, "sessions"))), 1)
+
+    def test_spawn_env_points_codex_at_the_private_home(self):
+        adapter = self.make(att_id="att-1")
+
+        self.assertEqual(adapter.spawn_env(), {"CODEX_HOME": adapter.codex_home()})
+
+    def test_resume_links_the_prior_rollout_into_the_home(self):
+        prior = "b6c2b3e4-1111-2222-3333-444455556666"
+        name = f"rollout-2026-09-22T23-09-12-{prior}.jsonl"
+        shared_sessions = os.path.join(self.shared.name, "sessions", "2026", "09", "22")
+        self.write_rollout(os.path.join(shared_sessions, name), cwd="/work", session=prior)
+        adapter = self.make(att_id="att-1", resume=True, session=prior)
+
+        home = adapter.codex_home()
+
+        link = os.path.join(home, "sessions", "2026", "09", "22", name)
+        self.assertEqual(os.path.realpath(link),
+                         os.path.join(shared_sessions, name))
+
+    def test_resume_finds_its_linked_prior_despite_an_old_mtime(self):
+        """The linked prior predates this spawn; lineage, not recency, matches."""
+        prior = "b6c2b3e4-1111-2222-3333-444455556666"
+        name = f"rollout-2026-09-01T00-00-00-{prior}.jsonl"
+        source = self.write_rollout(
+            os.path.join(self.shared.name, "sessions", "2026", "09", "01", name),
+            cwd="/work", session=prior)
+        os.utime(source, (1_000_000, 1_000_000))
+        adapter = self.make(att_id="att-1", resume=True, session=prior)
+        adapter._home = adapter.codex_home()
+
+        self.assertEqual(adapter._find_rollout(),
+                         os.path.join(adapter._home, "sessions", "2026", "09", "01", name))
+
+    async def test_two_same_directory_attachments_each_tail_their_own_rollout(self):
+        """The 2026-09-22 write-fence incident, as a control.
+
+        sol and luna were attached to one cwd within two seconds of each
+        other and each tailed the other's rollout: discovery ordered the
+        shared sessions directory by recency, so the first scanner claimed
+        whichever file had been written last. With a CODEX_HOME per
+        attachment there is no shared directory to order — each adapter
+        can only ever see its own sessions.
+        """
+        cwd = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, cwd, True)
+        adapters, homes, rollouts = [], [], []
+        for att_id in ("att-sol", "att-luna"):
+            adapter = self.make(att_id=att_id, cwd=cwd)
+            home = adapter.codex_home()
+            adapter._home = home
+            rollouts.append(self.write_rollout(
+                os.path.join(home, "sessions", "2026", "09", "22",
+                             f"rollout-2026-09-22T23-09-12-{att_id}.jsonl"),
+                cwd=cwd, session=att_id))
+            adapters.append(adapter)
+            homes.append(home)
+        # Same second on the clock, luna's flush the newer of the two.
+        now = time.time()
+        for adapter in adapters:
+            adapter.spawned_at = now - 0.5
+        os.utime(rollouts[0], (now - 0.4, now - 0.4))
+        os.utime(rollouts[1], (now, now))
+
+        self.assertEqual(adapters[0]._find_rollout(), rollouts[0])
+        self.assertEqual(adapters[1]._find_rollout(), rollouts[1])
 
 
 if __name__ == "__main__":
