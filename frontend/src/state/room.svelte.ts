@@ -161,6 +161,10 @@ class Room {
     presenceSync.finish(presenceFetch, detail.presence, detail.working);
     this.history.merge(detail.messages);
     await this.history.catchUp(conversation.id, afterId);
+    // The pending restart request is event-carried state like attachment
+    // status: filed while the wire was down, its frame reached no tab, so
+    // re-read it here instead of leaving the banner hidden until a refresh.
+    void restart.load().catch(ignoreBackgroundFailure);
   }
 
   async toggleReaction(messageId: number, emoji: string): Promise<void> {
