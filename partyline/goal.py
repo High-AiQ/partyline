@@ -18,6 +18,7 @@ from .auth_guard import request_principal
 from .contracts import ConversationEvent, ConversationResponse
 from .line_depth import may_create_children, staffed_split_reason
 from .machine_scope import deny_unless
+from .system_notice import post_system_notice
 
 MAX_GOAL = 3000
 
@@ -47,13 +48,12 @@ def captain_rule(db, conv_id: str) -> str:
 
 
 def goal_rider(db, conv_id: str) -> str:
-    """The goal line of a manager's wake digest, with the standing rule; the
-    rule alone when no goal is recorded."""
+    """The goal line of a manager's wake digest."""
     conv = db.get_conversation(conv_id) or {}
     goal = " ".join(str(conv.get("goal") or "").split())
-    rule = captain_rule(db, conv_id)
     if not goal:
-        return f"({rule})"
+        return ""
+    rule = captain_rule(db, conv_id)
     return f"(goal you are seeing through: {goal}; {rule})"
 
 
@@ -76,6 +76,6 @@ def register_goal_route(app: FastAPI, runtime) -> None:
         conv = set_goal(db, conv_id, goal)
         who = f" by @{principal.name}"
         notice = f"☏ goal set{who}: {goal}" if goal else f"☏ goal cleared{who}"
-        await runtime.post_message(conv_id, "system", "system", notice)
+        await post_system_notice(runtime, conv_id, notice, actor=principal)
         await runtime.broadcast(conv_id, ConversationEvent(conversation=conv))
         return conv

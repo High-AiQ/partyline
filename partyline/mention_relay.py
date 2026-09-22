@@ -126,7 +126,7 @@ def reaches_a_process(db, speaker: dict, names: set[str]) -> bool:
 
 
 async def post_private(
-    runtime, line_id, sender, sender_type, body, *, audience, source=None, route=True
+    runtime, line_id, sender, sender_type, body, *, audience, source=None, actor=None, route=True
 ):
     """Post a message one process on ``line_id`` is shown, then route it there.
 
@@ -135,6 +135,8 @@ async def post_private(
     """
     copy = runtime.db.add_message(line_id, sender, sender_type, body)
     speaker_id, origin_id = source or (None, None)
+    if source is None and getattr(actor, "kind", None) == "machine":
+        speaker_id, origin_id = actor.attachment_id, actor.conv_id
     runtime.db._exec(
         "UPDATE messages SET source_attachment_id=?, source_conv_id=?,"
         " audience_attachment_id=? WHERE id=?",
@@ -147,9 +149,10 @@ async def post_private(
         source_conv_name=origin["name"] if origin else None,
         audience_attachment_id=audience,
     )
-    # A reaction notice is one process's mail: browsers already see the
-    # reaction itself on the message, so the fan-out skips the copy while the
-    # addressed process still receives it through forced routing below.
+    # A reaction notice is one process's mail: no reply is needed unless it
+    # raises something new. Browsers already see the reaction itself on the
+    # message, so the fan-out skips the copy while forced routing still wakes
+    # the addressed process.
     if not is_reaction_notice(copy):
         await runtime.broadcast(line_id, MessageEvent(message=MessageResponse.model_validate(copy)))
     if route:

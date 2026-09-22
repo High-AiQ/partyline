@@ -135,6 +135,8 @@ class ReviewWorktreesTest(unittest.TestCase):
             f"/api/conversations/{self.kid['id']}/review-worktrees", headers=self.root_captain())
         self.assertEqual([row["sha"] for row in listed.json()], [sha])
         self.assertIn(self.review_dir(sha), " ".join(self.system_messages(self.kid["id"])))
+        notice = self.db.list_messages(self.kid["id"])[-1]
+        self.assertEqual(notice["source_attachment_id"], "root-lead")
         # the managed directory is invisible to git status in the main checkout
         self.assertEqual(_git("status", "--porcelain", cwd=self.repo).stdout.strip(), "")
 
