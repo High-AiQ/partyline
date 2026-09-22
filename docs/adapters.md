@@ -298,6 +298,14 @@ home existed gets the prior rollout symlinked in, so `codex resume <id>` still r
 writes stay private. Isolation removes the shared directory that recency ordering mis-sorted; it
 does not replace claiming, which stays mandatory for every adapter that cannot pin a path.
 
+Proof before speech is enforced in the shared base for every transcript adapter: the briefing and
+each wake carry `[partyline-claim: <attachment>/<nonce>]` until the tailed session records that
+exact token, agent speech from an unproven session is held (system notices still post), and the
+shared tail refuses outright a file carrying another *attachment's* marker. A resumed
+attachment's prior session is not foreign — the marker names the attachment — but its speech
+stays gated until this activation's own nonce lands, so a stale session cannot speak for the
+process that resumed it.
+
 ## Import and reload
 
 ```bash
