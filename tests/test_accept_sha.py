@@ -148,6 +148,8 @@ class AcceptShaTest(unittest.TestCase):
             f"hand-off accepted by @terra: line/kid moved to {accepted[:12]}",
             " ".join(self.system_messages(self.kid["id"])),
         )
+        notice = self.db.list_messages(self.kid["id"])[-1]
+        self.assertEqual(notice["source_attachment_id"], "root-lead")
 
     def test_accept_moves_the_branch_when_the_worktree_sits_on_a_side_branch(self):
         self.commit("first")

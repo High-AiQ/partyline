@@ -28,6 +28,7 @@ from .contracts import RestartPlanRequest, RestartRequestEvent, ShutdownEvent
 from . import deployment
 from .machine_scope import deny_unless, is_human
 from .reattach import RestartPlanError, create_restart_plan
+from .system_notice import post_system_notice
 
 logger = logging.getLogger(__name__)
 RESTART_DELAY_SECONDS = 2
@@ -87,8 +88,8 @@ def schedule_unit_restart(unit: str, delay: int = RESTART_DELAY_SECONDS) -> bool
 def register_restart_request_routes(app: FastAPI, runtime, adapter_metadata, request_exit) -> None:
     runtime.restart_request = None
 
-    async def announce(conv_id: str, text: str) -> None:
-        await runtime.post_message(conv_id, "system", "system", text)
+    async def announce(conv_id: str, text: str, *, actor=None) -> None:
+        await post_system_notice(runtime, conv_id, text, actor=actor)
         await runtime.broadcast_all(RestartRequestEvent(request=runtime.restart_request))
 
     @app.get("/api/restart-request", response_model=PendingRestart)
@@ -121,7 +122,8 @@ def register_restart_request_routes(app: FastAPI, runtime, adapter_metadata, req
             reason=reason, created_at=time.time(),
         )
         await announce(conv_id, f"☏ @{principal.name} asks a person to restart partyline: "
-                                f"{runtime.restart_request.reason} — approve or decline from the banner")
+                                f"{runtime.restart_request.reason} — approve or decline from the banner",
+                       actor=principal)
         return runtime.restart_request
 
     def _take(request: Request, request_id: str) -> RestartRequest:

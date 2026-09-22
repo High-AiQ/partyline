@@ -54,6 +54,8 @@ class GoalRouteTest(unittest.TestCase):
 
     def test_the_manager_may_record_it_and_an_implementer_may_not(self):
         self.assertEqual(self.put("by the lead", self.lead).status_code, 200)
+        [notice] = self.db.list_messages("line")
+        self.assertEqual(notice["source_attachment_id"], "lead")
         self.assertEqual(self.put("by the worker", self.worker).status_code, 403)
         self.assertEqual(self.db.get_conversation("line")["goal"], "by the lead")
 

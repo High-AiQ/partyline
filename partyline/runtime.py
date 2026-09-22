@@ -94,6 +94,7 @@ class ChatRuntime:
         await self.route_mentions(conv_id, msg)
         return msg
 
+
     async def broadcast_attachment(self, conv_id: str, att_id: str) -> None:
         """Broadcast live attachment presentation without blocking the event loop."""
         await broadcast_attachment_state(self, conv_id, att_id)

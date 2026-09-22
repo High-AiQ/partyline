@@ -54,7 +54,9 @@ class RestartRequestTest(unittest.TestCase):
         filed = self.file(self.captain)
         self.assertEqual(filed.status_code, 200, filed.text)
         self.assertEqual(filed.json()["requester"], "astra")
-        self.assertIn("asks a person to restart partyline", self.db.list_messages("line")[-1]["body"])
+        notice = self.db.list_messages("line")[-1]
+        self.assertIn("asks a person to restart partyline", notice["body"])
+        self.assertEqual(notice["source_attachment_id"], "cap")
         self.assertEqual(self.file(self.captain).status_code, 409)  # one at a time
         pending = self.client.get("/api/restart-request", headers=self.worker).json()
         self.assertEqual(pending["request"]["id"], filed.json()["id"])
