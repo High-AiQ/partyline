@@ -23,10 +23,10 @@ import logging
 import sqlite3
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
-
 from partyline.adapters import Adapter
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
+
+logger = logging.getLogger(__name__)
 
 
 STORE = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
