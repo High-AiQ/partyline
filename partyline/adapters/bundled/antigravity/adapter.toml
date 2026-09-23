@@ -6,6 +6,8 @@ entrypoint = "adapter.py"
 command = ["agy"]
 requires = ["agy"]
 env_unset = []
+# OAuth state and brain transcripts; the pinned log root partyline creates.
+write_paths = ["~/.gemini", "~/.partyline/sessions/antigravity"]
 output = "session transcript"
 
 update_command = ["agy", "update"]
