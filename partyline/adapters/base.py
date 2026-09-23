@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import fcntl
-import json
 import os
 import signal
 import struct
@@ -21,6 +20,7 @@ from collections.abc import Awaitable, Callable
 import pyte
 
 from partyline.adapters import activation, fence, pty_io
+from partyline.adapters.jsonl_receipts import JsonlPasteReceipts, tail_jsonl
 from partyline.adapters.task_logging import log_task_deaths
 from partyline.adapters.briefing import (
     fresh_checkpoint_briefing, connection_briefing,
@@ -38,7 +38,7 @@ Post = Callable[[str, str, str], Awaitable[None]]
 Status = Callable[[str], Awaitable[None]]
 
 
-class Adapter(activation.Activation, pty_io.PtyWriter):
+class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter):
     """Base class for a process connected through a pseudo-terminal."""
 
     kind = "process"
@@ -70,6 +70,7 @@ class Adapter(activation.Activation, pty_io.PtyWriter):
         self._term_stream = pyte.ByteStream(self._term)
         self._terminal_query_tail = b""
         self._terminal_viewers = TerminalViewerRegistry(self.screen_text)
+        self._jsonl_receipts_init()
 
     async def post(self, sender: str, sender_type: str, body: str):
         """Send something to the chat, unless the process is resuming mid-turn.
@@ -227,9 +228,25 @@ class Adapter(activation.Activation, pty_io.PtyWriter):
         # Being woken ends post-resume silence — only once the wake reached the pty:
         # clearing first lets a tail release held speech before the turn is recorded.
         text = self.format_digest(messages)
-        if text.strip():
-            await self.send_keys(text)
+        marker = getattr(self, "_pending_paste_marker", None)
+        self._pending_paste_marker = None
+        if marker is None and getattr(self, "jsonl_paste_receipts", False):
+            marker = self._new_paste_marker()
+        tracked = self._track_jsonl_paste(text, messages, marker) if marker else False
+        paste = f"{marker}\n\n{text}" if marker else text
+        if paste.strip():
+            try:
+                await self.send_keys(paste)
+            except BaseException:
+                if tracked:
+                    self._jsonl_receipts = [
+                        receipt for receipt in self._jsonl_receipts
+                        if receipt["marker"] != marker
+                    ]
+                raise
         self._silent_until_wake = False
+        if tracked:
+            return False
 
     def stage_startup_delivery(self, messages: list[dict]) -> bool:
         """Stage a wake in the process command, if this adapter supports it.
@@ -291,51 +308,4 @@ class Adapter(activation.Activation, pty_io.PtyWriter):
 
     async def _tail_jsonl(self, path: str, handle_line):
         """Follow a JSONL transcript, ignoring incomplete or invalid records."""
-        with open(path, encoding="utf-8", errors="replace") as file:
-            if self.recorded_claim(path):
-                self._mark_claim_proven()
-            elif self.foreign_claim(path):
-                # Another activation's claim in a file that does not carry
-                # ours: the file belongs to a pty we do not own, and tailing
-                # it would relay a stranger's words under this handle. Refuse
-                # loudly and stay unready — held wake credit is the visible
-                # symptom an operator can act on.
-                await self.post(
-                    "system", "system",
-                    f"{self.att['name']}: not adopting {os.path.basename(path)} — "
-                    "it carries another attachment's claim marker",
-                )
-                return
-            # Opening the claimed transcript is the readiness boundary for
-            # transcript adapters: a sequential restart may now safely advance
-            # to the next process without two discovery loops claiming one file.
-            self.mark_ready()
-            while True:
-                position = file.tell()
-                line = file.readline()
-                if not line:
-                    if not self.alive():
-                        return
-                    await asyncio.sleep(0.5)
-                    continue
-                if not line.endswith("\n"):
-                    # A half-written record: wait for the writer to finish it.
-                    # If the writer is gone it never will be, and without this
-                    # check the tail spins on that fragment forever.
-                    if not self.alive():
-                        return
-                    file.seek(position)
-                    await asyncio.sleep(0.3)
-                    continue
-                if self._claim_in_line(line):
-                    self._mark_claim_proven()
-                try:
-                    record = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                # JSONL can legally contain any JSON value. Transcript
-                # handlers read named fields, so keep a scalar/list record
-                # from killing their tail task and leaving a live jack mute.
-                if not isinstance(record, dict):
-                    continue
-                await handle_line(record)
+        await tail_jsonl(self, path, handle_line)

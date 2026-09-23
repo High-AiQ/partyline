@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from datetime import datetime
 
 from . import logparse
@@ -112,6 +113,21 @@ class WakeSettlement:
         if prompt and self._evidences(content, prompt, truncated=truncated):
             self.mark_startup_delivery_received()
 
+    async def _deliver_with_wake_receipt(self, messages: list[dict], digest: str, marker: str):
+        """Register before the pty write so a fast transcript can settle it."""
+        wake = None
+        if digest.strip() and self.alive():
+            ids = tuple(message["id"] for message in messages if isinstance(message.get("id"), int))
+            wake = (f"{marker}\n\n{digest}", time.time(), ids, self._turn_open)
+            self._outstanding.append(wake)
+        try:
+            return await super().deliver(messages)
+        except BaseException:
+            if wake is not None:
+                self._outstanding = [item for item in self._outstanding if item is not wake]
+            self._pending_paste_marker = None
+            raise
+
     async def _note_user_input(
         self, content: str, created_at, *, transcript: bool = True, truncated: bool = False
     ):
@@ -146,7 +162,11 @@ class WakeSettlement:
             self._resend_counts[digest] = count
             if count <= MAX_RESENDS:
                 kept.append((digest, pasted_at, message_ids, mid_turn))
-                await self.send_keys(digest)
+                marker = self._new_paste_marker()
+                self._track_jsonl_paste(
+                    digest, [{"id": message_id} for message_id in message_ids], marker
+                )
+                await self.send_keys(f"{marker}\n\n{digest}")
             else:
                 self._resend_counts.pop(digest, None)
                 await self._repool(list(message_ids))
