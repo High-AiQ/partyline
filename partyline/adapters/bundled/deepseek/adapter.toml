@@ -6,6 +6,8 @@ entrypoint = "adapter.py"
 command = ["dsh", "--profile", "acp"]
 requires = ["dsh"]
 env_unset = []
+# dsh's home (DSH_HOME default): sessions, profiles, and patched models live here.
+write_paths = ["~/.dsh"]
 output = "read-only plain JSONL session transcript"
 update_command = ["npm", "install", "--global", "@deepseek-ai/dsh@0.1.5-rc.1"]
 
