@@ -22,9 +22,10 @@ What keeps this a return rather than a second source of noise:
 * The notice is a system message. It never counts as a requester, so a
   turn woken *only* by a notice owes nothing when it ends — one explicit
   wake yields at most one implicit reply, and no chain can run on its own.
-* Handing off to *any* live process settles the turn: delegating onward
-  means the work is still moving and the requester's next signal comes
-  from the end of that chain, not from a false "finished".
+* Handing off clears only the requesters that speech actually reaches.
+  Delegating downward leaves an upstream requester owed; a later turn that
+  addresses them clears them. This turn sends no "finished" notice while
+  the work is moving, and a deferred notice is superseded by the hand-off.
 * A manager wrapping up to a person does not bounce back to its
   implementers. The lead's terminal turn — "@operator the PR is up" — is the
   one case where a requester's silence is correct, so a manager's turn
@@ -39,10 +40,11 @@ What keeps this a return rather than a second source of noise:
   names the addressees (`mentions.addressees`). Without this, every status
   line naming a worker made its author a requester, and the room filled
   with returns about turns nobody had asked for.
-* A turn that says nothing owes nothing. Words said before the wake are not
-  this turn's words either. On the first fleet trial, silent ends were
-  the process reading a passing mention and having nothing to add, and
-  the "last words" quoted were a greeting from before the wake.
+* A silent turn after an addressed wake is unanswered: each requester is
+  told it said nothing, and a child captain also tells the parent line's
+  captain. Words said before the wake are not this turn's words. A turn
+  woken only by a notice still owes nothing, and the notice names the
+  finisher without a sigil, so it never rings the finisher.
 * A return rings only a requester that is waiting. A captain that acks
   "@lead on it" and keeps working has not stopped for an answer; ringing
   it with the lead's "holding" interrupted real work on the live run, and
@@ -63,34 +65,14 @@ from __future__ import annotations
 
 import asyncio
 
-from .hierarchy import descendants, lead_attachment
+from .hierarchy import lead_attachment, parent_id_of
 from .mention_relay import LIVE, is_foreign, post_private, reaches_a_process, speaker_attachment
 from .mentions import addressees, line_addressed, mentioned_names
+from .return_notice import format_notice, is_undeliverable_closing
 
-EXCERPT = 280
 # Long enough for a transcript tail to post the turn's last message after the
 # harness receipt, short enough that a manager is not kept waiting.
 RETURN_GRACE_SECONDS = 3.0
-
-
-def excerpt(body: str | None) -> str:
-    """A one-line quote whose mentions cannot ring anyone.
-
-    The notice is routed on purpose, so a quoted ``@name`` would wake that
-    name on the requester's line — a second, accidental hand-off. The
-    fullwidth sign reads the same and is not a mention.
-    """
-    if not body:
-        return ""
-    text = " ".join(body.split()).replace("@", "＠")
-    return text if len(text) <= EXCERPT else text[: EXCERPT - 1].rstrip() + "…"
-
-
-def is_undeliverable_closing(db, finisher: dict, body: str) -> bool:
-    """Whether a turn's closing words addressed only names that reach no process."""
-    names = mentioned_names(body)
-    names.discard(finisher["name"].lower())
-    return bool(names and not reaches_a_process(db, finisher, names))
 
 
 class ReturnPath:
@@ -110,6 +92,10 @@ class ReturnPath:
         self.askers: dict[str, dict[str, str]] = {}
         self.addressed: set[str] = set()
         self.last_said: dict[str, str] = {}
+        # att_id woke by a process or a foreign human, not by a system notice
+        self.real_wake: set[str] = set()
+        # att_id whose silent settle should also tell the parent line's captain
+        self.notify_parent: set[str] = set()
         # att_id -> the return decision waiting out its grace
         self.pending: dict[str, asyncio.Task] = {}
 
@@ -122,6 +108,8 @@ class ReturnPath:
         for table in (self.requesters, self.askers, self.last_said, self.deferred):
             table.pop(att_id, None)
         self.addressed.discard(att_id)
+        self.real_wake.discard(att_id)
+        self.notify_parent.discard(att_id)
         if task := self.pending.pop(att_id, None):
             task.cancel()
 
@@ -131,6 +119,7 @@ class ReturnPath:
         if me is None:
             return
         self.last_said.pop(att_id, None)  # what was said before the wake is not an answer
+        woke = False
         for message in messages:
             body = str(message.get("body") or "")
             if me["name"].lower() not in addressees(body) | line_addressed(body):
@@ -144,8 +133,45 @@ class ReturnPath:
                         asker["id"], {**asker, "since_id": message["id"]}
                     )
                     entry["since_id"] = min(entry["since_id"], message["id"])
+                    woke = True
             elif kind == "human" and is_foreign(message):
                 self.askers.setdefault(att_id, {})[message["sender"]] = message["source_conv_id"]
+                woke = True
+        if woke:
+            self.real_wake.add(att_id)
+
+    def _release_reached(self, att_id: str, body: str) -> None:
+        """Drop requesters this speech addresses and can actually ring. The rest stay owed."""
+        me = self._row(att_id)
+        reqs = self.requesters.get(att_id)
+        if me is None or not reqs:
+            return
+        names = addressees(body) | line_addressed(body)
+        for req_id, req in list(reqs.items()):
+            handle = str(req.get("name") or "").lower()
+            if handle in names and reaches_a_process(self.runtime.db, me, {handle}):
+                reqs.pop(req_id, None)
+        if not reqs:
+            self.requesters.pop(att_id, None)
+
+    def _close_speech(self, att_id: str) -> None:
+        """Forget this turn's words. Unreached requesters stay owed into the next one."""
+        self.addressed.discard(att_id)
+        self.last_said.pop(att_id, None)
+        self.real_wake.discard(att_id)
+        self.notify_parent.discard(att_id)
+
+    def _parent_captain(self, finisher: dict) -> dict | None:
+        """The live captain above this child captain, never the finisher itself."""
+        if not finisher.get("is_lead"):
+            return None
+        parent = parent_id_of(self.runtime.db.get_conversation(finisher["conv_id"]))
+        if not parent:
+            return None
+        manager = lead_attachment(self.runtime.db, parent)
+        if manager and manager["status"] in LIVE and manager["id"] != finisher["id"]:
+            return manager
+        return None
 
     def note_spoke(self, att_id: str, body: str) -> None:
         """The process said something; a mention of a live process settles the turn."""
@@ -153,10 +179,12 @@ class ReturnPath:
         if me is None:
             return
         self.last_said[att_id] = body
+        self._release_reached(att_id, body)
         if reaches_a_process(self.runtime.db, me, mentioned_names(body) | line_addressed(body)):
             self.addressed.add(att_id)
             if task := self.pending.pop(att_id, None):
                 task.cancel()  # the last words handed off after all
+                self._close_speech(att_id)
 
     async def turn_ended(self, att_id: str) -> None:
         """The harness closed the turn: deliver what was deferred for this process,
@@ -176,17 +204,24 @@ class ReturnPath:
                                audience=att_id, source=(source_att, source.get("conv_id")))
         if att_id in self.pending:
             return
+        real = att_id in self.real_wake
         manager = lead_attachment(self.runtime.db, finisher["conv_id"]) if finisher else None
-        captain_owed = bool(
-            undeliverable
-            and manager
-            and manager["status"] in LIVE
-            and manager["id"] != att_id
-            and not finisher.get("is_lead")
+        line_captain = bool(
+            undeliverable and manager and manager["status"] in LIVE
+            and manager["id"] != att_id and not finisher.get("is_lead")
         )
-        if handed_off or not (self.requesters.get(att_id) or self.askers.get(att_id) or captain_owed):
-            self._clear(att_id)  # the turn is over either way; nothing carries into the next
+        parent = self._parent_captain(finisher) if finisher and real and not said else None
+        owed = bool(self.requesters.get(att_id) or self.askers.get(att_id) or line_captain or parent)
+        # A hand-off, or a turn a notice alone woke, carries unreached requesters and
+        # sends nothing. Silence after a real wake still owes those requesters.
+        if handed_off or (not real and not line_captain) or not owed:
+            if handed_off or (not real and not line_captain):
+                self._close_speech(att_id)
+            else:
+                self._clear(att_id)
             return
+        if parent:
+            self.notify_parent.add(att_id)
         self.pending[att_id] = asyncio.create_task(self._settle(att_id))
 
     def _working(self, att_id: str) -> bool:
@@ -204,16 +239,29 @@ class ReturnPath:
             self.last_said.pop(att_id, None),
         )
         self.addressed.discard(att_id)
+        self.real_wake.discard(att_id)
+        self.notify_parent.discard(att_id)
         return state
+
+    def _add_parent(self, att_id: str, finisher: dict, requesters: dict) -> None:
+        parent = self._parent_captain(finisher)
+        if parent is None or parent["id"] in requesters or parent["id"] == att_id:
+            return
+        since = [row.get("since_id") for row in requesters.values() if row.get("since_id") is not None]
+        requesters[parent["id"]] = {
+            **parent,
+            "since_id": min(since) if since else finisher.get("last_seen") or None,
+        }
 
     async def _settle(self, att_id: str) -> list[dict]:
         await asyncio.sleep(self.grace)
         self.pending.pop(att_id, None)
+        tell_parent = att_id in self.notify_parent
         requesters, askers, said = self._clear(att_id)
         finisher = self._row(att_id)
-        if finisher is None or not said:
+        if finisher is None:
             return []
-        if is_undeliverable_closing(self.runtime.db, finisher, said) and not finisher.get("is_lead"):
+        if said and is_undeliverable_closing(self.runtime.db, finisher, said) and not finisher.get("is_lead"):
             manager = lead_attachment(self.runtime.db, finisher["conv_id"])
             if manager and manager["status"] in LIVE and manager["id"] != att_id:
                 if manager["id"] not in requesters:
@@ -221,6 +269,8 @@ class ReturnPath:
                         **manager,
                         "since_id": finisher.get("last_seen") or None,
                     }
+        elif not said and tell_parent:
+            self._add_parent(att_id, finisher, requesters)
         posted = []
         for requester in requesters.values():
             if requester["id"] == att_id:
@@ -230,8 +280,9 @@ class ReturnPath:
                 continue
             if finisher.get("is_lead") and not current.get("is_lead"):
                 continue
-            body = self._notice(
-                current["name"], finisher, current["conv_id"], said, requester.get("since_id")
+            body = format_notice(
+                self.runtime, current["name"], finisher, current["conv_id"], said,
+                requester.get("since_id"),
             )
             if self._working(current["id"]):
                 self.deferred.setdefault(current["id"], []).append((current["conv_id"], body, att_id))
@@ -241,26 +292,6 @@ class ReturnPath:
                 audience=current["id"], source=(att_id, finisher["conv_id"]),
             ))
         for handle, line_id in askers.items():
-            body = self._notice(handle, finisher, line_id, said)
+            body = format_notice(self.runtime, handle, finisher, line_id, said)
             posted.append(await self.runtime.post_message(line_id, "system", "system", body))
         return posted
-
-    def _notice(
-        self, to: str, finisher: dict, on_line: str, said: str, since_id: int | None = None
-    ) -> str:
-        where = pointer = ""
-        if finisher["conv_id"] != on_line:
-            line = self.runtime.db.get_conversation(finisher["conv_id"]) or {}
-            where = f" on line «{line.get('name', '?')}»"
-            # A child captain rung from above cannot read the parent line; a
-            # pointer it will only get 403 from is worse than none.
-            readable = finisher["conv_id"] in descendants(self.runtime.db, on_line)
-            if since_id is not None and readable:  # everything since the wake, in one call
-                pointer = (f". Read it all: GET /api/conversations/{finisher['conv_id']}"
-                           f"/messages?after_id={since_id - 1}")
-        tail = f"; last said: «{excerpt(said)}»"
-        # The finisher is named without the sigil: this notice must not wake it.
-        return (
-            f"↩ @{to} — {finisher['name']}{where} ended its turn without handing off "
-            f"to any process{tail}{pointer}"
-        )
