@@ -27,6 +27,7 @@ from .auth_guard import request_principal
 from .contracts import RestartPlanRequest, RestartRequestEvent, ShutdownEvent
 from . import deployment
 from .machine_scope import deny_unless, is_human
+from .mention_relay import post_private
 from .reattach import RestartPlanError, create_restart_plan
 from .system_notice import post_system_notice
 
@@ -46,6 +47,10 @@ class RestartRequest(BaseModel):
     id: str
     conversation_id: str
     requester: str
+    # The exact attachment that filed, when a process did: name matching would
+    # hand the outcome to an older exited namesake, and a person has none even
+    # when a process shares their handle.
+    requester_attachment_id: str | None = None
     reason: str
     created_at: float
 
@@ -92,6 +97,26 @@ def register_restart_request_routes(app: FastAPI, runtime, adapter_metadata, req
         await post_system_notice(runtime, conv_id, text, actor=actor)
         await runtime.broadcast_all(RestartRequestEvent(request=runtime.restart_request))
 
+    async def ring_requester(request: RestartRequest, text: str, *, actor) -> None:
+        """Privately ring the process that asked, so it hears the outcome now.
+
+        Addressed by the attachment id retained at filing — never by name, and
+        never when a person filed — and posted on that attachment's own line,
+        which differs from the requested line when a captain files across the
+        tree. The actor is the deciding person, not the requester, so the
+        self-echo rule that hides a notice a process caused does not hide this
+        one from it.
+        """
+        if not request.requester_attachment_id:
+            return  # a person filed it; the public notice already names them
+        target = runtime.db.get_attachment(request.requester_attachment_id)
+        if target is None:
+            return
+        await post_private(
+            runtime, target["conv_id"], "system", "system", text,
+            audience=target["id"], actor=actor,
+        )
+
     @app.get("/api/restart-request", response_model=PendingRestart)
     async def pending(request: Request):
         request_principal(request)
@@ -119,6 +144,7 @@ def register_restart_request_routes(app: FastAPI, runtime, adapter_metadata, req
                           "build; this restart resumes processes and deploys nothing. " + reason)
         runtime.restart_request = RestartRequest(
             id=uuid.uuid4().hex[:12], conversation_id=conv_id, requester=principal.name,
+            requester_attachment_id=principal.attachment_id,
             reason=reason, created_at=time.time(),
         )
         await announce(conv_id, f"☏ @{principal.name} asks a person to restart partyline: "
@@ -137,7 +163,8 @@ def register_restart_request_routes(app: FastAPI, runtime, adapter_metadata, req
     @app.post("/api/restart-request/{request_id}/approve", response_model=PendingRestart)
     async def approve(request: Request, request_id: str):
         current = _take(request, request_id)
-        who = request_principal(request).name
+        principal = request_principal(request)
+        who = principal.name
         unit = service_unit()
         if unit is None and request_exit is None:
             raise HTTPException(409, "partyline is not running under systemd; restart it by hand")
@@ -150,9 +177,12 @@ def register_restart_request_routes(app: FastAPI, runtime, adapter_metadata, req
             if exc.status_code != 409:  # 409 = nothing live to resume: still restart
                 raise HTTPException(exc.status_code, exc.detail) from exc
         runtime.restart_request = None
-        await announce(current.conversation_id,
-                       f"☏ restart approved by @{who} — partyline is restarting; every live "
-                       "process is resumed with its context when it is back")
+        text = (f"☏ restart approved by @{who} — partyline is restarting; every live "
+                "process is resumed with its context when it is back")
+        await announce(current.conversation_id, text)
+        # Persist and ring the requester before the shutdown sequence starts:
+        # a process mid-turn must find this in its backlog when it resumes.
+        await ring_requester(current, text, actor=principal)
         for conv_id in list(runtime.sockets):
             await runtime.broadcast(conv_id, ShutdownEvent())
         if unit is not None:
@@ -165,7 +195,9 @@ def register_restart_request_routes(app: FastAPI, runtime, adapter_metadata, req
     @app.delete("/api/restart-request/{request_id}", response_model=PendingRestart)
     async def decline(request: Request, request_id: str):
         current = _take(request, request_id)
+        principal = request_principal(request)
         runtime.restart_request = None
-        await announce(current.conversation_id,
-                       f"☏ restart declined by @{request_principal(request).name}")
+        text = f"☏ restart declined by @{principal.name}"
+        await announce(current.conversation_id, text)
+        await ring_requester(current, text, actor=principal)
         return PendingRestart(request=None)
