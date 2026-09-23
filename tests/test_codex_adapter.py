@@ -3,6 +3,7 @@
 import json
 import os
 import shutil
+import sqlite3
 import tempfile
 import time
 import unittest
@@ -19,7 +20,7 @@ class CodexCommandTest(unittest.IsolatedAsyncioTestCase):
             Path(__file__).parent.parent / "partyline" / "adapters" / "bundled" / "codex" / "adapter.toml"
         ).read_text(encoding="utf-8")
 
-        self.assertIn('version = "1.2.0"', manifest)
+        self.assertIn('version = "1.3.0"', manifest)
         self.assertIn('update_command = ["codex", "update"]', manifest)
 
     def make_adapter(
@@ -789,6 +790,495 @@ class CodexHomeTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(adapters[0]._find_rollout(), rollouts[0])
         self.assertEqual(adapters[1]._find_rollout(), rollouts[1])
+
+
+class CodexThreadHistoryTest(unittest.IsolatedAsyncioTestCase):
+    """Resumed turns relayed from CODEX_HOME's paginated thread history.
+
+    Verified against codex-cli 0.156: ``codex resume`` writes no new rollout
+    file. The turn is projected into ``thread_history_1.sqlite`` — this suite
+    is the fixture stand-in for that store, with negative controls for
+    compaction summaries, replayed history, foreign claim markers, and
+    malformed rows. The vendor CLI is never invoked.
+    """
+
+    def setUp(self):
+        from partyline.adapters.bundled.codex import thread_history as th
+
+        self.th = th
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = self.tmp.name
+        self.db_path = os.path.join(self.home, th.STORE_NAME)
+        self.spawned_at = time.time()
+        self.messages: list[tuple[str, str, str]] = []
+        self.receipts: list[tuple[dict, str]] = []
+        self.startup_marks = 0
+        self.ready = False
+
+        adapter = PartylineAdapter.__new__(PartylineAdapter)
+        adapter.att = {
+            "id": "att-1",
+            "name": "terra",
+            "resume": True,
+            "cli_session": "thread-1",
+            "adapter_metadata": {"capabilities": {"transcript": True}},
+        }
+        adapter.resume = True
+        adapter._nonce = "nonce22222222"
+        adapter._claim_proven = False
+        adapter._startup_prompt = ""
+        adapter._startup_delivery_result = None
+        adapter._stopping = False
+        adapter.spawned_at = self.spawned_at
+        adapter._home = self.home
+
+        async def post(sender, sender_type, body):
+            if adapter.pastes_claim() and not adapter._claim_proven and sender_type == "agent":
+                return
+            self.messages.append((sender, sender_type, body))
+            adapter._alive = False
+
+        adapter.post = post
+        adapter.mark_startup_delivery_received = lambda: setattr(
+            self, "startup_marks", self.startup_marks + 1
+        )
+        adapter.mark_ready = lambda: setattr(self, "ready", True)
+        adapter._alive = True
+        adapter.alive = lambda: adapter._alive
+        self.adapter = adapter
+
+        async def fake_receipt(att, event):
+            self.receipts.append((att, event))
+
+        self._receipt_patch = patch.object(th, "receipt", new=fake_receipt)
+        self._receipt_patch.start()
+        self.addCleanup(self._receipt_patch.stop)
+
+    def write_store(self, items=(), turns=()) -> None:
+        db = sqlite3.connect(self.db_path)
+        db.executescript(
+            """
+            CREATE TABLE thread_turns (
+                thread_id TEXT NOT NULL, turn_id TEXT NOT NULL,
+                status TEXT NOT NULL, started_at INTEGER, completed_at INTEGER,
+                PRIMARY KEY (thread_id, turn_id)
+            );
+            CREATE TABLE thread_items (
+                thread_id TEXT NOT NULL, turn_id TEXT NOT NULL, item_id TEXT NOT NULL,
+                created_at_ms INTEGER NOT NULL, item_json TEXT NOT NULL,
+                item_type TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (thread_id, turn_id, item_id)
+            );
+            """
+        )
+        db.executemany(
+            "INSERT INTO thread_turns(thread_id, turn_id, status, started_at, completed_at) "
+            "VALUES(?,?,?,?,?)",
+            turns,
+        )
+        db.executemany(
+            "INSERT INTO thread_items(thread_id, turn_id, item_id, created_at_ms, item_json, item_type) "
+            "VALUES(?,?,?,?,?,?)",
+            items,
+        )
+        db.commit()
+        db.close()
+
+    @staticmethod
+    def item(item_id: str, item_type: str, payload: dict, *, thread="thread-1",
+             turn="turn-1", at_ms: int | None = None) -> tuple:
+        at = int(time.time() * 1000) if at_ms is None else at_ms
+        return (thread, turn, item_id, at, json.dumps(payload), item_type)
+
+    async def run_tail(self, *, timeout: float = 0.0) -> bool:
+        async def stop_after_poll(*_a, **_k):
+            self.adapter._alive = False
+
+        with patch.object(self.th.asyncio, "sleep", new=stop_after_poll):
+            return await self.th.tail_thread_history(
+                self.adapter, self.home, "thread-1", timeout=timeout
+            )
+
+    async def test_resumed_agent_message_is_relayed_from_thread_history(self):
+        token = self.adapter._claim_token
+        self.write_store(
+            items=[
+                self.item("u1", "userMessage",
+                          {"type": "userMessage", "content": [{"type": "text", "text": token}]}),
+                self.item("a1", "agentMessage",
+                          {"type": "agentMessage", "text": "BRAVO-TWO.", "phase": "final_answer"}),
+            ],
+            turns=[("thread-1", "turn-1", "completed", 1, 2)],
+        )
+
+        self.assertTrue(await self.run_tail())
+
+        self.assertTrue(self.ready)
+        self.assertEqual(self.messages, [("terra", "agent", "BRAVO-TWO.")])
+        self.assertTrue(self.adapter._claim_proven)
+
+    async def test_speech_stays_held_until_this_activation_nonce_is_observed(self):
+        """The claim-marker gate: a prior activation's token is not this one's."""
+        self.write_store(
+            items=[
+                self.item("u1", "userMessage",
+                          {"type": "userMessage",
+                           "content": [{"type": "text",
+                                        "text": "[partyline-claim: att-1/oldnonce000000]"}]}),
+                self.item("a1", "agentMessage",
+                          {"type": "agentMessage", "text": "leftover speech"}),
+            ],
+        )
+
+        await self.run_tail()
+
+        self.assertEqual(self.messages, [])
+        self.assertFalse(self.adapter._claim_proven)
+
+    async def test_context_compaction_is_never_speech(self):
+        token = self.adapter._claim_token
+        self.write_store(
+            items=[
+                self.item("u1", "userMessage",
+                          {"type": "userMessage", "content": [{"type": "text", "text": token}]}),
+                self.item("c1", "contextCompaction", {"type": "contextCompaction", "id": "c1"}),
+                self.item("a1", "agentMessage", {"type": "agentMessage", "text": "after compact"}),
+            ],
+        )
+
+        await self.run_tail()
+
+        self.assertEqual(self.messages, [("terra", "agent", "after compact")])
+
+    async def test_only_agent_message_rows_are_speech(self):
+        """0.156 also writes reasoning, commandExecution, fileChange, imageView,
+        sleep, and collabAgentToolCall. A text field on any of those is vendor
+        internals — reasoning leaking into chat is the person-visible failure —
+        so the relay allowlists agentMessage and nothing else."""
+        token = self.adapter._claim_token
+        self.write_store(
+            items=[
+                self.item("u1", "userMessage",
+                          {"type": "userMessage", "content": [{"type": "text", "text": token}]}),
+                self.item("r1", "reasoning",
+                          {"type": "reasoning", "id": "rs_1",
+                           "summary": [{"text": "I should leak this"}],
+                           "content": [{"text": "and this"}],
+                           "text": "LEAKED-REASONING"}),
+                self.item("x1", "commandExecution",
+                          {"type": "commandExecution", "id": "exec-1",
+                           "command": "echo LEAKED-COMMAND",
+                           "aggregatedOutput": "LEAKED-COMMAND",
+                           "text": "LEAKED-COMMAND"}),
+                self.item("f1", "fileChange",
+                          {"type": "fileChange", "id": "exec-2",
+                           "changes": [{"path": "/tmp/x", "diff": "+LEAKED-DIFF"}],
+                           "text": "LEAKED-DIFF"}),
+                self.item("i1", "imageView",
+                          {"type": "imageView", "id": "exec-3", "path": "/tmp/x.png",
+                           "text": "LEAKED-IMAGE"}),
+                self.item("s1", "sleep",
+                          {"type": "sleep", "id": "call_1", "durationMs": 1,
+                           "text": "LEAKED-SLEEP"}),
+                self.item("k1", "collabAgentToolCall",
+                          {"type": "collabAgentToolCall", "id": "call_2", "tool": "wait",
+                           "text": "LEAKED-COLLAB"}),
+                self.item("p1", "plan",
+                          {"type": "plan", "id": "plan-1",
+                           "steps": ["LEAKED-PLAN"], "text": "LEAKED-PLAN"}),
+                self.item("a1", "agentMessage",
+                          {"type": "agentMessage", "text": "the only speech"}),
+            ],
+        )
+
+        await self.run_tail()
+
+        self.assertEqual(self.messages, [("terra", "agent", "the only speech")])
+
+    async def test_history_predating_this_activation_is_not_replayed(self):
+        token = self.adapter._claim_token
+        old_ms = int((self.spawned_at - 3600) * 1000)
+        self.write_store(
+            items=[
+                self.item("old-user", "userMessage",
+                          {"type": "userMessage", "content": [{"type": "text", "text": "old"}]},
+                          at_ms=old_ms),
+                self.item("old-agent", "agentMessage",
+                          {"type": "agentMessage", "text": "replayed"},
+                          at_ms=old_ms),
+                self.item("new-user", "userMessage",
+                          {"type": "userMessage", "content": [{"type": "text", "text": token}]}),
+                self.item("new-agent", "agentMessage",
+                          {"type": "agentMessage", "text": "fresh only"}),
+            ],
+        )
+
+        await self.run_tail()
+
+        self.assertEqual(self.messages, [("terra", "agent", "fresh only")])
+
+    async def test_malformed_rows_are_survived(self):
+        token = self.adapter._claim_token
+        now = int(time.time() * 1000)
+        self.write_store(
+            items=[
+                ("thread-1", "turn-1", "bad", now, "not json", "agentMessage"),
+                ("thread-1", "turn-1", "num", now, json.dumps({"text": 9}), "agentMessage"),
+                ("thread-1", "turn-1", "u1", now,
+                 json.dumps({"type": "userMessage", "content": [{"type": "text", "text": token}]}),
+                 "userMessage"),
+                ("thread-1", "turn-1", "a1", now,
+                 json.dumps({"type": "agentMessage", "text": "still here"}), "agentMessage"),
+            ],
+        )
+
+        await self.run_tail()
+
+        self.assertEqual(self.messages, [("terra", "agent", "still here")])
+
+    async def test_turn_boundaries_become_receipts(self):
+        from partyline.adapters.receipts import BEGAN, ENDED
+
+        started = int(self.spawned_at)
+        self.write_store(turns=[("thread-1", "turn-open", "inProgress", started, None)])
+        polls = {"n": 0}
+
+        async def two_polls(*_a, **_k):
+            polls["n"] += 1
+            if polls["n"] == 1:
+                db = sqlite3.connect(self.db_path)
+                db.execute(
+                    "UPDATE thread_turns SET status='completed', completed_at=? "
+                    "WHERE turn_id='turn-open'",
+                    (started + 1,),
+                )
+                db.commit()
+                db.close()
+            else:
+                self.adapter._alive = False
+
+        with patch.object(self.th.asyncio, "sleep", new=two_polls):
+            await self.th.tail_thread_history(self.adapter, self.home, "thread-1")
+
+        self.assertEqual(self.receipts, [(self.adapter.att, BEGAN), (self.adapter.att, ENDED)])
+
+    async def test_a_superseded_open_turn_ends_before_the_new_one_begins(self):
+        from partyline.adapters.receipts import BEGAN, ENDED
+
+        started = int(self.spawned_at)
+        self.write_store(
+            items=[],
+            turns=[
+                ("thread-1", "aborted", "inProgress", started, None),
+                ("thread-1", "next", "inProgress", started + 2, None),
+            ],
+        )
+
+        await self.run_tail()
+
+        self.assertEqual(
+            self.receipts,
+            [(self.adapter.att, BEGAN), (self.adapter.att, ENDED), (self.adapter.att, BEGAN)],
+        )
+
+    async def test_startup_digest_in_a_user_message_marks_the_receipt(self):
+        prompt = "Continuation debrief: nonce-123 [partyline-claim: att-1/nonce22222222]"
+        self.adapter._startup_prompt = prompt
+        self.write_store(
+            items=[
+                self.item("u1", "userMessage",
+                          {"type": "userMessage",
+                           "content": [{"type": "text", "text": prompt}]}),
+            ],
+        )
+
+        await self.run_tail()
+
+        self.assertEqual(self.startup_marks, 1)
+
+    async def test_agent_message_is_not_a_startup_receipt(self):
+        prompt = "Continuation debrief: nonce-123 [partyline-claim: att-1/nonce22222222]"
+        self.adapter._startup_prompt = prompt
+        self.write_store(
+            items=[
+                self.item("a1", "agentMessage",
+                          {"type": "agentMessage", "text": prompt}),
+            ],
+        )
+
+        await self.run_tail()
+
+        self.assertEqual(self.startup_marks, 0)
+
+    async def test_missing_store_reports_fallback_instead_of_hanging(self):
+        self.assertFalse(await self.run_tail(timeout=0.0))
+        self.assertFalse(self.ready)
+        self.assertEqual(self.messages, [])
+
+    async def test_a_late_store_is_waited_for_not_refused(self):
+        token = self.adapter._claim_token
+        polls = {"n": 0}
+
+        async def appear_then_stop(*_a, **_k):
+            polls["n"] += 1
+            if polls["n"] == 1:
+                self.write_store(items=[
+                    self.item("u1", "userMessage",
+                              {"type": "userMessage",
+                               "content": [{"type": "text", "text": token}]}),
+                    self.item("a1", "agentMessage", {"type": "agentMessage", "text": "late store"}),
+                ])
+            else:
+                self.adapter._alive = False
+
+        with patch.object(self.th.asyncio, "sleep", new=appear_then_stop):
+            opened = await self.th.tail_thread_history(
+                self.adapter, self.home, "thread-1", timeout=5.0
+            )
+
+        self.assertTrue(opened)
+        self.assertEqual(self.messages, [("terra", "agent", "late store")])
+
+    async def test_a_turn_that_completes_between_polls_is_not_re_emitted(self):
+        from partyline.adapters.receipts import BEGAN, ENDED
+
+        started = int(self.spawned_at)
+        self.write_store(turns=[("thread-1", "t1", "inProgress", started, None)])
+        polls = {"n": 0}
+
+        async def three_polls(*_a, **_k):
+            polls["n"] += 1
+            if polls["n"] == 1:
+                db = sqlite3.connect(self.db_path)
+                db.execute(
+                    "UPDATE thread_turns SET status='completed' WHERE turn_id='t1'"
+                )
+                db.commit()
+                db.close()
+            elif polls["n"] > 2:
+                self.adapter._alive = False
+
+        with patch.object(self.th.asyncio, "sleep", new=three_polls):
+            await self.th.tail_thread_history(self.adapter, self.home, "thread-1")
+
+        self.assertEqual(self.receipts, [(self.adapter.att, BEGAN), (self.adapter.att, ENDED)])
+
+    async def test_a_turn_already_completed_on_first_sight_begins_and_ends(self):
+        from partyline.adapters.receipts import BEGAN, ENDED
+
+        started = int(self.spawned_at)
+        self.write_store(turns=[("thread-1", "t1", "completed", started, started + 1)])
+
+        await self.run_tail()
+
+        self.assertEqual(
+            self.receipts, [(self.adapter.att, BEGAN), (self.adapter.att, ENDED)]
+        )
+
+    async def test_duplicate_item_rows_are_counted_once_across_polls(self):
+        token = self.adapter._claim_token
+        self.write_store(items=[
+            self.item("u1", "userMessage",
+                      {"type": "userMessage", "content": [{"type": "text", "text": token}]}),
+            self.item("a1", "agentMessage", {"type": "agentMessage", "text": "once"}),
+        ])
+        polls = {"n": 0}
+
+        async def two_polls(*_a, **_k):
+            polls["n"] += 1
+            if polls["n"] > 1:
+                self.adapter._alive = False
+
+        # post() clears _alive; restore it between polls so the second read runs.
+        original_post = self.adapter.post
+
+        async def post_keep_alive(sender, sender_type, body):
+            await original_post(sender, sender_type, body)
+            self.adapter._alive = True
+
+        self.adapter.post = post_keep_alive
+        with patch.object(self.th.asyncio, "sleep", new=two_polls):
+            await self.th.tail_thread_history(self.adapter, self.home, "thread-1")
+
+        self.assertEqual(self.messages, [("terra", "agent", "once")])
+
+    def test_parse_helpers_treat_shapes_the_store_actually_writes(self):
+        th = self.th
+        self.assertIsNone(th.parse_item("contextCompaction", "{}"))
+        self.assertIsNone(th.parse_item("agentMessage", "not json"))
+        self.assertIsNone(th.parse_item("agentMessage", "12"))
+        self.assertEqual(th.parse_item("agentMessage", '{"text": "hi"}'), {"text": "hi"})
+        self.assertEqual(
+            th.user_text({"content": [{"type": "text", "text": "a"}, {"type": "other"}]}),
+            "a",
+        )
+        self.assertEqual(th.agent_text({"text": "hello"}), "hello")
+        self.assertEqual(th.agent_text({"text": 9}), "")
+        self.assertEqual(th.agent_text({}), "")
+
+    async def test_reopening_a_completed_turn_reports_a_new_beginning(self):
+        from partyline.adapters.receipts import BEGAN
+
+        seen = {"t1": "completed"}
+        open_turn = await self.th._emit_turn(
+            self.adapter, "t1", "inProgress", seen, None
+        )
+        self.assertEqual(open_turn, "t1")
+        self.assertEqual(self.receipts, [(self.adapter.att, BEGAN)])
+
+    async def test_poll_errors_do_not_kill_the_tail(self):
+        token = self.adapter._claim_token
+        self.write_store(
+            items=[
+                self.item("u1", "userMessage",
+                          {"type": "userMessage", "content": [{"type": "text", "text": token}]}),
+                self.item("a1", "agentMessage", {"type": "agentMessage", "text": "survived"}),
+            ],
+        )
+        real_connect = self.th.connect
+        calls = {"n": 0}
+
+        def flaky(_home):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise sqlite3.OperationalError("database is locked")
+            return real_connect(_home)
+
+        with patch.object(self.th, "connect", new=flaky):
+            async def one_sleep(*_a, **_k):
+                if calls["n"] >= 2:
+                    self.adapter._alive = False
+
+            with patch.object(self.th.asyncio, "sleep", new=one_sleep):
+                await self.th.tail_thread_history(self.adapter, self.home, "thread-1")
+
+        self.assertEqual(self.messages, [("terra", "agent", "survived")])
+
+    async def test_resume_prefers_thread_history_over_the_rollout_tail(self):
+        """The 0.156 finding as a control: no new rollout is written, so the
+        resumed turn must come from the sqlite store, not a forked file."""
+        token = self.adapter._claim_token
+        self.write_store(
+            items=[
+                self.item("u1", "userMessage",
+                          {"type": "userMessage", "content": [{"type": "text", "text": token}]}),
+                self.item("a1", "agentMessage", {"type": "agentMessage", "text": "from sqlite"}),
+            ],
+            turns=[("thread-1", "turn-1", "completed", 1, 2)],
+        )
+        adapter = self.adapter
+        adapter._fresh = lambda ts: True
+        adapter._find_rollout = lambda: self.fail("resume must not hunt a new rollout")
+        adapter._tail_jsonl = lambda *a, **k: self.fail("resume must not tail a rollout")
+
+        async def quiet_sleep(*_a, **_k):
+            return None
+
+        with patch("partyline.adapters.bundled.codex.adapter.asyncio.sleep", new=quiet_sleep):
+            await adapter._run()
+
+        self.assertEqual(self.messages, [("terra", "agent", "from sqlite")])
 
 
 if __name__ == "__main__":

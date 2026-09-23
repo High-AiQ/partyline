@@ -14,6 +14,13 @@ pty receives — so even a shared sessions directory cannot pair two
 same-directory attachments by scan order (the 2026-09-22 write-fence
 incident), and the shared tail refuses any file carrying another
 attachment's marker.
+
+A resumed turn is not a new rollout (verified against codex-cli 0.156):
+``codex resume`` appends the turn in place and projects it into
+``thread_history_1.sqlite`` under ``CODEX_HOME``. Resume therefore relays
+from that paginated store first (``thread_history.py``), the same way the
+opencode adapter tails its session db, and falls back to the rollout tail
+only when the store never appears.
 """
 
 import asyncio
@@ -22,6 +29,7 @@ import json
 import os
 
 from partyline.adapters.base import Adapter as BaseAdapter
+from partyline.adapters.bundled.codex.thread_history import tail_thread_history
 from partyline.adapters.compaction import is_compaction_record
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
 
@@ -169,6 +177,16 @@ class PartylineAdapter(BaseAdapter):
         await asyncio.sleep(6.0)
         if not self.alive():
             return
+
+        # A resumed turn is projected into CODEX_HOME's thread-history db
+        # rather than a fresh rollout. Prefer that store; the rollout tail
+        # below stays the fresh-attach path and the resume fallback.
+        if self.resume and (thread_id := self.att.get("cli_session")):
+            home = getattr(self, "_home", "") or (
+                self.codex_home() if self.att.get("id") else ""
+            )
+            if home and await tail_thread_history(self, home, thread_id):
+                return
 
         # No cross-adapter lock: the claim token means no two adapters can
         # ever match the same rollout, and serializing discovery only ever
