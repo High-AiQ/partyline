@@ -33,6 +33,7 @@ import resource
 import shutil
 import subprocess
 import sys
+import tempfile
 
 DEFAULT_COMMAND = [
     "uv", "run", "--locked", "coverage", "run", "-m", "unittest", "discover", "-s", "tests",
@@ -67,12 +68,13 @@ def systemd_available() -> bool:
     return probe.returncode == 0
 
 
-def run_capped(command: list[str], limit: int) -> int:
+def run_capped(command: list[str], limit: int, env: dict[str, str]) -> int:
     if systemd_available():
         print(f"capped-test: cgroup MemoryMax={limit} (whole process tree)", flush=True)
         return subprocess.run(
             ["systemd-run", "--user", "--scope", "-q",
-             "-p", f"MemoryMax={limit}", "-p", "MemorySwapMax=0", *command]
+             "-p", f"MemoryMax={limit}", "-p", "MemorySwapMax=0", *command],
+            env=env,
         ).returncode
 
     print(f"capped-test: RLIMIT_AS={limit} (this process only)", file=sys.stderr, flush=True)
@@ -80,7 +82,7 @@ def run_capped(command: list[str], limit: int) -> int:
     def apply_limit():  # pragma: no cover - runs in the forked child
         resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
 
-    return subprocess.run(command, preexec_fn=apply_limit).returncode
+    return subprocess.run(command, env=env, preexec_fn=apply_limit).returncode
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -92,7 +94,15 @@ def main(argv: list[str] | None = None) -> int:
 
     command = [arg for arg in args.command if arg != "--"] or DEFAULT_COMMAND
     limit = parse_size(args.memory)
-    code = run_capped(command, limit)
+    env = os.environ.copy()
+    for key in (
+        "PARTYLINE_DB", "PARTYLINE_API", "PARTYLINE_TOKEN", "PARTYLINE_MEDIA_DIR",
+        "PARTYLINE_CONV_ID", "PARTYLINE_HANDLE",
+    ):
+        env.pop(key, None)
+    with tempfile.TemporaryDirectory(prefix="partyline-capped-test-") as temp_dir:
+        env["PARTYLINE_DB"] = os.path.join(temp_dir, "partyline.db")
+        code = run_capped(command, limit, env)
 
     # 137 is the shell's encoding of SIGKILL, which is how both the cgroup and
     # the OOM killer end a process that would not stop growing. Say so: the

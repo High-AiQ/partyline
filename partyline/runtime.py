@@ -13,6 +13,7 @@ from .db import Db
 from .delivery_hooks import delivery_hooks
 from .message_routing import route_message
 from .reattach import ReattachCoordinator
+from .runtime_delivery_credit import DeliveryCreditMixin
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
 RESERVED_NAMES = {"all", "system"}  # @all rings everyone; system is the notice sender
@@ -27,7 +28,7 @@ def handle_error(handle: str) -> str | None:
     return None
 
 
-class ChatRuntime:
+class ChatRuntime(DeliveryCreditMixin):
     """Own process-local chat state and the behavior that operates on it."""
 
     def __init__(self, db: Db):
@@ -37,8 +38,9 @@ class ChatRuntime:
         self.live: dict[str, Adapter] = {}
         # A planned process is queued behind its durable cursor, not unreachable.
         self.reattaching: set[str] = set()
-        # Pasted-but-unproved message ids, keyed per activation because a
-        # replacement owes nothing to its predecessor's unproved pastes.
+        # Pasted-but-unproved message ids, keyed per activation. Transcript
+        # identity releases these for retry; only a paste-specific receipt
+        # may advance the durable cursor.
         self.uncredited: dict[str, dict] = {}
         self.unclaimed_noticed: set[str] = set()
 
@@ -102,23 +104,32 @@ class ChatRuntime:
     async def deliver_pending(self, conv_id: str, att: dict, adapter: Adapter) -> bool:
         """Deliver from the durable cursor, advancing it only after a paste.
 
-        An unclaimed transcript adapter gets the paste without the credit:
-        its wake carries its claim token, so pasting is how it claims, while
-        an unadvanced ``last_seen`` is the durable record of what was never
-        proved ingested. Credit lands when the claim does.
+        An unclaimed transcript adapter may paste to claim its session, but
+        that proves identity only. An unadvanced ``last_seen`` is the durable
+        record of any paste that has not received its own ingestion proof.
         """
         await self._credit_claimed(att, adapter)
-        pending = self.db.messages_after(conv_id, att["last_seen"], att["name"], att["id"])
-        ours = self._live_uncredited(att["id"], adapter.att.get("runtime_owner"))
-        pending = [m for m in pending if m["id"] not in (ours or ())]
-        if not pending:
-            return True
         runtime_owner = adapter.att.get("runtime_owner")
         async with self.db.reserve_attachment_delivery(att["id"], runtime_owner) as reserved:
             if not reserved:
                 return False
+            current = self.db.get_attachment(att["id"])
+            if current is None or current.get("runtime_owner") != runtime_owner:
+                return False
+            att = current
+            pending = self.db.messages_after(
+                conv_id, att["last_seen"], att["name"], att["id"]
+            )
+            ours = self._live_uncredited(att["id"], runtime_owner)
+            pending = [m for m in pending if m["id"] not in (ours or ())]
+            if not pending:
+                return not bool(ours)
             pasted = await adapter.deliver(pending)
             if pasted is False:
+                if claims_transcript(adapter.att):
+                    self._record_unproved(att, adapter, pending)
+                    if not transcript_claimed(adapter):
+                        await self._hold_credit(conv_id, att, adapter, pending)
                 return False
             if claims_transcript(adapter.att) and not transcript_claimed(adapter):
                 await self._hold_credit(conv_id, att, adapter, pending)
@@ -127,58 +138,6 @@ class ChatRuntime:
                 raise RuntimeError("attachment ownership changed during mention delivery")
             self.db.clear_queued_delivery_ids(att["id"], [m["id"] for m in pending])
         return True
-
-    def _live_uncredited(self, att_id: str, runtime_owner: str | None) -> set[int] | None:
-        """This activation's pasted-unproved ids, if any survive.
-
-        A predecessor's entries are not ours to suppress or credit: they are
-        dropped so the replacement's cursor speaks for itself."""
-        entry = self.uncredited.get(att_id)
-        if entry is None:
-            return None
-        if entry["owner"] != runtime_owner:
-            del self.uncredited[att_id]
-            self.unclaimed_noticed.discard(att_id)
-            return None
-        return entry["ids"]
-
-    def credit_unclaimed(self, att_id: str, runtime_owner: str | None) -> int | None:
-        """Credit pasted ids the moment the claim proves them, else nothing."""
-        adapter = self.live.get(att_id)
-        if adapter is None or not transcript_claimed(adapter):
-            return None
-        ids = self._live_uncredited(att_id, runtime_owner)
-        if not ids:
-            return None
-        high_water = max(ids)
-        if not self.db.set_last_seen(att_id, high_water, runtime_owner):
-            return None  # ownership changed under us; the new activation decides
-        del self.uncredited[att_id]
-        self.unclaimed_noticed.discard(att_id)
-        return high_water
-
-    async def _hold_credit(self, conv_id: str, att: dict, adapter: Adapter, pending: list[dict]):
-        """Record pasted-but-unproved message ids and say so, once."""
-        entry = self.uncredited.setdefault(
-            att["id"], {"owner": adapter.att.get("runtime_owner"), "ids": set()}
-        )
-        ids = entry["ids"]
-        ids.update(m["id"] for m in pending)
-        if att["id"] in self.unclaimed_noticed:
-            return
-        self.unclaimed_noticed.add(att["id"])
-        plural = "wake" if len(ids) == 1 else "wakes"
-        await self.post_message(
-            conv_id, "system", "system",
-            f"⚠ {len(ids)} {plural} pasted to @{att['name']} but it has not claimed "
-            "its transcript yet — delivery credit held until it does",
-        )
-
-    async def _credit_claimed(self, att: dict, adapter: Adapter):
-        """A claim that arrived before this delivery credits its backlog now."""
-        high_water = self.credit_unclaimed(att["id"], adapter.att.get("runtime_owner"))
-        if high_water is not None:  # refresh the snapshot: no stale-row re-paste
-            att["last_seen"] = max(att["last_seen"], high_water)
 
     def held_wake_hooks(self, conv_id: str, att_id: str, name: str):
         """Persist and flush exact held batches without re-running mention routing."""

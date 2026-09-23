@@ -442,12 +442,16 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         adapter = self.make(resume=True, cli_session=CONV_ID)
         adapter.spawned_at = time.time()
         adapter.send_keys = AsyncMock()
+        adapter.alive = lambda: True
         digest = "[greg]: " + "x" * 4000 + "\n[astra]: tail that was cut"
-        adapter._outstanding = [(digest, time.time() - 5, (41,), False)]
-        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time()))
+        adapter.format_digest = lambda _messages: digest
+        await adapter.deliver([{"id": 41, "sender": "greg", "body": digest}])
+        marker = adapter._outstanding[0][0].split("\n", 1)[0]
+        self.assertTrue(adapter.send_keys.await_args.args[0].startswith(marker))
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 1))
         record = json.loads(step(
             1, "USER_EXPLICIT", "USER_INPUT",
-            "<USER_REQUEST>\n[greg]: " + "x" * 4000 + "\n<truncated 30 bytes>\n"
+            f"<USER_REQUEST>\n{marker}\n\n[greg]: " + "x" * 600 + "\n<truncated 3400 bytes>\n"
             "</USER_REQUEST>",
             created=now, truncated_fields=["content"],
         ))
@@ -455,7 +459,40 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         await adapter._settle_user_input_record(record, record["content"])
 
         self.assertEqual(adapter._outstanding, [], "the wake was proven, not re-sent")
-        adapter.send_keys.assert_not_awaited()
+        adapter.send_keys.assert_awaited_once()  # the original paste only
+
+    async def test_user_input_observed_during_write_settles_antigravity_paste(self):
+        adapter = self.make()
+        adapter.alive = lambda: True
+        confirmed = AsyncMock(return_value=True)
+        adapter.att["confirm_delivery_ids"] = confirmed
+
+        async def observe_during_write(text):
+            record = {
+                "type": "USER_INPUT", "source": "USER_EXPLICIT",
+                "created_at": later(time.time()), "content": text,
+            }
+            await adapter._observe_jsonl_paste(record)
+            await adapter._settle_user_input_record(record, text)
+
+        adapter.send_keys = AsyncMock(side_effect=observe_during_write)
+
+        await adapter.deliver([{"id": 42, "sender": "greg", "body": "fast wake"}])
+
+        confirmed.assert_awaited_once_with([42])
+        self.assertEqual(adapter._jsonl_receipts, [])
+        self.assertEqual(adapter._outstanding, [])
+
+    async def test_failed_antigravity_write_rolls_back_both_receipts(self):
+        adapter = self.make()
+        adapter.alive = lambda: True
+        adapter.send_keys = AsyncMock(side_effect=OSError("pty closed"))
+
+        with self.assertRaisesRegex(OSError, "pty closed"):
+            await adapter.deliver([{"id": 43, "sender": "greg", "body": "failed wake"}])
+
+        self.assertEqual(adapter._jsonl_receipts, [])
+        self.assertEqual(adapter._outstanding, [])
 
     async def test_resume_tails_the_conversation_this_log_created_not_cli_session(self):
         """Report 22: agy opened a new conversation; the adapter tailed the old one.
@@ -665,29 +702,33 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         sent = []
         adapter.send_keys = AsyncMock(side_effect=lambda text: sent.append(text))
         await adapter.deliver([{"id": 41, "sender": "greg", "body": "wake one"}])
-        digest = adapter.format_digest([{"sender": "greg", "body": "wake one"}])
-        self.assertEqual([wake[0] for wake in adapter._outstanding], [digest])
+        paste = adapter._outstanding[0][0]
+        self.assertTrue(paste.startswith(adapter._jsonl_receipts[0]["marker"]))
+        self.assertEqual([wake[0] for wake in adapter._outstanding], [paste])
         pasted = adapter._outstanding[0][1]
 
         # 1st skip proof -> 1st resend
         await adapter._note_user_input(
             "<USER_REQUEST>\n/some other command\n</USER_REQUEST>", later(pasted)
         )
-        self.assertEqual(sent, [digest, digest])
-        self.assertEqual([wake[0] for wake in adapter._outstanding], [digest])
+        self.assertEqual(len(sent), 2)
+        self.assertEqual(sent[0], paste)
+        self.assertTrue(sent[1].startswith(adapter._jsonl_receipts[-1]["marker"]))
+        self.assertEqual(adapter._jsonl_receipts[-1]["ids"], [41])
+        self.assertEqual([wake[0] for wake in adapter._outstanding], [paste])
 
         # 2nd skip proof -> 2nd resend
         await adapter._note_user_input(
             "<USER_REQUEST>\n/second command\n</USER_REQUEST>", later(pasted)
         )
-        self.assertEqual(sent, [digest, digest, digest])
-        self.assertEqual([wake[0] for wake in adapter._outstanding], [digest])
+        self.assertEqual(len(sent), 3)
+        self.assertEqual([wake[0] for wake in adapter._outstanding], [paste])
 
         # 3rd skip proof -> give up, post notice, repool
         await adapter._note_user_input(
             "<USER_REQUEST>\n/something else\n</USER_REQUEST>", later(pasted)
         )
-        self.assertEqual(sent, [digest, digest, digest])
+        self.assertEqual(len(sent), 3)
         self.assertEqual(adapter._outstanding, [])
         adapter.att["repool_message_ids"].assert_awaited_once_with([41])
         self.assertEqual(len(self.messages), 1)
@@ -705,14 +746,14 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         sent = []
         adapter.send_keys = AsyncMock(side_effect=lambda text: sent.append(text))
         await adapter.deliver([{"sender": "greg", "body": "mid-turn wake"}])
-        digest = adapter.format_digest([{"sender": "greg", "body": "mid-turn wake"}])
+        paste = adapter._outstanding[0][0]
         # The record was written before the paste: no verdict either way.
         await adapter._note_user_input(
             "<USER_REQUEST>\n/unrelated earlier turn\n</USER_REQUEST>",
             time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 10)),
         )
-        self.assertEqual(sent, [digest])
-        self.assertEqual([wake[0] for wake in adapter._outstanding], [digest])
+        self.assertEqual(sent, [paste])
+        self.assertEqual([wake[0] for wake in adapter._outstanding], [paste])
         self.assertEqual(self.messages, [])
 
     async def test_a_transcript_input_containing_the_digest_verifies_it(self):
@@ -721,15 +762,15 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         sent = []
         adapter.send_keys = AsyncMock(side_effect=lambda text: sent.append(text))
         await adapter.deliver([{"sender": "greg", "body": "wake two"}])
-        digest = adapter.format_digest([{"sender": "greg", "body": "wake two"}])
+        paste = adapter._outstanding[0][0]
         # The TUI took the paste, possibly reflowed: whitespace differences
         # must still verify the digest, with no resend and no notice.
         await adapter._note_user_input(
-            "<USER_REQUEST>\n  " + digest.replace("\n", " \n ") + "\n</USER_REQUEST>",
+            "<USER_REQUEST>\n  " + paste.replace("\n", " \n ") + "\n</USER_REQUEST>",
             later(adapter._outstanding[0][1]),
         )
         # Only deliver()'s original paste: verification sends nothing.
-        self.assertEqual(sent, [digest])
+        self.assertEqual(sent, [paste])
         self.assertEqual(adapter._outstanding, [])
         self.assertEqual(self.messages, [])
 
@@ -755,9 +796,9 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.messages), 2)
         # A later wake that lands resets the cap for future losses.
         await adapter.deliver([{"sender": "greg", "body": "fourth"}])
-        digest = adapter.format_digest([{"sender": "greg", "body": "fourth"}])
+        paste = adapter._outstanding[-1][0]
         await adapter._note_user_input(
-            "<USER_REQUEST>\n" + digest + "\n</USER_REQUEST>", later(time.time())
+            "<USER_REQUEST>\n" + paste + "\n</USER_REQUEST>", later(time.time())
         )
         self.assertEqual(adapter._notices, 0)
 
@@ -795,9 +836,9 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         sent = []
         adapter.send_keys = AsyncMock(side_effect=lambda text: sent.append(text))
         await adapter.deliver([{"sender": "greg", "body": 'wake "quoted" five'}])
-        digest = adapter.format_digest([{"sender": "greg", "body": 'wake "quoted" five'}])
-        await adapter._note_log_line(glog_submission(digest, adapter._outstanding[0][1] + 5))
-        self.assertEqual(sent, [digest])
+        paste = adapter._outstanding[0][0]
+        await adapter._note_log_line(glog_submission(paste, adapter._outstanding[0][1] + 5))
+        self.assertEqual(sent, [paste])
         self.assertEqual(adapter._outstanding, [])
         self.assertEqual(self.messages, [])
 
@@ -808,20 +849,19 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         sent = []
         adapter.send_keys = AsyncMock(side_effect=lambda text: sent.append(text))
         await adapter.deliver([{"id": 42, "sender": "greg", "body": "wake six"}])
-        digest = adapter.format_digest([{"sender": "greg", "body": "wake six"}])
         pasted = adapter._outstanding[0][1]
 
         # 1st skip -> 1st resend
         await adapter._note_log_line(glog_submission("/status", pasted + 5))
-        self.assertEqual(sent, [digest, digest])
+        self.assertEqual(len(sent), 2)
 
         # 2nd skip -> 2nd resend
         await adapter._note_log_line(glog_submission("/info", pasted + 6))
-        self.assertEqual(sent, [digest, digest, digest])
+        self.assertEqual(len(sent), 3)
 
         # 3rd skip -> give up, repool, notice
         await adapter._note_log_line(glog_submission("/quit", pasted + 7))
-        self.assertEqual(sent, [digest, digest, digest])
+        self.assertEqual(len(sent), 3)
         self.assertEqual(adapter._outstanding, [])
         adapter.att["repool_message_ids"].assert_awaited_once_with([42])
         self.assertEqual(len(self.messages), 1)
@@ -866,14 +906,14 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         sent = []
         adapter.send_keys = AsyncMock(side_effect=lambda text: sent.append(text))
         await adapter.deliver([{"sender": "greg", "body": "wake seven"}])
-        digest = adapter.format_digest([{"sender": "greg", "body": "wake seven"}])
+        paste = adapter._outstanding[0][0]
         # A submission line with no glog prefix carries no ordering evidence.
         await adapter._note_log_line('HandleUserInput called with text: "/status"\n')
         # And a line that is not a submission says nothing at all.
         await adapter._note_log_line(glog_submission("", time.time()).replace(
             'HandleUserInput called with text: ""', "Streaming conversation abc"))
-        self.assertEqual(sent, [digest])
-        self.assertEqual([wake[0] for wake in adapter._outstanding], [digest])
+        self.assertEqual(sent, [paste])
+        self.assertEqual([wake[0] for wake in adapter._outstanding], [paste])
         self.assertEqual(self.messages, [])
 
     def test_logparse_rolls_back_a_future_yearless_stamp(self):
@@ -897,11 +937,11 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         os.makedirs(self.log_root, exist_ok=True)
         Path(adapter.log_path()).write_text("", encoding="utf-8")
         await adapter.deliver([{"sender": "greg", "body": "via log"}])
-        digest = adapter.format_digest([{"sender": "greg", "body": "via log"}])
+        paste = adapter._outstanding[0][0]
         tail = asyncio.create_task(adapter._tail_log())
         await asyncio.sleep(0.1)  # let the tail open the file and seek to EOF
         with open(adapter.log_path(), "a", encoding="utf-8") as file:
-            file.write(glog_submission(digest, time.time() + 5))
+            file.write(glog_submission(paste, time.time() + 5))
         for _ in range(30):
             if not adapter._outstanding:
                 break
@@ -954,13 +994,13 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         sent = []
         adapter.send_keys = AsyncMock(side_effect=lambda text: sent.append(text))
         await adapter.deliver([{"sender": "greg", "body": "wake eleven"}])
-        digest = adapter.format_digest([{"sender": "greg", "body": "wake eleven"}])
-        await adapter._note_user_input(digest, "not-a-date")
+        paste = adapter._outstanding[0][0]
+        await adapter._note_user_input(paste, "not-a-date")
         self.assertEqual(adapter._outstanding, [])
         # A record carrying no timestamp at all still settles a wake.
         await adapter.deliver([{"sender": "greg", "body": "wake twelve"}])
-        digest = adapter.format_digest([{"sender": "greg", "body": "wake twelve"}])
-        await adapter._note_user_input(digest, None)
+        paste = adapter._outstanding[0][0]
+        await adapter._note_user_input(paste, None)
         self.assertEqual(adapter._outstanding, [])
 
     async def test_a_mid_turn_paste_is_not_credited_by_its_own_log_echo(self):
@@ -974,10 +1014,10 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         sent = []
         adapter.send_keys = AsyncMock(side_effect=lambda text: sent.append(text))
         await adapter.deliver([{"sender": "greg", "body": "busy wake"}])
-        digest = adapter.format_digest([{"sender": "greg", "body": "busy wake"}])
-        await adapter._note_log_line(glog_submission(digest, adapter._outstanding[0][1] + 5))
-        self.assertEqual([wake[0] for wake in adapter._outstanding], [digest])
-        self.assertEqual(sent, [digest])  # no blind resend into the busy TUI
+        paste = adapter._outstanding[0][0]
+        await adapter._note_log_line(glog_submission(paste, adapter._outstanding[0][1] + 5))
+        self.assertEqual([wake[0] for wake in adapter._outstanding], [paste])
+        self.assertEqual(sent, [paste])  # no blind resend into the busy TUI
         self.assertEqual(self.messages, [])
 
     async def test_a_transcript_input_verifies_a_mid_turn_wake(self):
@@ -986,9 +1026,9 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         adapter._turn_open = True
         adapter.send_keys = AsyncMock()
         await adapter.deliver([{"sender": "greg", "body": "queued wake"}])
-        digest = adapter.format_digest([{"sender": "greg", "body": "queued wake"}])
+        paste = adapter._outstanding[0][0]
         await adapter._note_user_input(
-            "<USER_REQUEST>\n" + digest + "\n</USER_REQUEST>", later(adapter._outstanding[0][1])
+            "<USER_REQUEST>\n" + paste + "\n</USER_REQUEST>", later(adapter._outstanding[0][1])
         )
         self.assertEqual(adapter._outstanding, [])
 
@@ -1002,12 +1042,12 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         sent = []
         adapter.send_keys = AsyncMock(side_effect=lambda text: sent.append(text))
         await adapter.deliver([{"id": 7, "sender": "greg", "body": "held wake"}])
-        digest = adapter.format_digest([{"sender": "greg", "body": "held wake"}])
+        paste = adapter._outstanding[0][0]
         await adapter._note_user_input(
             "<USER_REQUEST>\n/some other command\n</USER_REQUEST>", later(adapter._outstanding[0][1])
         )
-        self.assertEqual(sent, [digest])  # only the original paste
-        self.assertEqual([wake[0] for wake in adapter._outstanding], [digest])
+        self.assertEqual(sent, [paste])  # only the original paste
+        self.assertEqual([wake[0] for wake in adapter._outstanding], [paste])
 
     async def test_turn_end_repools_a_mid_turn_wake_that_never_began_a_turn(self):
         adapter = self.make()
@@ -1034,11 +1074,11 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         adapter.att["repool_message_ids"] = AsyncMock(return_value=True)
         adapter.send_keys = AsyncMock()
         await adapter.deliver([{"id": 11, "sender": "greg", "body": "maybe queued"}])
-        digest = adapter.format_digest([{"sender": "greg", "body": "maybe queued"}])
+        paste = adapter._outstanding[0][0]
 
         async def land_record_during_grace(_seconds):
             await adapter._note_user_input(
-                "<USER_REQUEST>\n" + digest + "\n</USER_REQUEST>", later(time.time())
+                "<USER_REQUEST>\n" + paste + "\n</USER_REQUEST>", later(time.time())
             )
 
         with patch(
@@ -1061,7 +1101,7 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         adapter.att["repool_message_ids"] = AsyncMock(return_value=True)
         adapter.send_keys = AsyncMock()
         await adapter.deliver([{"id": 21, "sender": "greg", "body": "wake one"}])
-        digest1 = adapter.format_digest([{"sender": "greg", "body": "wake one"}])
+        paste1 = adapter._outstanding[0][0]
         gate = asyncio.Event()
         graces = {"n": 0}
         real_sleep = asyncio.sleep
@@ -1085,7 +1125,7 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
             # wake one settles from its transcript record during the grace…
             await adapter._note_user_input(
-                "<USER_REQUEST>\n" + digest1 + "\n</USER_REQUEST>", later(time.time())
+                "<USER_REQUEST>\n" + paste1 + "\n</USER_REQUEST>", later(time.time())
             )
             # …and wake two is pasted into turn two, which ends mid-grace.
             await adapter.deliver([{"id": 22, "sender": "greg", "body": "wake two"}])

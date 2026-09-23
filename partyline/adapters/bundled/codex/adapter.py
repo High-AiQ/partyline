@@ -50,6 +50,7 @@ def _item_text(item: dict) -> str:
 
 class PartylineAdapter(BaseAdapter):
     kind = "codex"
+    jsonl_paste_receipts = True
 
     def codex_home(self) -> str:
         """This attachment's private CODEX_HOME, created and seeded."""
