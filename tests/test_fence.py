@@ -74,6 +74,19 @@ def _att(cwd, conv_id="conv-fence", metadata=None, grants=None):
             "adapter_metadata": metadata or {}, "write_grants": grants or []}
 
 
+def _isolate_home(test_case, root=None):
+    if root is None:
+        test_case.home = tempfile.TemporaryDirectory()
+        test_case.addCleanup(test_case.home.cleanup)
+        root = test_case.home.name
+    os.makedirs(root, exist_ok=True)
+    home_patch = patch.dict(os.environ, {"HOME": root})
+    home_patch.start()
+    test_case.addCleanup(home_patch.stop)
+    for name in (".cache", ".config", ".grok"):
+        os.makedirs(os.path.join(root, name), exist_ok=True)
+
+
 class FakeAdapter:
     """Just the two surfaces the fence touches: att and build_command."""
 
@@ -86,6 +99,9 @@ class FakeAdapter:
 
 
 class LaunchArgvTest(unittest.TestCase):
+    def setUp(self):
+        _isolate_home(self)
+
     def test_flag_off_spawns_the_bare_command(self):
         adapter = FakeAdapter(_att("/tmp"), ["codex", "--flag"])
         with overridden(write_fence=False):
@@ -307,12 +323,13 @@ class FenceIntegrationTest(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
+        _isolate_home(self, os.path.join(self.directory.name, "home"))
         self.fix = _worktree_fixture(self.directory.name)
-        self.addCleanup(shutil.rmtree, os.path.expanduser(
-            os.path.join(git_fence.FENCE_ROOT, "conv-int")), ignore_errors=True)
         patcher = patch.object(git_fence, "FENCE_ROOT", self.mirror_root())
         patcher.start()
         self.addCleanup(patcher.stop)
+        self.addCleanup(shutil.rmtree, os.path.join(self.mirror_root(), "conv-int"),
+                        ignore_errors=True)
         self.addCleanup(_git, "worktree", "prune", cwd=self.fix["repo"])
         self.att = _att(self.fix["line_wt"], conv_id="conv-int")
 
