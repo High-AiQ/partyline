@@ -34,7 +34,7 @@ it is a fence against accidents, not a jail against malice. See
 | path | writable | why |
 | --- | --- | --- |
 | the line's cwd tree | yes | the tree the line works in; a directly attached line keeps its cwd writable because the person put it there |
-| the line's recorded review worktrees | yes | only paths in that line's `review_worktrees` rows, inside the repository's `.review/<sha>` directory; each review checkout's own Git metadata is writable too |
+| the repository's `.review/` directory | yes | disposable review checkouts may be created after spawn; only the line's recorded review checkouts get writable Git metadata |
 | git shared state (child lines) | partially | see the mirror below |
 | adapter home paths from the manifest `write_paths` | yes | sessions, transcripts, auth state each CLI writes (`~/.claude`, `~/.cursor`, `~/.grok`, …) |
 | an adapter's computed paths | yes | a per-attachment vendor home the manifest cannot name (codex's `CODEX_HOME`) |
@@ -42,13 +42,20 @@ it is a fence against accidents, not a jail against malice. See
 | `~/.cache`, `~/.config` | yes | the two home directories CLIs routinely update |
 | everything else | no | read-only via the `/` bind, including the host's other checkouts and `/` itself |
 
-At spawn and resume, Partyline loads review-worktree rows for the owning
-conversation only. The fence checks that each row names a full SHA at the
-canonical `<repo>/.review/<sha>` path and that it is still a Git worktree
-of that repository. It does not discover checkouts by scanning `.review`:
-sibling lines' review worktrees and unrecorded directories remain read-only.
-The review checkout gets its own Git metadata directory writable through
-`git_fence`; the shared `worktrees/` tree stays read-only.
+For any line working in a repository, the whole canonical `<repo>/.review/`
+directory is writable, including review checkout directories created after
+the process starts. These checkouts are disposable: Partyline creates and
+prunes them, and acceptance verifies the SHA object rather than the checkout.
+This means sibling lines can write files in each other's review checkouts;
+nothing under `.review/` is a source of truth.
+
+Git metadata is narrower. At spawn and resume, Partyline loads review rows
+for the owning conversation only. The fence checks each row's owner, full
+SHA, canonical `<repo>/.review/<sha>` path, and repository identity before
+binding that checkout's own Git metadata writable through `git_fence`.
+The shared `.git/worktrees/` directory stays read-only. A checkout created
+after spawn has no writable metadata bind, so a Git index refresh fails
+softly; read-only commands such as `diff`, `log`, and `show` still work.
 
 Note on the private `/tmp`: bubblewrap recreates the directory chain of
 each bind destination inside the tmpfs, so paths under `/tmp` that are

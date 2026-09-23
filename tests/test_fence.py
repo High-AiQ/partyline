@@ -10,6 +10,7 @@ worktree metadata stay byte-for-byte unchanged on the host.
 """
 
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -363,7 +364,7 @@ class FenceIntegrationTest(unittest.TestCase):
             self.assertEqual(self.host_bytes(path), original, path)
         self.assertFalse(os.path.exists(os.path.join(common, "hooks", "evil-hook")))
 
-    def test_only_owner_can_write_its_managed_review_worktree(self):
+    def test_recorded_review_worktree_gets_its_own_git_metadata_bind(self):
         db = Db(os.path.join(self.directory.name, "review-lines.db"))
         self.addCleanup(db.close)
         db.create_conversation("conv-int", "line")
@@ -383,18 +384,43 @@ class FenceIntegrationTest(unittest.TestCase):
         with patch.object(git_fence, "FENCE_ROOT", self.mirror_root()):
             pairs = fence.write_set(self.att, adapter_paths=[])
             own_gitdir = git_fence._worktree_gitdir(own["path"])
-            self.assertIn((own["path"], own["path"], False), pairs)
+            sibling_gitdir = git_fence._worktree_gitdir(sibling["path"])
+            review_root = os.path.join(self.fix["repo"], ".review")
+            line_gitdir = git_fence._worktree_gitdir(self.fix["line_wt"])
+            common = git_fence.common_gitdir(line_gitdir)
+            self.assertIn((review_root, review_root, False), pairs)
             self.assertIn((own_gitdir, own_gitdir, False), pairs)
-            self.assertNotIn((sibling["path"], sibling["path"], False), pairs)
+            self.assertIn((os.path.join(common, "worktrees"),
+                           os.path.join(common, "worktrees"), True), pairs)
+            self.assertNotIn((sibling_gitdir, sibling_gitdir, False), pairs)
 
             own_marker = os.path.join(own["path"], "review-write.txt")
             self.assertEqual(self.run_fenced("touch", own_marker).returncode, 0)
             result = self.run_fenced("git", "-C", own["path"], "add", "review-write.txt")
             self.assertEqual(result.returncode, 0, result.stderr)
-            sibling_marker = os.path.join(sibling["path"], "blocked-write.txt")
+            sibling_marker = os.path.join(sibling["path"], "shared-review-write.txt")
             result = self.run_fenced("touch", sibling_marker)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertFalse(os.path.exists(sibling_marker))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(os.path.isfile(sibling_marker))
+
+    def test_new_review_checkout_is_writable_but_repo_and_sibling_are_not(self):
+        review_root = os.path.join(self.fix["repo"], ".review")
+        new_dir = os.path.join(review_root, "new-checkout")
+        review_marker = os.path.join(new_dir, "gate-marker")
+        root_marker = os.path.join(self.fix["repo"], "fence-root-probe")
+        sibling_marker = os.path.join(self.fix["sibling_wt"], "fence-sibling-probe")
+        self.assertFalse(os.path.exists(new_dir))
+        script = " && ".join((
+            f"mkdir -p {shlex.quote(new_dir)}",
+            f"touch {shlex.quote(review_marker)}",
+            f"! touch {shlex.quote(root_marker)} 2>/dev/null",
+            f"! touch {shlex.quote(sibling_marker)} 2>/dev/null",
+        ))
+        result = self.run_fenced("sh", "-c", script)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(os.path.isfile(review_marker))
+        self.assertFalse(os.path.exists(root_marker))
+        self.assertFalse(os.path.exists(sibling_marker))
 
 
 class WriteSetGrantApiTest(unittest.TestCase):
