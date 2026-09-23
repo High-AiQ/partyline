@@ -181,9 +181,17 @@ is what the 409 path exists to avoid.
 | opencode | `write_paths` | none |
 | antigravity | `write_paths` | a trust dialog per new worktree path; the pinned log root is part of the write set |
 | grok | `write_paths` | none with `--permission-mode bypassPermissions` |
+| deepseek | `write_paths` | none: `~/.dsh` (sessions, profiles, patched models) is declared |
+| hermes | `write_paths` | none: `~/.hermes` (the claimed state.db) is declared |
+| muse | `write_paths` | none: `~/.local/share/muse` (session logs) is declared |
+| pi | `write_paths` | none: `~/.pi` and the pinned `~/.partyline/sessions/pi` are declared |
 
 Probe evidence (2026-09-22/23, real CLIs under the fence): codex, claude,
 cursor, opencode, and grok completed real turns and wrote only inside the
 fence; antigravity validated startup, auth, transcript writes, and paste
 ingestion (its model turn was quota-blocked, which is external to the
-fence). Logs: the write-fence line's hand-off.
+fence). Logs: the write-fence line's hand-off. deepseek, hermes, muse, and
+pi never got that probe — which is how qwen (deepseek) shipped: it exited 1
+at its first write to `~/.dsh` under the fence (found 2026-09-23). The
+declarations are now in place and pinned by tests; a real fenced spawn of
+those four remains to be re-probed on a host that can create namespaces.

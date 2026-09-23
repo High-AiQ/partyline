@@ -550,5 +550,37 @@ class CompatibilityShimTest(unittest.TestCase):
         self.assertTrue(issubclass(RawAdapter, Adapter))
 
 
+class BundledManifestWritePathsTest(unittest.TestCase):
+    """The write fence derives a CLI's home writes from the manifest
+    (docs/write-fence.md). deepseek, hermes, muse, and pi shipped with no
+    declaration and could not start under the fence — qwen (dsh) exited 1
+    on its first write to ~/.dsh — so the declarations are pinned here.
+    """
+
+    def manifest(self, name):
+        return loader._manifest(loader.BUNDLED_ROOT / name)
+
+    def test_the_repaired_adapters_declare_their_home_writes(self):
+        expected = {
+            "deepseek": ["~/.dsh"],
+            "hermes": ["~/.hermes"],
+            "muse": ["~/.local/share/muse"],
+            "pi": ["~/.pi", "~/.partyline/sessions/pi"],
+        }
+        for name, paths in expected.items():
+            self.assertEqual(self.manifest(name)["write_paths"], paths, name)
+
+    def test_the_previously_declared_adapters_keep_theirs(self):
+        expected = {
+            "antigravity": ["~/.gemini", "~/.partyline/sessions/antigravity"],
+            "claude": ["~/.claude", "~/.claude.json"],
+            "cursor": ["~/.cursor"],
+            "grok": ["~/.grok"],
+            "opencode": ["~/.local/share/opencode", "~/.local/state"],
+        }
+        for name, paths in expected.items():
+            self.assertEqual(self.manifest(name)["write_paths"], paths, name)
+
+
 if __name__ == "__main__":
     unittest.main()

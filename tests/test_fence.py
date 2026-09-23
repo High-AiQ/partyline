@@ -22,6 +22,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from partyline import auth_store, auth_tokens, fence, fence_darwin, git_fence, server
+from partyline.adapters import loader
 from partyline.auth_guard import install_auth_guard
 from partyline.write_set_routes import list_write_grants, write_set_router
 from partyline.db import Db
@@ -171,6 +172,20 @@ class LaunchArgvTest(unittest.TestCase):
         pairs = fence.write_set(att, adapter_paths=None)
         grok = os.path.expanduser("~/.grok")
         self.assertIn((grok, grok, False), pairs)
+
+    def test_repaired_manifest_write_paths_reach_the_write_set(self):
+        """deepseek, hermes, muse, and pi: the declarations added after the
+        qwen incident must land in the spawn write set, expanded."""
+        declared = [path for name in ("deepseek", "hermes", "muse", "pi")
+                    for path in loader._manifest(loader.BUNDLED_ROOT / name)["write_paths"]]
+        self.assertTrue(declared)
+        for path in declared:
+            os.makedirs(os.path.expanduser(path), exist_ok=True)
+        att = _att("/tmp", metadata={"write_paths": declared})
+        pairs = fence.write_set(att, adapter_paths=None)
+        guests = {dst for _src, dst, _ro in pairs}
+        for path in declared:
+            self.assertIn(os.path.expanduser(path), guests, path)
 
 
 class DarwinSandboxExecTest(unittest.TestCase):
