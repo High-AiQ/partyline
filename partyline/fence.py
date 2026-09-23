@@ -60,8 +60,28 @@ def existing(paths: list[str]) -> list[str]:
     return [p for p in paths if os.path.lexists(p)]
 
 
-def _review_worktree_paths(att: dict) -> list[str]:
-    """Return only recorded, canonical review checkouts of this line's repo."""
+def _review_directory(cwd: str, *, create: bool = False) -> str | None:
+    """Return the repository's real .review directory, creating it for a bind."""
+    repo = repo_root(cwd)
+    if repo is None:
+        return None
+    repo = os.path.realpath(repo)
+    review_root = os.path.join(repo, REVIEW_DIR)
+    if create and not os.path.lexists(review_root):
+        try:
+            os.mkdir(review_root)
+        except FileExistsError:
+            pass
+        except OSError:
+            return None
+    if (not os.path.isdir(review_root) or os.path.islink(review_root) or
+            os.path.realpath(review_root) != review_root):
+        return None
+    return review_root
+
+
+def _review_worktree_paths(att: dict, review_root: str | None = None) -> list[str]:
+    """Return recorded, canonical review checkouts for metadata binds only."""
     conv_id = att.get("conv_id")
     cwd = att.get("cwd") or ""
     rows = att.get("review_worktrees") or []
@@ -69,8 +89,9 @@ def _review_worktree_paths(att: dict) -> list[str]:
     if repo is None:
         return []
     repo = os.path.realpath(repo)
-    review_root = os.path.join(repo, REVIEW_DIR)
-    if not os.path.isdir(review_root) or os.path.realpath(review_root) != review_root:
+    expected_root = os.path.join(repo, REVIEW_DIR)
+    review_root = review_root or _review_directory(cwd)
+    if review_root != expected_root:
         return []
 
     paths = []
@@ -119,8 +140,10 @@ def write_set(att: dict, adapter_paths: list[str] | None = None) -> list[tuple[s
             continue
         covered.add(src)
         binds.append((src, dst, read_only))
-    for path in _review_worktree_paths(att):
-        add(path)
+    review_root = _review_directory(att.get("cwd") or "", create=True)
+    if review_root:
+        add(review_root)
+    for path in _review_worktree_paths(att, review_root):
         for src, dst, read_only in git_fence.git_binds(path, att.get("conv_id") or ""):
             if src in covered:
                 continue
