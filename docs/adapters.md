@@ -298,6 +298,22 @@ home existed gets the prior rollout symlinked in, so `codex resume <id>` still r
 writes stay private. Isolation removes the shared directory that recency ordering mis-sorted; it
 does not replace claiming, which stays mandatory for every adapter that cannot pin a path.
 
+A resumed codex turn is **not** a new rollout (verified against codex-cli 0.156 on 2026-09-23 by
+starting a real CLI in a private `CODEX_HOME`, resuming it, and diffing the home): `codex resume`
+appends the turn to the prior rollout in place and projects it into `thread_history_1.sqlite`
+under that `CODEX_HOME` (`thread_items` / `thread_turns`, `history_mode = paginated`). Looking
+for a forked `rollout-*<new-id>.jsonl` finds nothing and looks like a silent resume. The adapter
+therefore relays resumed turns from that paginated store first — read-only and WAL-safe, the way
+the opencode adapter tails its session db — and falls back to the rollout tail only when the
+store never appears. The claim-marker gate reads the same store: a `userMessage` row is the
+structured record of a pasted digest, so this activation's nonce must appear there before any
+agent speech from the resumed thread is posted.
+
+| DO | DO NOT |
+| --- | --- |
+| On resume, tail the store the CLI actually writes (codex: `thread_history_1.sqlite` under `CODEX_HOME`; the rollout is appended in place, not forked) | Hunt for a new rollout file and fall silent when none appears |
+| Prove the claim nonce in that same source before relaying speech | Open the speech gate from a prior activation's marker |
+
 Proof before speech is enforced in the shared base for every transcript adapter: the briefing and
 each wake carry `[partyline-claim: <attachment>/<nonce>]` until the tailed session records that
 exact token, agent speech from an unproven session is held (system notices still post), and the
