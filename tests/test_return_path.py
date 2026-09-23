@@ -15,7 +15,7 @@ from partyline.hierarchy import create_child_conversation, set_lead
 from partyline.mention_relay import post_private
 from partyline.presence import Presence
 from partyline.runtime import ChatRuntime
-from partyline.turn_return import excerpt
+from partyline.return_notice import excerpt
 
 
 class Recorder:
@@ -83,6 +83,9 @@ class Tree(unittest.IsolatedAsyncioTestCase):
 
     def notices(self, conv_id):
         return [m["body"] for m in self.line(conv_id) if m["sender_type"] == "system"]
+
+    def returns_to(self, att_id):
+        return [body for body in self.adapters[att_id].bodies() if body.startswith("↩")]
 
 
 class CrossLineMentionTest(Tree):
@@ -377,18 +380,22 @@ class ReturnPathTest(Tree):
         self.assertIn("@person — builder on line «Child» ended its turn", notice)
         self.assertEqual(self.adapters["lead"].delivered, [])  # unrouted: nobody is rung
 
-    async def test_a_silent_turn_owes_nothing(self):
+    async def test_a_silent_turn_after_an_addressed_wake_says_nothing(self):
         await self.say("lead", "@builder render page one")
         await self.turn("builder")
 
-        self.assertEqual([b for b in self.adapters["lead"].bodies() if b.startswith("↩")], [])
+        [notice] = self.returns_to("lead")
+        self.assertIn("and said nothing", notice)
+        self.assertNotIn("last said", notice)
 
     async def test_words_said_before_the_wake_are_not_this_turns_answer(self):
         await self.say("builder", "Hello, builder is connected.")
         await self.say("lead", "@builder render page one")
         await self.turn("builder")
 
-        self.assertEqual([b for b in self.adapters["lead"].bodies() if b.startswith("↩")], [])
+        [notice] = self.returns_to("lead")
+        self.assertIn("and said nothing", notice)
+        self.assertNotIn("Hello", notice)
 
     async def test_a_passing_mention_does_not_make_a_requester(self):
         """`@sub have builder build it` rings builder too, but only sub owes lead."""
@@ -400,6 +407,76 @@ class ReturnPathTest(Tree):
         self.assertEqual(
             len([b for b in self.adapters["lead"].bodies() if b.startswith("↩")]), 1
         )
+
+    async def test_a_silent_sub_captain_returns_once_to_the_captain_who_assigned_it(self):
+        """2026-09-23 write-fence-audit: sol rings terra, terra delegates, the
+        worker reports, terra says nothing. sol gets one notice, and it says
+        terra said nothing."""
+        self.db.create_conversation("write-fence", "write-fence")
+        create_child_conversation(self.db, "write-fence", "write-fence-audit", "write-fence-audit")
+        for att_id, line in (
+            ("sol", "write-fence"),
+            ("terra", "write-fence-audit"),
+            ("cursor-composer", "write-fence-audit"),
+        ):
+            self.attach(att_id, line)
+        set_lead(self.db, "write-fence", "sol")
+        set_lead(self.db, "write-fence-audit", "terra")
+
+        await self.say("sol", "@terra review the fence")
+        await self.turn("terra", "@cursor-composer finish the review evidence")
+        self.assertEqual(self.returns_to("sol"), [])
+
+        await self.say("cursor-composer", "@terra evidence is filed")
+        await self.turn("terra")
+
+        [notice] = self.returns_to("sol")
+        self.assertIn("terra", notice)
+        self.assertIn("and said nothing", notice)
+
+    async def test_downward_delegation_keeps_the_upstream_until_it_is_addressed(self):
+        """A captain woken from above that only delegates still owes the upstream.
+        A later turn that addresses the upstream clears it."""
+        await self.say("lead", "@sub take page one")
+        await self.turn("sub", "@builder build page one, no upload")
+
+        self.assertEqual(self.returns_to("lead"), [])
+        self.assertIn("lead", self.runtime.returns.requesters.get("sub", {}))
+
+        await self.turn("sub", "@lead page one accepted")
+
+        self.assertEqual(self.returns_to("lead"), [])
+        self.assertNotIn("sub", self.runtime.returns.requesters)
+        self.assertIn("@lead page one accepted", self.adapters["lead"].bodies())
+
+    async def test_a_silent_return_never_rings_the_finisher(self):
+        """A worker's report wakes the child captain; silence tells the parent, not the captain."""
+        await self.say("builder", "@sub done")
+        await self.turn("sub")
+
+        [notice] = self.returns_to("lead")
+        self.assertIn("and said nothing", notice)
+        self.assertNotIn("@sub", notice)
+        self.assertEqual(self.returns_to("sub"), [])
+
+    async def test_a_silent_turn_woken_only_by_a_notice_owes_nothing(self):
+        await self.say("lead", "@sub take page one")
+        await self.turn("sub", "@builder build it")
+        await self.turn("builder", "Done.")
+        await self.turn("sub")
+
+        self.assertEqual(self.returns_to("lead"), [])
+        self.assertIn("lead", self.runtime.returns.requesters.get("sub", {}))
+
+    async def test_a_carried_requester_that_left_is_skipped(self):
+        await self.say("lead", "@sub take page one")
+        await self.turn("sub", "@builder build it")
+        self.db.set_attachment_status("lead", "detached", "own")
+        await self.say("builder", "@sub done")
+        await self.turn("sub")
+
+        self.assertEqual(self.returns_to("lead"), [])
+        self.assertEqual(self.adapters["lead"].delivered, [])
 
     async def test_a_status_line_naming_a_worker_owes_nothing_either(self):
         await self.say("lead", "@worker run the suite")
