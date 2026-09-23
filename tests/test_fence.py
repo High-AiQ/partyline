@@ -322,6 +322,25 @@ class ReviewWorktreeFencePathTest(unittest.TestCase):
         att["review_worktrees"] = [{"conv_id": "owner", "sha": sha, "path": path}]
         self.assertEqual(fence._review_worktree_paths(att), [])
 
+    def test_root_checkout_skips_the_mirror_over_its_own_git_dir(self):
+        att = _att(self.fix["repo"], conv_id="owner")
+        att["review_worktrees"] = [{"conv_id": "owner", "sha": self.sha, "path": self.path}]
+        git_dir = os.path.join(self.fix["repo"], ".git")
+        pairs = fence.write_set(att, adapter_paths=[])
+        for _src, dst, _ro in pairs:
+            self.assertFalse(
+                dst == git_dir or dst.startswith(git_dir + os.sep), dst)
+
+    def test_linked_worktree_checkout_keeps_the_mirror_binds(self):
+        att = _att(self.fix["line_wt"], conv_id="owner")
+        att["review_worktrees"] = [{"conv_id": "owner", "sha": self.sha, "path": self.path}]
+        common = git_fence.common_gitdir(git_fence._worktree_gitdir(self.fix["line_wt"]))
+        with patch.object(git_fence, "FENCE_ROOT",
+                          os.path.join(self.directory.name, "fence-root")):
+            pairs = fence.write_set(att, adapter_paths=[])
+        dests = {dst for _src, dst, _ro in pairs}
+        self.assertIn(os.path.join(common, "refs"), dests)
+
 
 @unittest.skipUnless(BWRAP_SKIP_REASON is None, BWRAP_SKIP_REASON or "")
 class FenceIntegrationTest(unittest.TestCase):
