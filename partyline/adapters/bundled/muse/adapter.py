@@ -234,6 +234,7 @@ class PartylineAdapter(Adapter):
                     file.seek(position)
                     await asyncio.sleep(0.3)
                     continue
+                self.observe_claim(line)
                 record = self._decode(line)
                 message = self._assistant_message(record or {})
                 if message is None:

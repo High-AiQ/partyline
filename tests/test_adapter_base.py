@@ -10,6 +10,7 @@ import asyncio
 import json
 import os
 import tempfile
+import types
 import time
 import unittest
 from pathlib import Path
@@ -753,6 +754,125 @@ async def _noop_post(sender, sender_type, body):
 
 async def _noop_status(status):
     pass
+
+
+class ClaimGateTest(unittest.IsolatedAsyncioTestCase):
+    """Proof before speech: the claim token every transcript adapter pastes.
+
+    The write-fence incident paired two same-directory attachments onto
+    each other's sessions; the gate means a wrongly adopted file carries no
+    speech at all, and the token means the file that does carry speech is
+    the one that recorded this activation's own paste.
+    """
+
+    def make(self, *, transcript: bool = True) -> Recorder:
+        metadata = {"capabilities": {"transcript": True}} if transcript else {}
+        return Recorder(["cat"], id="att-1",
+                        adapter_metadata=metadata)
+
+    def write(self, lines: list[str]) -> str:
+        handle, path = tempfile.mkstemp(suffix=".jsonl")
+        with os.fdopen(handle, "w", encoding="utf-8") as fh:
+            fh.writelines(line + "\n" for line in lines)
+        self.addCleanup(os.unlink, path)
+        return path
+
+    def test_briefing_and_digest_carry_the_token_until_observed(self):
+        adapter = self.make()
+        token = adapter._claim_token
+        self.assertIn(token, adapter.briefing())
+        self.assertIn(token, adapter.format_digest([{"sender": "greg", "body": "hi"}]))
+
+        adapter._mark_claim_proven()
+        self.assertNotIn(token, adapter.briefing())
+        self.assertNotIn(token, adapter.format_digest([{"sender": "greg", "body": "hi"}]))
+
+        bare = self.make(transcript=False)
+        self.assertNotIn("[partyline-claim: ", bare.briefing())
+
+    async def test_agent_speech_is_gated_until_our_marker_is_observed(self):
+        adapter = self.make()
+        token = adapter._claim_token
+        # The process is live while the session is written, so the tail
+        # watches the file grow rather than reading a finished one.
+        adapter.proc = types.SimpleNamespace(poll=lambda: None)
+        path = self.write([json.dumps({"role": "agent", "text": "before the marker"})])
+        seen: list[dict] = []
+
+        async def handle(record):
+            seen.append(record)
+            if record.get("role") == "agent":
+                await adapter.post("dummy", "agent", record["text"])
+
+        tail = asyncio.create_task(adapter._tail_jsonl(path, handle))
+        await until(lambda: len(seen) >= 1, what="the first record")
+        # The unproven line arrived and was held, not posted.
+        self.assertEqual([p for p in adapter.posts if p[1] == "agent"], [])
+
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"message": token}) + "\n")
+            fh.write(json.dumps({"role": "agent", "text": "after the marker"}) + "\n")
+        await until(lambda: adapter._claim_proven, what="the claim marker")
+        await until(lambda: any(p[1] == "agent" and p[2] == "after the marker"
+                                for p in adapter.posts), what="speech after the marker")
+        adapter.proc = types.SimpleNamespace(poll=lambda: 0)
+        await asyncio.wait_for(tail, 10)
+        self.assertEqual([p[2] for p in adapter.posts if p[1] == "agent"],
+                         ["after the marker"])
+
+    async def test_speech_flows_when_the_file_already_carries_the_marker(self):
+        adapter = self.make()
+        path = self.write([
+            json.dumps({"role": "agent", "text": "spoke first"}),
+            json.dumps({"message": adapter._claim_token}),
+        ])
+
+        async def handle(record):
+            if record.get("role") == "agent":
+                await adapter.post("dummy", "agent", record["text"])
+
+        await adapter._tail_jsonl(path, handle)
+
+        self.assertEqual([p[2] for p in adapter.posts if p[1] == "agent"],
+                         ["spoke first"])
+
+    async def test_a_foreign_marked_transcript_is_refused(self):
+        adapter = self.make()
+        _ = adapter._claim_token  # this activation's nonce exists
+        path = self.write([
+            json.dumps({"message": "[partyline-claim: other-att/deadbeef123]"}),
+            json.dumps({"role": "agent", "text": "someone else's words"}),
+        ])
+
+        async def handle(record):
+            if record.get("role") == "agent":
+                await adapter.post("dummy", "agent", record["text"])
+
+        await adapter._tail_jsonl(path, handle)
+
+        self.assertEqual([p[2] for p in adapter.posts if p[1] == "agent"], [])
+        self.assertIn("not adopting", " ".join(p[2] for p in adapter.posts))
+        self.assertIsNone(adapter._ready_result)
+
+    async def test_this_attachments_prior_activation_is_not_foreign(self):
+        """A resume reopens the session the last activation wrote."""
+        adapter = self.make()
+        _ = adapter._claim_token
+        path = self.write([
+            json.dumps({"message": "[partyline-claim: att-1/oldnonce]"}),
+            json.dumps({"role": "agent", "text": "carried over"}),
+        ])
+
+        async def handle(record):
+            if record.get("role") == "agent":
+                await adapter.post("dummy", "agent", record["text"])
+
+        await adapter._tail_jsonl(path, handle)
+
+        # Not refused — but not proven either, so speech stays gated until
+        # this activation's own wake records its nonce.
+        self.assertEqual([p[2] for p in adapter.posts if p[1] == "agent"], [])
+        self.assertTrue(adapter._ready_result)
 
 
 if __name__ == "__main__":

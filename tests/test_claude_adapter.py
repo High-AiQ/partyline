@@ -378,7 +378,8 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
 
         adapter = PartylineAdapter(
             {"command": ["claude"], "id": ident, "name": name,
-             "cwd": "/work", "conv_name": "a line", "resume": False},
+             "cwd": "/work", "conv_name": "a line", "resume": False,
+             "adapter_metadata": {"capabilities": {"transcript": True}}},
             post, on_status,
         )
         adapter.spawned_at = 1_000.0
@@ -503,13 +504,18 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(later_keys.called, "the later attachment was never briefed")
 
-    def test_the_token_stops_riding_wakes_once_a_session_is_claimed(self):
+    def test_the_token_stops_riding_wakes_once_the_session_is_proven(self):
         adapter = self.make_adapter()
         messages = [{"sender": "greg", "body": "hello"}]
         self.assertIn(adapter._claim_token, adapter.format_digest(messages))
 
+        # A fallback claim (the pinned path, nothing proved yet) keeps
+        # carrying the token: the first wake that records it is the proof,
+        # and stopping at the claim alone would leave the speech gate shut.
         adapter._transcript = "/somewhere/claimed.jsonl"
+        self.assertIn(adapter._claim_token, adapter.format_digest(messages))
 
+        adapter._mark_claim_proven()
         self.assertNotIn(adapter._claim_token, adapter.format_digest(messages))
 
     async def test_a_resumed_attachment_claims_its_session_on_the_first_wake(self):

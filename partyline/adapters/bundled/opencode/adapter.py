@@ -145,7 +145,7 @@ class PartylineAdapter(Adapter):
                     boundaries = db.execute(
                         "SELECT id, time_created, json_extract(data, '$.role'), "
                         "json_extract(data, '$.finish'), "
-                        "json_extract(data, '$.time.completed') IS NOT NULL FROM message "
+                        "json_extract(data, '$.time.completed') IS NOT NULL, data FROM message "
                         "WHERE session_id = ? AND time_created >= ? "
                         "AND json_extract(data, '$.role') IN ('user', 'assistant') "
                         "ORDER BY time_created, id",
@@ -164,7 +164,11 @@ class PartylineAdapter(Adapter):
                     continue
                 if isinstance(body, str) and body.strip():
                     await self.post(self.att["name"], "agent", body)
-            for message_id, created_ms, role, finish, completed in boundaries:
+            for message_id, created_ms, role, finish, completed, raw in boundaries:
+                # The pasted claim token lands in user messages; watching
+                # them here opens the speech gate from this session.
+                if role == "user":
+                    self.observe_claim(raw)
                 if role == "assistant" and not completed:
                     abandoned[message_id] = created_ms
                     continue

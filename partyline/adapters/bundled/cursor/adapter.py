@@ -86,9 +86,8 @@ class PartylineAdapter(WakeSettlement, Adapter):
     def _is_replaced(self, fh, path: Path, open_mtime_ns: int) -> bool:
         try:
             st = path.stat()
-            if st.st_ino != os.fstat(fh.fileno()).st_ino or st.st_size < fh.tell():
-                return True
-            if st.st_mtime_ns != open_mtime_ns:
+            if (st.st_ino != os.fstat(fh.fileno()).st_ino or st.st_size < fh.tell()
+                    or st.st_mtime_ns != open_mtime_ns):
                 return True
             return False
         except OSError:
@@ -204,6 +203,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
                             await asyncio.sleep(0.3)
                             continue
                         fp = fingerprint(line)
+                        self.observe_claim(line)
                         if matched < len(seen_fps):
                             if seen_fps[matched] == fp:
                                 matched += 1

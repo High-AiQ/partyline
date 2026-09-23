@@ -1,16 +1,22 @@
 """Private Codex adapter; tails matching rollout JSONL events.
 
-The rollout file is created lazily, on the first turn's flush rather than at TUI
-boot, and it carries no id we chose — so a fresh attachment has to find it by
-working directory and start time. Two TUIs launched in one directory seconds
-apart are indistinguishable that way, so discovery is serialized by _DISCOVERY
-and every resolved rollout is claimed in _CLAIMED. Without that, the second
-attachment latches onto the first one's transcript and reposts its messages
-under the wrong handle.
+Each attachment runs Codex with a ``CODEX_HOME`` of its own under
+``~/.partyline/sessions/codex/<attachment-id>``, seeded with the user's
+auth and config: the CLI creates every other file it needs there (verified
+against codex-cli 0.156), and its rollouts land in a directory no other
+attachment writes. A resume links the prior activation's rollout into the
+same home so ``codex resume <id>`` resolves it there.
+
+Isolation is the fence; the claim token is the proof. The briefing and
+every wake carry ``[partyline-claim: <attachment>/<nonce>]``, and a
+rollout is adopted only once it records that token — the paste only this
+pty receives — so even a shared sessions directory cannot pair two
+same-directory attachments by scan order (the 2026-09-22 write-fence
+incident), and the shared tail refuses any file carrying another
+attachment's marker.
 """
 
 import asyncio
-import contextlib
 import glob
 import json
 import os
@@ -18,6 +24,13 @@ import os
 from partyline.adapters.base import Adapter as BaseAdapter
 from partyline.adapters.compaction import is_compaction_record
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
+
+HOME_ROOT = os.path.expanduser("~/.partyline/sessions/codex")
+SHARED_HOME = os.path.expanduser("~/.codex")
+# Read-mostly entries shared from the user's own codex home. Everything
+# else — sessions, history, the sqlite state — is created per attachment,
+# so concurrent CLIs never write one file or share one wal.
+SHARED = ("auth.json", "config.toml", "plugins", "skills")
 
 
 def _item_text(item: dict) -> str:
@@ -29,12 +42,48 @@ def _item_text(item: dict) -> str:
 class PartylineAdapter(BaseAdapter):
     kind = "codex"
 
-    _CLAIMED: set[str] = set()
-    _DISCOVERY = asyncio.Lock()
+    def codex_home(self) -> str:
+        """This attachment's private CODEX_HOME, created and seeded."""
+        home = os.path.join(HOME_ROOT, self.att["id"])
+        os.makedirs(os.path.join(home, "sessions"), exist_ok=True)
+        for name in SHARED:
+            link = os.path.join(home, name)
+            if os.path.lexists(link):
+                continue
+            try:
+                os.symlink(os.path.join(SHARED_HOME, name), link)
+            except OSError:
+                pass  # an entry the user does not have is not ours to invent
+        if prior := self.att.get("cli_session"):
+            self._link_prior_session(home, prior)
+        return home
 
-    async def stop(self):
-        self._CLAIMED.discard(getattr(self, "_rollout", "") or "")
-        await super().stop()
+    def _link_prior_session(self, home: str, prior: str) -> None:
+        """Make the recorded session resolvable inside this home.
+
+        Sessions recorded before per-attachment homes still live in the
+        shared tree; a symlink lets ``codex resume <id>`` find them while
+        every new write stays inside this home.
+        """
+        shared_sessions = os.path.join(SHARED_HOME, "sessions")
+        pattern = os.path.join(shared_sessions, "**", f"rollout-*{prior}.jsonl")
+        for source in glob.glob(pattern, recursive=True):
+            target = os.path.join(home, "sessions",
+                                  os.path.relpath(source, shared_sessions))
+            if os.path.lexists(target):
+                continue
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            try:
+                os.symlink(source, target)
+            except OSError:
+                pass
+
+    def spawn_env(self) -> dict[str, str]:
+        return {"CODEX_HOME": getattr(self, "_home", "") or self.codex_home()}
+
+    async def start(self):
+        self._home = self.codex_home()
+        await super().start()
 
     def build_command(self) -> list[str]:
         cmd = list(self.att["command"]) or ["codex"]
@@ -63,12 +112,33 @@ class PartylineAdapter(BaseAdapter):
         return True
 
     def _find_rollout(self) -> str | None:
-        pattern = os.path.expanduser("~/.codex/sessions/**/rollout-*.jsonl")
-        candidates = [path for path in glob.glob(pattern, recursive=True)
-                      if os.path.getmtime(path) >= self.spawned_at - 2]
+        """The rollout that records this activation's claim token.
+
+        The home already keeps neighbours out; the token is the proof that
+        what we adopted is this pty's session even if isolation ever fails
+        — a rollout is only claimed once it has ingested a paste that only
+        this activation makes, so two attachments can never pair wrong by
+        scan order, and a rollout carrying another attachment's marker is
+        skipped rather than adopted. A resume may additionally match by
+        recorded lineage, which is exact content: the fork names the
+        session it resumed.
+        """
+        home = getattr(self, "_home", "") or self.codex_home()
+        pattern = os.path.join(home, "sessions", "**", "rollout-*.jsonl")
+        candidates = []
+        for path in glob.glob(pattern, recursive=True):
+            # A resumed activation's linked prior session predates this
+            # spawn; its lineage match below is exact, so the mtime bound
+            # applies only to fresh attachments, where it bounds the scan.
+            try:
+                recent = self.resume or os.path.getmtime(path) >= self.spawned_at - 2
+            except OSError:
+                continue
+            if recent:
+                candidates.append(path)
         for path in sorted(candidates, key=os.path.getmtime, reverse=True):
-            if path in self._CLAIMED:
-                continue  # another live attachment is already tailing it
+            if self.foreign_claim(path):
+                continue  # another attachment's pty wrote this one
             try:
                 with open(path, encoding="utf-8", errors="replace") as fh:
                     meta = json.loads(fh.readline())
@@ -85,10 +155,12 @@ class PartylineAdapter(BaseAdapter):
                 prior = self.att.get("cli_session")
                 if prior not in (payload.get("forked_from_id"),
                                  payload.get("session_id"), payload.get("id")):
-                    continue
+                    if not self.recorded_claim(path):
+                        continue
             elif payload.get("cwd") != self.att["cwd"]:
                 continue
-            self._CLAIMED.add(path)
+            elif not self.recorded_claim(path):
+                continue
             self._rollout = path
             return path
         return None
@@ -98,35 +170,33 @@ class PartylineAdapter(BaseAdapter):
         if not self.alive():
             return
 
-        # One fresh attachment at a time, from briefing to resolved rollout.
-        # Resumes match on the recorded session id instead, so they stay out of
-        # the lock — their rollout may not appear for many minutes.
-        path = None
-        async with (contextlib.nullcontext() if self.resume else self._DISCOVERY):
-            waited = 0.0
-            if not self.resume:
-                await self.send_keys(self.briefing())
+        # No cross-adapter lock: the claim token means no two adapters can
+        # ever match the same rollout, and serializing discovery only ever
+        # gagged later attachments behind one CLI stuck on a trust screen.
+        waited = 0.0
+        if not self.resume:
+            await self.send_keys(self.briefing())
 
-            while path is None:
+        while True:
+            path = self._find_rollout()
+            if path or not self.alive():
+                break
+            await asyncio.sleep(1.0)
+            waited += 1.0
+            if self.resume:
+                continue
+            if waited in (20.0, 40.0):
+                os.write(self.master, b"\r")
                 await asyncio.sleep(1.0)
-                waited += 1.0
-                path = self._find_rollout()
-                if path or not self.alive():
-                    break
-                if self.resume:
-                    continue
-                if waited in (20.0, 40.0):
-                    os.write(self.master, b"\r")
-                    await asyncio.sleep(1.0)
-                    await self.send_keys(self.briefing())
-                elif waited > 90.0:
-                    await self.post(
-                        "system", "system",
-                        f"{self.att['name']}: no rollout file after 90s — the CLI is probably "
-                        f"on a login/trust/update screen. Run it manually once in "
-                        f"{self.att['cwd']}, then re-attach.",
-                    )
-                    return
+                await self.send_keys(self.briefing())
+            elif waited > 90.0:
+                await self.post(
+                    "system", "system",
+                    f"{self.att['name']}: no rollout file after 90s — the CLI is probably "
+                    f"on a login/trust/update screen. Run it manually once in "
+                    f"{self.att['cwd']}, then re-attach.",
+                )
+                return
         if not path:
             return
 
