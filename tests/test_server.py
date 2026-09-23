@@ -20,6 +20,17 @@ from partyline.hook_routes import handle_hook
 from partyline.preset_routes import presets_router
 from partyline.restart_report import restart_report_router
 from partyline.runtime import ChatRuntime
+from partyline.features import overridden
+
+
+def setUpModule():
+    global _write_fence_off
+    _write_fence_off = overridden(write_fence=False)
+    _write_fence_off.__enter__()
+
+
+def tearDownModule():
+    _write_fence_off.__exit__(None, None, None)
 
 
 class FakeAdapter:

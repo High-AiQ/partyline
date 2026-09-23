@@ -34,7 +34,8 @@ def _bwrap_skip_reason():
         return "bubblewrap is not installed"
     try:
         result = subprocess.run(
-            [fence.BWRAP, "--ro-bind", "/", "/", "--", "true"],
+            [fence.BWRAP, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
+             "--", "true"],
             capture_output=True, text=True, timeout=5,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
