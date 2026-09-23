@@ -1,5 +1,6 @@
 """Startup-delivery contract for the private Codex adapter."""
 
+import asyncio
 import json
 import os
 import shutil
@@ -832,6 +833,7 @@ class CodexThreadHistoryTest(unittest.IsolatedAsyncioTestCase):
         adapter._stopping = False
         adapter.spawned_at = self.spawned_at
         adapter._home = self.home
+        adapter._jsonl_receipts_init()
 
         async def post(sender, sender_type, body):
             if adapter.pastes_claim() and not adapter._claim_proven and sender_type == "agent":
@@ -917,6 +919,66 @@ class CodexThreadHistoryTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.ready)
         self.assertEqual(self.messages, [("terra", "agent", "BRAVO-TWO.")])
         self.assertTrue(self.adapter._claim_proven)
+
+    async def test_resumed_continuation_receipt_is_credited_from_thread_history(self):
+        marker = self.adapter._new_paste_marker()
+        paste = f"{marker}\n{self.adapter._claim_token}\ncontinue from checkpoint"
+        self.adapter._track_jsonl_paste(paste, [{"id": 71}], marker)
+        credited = []
+        writes = []
+        retry_tasks = []
+
+        async def send_keys(text):
+            writes.append(text)
+
+        self.adapter.send_keys = AsyncMock(side_effect=send_keys)
+        await self.adapter.send_keys(paste)  # the continuation's original pty write
+
+        async def confirm(ids):
+            credited.append(list(ids))
+            return True
+
+        self.adapter.att["confirm_delivery_ids"] = confirm
+        at_ready = []
+        original_mark_ready = self.adapter.mark_ready
+
+        def mark_ready():
+            at_ready.append((list(credited), list(self.adapter._jsonl_receipts)))
+            original_mark_ready()
+            on_claimed = self.adapter.att.get("on_transcript_claimed")
+            if on_claimed:
+                on_claimed()
+
+        async def retry_if_unproved():
+            if self.adapter._jsonl_receipts:
+                await self.adapter.send_keys(paste)
+
+        def transcript_claimed():
+            retry_tasks.append(asyncio.create_task(retry_if_unproved()))
+
+        self.adapter.mark_ready = mark_ready
+        self.adapter.att["on_transcript_claimed"] = transcript_claimed
+        self.write_store(
+            items=[
+                self.item("u1", "userMessage", {
+                    "type": "userMessage",
+                    "content": [{"type": "text", "text": paste}],
+                }),
+                self.item("a1", "agentMessage", {
+                    "type": "agentMessage", "text": "continued response",
+                }),
+            ],
+            turns=[("thread-1", "turn-1", "completed", 1, 2)],
+        )
+
+        self.assertTrue(await self.run_tail())
+        await asyncio.gather(*retry_tasks)
+
+        self.assertEqual(credited, [[71]])
+        self.assertEqual(at_ready, [([[71]], [])])
+        self.assertEqual(writes, [paste])
+        self.assertEqual(self.adapter._jsonl_receipts, [])
+        self.assertEqual(self.adapter._jsonl_confirmed_ids, {71})
 
     async def test_speech_stays_held_until_this_activation_nonce_is_observed(self):
         """The claim-marker gate: a prior activation's token is not this one's."""

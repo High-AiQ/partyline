@@ -94,6 +94,10 @@ class JsonlPasteReceipts:
         text = _user_text(record)
         if text is None:
             return
+        await self.observe_paste_text(text)
+
+    async def observe_paste_text(self, text: str) -> None:
+        """Settle a paste from structured user text outside JSONL adapters."""
         observed = _normal(text)
         match = next((receipt for receipt in self._jsonl_receipts
                       if not receipt["proven"] and receipt["marker"] in observed), None)
