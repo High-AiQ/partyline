@@ -34,12 +34,21 @@ it is a fence against accidents, not a jail against malice. See
 | path | writable | why |
 | --- | --- | --- |
 | the line's cwd tree | yes | the tree the line works in; a directly attached line keeps its cwd writable because the person put it there |
+| the line's recorded review worktrees | yes | only paths in that line's `review_worktrees` rows, inside the repository's `.review/<sha>` directory; each review checkout's own Git metadata is writable too |
 | git shared state (child lines) | partially | see the mirror below |
 | adapter home paths from the manifest `write_paths` | yes | sessions, transcripts, auth state each CLI writes (`~/.claude`, `~/.cursor`, `~/.grok`, …) |
 | an adapter's computed paths | yes | a per-attachment vendor home the manifest cannot name (codex's `CODEX_HOME`) |
 | granted paths (`conversation_write_grants`) | yes | requested, granted, recorded |
 | `~/.cache`, `~/.config` | yes | the two home directories CLIs routinely update |
 | everything else | no | read-only via the `/` bind, including the host's other checkouts and `/` itself |
+
+At spawn and resume, Partyline loads review-worktree rows for the owning
+conversation only. The fence checks that each row names a full SHA at the
+canonical `<repo>/.review/<sha>` path and that it is still a Git worktree
+of that repository. It does not discover checkouts by scanning `.review`:
+sibling lines' review worktrees and unrecorded directories remain read-only.
+The review checkout gets its own Git metadata directory writable through
+`git_fence`; the shared `worktrees/` tree stays read-only.
 
 Note on the private `/tmp`: bubblewrap recreates the directory chain of
 each bind destination inside the tmpfs, so paths under `/tmp` that are

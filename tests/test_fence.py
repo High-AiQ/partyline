@@ -26,6 +26,7 @@ from partyline.db import Db
 from partyline.features import overridden
 from partyline.hierarchy_routes import hierarchy_router
 from partyline.runtime import ChatRuntime
+from partyline.review_worktrees import create_review_worktree, list_review_worktrees
 
 BWRAP_PRESENT = fence.bwrap_available()
 
@@ -242,6 +243,39 @@ class GitMirrorTest(unittest.TestCase):
             os.path.join(self.directory.name, "nope"), "refs/heads/x"))
 
 
+class ReviewWorktreeFencePathTest(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.fix = _worktree_fixture(self.directory.name)
+        self.addCleanup(_git, "worktree", "prune", cwd=self.fix["repo"])
+        self.sha = _git("rev-parse", "HEAD", cwd=self.fix["line_wt"]).stdout.strip()
+        review_root = os.path.join(self.fix["repo"], ".review")
+        os.makedirs(review_root)
+        self.path = os.path.join(review_root, self.sha)
+        _git("worktree", "add", "-q", "--detach", self.path, self.sha, cwd=self.fix["repo"])
+
+    def test_only_canonical_owned_rows_for_the_repository_are_accepted(self):
+        row = {"conv_id": "owner", "sha": self.sha, "path": self.path}
+        att = _att(self.fix["line_wt"], conv_id="owner")
+        att["review_worktrees"] = [row]
+        self.assertEqual(fence._review_worktree_paths(att), [self.path])
+
+        row["conv_id"] = "sibling"
+        self.assertEqual(fence._review_worktree_paths(att), [])
+        row["conv_id"] = "owner"
+        row["path"] = os.path.join(self.directory.name, "relocated")
+        self.assertEqual(fence._review_worktree_paths(att), [])
+
+    def test_symlinked_review_path_is_not_granted(self):
+        sha = "a" * 40
+        path = os.path.join(self.fix["repo"], ".review", sha)
+        os.symlink(self.fix["sibling_wt"], path)
+        att = _att(self.fix["line_wt"], conv_id="owner")
+        att["review_worktrees"] = [{"conv_id": "owner", "sha": sha, "path": path}]
+        self.assertEqual(fence._review_worktree_paths(att), [])
+
+
 @unittest.skipIf(not BWRAP_PRESENT, "bubblewrap is not installed")
 class FenceIntegrationTest(unittest.TestCase):
     """A real fenced process against a real repository.
@@ -328,6 +362,39 @@ class FenceIntegrationTest(unittest.TestCase):
         for path, original in before.items():
             self.assertEqual(self.host_bytes(path), original, path)
         self.assertFalse(os.path.exists(os.path.join(common, "hooks", "evil-hook")))
+
+    def test_only_owner_can_write_its_managed_review_worktree(self):
+        db = Db(os.path.join(self.directory.name, "review-lines.db"))
+        self.addCleanup(db.close)
+        db.create_conversation("conv-int", "line")
+        db.create_conversation("conv-sibling", "sibling")
+        db.add_attachment("line-worker", "conv-int", "worker", "fake", ["fake"],
+                          self.fix["line_wt"])
+        db.add_attachment("sibling-worker", "conv-sibling", "worker", "fake", ["fake"],
+                          self.fix["sibling_wt"])
+        own_sha = _git("rev-parse", "HEAD", cwd=self.fix["line_wt"]).stdout.strip()
+        _identity("commit", "-q", "--allow-empty", "-m", "sibling review",
+                  cwd=self.fix["sibling_wt"])
+        sibling_sha = _git("rev-parse", "HEAD", cwd=self.fix["sibling_wt"]).stdout.strip()
+        own = create_review_worktree(db, "conv-int", own_sha)
+        sibling = create_review_worktree(db, "conv-sibling", sibling_sha)
+        self.att["review_worktrees"] = list_review_worktrees(db, "conv-int")
+
+        with patch.object(git_fence, "FENCE_ROOT", self.mirror_root()):
+            pairs = fence.write_set(self.att, adapter_paths=[])
+            own_gitdir = git_fence._worktree_gitdir(own["path"])
+            self.assertIn((own["path"], own["path"], False), pairs)
+            self.assertIn((own_gitdir, own_gitdir, False), pairs)
+            self.assertNotIn((sibling["path"], sibling["path"], False), pairs)
+
+            own_marker = os.path.join(own["path"], "review-write.txt")
+            self.assertEqual(self.run_fenced("touch", own_marker).returncode, 0)
+            result = self.run_fenced("git", "-C", own["path"], "add", "review-write.txt")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            sibling_marker = os.path.join(sibling["path"], "blocked-write.txt")
+            result = self.run_fenced("touch", sibling_marker)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(os.path.exists(sibling_marker))
 
 
 class WriteSetGrantApiTest(unittest.TestCase):

@@ -28,8 +28,10 @@ captain above it or by a person, and the grant is recorded on the line
 from __future__ import annotations
 
 import os
+import re
 
 from . import features, git_fence
+from .line_worktree import REVIEW_DIR, repo_root
 
 BWRAP = "/usr/bin/bwrap"
 
@@ -58,6 +60,40 @@ def existing(paths: list[str]) -> list[str]:
     return [p for p in paths if os.path.lexists(p)]
 
 
+def _review_worktree_paths(att: dict) -> list[str]:
+    """Return only recorded, canonical review checkouts of this line's repo."""
+    conv_id = att.get("conv_id")
+    cwd = att.get("cwd") or ""
+    rows = att.get("review_worktrees") or []
+    repo = repo_root(cwd) if rows and conv_id else None
+    if repo is None:
+        return []
+    repo = os.path.realpath(repo)
+    review_root = os.path.join(repo, REVIEW_DIR)
+    if not os.path.isdir(review_root) or os.path.realpath(review_root) != review_root:
+        return []
+
+    paths = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if row.get("conv_id") != conv_id:
+            continue
+        sha, recorded = row.get("sha"), row.get("path")
+        if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
+            continue
+        expected = os.path.join(review_root, sha)
+        if (not isinstance(recorded, str) or not os.path.isabs(recorded) or
+                recorded != expected or os.path.islink(recorded) or
+                os.path.realpath(recorded) != recorded or not os.path.isdir(recorded)):
+            continue
+        if (git_fence._worktree_gitdir(recorded) is None or
+                os.path.realpath(repo_root(recorded) or "") != repo):
+            continue
+        paths.append(recorded)
+    return paths
+
+
 def write_set(att: dict, adapter_paths: list[str] | None = None) -> list[tuple[str, str, bool]]:
     """The ordered ``(host, guest, read_only)`` binds this attachment needs.
 
@@ -83,6 +119,13 @@ def write_set(att: dict, adapter_paths: list[str] | None = None) -> list[tuple[s
             continue
         covered.add(src)
         binds.append((src, dst, read_only))
+    for path in _review_worktree_paths(att):
+        add(path)
+        for src, dst, read_only in git_fence.git_binds(path, att.get("conv_id") or ""):
+            if src in covered:
+                continue
+            covered.add(src)
+            binds.append((src, dst, read_only))
     for path in adapter_paths if adapter_paths is not None else manifest_write_paths(att):
         add(path)
     for grant in att.get("write_grants") or []:
