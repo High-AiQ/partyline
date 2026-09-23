@@ -21,6 +21,7 @@ from .agent_connection import provision_connection, bind_connection_hint
 from .fence import FenceUnavailable
 from .hierarchy import tree_live_name_conflict
 from .role_delivery import bind_role_delivery
+from .review_worktrees import list_review_worktrees
 from .reattach import ResumedAttachment, adapter_can_resume
 from .transcript_delivery import TranscriptDeliveryRecord
 
@@ -153,6 +154,7 @@ async def resume_adapter(
     # a resumed process keeps the PARTYLINE_TOKEN its briefing already named.
     att["api_token"] = ensure_api_token(runtime.db, att_id)
     att["hook_url"] = hook_url(att_id, runtime_owner)
+    att["review_worktrees"] = list_review_worktrees(runtime.db, att["conv_id"])
     provision_connection(runtime.db.path, att)
     att["digest_rider"] = lambda: ""
     bind_connection_hint(att)
