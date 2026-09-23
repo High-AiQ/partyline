@@ -29,7 +29,23 @@ from partyline.hierarchy_routes import hierarchy_router
 from partyline.runtime import ChatRuntime
 from partyline.review_worktrees import create_review_worktree, list_review_worktrees
 
-BWRAP_PRESENT = fence.bwrap_available()
+def _bwrap_skip_reason():
+    if not fence.bwrap_available():
+        return "bubblewrap is not installed"
+    try:
+        result = subprocess.run(
+            [fence.BWRAP, "--ro-bind", "/", "/", "--", "true"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"bubblewrap cannot create a user namespace: {exc}"
+    if result.returncode:
+        detail = result.stderr.strip() or result.stdout.strip() or "namespace probe failed"
+        return f"bubblewrap cannot create a user namespace: {detail}"
+    return None
+
+
+BWRAP_SKIP_REASON = _bwrap_skip_reason()
 
 
 def _git(*args, cwd):
@@ -76,7 +92,8 @@ class LaunchArgvTest(unittest.TestCase):
             self.assertEqual(fence.launch_argv(adapter), ["codex", "--flag"])
 
     def test_wrap_prefix_and_command_tail(self):
-        argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli", "--go"]))
+        with patch.object(fence, "bwrap_available", return_value=True):
+            argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli", "--go"]))
         self.assertEqual(argv[0], fence.BWRAP)
         self.assertIn("--die-with-parent", argv)
         self.assertEqual(argv[-3:], ["--", "cli", "--go"])
@@ -85,7 +102,8 @@ class LaunchArgvTest(unittest.TestCase):
         self.assertEqual(argv[argv.index("--ro-bind") + 2], "/")
 
     def test_cwd_and_homes_are_writable_binds(self):
-        argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
+        with patch.object(fence, "bwrap_available", return_value=True):
+            argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
         pairs = [(argv[i + 1], argv[i + 2]) for i, a in enumerate(argv) if a == "--bind"]
         guests = {dst for _src, dst in pairs}
         self.assertIn("/tmp", guests)
@@ -94,7 +112,8 @@ class LaunchArgvTest(unittest.TestCase):
 
     def test_manifest_fence_args_apply_only_when_fenced(self):
         att = _att("/tmp", metadata={"fence_args": ["--yolo"], "write_paths": []})
-        argv = fence.launch_argv(FakeAdapter(att, ["codex"]))
+        with patch.object(fence, "bwrap_available", return_value=True):
+            argv = fence.launch_argv(FakeAdapter(att, ["codex"]))
         self.assertEqual(argv[-2:], ["codex", "--yolo"])
         with overridden(write_fence=False):
             self.assertEqual(fence.launch_argv(FakeAdapter(att, ["codex"])), ["codex"])
@@ -277,7 +296,7 @@ class ReviewWorktreeFencePathTest(unittest.TestCase):
         self.assertEqual(fence._review_worktree_paths(att), [])
 
 
-@unittest.skipIf(not BWRAP_PRESENT, "bubblewrap is not installed")
+@unittest.skipUnless(BWRAP_SKIP_REASON is None, BWRAP_SKIP_REASON or "")
 class FenceIntegrationTest(unittest.TestCase):
     """A real fenced process against a real repository.
 

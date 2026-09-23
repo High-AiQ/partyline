@@ -33,6 +33,17 @@ from partyline.adapters.bundled.cursor.startup import (
     workspace_command,
 )
 from partyline.adapters.receipts import BEGAN, ENDED
+from partyline.features import overridden
+
+
+def setUpModule():
+    global _write_fence_override
+    _write_fence_override = overridden(write_fence=False)
+    _write_fence_override.__enter__()
+
+
+def tearDownModule():
+    _write_fence_override.__exit__(None, None, None)
 
 
 class Process:
