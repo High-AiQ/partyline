@@ -44,6 +44,10 @@ REGISTRY: dict[str, Flag] = {
         Flag("heartbeat", default=False, status="deprecated",
              summary="the root captain's self-timer (POST /api/heartbeat); superseded by "
                      "the return path and goal riders, off since 1.23.0"),
+        Flag("write_fence", default=True, status="stable",
+             summary="launch every attached process inside a bubblewrap write fence "
+                     "(partyline/fence.py); fail-closed — off only for one emergency "
+                     "restart cycle, never as a configuration"),
     )
 }
 

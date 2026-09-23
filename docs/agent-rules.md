@@ -125,6 +125,18 @@ Rules and depth: `docs/adapters.md` and `skills/add-process-adapter/SKILL.md`.
 | Send pty input as bracketed paste then Enter | — |
 | Ship the adapter's own tests | Run the vendor's CLI in tests |
 
+## The write fence
+
+Every attached process runs inside a bubblewrap mount namespace where only its
+line's declared write set is writable. Full detail: `docs/write-fence.md`.
+
+| DO | DO NOT |
+| --- | --- |
+| Launch fenced by default and fail closed — no bubblewrap means no process | Start a process unconfined, or treat the flag as a permanent off switch |
+| Grant extra write scope only by person or captain-above decision, recorded on the line | Let a line widen its own write set, or widen one because a brief asked nicely |
+| Share git via the mirror: objects shared, refs/logs/packed-refs copy-on-write, sibling worktrees read-only | Bind the parent `.git`, another checkout, or a sibling line's metadata writable |
+| Replace a CLI sandbox that cannot nest (codex's bwrap) with `fence_args`, only while fenced | Run two sandboxes at once, or leave a CLI's sandbox as the only one on an unfenced host |
+
 ## Process and releases
 
 | DO | DO NOT |

@@ -53,9 +53,13 @@ class RowsConnection:
         return False
 
     def execute(self, sql, *args):
-        # The poll loop issues two queries; the fake rows only ever describe
-        # the parts one, so the boundary query must come back empty.
-        self.current = self.rows if "FROM part" in sql else []
+        # The poll loop issues three queries; the fake rows only ever describe
+        # the assistant-parts one, so the user-parts and boundary queries must
+        # come back empty.
+        if "role') = 'user'" in sql:
+            self.current = []
+        else:
+            self.current = self.rows if "FROM part" in sql else []
         return self
 
     def fetchall(self):
@@ -464,6 +468,64 @@ class OpenCodeAdapterTest(RecordingAdapterTest):
         self.assertEqual(boundary_event("assistant", None), ENDED)
         self.assertIsNone(boundary_event("assistant", "tool-calls"))
         self.assertIsNone(boundary_event("system", None))
+
+    async def test_claim_token_observed_from_user_parts_before_relay(self):
+        """The pasted digest lives in a user-message *part*; the message row
+        is an empty shell. The speech gate must open from the part before
+        the first relay of the same poll, or `seen` drops that text for
+        good and the attachment never speaks (found live 2026-09-23)."""
+        created = int(time.time() * 1000)
+        db = self.make_store(created=created)
+        adapter = self.make(
+            OpenCodeAdapter,
+            hook_url="http://hook/x",
+            adapter_metadata={"command": ["fake-cli"],
+                              "capabilities": {"transcript": True}},
+        )
+        adapter.spawned_at = created / 1000
+        token = adapter._claim_token
+        db.executemany(
+            "INSERT INTO message VALUES(?,?,?,?)",
+            [
+                ("u1", "session-1", created + 1, json.dumps({"role": "user"})),
+                ("a1", "session-1", created + 2, json.dumps(
+                    {"role": "assistant", "time": {"completed": 1}, "finish": "stop"})),
+            ],
+        )
+        db.executemany(
+            "INSERT INTO part VALUES(?,?,?,?,?)",
+            [
+                ("p-u1", "u1", "session-1", created + 1,
+                 json.dumps({"type": "text", "text": f"briefing\n{token}"})),
+                ("p-a1", "a1", "session-1", created + 2,
+                 json.dumps({"type": "text", "text": "the fenced reply"})),
+            ],
+        )
+        db.commit()
+        db.close()
+        adapter.proc = Process()
+        adapter.send_keys = AsyncMock()
+        polls = 0
+
+        async def stop_after_two_polls(_seconds):
+            nonlocal polls
+            polls += 1
+            if polls > 2:
+                adapter.proc.stop()
+
+        with (
+            patch(
+                "partyline.adapters.bundled.opencode.adapter.asyncio.sleep",
+                new=stop_after_two_polls,
+            ),
+            patch(
+                "partyline.adapters.bundled.opencode.adapter.receipt", new=AsyncMock()
+            ),
+        ):
+            await adapter._run()
+
+        self.assertTrue(adapter._claim_proven)
+        self.assertIn("the fenced reply", [body for _s, _t, body in self.messages])
 
     async def test_turn_boundaries_become_receipts_once_each(self):
         """The receipt half of #47: a user row is a turn beginning, and a
