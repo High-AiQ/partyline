@@ -8,6 +8,8 @@ requires = ["hermes"]
 # Probed with Hermes 0.20.0 on 2026-08-23; re-probe after CLI updates.
 compact_paste = "/compress"
 env_unset = []
+# hermes's home (HERMES_HOME default); the claimed state.db transcript lives in it.
+write_paths = ["~/.hermes"]
 output = "read-only SQLite session transcript"
 
 update_command = ["hermes", "update"]

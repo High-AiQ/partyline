@@ -21,6 +21,17 @@ from partyline.media import MediaStore
 from partyline.media_routes import media_router
 from partyline.runtime import ChatRuntime
 from partyline.conversation_routes import register_conversation_routes
+from partyline.features import overridden
+
+
+def setUpModule():
+    global _write_fence_off
+    _write_fence_off = overridden(write_fence=False)
+    _write_fence_off.__enter__()
+
+
+def tearDownModule():
+    _write_fence_off.__exit__(None, None, None)
 
 
 def png():

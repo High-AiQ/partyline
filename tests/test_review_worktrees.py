@@ -29,6 +29,17 @@ from partyline.review_worktrees import (
 )
 from partyline.runtime import ChatRuntime
 from partyline.worktree_lifecycle import sweep_orphaned_worktrees
+from partyline.features import overridden
+
+
+def setUpModule():
+    global _write_fence_off
+    _write_fence_off = overridden(write_fence=False)
+    _write_fence_off.__enter__()
+
+
+def tearDownModule():
+    _write_fence_off.__exit__(None, None, None)
 
 
 def _git(*args, cwd):
