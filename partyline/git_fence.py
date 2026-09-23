@@ -203,6 +203,28 @@ def _read_ref(root: str, ref: str) -> str | None:
     return None
 
 
+def darwin_write_paths(cwd: str) -> list[str]:
+    """The writable git paths for one checkout on Darwin.
+
+    macOS has no mount namespaces, so the mirror cannot be mounted and the
+    fence falls back to the weaker Darwin guarantee (docs/write-fence.md):
+    the worktree's own metadata directory and the repository's shared
+    ``objects/``, ``refs/``, ``logs/``, and ``packed-refs`` are writable —
+    sibling refs are writable there too — while ``config``, ``hooks``, and
+    ``description`` are never named. A cwd that is not a linked worktree
+    needs nothing: its ``.git`` is inside the tree it already writes.
+    """
+    gitdir = _worktree_gitdir(cwd)
+    if gitdir is None:
+        return []
+    common = common_gitdir(gitdir)
+    candidates = [gitdir]
+    for name in ("objects", "refs", "logs"):
+        candidates.append(os.path.join(common, name))
+    candidates.append(os.path.join(common, "packed-refs"))
+    return [path for path in candidates if os.path.lexists(path)]
+
+
 def git_binds(cwd: str, conv_id: str) -> list[tuple[str, str, bool]]:
     """The git ``(host, guest, read_only)`` binds a fenced worktree line needs.
 

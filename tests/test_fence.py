@@ -13,6 +13,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -20,7 +21,7 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from partyline import auth_store, auth_tokens, fence, git_fence, server
+from partyline import auth_store, auth_tokens, fence, fence_darwin, git_fence, server
 from partyline.auth_guard import install_auth_guard
 from partyline.write_set_routes import list_write_grants, write_set_router
 from partyline.db import Db
@@ -170,6 +171,154 @@ class LaunchArgvTest(unittest.TestCase):
         pairs = fence.write_set(att, adapter_paths=None)
         grok = os.path.expanduser("~/.grok")
         self.assertIn((grok, grok, False), pairs)
+
+
+class DarwinSandboxExecTest(unittest.TestCase):
+    """The Darwin seam: backend choice, profile plan, and fail-closed
+    refusal, asserted with sys.platform patched — no sandbox-exec binary
+    is needed on Linux, and none of this runs a real sandbox.
+    """
+
+    def setUp(self):
+        _isolate_home(self)
+
+    def darwin(self):
+        return patch.object(sys, "platform", "darwin")
+
+    def test_backend_is_chosen_by_platform(self):
+        with patch.object(sys, "platform", "linux"):
+            self.assertEqual(fence.backend(), "bubblewrap")
+        with self.darwin():
+            self.assertEqual(fence.backend(), "sandbox-exec")
+        with patch.object(sys, "platform", "win32"):
+            self.assertEqual(fence.backend(), "none")
+
+    def test_darwin_argv_is_profile_then_command(self):
+        with self.darwin(), \
+                patch.object(fence_darwin, "sandbox_exec_available", return_value=True):
+            argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli", "--go"]))
+        self.assertEqual(argv[0], fence_darwin.SANDBOX_EXEC)
+        self.assertEqual(argv[1], "-p")
+        self.assertTrue(argv[2].startswith("(version 1)\n(allow default)\n(deny file-write*)\n"))
+        self.assertEqual(argv[3:], ["cli", "--go"])
+
+    def test_darwin_fence_args_apply_and_dedupe(self):
+        flag = "--dangerously-bypass-approvals-and-sandbox"
+        att = _att("/tmp", metadata={"fence_args": [flag], "write_paths": []})
+        with self.darwin(), \
+                patch.object(fence_darwin, "sandbox_exec_available", return_value=True):
+            bare = fence.launch_argv(FakeAdapter(att, ["codex"]))
+            carrying = fence.launch_argv(FakeAdapter(att, ["codex", flag]))
+        self.assertEqual(bare[3:], ["codex", flag])
+        self.assertEqual(carrying[3:], ["codex", flag])
+        for argv in (bare, carrying):
+            self.assertEqual(argv.count(flag), 1)
+
+    def test_linux_plan_stays_the_bwrap_argv(self):
+        with patch.object(sys, "platform", "linux"), \
+                patch.object(fence, "bwrap_available", return_value=True):
+            self.assertEqual(fence.backend_available(), (True, ""))
+            argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli", "--go"]))
+        self.assertEqual(argv[0], fence.BWRAP)
+        self.assertEqual(argv[-3:], ["--", "cli", "--go"])
+
+    def test_profile_denies_writes_then_reallows_only_the_write_set(self):
+        text = fence_darwin.profile(["/some/worktree"])
+        self.assertEqual(text.splitlines()[:3],
+                         ["(version 1)", "(allow default)", "(deny file-write*)"])
+        self.assertIn('(subpath "/some/worktree")', text)
+        self.assertIn('(subpath "/private/tmp")', text)
+        self.assertIn('(literal "/dev/null")', text)
+        self.assertIn('(regex #"^/dev/ttys[0-9]+$")', text)
+        for outside in ("/", "/etc", "/Users", "/private/etc", "/usr", "/var",
+                        "/some", "/some/worktree-elsewhere"):
+            self.assertNotIn(f'(subpath "{outside}")', text)
+            self.assertNotIn(f'(literal "{outside}")', text)
+
+    def test_profile_names_the_process_temp_dir_in_both_spellings(self):
+        with tempfile.TemporaryDirectory() as base:
+            tmpdir = os.path.join(base, "T")
+            os.makedirs(tmpdir)
+            with patch.dict(os.environ, {"TMPDIR": tmpdir}):
+                text = fence_darwin.profile([])
+        self.assertIn(f'(subpath "{tmpdir}")', text)
+        self.assertIn(f'(subpath "{os.path.realpath(tmpdir)}")', text)
+        self.assertIn('(subpath "/private/tmp")', text)
+
+    def test_profile_escapes_quotes_and_backslashes(self):
+        weird = '/tmp/space dir and "quote" and back\\slash'
+        text = fence_darwin.profile([weird])
+        self.assertIn('(subpath "/tmp/space dir and \\"quote\\" and back\\\\slash")', text)
+
+    def test_darwin_write_set_is_the_weaker_documented_git_scope(self):
+        with tempfile.TemporaryDirectory() as base:
+            fix = _worktree_fixture(base)
+            _git("pack-refs", "--all", cwd=fix["repo"])  # so packed-refs exists to grant
+            sha = _git("rev-parse", "HEAD", cwd=fix["line_wt"]).stdout.strip()
+            review_root = os.path.join(fix["repo"], ".review")
+            os.makedirs(review_root)
+            review = os.path.join(review_root, sha)
+            _git("worktree", "add", "-q", "--detach", review, sha, cwd=fix["repo"])
+            att = _att(fix["line_wt"], conv_id="owner")
+            att["review_worktrees"] = [{"conv_id": "owner", "sha": sha, "path": review}]
+            fence_root = os.path.join(base, "fence-root")
+            with patch.object(git_fence, "FENCE_ROOT", fence_root):
+                paths = fence.darwin_write_set(att, adapter_paths=[])
+            self.assertFalse(os.path.exists(fence_root))  # no mirror on Darwin
+            gitdir = git_fence._worktree_gitdir(fix["line_wt"])
+            common = git_fence.common_gitdir(gitdir)
+            for path in (fix["line_wt"], gitdir, os.path.join(common, "objects"),
+                         os.path.join(common, "refs"), os.path.join(common, "logs"),
+                         os.path.join(common, "packed-refs"), review,
+                         git_fence._worktree_gitdir(review)):
+                self.assertIn(path, paths)
+            for forbidden in ("config", "hooks", "description", "worktrees"):
+                self.assertNotIn(os.path.join(common, forbidden), paths)
+            self.assertEqual(git_fence.darwin_write_paths(fix["repo"]), [])
+
+    def test_darwin_argv_allows_that_scope_and_nothing_wider(self):
+        with tempfile.TemporaryDirectory() as base:
+            fix = _worktree_fixture(base)
+            att = _att(fix["line_wt"])
+            with self.darwin(), \
+                    patch.object(fence_darwin, "sandbox_exec_available", return_value=True):
+                argv = fence.launch_argv(FakeAdapter(att, ["git", "status"]))
+            text = argv[2]
+            gitdir = git_fence._worktree_gitdir(fix["line_wt"])
+            common = git_fence.common_gitdir(gitdir)
+            self.assertIn(f'(subpath "{gitdir}")', text)
+            self.assertIn(f'(subpath "{os.path.join(common, "refs")}")', text)
+            self.assertNotIn(f'(subpath "{os.path.join(common, "config")}")', text)
+            self.assertNotIn(f'(subpath "{os.path.join(common, "hooks")}")', text)
+            self.assertNotIn(f'(subpath "{os.path.join(common, "worktrees")}")', text)
+
+    def test_darwin_without_sandbox_exec_fails_closed_naming_platform_and_switch(self):
+        with self.darwin(), \
+                patch.object(fence_darwin, "sandbox_exec_available", return_value=False):
+            self.assertEqual(fence.backend_available(), (
+                False, f"{fence_darwin.SANDBOX_EXEC} is missing or not executable"))
+            with self.assertRaises(fence.FenceUnavailable) as caught:
+                fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
+        # attachment_start and attachment_resume interpolate this message
+        # verbatim into their 409s, so platform and switch ride along.
+        for needle in ("darwin", fence_darwin.SANDBOX_EXEC,
+                       "PARTYLINE_FEATURE_WRITE_FENCE=0", "refusing"):
+            self.assertIn(needle, str(caught.exception))
+
+    def test_a_platform_with_no_backend_fails_closed(self):
+        with patch.object(sys, "platform", "win32"):
+            available, reason = fence.backend_available()
+            self.assertFalse(available)
+            self.assertIn("win32", reason)
+            with self.assertRaises(fence.FenceUnavailable):
+                fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
+
+    def test_sandbox_exec_availability_checks_the_real_binary(self):
+        with patch("os.path.isfile", return_value=True), \
+                patch("os.access", return_value=True):
+            self.assertTrue(fence_darwin.sandbox_exec_available())
+        with patch("os.path.isfile", return_value=False):
+            self.assertFalse(fence_darwin.sandbox_exec_available())
 
 
 class GitMirrorTest(unittest.TestCase):
