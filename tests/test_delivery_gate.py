@@ -1,13 +1,14 @@
-"""The readiness gate: a transcript-claiming adapter is not credited until it claims.
+"""The readiness gate: a transcript claim releases old pastes for retry.
 
 A wake pasted into an adapter that has not claimed its transcript used to
 advance ``last_seen`` on the paste alone — exactly how a mention was credited
 to a live-but-mute CLI that could never speak again. The gate pastes (the wake
 carries the claim token, so pasting is how an unclaimed adapter claims) but
-holds delivery credit until the claim appears; an unadvanced cursor is the
-durable record of what was never proved ingested.
+holds delivery credit until the claim appears, then retries the pending wake.
+An unadvanced cursor is the durable record of what was never proved ingested.
 """
 
+import asyncio
 import tempfile
 import unittest
 
@@ -32,6 +33,8 @@ class RecordingAdapter(Adapter):
             self.record_status,
         )
         self.deliveries: list[list[dict]] = []
+        self.delivery_result = None
+        self.delivery_event = asyncio.Event()
         self.posts: list[tuple] = []
         self.statuses: list[str] = []
 
@@ -44,6 +47,8 @@ class RecordingAdapter(Adapter):
     async def deliver(self, messages: list[dict]):
         # Record instead of writing a pty; the gate only observes the paste.
         self.deliveries.append(messages)
+        self.delivery_event.set()
+        return self.delivery_result
 
 
 class ReadinessDeliveryGateTest(unittest.IsolatedAsyncioTestCase):
@@ -90,8 +95,8 @@ class ReadinessDeliveryGateTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.messages), 1)
         self.assertIn("has not claimed its transcript", self.messages[0][1])
 
-    async def test_the_claim_credits_everything_pasted_so_far(self):
-        adapter = self.adapter(transcript=True)
+    async def test_claim_does_not_credit_a_paste_without_its_own_proof(self):
+        adapter = self.adapter(transcript=True, completion="receipt")
         first = self.say("wake one")
         await self.runtime.deliver_pending("line", self.attachment(), adapter)
         second = self.say("wake two")
@@ -99,10 +104,34 @@ class ReadinessDeliveryGateTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(adapter.deliveries), 2)
         self.assertEqual(adapter.deliveries[1], [m for m in adapter.deliveries[1] if m["id"] == second])
 
-        adapter._ready_result = True  # the transcript claim appears
-        self.assertTrue(await self.runtime.deliver_pending("line", self.attachment(), adapter))
-        self.assertEqual(self.db.get_attachment("att")["last_seen"], max(first, second))
-        self.assertEqual(len(adapter.deliveries), 2)  # crediting re-pastes nothing
+        adapter.delivery_result = False  # paste still has no user-record receipt
+        adapter.delivery_event.clear()
+        adapter.mark_ready()  # the transcript claim appears
+        self.assertEqual(self.db.get_attachment("att")["last_seen"], 0)
+        await asyncio.wait_for(adapter.delivery_event.wait(), timeout=1.0)
+        self.assertEqual(len(adapter.deliveries), 3)  # both unproved wakes retry
+
+        await adapter.att["confirm_delivery_ids"]([first])
+        self.assertEqual(self.db.get_attachment("att")["last_seen"], first)
+        self.assertEqual(len(adapter.deliveries), 3)
+
+    async def test_unproved_pastes_are_suppressed_and_later_proof_cannot_skip_a_gap(self):
+        adapter = self.adapter(transcript=True)
+        adapter._ready_result = True
+        adapter.delivery_result = False
+        first = self.say("wake one")
+        self.assertFalse(await self.runtime.deliver_pending("line", self.attachment(), adapter))
+        second = self.say("wake two")
+        self.assertFalse(await self.runtime.deliver_pending("line", self.attachment(), adapter))
+        self.assertEqual([[m["id"] for m in batch] for batch in adapter.deliveries], [[first], [second]])
+        self.assertFalse(await self.runtime.deliver_pending("line", self.attachment(), adapter))
+        self.assertEqual(len(adapter.deliveries), 2)
+
+        confirm = adapter.att["confirm_delivery_ids"]
+        self.assertFalse(await confirm([second]))
+        self.assertEqual(self.db.get_attachment("att")["last_seen"], 0)
+        self.assertTrue(await confirm([first]))
+        self.assertEqual(self.db.get_attachment("att")["last_seen"], second)
 
     async def test_a_second_unready_delivery_pastes_only_what_is_new(self):
         adapter = self.adapter(transcript=True)
@@ -144,32 +173,88 @@ class ReadinessDeliveryGateTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(delivered, [stale, fresh])  # nothing suppressed
         self.assertEqual(self.db.get_attachment("att")["last_seen"], fresh)
 
-    async def test_the_claim_credits_through_a_state_broadcast_without_a_mention(self):
-        adapter = self.adapter(transcript=True)
+    async def test_a_state_broadcast_releases_unproved_pastes_without_credit(self):
+        adapter = self.adapter(transcript=True, completion="receipt")
+        adapter.delivery_result = False
         only = self.say("wake one")
-        await self.runtime.deliver_pending("line", self.attachment(), adapter)
+        self.assertFalse(await self.runtime.deliver_pending("line", self.attachment(), adapter))
         self.assertEqual(self.db.get_attachment("att")["last_seen"], 0)
 
         from partyline.attachment_broadcast import broadcast_attachment_state
 
         adapter._ready_result = True  # the claim appears mid-turn
+        adapter.delivery_event.clear()
         await broadcast_attachment_state(self.runtime, "line", "att")
+        self.assertEqual(self.db.get_attachment("att")["last_seen"], 0)
+        await asyncio.wait_for(adapter.delivery_event.wait(), timeout=1.0)
+        self.assertEqual(len(adapter.deliveries), 2)
+        await adapter.att["confirm_delivery_ids"]([only])
         self.assertEqual(self.db.get_attachment("att")["last_seen"], only)
-        self.assertEqual(len(adapter.deliveries), 1)  # no re-paste, no mention needed
 
-    async def test_mark_ready_itself_credits_without_broadcast_or_mention(self):
-        """Sol's fixture: hermes/muse/pi declare no receipt turn ends, so no
-        attachment broadcast is guaranteed after the claim. The claim point
-        itself (mark_ready, fired by _tail_jsonl in all nine adapters) has to
-        be the trigger."""
-        adapter = self.adapter(transcript=True)
+    async def test_claim_retries_preclaim_paste_without_a_later_mention(self):
+        """Claim releases the old attempt and retries it while the line is idle."""
+        adapter = self.adapter(transcript=True, completion="receipt")
+        adapter.delivery_result = False
         only = self.say("wake one")
-        await self.runtime.deliver_pending("line", self.attachment(), adapter)
+        self.assertFalse(await self.runtime.deliver_pending("line", self.attachment(), adapter))
         self.assertEqual(self.db.get_attachment("att")["last_seen"], 0)
 
+        adapter.delivery_event.clear()
         adapter.mark_ready()  # _tail_jsonl opening the claimed transcript
+        self.assertEqual(self.db.get_attachment("att")["last_seen"], 0)
+        await asyncio.wait_for(adapter.delivery_event.wait(), timeout=1.0)
+        self.assertEqual(len(adapter.deliveries), 2)  # automatic idle retry
+        self.assertEqual(self.db.get_attachment("att")["last_seen"], 0)
+
+        await adapter.att["confirm_delivery_ids"]([only])
         self.assertEqual(self.db.get_attachment("att")["last_seen"], only)
+
+    async def test_claim_retry_holds_addressed_wake_until_briefing_turn_ends(self):
+        adapter = self.adapter(transcript=True, completion="receipt")
+        adapter.delivery_result = False
+        only = self.say("wake one")  # direct addressing would bypass the busy hold
+        self.assertFalse(await self.runtime.deliver_pending("line", self.attachment(), adapter))
+
+        await self.presence.started("line", "att", "owner")
+        adapter.mark_ready()
+        await asyncio.sleep(0)  # run the scheduled claim retry
+
         self.assertEqual(len(adapter.deliveries), 1)
+        self.assertEqual(self.presence.queue.held_ids("att"), [only])
+        self.assertEqual(self.db.get_attachment("att")["last_seen"], 0)
+
+        await self.presence.ended("line", "att", "owner")
+        self.assertEqual(len(adapter.deliveries), 2)
+        self.assertEqual(self.db.get_attachment("att")["last_seen"], 0)
+        await adapter.att["confirm_delivery_ids"]([only])
+        self.assertEqual(self.db.get_attachment("att")["last_seen"], only)
+
+    async def test_claim_keeps_old_ids_suppressed_until_retry_queue_owns_them(self):
+        adapter = self.adapter(transcript=True, completion="receipt")
+        adapter.delivery_result = False
+        first = self.say("wake one")
+        self.assertFalse(await self.runtime.deliver_pending("line", self.attachment(), adapter))
+
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def blocked_repool(message_ids):
+            self.assertEqual(message_ids, [first])
+            entered.set()
+            await release.wait()
+            return True
+
+        adapter.att["repool_message_ids"] = blocked_repool
+        adapter.mark_ready()
+        await asyncio.wait_for(entered.wait(), timeout=1.0)
+
+        second = self.say("wake two")
+        await self.runtime.deliver_pending("line", self.attachment(), adapter)
+        self.assertEqual([m["id"] for m in adapter.deliveries[-1]], [second])
+
+        release.set()
+        await asyncio.sleep(0)
+        self.assertEqual(self.runtime.uncredited["att"]["ids"], {second})
 
     async def test_the_claim_hook_is_activation_scoped(self):
         """A replacement activation registers its own hook; the predecessor's

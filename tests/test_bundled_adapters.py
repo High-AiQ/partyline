@@ -8,6 +8,7 @@ canonical transcript content.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sqlite3
@@ -469,6 +470,322 @@ class OpenCodeAdapterTest(RecordingAdapterTest):
         self.assertIsNone(boundary_event("assistant", "tool-calls"))
         self.assertIsNone(boundary_event("system", None))
 
+    async def test_fresh_readiness_requires_the_briefing_user_message(self):
+        db = self.make_store()
+        adapter = self.make(OpenCodeAdapter, adapter_metadata={"capabilities": {"transcript": True}})
+        self.assertFalse(adapter._briefing_ingested("session-1"))
+        token = adapter._claim_token
+        db.execute("INSERT INTO message VALUES(?,?,?,?)", (
+            "briefing", "session-1", int(time.time() * 1000), json.dumps({"role": "user"}),
+        ))
+        db.execute("INSERT INTO part VALUES(?,?,?,?,?)", (
+            "briefing-part", "briefing", "session-1", int(time.time() * 1000),
+            json.dumps({"type": "text", "text": f"briefing {token}"}),
+        ))
+        db.commit()
+        db.close()
+        self.assertTrue(adapter._briefing_ingested("session-1"))
+
+    async def test_resumed_session_waits_for_fresh_input_before_pasting_queued_wakes(self):
+        db = self.make_store(session_id="resume-s", created=int((time.time() - 60) * 1000))
+        db.close()
+        adapter = self.make(
+            OpenCodeAdapter,
+            resume=True,
+            cli_session="resume-s",
+            adapter_metadata={"capabilities": {"transcript": True}},
+        )
+        adapter.spawned_at = time.time()
+        adapter.proc = Process()
+        sent = []
+        prompt_sent = asyncio.Event()
+        retry_probe_sent = asyncio.Event()
+        third_probe_sent = asyncio.Event()
+        old_session_polled = asyncio.Event()
+        allow_retry = asyncio.Event()
+        accept_fresh_input = asyncio.Event()
+
+        async def send_keys(text):
+            sent.append(text)
+            if len(sent) == 1:
+                prompt_sent.set()
+            elif len(sent) == 2:
+                retry_probe_sent.set()
+            elif len(sent) == 3:
+                third_probe_sent.set()
+
+        adapter.send_keys = AsyncMock(side_effect=send_keys)
+        poll_count = 0
+
+        async def sleep(seconds):
+            nonlocal poll_count
+            if seconds == 3.0:
+                return
+            poll_count += 1
+            if poll_count == 1:
+                old_session_polled.set()
+                await allow_retry.wait()
+            elif poll_count == 2:
+                await accept_fresh_input.wait()
+            else:
+                adapter.proc.stop()
+
+        wake = {"id": 17, "sender": "human", "body": "queued wake"}
+        pending = asyncio.create_task(adapter.deliver([wake]))
+        await asyncio.sleep(0)
+        with (
+            patch("partyline.adapters.bundled.opencode.adapter.asyncio.sleep", new=sleep),
+            patch.object(opencode_module, "RESUME_PROBE_INTERVAL", 0),
+        ):
+            running = asyncio.create_task(adapter._run())
+            await asyncio.wait_for(prompt_sent.wait(), timeout=1.0)
+            await asyncio.wait_for(old_session_polled.wait(), timeout=1.0)
+            self.assertFalse(pending.done())
+            self.assertEqual(len(sent), 2)  # the first probe was retried
+            self.assertIsNone(adapter._ready_result)  # old session row is insufficient
+
+            allow_retry.set()
+            await asyncio.wait_for(third_probe_sent.wait(), timeout=1.0)
+            self.assertFalse(pending.done())
+            self.assertEqual(len(sent), 3)  # repeated probes still do not count as proof
+            self.assertIsNone(adapter._ready_result)
+
+            db = sqlite3.connect(self.store)
+            now_ms = int(time.time() * 1000)
+            db.execute(
+                "INSERT INTO message VALUES(?,?,?,?)",
+                ("fresh-user", "resume-s", now_ms, json.dumps({"role": "user"})),
+            )
+            db.execute(
+                "INSERT INTO part VALUES(?,?,?,?,?)",
+                (
+                    "fresh-part", "fresh-user", "resume-s", now_ms,
+                    json.dumps({"type": "text", "text": adapter._claim_token}),
+                ),
+            )
+            db.commit()
+            db.close()
+            accept_fresh_input.set()
+            await asyncio.gather(running, pending)
+
+        self.assertTrue(await adapter.wait_ready())
+        self.assertEqual(len(sent), 4)
+        self.assertTrue(sent[3].startswith("[partyline-paste: "))
+        self.assertIn(adapter.format_digest([wake]), sent[3])
+
+    async def test_wake_waiting_before_readiness_is_pasted_once_afterward(self):
+        adapter = self.make(OpenCodeAdapter)
+        adapter.send_keys = AsyncMock()
+        message = {"id": 4, "sender": "human", "body": "wake"}
+        pending = asyncio.create_task(adapter.deliver([message]))
+        await asyncio.sleep(0)
+        adapter.send_keys.assert_not_awaited()
+
+        adapter.mark_ready()
+        self.assertFalse(await pending)  # paste is not delivery proof
+        adapter.send_keys.assert_awaited_once()
+        self.assertEqual(adapter._wake_receipts[0]["ids"], [4])
+
+    async def test_continuation_waits_for_its_user_part_receipt(self):
+        adapter = self.make(OpenCodeAdapter)
+        adapter._ready_result = True
+        adapter.proc = Process()
+        adapter.send_keys = AsyncMock()
+        confirmed = AsyncMock(return_value=True)
+        adapter.att["confirm_delivery_ids"] = confirmed
+        message = {"id": 9, "sender": "human", "body": "resume"}
+
+        adapter.prepare_delivery_receipt([9])
+        self.assertFalse(await adapter.deliver([message]))
+        waiter = asyncio.create_task(adapter.wait_delivery_received([9]))
+        marker = adapter._wake_receipts[0]["marker"]
+        await adapter._observe_user_part(json.dumps({"text": marker}))
+
+        self.assertTrue(await waiter)
+        confirmed.assert_awaited_once_with([9])
+
+    async def test_user_part_observed_during_write_settles_opencode_paste(self):
+        adapter = self.make(OpenCodeAdapter)
+        adapter._ready_result = True
+        adapter.proc = Process()
+        confirmed = AsyncMock(return_value=True)
+        adapter.att["confirm_delivery_ids"] = confirmed
+
+        async def observe_during_write(text):
+            marker = text.splitlines()[0]
+            await adapter._observe_user_part(
+                json.dumps({"text": marker}), part_id="fast-part"
+            )
+
+        adapter.send_keys = AsyncMock(side_effect=observe_during_write)
+
+        self.assertFalse(await adapter.deliver([
+            {"id": 10, "sender": "human", "body": "fast wake"}
+        ]))
+
+        confirmed.assert_awaited_once_with([10])
+        self.assertEqual(adapter._wake_receipts, [])
+
+    async def test_failed_opencode_write_rolls_back_its_receipt(self):
+        adapter = self.make(OpenCodeAdapter)
+        adapter._ready_result = True
+        adapter.send_keys = AsyncMock(side_effect=OSError("pty closed"))
+
+        with self.assertRaisesRegex(OSError, "pty closed"):
+            await adapter.deliver([{"id": 11, "sender": "human", "body": "wake"}])
+
+        self.assertEqual(adapter._wake_receipts, [])
+        self.assertIsNone(adapter._pending_paste_marker)
+
+    async def test_one_user_part_proves_only_one_identical_digest_paste(self):
+        adapter = self.make(OpenCodeAdapter)
+        adapter._ready_result = True
+        adapter.format_digest = lambda _messages: "same digest"
+        adapter.send_keys = AsyncMock()
+        confirmed = AsyncMock(return_value=True)
+        adapter.att["confirm_delivery_ids"] = confirmed
+        await adapter.deliver([{"id": 30, "body": "same"}])
+        await adapter.deliver([{"id": 31, "body": "same"}])
+
+        first_marker = adapter._wake_receipts[0]["marker"]
+        await adapter._observe_user_part(json.dumps({"text": first_marker}))
+
+        confirmed.assert_awaited_once_with([30])
+        self.assertEqual([wake["ids"] for wake in adapter._wake_receipts], [[31]])
+
+    async def test_repoll_of_the_same_user_part_cannot_prove_a_later_paste(self):
+        adapter = self.make(OpenCodeAdapter)
+        adapter._ready_result = True
+        adapter.format_digest = lambda _messages: "same digest"
+        adapter.send_keys = AsyncMock()
+        confirmed = AsyncMock(return_value=True)
+        adapter.att["confirm_delivery_ids"] = confirmed
+        await adapter.deliver([{"id": 40, "body": "same"}])
+        raw = json.dumps({"text": adapter._wake_receipts[0]["marker"]})
+        await adapter._observe_user_part(raw, part_id="part-1")
+        await adapter.deliver([{"id": 41, "body": "same"}])
+
+        await adapter._observe_user_part(raw, part_id="part-1")
+
+        confirmed.assert_awaited_once_with([40])
+        self.assertEqual([wake["ids"] for wake in adapter._wake_receipts], [[41]])
+
+    async def test_user_part_id_is_not_reused_across_opencode_polls(self):
+        created = int(time.time() * 1000)
+        db = self.make_store(created=created)
+        db.execute(
+            "INSERT INTO message VALUES(?,?,?,?)",
+            ("u1", "session-1", created + 1, json.dumps({"role": "user"})),
+        )
+        db.execute(
+            "INSERT INTO part VALUES(?,?,?,?,?)",
+            ("part-1", "u1", "session-1", created + 2,
+             json.dumps({"type": "text", "text": "same digest"})),
+        )
+        db.commit()
+        db.close()
+        adapter = self.make(OpenCodeAdapter, resume=True, cli_session="session-1")
+        adapter.spawned_at = created / 1000
+        adapter._ready_result = True
+        adapter.proc = Process()
+        adapter.format_digest = lambda _messages: "same digest"
+        adapter.send_keys = AsyncMock()
+        confirmed = AsyncMock(return_value=True)
+        adapter.att["confirm_delivery_ids"] = confirmed
+        first_poll = asyncio.Event()
+        continue_polling = asyncio.Event()
+        poll_count = 0
+
+        async def gated_sleep(seconds):
+            nonlocal poll_count
+            if seconds == 3.0:
+                return
+            poll_count += 1
+            if poll_count == 1:
+                first_poll.set()
+                await continue_polling.wait()
+            elif poll_count == 2:
+                adapter.proc.stop()
+
+        await adapter.deliver([{"id": 60, "body": "same"}])
+        db = sqlite3.connect(self.store)
+        db.execute(
+            "UPDATE part SET data=? WHERE id='part-1'",
+            (json.dumps({"type": "text", "text": adapter._wake_receipts[0]["marker"]}),),
+        )
+        db.commit()
+        db.close()
+        with (
+            patch("partyline.adapters.bundled.opencode.adapter.asyncio.sleep",
+                  new=gated_sleep),
+            patch.object(opencode_module, "RESUME_PROBE_INTERVAL", 9999),
+            patch("partyline.adapters.bundled.opencode.adapter.receipt",
+                  new=AsyncMock()),
+        ):
+            running = asyncio.create_task(adapter._run())
+            await asyncio.wait_for(first_poll.wait(), timeout=1)
+            confirmed.assert_awaited_once_with([60])
+            await adapter.deliver([{"id": 61, "body": "same"}])
+            continue_polling.set()
+            await running
+
+        confirmed.assert_awaited_once_with([60])
+        self.assertEqual([wake["ids"] for wake in adapter._wake_receipts], [[61]])
+
+    async def test_lost_paste_is_repooled_after_turn_end(self):
+        adapter = self.make(OpenCodeAdapter)
+        adapter._ready_result = True
+        adapter.send_keys = AsyncMock()
+        repool = AsyncMock(return_value=True)
+        adapter.att["repool_message_ids"] = repool
+        await adapter.deliver([{"id": 12, "sender": "human", "body": "lost"}])
+
+        with patch("partyline.adapters.bundled.opencode.wakes.asyncio.sleep", new=AsyncMock()):
+            await adapter._repool_unproved()
+
+        repool.assert_awaited_once_with([12])
+        self.assertEqual(adapter._wake_receipts, [])
+
+    async def test_retried_earlier_wake_unblocks_proven_later_wake(self):
+        adapter = self.make(OpenCodeAdapter)
+        adapter._ready_result = True
+        adapter.format_digest = lambda messages: messages[0]["body"]
+        adapter.send_keys = AsyncMock()
+        repool = AsyncMock(return_value=True)
+        adapter.att["repool_message_ids"] = repool
+        ingested = set()
+        confirmed = set()
+        calls = []
+
+        async def confirm(ids):
+            calls.append(list(ids))
+            if not set(ids) <= ingested:
+                return False
+            confirmed.update(ids)
+            if len({1, 2} & confirmed) == 2:
+                return True
+            return False
+
+        adapter.att["confirm_delivery_ids"] = confirm
+        wake_a = {"id": 1, "body": "digest A"}
+        wake_b = {"id": 2, "body": "digest B"}
+        await adapter.deliver([wake_a])
+        await adapter.deliver([wake_b])
+        ingested.add(2)
+        marker_b = next(wake["marker"] for wake in adapter._wake_receipts if wake["ids"] == [2])
+        await adapter._observe_user_part(json.dumps({"text": marker_b}))
+
+        with patch("partyline.adapters.bundled.opencode.wakes.asyncio.sleep", new=AsyncMock()):
+            await adapter._repool_unproved()
+        await adapter.deliver([wake_a])
+        ingested.add(1)
+        marker_a = next(wake["marker"] for wake in adapter._wake_receipts if wake["ids"] == [1])
+        await adapter._observe_user_part(json.dumps({"text": marker_a}))
+
+        self.assertIn([1], calls)
+        self.assertIn([2], calls)
+        self.assertEqual(confirmed, {1, 2})
+
     async def test_claim_token_observed_from_user_parts_before_relay(self):
         """The pasted digest lives in a user-message *part*; the message row
         is an empty shell. The speech gate must open from the part before
@@ -629,6 +946,9 @@ class OpenCodeAdapterTest(RecordingAdapterTest):
     async def test_run_tails_completed_text_parts_and_skips_invalid_parts(self):
         created = int(time.time() * 1000)
         db = self.make_store(created=created)
+        adapter = self.make(OpenCodeAdapter)
+        adapter.spawned_at = created / 1000
+        token = adapter._claim_token
         db.executemany(
             "INSERT INTO message VALUES(?,?,?,?)",
             [
@@ -642,13 +962,12 @@ class OpenCodeAdapterTest(RecordingAdapterTest):
             [
                 ("p1", "m1", "session-1", created, json.dumps({"type": "text", "text": "hello"})),
                 ("p2", "m2", "session-1", created + 1, json.dumps({"type": "text", "text": 123})),
-                ("p3", "m3", "session-1", created + 2, json.dumps({"type": "text", "text": "user"})),
+                ("p3", "m3", "session-1", created + 2,
+                 json.dumps({"type": "text", "text": f"briefing {token}"})),
             ],
         )
         db.commit()
         db.close()
-        adapter = self.make(OpenCodeAdapter)
-        adapter.spawned_at = created / 1000
         adapter.proc = Process()
         sent = []
         adapter.send_keys = AsyncMock(side_effect=lambda text: sent.append(text))
@@ -682,8 +1001,8 @@ class OpenCodeAdapterTest(RecordingAdapterTest):
 
         with patch("partyline.adapters.bundled.opencode.adapter.asyncio.sleep", new=stop_after_poll):
             await adapter._run()
-        adapter.send_keys.assert_not_awaited()
-        self.assertTrue(await adapter.wait_ready())
+        adapter.send_keys.assert_awaited_once_with(adapter._resume_probe())
+        self.assertIsNone(adapter._ready_result)  # the session row alone is stale evidence
 
         dead = self.make(OpenCodeAdapter)
         dead.proc = Process()

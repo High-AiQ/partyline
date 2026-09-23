@@ -55,6 +55,7 @@ PASTE_PACE = 5.0
 
 class PartylineAdapter(WakeSettlement, Adapter):
     kind = "antigravity"
+    jsonl_paste_receipts = True
 
     MAX_NOTICES = 2
 
@@ -118,12 +119,8 @@ class PartylineAdapter(WakeSettlement, Adapter):
         ):
             await self._write_all(b"\r")
         digest = self.format_digest(messages)
-        await super().deliver(messages)
-        if digest.strip() and self.alive():
-            ids = tuple(message["id"] for message in messages if isinstance(message.get("id"), int))
-            # Whether the CLI was already mid-turn decides which evidence may
-            # later settle this wake (see wakes.py) — captured now, at paste.
-            self._outstanding.append((digest, time.time(), ids, self._turn_open))
+        marker = self._pending_paste_marker = self._new_paste_marker()
+        return await self._deliver_with_wake_receipt(messages, digest, marker)
 
     def _schedule_settle(self) -> None:
         """One settlement runs at a time; an end landing during a pass queues

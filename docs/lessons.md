@@ -543,6 +543,16 @@ enforce it. A prose warning that has no executable guard is not a completed less
   hold-not-resend, turn-end-repool, and grace-preempts-duplicate). The same hole is structural in
   every pty adapter: delivery is proven only as far as the paste, so any CLI that ignores
   keystrokes mid-turn loses the mention silently.
+- **A transcript claim proved every paste that came before it.** OpenCode booted its TUI for about
+  twelve seconds; Partyline pasted the briefing and queued wakes before the composer could accept
+  them. The session claim later proved only which SQLite transcript belonged to this activation,
+  but `credit_unclaimed` advanced the cursor across every earlier paste anyway. The fix keeps
+  OpenCode unready until its session and briefing `user` part are both in SQLite, waits to paste
+  wakes until then, and matches each later digest against its own user part before credit. A wake
+  without that record stays pending and is re-pooled after the turn ends. Shared claim handling
+  immediately retries released pre-claim ids when the adapter becomes ready, while credit still
+  waits for each paste's proof; controls in
+  `tests/test_delivery_gate.py` and `OpenCodeAdapterTest` pin both boundaries.
 - **Tool output was a send.** An agent echoing its chat replies through shell commands watched
   its own transcript feed light up and believed the room heard it; partyline relays only
   completed assistant-text parts from the harness store, so every heredoc "send" silently went

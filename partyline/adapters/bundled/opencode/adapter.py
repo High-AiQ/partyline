@@ -21,15 +21,18 @@ import contextlib
 import json
 import logging
 import sqlite3
+import time
 from pathlib import Path
 
 from partyline.adapters import Adapter
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
+from partyline.adapters.bundled.opencode.wakes import WakeSettlement
 
 logger = logging.getLogger(__name__)
 
 
 STORE = Path.home() / ".local" / "share" / "opencode" / "opencode.db"
+RESUME_PROBE_INTERVAL = 5.0
 
 
 def boundary_event(role: str | None, finish: str | None) -> str | None:
@@ -45,7 +48,7 @@ def boundary_event(role: str | None, finish: str | None) -> str | None:
     return None
 
 
-class PartylineAdapter(Adapter):
+class PartylineAdapter(WakeSettlement, Adapter):
     kind = "opencode"
 
     # A session created by a fresh TUI has no caller-supplied identifier.  Do
@@ -53,6 +56,10 @@ class PartylineAdapter(Adapter):
     # one directory never tail the same transcript.
     _CLAIMED: set[str] = set()
     _DISCOVERY = asyncio.Lock()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._wakes_init()
 
     async def stop(self):
         self._CLAIMED.discard(getattr(self, "_session_id", "") or "")
@@ -90,6 +97,36 @@ class PartylineAdapter(Adapter):
                 return str(session_id)
         return None
 
+    def _briefing_ingested(self, session_id: str) -> bool:
+        """The current TUI is ready only after its startup input is a user part."""
+        try:
+            with contextlib.closing(self._connect()) as db:
+                rows = db.execute(
+                    "SELECT part.data FROM part "
+                    "JOIN message ON message.id = part.message_id "
+                    "WHERE part.session_id = ? "
+                    "AND json_extract(message.data, '$.role') = 'user' "
+                    "AND json_extract(part.data, '$.type') = 'text'",
+                    (session_id,),
+                ).fetchall()
+        except sqlite3.Error:
+            return False
+        for (raw,) in rows:
+            try:
+                if self._claim_token in json.loads(raw).get("text", ""):
+                    return True
+            except (TypeError, json.JSONDecodeError, AttributeError):
+                continue
+        return False
+
+    def _resume_probe(self) -> str:
+        """Start resumed input with a fresh transcript-verifiable handshake."""
+        prompt = (
+            "Partyline resume check. Reply with READY, then wait for the next "
+            "instruction; do not continue prior work from this check."
+        )
+        return self._with_claim(prompt)
+
     async def _run(self):
         await asyncio.sleep(3.0)
         if not self.alive():
@@ -118,12 +155,13 @@ class PartylineAdapter(Adapter):
                     return
         if not session_id:
             return
+        if self.resume:
+            await self.send_keys(self._resume_probe())
+            last_resume_probe = time.monotonic()
         if self.on_cli_session:
             self.on_cli_session(session_id)
         # The session id is claimed before polling its parts. A restart
         # orchestrator can now start the next process without discovery races.
-        self.mark_ready()
-
         # Do not repeat old parts when reconnecting to an existing session.
         started_ms = int((self.spawned_at - 1) * 1000)
         seen: set[str] = set()
@@ -132,6 +170,7 @@ class PartylineAdapter(Adapter):
         # The next row in the session proves which — an abort writes no
         # completing row, so supersession is its only deterministic end.
         abandoned: dict[str, int] = {}
+        briefing_ready = False
         while self.alive():
             try:
                 with contextlib.closing(self._connect()) as db:
@@ -160,15 +199,16 @@ class PartylineAdapter(Adapter):
                     # posted before the gate opens is dropped and `seen`
                     # never retries it.
                     user_parts = db.execute(
-                        "SELECT part.data FROM part "
+                        "SELECT part.id, part.data FROM part "
                         "JOIN message ON message.id = part.message_id "
                         "WHERE part.session_id = ? AND part.time_created >= ? "
                         "AND json_extract(message.data, '$.role') = 'user' "
                         "AND json_extract(part.data, '$.type') = 'text'",
                         (session_id, started_ms),
                     ).fetchall()
-                    for row in user_parts:
-                        self.observe_claim(row[0])
+                    for part_id, raw_part in user_parts:
+                        self.observe_claim(raw_part)
+                        await self._observe_user_part(raw_part, part_id=part_id)
             except sqlite3.Error as exc:
                 logger.debug("opencode poll skipped: %s", exc)
                 await asyncio.sleep(0.5)
@@ -184,8 +224,8 @@ class PartylineAdapter(Adapter):
                 if isinstance(body, str) and body.strip():
                     await self.post(self.att["name"], "agent", body)
             for message_id, created_ms, role, finish, completed, raw in boundaries:
-                # The pasted claim token lands in user messages; watching
-                # them here opens the speech gate from this session.
+                # Message boundaries may carry the claim token; paste proof
+                # comes from the ID-tracked user parts above.
                 if role == "user":
                     self.observe_claim(raw)
                 if role == "assistant" and not completed:
@@ -201,9 +241,30 @@ class PartylineAdapter(Adapter):
                         continue
                     seen_boundaries.add(dead)
                     await receipt(self.att, ENDED)
+                    self._schedule_unproved_repool()
                 if message_id in seen_boundaries:
                     continue
                 seen_boundaries.add(message_id)
                 if event := boundary_event(role, finish):
                     await receipt(self.att, event)
+                    # Install the turn's busy state before readiness schedules
+                    # any queued wake retry through Presence.
+                    if (
+                        event == BEGAN
+                        and not briefing_ready
+                        and self._briefing_ingested(session_id)
+                    ):
+                        briefing_ready = True
+                        self.mark_ready()
+                    if event == ENDED:
+                        self._schedule_unproved_repool()
+            if (
+                self.resume
+                and not briefing_ready
+                and time.monotonic() - last_resume_probe >= RESUME_PROBE_INTERVAL
+            ):
+                # A paste during TUI startup can be lost. Retry the structured
+                # handshake; only its fresh user part opens readiness.
+                await self.send_keys(self._resume_probe())
+                last_resume_probe = time.monotonic()
             await asyncio.sleep(0.5)

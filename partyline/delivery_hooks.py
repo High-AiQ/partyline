@@ -38,15 +38,7 @@ def delivery_hooks(runtime, conv_id: str, att_id: str):
 
     async def confirm_ids(message_ids: list[int]) -> bool:
         """Credit transcript-evidenced ids only to the activation that pasted them."""
-        if not message_ids:
-            return False
-        async with runtime.db.reserve_attachment_delivery(att_id, runtime_owner) as reserved:
-            if not reserved:
-                return False
-            if not runtime.db.set_last_seen(att_id, max(message_ids), runtime_owner):
-                return False
-            runtime.db.clear_queued_delivery_ids(att_id, message_ids)
-        return True
+        return await runtime.confirm_delivery_ids(att_id, message_ids, runtime_owner)
 
     return (
         flush_held,
