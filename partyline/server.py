@@ -85,6 +85,7 @@ from .conversation_routes import register_conversation_routes
 from . import heartbeat_scheduler
 from .heartbeat_routes import heartbeat_router
 from .hierarchy_routes import hierarchy_router
+from .write_set_routes import write_set_router
 from .media_routes import media_router
 from .preset_routes import presets_router
 from .staffing_routes import staffing_router
@@ -169,6 +170,7 @@ app.include_router(media_router(runtime, media))
 app.include_router(message_router(runtime, media))
 app.include_router(reaction_router(runtime))
 app.include_router(hierarchy_router(runtime))
+app.include_router(write_set_router(runtime))
 app.include_router(heartbeat_router(runtime))
 app.include_router(hooks_router(runtime, presence))
 app.include_router(presets_router(runtime, ADAPTERS))

@@ -60,6 +60,8 @@ update_command = ["example-process", "update"]
 | `env_unset` | inherited variables to drop before spawning; a trailing `*` clears a whole prefix |
 | `capabilities` | table; `resume = true` only if re-attaching genuinely reopens the previous session; `immediate_mentions = true` only if a mention reaches a turn that is *already running* (below) |
 | `update_command` | optional argv to check/install CLI updates before a fresh attach; omit or `[]` if the process has no updater. Never a shell string. A pipe install belongs in one `bash -lc` argument. |
+| `write_paths` | optional array of `~`-relative home paths the CLI writes (sessions, auth, state); the write fence binds each writable. See `docs/write-fence.md`. |
+| `fence_args` | optional argv appended to the command only while the process actually runs fenced — for a CLI whose own sandbox cannot nest under the fence |
 
 Never put secrets or machine-specific paths in a manifest.
 

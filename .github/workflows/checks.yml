@@ -20,8 +20,8 @@ jobs:
       # AV1-capable decoder so the real rescue runs; where decoding still is
       # not possible the test skips with its logged reason and the stub
       # ffmpeg tests carry the coverage instead.
-      - name: ffmpeg for the upload-rescue path
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: system tools for backend tests
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg bubblewrap
       - name: lint
         run: uv run --locked ruff check .
       - name: test with coverage

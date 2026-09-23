@@ -273,4 +273,15 @@ MIGRATIONS = [
         sha TEXT NOT NULL,
         created_at REAL NOT NULL
     )""",
+    # Extra write scope a captain above or a person granted a line, on top of
+    # the derived default (the line's cwd tree, its git binds, adapter homes,
+    # the home caches). The default is never stored; only requested-and-
+    # granted paths are, so the record is the audit trail.
+    """CREATE TABLE IF NOT EXISTS conversation_write_grants(
+        conv_id TEXT NOT NULL,
+        path TEXT NOT NULL,
+        granted_by TEXT NOT NULL,
+        granted_at REAL NOT NULL,
+        PRIMARY KEY (conv_id, path)
+    )""",
 ]

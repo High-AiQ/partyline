@@ -8,7 +8,10 @@ from .agent_connection import provision_connection
 from .adapter_capabilities import adapter_completion
 from .attachment_view import attachment_response
 from .auth_store import ensure_api_token
+from .fence import FenceUnavailable
+from .review_worktrees import list_review_worktrees
 from .role_delivery import bind_role_delivery
+from .write_set_routes import list_write_grants
 
 
 def prepare_attachment(att, runtime, hook_url, checkpoint):
@@ -16,6 +19,8 @@ def prepare_attachment(att, runtime, hook_url, checkpoint):
     att["api_token"] = ensure_api_token(runtime.db, att["id"])
     att["conv_name"], att["topic"] = conv["name"], conv["topic"]
     att["hook_url"] = hook_url(att["id"], att["runtime_owner"])
+    att["write_grants"] = list_write_grants(runtime.db, att["conv_id"])
+    att["review_worktrees"] = list_review_worktrees(runtime.db, att["conv_id"])
     provision_connection(runtime.db.path, att)
     att["digest_rider"] = lambda: ""  # role delivery layers the goal and staffing on top
     bind_role_delivery(runtime.db, att)
@@ -57,6 +62,10 @@ async def start_attachment(att, *, runtime, presence, make_adapter, hook_url,
         )
         await announce_attachment(runtime, att, fresh=fresh)
         return await attachment_response(runtime.db.get_attachment(ident))
+    except FenceUnavailable as exc:
+        # Fail closed, loudly: no unconfined fallback exists on purpose.
+        await rollback_start(runtime, att)
+        raise HTTPException(409, f"write fence unavailable: {exc}") from exc
     except (Exception, asyncio.CancelledError) as exc:
         await rollback_start(runtime, att)
         if isinstance(exc, asyncio.CancelledError):

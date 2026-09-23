@@ -22,6 +22,17 @@ from partyline.adapters.briefing import child_env
 from partyline.adapters import pty_io
 from partyline.adapters.terminal import terminal_responses
 from datetime import UTC
+from partyline.features import overridden
+
+
+def setUpModule():
+    global _write_fence_override
+    _write_fence_override = overridden(write_fence=False)
+    _write_fence_override.__enter__()
+
+
+def tearDownModule():
+    _write_fence_override.__exit__(None, None, None)
 
 
 async def until(predicate, timeout=10.0, what="condition"):
