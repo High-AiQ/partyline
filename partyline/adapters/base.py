@@ -20,7 +20,7 @@ from collections.abc import Awaitable, Callable
 
 import pyte
 
-from partyline.adapters import pty_io
+from partyline.adapters import activation, pty_io
 from partyline.adapters.task_logging import log_task_deaths
 from partyline.adapters.briefing import (
     fresh_checkpoint_briefing, connection_briefing,
@@ -38,7 +38,7 @@ Post = Callable[[str, str, str], Awaitable[None]]
 Status = Callable[[str], Awaitable[None]]
 
 
-class Adapter(pty_io.PtyWriter):
+class Adapter(activation.Activation, pty_io.PtyWriter):
     """Base class for a process connected through a pseudo-terminal."""
 
     kind = "process"
@@ -74,10 +74,15 @@ class Adapter(pty_io.PtyWriter):
     async def post(self, sender: str, sender_type: str, body: str):
         """Send something to the chat, unless the process is resuming mid-turn.
 
-        Only agent speech is held back. System notices — exits, failures — must
-        always get through, because they are how a person finds out something
-        went wrong.
+        Transcript adapters additionally hold agent speech until this
+        activation's own claim token has been observed in the tailed
+        session: a file adopted by mistake then carries no speech at all
+        rather than another attachment's words under this handle. System
+        notices — exits, failures, refusals — always get through, because
+        they are how a person finds out something went wrong.
         """
+        if self.pastes_claim() and not self._claim_proven and sender_type == "agent":
+            return
         if self._silent_until_wake and sender_type == "agent":
             if not self._explained_silence:
                 self._explained_silence = True
@@ -95,6 +100,7 @@ class Adapter(pty_io.PtyWriter):
         master, slave = os.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
         env = dict(child_env(os.environ, self.att), TERM="xterm-256color")
+        env.update(self.spawn_env())
         # Adapters declare what to strip so a spawned CLI doesn't mistake itself
         # for a nested harness. A trailing "*" clears a whole prefix.
         for key in self.att.get("adapter_metadata", {}).get("env_unset", []):
@@ -237,22 +243,13 @@ class Adapter(pty_io.PtyWriter):
         """
         return False
 
-    def mark_startup_delivery_received(self) -> None:
-        """A staged startup digest appeared as structured process input."""
-        if self._startup_delivery_result is None and not self._stopping:
-            self._startup_delivery_result = True
-            self._startup_delivery.set()
-
-    async def wait_startup_delivery_received(self) -> bool:
-        """Wait for structured receipt, or for the process to exit first."""
-        await self._startup_delivery.wait()
-        return self._startup_delivery_result is True
-
     # The digest's shape lives in briefing.py; cwd git and the task rider are
-    # live delivery-time state, never staged.
+    # live delivery-time state, never staged. A transcript adapter's digest
+    # carries its claim token until the tailed session records one.
     def format_digest(self, messages: list[dict]) -> str:
-        return format_digest(messages, safe_rider(self.att), str(self.att.get("cwd", "")),
-                             api=child_env({}, self.att)["PARTYLINE_API"])
+        return self._with_claim(format_digest(messages, safe_rider(self.att),
+                                              str(self.att.get("cwd", "")),
+                                              api=child_env({}, self.att)["PARTYLINE_API"]))
 
     async def send_keys(self, text: str):
         await self._write_all(b"\x1b[200~" + text.encode() + b"\x1b[201~")
@@ -287,27 +284,28 @@ class Adapter(pty_io.PtyWriter):
         text += connection_briefing(self.att)
         if topic := (self.att.get("topic") or "").strip():
             text += TOPIC_BRIEFING.format(topic=topic)
-        return fresh_checkpoint_briefing(text, self.att.get("fresh_checkpoint"))
+        return self._with_claim(fresh_checkpoint_briefing(text, self.att.get("fresh_checkpoint")))
 
     def alive(self) -> bool:
         return self.proc is not None and self.proc.poll() is None
 
-    def _fresh(self, iso_ts) -> bool:
-        """Return whether a transcript record belongs to this running process."""
-        if not self.att.get("resume"):
-            return True
-        if not iso_ts:
-            return False
-        try:
-            from datetime import datetime
-            timestamp = datetime.fromisoformat(str(iso_ts).replace("Z", "+00:00")).timestamp()
-        except ValueError:
-            return False
-        return timestamp >= self.spawned_at - 5
-
     async def _tail_jsonl(self, path: str, handle_line):
         """Follow a JSONL transcript, ignoring incomplete or invalid records."""
         with open(path, encoding="utf-8", errors="replace") as file:
+            if self.recorded_claim(path):
+                self._mark_claim_proven()
+            elif self.foreign_claim(path):
+                # Another activation's claim in a file that does not carry
+                # ours: the file belongs to a pty we do not own, and tailing
+                # it would relay a stranger's words under this handle. Refuse
+                # loudly and stay unready — held wake credit is the visible
+                # symptom an operator can act on.
+                await self.post(
+                    "system", "system",
+                    f"{self.att['name']}: not adopting {os.path.basename(path)} — "
+                    "it carries another attachment's claim marker",
+                )
+                return
             # Opening the claimed transcript is the readiness boundary for
             # transcript adapters: a sequential restart may now safely advance
             # to the next process without two discovery loops claiming one file.
@@ -329,6 +327,8 @@ class Adapter(pty_io.PtyWriter):
                     file.seek(position)
                     await asyncio.sleep(0.3)
                     continue
+                if self._claim_in_line(line):
+                    self._mark_claim_proven()
                 try:
                     record = json.loads(line)
                 except json.JSONDecodeError:

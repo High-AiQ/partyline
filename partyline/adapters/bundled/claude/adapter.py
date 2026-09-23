@@ -5,7 +5,6 @@ import glob
 import json
 import os
 import shlex
-import uuid
 
 from partyline.adapters.base import Adapter as BaseAdapter
 from partyline.adapters.compaction import is_compaction_record
@@ -25,41 +24,6 @@ class PartylineAdapter(BaseAdapter):
     _CLAIMED: set[str] = set()
 
     _transcript: str = ""
-    _nonce: str = ""
-
-    @property
-    def _claim_token(self) -> str:
-        """The one string that names this activation and no other.
-
-        Identity cannot be inferred — not from spawn order, session order, or
-        any clock (review of #124 broke three such schemes). So it is stated
-        instead: a token is pasted into this pty with the briefing and with
-        every wake until a transcript is claimed, and the session that
-        records it is ours by construction.
-
-        The token is per-activation, not per-attachment. An attachment id is
-        stable across resumes, so every transcript this attachment ever wrote
-        still carries it — including the stale session a dropped pin left
-        behind, which would then be adopted by the very search meant to
-        replace it. A fresh nonce each time the adapter runs makes only this
-        activation's own sessions eligible.
-        """
-        if not self._nonce:
-            self._nonce = uuid.uuid4().hex[:12]
-        return f"[partyline-claim: {self.att['id']}/{self._nonce}]"
-
-    def briefing(self) -> str:
-        return f"{super().briefing()}\n\n{self._claim_token}"
-
-    def format_digest(self, messages: list[dict]) -> str:
-        """A wake, carrying the claim token until a transcript is claimed.
-
-        Once claimed the token stops being appended: it exists to name an
-        unidentified session, and a wake is the agent's to read, not a place
-        to leave bookkeeping lying around.
-        """
-        text = super().format_digest(messages)
-        return text if self._transcript else f"{text}\n\n{self._claim_token}"
 
     async def stop(self):
         self._CLAIMED.discard(self._transcript)
@@ -184,6 +148,10 @@ class PartylineAdapter(BaseAdapter):
             if self._recorded_our_token(path):
                 self._CLAIMED.add(path)
                 self._transcript = path
+                # The token in the file is this activation's proof; speech
+                # may flow. The pinned fallback below cannot prove, so it
+                # leaves the gate closed until a wake records the token.
+                self._mark_claim_proven()
                 return path
         # The one branch with no proof behind it is the only one a claim can
         # usefully guard.

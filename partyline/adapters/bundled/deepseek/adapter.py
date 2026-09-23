@@ -246,6 +246,7 @@ class PartylineAdapter(Adapter):
                     file.seek(position)
                     await asyncio.sleep(0.3)
                     continue
+                self.observe_claim(line)
                 try:
                     record = json.loads(line)
                 except json.JSONDecodeError:
