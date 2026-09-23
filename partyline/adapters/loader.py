@@ -43,6 +43,12 @@ def _manifest(path: Path) -> dict:
     manifest.setdefault("capabilities", {})
     manifest.setdefault("env_unset", [])
     manifest.setdefault("compact_paste", None)
+    manifest.setdefault("write_paths", [])
+    manifest.setdefault("fence_args", [])
+    for key in ("write_paths", "fence_args"):
+        value = manifest[key]
+        if not isinstance(value, list) or not all(isinstance(arg, str) for arg in value):
+            raise ValueError(f"adapter {key} must be an array of strings")
     command = manifest["command"]
     if not isinstance(command, list) or not all(isinstance(arg, str) for arg in command):
         raise ValueError("adapter command must be an argv array")

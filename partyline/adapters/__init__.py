@@ -1,5 +1,7 @@
 """Built-in process adapters and the public adapter registration API."""
 
+from partyline import fence as fence  # imported before .base, which wraps spawns with it
+
 from .base import Adapter
 from .bundled.raw.adapter import RawAdapter
 from .registry import ADAPTER_METADATA, ADAPTERS, make_adapter, register_adapter, unregister_adapter

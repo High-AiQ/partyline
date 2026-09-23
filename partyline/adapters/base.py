@@ -20,7 +20,7 @@ from collections.abc import Awaitable, Callable
 
 import pyte
 
-from partyline.adapters import activation, pty_io
+from partyline.adapters import activation, fence, pty_io
 from partyline.adapters.task_logging import log_task_deaths
 from partyline.adapters.briefing import (
     fresh_checkpoint_briefing, connection_briefing,
@@ -97,6 +97,7 @@ class Adapter(activation.Activation, pty_io.PtyWriter):
     def build_command(self) -> list[str]:
         return list(self.att["command"])
     async def start(self):
+        self.spawn_argv = fence.launch_argv(self)
         master, slave = os.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
         env = dict(child_env(os.environ, self.att), TERM="xterm-256color")
@@ -116,7 +117,6 @@ class Adapter(activation.Activation, pty_io.PtyWriter):
             fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 
         self.spawned_at = time.time()
-        self.spawn_argv = self.build_command()
         self.proc = subprocess.Popen(
             self.spawn_argv, stdin=slave, stdout=slave, stderr=slave,
             cwd=self.att["cwd"], env=env, preexec_fn=preexec,

@@ -18,6 +18,7 @@ from fastapi import HTTPException
 from .adapter_capabilities import adapter_completion
 from .auth_store import ensure_api_token
 from .agent_connection import provision_connection, bind_connection_hint
+from .fence import FenceUnavailable
 from .hierarchy import tree_live_name_conflict
 from .role_delivery import bind_role_delivery
 from .reattach import ResumedAttachment, adapter_can_resume
@@ -191,6 +192,9 @@ async def resume_adapter(
         raise HTTPException(409, f"'{att['name']}' is already live")
     try:
         await adapter.start()
+    except FenceUnavailable as exc:
+        await runtime.db.set_attachment_status_async(att_id, "exited", runtime_owner)
+        raise HTTPException(409, f"write fence unavailable: {exc}") from exc
     except Exception as exc:
         await runtime.db.set_attachment_status_async(att_id, "exited", runtime_owner)
         raise HTTPException(500, f"failed to resume: {exc}") from exc

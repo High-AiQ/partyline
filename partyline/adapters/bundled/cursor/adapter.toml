@@ -10,6 +10,8 @@ requires = ["agent"]
 # The embedded newline selects the slash-menu item; the base paste adds submit.
 compact_paste = "/summarize\n"
 env_unset = []
+# Chats keyed by cwd hash and per-workspace trust state.
+write_paths = ["~/.cursor"]
 # immediate_mentions: a paste into a busy `agent` is only a queued steer until a
 # second Enter submits it into the run (Cursor CLI docs, probed 2026-09-14); the
 # adapter sends that Enter. `@!name` is one Ctrl+C, confirmed by the transcript's
