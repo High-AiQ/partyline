@@ -73,7 +73,16 @@ retired. Do not rename the table or its columns: live databases carry them.
 The banner names who asked and why. Approving broadcasts `☏ restart approved by @who — partyline
 is restarting; every live process is resumed with its context when it is back` to the requesting
 line, then a `ShutdownEvent` to every open tab so no one is left wondering whether the drop was a
-crash. Declining announces `☏ restart declined by @who` and leaves the service untouched.
+crash. Declining announces `☏ restart declined by @who` and leaves the service untouched. Both
+outcomes also post a private copy addressed to the requester attachment alone (`mention_relay.post_private`,
+actor = the deciding person so the self-echo rule cannot hide it from the requester): the public
+notice only names the human, so without the copy the process that asked would read the outcome on
+its next unrelated wake. The request retains the filing attachment's id (`requester_attachment_id`),
+so an older exited row sharing the handle never captures the copy and a human-filed request targets
+no process; the copy is posted on that attachment's own line, which differs from the requested line
+when a captain files across the tree. On approval that copy is posted before the shutdown sequence
+starts, so a
+requester caught mid-turn finds it in its backlog when it resumes.
 
 ## What happens to a process mid-turn
 
