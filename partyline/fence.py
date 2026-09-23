@@ -115,6 +115,21 @@ def _review_worktree_paths(att: dict, review_root: str | None = None) -> list[st
     return paths
 
 
+def _review_worktree_git_binds(path: str, cwd: str, conv_id: str) -> list[tuple[str, str, bool]]:
+    """Git binds for a review worktree, skipped when its common .git is
+    already inside the line's own cwd tree (the root captain's checkout):
+    mounting a mirror over refs the line already owns writably would
+    shadow branches and pulls made after spawn from ever being seen.
+    """
+    gitdir = git_fence._worktree_gitdir(path)
+    if gitdir is not None:
+        common = os.path.realpath(git_fence.common_gitdir(gitdir))
+        cwd_real = os.path.realpath(cwd or "")
+        if common == cwd_real or common.startswith(cwd_real + os.sep):
+            return []
+    return git_fence.git_binds(path, conv_id)
+
+
 def write_set(att: dict, adapter_paths: list[str] | None = None) -> list[tuple[str, str, bool]]:
     """The ordered ``(host, guest, read_only)`` binds this attachment needs.
 
@@ -144,7 +159,8 @@ def write_set(att: dict, adapter_paths: list[str] | None = None) -> list[tuple[s
     if review_root:
         add(review_root)
     for path in _review_worktree_paths(att, review_root):
-        for src, dst, read_only in git_fence.git_binds(path, att.get("conv_id") or ""):
+        for src, dst, read_only in _review_worktree_git_binds(
+                path, att.get("cwd") or "", att.get("conv_id") or ""):
             if src in covered:
                 continue
             covered.add(src)
