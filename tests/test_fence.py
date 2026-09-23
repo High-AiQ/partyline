@@ -134,6 +134,17 @@ class LaunchArgvTest(unittest.TestCase):
         with overridden(write_fence=False):
             self.assertEqual(fence.launch_argv(FakeAdapter(att, ["codex"])), ["codex"])
 
+    def test_fence_args_dedupe_against_the_command(self):
+        flag = "--dangerously-bypass-approvals-and-sandbox"
+        att = _att("/tmp", metadata={"fence_args": [flag], "write_paths": []})
+        with patch.object(fence, "bwrap_available", return_value=True):
+            carrying = fence.launch_argv(FakeAdapter(att, ["codex", flag, "--go"]))
+            self.assertEqual(carrying[-3:], ["codex", flag, "--go"])
+            self.assertEqual(carrying.count(flag), 1)
+            bare = fence.launch_argv(FakeAdapter(att, ["codex"]))
+            self.assertEqual(bare[-2:], ["codex", flag])
+            self.assertEqual(bare.count(flag), 1)
+
     def test_missing_bwrap_refuses_rather_than_running_unconfined(self):
         with patch.object(fence, "BWRAP", "/nonexistent/bwrap"):
             with self.assertRaises(fence.FenceUnavailable):

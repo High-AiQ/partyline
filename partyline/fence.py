@@ -164,7 +164,8 @@ def launch_argv(adapter, tmpfs_tmp: bool = True) -> list[str]:
     ``fence_args`` from the manifest are appended to the command only
     when the fence is active: an adapter may declare argv that replaces a
     CLI-internal sandbox incompatible with the fence, because the fence
-    itself is then the only sandbox the process has.
+    itself is then the only sandbox the process has. A flag the command
+    already carries is not appended again — CLIs reject a repeated flag.
 
     ``tmpfs_tmp`` exists for tests, which run their fixtures from paths
     under ``/tmp``: with the tmpfs on, bubblewrap recreates the bind
@@ -189,4 +190,5 @@ def launch_argv(adapter, tmpfs_tmp: bool = True) -> list[str]:
         argv += ["--ro-bind" if read_only else "--bind", src, dst]
     argv += ["--die-with-parent", "--"]
     fence_args = (att.get("adapter_metadata") or {}).get("fence_args") or []
-    return argv + list(command) + list(fence_args)
+    command = list(command)
+    return argv + command + [a for a in fence_args if a not in command]
