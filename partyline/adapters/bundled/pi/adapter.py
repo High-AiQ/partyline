@@ -20,6 +20,7 @@ SESSION_ROOT = os.path.expanduser("~/.partyline/sessions/pi")
 
 class PartylineAdapter(Adapter):
     kind = "pi"
+    jsonl_paste_receipts = True
 
     def session_dir(self) -> str:
         """One directory per attachment — the transcript cannot be ambiguous."""

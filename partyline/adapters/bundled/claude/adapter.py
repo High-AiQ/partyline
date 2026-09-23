@@ -17,6 +17,7 @@ SCAN_BYTES = 512 * 1024
 
 class PartylineAdapter(BaseAdapter):
     kind = "claude"
+    jsonl_paste_receipts = True
 
     # Transcripts currently being tailed, so two adapters cannot follow one
     # session. It needs no lock: a claim token names exactly one activation,
