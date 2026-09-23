@@ -1,24 +1,29 @@
-"""The write fence: every attached process runs inside a bubblewrap mount
-namespace where only its line's declared write set is writable.
+"""The write fence: every attached process runs inside a platform sandbox
+where only its line's declared write set is writable.
 
 Why: a text brief does not bind a process. Whatever a line's worker is
 told, the only durable boundary is the one the kernel enforces at
 spawn time. The fence wraps the single place every pty process starts —
 ``adapters.base.Adapter.start`` — so no adapter can forget it.
 
-Shape of the wrap: ``/`` is bound read-only, ``/dev`` and ``/proc`` are
-mounted fresh, ``/tmp`` becomes a private tmpfs, and each write-set path
-is bound writable at its real path. The environment, the working
-directory, the process group, and the network are kept as they were —
-this is a filesystem fence, not a jail. A child line's Git needs are
-layered in by ``git_fence``: shared objects, a private copy-on-write
-mirror of refs, and its own worktree metadata.
+The backend is chosen per platform at launch (``backend``): on Linux,
+bubblewrap builds a mount namespace — ``/`` bound read-only, fresh
+``/dev`` and ``/proc``, a private tmpfs over ``/tmp``, and each write-set
+path bound writable at its real path. On Darwin, ``fence_darwin`` feeds
+``sandbox-exec`` a generated profile that denies ``file-write*`` outside
+the same write set (no mounts exist there, so git binds become the weaker
+documented scope instead). The environment, the working directory, the
+process group, and the network are kept as they were — this is a
+filesystem fence, not a jail. A child line's Git needs are layered in by
+``git_fence``: shared objects, a private copy-on-write mirror of refs,
+and its own worktree metadata.
 
-Failure is closed. If bubblewrap is missing or the namespace cannot be
-created, the process is refused — never started unconfined. The attach
-route surfaces that as a 409 with the reason. The ``write_fence``
-feature flag exists so one restart cycle can turn the fence off in an
-emergency; the default is on.
+Failure is closed. If the platform's backend exists but cannot run — or
+the platform has no backend at all — the process is refused, never
+started unconfined. The attach route surfaces that as a 409 with the
+reason, the platform, and the switch. The ``write_fence`` feature flag
+exists so one restart cycle can turn the fence off in an emergency; the
+default is on.
 
 Extra scope is requested, never assumed: a line may be granted more by a
 captain above it or by a person, and the grant is recorded on the line
@@ -29,8 +34,9 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 
-from . import features, git_fence
+from . import features, fence_darwin, git_fence
 from .line_worktree import REVIEW_DIR, repo_root
 
 BWRAP = "/usr/bin/bwrap"
@@ -47,6 +53,40 @@ class FenceUnavailable(RuntimeError):
 
 def bwrap_available() -> bool:
     return os.path.isfile(BWRAP) and os.access(BWRAP, os.X_OK)
+
+
+def backend() -> str:
+    """The fence backend this platform gets, decided at launch time:
+    bubblewrap on Linux, Apple's sandbox-exec on Darwin, none elsewhere.
+    """
+    if sys.platform.startswith("linux"):
+        return "bubblewrap"
+    if sys.platform == "darwin":
+        return "sandbox-exec"
+    return "none"
+
+
+def backend_available() -> tuple[bool, str]:
+    """Whether the platform's backend can run, with a human-readable reason."""
+    name = backend()
+    if name == "bubblewrap":
+        if bwrap_available():
+            return True, ""
+        return False, f"{BWRAP} is missing or not executable"
+    if name == "sandbox-exec":
+        if fence_darwin.sandbox_exec_available():
+            return True, ""
+        return False, f"{fence_darwin.SANDBOX_EXEC} is missing or not executable"
+    return False, f"partyline ships no write-fence backend for platform '{sys.platform}'"
+
+
+def _refusal(reason: str) -> str:
+    """The fail-closed message: what is missing, the platform, and the one
+    legitimate way out, named — the emergency flag, never a fallback.
+    """
+    return (f"{reason}; refusing to start an unconfined process "
+            f"(platform {sys.platform}; for one emergency restart cycle the fence "
+            f"can be switched off with PARTYLINE_FEATURE_WRITE_FENCE=0)")
 
 
 def manifest_write_paths(att: dict) -> list[str]:
@@ -174,8 +214,61 @@ def write_set(att: dict, adapter_paths: list[str] | None = None) -> list[tuple[s
     return binds
 
 
+def darwin_write_set(att: dict, adapter_paths: list[str] | None = None) -> list[str]:
+    """The writable paths for the sandbox-exec backend: the same scope as
+    the bubblewrap write set, with git_fence's weaker Darwin scope in
+    place of the mounts (docs/write-fence.md). Only paths that exist
+    grant anything, as everywhere else.
+    """
+    paths: list[str] = []
+    covered: set[str] = set()
+
+    def add(path: str) -> None:
+        if not path:
+            return
+        path = os.path.normpath(path)
+        if path in covered or not os.path.lexists(path):
+            return
+        covered.add(path)
+        paths.append(path)
+
+    cwd = att.get("cwd") or ""
+    add(cwd)
+    for path in git_fence.darwin_write_paths(cwd):
+        add(path)
+    review_root = _review_directory(cwd, create=True)
+    if review_root:
+        add(review_root)
+    for path in _review_worktree_paths(att, review_root):
+        add(path)
+        add(git_fence._worktree_gitdir(path) or "")
+    for path in adapter_paths if adapter_paths is not None else manifest_write_paths(att):
+        add(path)
+    for grant in att.get("write_grants") or []:
+        add(str(grant.get("path", "")))
+    for path in HOME_WRITE_PATHS:
+        add(os.path.expanduser(path))
+    return paths
+
+
+def _fence_args(att: dict) -> list[str]:
+    return (att.get("adapter_metadata") or {}).get("fence_args") or []
+
+
+def _bwrap_argv(att: dict, paths: list[str], command: list[str],
+                tmpfs_tmp: bool) -> list[str]:
+    argv = [BWRAP, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"]
+    if tmpfs_tmp:
+        argv += ["--tmpfs", "/tmp"]
+    for src, dst, read_only in write_set(att, paths):
+        argv += ["--ro-bind" if read_only else "--bind", src, dst]
+    tail = list(command) + [flag for flag in _fence_args(att) if flag not in command]
+    return argv + ["--die-with-parent", "--"] + tail
+
+
 def launch_argv(adapter, tmpfs_tmp: bool = True) -> list[str]:
-    """The argv to spawn for one adapter instance.
+    """The argv to spawn for one adapter instance, through the platform's
+    fence backend.
 
     ``fence_args`` from the manifest are appended to the command only
     when the fence is active: an adapter may declare argv that replaces a
@@ -188,23 +281,18 @@ def launch_argv(adapter, tmpfs_tmp: bool = True) -> list[str]:
     destinations' directory chain inside the private tmpfs, and paths that
     are not bind destinations resolve to empty ghost directories rather
     than to the host files the assertions inspect. Production always
-    mounts the private tmpfs.
+    mounts the private tmpfs; on Darwin there is no tmpfs and the flag
+    has no equivalent to name.
     """
     command = adapter.build_command()
     if not features.enabled("write_fence"):
         return command
-    if not bwrap_available():
-        raise FenceUnavailable(
-            f"{BWRAP} is missing or not executable; refusing to start an unconfined process")
+    available, reason = backend_available()
+    if not available:
+        raise FenceUnavailable(_refusal(reason))
     att = adapter.att
     hook = getattr(adapter, "write_paths", None)
     paths = manifest_write_paths(att) if hook is None else hook()
-    argv = [BWRAP, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"]
-    if tmpfs_tmp:
-        argv += ["--tmpfs", "/tmp"]
-    for src, dst, read_only in write_set(att, paths):
-        argv += ["--ro-bind" if read_only else "--bind", src, dst]
-    argv += ["--die-with-parent", "--"]
-    fence_args = (att.get("adapter_metadata") or {}).get("fence_args") or []
-    command = list(command)
-    return argv + command + [a for a in fence_args if a not in command]
+    if backend() == "sandbox-exec":
+        return fence_darwin.argv(darwin_write_set(att, paths), command, _fence_args(att))
+    return _bwrap_argv(att, paths, command, tmpfs_tmp)
