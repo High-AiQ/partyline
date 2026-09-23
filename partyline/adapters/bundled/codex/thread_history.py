@@ -8,6 +8,16 @@ rollout in place and projected into ``thread_history_1.sqlite`` under
 module reads that store the way the opencode adapter reads its session db:
 read-only, WAL-safe, never a write.
 
+Only ``agentMessage`` rows are chat. 0.156 writes these ``item_type`` values
+into ``thread_items`` (counts from a live ``~/.codex`` store, 2026-09-23):
+``reasoning``, ``commandExecution``, ``agentMessage``, ``fileChange``,
+``userMessage``, ``imageView``, ``contextCompaction``, ``sleep``,
+``collabAgentToolCall``. Several of those carry text of their own —
+``reasoning`` summaries, ``commandExecution.command`` / ``aggregatedOutput``,
+``fileChange`` diffs — and none of it is the process speaking. The relay is
+therefore an allowlist on ``item_type == "agentMessage"``; a new row kind the
+vendor invents must not become speech by merely having a ``text`` field.
+
 The claim-marker gate is unchanged: a ``userMessage`` row is the structured
 record of a pasted digest, so it is what proves this activation's nonce.
 Speech still flows only through ``adapter.post``, which holds it until that
@@ -148,6 +158,8 @@ async def tail_thread_history(adapter, home: str, thread_id: str, *, timeout: fl
                 if prompt and prompt in user_text(item):
                     adapter.mark_startup_delivery_received()
                 continue
+            if item_type != "agentMessage":
+                continue  # reasoning, commands, diffs: never the process talking
             item = parse_item(item_type, raw)
             if not item:
                 continue

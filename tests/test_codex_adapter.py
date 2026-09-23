@@ -951,6 +951,51 @@ class CodexThreadHistoryTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(self.messages, [("terra", "agent", "after compact")])
 
+    async def test_only_agent_message_rows_are_speech(self):
+        """0.156 also writes reasoning, commandExecution, fileChange, imageView,
+        sleep, and collabAgentToolCall. A text field on any of those is vendor
+        internals — reasoning leaking into chat is the person-visible failure —
+        so the relay allowlists agentMessage and nothing else."""
+        token = self.adapter._claim_token
+        self.write_store(
+            items=[
+                self.item("u1", "userMessage",
+                          {"type": "userMessage", "content": [{"type": "text", "text": token}]}),
+                self.item("r1", "reasoning",
+                          {"type": "reasoning", "id": "rs_1",
+                           "summary": [{"text": "I should leak this"}],
+                           "content": [{"text": "and this"}],
+                           "text": "LEAKED-REASONING"}),
+                self.item("x1", "commandExecution",
+                          {"type": "commandExecution", "id": "exec-1",
+                           "command": "echo LEAKED-COMMAND",
+                           "aggregatedOutput": "LEAKED-COMMAND",
+                           "text": "LEAKED-COMMAND"}),
+                self.item("f1", "fileChange",
+                          {"type": "fileChange", "id": "exec-2",
+                           "changes": [{"path": "/tmp/x", "diff": "+LEAKED-DIFF"}],
+                           "text": "LEAKED-DIFF"}),
+                self.item("i1", "imageView",
+                          {"type": "imageView", "id": "exec-3", "path": "/tmp/x.png",
+                           "text": "LEAKED-IMAGE"}),
+                self.item("s1", "sleep",
+                          {"type": "sleep", "id": "call_1", "durationMs": 1,
+                           "text": "LEAKED-SLEEP"}),
+                self.item("k1", "collabAgentToolCall",
+                          {"type": "collabAgentToolCall", "id": "call_2", "tool": "wait",
+                           "text": "LEAKED-COLLAB"}),
+                self.item("p1", "plan",
+                          {"type": "plan", "id": "plan-1",
+                           "steps": ["LEAKED-PLAN"], "text": "LEAKED-PLAN"}),
+                self.item("a1", "agentMessage",
+                          {"type": "agentMessage", "text": "the only speech"}),
+            ],
+        )
+
+        await self.run_tail()
+
+        self.assertEqual(self.messages, [("terra", "agent", "the only speech")])
+
     async def test_history_predating_this_activation_is_not_replayed(self):
         token = self.adapter._claim_token
         old_ms = int((self.spawned_at - 3600) * 1000)
