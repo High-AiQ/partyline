@@ -134,6 +134,17 @@ class LaunchArgvTest(unittest.TestCase):
         with overridden(write_fence=False):
             self.assertEqual(fence.launch_argv(FakeAdapter(att, ["codex"])), ["codex"])
 
+    def test_fence_args_dedupe_against_the_command(self):
+        flag = "--dangerously-bypass-approvals-and-sandbox"
+        att = _att("/tmp", metadata={"fence_args": [flag], "write_paths": []})
+        with patch.object(fence, "bwrap_available", return_value=True):
+            carrying = fence.launch_argv(FakeAdapter(att, ["codex", flag, "--go"]))
+            self.assertEqual(carrying[-3:], ["codex", flag, "--go"])
+            self.assertEqual(carrying.count(flag), 1)
+            bare = fence.launch_argv(FakeAdapter(att, ["codex"]))
+            self.assertEqual(bare[-2:], ["codex", flag])
+            self.assertEqual(bare.count(flag), 1)
+
     def test_missing_bwrap_refuses_rather_than_running_unconfined(self):
         with patch.object(fence, "BWRAP", "/nonexistent/bwrap"):
             with self.assertRaises(fence.FenceUnavailable):
@@ -310,6 +321,25 @@ class ReviewWorktreeFencePathTest(unittest.TestCase):
         att = _att(self.fix["line_wt"], conv_id="owner")
         att["review_worktrees"] = [{"conv_id": "owner", "sha": sha, "path": path}]
         self.assertEqual(fence._review_worktree_paths(att), [])
+
+    def test_root_checkout_skips_the_mirror_over_its_own_git_dir(self):
+        att = _att(self.fix["repo"], conv_id="owner")
+        att["review_worktrees"] = [{"conv_id": "owner", "sha": self.sha, "path": self.path}]
+        git_dir = os.path.join(self.fix["repo"], ".git")
+        pairs = fence.write_set(att, adapter_paths=[])
+        for _src, dst, _ro in pairs:
+            self.assertFalse(
+                dst == git_dir or dst.startswith(git_dir + os.sep), dst)
+
+    def test_linked_worktree_checkout_keeps_the_mirror_binds(self):
+        att = _att(self.fix["line_wt"], conv_id="owner")
+        att["review_worktrees"] = [{"conv_id": "owner", "sha": self.sha, "path": self.path}]
+        common = git_fence.common_gitdir(git_fence._worktree_gitdir(self.fix["line_wt"]))
+        with patch.object(git_fence, "FENCE_ROOT",
+                          os.path.join(self.directory.name, "fence-root")):
+            pairs = fence.write_set(att, adapter_paths=[])
+        dests = {dst for _src, dst, _ro in pairs}
+        self.assertIn(os.path.join(common, "refs"), dests)
 
 
 @unittest.skipUnless(BWRAP_SKIP_REASON is None, BWRAP_SKIP_REASON or "")

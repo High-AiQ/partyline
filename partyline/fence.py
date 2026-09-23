@@ -115,6 +115,21 @@ def _review_worktree_paths(att: dict, review_root: str | None = None) -> list[st
     return paths
 
 
+def _review_worktree_git_binds(path: str, cwd: str, conv_id: str) -> list[tuple[str, str, bool]]:
+    """Git binds for a review worktree, skipped when its common .git is
+    already inside the line's own cwd tree (the root captain's checkout):
+    mounting a mirror over refs the line already owns writably would
+    shadow branches and pulls made after spawn from ever being seen.
+    """
+    gitdir = git_fence._worktree_gitdir(path)
+    if gitdir is not None:
+        common = os.path.realpath(git_fence.common_gitdir(gitdir))
+        cwd_real = os.path.realpath(cwd or "")
+        if common == cwd_real or common.startswith(cwd_real + os.sep):
+            return []
+    return git_fence.git_binds(path, conv_id)
+
+
 def write_set(att: dict, adapter_paths: list[str] | None = None) -> list[tuple[str, str, bool]]:
     """The ordered ``(host, guest, read_only)`` binds this attachment needs.
 
@@ -144,7 +159,8 @@ def write_set(att: dict, adapter_paths: list[str] | None = None) -> list[tuple[s
     if review_root:
         add(review_root)
     for path in _review_worktree_paths(att, review_root):
-        for src, dst, read_only in git_fence.git_binds(path, att.get("conv_id") or ""):
+        for src, dst, read_only in _review_worktree_git_binds(
+                path, att.get("cwd") or "", att.get("conv_id") or ""):
             if src in covered:
                 continue
             covered.add(src)
@@ -164,7 +180,8 @@ def launch_argv(adapter, tmpfs_tmp: bool = True) -> list[str]:
     ``fence_args`` from the manifest are appended to the command only
     when the fence is active: an adapter may declare argv that replaces a
     CLI-internal sandbox incompatible with the fence, because the fence
-    itself is then the only sandbox the process has.
+    itself is then the only sandbox the process has. A flag the command
+    already carries is not appended again — CLIs reject a repeated flag.
 
     ``tmpfs_tmp`` exists for tests, which run their fixtures from paths
     under ``/tmp``: with the tmpfs on, bubblewrap recreates the bind
@@ -189,4 +206,5 @@ def launch_argv(adapter, tmpfs_tmp: bool = True) -> list[str]:
         argv += ["--ro-bind" if read_only else "--bind", src, dst]
     argv += ["--die-with-parent", "--"]
     fence_args = (att.get("adapter_metadata") or {}).get("fence_args") or []
-    return argv + list(command) + list(fence_args)
+    command = list(command)
+    return argv + command + [a for a in fence_args if a not in command]
