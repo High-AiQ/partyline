@@ -19,8 +19,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import sqlite3
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from partyline.adapters import Adapter
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
@@ -151,7 +154,23 @@ class PartylineAdapter(Adapter):
                         "ORDER BY time_created, id",
                         (session_id, started_ms),
                     ).fetchall()
-            except sqlite3.Error:
+                    # The pasted digest lives in a user-message *part*: the
+                    # message rows are empty shells, so the claim token is
+                    # only visible here. Observed before any relay — speech
+                    # posted before the gate opens is dropped and `seen`
+                    # never retries it.
+                    user_parts = db.execute(
+                        "SELECT part.data FROM part "
+                        "JOIN message ON message.id = part.message_id "
+                        "WHERE part.session_id = ? AND part.time_created >= ? "
+                        "AND json_extract(message.data, '$.role') = 'user' "
+                        "AND json_extract(part.data, '$.type') = 'text'",
+                        (session_id, started_ms),
+                    ).fetchall()
+                    for row in user_parts:
+                        self.observe_claim(row[0])
+            except sqlite3.Error as exc:
+                logger.debug("opencode poll skipped: %s", exc)
                 await asyncio.sleep(0.5)
                 continue
             for part_id, raw_data in rows:
