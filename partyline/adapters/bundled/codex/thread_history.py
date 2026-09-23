@@ -136,9 +136,9 @@ async def tail_thread_history(adapter, home: str, thread_id: str, *, timeout: fl
         except sqlite3.Error:
             await asyncio.sleep(0.5)
             continue
-        if not opened:
+        opening = not opened
+        if opening:
             opened = True
-            adapter.mark_ready()
         for turn_id, status, started_at in turns:
             if started_at is not None and started_at < (adapter.spawned_at - 5):
                 seen_turns[turn_id] = status
@@ -154,6 +154,7 @@ async def tail_thread_history(adapter, home: str, thread_id: str, *, timeout: fl
             if item_type == "userMessage":
                 adapter.observe_claim(raw)
                 item = parse_item(item_type, raw) or {}
+                await adapter.observe_paste_text(user_text(item))
                 prompt = getattr(adapter, "_startup_prompt", "")
                 if prompt and prompt in user_text(item):
                     adapter.mark_startup_delivery_received()
@@ -166,6 +167,8 @@ async def tail_thread_history(adapter, home: str, thread_id: str, *, timeout: fl
             body = agent_text(item).strip()
             if body:
                 speech.append(body)
+        if opening:
+            adapter.mark_ready()
         for body in speech:
             await adapter.post(adapter.att["name"], "agent", body)
         await asyncio.sleep(0.5)
