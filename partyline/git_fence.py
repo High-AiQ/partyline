@@ -31,6 +31,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import tempfile
 
 # Mirror state lives beside the other per-attachment session state.
 FENCE_ROOT = os.path.expanduser("~/.partyline/sessions/fence")
@@ -87,6 +88,49 @@ def _walk_files(root: str) -> list[str]:
     return sorted(found)
 
 
+def _ensure_mirror_directory(path: str) -> None:
+    """Ensure a mirror directory is not an attacker-controlled symlink."""
+    if os.path.islink(path) or (os.path.lexists(path) and not os.path.isdir(path)):
+        os.unlink(path)
+    os.makedirs(path, exist_ok=True)
+
+
+def _mirror_parent(root: str, rel: str) -> str:
+    """Create a real directory path below ``root`` for one mirror entry."""
+    _ensure_mirror_directory(root)
+    current = root
+    parts = rel.split(os.sep)[:-1]
+    for part in parts:
+        current = os.path.join(current, part)
+        _ensure_mirror_directory(current)
+    return current
+
+
+def _replace_mirror_file(root: str, rel: str, write_file) -> None:
+    """Write through a same-directory temporary and atomically replace the entry."""
+    parent = _mirror_parent(root, rel)
+    fd, temporary = tempfile.mkstemp(dir=parent)
+    os.close(fd)
+    try:
+        write_file(temporary)
+        os.replace(temporary, os.path.join(parent, os.path.basename(rel)))
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def _copy_to_mirror(src: str, root: str, rel: str) -> None:
+    _replace_mirror_file(root, rel, lambda temporary: shutil.copy2(src, temporary))
+
+
+def _write_mirror_text(root: str, rel: str, value: str) -> None:
+    def write(temporary: str) -> None:
+        with open(temporary, "w", encoding="utf-8") as file:
+            file.write(value)
+
+    _replace_mirror_file(root, rel, write)
+
+
 def refresh_mirror(common: str, gitdir: str, conv_id: str) -> str:
     """Create or refresh the line's refs mirror; returns the mirror directory.
 
@@ -97,19 +141,19 @@ def refresh_mirror(common: str, gitdir: str, conv_id: str) -> str:
     mirror's loose ref always wins.
     """
     mirror = _mirror_dir(common, conv_id)
+    _ensure_mirror_directory(mirror)
     own = _head_branch(gitdir)
     for name in ("refs", "logs"):
         real_dir = os.path.join(common, name)
         mirror_dir = os.path.join(mirror, name)
-        os.makedirs(mirror_dir, exist_ok=True)
+        _ensure_mirror_directory(mirror_dir)
         if not os.path.isdir(real_dir):
             continue
         for rel in _walk_files(real_dir):
             mirror_file = os.path.join(mirror_dir, rel)
             if os.path.lexists(mirror_file):
                 continue  # the mirror keeps what a previous launch wrote
-            os.makedirs(os.path.dirname(mirror_file), exist_ok=True)
-            shutil.copy2(os.path.join(real_dir, rel), mirror_file)
+            _copy_to_mirror(os.path.join(real_dir, rel), mirror_dir, rel)
         # Re-copy live sibling refs on every launch. The own branch and its
         # reflog are excluded: their mirror value is the line's committed
         # state, and the real copies never see the line's commits.
@@ -119,16 +163,14 @@ def refresh_mirror(common: str, gitdir: str, conv_id: str) -> str:
                 continue
             real_file = os.path.join(real_dir, rel)
             if os.path.isfile(real_file):
-                shutil.copy2(real_file, os.path.join(mirror_dir, rel))
+                _copy_to_mirror(real_file, mirror_dir, rel)
     # The own branch must exist loose in the mirror, or a real packed-refs
     # entry filtered below leaves the branch unresolvable.
-    if own and not os.path.isfile(os.path.join(mirror, own)):
-        value = _read_ref(common, own) or _read_ref(mirror, own)
+    own_path = os.path.join(mirror, own) if own else None
+    if own and (os.path.islink(own_path) or not os.path.isfile(own_path)):
+        value = _read_ref(common, own)
         if value:
-            path = os.path.join(mirror, own)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as file:
-                file.write(value + "\n")
+            _write_mirror_text(mirror, own, value + "\n")
     packed = os.path.join(common, "packed-refs")
     if os.path.isfile(packed):
         lines = []
@@ -136,8 +178,11 @@ def refresh_mirror(common: str, gitdir: str, conv_id: str) -> str:
             lines = file.readlines()
         if own:
             lines = [line for line in lines if not line.endswith(f" {own}\n")]
-        with open(os.path.join(mirror, "packed-refs"), "w", encoding="utf-8") as file:
-            file.writelines(lines)
+        _write_mirror_text(mirror, "packed-refs", "".join(lines))
+    else:
+        mirror_packed = os.path.join(mirror, "packed-refs")
+        if os.path.islink(mirror_packed):
+            os.unlink(mirror_packed)
     return mirror
 
 
@@ -180,7 +225,6 @@ def git_binds(cwd: str, conv_id: str) -> list[tuple[str, str, bool]]:
         (os.path.join(mirror, "refs"), os.path.join(common, "refs"), False),
     ]
     logs_mirror = os.path.join(mirror, "logs")
-    os.makedirs(logs_mirror, exist_ok=True)
     binds.append((logs_mirror, os.path.join(common, "logs"), False))
     if os.path.isfile(os.path.join(mirror, "packed-refs")):
         binds.append((os.path.join(mirror, "packed-refs"),

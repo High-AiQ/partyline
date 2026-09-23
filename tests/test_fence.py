@@ -160,6 +160,29 @@ class GitMirrorTest(unittest.TestCase):
                          open(os.path.join(common, "refs/heads/main")).read())
         _git("update-ref", "refs/heads/main", before.strip(), cwd=self.fix["repo"])
 
+    def test_refresh_replaces_symlinked_mirror_ref_without_touching_target(self):
+        common = git_fence.common_gitdir(self.gitdir(self.fix["line_wt"]))
+        target = os.path.join(self.directory.name, "host-target")
+        with open(target, "w", encoding="utf-8") as file:
+            file.write("host data must survive\n")
+        with patch.object(git_fence, "FENCE_ROOT", self.mirror_root()):
+            mirror = git_fence.refresh_mirror(common, self.gitdir(self.fix["line_wt"]),
+                                              "conv-symlink")
+            mirror_main = os.path.join(mirror, "refs/heads/main")
+            os.unlink(mirror_main)
+            os.symlink(target, mirror_main)
+            git_fence.refresh_mirror(common, self.gitdir(self.fix["line_wt"]),
+                                     "conv-symlink")
+
+        with open(target, encoding="utf-8") as file:
+            self.assertEqual(file.read(), "host data must survive\n")
+        self.assertFalse(os.path.islink(mirror_main))
+        self.assertTrue(os.path.isfile(mirror_main))
+        with open(mirror_main, encoding="utf-8") as mirror_file:
+            with open(os.path.join(common, "refs/heads/main"),
+                      encoding="utf-8") as real_file:
+                self.assertEqual(mirror_file.read(), real_file.read())
+
     def test_bind_plan_never_writes_real_refs_config_hooks(self):
         common = git_fence.common_gitdir(self.gitdir(self.fix["line_wt"]))
         with patch.object(git_fence, "FENCE_ROOT", self.mirror_root()):
