@@ -134,6 +134,60 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
         adapter._recorded_our_token = lambda path: True
         return adapter
 
+    async def run_fixture_records(self, records, posts):
+        adapter = self.make_adapter(posts)
+
+        async def tail(path: str, handle) -> None:
+            self.assertEqual(path, "fixture.jsonl")
+            for record in records:
+                await handle(record)
+
+        adapter._tail_jsonl = tail
+        with (
+            patch("partyline.adapters.bundled.claude.adapter.asyncio.sleep", AsyncMock()),
+            patch("partyline.adapters.bundled.claude.adapter.glob.glob", return_value=["fixture.jsonl"]),
+        ):
+            await adapter._run()
+
+    def fixture_records(self):
+        return [
+            json.loads(line)
+            for line in self.fixture.read_text(encoding="utf-8").splitlines()
+        ]
+
+    async def test_narration_sharing_a_record_with_tool_use_is_not_posted(self):
+        narration = next(
+            record for record in self.fixture_records()
+            if record.get("uuid") == "narration"
+        )
+        posts: list[tuple[str, str, str]] = []
+
+        await self.run_fixture_records([narration], posts)
+
+        self.assertEqual(posts, [])
+
+    async def test_text_only_assistant_record_is_posted(self):
+        text_only = next(
+            record for record in self.fixture_records()
+            if record.get("uuid") == "text-only"
+        )
+        posts: list[tuple[str, str, str]] = []
+
+        await self.run_fixture_records([text_only], posts)
+
+        self.assertEqual(posts, [("claude", "agent", "direct answer")])
+
+    async def test_mixed_turn_posts_only_its_final_text_record(self):
+        records = [
+            record for record in self.fixture_records()
+            if record.get("uuid") in {"turn-narration", "turn-final"}
+        ]
+        posts: list[tuple[str, str, str]] = []
+
+        await self.run_fixture_records(records, posts)
+
+        self.assertEqual(posts, [("claude", "agent", "final answer")])
+
     async def test_transcript_posts_only_fresh_unique_assistant_text(self):
         posts: list[tuple[str, str, str]] = []
         adapter = self.make_adapter(posts)
@@ -150,7 +204,11 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
         ):
             await adapter._run()
 
-        self.assertEqual(posts, [("claude", "agent", "first answer\n\nsecond paragraph")])
+        self.assertEqual(
+            posts,
+            [("claude", "agent", "direct answer"),
+             ("claude", "agent", "final answer")],
+        )
 
     async def test_run_waits_for_transcript_and_retries_briefing(self):
         posts: list[tuple[str, str, str]] = []

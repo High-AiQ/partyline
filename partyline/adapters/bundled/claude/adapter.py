@@ -225,12 +225,17 @@ class PartylineAdapter(BaseAdapter):
                 return
             if not self._fresh(obj.get("timestamp")):
                 return
+            content = (obj.get("message") or {}).get("content") or []
+            if any(
+                isinstance(block, dict) and block.get("type") == "tool_use"
+                for block in content
+            ):
+                return
             uid = obj.get("uuid")
             if uid and uid in seen:
                 return
             if uid:
                 seen.add(uid)
-            content = (obj.get("message") or {}).get("content") or []
             texts = [block.get("text", "") for block in content
                      if isinstance(block, dict) and block.get("type") == "text"]
             body = "\n\n".join(text for text in texts if text.strip())
