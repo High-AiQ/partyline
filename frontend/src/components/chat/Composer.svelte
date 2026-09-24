@@ -89,7 +89,7 @@
   async function send(): Promise<void> {
     if (uploading) return;
     if (!pendingFiles.files.length) {
-      if (!room.say(draft.text)) return;
+      if (!(await room.say(draft.text))) return;
       draft.clear();
       closeToken();
       requestAnimationFrame(resize);

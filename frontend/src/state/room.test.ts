@@ -5,6 +5,7 @@ import { wire } from "./wire.svelte.js";
 import type { WireEventHandler } from "./wire.svelte.js";
 import { api } from "../lib/api";
 import { fenceApi } from "../lib/fence-api";
+import * as roomSay from "../lib/room-say";
 import { restartApi } from "../lib/restart-api";
 import type { Attachment, Conversation, ConversationDetail } from "../lib/contracts";
 
@@ -110,6 +111,36 @@ describe("resync after a reconnect", () => {
     });
 
     expect(pending).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("room.say", () => {
+  it("absorbs a REST message into the feed", async () => {
+    room.conversation = conversation;
+    const posted = {
+      id: 42,
+      conv_id: conversation.id,
+      sender: "greg",
+      sender_type: "human" as const,
+      body: "still here",
+      created_at: 2,
+      files: [],
+    };
+    vi.spyOn(roomSay, "sayOnLine").mockResolvedValue({ ok: true, message: posted });
+
+    expect(await room.say("still here")).toBe(true);
+    expect(room.messages.some((message) => message.id === 42)).toBe(true);
+  });
+
+  it("shows a retry notice and keeps the draft when REST fails", async () => {
+    room.conversation = conversation;
+    vi.spyOn(roomSay, "sayOnLine").mockResolvedValue({
+      ok: false,
+      error: "could not send message",
+    });
+
+    expect(await room.say("held back")).toBe(false);
+    expect(room.notice).toEqual({ message: "could not send message", kind: "error" });
   });
 });
 
