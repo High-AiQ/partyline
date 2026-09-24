@@ -75,7 +75,7 @@ it is a fence against accidents, not a jail against malice. See
 | adapter home paths from the manifest `write_paths` | yes | sessions, transcripts, auth state each CLI writes (`~/.claude`, `~/.cursor`, `~/.grok`, …) |
 | an adapter's computed paths | yes | a per-attachment vendor home the manifest cannot name (codex's `CODEX_HOME`) |
 | granted paths (`conversation_write_grants`) | yes | requested, granted, recorded |
-| `~/.cache`, `~/.config` | yes | the two home directories CLIs routinely update |
+| `~/.cache`, `~/.config`, `~/.docker` | yes | the home directories CLIs routinely update, including `docker build`'s buildx state |
 | everything else | no | read-only via the `/` bind, including the host's other checkouts and `/` itself |
 
 For any line working in a repository, the whole canonical `<repo>/.review/`
