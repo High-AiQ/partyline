@@ -80,13 +80,14 @@ def backend_available() -> tuple[bool, str]:
     return False, f"partyline ships no write-fence backend for platform '{sys.platform}'"
 
 
-def _refusal(reason: str) -> str:
-    """The fail-closed message: what is missing, the platform, and the one
-    legitimate way out, named — the emergency flag, never a fallback.
-    """
-    return (f"{reason}; refusing to start an unconfined process "
-            f"(platform {sys.platform}; for one emergency restart cycle the fence "
-            f"can be switched off with PARTYLINE_FEATURE_WRITE_FENCE=0)")
+def _refusal(reason: str, remedy: str = "") -> str:
+    """Describe the probe failure and the person-side remedy for an attach 409."""
+    if not remedy:
+        from .fence_probe import remedy as install_remedy
+
+        remedy = install_remedy()
+    advice = f" Remedy: {remedy}" if remedy else ""
+    return f"{reason}.{advice}"
 
 
 def manifest_write_paths(att: dict) -> list[str]:
@@ -257,7 +258,8 @@ def _fence_args(att: dict) -> list[str]:
 
 def _bwrap_argv(att: dict, paths: list[str], command: list[str],
                 tmpfs_tmp: bool) -> list[str]:
-    argv = [BWRAP, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"]
+    argv = [BWRAP, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
+            "--unshare-user"]
     if tmpfs_tmp:
         argv += ["--tmpfs", "/tmp"]
     for src, dst, read_only in write_set(att, paths):
@@ -267,26 +269,15 @@ def _bwrap_argv(att: dict, paths: list[str], command: list[str],
 
 
 def launch_argv(adapter, tmpfs_tmp: bool = True) -> list[str]:
-    """The argv to spawn for one adapter instance, through the platform's
-    fence backend.
-
-    ``fence_args`` from the manifest are appended to the command only
-    when the fence is active: an adapter may declare argv that replaces a
-    CLI-internal sandbox incompatible with the fence, because the fence
-    itself is then the only sandbox the process has. A flag the command
-    already carries is not appended again — CLIs reject a repeated flag.
-
-    ``tmpfs_tmp`` exists for tests, which run their fixtures from paths
-    under ``/tmp``: with the tmpfs on, bubblewrap recreates the bind
-    destinations' directory chain inside the private tmpfs, and paths that
-    are not bind destinations resolve to empty ghost directories rather
-    than to the host files the assertions inspect. Production always
-    mounts the private tmpfs; on Darwin there is no tmpfs and the flag
-    has no equivalent to name.
-    """
+    """Build a fenced spawn argv; adapters may replace incompatible CLI sandboxes."""
     command = adapter.build_command()
     if not features.enabled("write_fence"):
         return command
+    from . import fence_probe
+
+    result = fence_probe.cached_result()
+    if result is not None and not result[0]:
+        raise FenceUnavailable(_refusal(result[1], result[2]))
     available, reason = backend_available()
     if not available:
         raise FenceUnavailable(_refusal(reason))

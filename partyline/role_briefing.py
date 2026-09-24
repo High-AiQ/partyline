@@ -73,6 +73,8 @@ STAFFING_TRAITS = (
 
 ASK_FIRST = (
     "### Ask the person first\n"
+    "Every process runs fenced; if an attach is refused with write fence unavailable, "
+    "the remedy in the banner is a person-side install, not a flag.\n"
     "Commits or pushes to shared branches, deploys, paid calls beyond a stated budget, "
     "deleting data, changing presets, and anything else that cannot be undone. On a "
     "captained line only you push: workers commit locally and hand you the SHA; you push "
