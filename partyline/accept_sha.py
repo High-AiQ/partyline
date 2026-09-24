@@ -19,6 +19,7 @@ import re
 from fastapi import HTTPException, Request
 
 from .auth_guard import request_principal
+from .git_fence import mirror_branch_ref
 from .hierarchy import ancestors, descendants, parent_id_of
 from .hierarchy_contracts import AcceptIn, AcceptResponse
 from .line_worktree import WORKTREES_DIR, _git, line_cwd, repo_and_worktree, rev
@@ -52,15 +53,31 @@ def _git_failure(done, fallback: str) -> AcceptError:
     return AcceptError(409, f"{fallback}: {lines[-1]}" if lines else fallback)
 
 
-def _move_branch(root: str, worktree: str | None, branch: str, full: str) -> None:
-    """Fast-forward in the worktree when it holds the branch; move the ref otherwise."""
-    if worktree and os.path.isdir(worktree):
+def _descends(root: str, older: str, newer: str) -> bool:
+    """``git merge-base --is-ancestor`` as a predicate."""
+    return _git("merge-base", "--is-ancestor", older, newer, cwd=root).returncode == 0
+
+
+def _move_branch(
+    root: str, worktree: str | None, branch: str, full: str, head: str,
+    fenced: bool = False,
+) -> None:
+    """Fast-forward the line's real branch to the accepted SHA.
+
+    Non-fenced, the worktree holding the branch merges ``--ff-only``, which
+    refuses a dirty tree and carries the files along. On the fenced path the
+    real ref moves by compare-and-swap — ``update-ref`` names the previously
+    read tip as the value it expects to replace, so a concurrent move is
+    refused, never clobbered; the fenced worktree already holds the accepted
+    content, so nothing is checked out over it.
+    """
+    if not fenced and worktree and os.path.isdir(worktree):
         if rev(worktree, "rev-parse", "--abbrev-ref", "HEAD") == branch:
             done = _git("merge", "--ff-only", "--quiet", full, cwd=worktree)
             if done.returncode != 0:
                 raise _git_failure(done, f"cannot fast-forward {branch} in the worktree")
             return
-    done = _git("branch", "--force", branch, full, cwd=root)
+    done = _git("update-ref", f"refs/heads/{branch}", full, head, cwd=root)
     if done.returncode != 0:
         raise _git_failure(done, f"cannot move {branch} to the accepted SHA")
 
@@ -70,7 +87,10 @@ def accept_sha(db, conv_id: str, sha: str) -> dict:
 
     Returns ``{"branch": name, "sha": full, "moved": bool}`` — ``moved`` is
     False when the branch already pointed at the SHA, so re-accepting is a
-    clean no-op that leaves the record in place.
+    clean no-op that leaves the record in place. Under the write fence the
+    line commits to its mirror branch, so when a mirror exists its tip must
+    be the SHA or an ancestor of it — a mirror holding work the SHA does not
+    include is refused as a stray.
     """
     conv = db.get_conversation(conv_id)
     if conv is None:
@@ -106,22 +126,36 @@ def accept_sha(db, conv_id: str, sha: str) -> dict:
                 409,
                 f"accepting only fast-forwards: {branch}{count} the accepted SHA does not include",
             )
-        # Descent from the branch point: a branch still sitting exactly at its
-        # merge-base with the parent carries no work of its own, so any other
-        # SHA belongs to some other line's descent — unless the parent has
-        # already landed that SHA, which makes it this line's work by
-        # definition. Land the work on the
-        # branch first — the hand-off is the SHA on the line's branch.
-        parent_tip = _base_ref(line_cwd(db, parent_id_of(conv)) if parent_id_of(conv) else None)
-        lineage = rev(root, "merge-base", branch, parent_tip) if parent_tip else None
-        landed = bool(parent_tip) and rev(root, "merge-base", parent_tip, full) == full
-        if lineage == head and not landed:
-            raise AcceptError(
-                409,
-                f"{branch} has no commits of its own — it sits at its branch point with the "
-                f"parent, and {name} has not landed there; land the work on the branch first",
-            )
-        _move_branch(root, worktree, branch, full)
+        # Descent from the branch point. A branch sitting exactly at its
+        # merge-base with the parent has no real commits of its own, so a
+        # foreign SHA used to be refused outright. Under the write fence that
+        # is exactly where every fenced hand-off lands: the line's commits
+        # live on its mirror branch and the real ref never moved. The mirror
+        # decides — its tip must be the SHA or an ancestor of it, so the
+        # accepted SHA carries every commit the line actually made; a mirror
+        # ahead of or diverging from the SHA is a stray commit. With no
+        # mirror the old refusal stands: land the work on the branch first.
+        mirror_head = mirror_branch_ref(cwd, conv_id, branch)
+        if mirror_head is not None:
+            if mirror_head != full and not _descends(root, mirror_head, full):
+                raise AcceptError(
+                    409,
+                    f"{name} is not this line's fenced tip {mirror_head[:12]} — "
+                    "a stray commit; hand off the SHA the line's branch actually holds",
+                )
+        else:
+            parent_tip = _base_ref(
+                line_cwd(db, parent_id_of(conv)) if parent_id_of(conv) else None)
+            lineage = rev(root, "merge-base", branch, parent_tip) if parent_tip else None
+            landed = bool(parent_tip) and rev(root, "merge-base", parent_tip, full) == full
+            if lineage == head and not landed:
+                raise AcceptError(
+                    409,
+                    f"{branch} has no commits of its own — it sits at its branch point with the "
+                    f"parent, and {name} has not landed there; land the work on the branch first",
+                )
+        _move_branch(root, worktree, branch, full, head,
+                     fenced=mirror_head is not None)
     db._exec("UPDATE conversations SET accepted_sha=? WHERE id=?", (full, conv_id))
     pruned = prune_accepted_review(db, conv_id, full)
     return {"branch": branch, "sha": full, "moved": moved, "pruned_reviews": pruned}
