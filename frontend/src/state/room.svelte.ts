@@ -1,10 +1,5 @@
-/**
- * The room: the list of lines, the line you are on, and everything on it.
- *
- * This turns server events into screen state and owns one ordering guard:
- *   - **`#epoch`** rises on line changes, discarding late awaits so a slower
- *     fetch cannot overwrite the line chosen after it.
- */
+/** The room: lines, the active line, and everything on it.
+ *  `#epoch` rises on line changes so late fetches cannot overwrite the chosen line. */
 
 import { SvelteSet } from "svelte/reactivity";
 import { api } from "../lib/api";
@@ -18,6 +13,7 @@ import type {
   WireEvent,
 } from "../lib/contracts";
 import { session } from "./session.svelte.js";
+import { sayOnLine } from "../lib/room-say";
 import { sendOffLine } from "../lib/offline-wire";
 import type { WireIdentity } from "../lib/wire-commands";
 import { restart } from "./restart.svelte.js";
@@ -206,18 +202,22 @@ class Room {
       this.leave({ clearRoute: false });
     }
   }
-
-  // ── talking ────────────────────────────────────────────────────────────
-  say(body: string): boolean {
-    const text = body.trim();
-    if (!text) return false;
-    return wire.send({ body: text });
+  // ── talking ─────────────────────────────────────────────────────────
+  async say(body: string): Promise<boolean> {
+    const conversation = this.conversation;
+    if (!conversation) return false;
+    const result = await sayOnLine(conversation.id, body);
+    if (!result.ok) {
+      if (result.error) this.showNotice(result.error, "error");
+      return false;
+    }
+    if (result.message) this.#absorb(result.message);
+    return true;
   }
   /** Post to a line we are not on — see `sendOffLine`. */
   warn(convId: string, body: string): Promise<void> {
     return sendOffLine(convId, this.identity, body);
   }
-
   showNotice(message: string, kind: RoomNotice["kind"] = ""): void {
     this.notice = { message, kind };
     if (this.#noticeTimer !== null) clearTimeout(this.#noticeTimer);
@@ -228,7 +228,6 @@ class Room {
   // ── server events ──────────────────────────────────────────────────────
   #onWireEvent(event: WireEvent, context: WireContext): void {
     const convId = this.conversation?.id;
-
     switch (event.type) {
       case "message":
         this.#absorb(event.message);

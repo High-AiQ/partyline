@@ -13,6 +13,7 @@ from partyline.conversation_routes import register_conversation_routes
 from partyline.db import Db
 from partyline.hierarchy_routes import hierarchy_router
 from partyline.media import MediaStore
+from partyline.message_routes import message_router
 from partyline.media_routes import media_router
 from partyline.preset_routes import presets_router
 from partyline.runtime import ChatRuntime
@@ -27,6 +28,7 @@ class ManagerWorkflowTest(unittest.TestCase):
         app = FastAPI()
         install_auth_guard(app, self.db)
         app.include_router(hierarchy_router(self.runtime))
+        app.include_router(message_router(self.runtime, self.media))
         app.include_router(media_router(self.runtime, self.media))
         app.include_router(presets_router(self.runtime, {}))
         register_compact_route(app, self.runtime, object())

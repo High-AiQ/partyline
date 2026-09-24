@@ -63,14 +63,23 @@ def self_mention_reason(db, principal, conv_id: str, body: str) -> str | None:
     return None
 
 
+async def post_human_message(runtime, conv_id: str, handle: str, body: str) -> dict:
+    """A person speaking on the wire or through REST — one routing path."""
+    text = body.strip()
+    if not text:
+        raise HTTPException(400, "message body is required")
+    return await runtime.post_message(conv_id, handle, "human", text)
+
+
 async def post_identified(runtime, conv_id, principal, body: str) -> dict:
     """A machine or person speaking through the API, mentions routed."""
     if (reason := self_mention_reason(runtime.db, principal, conv_id, body)) is not None:
         raise HTTPException(422, reason)
-    kind = "agent" if principal.kind == "machine" else "human"
-    stored = runtime.db.add_message(conv_id, principal.name, kind, body)
+    if principal.kind != "machine":
+        return await post_human_message(runtime, conv_id, principal.name, body)
+    stored = runtime.db.add_message(conv_id, principal.name, "agent", body)
     stored = {**stored, **stamp_source(runtime.db, stored["id"], principal)}
-    if kind == "agent" and (returns := getattr(runtime, "returns", None)) is not None:
+    if (returns := getattr(runtime, "returns", None)) is not None:
         # An API post is the process speaking: a hand-off here settles its turn
         # exactly as one said through its own pty would.
         returns.note_spoke(principal.attachment_id, body)
