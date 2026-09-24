@@ -6,7 +6,7 @@ request that a person approves, not through a manual `git pull` + Ctrl-C or an u
 
 | DO | DO NOT |
 | --- | --- |
-| Merge, pull the deployment checkout, and `uv sync --locked` before requesting a restart | Request a restart to "pick up" a commit the deployed checkout does not have |
+| Before planning from a stale clean checkout, the captain refreshes its attached checkout with `git pull --ff-only`; after merge, the captain fast-forwards it, verifies `git rev-parse HEAD`, runs `uv sync --locked`, then requests a restart; use HTTPS with `git -c credential.helper='!gh auth git-credential'` if fenced SSH is unavailable | Ask the person to pull; skip a dirty-checkout ask; reset, stash, or discard in a person's checkout |
 | Read `checkout_path` and `git_head` from `/api/version` to know which checkout the service serves | Assume the checkout you pulled is the one the service runs from |
 | File a restart request with a clear reason and wait for a person to approve it | Restart the service by any path other than the approved request |
 | Trust the automatic mid-turn mark and private continue notice to resume interrupted work | Delay approval waiting for every participant to go idle first |
@@ -18,8 +18,10 @@ safety contract; the failure modes that shaped it are recorded in [lessons.md](l
 
 ## The flow
 
-1. **Deploy first.** Merge the reviewed change, fast-forward the deployment checkout, and run
-   `uv sync --locked`. A restart only starts whatever code the checkout already has.
+1. **Deploy first.** Merge the reviewed change. The captain fast-forwards the checkout it is
+   attached to with `git pull --ff-only`; if fenced SSH is unavailable, use HTTPS with
+   `git -c credential.helper='!gh auth git-credential' pull --ff-only`. Verify `git rev-parse HEAD`,
+   then run `uv sync --locked`. A restart only starts whatever code the checkout already has.
 2. **File the request.** A line's captain (or a person) files a reason:
 
    ```bash
