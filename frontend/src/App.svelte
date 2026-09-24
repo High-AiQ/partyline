@@ -15,6 +15,7 @@
 
   import { room } from "./state/room.svelte.js";
   import { session } from "./state/session.svelte.js";
+  import { wire } from "./state/wire.svelte.js";
   import { dialogs } from "./state/dialogs.svelte.js";
   import { draft } from "./state/draft.svelte.js";
   import { layout } from "./state/layout.svelte.js";
@@ -97,6 +98,9 @@
 
 <svelte:window
   on:hashchange={routeChange}
+  on:focus={() => {
+    if (session.signedIn) wire.verifyOnWake();
+  }}
   on:keydown={(event) => {
     if (event.key !== "Escape") return;
     // Escape belongs to whatever is on top, and the reattach offer is not on
@@ -105,6 +109,13 @@
     if (dialogs.stack.length) dialogs.closeTop();
     else if (room.reattachOffer) room.chooseReattach("cancel");
     else if (layout.drawerOpen) layout.close();
+  }}
+/>
+
+<svelte:document
+  on:visibilitychange={() => {
+    if (document.visibilityState === "hidden") wire.noteHidden();
+    else if (session.signedIn) wire.verifyOnWake();
   }}
 />
 

@@ -11,7 +11,7 @@ from .contracts import ErrorEvent, Event, MessageEvent, MessageResponse
 from .handshake import hello_payload
 from .db import Db
 from .delivery_hooks import delivery_hooks
-from .message_routing import route_message
+from .message_routing import post_human_message, route_message
 from .reattach import ReattachCoordinator
 from .runtime_delivery_credit import DeliveryCreditMixin
 
@@ -304,7 +304,7 @@ class ChatRuntime(DeliveryCreditMixin):
                     continue
                 # The sender is the credential's handle; any client-supplied
                 # sender field is ignored, so impersonation cannot happen.
-                await self.post_message(conv_id, claimed_handle, "human", body)
+                await post_human_message(self, conv_id, claimed_handle, body)
         except WebSocketDisconnect:
             pass
         finally:

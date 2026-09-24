@@ -1,5 +1,6 @@
-/** The cursor-shaped REST call used by initial history and reconnect catch-up. */
+/** The cursor-shaped REST calls used by history, catch-up, and reliable send. */
 
+import { ChatMessageSchema, type ChatMessage } from "./contracts";
 import { request } from "./http";
 import { MessagePageSchema, type MessagePage } from "./message-page";
 
@@ -16,4 +17,15 @@ export function messagePage(id: string, page: MessagePageRequest = {}): Promise<
   if (page.limit !== undefined) query.set("limit", String(page.limit));
   const suffix = query.size ? `?${query.toString()}` : "";
   return request(`/api/conversations/${id}/messages${suffix}`, { schema: MessagePageSchema });
+}
+
+export function postMessage(convId: string, body: string): Promise<ChatMessage> {
+  const text = body.trim();
+  if (!text) return Promise.reject(new Error("message body is required"));
+  return request(`/api/conversations/${convId}/messages`, {
+    schema: ChatMessageSchema,
+    method: "POST",
+    body: { body: text },
+    fallback: "could not send message",
+  });
 }
