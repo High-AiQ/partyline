@@ -21,7 +21,8 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from partyline import auth_store, auth_tokens, fence, fence_darwin, git_fence, server
+from partyline import (auth_store, auth_tokens, fence, fence_darwin, fence_probe,
+                       git_fence, server)
 from partyline.adapters import loader
 from partyline.auth_guard import install_auth_guard
 from partyline.write_set_routes import list_write_grants, write_set_router
@@ -153,6 +154,24 @@ class LaunchArgvTest(unittest.TestCase):
             with self.assertRaises(fence.FenceUnavailable):
                 fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
 
+    def test_failed_boot_probe_refuses_with_the_banner_remedy(self):
+        result = (False, "user namespace unavailable", "apt-get install -y bubblewrap")
+        with patch.object(fence, "backend_available", return_value=(True, "")), \
+                patch.object(fence_probe, "cached_result", return_value=result):
+            with self.assertRaisesRegex(fence.FenceUnavailable, "apt-get install -y bubblewrap"):
+                fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
+
+    def test_missing_backend_refuses_with_cached_boot_failure(self):
+        reason = "bubblewrap is missing; Ubuntu AppArmor profile unavailable"
+        remedy = "apt-get install -y bubblewrap"
+        result = (False, reason, remedy)
+        with patch.object(fence_probe, "cached_result", return_value=result), \
+                patch.object(fence, "backend_available", return_value=(False, "bubblewrap is missing")):
+            with self.assertRaises(fence.FenceUnavailable) as caught:
+                fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
+        self.assertIn(reason, str(caught.exception))
+        self.assertIn(remedy, str(caught.exception))
+
     def test_write_set_dedupes_and_skips_missing(self):
         with tempfile.TemporaryDirectory() as base:
             outside = os.path.join(base, "extra")
@@ -236,6 +255,7 @@ class DarwinSandboxExecTest(unittest.TestCase):
             argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli", "--go"]))
         self.assertEqual(argv[0], fence.BWRAP)
         self.assertEqual(argv[-3:], ["--", "cli", "--go"])
+        self.assertIn("--unshare-user", argv)
 
     def test_profile_denies_writes_then_reallows_only_the_write_set(self):
         text = fence_darwin.profile(["/some/worktree"])
@@ -307,18 +327,15 @@ class DarwinSandboxExecTest(unittest.TestCase):
             self.assertNotIn(f'(subpath "{os.path.join(common, "hooks")}")', text)
             self.assertNotIn(f'(subpath "{os.path.join(common, "worktrees")}")', text)
 
-    def test_darwin_without_sandbox_exec_fails_closed_naming_platform_and_switch(self):
+    def test_darwin_without_sandbox_exec_fails_closed_with_install_remedy(self):
         with self.darwin(), \
                 patch.object(fence_darwin, "sandbox_exec_available", return_value=False):
             self.assertEqual(fence.backend_available(), (
                 False, f"{fence_darwin.SANDBOX_EXEC} is missing or not executable"))
             with self.assertRaises(fence.FenceUnavailable) as caught:
                 fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
-        # attachment_start and attachment_resume interpolate this message
-        # verbatim into their 409s, so platform and switch ride along.
-        for needle in ("darwin", fence_darwin.SANDBOX_EXEC,
-                       "PARTYLINE_FEATURE_WRITE_FENCE=0", "refusing"):
-            self.assertIn(needle, str(caught.exception))
+        self.assertIn("sandbox-exec", str(caught.exception))
+        self.assertIn("Remedy:", str(caught.exception))
 
     def test_a_platform_with_no_backend_fails_closed(self):
         with patch.object(sys, "platform", "win32"):
