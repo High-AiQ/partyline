@@ -158,7 +158,7 @@ class RoleBriefingTests(unittest.TestCase):
         text = worker_instructions(captained=True)
         self.assertIn("name the SHA and the gates you actually ran", text)
 
-    def test_dogfooding_requires_the_checkout_refreshed_before_any_planning(self):
+    def test_dogfooding_has_the_captain_refresh_and_restart_sequence(self):
         packs = {
             "splitting": role_instructions(["assign", "create_child"], "root", None),
             "leaf": role_instructions(["assign", "report"], "leaf", "parent", 2),
@@ -168,9 +168,19 @@ class RoleBriefingTests(unittest.TestCase):
             with self.subTest(label):
                 self.assertIn("behind or STALE", text)
                 self.assertIn("the service runs ahead of it", text)
-                self.assertIn("Refresh the checkout before planning any work from it", text)
-                self.assertIn("ask right away", text)
-                self.assertIn("a person pulls", text)
+                self.assertIn("and clean, refresh it before planning", text)
+                self.assertIn(
+                    "After your change is merged, refresh the checkout you are attached to too", text)
+                self.assertIn("as captain, fast-forward it with `git pull --ff-only`", text)
+                self.assertIn("the checkout you are attached to", text)
+                self.assertIn("git pull --ff-only", text)
+                self.assertIn("git -c credential.helper='!gh auth git-credential' pull --ff-only", text)
+                self.assertIn("Verify HEAD with `git rev-parse HEAD`", text)
+                self.assertIn("run `uv sync --locked`", text)
+                self.assertIn("and file the restart request for a person to approve or decline", text)
+                self.assertIn("Never ask the person to pull; ask first if the checkout is dirty", text)
+                self.assertIn("reset, stash or discard in a person's checkout", text)
+                self.assertNotIn("a person pulls", text)
                 self.assertIn("Never plan dogfooding from a stale base", text)
 
     def test_evidence_reuse_is_permitted_not_mandated_at_every_level(self):
