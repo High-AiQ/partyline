@@ -1,5 +1,8 @@
-{"type":"assistant","timestamp":"fresh","uuid":"reply-1","message":{"content":[{"type":"text","text":"first answer"},{"type":"tool_use","name":"Read"},{"type":"text","text":"second paragraph"}]}}
-{"type":"assistant","timestamp":"fresh","uuid":"reply-1","message":{"content":[{"type":"text","text":"duplicate answer"}]}}
+{"type":"assistant","timestamp":"fresh","uuid":"narration","message":{"content":[{"type":"text","text":"Let me check the config first."},{"type":"tool_use","name":"Read"}]}}
+{"type":"assistant","timestamp":"fresh","uuid":"text-only","message":{"content":[{"type":"text","text":"direct answer"}]}}
+{"type":"assistant","timestamp":"fresh","uuid":"turn-narration","message":{"content":[{"type":"text","text":"I’ll inspect the config."},{"type":"tool_use","name":"Read"}]}}
+{"type":"assistant","timestamp":"fresh","uuid":"turn-final","message":{"content":[{"type":"text","text":"final answer"}]}}
+{"type":"assistant","timestamp":"fresh","uuid":"turn-final","message":{"content":[{"type":"text","text":"duplicate answer"}]}}
 {"type":"assistant","timestamp":"fresh","uuid":"sidechain","isSidechain":true,"message":{"content":[{"type":"text","text":"private work"}]}}
 {"type":"user","timestamp":"fresh","uuid":"question","message":{"content":[{"type":"text","text":"user input"}]}}
 {"type":"assistant","timestamp":"stale","uuid":"old","message":{"content":[{"type":"text","text":"old answer"}]}}
