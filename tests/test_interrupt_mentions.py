@@ -73,6 +73,23 @@ class BangParsingTest(unittest.TestCase):
             with self.subTest(body=body):
                 self.assertEqual(interrupt_names(body), set())
 
+    def test_an_at_sign_inside_a_url_is_not_a_mention(self):
+        # A Teams deep link embeds an @ between a hex segment and the tenant
+        # host; that must never wake a process. Live repro on 3ed357f.
+        body = ("see https://teams.microsoft.com/l/message/19:c0745d4ddce049"
+                "8f8b96285a7c95a52f@thread.tacv2/1790200463543?tenantId=x")
+        self.assertEqual(mentioned_names(body), set())
+        self.assertEqual(interrupt_names(body), set())
+
+    def test_an_email_address_in_prose_is_not_a_mention(self):
+        self.assertEqual(mentioned_names("mail greg@example.com now"), set())
+
+    def test_a_mention_still_works_next_to_url_looking_text(self):
+        # The fix must not cost the ordinary case: a real mention right
+        # before or after something URL-shaped is still delivered.
+        self.assertEqual(mentioned_names("@sol see https://x.example/a@b"), {"sol"})
+        self.assertEqual(mentioned_names("check a@b.com @sol"), {"sol"})
+
 
 class Adapter:
     """The narrow adapter surface the interrupt policy touches."""
