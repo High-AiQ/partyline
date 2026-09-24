@@ -203,6 +203,22 @@ def _read_ref(root: str, ref: str) -> str | None:
     return None
 
 
+def mirror_branch_ref(cwd: str, conv_id: str, branch: str) -> str | None:
+    """The line's branch tip as its fence mirror holds it, when a mirror exists.
+
+    A fenced line commits to the mirror branch, never the real ref, so an
+    accept needs the mirror to tell the line's own work from a stray SHA.
+    ``None``: not a linked worktree, no mirror on disk, or no ref in it.
+    """
+    gitdir = _worktree_gitdir(cwd)
+    if gitdir is None:
+        return None
+    mirror = _mirror_dir(common_gitdir(gitdir), conv_id)
+    if not os.path.isdir(mirror):
+        return None
+    return _read_ref(mirror, f"refs/heads/{branch}")
+
+
 def darwin_write_paths(cwd: str) -> list[str]:
     """The writable git paths for one checkout on Darwin.
 

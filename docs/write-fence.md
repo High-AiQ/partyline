@@ -132,7 +132,9 @@ the real refs really do move):
 
 - The line's branch advances **in the mirror**. `git log` inside the line
   is correct; the real branch moves only when the captain accepts the
-  handed-off SHA (which works, because the commit object is shared).
+  handed-off SHA (which works, because the commit object is shared):
+  accept reads the mirror ref (`git_fence.mirror_branch_ref`) to tell the
+  line's own work from a stray, then fast-forwards the real ref.
 - Deleting a ref that lives only in `packed-refs` fails with a warning;
   the line's own branch is always loose in the mirror, so its own branch
   operations are unaffected.
