@@ -223,7 +223,11 @@ wrong commit. A captain of the parent — or the line's own captain, marking
 hand-off — records it with `POST /api/conversations/<id>/accept` and JSON
 `{"sha":"..."}`. The server verifies the SHA exists, verifies the line's branch
 can fast-forward to it, moves the branch, records it on the line, and announces
-it there. Accepting only fast-forwards: a branch that carries commits the SHA
+it there. Under the write fence the line commits to its mirror branch, so
+accept also reads that mirror when one exists: a SHA equal to the mirror tip
+or descended from it is landed on the real branch with a compare-and-swap ref
+update, while a mirror tip the SHA does not carry (ahead of it or diverging
+from it) is refused as a stray. Accepting only fast-forwards: a branch that carries commits the SHA
 does not include, or a SHA from an unrelated history, is refused with 409
 rather than merged or rebased, so accepting never orphans a commit. Nothing is
 pushed; the captain still pushes after its own review, as before. The recorded

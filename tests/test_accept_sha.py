@@ -253,6 +253,92 @@ class AcceptShaTest(unittest.TestCase):
         self.assertIn("(hand-off: ", rider)
         self.assertIn(f"accepted {sha[:12]}", rider)
 
+    # -- the fenced branch ----------------------------------------------------
+
+    def mirror(self, sha):
+        """A fence mirror holding the line's branch, as a fenced commit leaves it."""
+        from partyline import git_fence
+
+        self.addCleanup(setattr, git_fence, "FENCE_ROOT", git_fence.FENCE_ROOT)
+        git_fence.FENCE_ROOT = os.path.join(self.directory.name, "fence")
+        gitdir = git_fence._worktree_gitdir(self.worktree)
+        mirror = git_fence._mirror_dir(git_fence.common_gitdir(gitdir), self.kid["id"])
+        git_fence._write_mirror_text(mirror, "refs/heads/line/kid", sha + "\n")
+        return mirror
+
+    def test_a_fenced_line_s_handoff_lands_on_the_real_branch(self):
+        # Under the write fence the branch advances in the mirror and the real
+        # ref stays at the branch point, so the parent's accept used to refuse
+        # the hand-off with "no commits of its own". The mirror tells accept
+        # this SHA is the line's own work: land it on the real branch.
+        real = self.branch_head()
+        fenced = self.commit("the real work")
+        self.mirror(fenced)
+        _git("update-ref", "refs/heads/line/kid", real, fenced, cwd=self.repo)
+        self.assertNotEqual(self.branch_head(), fenced)
+        response = self.accept(fenced)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["moved"])
+        self.assertEqual(self.branch_head(), fenced)
+        self.assertEqual(
+            self.db.get_conversation(self.kid["id"])["accepted_sha"], fenced)
+        self.assertEqual(
+            _git("rev-parse", "--abbrev-ref", "HEAD", cwd=self.worktree).stdout.strip(),
+            "line/kid")
+        self.assertEqual(_git("status", "--porcelain", cwd=self.worktree).stdout, "")
+
+    def test_a_sha_that_diverges_from_the_mirror_is_a_stray(self):
+        real = self.branch_head()
+        self.commit("the line's own work")
+        self.mirror(self.branch_head())
+        _git("update-ref", "refs/heads/line/kid", real, self.branch_head(), cwd=self.repo)
+        stray = _identity("commit-tree", EMPTY_TREE, "-p", real, "-m", "stray",
+                          cwd=self.repo).stdout.strip()
+        response = self.accept(stray)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("stray", response.json()["detail"])
+        self.assertNotEqual(self.branch_head(), stray)
+        self.assertIsNone(self.db.get_conversation(self.kid["id"])["accepted_sha"])
+
+    def test_a_sha_behind_the_mirror_tip_is_a_stray(self):
+        # the mirror is the line's actual state: a hand-off older than the
+        # mirror tip does not carry the line's work and is refused, so the
+        # record never lags what the line really holds
+        real = self.branch_head()
+        fenced = self.commit("the line's own work")
+        newer = self.commit("more work past the hand-off")
+        self.mirror(newer)
+        _git("update-ref", "refs/heads/line/kid", real, newer, cwd=self.repo)
+        response = self.accept(fenced)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("stray", response.json()["detail"])
+        self.assertNotEqual(self.branch_head(), fenced)
+        self.assertIsNone(self.db.get_conversation(self.kid["id"])["accepted_sha"])
+
+    def test_a_fenced_accept_moves_the_real_ref_by_cas(self):
+        # the checked-out fenced worktree is already at the mirror tip: the
+        # real ref must move by update-ref compare-and-swap against the
+        # previously read tip, not by a merge in the worktree
+        real = self.branch_head()
+        fenced = self.commit("the real work")
+        self.mirror(fenced)
+        _git("update-ref", "refs/heads/line/kid", real, fenced, cwd=self.repo)
+        calls = []
+        original = line_worktree_module._git
+
+        def spy(*args, cwd):
+            calls.append(args)
+            return original(*args, cwd=cwd)
+
+        with patch.object(accept_sha_module, "_git", side_effect=spy), \
+                patch.object(line_worktree_module, "_git", side_effect=spy):
+            response = self.accept(fenced)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn(("update-ref", "refs/heads/line/kid", fenced, real), calls)
+        self.assertNotIn(("merge", "--ff-only", "--quiet", fenced), calls)
+        self.assertEqual(self.branch_head(), fenced)
+        self.assertEqual(_git("status", "--porcelain", cwd=self.worktree).stdout, "")
+
     # -- refusals ------------------------------------------------------------
 
     def test_an_unknown_or_non_hex_sha_is_refused(self):
@@ -376,8 +462,8 @@ class AcceptShaTest(unittest.TestCase):
             return original(*args, cwd=cwd)
 
         def branch_refuses(*args, cwd):
-            if args[:1] == ("branch",):
-                return subprocess.CompletedProcess(args, 1, "", "error: cannot force update")
+            if args[:1] == ("update-ref",):
+                return subprocess.CompletedProcess(args, 1, "", "error: cannot move ref")
             return original(*args, cwd=cwd)
 
         sha = self.commit_side("parked on a side branch")
