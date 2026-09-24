@@ -10,7 +10,7 @@ interrupt, and only when a human wrote it.
 import re
 import unicodedata
 
-MENTION_RE = re.compile(r"@(!?)([A-Za-z0-9][A-Za-z0-9_.-]*)")
+MENTION_RE = re.compile(r"(?<![A-Za-z0-9_])@(!?)([A-Za-z0-9][A-Za-z0-9_.-]*)")
 
 
 def _normalized(body: str) -> str:
