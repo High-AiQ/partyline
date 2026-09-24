@@ -130,6 +130,22 @@ class LaunchArgvTest(unittest.TestCase):
         self.assertIn(os.path.expanduser("~/.cache"), guests)
         self.assertIn(os.path.expanduser("~/.config"), guests)
 
+    def test_docker_home_is_a_writable_bind_when_it_exists(self):
+        os.makedirs(os.path.join(self.home.name, ".docker"), exist_ok=True)
+        with patch.object(fence, "bwrap_available", return_value=True):
+            argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
+        pairs = [(argv[i + 1], argv[i + 2]) for i, a in enumerate(argv) if a == "--bind"]
+        guests = {dst for _src, dst in pairs}
+        self.assertIn(os.path.expanduser("~/.docker"), guests)
+
+    def test_missing_docker_home_binds_nothing(self):
+        self.assertFalse(os.path.lexists(os.path.expanduser("~/.docker")))
+        with patch.object(fence, "bwrap_available", return_value=True):
+            argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
+        pairs = [(argv[i + 1], argv[i + 2]) for i, a in enumerate(argv) if a == "--bind"]
+        guests = {dst for _src, dst in pairs}
+        self.assertNotIn(os.path.expanduser("~/.docker"), guests)
+
     def test_manifest_fence_args_apply_only_when_fenced(self):
         att = _att("/tmp", metadata={"fence_args": ["--yolo"], "write_paths": []})
         with patch.object(fence, "bwrap_available", return_value=True):
@@ -235,6 +251,16 @@ class DarwinSandboxExecTest(unittest.TestCase):
         self.assertEqual(argv[1], "-p")
         self.assertTrue(argv[2].startswith("(version 1)\n(allow default)\n(deny file-write*)\n"))
         self.assertEqual(argv[3:], ["cli", "--go"])
+
+    def test_darwin_docker_home_allowed_only_when_it_exists(self):
+        with self.darwin(), \
+                patch.object(fence_darwin, "sandbox_exec_available", return_value=True):
+            docker = os.path.expanduser("~/.docker")
+            argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
+            self.assertNotIn(f'(subpath "{docker}")', argv[2])
+            os.makedirs(docker, exist_ok=True)
+            argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
+            self.assertIn(f'(subpath "{docker}")', argv[2])
 
     def test_darwin_fence_args_apply_and_dedupe(self):
         flag = "--dangerously-bypass-approvals-and-sandbox"
