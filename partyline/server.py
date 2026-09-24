@@ -40,6 +40,7 @@ from .bind import (BindConfig, apply_server_config, load_bind_config, load_doten
                    parse_bind_args, uvicorn_config)
 from .compact_routes import register_compact_route
 from . import features
+from . import fence_probe
 from .adapters import (
     ADAPTERS,
     ADAPTER_METADATA,
@@ -132,6 +133,14 @@ async def _run_automatic_reattachment() -> None:
 @asynccontextmanager
 async def lifespan(app):
     deployment.prime()  # pin the served checkout's HEAD to this boot, before any pull
+    probe_result = (True, "", "")
+    if features.enabled("write_fence"):
+        probe_result = fence_probe.probe()
+        if not probe_result[0]:
+            logger.warning("write-fence preflight failed: %s; remedy: %s",
+                           probe_result[1], probe_result[2])
+    fence_probe.set_result(probe_result)
+    app.state.fence_status = fence_probe.status(probe_result)
     runtime.db.mark_stale_attachments()
     await asyncio.to_thread(sweep_orphaned_worktrees, runtime.db)
     automatic_task = asyncio.create_task(_run_automatic_reattachment())
@@ -308,6 +317,12 @@ async def shutdown(request: Request, body: ShutdownRequest | None = None):
 def list_features():
     """Which flags this server runs with, so a client or a captain can tell."""
     return features.current().describe()
+
+
+@app.get("/api/fence/status")
+def fence_status():
+    """Expose the one boot-time fence probe to clients and operators."""
+    return getattr(app.state, "fence_status", fence_probe.status())
 
 
 @app.get("/api/adapters", response_model=list[AdapterMetadataResponse])
@@ -497,6 +512,10 @@ async def _serve_socket(ws: WebSocket, conv_id: str, handle: str):
 
 def main(argv: Sequence[str] | None = None):
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == "doctor":
+        from .doctor import run
+
+        return run(ADAPTER_METADATA)
     parsed = parse_bind_args(arguments)
     config = load_bind_config(parsed.config)
     host, port = apply_server_config(app.state, parsed, os.environ, config)

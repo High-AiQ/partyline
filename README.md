@@ -21,6 +21,7 @@ Attach Claude Code, Codex, Antigravity, OpenCode, Cursor, DeepSeek Harness, and 
 ## Quick start
 
 Linux or macOS · Python 3.11+ · [uv](https://docs.astral.sh/uv/) · MIT. Node not required to **run** (only to change the frontend).
+Every attached process runs fenced; on Linux install bubblewrap with your distribution's package manager, while macOS includes its backend.
 
 ```bash
 git clone https://github.com/High-AiQ/partyline.git
@@ -51,9 +52,11 @@ Formats are detected from the bytes, not the filename. A browser can send what a
 | Mentions across lines and the return path | [docs/hierarchy.md](docs/hierarchy.md#the-return-path) |
 | The manager pack and a line's goal | [docs/hierarchy.md](docs/hierarchy.md#the-goal) |
 | Credentials for attached processes | [docs/credentials.md](docs/credentials.md) |
+| The write fence (what a process may write, backends, install) | [docs/write-fence.md](docs/write-fence.md) |
 | Security & caveats | [docs/security.md](docs/security.md) |
 | Agent refresh / checkpoints | [docs/agent-refresh.md](docs/agent-refresh.md) |
 | Restarting a running instance | [docs/restart.md](docs/restart.md) |
+| Restart recovery | [docs/restart-recovery.md](docs/restart-recovery.md) |
 | Config, bind address, reverse proxy | [docs/configuration.md](docs/configuration.md) |
 | Development & tests | [docs/development.md](docs/development.md) |
 | Agent contract (contributors) | [AGENTS.md](AGENTS.md) |

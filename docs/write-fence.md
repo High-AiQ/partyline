@@ -8,8 +8,8 @@ where writes land.
 | DO | DO NOT |
 | --- | --- |
 | Wrap at the one spawn point (`adapters.base.Adapter.start`) so no adapter can forget it | Wrap per adapter, or leave one spawn path unwrapped |
-| Fail closed: backend missing or unable to run, no process — a 409 naming the reason, the platform, and the switch | Fall back to an unconfined launch, ever |
-| Ship a backend for every platform partyline runs on | Fail closed on a platform with no backend without naming the switch |
+| Fail closed: backend missing or unable to run, no process — a 409 naming the reason and person-side install remedy | Fall back to an unconfined launch, ever |
+| Ship a backend for every supported platform | Fail closed without naming the install remedy |
 | Push over HTTPS with gh credentials or `ssh -F /dev/null` from a fenced process | Expect the system ssh config to be readable inside the fence |
 | Treat the fence as the line's real sandbox | Assume the CLI's own sandbox also applies under the fence |
 | Grant extra scope explicitly, from a person or a captain above, recorded on the line | Let a line widen its own write set, or grant by implication |
@@ -20,8 +20,8 @@ where writes land.
 
 `fence.launch_argv` picks the backend by `sys.platform` and refuses to
 spawn when the chosen one cannot run (`fence.backend_available()` returns
-a human-readable reason; the 409 from attach and resume carries it with
-the platform and `PARTYLINE_FEATURE_WRITE_FENCE=0`).
+a human-readable reason; startup preflight and the attach 409 include the
+same platform-specific person-side install remedy).
 
 - **Linux — bubblewrap.** A mount namespace: `/` bound read-only, fresh
   `/dev` and `/proc`, a private tmpfs over `/tmp`, each write-set path
@@ -46,10 +46,10 @@ on every macOS this code runs on.
 
 ## The wrap
 
-`partyline/fence.py` builds the plan. On Linux:
+`partyline/fence.py` builds the plan and explicitly creates the user namespace. On Linux:
 
 ```
-bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp
+bwrap --ro-bind / / --dev /dev --proc /proc --unshare-user --tmpfs /tmp
       --bind <write-set path> <same path> ... --die-with-parent -- <command>
 ```
 
@@ -166,10 +166,12 @@ spawn time binds nothing.
 
 ## Feature flag
 
-`write_fence` (default **on**, stable). `PARTYLINE_FEATURE_WRITE_FENCE=0`
-or `[features] write_fence = false` turns it off for one emergency
-restart cycle. It is not a permanent configuration: an unfenced launch
-is what the 409 path exists to avoid.
+`write_fence` (default **on**, stable). At boot, Partyline runs the selected
+backend once against a harmless command. A failed check is logged and shown
+at `/api/fence/status`; attach and resume remain refused with the same
+person-side install remedy. `partyline doctor` runs the probe and checks the
+CLI requirements declared by installed adapter manifests. The emergency
+`PARTYLINE_FEATURE_WRITE_FENCE=0` switch remains for one restart cycle only.
 
 ## Adapter notes
 

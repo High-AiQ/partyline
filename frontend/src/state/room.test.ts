@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { room } from "./room.svelte.js";
-import { restart } from "./restart.svelte.js";
 import { session } from "./session.svelte.js";
 import { wire } from "./wire.svelte.js";
 import type { WireEventHandler } from "./wire.svelte.js";
 import { api } from "../lib/api";
+import { fenceApi } from "../lib/fence-api";
+import { restartApi } from "../lib/restart-api";
 import type { Attachment, Conversation, ConversationDetail } from "../lib/contracts";
 
 const jack: Attachment = {
@@ -83,7 +84,7 @@ describe("room roster snapshots that were in flight during a removal", () => {
 });
 
 describe("resync after a reconnect", () => {
-  it("re-reads the pending restart request the outage may have missed", async () => {
+  it("re-reads restart and fence status the outage may have missed", async () => {
     room.conversation = conversation;
     vi.spyOn(api, "conversation").mockResolvedValue({
       conversation,
@@ -94,11 +95,21 @@ describe("resync after a reconnect", () => {
       presence: null,
     });
     vi.spyOn(room.history, "catchUp").mockResolvedValue(undefined);
-    const load = vi.spyOn(restart, "load").mockResolvedValue(undefined);
+    const pending = vi.spyOn(restartApi, "pending").mockResolvedValue({ request: null });
+    const status = vi.spyOn(fenceApi, "status").mockResolvedValue({
+      ok: false,
+      backend: "bubblewrap",
+      platform: "linux",
+      reason: "user namespace unavailable",
+      remedy: "apt-get install -y bubblewrap",
+    });
 
     await room.resync();
+    await vi.waitFor(() => {
+      expect(status).toHaveBeenCalledTimes(1);
+    });
 
-    expect(load).toHaveBeenCalledTimes(1);
+    expect(pending).toHaveBeenCalledTimes(1);
   });
 });
 

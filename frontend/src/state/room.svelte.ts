@@ -164,7 +164,7 @@ class Room {
     // The pending restart request is event-carried state like attachment
     // status: filed while the wire was down, its frame reached no tab, so
     // re-read it here instead of leaving the banner hidden until a refresh.
-    void restart.load().catch(ignoreBackgroundFailure);
+    void restart.load(true).catch(ignoreBackgroundFailure);
   }
 
   async toggleReaction(messageId: number, emoji: string): Promise<void> {

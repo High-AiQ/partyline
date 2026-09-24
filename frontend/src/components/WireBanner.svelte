@@ -12,7 +12,21 @@
   import { restart } from "../state/restart.svelte.js";
   import { room } from "../state/room.svelte.js";
   import { wire } from "../state/wire.svelte.js";
+  import { fence } from "../state/fence.svelte.js";
 </script>
+
+{#if fence.status && !fence.status.ok}
+  <div
+    id="fenceUnavailable"
+    class="fixed left-1/2 top-[72px] z-68 flex max-w-[min(720px,92vw)] -translate-x-1/2 flex-col gap-1 rounded-[5px] border border-red/55 bg-ink-2 px-[14px] py-2 text-[11px] text-cream-dim shadow-[0_12px_30px_rgb(0_0_0/0.45)]"
+    role="alert"
+    aria-live="assertive"
+  >
+    <strong>Write fence unavailable on {fence.status.platform} ({fence.status.backend})</strong>
+    <span>{fence.status.reason}</span>
+    {#if fence.status.remedy}<span>Remedy: {fence.status.remedy}</span>{/if}
+  </div>
+{/if}
 
 {#if restart.request && !wire.outage}
   <div
