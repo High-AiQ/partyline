@@ -35,6 +35,8 @@ import type { HelloEvent, ReattachAction, WireEvent, WireMessageCommand } from "
 
 export const GRACE_MS = 3000;
 export const RETRY_MS = 1500;
+/** A tab hidden shorter than this is treated as a quick switch, not sleep. */
+export const WAKE_VERIFY_MS = 1000;
 export interface WireContext {
   wasReady: boolean;
   claimRejected: boolean;
@@ -95,6 +97,15 @@ class Wire {
   #graceTimer: ReturnType<typeof setTimeout> | null = null;
   #retryTimer: ReturnType<typeof setTimeout> | null = null;
   #claimRejected = false;
+  #hiddenAt = 0;
+  #session: {
+    convId: string;
+    identity: WireIdentity;
+    onEvent: WireEventHandler;
+    onResync: WireResyncHandler;
+    onHandshake: WireHandshakeHandler;
+    authenticationPhase: SocketAuthPhase;
+  } | null = null;
 
   /** The live socket, for tests that need to drop or fake traffic on it. */
   get socket(): WebSocket | null {
@@ -120,6 +131,14 @@ class Wire {
     this.#teardown();
     this.ready = false;
     this.#claimRejected = false;
+    this.#session = {
+      convId,
+      identity,
+      onEvent,
+      onResync,
+      onHandshake,
+      authenticationPhase,
+    };
 
     const startedWith = readAccessToken();
     const socket = new WebSocket(authenticatedSocketUrl(`/ws/${convId}`, location, startedWith));
@@ -237,9 +256,34 @@ class Wire {
 
   /** Send on the open wire. Returns false if there is nothing to send on. */
   send(payload: WireMessageCommand): boolean {
-    if (!this.ready || this.#socket?.readyState !== WebSocket.OPEN) return false;
-    this.#socket.send(JSON.stringify(WireMessageCommandSchema.parse(payload)));
-    return true;
+    const socket = this.#socket;
+    if (!this.ready || socket?.readyState !== WebSocket.OPEN) {
+      this.#reconnectNow();
+      return false;
+    }
+    try {
+      socket.send(JSON.stringify(WireMessageCommandSchema.parse(payload)));
+      return true;
+    } catch {
+      this.#reconnectNow();
+      return false;
+    }
+  }
+
+  /** Record when the tab went hidden so wake can tell sleep from a quick switch. */
+  noteHidden(): void {
+    this.#hiddenAt = Date.now();
+  }
+
+  /** After the tab wakes, replace a socket that may be OPEN-but-dead after sleep. */
+  verifyOnWake(): void {
+    const session = this.#session;
+    if (!session || this.stopped || this.#claimRejected) return;
+    const hiddenAt = this.#hiddenAt;
+    this.#hiddenAt = 0;
+    if (!hiddenAt || Date.now() - hiddenAt < WAKE_VERIFY_MS) return;
+    this.ready = false;
+    this.#reconnectNow();
   }
 
   /** Accept or cancel the exact same-line offer reported by the server. */
@@ -257,6 +301,8 @@ class Wire {
     this.#teardown();
     this.ready = false;
     this.#claimRejected = false;
+    this.#session = null;
+    this.#hiddenAt = 0;
   }
 
   /** Say that the server is speaking a protocol this document does not know. */
@@ -300,6 +346,17 @@ class Wire {
       this.#graceTimer = null;
       this.outage = { message: "the wire is down — reconnecting…", stopped: false };
     }, GRACE_MS);
+  }
+
+  #reconnectNow(): void {
+    const session = this.#session;
+    if (!session || this.#claimRejected || this.stopped) return;
+    if (this.#retryTimer !== null) {
+      clearTimeout(this.#retryTimer);
+      this.#retryTimer = null;
+    }
+    const { convId, identity, onEvent, onResync, onHandshake, authenticationPhase } = session;
+    this.connect(convId, identity, onEvent, onResync, onHandshake, authenticationPhase);
   }
 
   #teardown(): void {

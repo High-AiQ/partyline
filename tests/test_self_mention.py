@@ -12,6 +12,7 @@ from partyline.conversation_routes import register_conversation_routes
 from partyline.db import Db
 from partyline.hierarchy_routes import hierarchy_router
 from partyline.media import MediaStore
+from partyline.message_routes import message_router
 from partyline.message_routing import self_mention_reason
 from partyline.runtime import ChatRuntime
 
@@ -26,6 +27,7 @@ class SelfMentionTest(unittest.TestCase):
         app = FastAPI()
         install_auth_guard(app, self.db)
         app.include_router(hierarchy_router(self.runtime))
+        app.include_router(message_router(self.runtime, MediaStore(self.db, self.directory.name + "/media")))
 
         async def fake_start(att, **kwargs):
             return att

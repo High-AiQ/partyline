@@ -18,6 +18,7 @@ from partyline.reports import wake_message
 from partyline.machine_scope import deny_unless_attachment
 from partyline.hierarchy_routes import hierarchy_router
 from partyline.media import MediaStore
+from partyline.message_routes import message_router
 from partyline.media_routes import media_router
 from partyline.runtime import ChatRuntime
 from partyline.conversation_routes import register_conversation_routes
@@ -52,6 +53,7 @@ class HierarchyApiTest(unittest.TestCase):
         app = FastAPI()
         install_auth_guard(app, self.db)
         app.include_router(hierarchy_router(self.runtime))
+        app.include_router(message_router(self.runtime, self.media))
         app.include_router(media_router(self.runtime, self.media))
 
         async def fake_start(att, **kwargs):

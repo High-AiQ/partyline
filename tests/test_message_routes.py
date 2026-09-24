@@ -98,6 +98,17 @@ class MessageRoutesTest(unittest.TestCase):
         self.assertEqual(self.ids(second), [message["id"] for message in self.messages[30:]])
         self.assertFalse(second.json()["has_more"])
 
+    def test_human_post_matches_socket_routing(self):
+        posted = self.client.post(
+            "/api/conversations/line/messages",
+            json={"body": "hello from REST"},
+        )
+        self.assertEqual(posted.status_code, 200)
+        body = posted.json()
+        self.assertEqual(body["sender"], "greg")
+        self.assertEqual(body["sender_type"], "human")
+        self.assertEqual(body["body"], "hello from REST")
+
     def test_invalid_page_shapes_are_rejected(self):
         both = self.client.get(
             "/api/conversations/line/messages",

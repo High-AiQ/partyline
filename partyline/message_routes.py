@@ -1,4 +1,4 @@
-"""Conversation detail and paginated human-history reads."""
+"""Conversation detail, paginated human-history reads, and reliable REST send."""
 
 import asyncio
 
@@ -6,8 +6,11 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from .attachment_view import attachment_response
 from .auth_guard import request_principal
-from .machine_scope import deny_unless
+from .contracts import MessageResponse
+from .hierarchy_contracts import MessageIn
+from .machine_scope import deny_unless, is_human
 from .message_contracts import MessagePageResponse
+from .message_routing import post_identified
 from .reaction_store import attach
 
 
@@ -53,5 +56,17 @@ def message_router(runtime, media) -> APIRouter:
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         return {"messages": attach(runtime.db, media.attach(rows), principal), "has_more": has_more}
+
+    @router.post(
+        "/api/conversations/{conv_id}/messages",
+        response_model=MessageResponse,
+    )
+    async def post_message(request: Request, conv_id: str, body: MessageIn):
+        principal = request_principal(request)
+        capability = (
+            "write" if principal.conv_id == conv_id or is_human(principal) else "assign"
+        )
+        deny_unless(runtime.db, principal, conv_id, capability)
+        return await post_identified(runtime, conv_id, principal, body.body)
 
     return router

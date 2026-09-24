@@ -10,7 +10,6 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from .auth_guard import request_principal
 from .contracts import (
     ConversationResponse,
-    MessageResponse,
     ConversationsChangedEvent,
 )
 from .mention_relay import live_manager, post_private, ring_workers
@@ -31,7 +30,6 @@ from .hierarchy_contracts import (
     ChildIn,
     LeadIn,
     LeadOut,
-    MessageIn,
     ParentIn,
     Report,
     ReportIn,
@@ -281,17 +279,5 @@ def hierarchy_router(runtime) -> APIRouter:
             )
         except ReportError as exc:
             raise _http(exc) from exc
-
-    @router.post(
-        "/api/conversations/{conv_id}/messages",
-        response_model=MessageResponse,
-    )
-    async def post_message(request: Request, conv_id: str, body: MessageIn):
-        principal = request_principal(request)
-        capability = (
-            "write" if principal.conv_id == conv_id or is_human(principal) else "assign"
-        )
-        deny_unless(db, principal, conv_id, capability)
-        return await post_identified(runtime, conv_id, principal, body.body)
 
     return router
