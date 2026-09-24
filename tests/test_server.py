@@ -379,6 +379,27 @@ class ServerTest(unittest.TestCase):
             self.arun(coroutine)
         self.assertEqual(raised.exception.status_code, status)
 
+    def test_lifespan_probes_once_and_exposes_failure_and_remedy(self):
+        result = (False, "user namespace unavailable", "apt-get install -y bubblewrap")
+
+        async def exercise():
+            with overridden(write_fence=True), patch.object(
+                server.fence_probe, "probe", return_value=result
+            ) as probe:
+                async with server.lifespan(server.app):
+                    probe.assert_called_once_with()
+                    status = server.fence_status()
+                    self.assertFalse(status["ok"])
+                    self.assertEqual(status["reason"], result[1])
+                    self.assertEqual(status["remedy"], result[2])
+
+        self.arun(exercise())
+
+    def test_doctor_subcommand_returns_the_doctors_exit_code(self):
+        with patch("partyline.doctor.run", return_value=1) as doctor:
+            self.assertEqual(server.main(["doctor"]), 1)
+        doctor.assert_called_once_with(server.ADAPTER_METADATA)
+
     def add_attachment(self, ident, name="terra", status="running", owner=None):
         server.runtime.db.add_attachment(
             ident, "line", name, "fake", ["fake"], self.directory.name, owner)
@@ -1528,11 +1549,12 @@ class ShutdownTest(ServerTest):
         )
 
         async def exercise():
-            async with server.lifespan(server.app):
-                await server.app.state.automatic_reattach_task
-                self.assertIn("a1", server.runtime.live)
-                self.assertIsNone(server.runtime.db.get_restart_plan())
-                self.assertEqual(server.runtime.sockets, {})
+            with patch.object(server.fence_probe, "probe", return_value=(True, "", "")):
+                async with server.lifespan(server.app):
+                    await server.app.state.automatic_reattach_task
+                    self.assertIn("a1", server.runtime.live)
+                    self.assertIsNone(server.runtime.db.get_restart_plan())
+                    self.assertEqual(server.runtime.sockets, {})
 
         self.arun(exercise())
 

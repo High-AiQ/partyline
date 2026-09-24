@@ -575,7 +575,8 @@ enforce it. A prose warning that has no executable guard is not a completed less
   `_PINNED`/`_CLAIMED` so neighbours cannot swap transcripts), and the 45s mark warns once and keeps
   watching for as long as the process is alive. Guard: an adapter's silence about a live process is
   never a reason to stop listening to it — and readiness that is declared but not enforced lets
-  deliveries flow to an attachment that can never answer. Adversarial review then found two ways
+  deliveries flow to an attachment that can never answer. The related persisted-speech analysis is
+  [Claude relay gap](claude-relay-gap.md). Adversarial review then found two ways
   the first fix was still wrong, both of them the same mistake in miniature — trusting a file's
   existence instead of its evidence. Ordering candidates by recency let two same-directory
   attachments adopt each other's sessions, with claim order deciding identity; ownership is now
