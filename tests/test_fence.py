@@ -437,8 +437,9 @@ class ProtectListTest(unittest.TestCase):
     def test_database_paths_include_runtime_lock_and_sqlite_sidecars(self):
         paths = [
             self.db.path, self.db.runtime_lock_path, self.db.path + "-wal",
-            self.db.path + "-shm", self.db.path + "-journal",
+            self.db.path + "-shm",
         ]
+        self.assertFalse(os.path.exists(self.db.path + "-journal"))
         self.assertTrue(all(os.path.isfile(path) for path in paths))
         for path in paths[1:]:
             os.unlink(path)
@@ -446,7 +447,7 @@ class ProtectListTest(unittest.TestCase):
         paths = fence_protect.database_paths(self.db)
         self.assertEqual(paths, [
             self.db.path, self.db.runtime_lock_path, self.db.path + "-wal",
-            self.db.path + "-shm", self.db.path + "-journal",
+            self.db.path + "-shm",
         ])
         self.assertTrue(all(os.path.isfile(path) for path in paths))
 
