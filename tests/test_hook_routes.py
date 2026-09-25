@@ -8,6 +8,7 @@ An unseen name is a 422, not a dropped receipt — that silence is how Grok's
 import json
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 from pydantic import ValidationError
 
@@ -15,7 +16,8 @@ from partyline.adapter_capabilities import adapter_completion
 from partyline.adapters import ADAPTER_METADATA
 from partyline.bind import BindConfig
 from partyline.hook_contracts import parse_hook_payload
-from partyline.hook_routes import hook_url
+from partyline.contracts import AttentionEvent
+from partyline.hook_routes import hook_url, surface_attention
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "hooks"
@@ -118,6 +120,24 @@ class HookUrlTest(unittest.TestCase):
         self.assertEqual(
             hook_url("att", BindConfig("::1", 8643), "tok"),
             "http://[::1]:8643/api/hooks/att/tok",
+        )
+
+
+class StartupAttentionTest(unittest.IsolatedAsyncioTestCase):
+    async def test_startup_prompt_uses_the_existing_attention_notice_and_event(self):
+        runtime = type("Runtime", (), {
+            "post_message": AsyncMock(), "broadcast": AsyncMock(),
+        })()
+        att = {"id": "att", "conv_id": "line", "name": "claude"}
+
+        await surface_attention(runtime, att, "trust prompt")
+
+        runtime.post_message.assert_awaited_once_with(
+            "line", "system", "system",
+            "⏸ @claude needs attention: trust prompt — use peek to view/answer the dialog",
+        )
+        runtime.broadcast.assert_awaited_once_with(
+            "line", AttentionEvent(attachment_id="att"),
         )
 
 

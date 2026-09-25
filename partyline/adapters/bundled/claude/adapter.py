@@ -188,9 +188,8 @@ class PartylineAdapter(BaseAdapter):
             if self.resume:
                 continue
             if waited in (12.0, 24.0):
-                os.write(self.master, b"\r")
-                await asyncio.sleep(1.0)
-                await self.send_keys(self.briefing())
+                if not await self.send_startup_briefing():
+                    return None
             elif waited > 45.0 and not warned:
                 warned = True
                 await self.post(
@@ -211,7 +210,11 @@ class PartylineAdapter(BaseAdapter):
         # hostage for as long as it lived, and the claim token removes the
         # reason for it: no two adapters can match the same transcript.
         if not self.resume:
-            await self.send_keys(self.briefing())
+            if not await self.send_startup_briefing():
+                return
+        else:
+            if not await self.release_startup_delivery():
+                return
         path = await self._await_transcript()
         if path is None:
             return

@@ -32,6 +32,15 @@ from .hook_contracts import hook_validation_detail, parse_hook_payload
 ATTENTION_RE = re.compile(r"permission|approv|trust|login|auth", re.IGNORECASE)
 
 
+async def surface_attention(runtime, att: dict, message: str) -> None:
+    """Post and broadcast the shared human-attention signal for an attachment."""
+    await runtime.post_message(
+        att["conv_id"], "system", "system",
+        f"⏸ @{att['name']} needs attention: {message} — use peek to view/answer the dialog",
+    )
+    await runtime.broadcast(att["conv_id"], AttentionEvent(attachment_id=att["id"]))
+
+
 def hook_url(att_id: str, bind: BindConfig, token: str = "") -> str:
     """Where this attachment's harness should post, token included."""
     host = f"[{bind.host}]" if ":" in bind.host else bind.host
@@ -79,11 +88,7 @@ async def handle_hook(runtime, presence, att_id: str, token: str, request: Reque
     # Only surface events that mean "a human must look at me" — idle chatter
     # from an agent waiting between mentions would spam the line.
     if message and ATTENTION_RE.search(message):
-        await runtime.post_message(
-            att["conv_id"], "system", "system",
-            f"⏸ @{att['name']} needs attention: {message} — use peek to view/answer the dialog",
-        )
-        await runtime.broadcast(att["conv_id"], AttentionEvent(attachment_id=att_id))
+        await surface_attention(runtime, att, message)
     return {"ok": True}
 
 
