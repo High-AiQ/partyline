@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 
+from . import db_sidecars
 from .line_worktree import repo_root
 
 
@@ -46,8 +47,7 @@ def protected_repo_roots(db) -> list[str]:
 
 def database_paths(db) -> list[str]:
     """The database file and the sidecars a fenced process must never write."""
-    return [db.path, db.runtime_lock_path,
-            f"{db.path}-wal", f"{db.path}-shm", f"{db.path}-journal"]
+    return db_sidecars.ensure(db)
 
 
 def own_repo_root(cwd: str) -> str | None:

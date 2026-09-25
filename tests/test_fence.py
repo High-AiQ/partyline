@@ -435,11 +435,32 @@ class ProtectListTest(unittest.TestCase):
         self.assertIsNone(fence_protect.own_repo_root(self.fix["line_wt"]))
 
     def test_database_paths_include_runtime_lock_and_sqlite_sidecars(self):
+        paths = [
+            self.db.path, self.db.runtime_lock_path, self.db.path + "-wal",
+            self.db.path + "-shm", self.db.path + "-journal",
+        ]
+        self.assertTrue(all(os.path.isfile(path) for path in paths))
+        for path in paths[1:]:
+            os.unlink(path)
+
         paths = fence_protect.database_paths(self.db)
         self.assertEqual(paths, [
             self.db.path, self.db.runtime_lock_path, self.db.path + "-wal",
             self.db.path + "-shm", self.db.path + "-journal",
         ])
+        self.assertTrue(all(os.path.isfile(path) for path in paths))
+
+        att = _att(self.directory.name)
+        att["db_paths"] = paths
+        with patch.object(fence, "bwrap_available", return_value=True):
+            argv = fence.launch_argv(FakeAdapter(att, ["cli"]))
+        read_only_binds = {
+            (argv[index + 1], argv[index + 2])
+            for index, flag in enumerate(argv)
+            if flag == "--ro-bind"
+        }
+        self.assertTrue(all((path, path) in read_only_binds for path in paths))
+        self.db._exec("SELECT 1")  # SQLite tolerates the empty pre-created sidecars.
 
 
 class GitMirrorTest(unittest.TestCase):
