@@ -75,7 +75,7 @@ it is a fence against accidents, not a jail against malice. See
 | adapter home paths from the manifest `write_paths` | yes | sessions, transcripts, auth state each CLI writes (`~/.claude`, `~/.cursor`, `~/.grok`, `~/.codex`, …) |
 | an adapter's computed paths | yes | a per-attachment vendor home the manifest cannot name (codex's `CODEX_HOME`) |
 | granted paths (`conversation_write_grants`) | yes | requested, granted, recorded |
-| `~/.cache`, `~/.config`, `~/.docker` | yes | the home directories CLIs routinely update, including `docker build`'s buildx state |
+| `~/.cache`, `~/.config`, `~/.docker`, `~/.npm` | yes | the home directories CLIs routinely update, including `docker build`'s buildx state and npm's default cache |
 | everything else | no | read-only via the `/` bind, including the host's other checkouts and `/` itself |
 
 For any line working in a repository, the whole canonical `<repo>/.review/`
@@ -158,13 +158,21 @@ the CLI's own sandbox stays.
 ```
 POST /api/conversations/<id>/write-set   {"path": "/abs/normalized/path"}
 GET  /api/conversations/<id>/write-set
+GET  /api/conversations/<id>/write-set/request
+POST /api/conversations/<id>/write-set/request/<id>/approve   (person only)
+DELETE /api/conversations/<id>/write-set/request/<id>         (person only)
 ```
 
-A person, or the captain of an ancestor line, may grant. A line may ask,
-never grant its own. Grants are rows in `conversation_write_grants` with
-the grantor recorded, and a system notice announces them on the line.
-Paths must be absolute and normalized; a path that does not exist at
-spawn time binds nothing.
+A **person** POST grants directly and the grant is recorded immediately. A
+**machine** on the line, or the captain of an ancestor line, POST files a
+pending request instead — at most one per line; a second filing is **409**.
+Every open tab on that line shows the banner; a person approves or declines.
+Approval inserts the grant row, posts a system notice, privately rings the
+requester on its home line (by attachment id, never by name), and detaches
+and resumes every live process on the line so the widened bind applies.
+Decline clears the request and rings the requester the same way. Grants are
+rows in `conversation_write_grants` with the grantor recorded. Paths must be
+absolute and normalized; a path that does not exist at spawn time binds nothing.
 
 ## Feature flag
 
