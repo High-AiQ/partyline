@@ -27,6 +27,14 @@ same platform-specific person-side install remedy).
   `/dev` and `/proc`, a private tmpfs over `/tmp`, each write-set path
   bound writable at its real path, `--die-with-parent`. The strongest
   guarantee: sibling data is physically read-only, and `/tmp` is private.
+  Fresh `--dev` ships only the minimal `--dev` set (`null`, `zero`, `tty`,
+  `random`...), which hides every host GPU node, so any existing
+  `/dev/nvidia*`, `/dev/nvidia-caps`, `/dev/dri`, `/dev/kfd`, `/dev/video*`,
+  and `/dev/snd` is passed through individually with `--dev-bind` (bind
+  only if it exists, as everywhere else in the fence). A blanket
+  `--dev-bind /dev /dev` was rejected: it would also hand out host block
+  and raw-memory devices that the minimal `--dev` deliberately excludes,
+  widening the fence's scope well past what a GPU workload needs.
 - **Darwin — `/usr/bin/sandbox-exec`.** macOS has no bubblewrap and no
   mount namespace a process may create, so the fence generates an SBPL
   profile (Apple's documented sandbox profile language) and passes it
@@ -49,7 +57,8 @@ on every macOS this code runs on.
 `partyline/fence.py` builds the plan and explicitly creates the user namespace. On Linux:
 
 ```
-bwrap --ro-bind / / --dev /dev --proc /proc --unshare-user --tmpfs /tmp
+bwrap --ro-bind / / --dev /dev --proc /proc --unshare-user
+      --dev-bind <gpu device> <same path> ... --tmpfs /tmp
       --bind <write-set path> <same path> ... --die-with-parent -- <command>
 ```
 
