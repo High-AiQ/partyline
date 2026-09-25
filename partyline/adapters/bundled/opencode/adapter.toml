@@ -7,7 +7,6 @@ command = ["opencode"]
 requires = ["opencode"]
 env_unset = []
 # Local session store and shared app state.
-write_paths = ["~/.local/share/opencode", "~/.local/state"]
 output = "local session transcript"
 
 update_command = ["opencode", "upgrade"]

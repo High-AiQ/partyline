@@ -13,6 +13,7 @@ import uuid
 from typing import Literal, TypedDict
 
 from .db_schema import MIGRATIONS, SCHEMA
+from .db_sidecars import ensure as ensure_db_sidecars
 from .query_result import materialize
 from .conversation_queries import ACTIVE_CONVERSATIONS, ARCHIVED_CONVERSATIONS, CONVERSATION_BY_ID
 from .message_queries import MESSAGE_SELECT, as_message, select_message_page
@@ -70,10 +71,8 @@ def _restart_plan_row(row) -> RestartPlan:
 class Db:
     def __init__(self, path):
         self.path = os.path.abspath(os.fspath(path))
-        # SQLite transactions protect rows, but a pty write is outside SQLite.
-        # This cross-process lock makes an ownership transition wait until an
-        # already-authorised delivery has finished, closing the read -> pty
-        # write race between retiring and replacement server generations.
+        # SQLite transactions do not protect pty writes; this cross-process
+        # lock serializes ownership changes against authorized deliveries.
         self.runtime_lock_path = f"{self.path}.runtime.lock"
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
@@ -86,10 +85,10 @@ class Db:
                 except sqlite3.OperationalError:
                     pass  # already applied
             self.conn.commit()
+        ensure_db_sidecars(self)
 
     def close(self):
-        """Release the connection. The server holds one for its whole life, so
-        this exists for tests and for anything that opens a second database."""
+        """Close the connection; the server holds it for its whole life."""
         with self.lock:
             self.conn.close()
 

@@ -33,6 +33,8 @@ import os
 import shutil
 import tempfile
 
+from .git_fence_root import refresh as refresh_root_mirror
+
 # Mirror state lives beside the other per-attachment session state.
 FENCE_ROOT = os.path.expanduser("~/.partyline/sessions/fence")
 
@@ -234,20 +236,33 @@ def darwin_write_paths(cwd: str) -> list[str]:
     if gitdir is None:
         return []
     common = common_gitdir(gitdir)
-    candidates = [gitdir]
+    candidates = [gitdir, common]
     for name in ("objects", "refs", "logs"):
         candidates.append(os.path.join(common, name))
     candidates.append(os.path.join(common, "packed-refs"))
     return [path for path in candidates if os.path.lexists(path)]
 
 
+def darwin_protected_git_paths(cwd: str) -> list[str]:
+    """Git paths that stay protected when Darwin allows the common .git root."""
+    gitdir = _worktree_gitdir(cwd)
+    if gitdir is None:
+        return []
+    common = common_gitdir(gitdir)
+    candidates = [os.path.join(common, name) for name in (
+        "config", "hooks", "worktrees", "description", "HEAD", "info", "branches",
+    )]
+    return [path for path in candidates if os.path.lexists(path)]
+
+
 def git_binds(cwd: str, conv_id: str) -> list[tuple[str, str, bool]]:
     """The git ``(host, guest, read_only)`` binds a fenced worktree line needs.
 
-    Order is load-bearing: the shared ``worktrees/`` tree is bound
-    read-only after the writable binds that need to shadow it, and the
-    line's own metadata directory is bound writable after that, so the
-    last word on each path is the right one.
+    Order is load-bearing: the private root mirror covers transient
+    common-directory writes, real shared objects remain writable, real
+    config/hooks/worktrees are protected, this worktree's metadata is
+    reopened, then refs/logs/packed-refs are mirrored over their real
+    paths.
 
     An empty list means the cwd is not a linked worktree and needs no git
     binds at all: a plain directory or a repository root whose ``.git`` is
@@ -258,8 +273,14 @@ def git_binds(cwd: str, conv_id: str) -> list[tuple[str, str, bool]]:
         return []
     common = common_gitdir(gitdir)
     mirror = refresh_mirror(common, gitdir, conv_id)
+    refresh_root_mirror(common, mirror)
     binds = [
+        (mirror, common, False),
         (os.path.join(common, "objects"), os.path.join(common, "objects"), False),
+        (os.path.join(common, "hooks"), os.path.join(common, "hooks"), True),
+        (os.path.join(common, "config"), os.path.join(common, "config"), True),
+        (os.path.join(common, "worktrees"), os.path.join(common, "worktrees"), True),
+        (gitdir, gitdir, False),
         (os.path.join(mirror, "refs"), os.path.join(common, "refs"), False),
     ]
     logs_mirror = os.path.join(mirror, "logs")
@@ -267,7 +288,4 @@ def git_binds(cwd: str, conv_id: str) -> list[tuple[str, str, bool]]:
     if os.path.isfile(os.path.join(mirror, "packed-refs")):
         binds.append((os.path.join(mirror, "packed-refs"),
                       os.path.join(common, "packed-refs"), False))
-    binds.append((os.path.join(common, "worktrees"),
-                  os.path.join(common, "worktrees"), True))
-    binds.append((gitdir, gitdir, False))
-    return binds
+    return [bind for bind in binds if os.path.lexists(bind[0])]
