@@ -8,8 +8,10 @@
    *     server used to look exactly like a slow one.
    */
   import RestartApprovalDialog from "./dialogs/RestartApprovalDialog.svelte";
+  import WriteSetGrantApprovalDialog from "./dialogs/WriteSetGrantApprovalDialog.svelte";
   import { dialogs } from "../state/dialogs.svelte";
   import { restart } from "../state/restart.svelte.js";
+  import { writeSet } from "../state/write-set.svelte.js";
   import { room } from "../state/room.svelte.js";
   import { wire } from "../state/wire.svelte.js";
   import { fence } from "../state/fence.svelte.js";
@@ -39,6 +41,24 @@
       >@{restart.request.requester} asks to restart partyline: {restart.request.reason}</span
     >
     <button type="button" class="primary flex-none" onclick={() => dialogs.open(RestartApprovalDialog)}
+      >review</button
+    >
+  </div>
+{/if}
+
+{#if writeSet.request && !wire.outage}
+  <div
+    id="writeSetRequest"
+    class="fixed left-1/2 {restart.request
+      ? 'top-[54px]'
+      : 'top-[18px]'} z-69 flex max-w-[min(640px,92vw)] -translate-x-1/2 items-center gap-3 rounded-[5px] border border-copper/60 bg-ink-2 px-[14px] py-2 text-[11px] text-cream-dim shadow-[0_12px_30px_rgb(0_0_0/0.45)]"
+    role="status"
+    aria-live="polite"
+  >
+    <span class="min-w-0 truncate"
+      >@{writeSet.request.requester} asks to grant write-set scope for {writeSet.request.path}</span
+    >
+    <button type="button" class="primary flex-none" onclick={() => dialogs.open(WriteSetGrantApprovalDialog)}
       >review</button
     >
   </div>

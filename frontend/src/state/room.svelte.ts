@@ -17,12 +17,12 @@ import { sayOnLine } from "../lib/room-say";
 import { sendOffLine } from "../lib/offline-wire";
 import type { WireIdentity } from "../lib/wire-commands";
 import { restart } from "./restart.svelte.js";
+import { leavePendingBanners, openPendingBanners, resyncPendingBanners } from "./room-pending-sync.js";
+import { onRoomWireEvent } from "./room-wire-events.js";
 import { wire } from "./wire.svelte.js";
 import type { WireContext } from "./wire.svelte.js";
 import { clearConversationRoute, routedConversationId, setConversationRoute } from "../lib/routing";
 import { isLive, withoutForgotten } from "../lib/attachments";
-import { applyLineLive } from "../lib/line-live";
-import { handleWireError } from "./room-wire-error";
 import { MessageHistory } from "./message-history.svelte";
 import { presenceSync } from "./presence-coordinator.svelte.js";
 import { draft } from "./draft.svelte.js";
@@ -141,6 +141,7 @@ class Room {
     this.attachments = withoutForgotten(detail.attachments, this.#removed);
     presenceSync.finish(presenceFetch, detail.presence, detail.working);
     this.history.seed(detail.messages, detail.has_more_messages);
+    openPendingBanners(conversation.id);
     void this.loadConversations().catch(ignoreBackgroundFailure);
   }
 
@@ -157,10 +158,7 @@ class Room {
     presenceSync.finish(presenceFetch, detail.presence, detail.working);
     this.history.merge(detail.messages);
     await this.history.catchUp(conversation.id, afterId);
-    // The pending restart request is event-carried state like attachment
-    // status: filed while the wire was down, its frame reached no tab, so
-    // re-read it here instead of leaving the banner hidden until a refresh.
-    void restart.load(true).catch(ignoreBackgroundFailure);
+    resyncPendingBanners(conversation.id);
   }
 
   async toggleReaction(messageId: number, emoji: string): Promise<void> {
@@ -189,6 +187,7 @@ class Room {
     this.attention.clear();
     this.#removed.clear();
     this.reattachOffer = null;
+    leavePendingBanners();
     if (clearRoute && routedConversationId()) clearConversationRoute();
   }
 
@@ -227,67 +226,7 @@ class Room {
   }
   // ── server events ──────────────────────────────────────────────────────
   #onWireEvent(event: WireEvent, context: WireContext): void {
-    const convId = this.conversation?.id;
-    switch (event.type) {
-      case "message":
-        this.#absorb(event.message);
-        break;
-      case "reaction":
-        this.history.updateReactions(event.message_id, event.reactions);
-        break;
-      case "attachment":
-        this.upsertAttachment(event.attachment);
-        break;
-      case "attachment_removed":
-        this.removeAttachment(event.attachment_id);
-        break;
-      case "line_live":
-        this.conversations = applyLineLive(this.conversations, event);
-        break;
-      case "attention":
-        this.attention.add(event.attachment_id);
-        break;
-      case "working":
-        presenceSync.apply(event);
-        break;
-
-      case "reattach_offer":
-        if (event.conversation_id === convId) this.reattachOffer = event;
-        break;
-
-      case "reattach_decision":
-        if (event.conversation_id === convId && event.token === this.reattachOffer?.token) {
-          this.reattachOffer = null;
-        }
-        break;
-
-      case "conversation":
-        if (event.conversation.id === convId) {
-          this.conversation = event.conversation;
-          void this.loadConversations().catch(ignoreBackgroundFailure);
-        }
-        break;
-
-      case "conversation_archived":
-      case "conversation_deleted":
-        if (event.conversation_id === convId) this.leave();
-        void this.loadConversations().catch(ignoreBackgroundFailure);
-        this.refreshArchiveIfOpen();
-        break;
-
-      case "conversations_changed":
-        void this.loadConversations().catch(ignoreBackgroundFailure);
-        this.refreshArchiveIfOpen();
-        break;
-
-      case "restart_request":
-        restart.apply(event.request);
-        break;
-
-      case "error":
-        if (event.conversation_id === convId) handleWireError(this, event, context);
-        break;
-    }
+    onRoomWireEvent(this, event, context);
   }
 
   chooseReattach(action: ReattachAction): boolean {
@@ -322,6 +261,10 @@ class Room {
   }
   #absorb(message: ChatMessage): void {
     this.history.merge([message]);
+  }
+
+  absorb(message: ChatMessage): void {
+    this.#absorb(message);
   }
 }
 
