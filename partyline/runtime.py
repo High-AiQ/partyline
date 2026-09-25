@@ -1,5 +1,6 @@
 """Live chat state and behavior underneath the HTTP/WebSocket routes."""
 
+import asyncio
 import re
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -36,6 +37,9 @@ class ChatRuntime(DeliveryCreditMixin):
         self.sockets: dict[str, set] = {}
         self.human_handles: dict[str, dict[WebSocket, tuple[str, str]]] = {}
         self.live: dict[str, Adapter] = {}
+        # Manual and restart-plan resumes must never start the same attachment
+        # concurrently. Locks are process-local and keyed by durable id.
+        self.resume_locks: dict[str, asyncio.Lock] = {}
         # A planned process is queued behind its durable cursor, not unreachable.
         self.reattaching: set[str] = set()
         # Pasted-but-unproved message ids, keyed per activation. Transcript

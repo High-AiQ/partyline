@@ -294,4 +294,6 @@ MIGRATIONS = [
         requester_attachment_id TEXT,
         created_at REAL NOT NULL
     )""",
+    # The live activation start differs from attachment creation after Resume.
+    "ALTER TABLE attachments ADD COLUMN runtime_started_at REAL",
 ]

@@ -1,11 +1,15 @@
 import asyncio
 from contextlib import contextmanager
+from datetime import UTC, datetime
+import hashlib
 import tempfile
 import threading
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+from fastapi import HTTPException
+from partyline.conversation_routes import unique_handle
 from partyline.db import Db
 from partyline.reattach import (
     ContinuationDeliveryPending,
@@ -135,6 +139,65 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result.ready, ("sol", "terra"))
         self.assertIn("Continuation debrief", adapters["one"].deliveries[0][0]["body"])
+
+    async def test_attachment_already_live_before_its_turn_is_ready_without_resume(self):
+        self.db.claim_attachment("one", "skip-generation")
+        self.db.set_attachment_status("one", "running", "skip-generation")
+        started_at = datetime(2026, 9, 25, 10, 14, 52, tzinfo=UTC).timestamp()
+        self.db._exec(
+            "UPDATE attachments SET runtime_started_at=? WHERE id='one'", (started_at,)
+        )
+        adapter = ReadyAdapter(self.order, "sol")
+        adapter.att["runtime_owner"] = "skip-generation"
+        self.runtime.live["one"] = adapter
+        resumed = []
+
+        async def resume(*_args):
+            resumed.append(True)
+            raise AssertionError("already-live attachments must be skipped")
+
+        result = await ReattachCoordinator(self.runtime, resume).run(
+            {**self.plan, "attachment_ids": ["one"]}, None
+        )
+
+        self.assertEqual(result.ready, ("sol",))
+        self.assertEqual(resumed, [])
+        body = self.db.list_messages("line")[-2]["body"]
+        self.assertEqual(
+            body,
+            "☏ @sol is already live on line 'Line'; treating it as ready and skipping "
+            f"resume (started 2026-09-25 10:14:52 UTC, generation "
+            f"{hashlib.sha256(b'skip-generation').hexdigest()[:8]})",
+        )
+
+    async def test_live_winner_after_initial_check_is_rechecked_as_ready(self):
+        async def manual_resume_wins(attachment_id, _pending):
+            adapter = ReadyAdapter(self.order, "sol")
+            self.runtime.live[attachment_id] = adapter
+            self.db.set_attachment_status(attachment_id, "running", None)
+            raise HTTPException(409, "attachment 'sol' (one) on line 'Line' is already live")
+
+        result = await ReattachCoordinator(self.runtime, manual_resume_wins).run(
+            {**self.plan, "attachment_ids": ["one"]}, None
+        )
+
+        self.assertEqual(result.ready, ("sol",))
+        self.assertEqual(result.failed, ())
+        bodies = [message["body"] for message in self.db.list_messages("line")]
+        self.assertTrue(any("already live" in body and "skipping resume" in body for body in bodies))
+        self.assertFalse(any("could not reattach safely" in body for body in bodies))
+
+    async def test_different_attachment_conflict_remains_a_failure(self):
+        async def conflicting_resume(_attachment_id, _pending):
+            raise HTTPException(409, "'sol' is already attached on 'Other line'")
+
+        result = await ReattachCoordinator(self.runtime, conflicting_resume).run(
+            {**self.plan, "attachment_ids": ["one"]}, None
+        )
+
+        self.assertEqual(result.ready, ())
+        self.assertEqual(result.failed, ("sol",))
+        self.assertNotIn("one", self.runtime.live)
 
     async def test_staged_delivery_advances_cursor_without_pty_delivery(self):
         adapters = {}
@@ -321,6 +384,60 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.ready, ("terra",))
         self.assertEqual(result.failed, ("missing",))
+
+    async def test_unconfirmed_attachment_without_live_adapter_is_exited_and_handle_reused(self):
+        self.assertTrue(self.db.claim_attachment("one", "new-generation"))
+        self.db.set_attachment_status("one", "running", "new-generation")
+        self.db.add_message("line", "greg", "human", "Continue the task.")
+
+        async def unconfirmed_resume(_attachment_id, _pending):
+            adapter = ReadyAdapter(self.order, "sol")
+            adapter.att["runtime_owner"] = "new-generation"
+            adapter.wait_startup_delivery_received = lambda: asyncio.sleep(30)
+            return ResumedAttachment(adapter, True)
+
+        result = await ReattachCoordinator(
+            self.runtime, unconfirmed_resume, ready_timeout=0.01
+        ).run(
+            {**self.plan, "attachment_ids": ["one"]}, "greg"
+        )
+
+        self.assertEqual(result.unconfirmed, ("sol",))
+        self.assertEqual(result.failed, ())
+        self.assertEqual(result.ready, ())
+        self.assertEqual(self.db.get_attachment("one")["status"], "exited")
+        self.assertNotIn("one", self.runtime.reattaching)
+        self.assertEqual(unique_handle(self.db, "line", "sol"), "sol")
+        replacement = self.db.add_attachment(
+            "replacement", "line", "sol", "fake", ["fake"], self.directory.name
+        )
+        self.assertEqual(replacement["name"], "sol")
+
+    async def test_stale_adapter_from_another_generation_does_not_keep_handle_live(self):
+        self.assertTrue(self.db.claim_attachment("one", "new-generation"))
+        self.db.set_attachment_status("one", "running", "new-generation")
+        self.db.add_message("line", "greg", "human", "Continue the task.")
+        stale = ReadyAdapter(self.order, "sol")
+        stale.att["runtime_owner"] = "previous-generation"
+        self.runtime.live["one"] = stale
+
+        async def unconfirmed_resume(_attachment_id, _pending):
+            adapter = ReadyAdapter(self.order, "sol")
+            adapter.att["runtime_owner"] = "new-generation"
+            adapter.wait_startup_delivery_received = lambda: asyncio.sleep(30)
+            return ResumedAttachment(adapter, True)
+
+        result = await ReattachCoordinator(
+            self.runtime, unconfirmed_resume, ready_timeout=0.01
+        ).run(
+            {**self.plan, "attachment_ids": ["one"]}, "greg"
+        )
+
+        self.assertEqual(result.unconfirmed, ("sol",))
+        self.assertEqual(result.failed, ())
+        self.assertEqual(result.ready, ())
+        self.assertEqual(self.db.get_attachment("one")["status"], "exited")
+        self.assertEqual(unique_handle(self.db, "line", "sol"), "sol")
 
     async def test_a_slow_process_is_left_running_and_the_sequence_advances(self):
         """Slow is not failed.
@@ -511,6 +628,38 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("@sol", warning)
         self.assertIn("Continue the durable recovery review.", warning)
 
+    async def test_final_unconfirmed_warning_distinguishes_live_and_exited_attachments(self):
+        automatic = self.db.save_restart_plan(
+            "line", ["one", "two"], "Continue after checking recovery.", "automatic"
+        )
+        previous = self.db.claim_restart_plan("automatic", "previous-attempt", 30)
+        self.assertEqual(previous["attempt_count"], 1)
+        self.assertTrue(
+            self.db.release_restart_plan_claim(automatic["token"], "previous-attempt")
+        )
+        self.db.add_message("line", "greg", "human", "Continue both tasks.")
+
+        async def resume(attachment_id, _pending):
+            owner = f"current-{attachment_id}"
+            self.assertTrue(self.db.claim_attachment(attachment_id, owner))
+            self.assertTrue(self.db.set_attachment_status(attachment_id, "running", owner))
+            name = self.db.get_attachment(attachment_id)["name"]
+            adapter = ReadyAdapter(self.order, name)
+            adapter.att["runtime_owner"] = owner
+            adapter.wait_startup_delivery_received = lambda: asyncio.sleep(30)
+            if attachment_id == "one":
+                self.runtime.live[attachment_id] = adapter
+            return ResumedAttachment(adapter, True)
+
+        result = await ReattachCoordinator(self.runtime, resume, ready_timeout=0.01).run_automatic()
+
+        self.assertEqual(result.unconfirmed, ("sol", "terra"))
+        self.assertEqual(self.db.get_attachment("one")["status"], "running")
+        self.assertEqual(self.db.get_attachment("two")["status"], "exited")
+        warning = self.db.list_messages("line")[-1]["body"]
+        self.assertIn("live current-generation adapter were left active", warning)
+        self.assertIn("plan-owned attachments without one were marked exited", warning)
+
     async def test_lease_is_checked_before_the_first_coordinator_effect(self):
         resume = AsyncMock()
 
@@ -638,6 +787,8 @@ class FleetPlanTest(unittest.IsolatedAsyncioTestCase):
         self.db.add_message("owner", "greg", "human", "owner side news")
         self.db.add_message("other", "greg", "human", "other side news")
         plan = self.db.save_restart_plan("owner", ["one", "two"], "Continue.")
+        self.db.mark_stale_attachments()
+        self.runtime.live.clear()
         seen = {}
 
         async def resume(attachment_id, pending):
@@ -659,6 +810,8 @@ class FleetPlanTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_every_covered_line_is_told_the_restart_happened(self):
         plan = self.db.save_restart_plan("owner", ["one", "two"], "Continue.")
+        self.db.mark_stale_attachments()
+        self.runtime.live.clear()
 
         async def resume(attachment_id, _pending):
             name = self.db.get_attachment(attachment_id)["name"]

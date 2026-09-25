@@ -217,6 +217,9 @@ class LifecycleTest(unittest.TestCase):
     def test_reserved_replacement_prevents_old_resume_and_double_fresh(self):
         old = self.db.get_attachment("old")
         asyncio.run(create_fresh_record(self.db, old, FreshAttachmentRequest()))
+        replacement = self.db.list_attachments("line")[-1]
+        self.assertIsNotNone(replacement["runtime_started_at"])
+        self.assertEqual(replacement["runtime_started_at"], replacement["created_at"])
         self.assertFalse(self.db.claim_attachment("old", "racing-resume"))
         self.assertEqual(self.fresh({}).status_code, 409)
         self.assertEqual(len(self.db.list_attachments("line")), 2)
