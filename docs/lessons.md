@@ -997,3 +997,19 @@ timed-out stop is unknown, not proof that there was nothing to stop.
 | DO | DO NOT |
 | --- | --- |
 | Verify the whole process group after TERM and KILL; keep unconfirmed live processes tracked | Infer child-process death from the wrapper's return code or remove a live attachment from runtime tracking before stop completes |
+
+## A no-session timeout does not identify why a CLI stopped
+
+Two earlier glm-flash attaches reached Partyline's 45-second no-session notice,
+but that notice alone cannot distinguish a provider error from a CLI crash before
+OpenCode wrote a session row. Fresh glm-flash and kimi attaches both created a
+session and a briefing user part within milliseconds in the same worktree, with
+neither TUI showing a provider error; that reproduces neither failure nor its
+cause. The fenced process cannot read the host kernel log, so its absence from
+the investigation is not evidence that no kernel-level crash occurred. A person
+with host access must collect the kernel log around the original failure time
+before assigning a cause or prescribing a provider change.
+
+| DO | DO NOT |
+| --- | --- |
+| Have a person check `dmesg` or `journalctl -k` around a pre-session CLI crash | Infer a provider failure from a generic no-session timeout or treat fence-limited kernel logs as clean |
