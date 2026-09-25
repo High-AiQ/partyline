@@ -243,6 +243,33 @@ class LaunchArgvTest(unittest.TestCase):
         guests = {dst for _src, dst in pairs}
         self.assertNotIn(os.path.expanduser("~/.codex"), guests)
 
+    def test_gpu_device_nodes_bind_through_the_dev_tmpfs_when_present(self):
+        with tempfile.TemporaryDirectory() as dev_root:
+            for name in ("nvidia0", "nvidiactl", "nvidia-uvm", "nvidia-uvm-tools",
+                         "nvidia-modeset"):
+                open(os.path.join(dev_root, name), "w").close()
+            os.makedirs(os.path.join(dev_root, "nvidia-caps"))
+            os.makedirs(os.path.join(dev_root, "dri"))
+            open(os.path.join(dev_root, "kfd"), "w").close()
+            open(os.path.join(dev_root, "video0"), "w").close()
+            os.makedirs(os.path.join(dev_root, "snd"))
+            with patch.object(fence, "DEV_ROOT", dev_root), \
+                    patch.object(fence, "bwrap_available", return_value=True):
+                argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
+            pairs = [(argv[i + 1], argv[i + 2]) for i, a in enumerate(argv)
+                     if a == "--dev-bind"]
+            guests = {dst for _src, dst in pairs}
+            for name in ("nvidia0", "nvidiactl", "nvidia-uvm", "nvidia-uvm-tools",
+                         "nvidia-modeset", "nvidia-caps", "dri", "kfd", "video0", "snd"):
+                self.assertIn(os.path.join(dev_root, name), guests, name)
+
+    def test_missing_gpu_device_nodes_add_no_dev_binds(self):
+        with tempfile.TemporaryDirectory() as dev_root:
+            with patch.object(fence, "DEV_ROOT", dev_root), \
+                    patch.object(fence, "bwrap_available", return_value=True):
+                argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
+            self.assertNotIn("--dev-bind", argv)
+
     def test_repaired_manifest_write_paths_reach_the_write_set(self):
         """deepseek, hermes, muse, pi, and codex: the declarations added
         after the qwen and folder-trust incidents must land in the spawn
