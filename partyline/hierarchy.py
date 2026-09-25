@@ -21,22 +21,23 @@ def parent_id_of(conv: dict | None) -> str | None:
     return value or None
 
 
-def child_ids(db: Db, conv_id: str) -> list[str]:
-    rows = db._exec(
-        "SELECT id FROM conversations WHERE parent_id=? ORDER BY created_at",
-        (conv_id,),
-    ).fetchall()
+def child_ids(db: Db, conv_id: str, *, include_archived: bool = True) -> list[str]:
+    """Child ids, including archived lines unless an operational caller opts out."""
+    query = "SELECT id FROM conversations WHERE parent_id=?"
+    if not include_archived:
+        query += " AND archived_at IS NULL"
+    rows = db._exec(query + " ORDER BY created_at", (conv_id,)).fetchall()
     return [row["id"] for row in rows]
 
 
-def descendants(db: Db, conv_id: str) -> list[str]:
+def descendants(db: Db, conv_id: str, *, include_archived: bool = True) -> list[str]:
     found: list[str] = []
-    queue = list(child_ids(db, conv_id))
+    queue = list(child_ids(db, conv_id, include_archived=include_archived))
     seen = set(queue)
     while queue:
         current = queue.pop(0)
         found.append(current)
-        for child in child_ids(db, current):
+        for child in child_ids(db, current, include_archived=include_archived):
             if child not in seen:
                 seen.add(child)
                 queue.append(child)
