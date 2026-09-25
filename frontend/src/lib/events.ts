@@ -10,6 +10,7 @@ import {
   ReattachCandidateSchema,
   RestartRequestSchema,
 } from "./contracts";
+import { WriteSetGrantRequestSchema } from "./write-set-contracts";
 import { ReactionResponseSchema } from "./reaction-contracts";
 
 export const HelloEventSchema = z.object({
@@ -145,6 +146,15 @@ export const RestartRequestEventSchema = z.object({
     .default(null),
 });
 export type RestartRequestEvent = z.infer<typeof RestartRequestEventSchema>;
+
+export const WriteSetGrantRequestEventSchema = z.object({
+  type: z.literal("write_set_grant_request"),
+  request: z
+    .lazy(() => WriteSetGrantRequestSchema)
+    .nullable()
+    .default(null),
+});
+export type WriteSetGrantRequestEvent = z.infer<typeof WriteSetGrantRequestEventSchema>;
 export type ConversationsChangedEvent = z.infer<typeof ConversationsChangedEventSchema>;
 
 const CurrentWireEventSchema = z.discriminatedUnion("type", [
@@ -165,6 +175,7 @@ const CurrentWireEventSchema = z.discriminatedUnion("type", [
   ReattachOfferEventSchema,
   ReattachDecisionEventSchema,
   RestartRequestEventSchema,
+  WriteSetGrantRequestEventSchema,
 ]);
 
 /** Normalize the boolean-only presence frame emitted by older servers. */
