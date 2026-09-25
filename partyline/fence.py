@@ -32,6 +32,7 @@ captain above it or by a person, and the grant is recorded on the line
 
 from __future__ import annotations
 
+import glob
 import os
 import re
 import sys
@@ -45,6 +46,16 @@ BWRAP = "/usr/bin/bwrap"
 # Read access to everything else in the home stays, as everywhere else on
 # the host — this fence bounds writes, not reads.
 HOME_WRITE_PATHS = ("~/.cache", "~/.config", "~/.docker", "~/.npm")
+
+# Named individually, not via --dev-bind /dev /dev, so hidden block/raw-memory devices stay hidden.
+DEV_ROOT = "/dev"
+GPU_DEV_GLOB_NAMES = ("nvidia*", "dri", "kfd", "video*", "snd")
+
+
+def _gpu_dev_binds() -> list[str]:
+    """Existing host GPU device nodes to bind through the fresh --dev."""
+    return [p for name in GPU_DEV_GLOB_NAMES
+            for p in sorted(glob.glob(os.path.join(DEV_ROOT, name)))]
 
 
 class FenceUnavailable(RuntimeError):
@@ -258,8 +269,8 @@ def _fence_args(att: dict) -> list[str]:
 
 def _bwrap_argv(att: dict, paths: list[str], command: list[str],
                 tmpfs_tmp: bool) -> list[str]:
-    argv = [BWRAP, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
-            "--unshare-user"]
+    argv = [BWRAP, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--unshare-user"]
+    argv += [flag for gpu in _gpu_dev_binds() for flag in ("--dev-bind", gpu, gpu)]
     if tmpfs_tmp:
         argv += ["--tmpfs", "/tmp"]
     for src, dst, read_only in write_set(att, paths):
