@@ -26,6 +26,7 @@ from partyline import (auth_store, auth_tokens, fence, fence_darwin, fence_probe
 from partyline.adapters import loader
 from partyline.auth_guard import install_auth_guard
 from partyline.write_set_routes import list_write_grants, write_set_router
+from partyline.write_set_requests import register_write_set_request_routes
 from partyline.db import Db
 from partyline.features import overridden
 from partyline.hierarchy_routes import hierarchy_router
@@ -129,6 +130,22 @@ class LaunchArgvTest(unittest.TestCase):
         self.assertIn("/tmp", guests)
         self.assertIn(os.path.expanduser("~/.cache"), guests)
         self.assertIn(os.path.expanduser("~/.config"), guests)
+
+    def test_npm_home_is_a_writable_bind_when_it_exists(self):
+        os.makedirs(os.path.join(self.home.name, ".npm"), exist_ok=True)
+        with patch.object(fence, "bwrap_available", return_value=True):
+            argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
+        pairs = [(argv[i + 1], argv[i + 2]) for i, a in enumerate(argv) if a == "--bind"]
+        guests = {dst for _src, dst in pairs}
+        self.assertIn(os.path.expanduser("~/.npm"), guests)
+
+    def test_missing_npm_home_binds_nothing(self):
+        self.assertFalse(os.path.lexists(os.path.expanduser("~/.npm")))
+        with patch.object(fence, "bwrap_available", return_value=True):
+            argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
+        pairs = [(argv[i + 1], argv[i + 2]) for i, a in enumerate(argv) if a == "--bind"]
+        guests = {dst for _src, dst in pairs}
+        self.assertNotIn(os.path.expanduser("~/.npm"), guests)
 
     def test_docker_home_is_a_writable_bind_when_it_exists(self):
         os.makedirs(os.path.join(self.home.name, ".docker"), exist_ok=True)
@@ -280,6 +297,16 @@ class DarwinSandboxExecTest(unittest.TestCase):
             os.makedirs(docker, exist_ok=True)
             argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
             self.assertIn(f'(subpath "{docker}")', argv[2])
+
+    def test_darwin_npm_home_allowed_only_when_it_exists(self):
+        with self.darwin(), \
+                patch.object(fence_darwin, "sandbox_exec_available", return_value=True):
+            npm = os.path.expanduser("~/.npm")
+            argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
+            self.assertNotIn(f'(subpath "{npm}")', argv[2])
+            os.makedirs(npm, exist_ok=True)
+            argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
+            self.assertIn(f'(subpath "{npm}")', argv[2])
 
     def test_darwin_codex_home_allowed_only_when_it_exists(self):
         att = _att("/tmp", metadata={"write_paths": ["~/.codex"]})
@@ -742,6 +769,7 @@ class WriteSetGrantApiTest(unittest.TestCase):
         install_auth_guard(app, self.db)
         app.include_router(hierarchy_router(self.runtime))
         app.include_router(write_set_router(self.runtime))
+        register_write_set_request_routes(app, self.runtime, lambda att_id, pending=None: None)
 
         self.client = TestClient(app)
         self.addCleanup(self.client.close)
@@ -778,23 +806,45 @@ class WriteSetGrantApiTest(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
         self.assertEqual(len(list_write_grants(self.db, self.kid["id"])), 1)
 
-    def test_the_line_itself_cannot_grant_its_own_scope(self):
+    def test_the_line_itself_files_a_write_set_request(self):
         self.db.add_attachment("kid-worker", self.kid["id"], "worker", "fake",
                                ["fake"], self.directory.name)
+        target = os.path.join(self.directory.name, "x")
         response = self.client.post(
             f"/api/conversations/{self.kid['id']}/write-set",
-            json={"path": os.path.join(self.directory.name, "x")},
+            json={"path": target},
             headers=self.machine("kid-worker"))
-        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["path"], target)
+        self.assertEqual(body["requester"], "worker")
+        pending = self.client.get(f"/api/conversations/{self.kid['id']}/write-set/request")
+        self.assertEqual(pending.status_code, 200)
+        self.assertEqual(pending.json()["request"]["id"], body["id"])
 
-    def test_a_captain_above_can_grant(self):
+    def test_a_captain_above_can_file_a_write_set_request(self):
+        target = os.path.join(self.directory.name, "captain-requested")
         response = self.client.post(
             f"/api/conversations/{self.kid['id']}/write-set",
-            json={"path": os.path.join(self.directory.name, "captain-granted")},
+            json={"path": target},
             headers=self.machine("root-lead"))
         self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["path"], target)
 
-    def test_an_unrelated_machine_cannot_grant(self):
+    def test_a_second_write_set_request_while_pending_is_409(self):
+        self.db.add_attachment("kid-worker", self.kid["id"], "worker", "fake",
+                               ["fake"], self.directory.name)
+        headers = self.machine("kid-worker")
+        first = os.path.join(self.directory.name, "first")
+        second = os.path.join(self.directory.name, "second")
+        self.assertEqual(self.client.post(
+            f"/api/conversations/{self.kid['id']}/write-set",
+            json={"path": first}, headers=headers).status_code, 200)
+        self.assertEqual(self.client.post(
+            f"/api/conversations/{self.kid['id']}/write-set",
+            json={"path": second}, headers=headers).status_code, 409)
+
+    def test_an_unrelated_machine_cannot_file_a_request(self):
         self.db.create_conversation("stranger", "Stranger")
         self.db.add_attachment("stranger-lead", "stranger", "other", "fake",
                                ["fake"], self.directory.name)

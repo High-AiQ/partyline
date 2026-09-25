@@ -44,7 +44,7 @@ BWRAP = "/usr/bin/bwrap"
 # Home directories every CLI may update: caches and tool configuration.
 # Read access to everything else in the home stays, as everywhere else on
 # the host — this fence bounds writes, not reads.
-HOME_WRITE_PATHS = ("~/.cache", "~/.config", "~/.docker")
+HOME_WRITE_PATHS = ("~/.cache", "~/.config", "~/.docker", "~/.npm")
 
 
 class FenceUnavailable(RuntimeError):
