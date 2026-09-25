@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from partyline import auth_store, auth_tokens
+from partyline.adapters import ADAPTER_METADATA
 from partyline.attachment_resume import resume_adapter
 from partyline.auth_guard import install_auth_guard
 from partyline.db import Db
@@ -44,6 +45,10 @@ class WriteSetRequestTest(unittest.TestCase):
         self.addCleanup(self.db.close)
         self.runtime = ChatRuntime(self.db)
         self.resumed = []
+        metadata = {**ADAPTER_METADATA, "fake": {"capabilities": {"resume": True}}}
+        metadata_patch = patch("partyline.write_set_requests.ADAPTER_METADATA", metadata)
+        metadata_patch.start()
+        self.addCleanup(metadata_patch.stop)
         app = FastAPI()
         install_auth_guard(app, self.db)
         app.include_router(write_set_router(self.runtime))
@@ -163,6 +168,29 @@ class WriteSetRequestTest(unittest.TestCase):
         self.assertIn("could not resume @worker", notice)
         copies = self.audience_copies("wrk")
         self.assertIn("could not resume @worker", copies[0]["body"])
+
+    def test_non_resumable_live_adapter_keeps_request_pending_without_grant_or_detach(self):
+        request_id = self.file(self.worker).json()["id"]
+        self.db.set_attachment_status("cap", "exited", None)
+        self.db._exec("UPDATE attachments SET adapter='raw' WHERE id='wrk'")
+        worker = self.go_live("wrk")
+        metadata = {
+            "fake": {"capabilities": {"resume": True}},
+            "raw": {"capabilities": {"resume": False}},
+        }
+        with patch("partyline.write_set_requests.ADAPTER_METADATA", metadata):
+            response = self.client.post(
+                f"/api/conversations/line/write-set/request/{request_id}/approve",
+                headers=self.human,
+            )
+
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("@worker (raw)", response.json()["detail"])
+        self.assertFalse(worker.stopped)
+        self.assertEqual(list_write_grants(self.db, "line"), [])
+        pending = self.client.get(
+            "/api/conversations/line/write-set/request", headers=self.human)
+        self.assertEqual(pending.json()["request"]["id"], request_id)
 
     def test_machine_filed_bad_path_is_400(self):
         response = self.file(self.worker, path="relative/path")

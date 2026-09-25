@@ -17,6 +17,7 @@ import { sayOnLine } from "../lib/room-say";
 import { sendOffLine } from "../lib/offline-wire";
 import type { WireIdentity } from "../lib/wire-commands";
 import { restart } from "./restart.svelte.js";
+import { writeSet } from "./write-set.svelte.js";
 import { leavePendingBanners, openPendingBanners, resyncPendingBanners } from "./room-pending-sync.js";
 import { onRoomWireEvent } from "./room-wire-events.js";
 import { wire } from "./wire.svelte.js";
@@ -106,6 +107,7 @@ class Room {
     if (!fromRoute) setConversationRoute(conversation.id);
 
     this.conversation = conversation;
+    writeSet.activate(conversation.id);
     draft.openLine(conversation.id);
     this.history.reset();
     this.attachments = [];

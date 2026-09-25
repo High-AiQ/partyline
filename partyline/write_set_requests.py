@@ -16,6 +16,7 @@ import uuid
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
+from .adapters import ADAPTER_METADATA
 from .auth_guard import request_principal
 from .contracts import WriteSetGrantRequestEvent
 from .hierarchy import ancestors
@@ -23,6 +24,7 @@ from .line_process_routes import detach_attachment, live_attachments
 from .machine_scope import deny_unless, is_human
 from .mention_relay import post_private
 from .resume_continuation import resume_with_backlog
+from .reattach import adapter_can_resume
 from .system_notice import post_system_notice
 from .write_set_routes import add_write_grant
 
@@ -106,6 +108,13 @@ async def resume_line_attachments(runtime, conv_id: str, resume) -> tuple[list[s
     return resumed, failed
 
 
+def non_resumable_live_attachments(runtime, conv_id: str) -> list[dict]:
+    return [
+        att for att in live_attachments(runtime.db, conv_id, include_children=False)
+        if not adapter_can_resume(ADAPTER_METADATA.get(att["adapter"], {}))
+    ]
+
+
 def make_announcer(runtime):
     async def announce(conv_id: str, text: str, *, actor=None) -> None:
         await post_system_notice(runtime, conv_id, text, actor=actor)
@@ -148,6 +157,14 @@ def register_write_set_request_routes(app: FastAPI, runtime, resume) -> None:
     async def approve(request: Request, conv_id: str, request_id: str):
         current = _take(request, conv_id, request_id)
         principal = request_principal(request)
+        blocked = non_resumable_live_attachments(runtime, conv_id)
+        if blocked:
+            names = ", ".join(f"@{att['name']} ({att['adapter']})" for att in blocked)
+            raise HTTPException(
+                409,
+                f"cannot approve while live processes cannot resume: {names}; "
+                "detach them first",
+            )
         who = principal.name
         add_write_grant(runtime.db, conv_id, current.path, who)
         with runtime.db.lock:
