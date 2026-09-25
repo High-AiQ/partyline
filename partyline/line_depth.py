@@ -62,7 +62,7 @@ def may_split(db, conv_id: str) -> bool:
 
 def sideways_attach_reason(db, conv_id: str) -> str | None:
     """Why a machine may not attach a process to this line, or None."""
-    if child_ids(db, conv_id):
+    if child_ids(db, conv_id, include_archived=False):
         return ("this line already has child lines; work goes down, not sideways — "
                 "attach the process to the child line that owns the slice")
     return None

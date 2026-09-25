@@ -49,7 +49,7 @@ def archive_blockers(
             "goal_not_cleared",
             "goal not cleared: this line's goal is not cleared; clear it before retiring the line",
         ))
-    if not include_children and child_ids(db, conv_id):
+    if not include_children and child_ids(db, conv_id, include_archived=False):
         blockers.append(_blocker(
             "child_lines",
             "child lines: unlink or archive child lines first, or pass include_children=true",
