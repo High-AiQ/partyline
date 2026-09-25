@@ -208,10 +208,29 @@ class LaunchArgvTest(unittest.TestCase):
         grok = os.path.expanduser("~/.grok")
         self.assertIn((grok, grok, False), pairs)
 
+    def test_codex_home_is_a_writable_bind_when_it_exists(self):
+        os.makedirs(os.path.join(self.home.name, ".codex"), exist_ok=True)
+        att = _att("/tmp", metadata={"write_paths": ["~/.codex"]})
+        with patch.object(fence, "bwrap_available", return_value=True):
+            argv = fence.launch_argv(FakeAdapter(att, ["codex"]))
+        pairs = [(argv[i + 1], argv[i + 2]) for i, a in enumerate(argv) if a == "--bind"]
+        guests = {dst for _src, dst in pairs}
+        self.assertIn(os.path.expanduser("~/.codex"), guests)
+
+    def test_missing_codex_home_binds_nothing(self):
+        self.assertFalse(os.path.lexists(os.path.expanduser("~/.codex")))
+        att = _att("/tmp", metadata={"write_paths": ["~/.codex"]})
+        with patch.object(fence, "bwrap_available", return_value=True):
+            argv = fence.launch_argv(FakeAdapter(att, ["codex"]))
+        pairs = [(argv[i + 1], argv[i + 2]) for i, a in enumerate(argv) if a == "--bind"]
+        guests = {dst for _src, dst in pairs}
+        self.assertNotIn(os.path.expanduser("~/.codex"), guests)
+
     def test_repaired_manifest_write_paths_reach_the_write_set(self):
-        """deepseek, hermes, muse, and pi: the declarations added after the
-        qwen incident must land in the spawn write set, expanded."""
-        declared = [path for name in ("deepseek", "hermes", "muse", "pi")
+        """deepseek, hermes, muse, pi, and codex: the declarations added
+        after the qwen and folder-trust incidents must land in the spawn
+        write set, expanded."""
+        declared = [path for name in ("deepseek", "hermes", "muse", "pi", "codex")
                     for path in loader._manifest(loader.BUNDLED_ROOT / name)["write_paths"]]
         self.assertTrue(declared)
         for path in declared:
@@ -261,6 +280,17 @@ class DarwinSandboxExecTest(unittest.TestCase):
             os.makedirs(docker, exist_ok=True)
             argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
             self.assertIn(f'(subpath "{docker}")', argv[2])
+
+    def test_darwin_codex_home_allowed_only_when_it_exists(self):
+        att = _att("/tmp", metadata={"write_paths": ["~/.codex"]})
+        with self.darwin(), \
+                patch.object(fence_darwin, "sandbox_exec_available", return_value=True):
+            codex_home = os.path.expanduser("~/.codex")
+            argv = fence.launch_argv(FakeAdapter(att, ["codex"]))
+            self.assertNotIn(f'(subpath "{codex_home}")', argv[2])
+            os.makedirs(codex_home, exist_ok=True)
+            argv = fence.launch_argv(FakeAdapter(att, ["codex"]))
+            self.assertIn(f'(subpath "{codex_home}")', argv[2])
 
     def test_darwin_fence_args_apply_and_dedupe(self):
         flag = "--dangerously-bypass-approvals-and-sandbox"
