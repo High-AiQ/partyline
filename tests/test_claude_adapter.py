@@ -91,6 +91,137 @@ class ClaudeCommandTest(unittest.TestCase):
         )
 
 
+class ClaudeStartupPromptTest(unittest.IsolatedAsyncioTestCase):
+    fixture = Path(__file__).parent / "fixtures" / "claude_trust_prompt.txt"
+
+    def make_adapter(self, attention: AsyncMock) -> PartylineAdapter:
+        async def post(*_args) -> None:
+            return None
+
+        async def status(*_args) -> None:
+            return None
+
+        return PartylineAdapter(
+            {
+                "command": ["claude"],
+                "id": "attachment-1",
+                "name": "claude",
+                "cwd": "/work",
+                "adapter_metadata": {
+                    "startup_prompts": {
+                        "trust prompt": ["Do you trust the files in this folder?"],
+                    },
+                },
+                "startup_attention": attention,
+            },
+            post,
+            status,
+        )
+
+    async def test_trust_prompt_blocks_briefing_until_person_clears_it(self):
+        """The first paste must not select the trust dialog's default exit."""
+        attention = AsyncMock()
+        adapter = self.make_adapter(attention)
+        prompt = self.fixture.read_text(encoding="utf-8")
+        screens = iter((prompt, "Claude Code is ready"))
+        adapter.screen_text = lambda: next(screens)
+        adapter.alive = lambda: True
+        adapter.send_keys = AsyncMock()
+
+        await adapter.send_startup_briefing()
+
+        attention.assert_awaited_once_with("trust prompt")
+        adapter.send_keys.assert_awaited_once_with(adapter.briefing())
+
+    async def test_wake_waits_for_the_blocked_briefing_then_pastes_once(self):
+        attention = AsyncMock()
+        adapter = self.make_adapter(attention)
+        prompt = self.fixture.read_text(encoding="utf-8")
+        cleared = asyncio.Event()
+        adapter.screen_text = lambda: "" if cleared.is_set() else prompt
+        adapter.alive = lambda: True
+        adapter.send_keys = AsyncMock()
+
+        startup = asyncio.create_task(adapter.send_startup_briefing())
+        await asyncio.sleep(0)
+        wake = asyncio.create_task(adapter.deliver([{"sender": "greg", "body": "wake"}]))
+        await asyncio.sleep(0)
+        self.assertEqual(adapter.send_keys.await_count, 0)
+        self.assertEqual(attention.await_count, 1)
+
+        cleared.set()
+        await startup
+        await wake
+
+        self.assertEqual(adapter.send_keys.await_count, 2)
+        self.assertEqual(adapter.send_keys.await_args_list[0].args, (adapter.briefing(),))
+
+    async def test_retry_is_held_when_the_trust_prompt_reappears(self):
+        attention = AsyncMock()
+        adapter = self.make_adapter(attention)
+        prompt = self.fixture.read_text(encoding="utf-8")
+        screens = iter(("Claude Code is ready", prompt, "Claude Code is ready"))
+        adapter.screen_text = lambda: next(screens)
+        adapter.alive = lambda: True
+        adapter.send_keys = AsyncMock()
+
+        await adapter.send_startup_briefing()
+        retry = asyncio.create_task(adapter.send_startup_briefing())
+        await asyncio.sleep(0)
+        self.assertEqual(adapter.send_keys.await_count, 1)
+
+        await retry
+
+        self.assertEqual(adapter.send_keys.await_count, 2)
+        attention.assert_awaited_once_with("trust prompt")
+
+    async def test_wake_waits_while_a_retry_is_blocked_by_the_trust_prompt(self):
+        attention = AsyncMock()
+        adapter = self.make_adapter(attention)
+        prompt = self.fixture.read_text(encoding="utf-8")
+        cleared = asyncio.Event()
+        screens = iter(("Claude Code is ready",))
+
+        def screen():
+            try:
+                return next(screens)
+            except StopIteration:
+                return "Claude Code is ready" if cleared.is_set() else prompt
+
+        adapter.screen_text = screen
+        adapter.alive = lambda: True
+        adapter.send_keys = AsyncMock()
+        await adapter.send_startup_briefing()
+
+        retry = asyncio.create_task(adapter.send_startup_briefing())
+        await asyncio.sleep(0)
+        wake = asyncio.create_task(adapter.deliver([{"sender": "greg", "body": "wake"}]))
+        await asyncio.sleep(0)
+        self.assertEqual(adapter.send_keys.await_count, 1)
+
+        cleared.set()
+        await retry
+        await wake
+
+        self.assertEqual(adapter.send_keys.await_count, 3)
+
+    async def test_exit_releases_blocked_startup_and_wake_without_a_paste(self):
+        attention = AsyncMock()
+        adapter = self.make_adapter(attention)
+        adapter.screen_text = lambda: self.fixture.read_text(encoding="utf-8")
+        adapter.alive = lambda: True
+        adapter.send_keys = AsyncMock()
+
+        startup = asyncio.create_task(adapter.send_startup_briefing())
+        wake = asyncio.create_task(adapter.deliver([{"sender": "greg", "body": "wake"}]))
+        await asyncio.sleep(0)
+        adapter.abort_startup_prompt()
+
+        self.assertFalse(await startup)
+        self.assertFalse(await wake)
+        adapter.send_keys.assert_not_awaited()
+
+
 class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
     # Test fixtures live beside the tests, not inside the adapter package.
     # Anything under partyline/ ships in the wheel, so a fixture placed there
@@ -382,8 +513,8 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
         ):
             await adapter._run()
         # Should have retried at 12
-        self.assertEqual(mock_write.call_count, 1)
-        self.assertGreaterEqual(mock_keys.call_count, 2)  # initial + 1 retry
+        mock_write.assert_not_called()
+        self.assertEqual(mock_keys.call_count, 2)  # initial + 1 retry
         self.assertEqual(posts, [("claude", "agent", "after retry")])
 
 

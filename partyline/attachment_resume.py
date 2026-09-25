@@ -22,6 +22,7 @@ from .auth_store import ensure_api_token
 from .agent_connection import provision_connection, bind_connection_hint
 from .fence import FenceUnavailable
 from .fence_protect import database_paths, protected_repo_roots
+from .hook_routes import surface_attention
 from .hierarchy import tree_live_name_conflict
 from .role_delivery import bind_role_delivery
 from .review_worktrees import list_review_worktrees
@@ -232,6 +233,7 @@ async def _resume_adapter_locked(
         conv["id"], att_id,
         runtime.post_callback(att_id, conv["id"], runtime_owner, route=False),
     )
+    att["startup_attention"] = lambda prompt: surface_attention(runtime, att, prompt)
 
     adapter = make_adapter(
         att["adapter"],

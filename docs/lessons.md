@@ -54,6 +54,14 @@ misleading evidence:
 These are durable false assumptions from dogfooding, paired with the evidence and guard that
 replaced them:
 
+- **A delayed startup paste necessarily reaches the CLI's input editor.** Claude Code can
+  instead be waiting at its folder-trust, login, or update dialog, where a bracketed briefing
+  plus Enter selects the dialog's default and exits. Startup-prompt phrases now live in adapter
+  metadata; matching one holds both the briefing and queued wakes, posts the existing attention
+  notice/event, and polls until a person resolves it in the terminal viewer. The Claude fixture
+  control proves no paste happens while the trust screen is present and that clearance sends the
+  briefing exactly once.
+
 - **A live attachment row always has a current-generation adapter.** On 2026-09-25, the person
   resumed one attachment after the 2.12.0 restart while the saved plan still contained that id.
   The automatic runner then collided with the live row's claim and reported a false failure that
