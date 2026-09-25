@@ -72,7 +72,7 @@ it is a fence against accidents, not a jail against malice. See
 | the line's cwd tree | yes | the tree the line works in; a directly attached line keeps its cwd writable because the person put it there |
 | the repository's `.review/` directory | yes | disposable review checkouts may be created after spawn; only the line's recorded review checkouts get writable Git metadata |
 | git shared state (child lines) | partially | see the mirror below |
-| adapter home paths from the manifest `write_paths` | yes | sessions, transcripts, auth state each CLI writes (`~/.claude`, `~/.cursor`, `~/.grok`, …) |
+| adapter home paths from the manifest `write_paths` | yes | sessions, transcripts, auth state each CLI writes (`~/.claude`, `~/.cursor`, `~/.grok`, `~/.codex`, …) |
 | an adapter's computed paths | yes | a per-attachment vendor home the manifest cannot name (codex's `CODEX_HOME`) |
 | granted paths (`conversation_write_grants`) | yes | requested, granted, recorded |
 | `~/.cache`, `~/.config`, `~/.docker` | yes | the home directories CLIs routinely update, including `docker build`'s buildx state |
@@ -179,7 +179,7 @@ CLI requirements declared by installed adapter manifests. The emergency
 
 | adapter | manifest additions | first attach |
 | --- | --- | --- |
-| codex | `fence_args` (sandbox replaced by the fence) | none: repo-root trust covers worktrees |
+| codex | `fence_args` (sandbox replaced by the fence), `write_paths` | none: `~/.codex` is declared so a folder-trust decision saves through `codex_home()`'s symlinks to the real `config.toml` |
 | claude | `write_paths` | a folder-trust dialog per new worktree path, answered once in the pty |
 | cursor | `write_paths` | none: the bundled command ships `--trust` |
 | opencode | `write_paths` | none |
