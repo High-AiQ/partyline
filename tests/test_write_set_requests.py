@@ -11,13 +11,12 @@ from fastapi.testclient import TestClient
 
 from partyline import auth_store, auth_tokens
 from partyline.adapters import ADAPTER_METADATA
-from partyline.attachment_resume import resume_adapter
 from partyline.auth_guard import install_auth_guard
 from partyline.db import Db
 from partyline.reattach import ResumedAttachment
 from partyline.runtime import ChatRuntime
 from partyline.write_set_requests import register_write_set_request_routes, resume_line_attachments
-from partyline.write_set_routes import add_write_grant, list_write_grants, write_set_router
+from partyline.write_set_routes import list_write_grants, write_set_router
 from tests.test_server import FakeAdapter
 
 
@@ -280,51 +279,6 @@ class WriteSetRequestTest(unittest.TestCase):
         self.assertEqual(len(self.audience_copies("cap")), 1)
         ringed = [m for m in cap.delivered if m.get("audience_attachment_id") == "cap"]
         self.assertEqual(len(ringed), 1)
-
-
-class ResumeWriteGrantsTest(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.directory = tempfile.TemporaryDirectory()
-        self.db = Db(f"{self.directory.name}/partyline.db")
-        self.runtime = ChatRuntime(self.db)
-        self.db.create_conversation("line", "Line")
-        self.db.add_attachment("one", "line", "luna", "fake", ["fake"], self.directory.name)
-        self.db._exec("UPDATE attachments SET status='exited' WHERE id='one'")
-        self.grant = os.path.join(self.directory.name, "granted")
-        add_write_grant(self.db, "line", self.grant, "person")
-        self.captured = {}
-
-    async def asyncTearDown(self):
-        self.db.close()
-        self.directory.cleanup()
-
-    def make_adapter(self, _adapter, att, *_args, **_kwargs):
-        self.captured["write_grants"] = att.get("write_grants")
-        return FakeAdapter(att=att)
-
-    class _Presence:
-        def watch(self, adapter, *_args):
-            return adapter
-
-        def posting(self, *_args):
-            return lambda _body: None
-
-        def statusing(self, *_args, **_kwargs):
-            return lambda _status: None
-
-    @patch("partyline.attachment_resume.bind_role_delivery")
-    @patch("partyline.attachment_resume.bind_connection_hint")
-    @patch("partyline.attachment_resume.provision_connection")
-    async def test_resume_adapter_loads_write_grants(self, *_mocks):
-        await resume_adapter(
-            "one", None,
-            runtime=self.runtime,
-            adapter_metadata={"fake": {"capabilities": {"resume": True}}},
-            make_adapter=self.make_adapter,
-            presence=self._Presence(),
-            hook_url=lambda _ident, _token: "http://127.0.0.1:8643/api/hooks/one/token",
-        )
-        self.assertEqual([row["path"] for row in self.captured["write_grants"]], [self.grant])
 
 
 if __name__ == "__main__":

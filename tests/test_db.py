@@ -61,6 +61,32 @@ class DbTest(unittest.TestCase):
         self.assertEqual(attachment["status"], "exited")
         self.assertEqual(attachment["last_seen"], 9)
         self.assertEqual(attachment["cli_session"], "session")
+        self.assertIsNone(attachment["runtime_started_at"])
+
+    def test_resume_activation_time_is_migrated_and_tracks_the_live_generation(self):
+        self.db.create_conversation("line", "Line")
+        attachment = self.db.add_attachment(
+            "att", "line", "terra", "fake", ["fake"], "/tmp"
+        )
+        original_created = attachment["created_at"]
+        self.assertIsNotNone(attachment["runtime_started_at"])
+        self.db.set_attachment_status("att", "exited", None)
+
+        self.assertTrue(self.db.claim_attachment("att", "new-generation"))
+        resumed = self.db.get_attachment("att")
+        self.assertGreaterEqual(resumed["runtime_started_at"], original_created)
+        self.assertEqual(resumed["runtime_owner"], "new-generation")
+
+        reopened = Db(self.db_path)
+        try:
+            self.assertEqual(
+                reopened.get_attachment("att")["runtime_started_at"],
+                resumed["runtime_started_at"],
+            )
+            reopened.mark_stale_attachments()
+            self.assertIsNone(reopened.get_attachment("att")["runtime_started_at"])
+        finally:
+            reopened.close()
 
     def test_command_changes_only_while_the_attachment_is_inactive(self):
         self.db.create_conversation("line", "Line")

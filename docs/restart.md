@@ -50,13 +50,15 @@ safety contract; the failure modes that shaped it are recorded in [lessons.md](l
    is about to kill (see `partyline/restart_requests.py`).
 5. **The new process resumes everyone.** On boot, the server claims the persisted plan through a
    durable lease and works through the saved attachments sequentially — several coding CLIs can
-   otherwise discover and claim the same transcript concurrently (`partyline/reattach.py`,
-   `run_automatic_restart_plan`). Continuation is not inferred from a cursor or pty write: for
-   adapters that support it, the debrief is delivered as structured process input before the
-   cursor advances, and each covered line hears a start banner and a closing summary. A failed
-   receipt keeps one retry; a second unconfirmed attempt is consumed with an actionable warning
-   while the process stays live and reachable. Whoever was mid-turn when the restart landed is rung
-   once their process resumes.
+  otherwise discover and claim the same transcript concurrently (`partyline/reattach.py`,
+  `run_automatic_restart_plan`). Continuation is not inferred from a cursor or pty write: for
+  adapters that support it, the debrief is delivered as structured process input before the
+  cursor advances, and each covered line hears a start banner and a closing summary. A failed
+  receipt keeps one retry; a second unconfirmed attempt is consumed with an actionable warning
+  while the process stays live and reachable. If a person resumes a planned attachment first,
+  automatic recovery treats that live process as ready and skips it; manual and automatic resumes
+  are serialized per attachment so the same process is never started twice. Whoever was mid-turn
+  when the restart landed is rung once their process resumes.
 
 The plan machinery — `restart_plan` table and columns, `reattach.py`, the claim/renew/release/complete
 lease lifecycle — is unchanged from the earlier operator-CLI-driven procedure; only that naming

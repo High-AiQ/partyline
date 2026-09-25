@@ -54,6 +54,20 @@ misleading evidence:
 These are durable false assumptions from dogfooding, paired with the evidence and guard that
 replaced them:
 
+- **A live attachment row always has a current-generation adapter.** On 2026-09-25, the person
+  resumed one attachment after the 2.12.0 restart while the saved plan still contained that id.
+  The automatic runner then collided with the live row's claim and reported a false failure that
+  looked like a handle conflict. A second recovery gap left a ghost handle: an unconfirmed plan
+  member could have no adapter in the new runtime's `live` map while its durable row still said
+  `running`, blocking reuse of the handle. Serialize manual and automatic resume per attachment;
+  if a same-id live process wins before or during the automatic claim, count it ready and skip
+  it. At plan completion, mark an unconfirmed row exited if no current-generation adapter owns
+  it, and keep genuinely live rows active. Keep distinct attachment/name conflicts as failures.
+  Show the activation start and a short hashed generation label in diagnostics; the raw runtime
+  owner is a hook capability. Controls: `tests.test_reattach` covers the initial liveness check,
+  the post-check race, and both live and ghost unconfirmed members;
+  `tests.test_attachment_resume` covers refusal text and concurrent resume serialization.
+
 - **One timeout screen observation proved Cursor's linked-worktree startup path was wrong.** A
   2026.09 Cursor attachment showed login and created no transcript, but its actual child argv and
   startup environment were not retained. Fresh PTY probes, including the real adapter beneath

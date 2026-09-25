@@ -51,5 +51,7 @@ For each stopped card choose **Resume** to reopen the same session with its cont
 for a process that was mid-work), or **Start fresh** to mint a new identity and pass the
 checkpoint path plus its last incorporated message id. Mention a resumed process to deliver the
 messages it missed; its first reply is delivered from structured input, not screen scraping, and
-is the receipt that recovery worked. Confirm with `GET /api/running` that only the processes you
-resumed are live.
+is the receipt that recovery worked. When an automatic restart plan also covers the attachment,
+resuming it by hand first is safe: automatic recovery sees the live attachment, counts it ready,
+and skips starting it again. Confirm with `GET /api/running` that only the processes you resumed
+are live.
