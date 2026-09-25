@@ -55,9 +55,10 @@ class ProbeTest(unittest.TestCase):
         self.assertEqual(argv[0], fence.BWRAP)
         self.assertIn("--unshare-user", argv)
         self.assertEqual(argv[-1], "/usr/bin/true")
-        self.assertEqual(run.call_args.kwargs["cwd"], run.call_args.args[0][
-            run.call_args.args[0].index("--bind") + 1
-        ])
+        cwd = run.call_args.kwargs["cwd"]
+        binds = [(argv[i + 1], argv[i + 2]) for i, flag in enumerate(argv)
+                 if flag in ("--bind", "--ro-bind")]
+        self.assertIn((cwd, cwd), binds)
 
     @patch("partyline.fence.backend_available", return_value=(False, "backend missing"))
     def test_missing_backend_returns_install_remedy_without_running(self, _available):

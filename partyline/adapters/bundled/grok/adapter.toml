@@ -10,7 +10,6 @@ requires = ["grok"]
 compact_paste = "/compact"
 env_unset = []
 # Sessions, steering config, and auth.
-write_paths = ["~/.grok"]
 # immediate_mentions is a claim about the harness; it is only *effective* when the
 # host sets [ui] follow_up_behavior = "steer" (see steering.py).
 capabilities = { resume = true, turn_end = "receipt", transcript = true, immediate_mentions = true }

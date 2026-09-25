@@ -1,5 +1,6 @@
 """The write fence: every attached process runs inside a platform sandbox
-where only its line's declared write set is writable.
+where a protected set — every managed repository and the partyline
+database — is read-only, and everything else is writable.
 
 Why: a text brief does not bind a process. Whatever a line's worker is
 told, the only durable boundary is the one the kernel enforces at
@@ -7,16 +8,27 @@ spawn time. The fence wraps the single place every pty process starts —
 ``adapters.base.Adapter.start`` — so no adapter can forget it.
 
 The backend is chosen per platform at launch (``backend``): on Linux,
-bubblewrap builds a mount namespace — ``/`` bound read-only, fresh
-``/dev`` and ``/proc``, a private tmpfs over ``/tmp``, and each write-set
-path bound writable at its real path. On Darwin, ``fence_darwin`` feeds
-``sandbox-exec`` a generated profile that denies ``file-write*`` outside
-the same write set (no mounts exist there, so git binds become the weaker
-documented scope instead). The environment, the working directory, the
-process group, and the network are kept as they were — this is a
-filesystem fence, not a jail. A child line's Git needs are layered in by
-``git_fence``: shared objects, a private copy-on-write mirror of refs,
-and its own worktree metadata.
+bubblewrap builds a mount namespace — ``/`` bound writable, a full
+``/dev`` and ``/proc`` pass through, then every protected repository root
+bound read-only, then this line's own
+worktree, metadata, review area, and git objects/mirror bound writable
+again on top. On Darwin, ``fence_darwin`` feeds ``sandbox-exec`` a
+generated profile that denies ``file-write*`` under the protected roots
+and the database, then re-allows it under the same carve-outs (no mounts
+exist there, so git binds become the weaker documented scope instead).
+The environment, the working directory, the process group, and the
+network are kept as they were — this is a filesystem fence, not a jail.
+A child line's Git needs are layered in by ``git_fence``: shared objects,
+a private copy-on-write mirror of refs, and its own worktree metadata.
+
+The protected set is computed fresh at spawn from the database
+(``fence_protect.protected_repo_roots``): every non-archived line's
+repository root, plus the database file and its sidecars. A repository
+not yet known to partyline is therefore writable — a documented
+consequence of deriving the set this way. A line whose own ``cwd`` is a
+repository's root (the root captain, in the person's checkout) is exempt
+from its own repository's protection and keeps that checkout writable,
+exactly as before the fence was inverted.
 
 Failure is closed. If the platform's backend exists but cannot run — or
 the platform has no backend at all — the process is refused, never
@@ -27,35 +39,20 @@ default is on.
 
 Extra scope is requested, never assumed: a line may be granted more by a
 captain above it or by a person, and the grant is recorded on the line
-(``conversation_write_grants``) and visible to the whole room.
+(``conversation_write_grants``), bound writable last so it can restore
+access even under a protected root, and visible to the whole room.
 """
 
 from __future__ import annotations
 
-import glob
 import os
-import re
 import sys
 
-from . import features, fence_darwin, git_fence
-from .line_worktree import REVIEW_DIR, repo_root
+from . import features, fence_darwin, fence_protect, git_fence
+from .fence_paths import darwin_write_set, write_set
 
 BWRAP = "/usr/bin/bwrap"
-
-# Home directories every CLI may update: caches and tool configuration.
-# Read access to everything else in the home stays, as everywhere else on
-# the host — this fence bounds writes, not reads.
-HOME_WRITE_PATHS = ("~/.cache", "~/.config", "~/.docker", "~/.npm")
-
-# Named individually, not via --dev-bind /dev /dev, so hidden block/raw-memory devices stay hidden.
 DEV_ROOT = "/dev"
-GPU_DEV_GLOB_NAMES = ("nvidia*", "dri", "kfd", "video*", "snd")
-
-
-def _gpu_dev_binds() -> list[str]:
-    """Existing host GPU device nodes to bind through the fresh --dev."""
-    return [p for name in GPU_DEV_GLOB_NAMES
-            for p in sorted(glob.glob(os.path.join(DEV_ROOT, name)))]
 
 
 class FenceUnavailable(RuntimeError):
@@ -101,185 +98,55 @@ def _refusal(reason: str, remedy: str = "") -> str:
     return f"{reason}.{advice}"
 
 
-def manifest_write_paths(att: dict) -> list[str]:
-    """Home paths the adapter declares its CLI writes, from the manifest."""
-    metadata = att.get("adapter_metadata") or {}
-    return [os.path.expanduser(p) for p in (metadata.get("write_paths") or [])]
-
-
 def existing(paths: list[str]) -> list[str]:
-    """Bind sources must exist; a missing path grants nothing, so skip it."""
+    """Bind sources must exist; a missing path grants or protects nothing."""
     return [p for p in paths if os.path.lexists(p)]
 
 
-def _review_directory(cwd: str, *, create: bool = False) -> str | None:
-    """Return the repository's real .review directory, creating it for a bind."""
-    repo = repo_root(cwd)
-    if repo is None:
-        return None
-    repo = os.path.realpath(repo)
-    review_root = os.path.join(repo, REVIEW_DIR)
-    if create and not os.path.lexists(review_root):
-        try:
-            os.mkdir(review_root)
-        except FileExistsError:
-            pass
-        except OSError:
-            return None
-    if (not os.path.isdir(review_root) or os.path.islink(review_root) or
-            os.path.realpath(review_root) != review_root):
-        return None
-    return review_root
+def _grant_paths(att: dict) -> list[str]:
+    return existing([str(grant.get("path", "")) for grant in att.get("write_grants") or []])
 
 
-def _review_worktree_paths(att: dict, review_root: str | None = None) -> list[str]:
-    """Return recorded, canonical review checkouts for metadata binds only."""
-    conv_id = att.get("conv_id")
-    cwd = att.get("cwd") or ""
-    rows = att.get("review_worktrees") or []
-    repo = repo_root(cwd) if rows and conv_id else None
-    if repo is None:
-        return []
-    repo = os.path.realpath(repo)
-    expected_root = os.path.join(repo, REVIEW_DIR)
-    review_root = review_root or _review_directory(cwd)
-    if review_root != expected_root:
-        return []
-
-    paths = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        if row.get("conv_id") != conv_id:
-            continue
-        sha, recorded = row.get("sha"), row.get("path")
-        if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
-            continue
-        expected = os.path.join(review_root, sha)
-        if (not isinstance(recorded, str) or not os.path.isabs(recorded) or
-                recorded != expected or os.path.islink(recorded) or
-                os.path.realpath(recorded) != recorded or not os.path.isdir(recorded)):
-            continue
-        if (git_fence._worktree_gitdir(recorded) is None or
-                os.path.realpath(repo_root(recorded) or "") != repo):
-            continue
-        paths.append(recorded)
-    return paths
-
-
-def _review_worktree_git_binds(path: str, cwd: str, conv_id: str) -> list[tuple[str, str, bool]]:
-    """Git binds for a review worktree, skipped when its common .git is
-    already inside the line's own cwd tree (the root captain's checkout):
-    mounting a mirror over refs the line already owns writably would
-    shadow branches and pulls made after spawn from ever being seen.
-    """
-    gitdir = git_fence._worktree_gitdir(path)
-    if gitdir is not None:
-        common = os.path.realpath(git_fence.common_gitdir(gitdir))
-        cwd_real = os.path.realpath(cwd or "")
-        if common == cwd_real or common.startswith(cwd_real + os.sep):
-            return []
-    return git_fence.git_binds(path, conv_id)
-
-
-def write_set(att: dict, adapter_paths: list[str] | None = None) -> list[tuple[str, str, bool]]:
-    """The ordered ``(host, guest, read_only)`` binds this attachment needs.
-
-    ``adapter_paths`` comes from the adapter instance: paths only the
-    running adapter knows, such as a per-attachment vendor home. A path
-    already covered by an earlier bind is skipped, so a grant for a path
-    inside the worktree or an adapter home cannot double-bind.
-    """
-    covered: set[str] = set()
-    binds: list[tuple[str, str, bool]] = []
-
-    def add(path: str) -> None:
-        path = os.path.normpath(path)
-        if path in covered or not os.path.lexists(path):
-            return
-        covered.add(path)
-        binds.append((path, path, False))
-
-    add(att.get("cwd") or "")
-    for src, dst, read_only in git_fence.git_binds(att.get("cwd") or "",
-                                                   att.get("conv_id") or ""):
-        if src in covered:
-            continue
-        covered.add(src)
-        binds.append((src, dst, read_only))
-    review_root = _review_directory(att.get("cwd") or "", create=True)
-    if review_root:
-        add(review_root)
-    for path in _review_worktree_paths(att, review_root):
-        for src, dst, read_only in _review_worktree_git_binds(
-                path, att.get("cwd") or "", att.get("conv_id") or ""):
-            if src in covered:
-                continue
-            covered.add(src)
-            binds.append((src, dst, read_only))
-    for path in adapter_paths if adapter_paths is not None else manifest_write_paths(att):
-        add(path)
-    for grant in att.get("write_grants") or []:
-        add(str(grant.get("path", "")))
-    for path in HOME_WRITE_PATHS:
-        add(os.path.expanduser(path))
-    return binds
-
-
-def darwin_write_set(att: dict, adapter_paths: list[str] | None = None) -> list[str]:
-    """The writable paths for the sandbox-exec backend: the same scope as
-    the bubblewrap write set, with git_fence's weaker Darwin scope in
-    place of the mounts (docs/write-fence.md). Only paths that exist
-    grant anything, as everywhere else.
-    """
-    paths: list[str] = []
-    covered: set[str] = set()
-
-    def add(path: str) -> None:
-        if not path:
-            return
-        path = os.path.normpath(path)
-        if path in covered or not os.path.lexists(path):
-            return
-        covered.add(path)
-        paths.append(path)
-
-    cwd = att.get("cwd") or ""
-    add(cwd)
-    for path in git_fence.darwin_write_paths(cwd):
-        add(path)
-    review_root = _review_directory(cwd, create=True)
-    if review_root:
-        add(review_root)
-    for path in _review_worktree_paths(att, review_root):
-        add(path)
-        add(git_fence._worktree_gitdir(path) or "")
-    for path in adapter_paths if adapter_paths is not None else manifest_write_paths(att):
-        add(path)
-    for grant in att.get("write_grants") or []:
-        add(str(grant.get("path", "")))
-    for path in HOME_WRITE_PATHS:
-        add(os.path.expanduser(path))
-    return paths
+def _protected_roots(att: dict) -> list[str]:
+    """This attachment's protected repository roots, minus its own — a root
+    captain's checkout is exempt from its own repository's protection."""
+    own = fence_protect.own_repo_root(att.get("cwd") or "")
+    return [root for root in existing(att.get("protected_roots") or []) if root != own]
 
 
 def _fence_args(att: dict) -> list[str]:
     return (att.get("adapter_metadata") or {}).get("fence_args") or []
 
 
-def _bwrap_argv(att: dict, paths: list[str], command: list[str],
-                tmpfs_tmp: bool) -> list[str]:
-    argv = [BWRAP, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--unshare-user"]
-    argv += [flag for gpu in _gpu_dev_binds() for flag in ("--dev-bind", gpu, gpu)]
-    if tmpfs_tmp:
-        argv += ["--tmpfs", "/tmp"]
-    for src, dst, read_only in write_set(att, paths):
+def _bwrap_argv(att: dict, command: list[str]) -> list[str]:
+    argv = [BWRAP, "--bind", "/", "/", "--dev-bind", DEV_ROOT, DEV_ROOT,
+            "--proc", "/proc", "--unshare-user"]
+    for root in _protected_roots(att):
+        argv += ["--ro-bind", root, root]
+    for src, dst, read_only in write_set(att):
         argv += ["--ro-bind" if read_only else "--bind", src, dst]
+    for path in existing(att.get("db_paths") or []):
+        argv += ["--ro-bind", path, path]
+    for path in _grant_paths(att):
+        argv += ["--bind", path, path]
     tail = list(command) + [flag for flag in _fence_args(att) if flag not in command]
     return argv + ["--die-with-parent", "--"] + tail
 
 
-def launch_argv(adapter, tmpfs_tmp: bool = True) -> list[str]:
+def _darwin_scope(att: dict) -> tuple[list[str], list[str], list[str], list[str]]:
+    """The ``(deny, allow)`` path lists ``fence_darwin.profile`` needs:
+    protected roots plus the database to deny, carve-outs plus grants to
+    allow back in.
+    """
+    cwd = att.get("cwd") or ""
+    deny = _protected_roots(att) + existing(att.get("db_paths") or [])
+    deny_git = git_fence.darwin_protected_git_paths(cwd)
+    allow = darwin_write_set(att) + _grant_paths(att)
+    allow_git = existing([git_fence._worktree_gitdir(cwd) or ""])
+    return deny, allow, deny_git, allow_git
+
+
+def launch_argv(adapter) -> list[str]:
     """Build a fenced spawn argv; adapters may replace incompatible CLI sandboxes."""
     command = adapter.build_command()
     if not features.enabled("write_fence"):
@@ -293,8 +160,8 @@ def launch_argv(adapter, tmpfs_tmp: bool = True) -> list[str]:
     if not available:
         raise FenceUnavailable(_refusal(reason))
     att = adapter.att
-    hook = getattr(adapter, "write_paths", None)
-    paths = manifest_write_paths(att) if hook is None else hook()
     if backend() == "sandbox-exec":
-        return fence_darwin.argv(darwin_write_set(att, paths), command, _fence_args(att))
-    return _bwrap_argv(att, paths, command, tmpfs_tmp)
+        deny, allow, deny_git, allow_git = _darwin_scope(att)
+        return fence_darwin.argv(deny, allow, deny_git, allow_git,
+                                 command, _fence_args(att))
+    return _bwrap_argv(att, command)

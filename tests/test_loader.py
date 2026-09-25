@@ -181,6 +181,10 @@ class ManifestValidationTest(unittest.TestCase):
     def test_a_command_that_is_not_an_argv_array_is_rejected(self):
         self.assertIn("argv array", self._load_expecting_failure(command="probe --flag"))
 
+    def test_obsolete_write_paths_are_rejected(self):
+        self.assertIn("write_paths is obsolete",
+                      self._load_expecting_failure(write_paths=["~/.probe"]))
+
     def test_an_update_command_that_is_not_an_argv_array_is_rejected(self):
         self.assertIn(
             "argv array", self._load_expecting_failure(update_command="grok update")
@@ -550,36 +554,11 @@ class CompatibilityShimTest(unittest.TestCase):
         self.assertTrue(issubclass(RawAdapter, Adapter))
 
 
-class BundledManifestWritePathsTest(unittest.TestCase):
-    """The write fence derives a CLI's home writes from the manifest
-    (docs/write-fence.md). deepseek, hermes, muse, and pi shipped with no
-    declaration and could not start under the fence — qwen (dsh) exited 1
-    on its first write to ~/.dsh — so the declarations are pinned here.
-    """
-
-    def manifest(self, name):
-        return loader._manifest(loader.BUNDLED_ROOT / name)
-
-    def test_the_repaired_adapters_declare_their_home_writes(self):
-        expected = {
-            "deepseek": ["~/.dsh"],
-            "hermes": ["~/.hermes"],
-            "muse": ["~/.local/share/muse"],
-            "pi": ["~/.pi", "~/.partyline/sessions/pi"],
-        }
-        for name, paths in expected.items():
-            self.assertEqual(self.manifest(name)["write_paths"], paths, name)
-
-    def test_the_previously_declared_adapters_keep_theirs(self):
-        expected = {
-            "antigravity": ["~/.gemini", "~/.partyline/sessions/antigravity"],
-            "claude": ["~/.claude", "~/.claude.json"],
-            "cursor": ["~/.cursor"],
-            "grok": ["~/.grok"],
-            "opencode": ["~/.local/share/opencode", "~/.local/state"],
-        }
-        for name, paths in expected.items():
-            self.assertEqual(self.manifest(name)["write_paths"], paths, name)
+class BundledManifestFenceTest(unittest.TestCase):
+    def test_no_adapter_manifest_can_grant_home_writes(self):
+        for manifest_path in loader.BUNDLED_ROOT.glob("*/adapter.toml"):
+            with self.subTest(adapter=manifest_path.parent.name):
+                self.assertNotIn("write_paths", loader._manifest(manifest_path.parent))
 
 
 if __name__ == "__main__":

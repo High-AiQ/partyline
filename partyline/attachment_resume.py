@@ -21,6 +21,7 @@ from .activation_diagnostics import activation_context, line_name
 from .auth_store import ensure_api_token
 from .agent_connection import provision_connection, bind_connection_hint
 from .fence import FenceUnavailable
+from .fence_protect import database_paths, protected_repo_roots
 from .hierarchy import tree_live_name_conflict
 from .role_delivery import bind_role_delivery
 from .review_worktrees import list_review_worktrees
@@ -214,6 +215,8 @@ async def _resume_adapter_locked(
     att["hook_url"] = hook_url(att_id, runtime_owner)
     att["review_worktrees"] = list_review_worktrees(runtime.db, att["conv_id"])
     att["write_grants"] = list_write_grants(runtime.db, att["conv_id"])
+    att["protected_roots"] = protected_repo_roots(runtime.db)
+    att["db_paths"] = database_paths(runtime.db)
     provision_connection(runtime.db.path, att)
     att["digest_rider"] = lambda: ""
     bind_connection_hint(att)

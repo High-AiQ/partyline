@@ -10,7 +10,6 @@ requires = ["pi"]
 compact_paste = "/compact"
 env_unset = []
 # Sessions are pinned under partyline; ~/.pi is the agent's own state home.
-write_paths = ["~/.pi", "~/.partyline/sessions/pi"]
 output = "session transcript"
 
 update_command = ["pi", "update", "--self"]
