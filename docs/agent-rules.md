@@ -124,6 +124,7 @@ Rules and depth: `docs/adapters.md` and `skills/add-process-adapter/SKILL.md`.
 | Locate and *claim* the transcript unambiguously | Let two attachments resolve the same transcript |
 | Give each attachment a claim marker of its own and relay no transcript speech until the session records it | Adopt a session by directory scan order or mtime, or relay one carrying another attachment's marker |
 | Send pty input as bracketed paste then Enter | — |
+| When a CLI crashes before creating a transcript or session, ask a person to check the host kernel log (`dmesg` or `journalctl -k`) around the failure time | Treat a fenced process's inability to read the kernel log as evidence that the kernel was healthy, or infer a provider cause from a generic no-session timeout |
 | Ship the adapter's own tests | Run the vendor's CLI in tests |
 
 ## The write fence
