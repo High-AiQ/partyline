@@ -21,9 +21,9 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from partyline import (auth_store, auth_tokens, fence, fence_darwin, fence_probe,
+from partyline import (auth_store, auth_tokens, fence, fence_darwin, fence_paths, fence_probe,
+                       fence_protect,
                        git_fence, server)
-from partyline.adapters import loader
 from partyline.auth_guard import install_auth_guard
 from partyline.write_set_routes import list_write_grants, write_set_router
 from partyline.write_set_requests import register_write_set_request_routes
@@ -76,7 +76,8 @@ def _worktree_fixture(base: str) -> dict:
 
 def _att(cwd, conv_id="conv-fence", metadata=None, grants=None):
     return {"cwd": cwd, "conv_id": conv_id,
-            "adapter_metadata": metadata or {}, "write_grants": grants or []}
+            "adapter_metadata": metadata or {}, "write_grants": grants or [],
+            "protected_roots": [], "db_paths": []}
 
 
 def _isolate_home(test_case, root=None):
@@ -113,58 +114,69 @@ class LaunchArgvTest(unittest.TestCase):
             self.assertEqual(fence.launch_argv(adapter), ["codex", "--flag"])
 
     def test_wrap_prefix_and_command_tail(self):
-        with patch.object(fence, "bwrap_available", return_value=True):
-            argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli", "--go"]))
+        with tempfile.TemporaryDirectory() as base:
+            att = _att(base)
+            att["protected_roots"] = [base]
+            with patch.object(fence, "bwrap_available", return_value=True):
+                argv = fence.launch_argv(FakeAdapter(att, ["cli", "--go"]))
         self.assertEqual(argv[0], fence.BWRAP)
         self.assertIn("--die-with-parent", argv)
         self.assertEqual(argv[-3:], ["--", "cli", "--go"])
-        for flag in ("--ro-bind", "--dev", "--proc", "--tmpfs"):
+        for flag in ("--bind", "--ro-bind", "--dev-bind", "--proc"):
             self.assertIn(flag, argv)
-        self.assertEqual(argv[argv.index("--ro-bind") + 2], "/")
+        self.assertNotIn("--tmpfs", argv)
+        self.assertEqual(argv[argv.index("--bind") + 1:argv.index("--bind") + 3], ["/", "/"])
+        self.assertEqual(argv[argv.index("--ro-bind") + 1:argv.index("--ro-bind") + 3],
+                         [base, base])
 
-    def test_cwd_and_homes_are_writable_binds(self):
+    def test_cwd_is_a_writable_bind(self):
         with patch.object(fence, "bwrap_available", return_value=True):
             argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
         pairs = [(argv[i + 1], argv[i + 2]) for i, a in enumerate(argv) if a == "--bind"]
         guests = {dst for _src, dst in pairs}
         self.assertIn("/tmp", guests)
-        self.assertIn(os.path.expanduser("~/.cache"), guests)
-        self.assertIn(os.path.expanduser("~/.config"), guests)
+        self.assertNotIn(os.path.expanduser("~/.cache"), guests)
 
-    def test_npm_home_is_a_writable_bind_when_it_exists(self):
-        os.makedirs(os.path.join(self.home.name, ".npm"), exist_ok=True)
-        with patch.object(fence, "bwrap_available", return_value=True):
-            argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
-        pairs = [(argv[i + 1], argv[i + 2]) for i, a in enumerate(argv) if a == "--bind"]
-        guests = {dst for _src, dst in pairs}
-        self.assertIn(os.path.expanduser("~/.npm"), guests)
+    def test_protected_repository_and_database_are_read_only_before_carveouts(self):
+        with tempfile.TemporaryDirectory() as base:
+            repo = os.path.join(base, "repo")
+            line = os.path.join(repo, "worktree")
+            os.makedirs(line)
+            database = os.path.join(base, "partyline.db")
+            open(database, "w").close()
+            att = _att(line)
+            att.update(protected_roots=[repo], db_paths=[database])
+            with patch.object(fence, "bwrap_available", return_value=True):
+                argv = fence.launch_argv(FakeAdapter(att, ["cli"]))
+            repo_ro = argv.index("--ro-bind")
+            own_rw = argv.index("--bind", repo_ro)
+            db_ro = argv.index("--ro-bind", own_rw)
+            self.assertEqual(argv[repo_ro + 1:repo_ro + 3], [repo, repo])
+            self.assertEqual(argv[own_rw + 1:own_rw + 3], [line, line])
+            self.assertEqual(argv[db_ro + 1:db_ro + 3], [database, database])
+            self.assertLess(repo_ro, own_rw)
+            self.assertLess(own_rw, db_ro)
 
-    def test_missing_npm_home_binds_nothing(self):
-        self.assertFalse(os.path.lexists(os.path.expanduser("~/.npm")))
-        with patch.object(fence, "bwrap_available", return_value=True):
-            argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
-        pairs = [(argv[i + 1], argv[i + 2]) for i, a in enumerate(argv) if a == "--bind"]
-        guests = {dst for _src, dst in pairs}
-        self.assertNotIn(os.path.expanduser("~/.npm"), guests)
-
-    def test_docker_home_is_a_writable_bind_when_it_exists(self):
-        os.makedirs(os.path.join(self.home.name, ".docker"), exist_ok=True)
-        with patch.object(fence, "bwrap_available", return_value=True):
-            argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
-        pairs = [(argv[i + 1], argv[i + 2]) for i, a in enumerate(argv) if a == "--bind"]
-        guests = {dst for _src, dst in pairs}
-        self.assertIn(os.path.expanduser("~/.docker"), guests)
-
-    def test_missing_docker_home_binds_nothing(self):
-        self.assertFalse(os.path.lexists(os.path.expanduser("~/.docker")))
-        with patch.object(fence, "bwrap_available", return_value=True):
-            argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
-        pairs = [(argv[i + 1], argv[i + 2]) for i, a in enumerate(argv) if a == "--bind"]
-        guests = {dst for _src, dst in pairs}
-        self.assertNotIn(os.path.expanduser("~/.docker"), guests)
+    def test_a_write_grant_is_bound_after_protected_roots(self):
+        with tempfile.TemporaryDirectory() as base:
+            repo = os.path.join(base, "repo")
+            line = os.path.join(repo, "worktree")
+            grant = os.path.join(repo, "shared")
+            os.makedirs(line)
+            os.makedirs(grant)
+            att = _att(line, grants=[{"path": grant}])
+            att["protected_roots"] = [repo]
+            with patch.object(fence, "bwrap_available", return_value=True):
+                argv = fence.launch_argv(FakeAdapter(att, ["cli"]))
+            ro = argv.index("--ro-bind")
+            rw = argv.index("--bind", ro)
+            self.assertEqual(argv[ro + 1:ro + 3], [repo, repo])
+            self.assertEqual(argv[rw + 1:rw + 3], [line, line])
+            last = max(i for i, item in enumerate(argv) if item == "--bind")
+            self.assertEqual(argv[last + 1:last + 3], [grant, grant])
 
     def test_manifest_fence_args_apply_only_when_fenced(self):
-        att = _att("/tmp", metadata={"fence_args": ["--yolo"], "write_paths": []})
+        att = _att("/tmp", metadata={"fence_args": ["--yolo"]})
         with patch.object(fence, "bwrap_available", return_value=True):
             argv = fence.launch_argv(FakeAdapter(att, ["codex"]))
         self.assertEqual(argv[-2:], ["codex", "--yolo"])
@@ -173,7 +185,7 @@ class LaunchArgvTest(unittest.TestCase):
 
     def test_fence_args_dedupe_against_the_command(self):
         flag = "--dangerously-bypass-approvals-and-sandbox"
-        att = _att("/tmp", metadata={"fence_args": [flag], "write_paths": []})
+        att = _att("/tmp", metadata={"fence_args": [flag]})
         with patch.object(fence, "bwrap_available", return_value=True):
             carrying = fence.launch_argv(FakeAdapter(att, ["codex", flag, "--go"]))
             self.assertEqual(carrying[-3:], ["codex", flag, "--go"])
@@ -207,83 +219,12 @@ class LaunchArgvTest(unittest.TestCase):
 
     def test_write_set_dedupes_and_skips_missing(self):
         with tempfile.TemporaryDirectory() as base:
-            outside = os.path.join(base, "extra")
-            os.makedirs(outside)
-            att = _att(base, grants=[{"path": base},  # inside cwd: covered
-                                     {"path": outside},
-                                     {"path": os.path.join(base, "missing")}])
+            att = _att(base)
             with patch.object(git_fence, "FENCE_ROOT", os.path.join(base, "fence")):
-                pairs = fence.write_set(att, adapter_paths=[])
+                pairs = fence.write_set(att)
             sources = [src for src, _dst, _ro in pairs]
             self.assertEqual(sources.count(base), 1)
-            self.assertIn(outside, sources)
             self.assertNotIn(os.path.join(base, "missing"), sources)
-
-    def test_manifest_write_paths_expand_and_bind(self):
-        att = _att("/tmp", metadata={"write_paths": ["~/.grok"]})
-        pairs = fence.write_set(att, adapter_paths=None)
-        grok = os.path.expanduser("~/.grok")
-        self.assertIn((grok, grok, False), pairs)
-
-    def test_codex_home_is_a_writable_bind_when_it_exists(self):
-        os.makedirs(os.path.join(self.home.name, ".codex"), exist_ok=True)
-        att = _att("/tmp", metadata={"write_paths": ["~/.codex"]})
-        with patch.object(fence, "bwrap_available", return_value=True):
-            argv = fence.launch_argv(FakeAdapter(att, ["codex"]))
-        pairs = [(argv[i + 1], argv[i + 2]) for i, a in enumerate(argv) if a == "--bind"]
-        guests = {dst for _src, dst in pairs}
-        self.assertIn(os.path.expanduser("~/.codex"), guests)
-
-    def test_missing_codex_home_binds_nothing(self):
-        self.assertFalse(os.path.lexists(os.path.expanduser("~/.codex")))
-        att = _att("/tmp", metadata={"write_paths": ["~/.codex"]})
-        with patch.object(fence, "bwrap_available", return_value=True):
-            argv = fence.launch_argv(FakeAdapter(att, ["codex"]))
-        pairs = [(argv[i + 1], argv[i + 2]) for i, a in enumerate(argv) if a == "--bind"]
-        guests = {dst for _src, dst in pairs}
-        self.assertNotIn(os.path.expanduser("~/.codex"), guests)
-
-    def test_gpu_device_nodes_bind_through_the_dev_tmpfs_when_present(self):
-        with tempfile.TemporaryDirectory() as dev_root:
-            for name in ("nvidia0", "nvidiactl", "nvidia-uvm", "nvidia-uvm-tools",
-                         "nvidia-modeset"):
-                open(os.path.join(dev_root, name), "w").close()
-            os.makedirs(os.path.join(dev_root, "nvidia-caps"))
-            os.makedirs(os.path.join(dev_root, "dri"))
-            open(os.path.join(dev_root, "kfd"), "w").close()
-            open(os.path.join(dev_root, "video0"), "w").close()
-            os.makedirs(os.path.join(dev_root, "snd"))
-            with patch.object(fence, "DEV_ROOT", dev_root), \
-                    patch.object(fence, "bwrap_available", return_value=True):
-                argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
-            pairs = [(argv[i + 1], argv[i + 2]) for i, a in enumerate(argv)
-                     if a == "--dev-bind"]
-            guests = {dst for _src, dst in pairs}
-            for name in ("nvidia0", "nvidiactl", "nvidia-uvm", "nvidia-uvm-tools",
-                         "nvidia-modeset", "nvidia-caps", "dri", "kfd", "video0", "snd"):
-                self.assertIn(os.path.join(dev_root, name), guests, name)
-
-    def test_missing_gpu_device_nodes_add_no_dev_binds(self):
-        with tempfile.TemporaryDirectory() as dev_root:
-            with patch.object(fence, "DEV_ROOT", dev_root), \
-                    patch.object(fence, "bwrap_available", return_value=True):
-                argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
-            self.assertNotIn("--dev-bind", argv)
-
-    def test_repaired_manifest_write_paths_reach_the_write_set(self):
-        """deepseek, hermes, muse, pi, and codex: the declarations added
-        after the qwen and folder-trust incidents must land in the spawn
-        write set, expanded."""
-        declared = [path for name in ("deepseek", "hermes", "muse", "pi", "codex")
-                    for path in loader._manifest(loader.BUNDLED_ROOT / name)["write_paths"]]
-        self.assertTrue(declared)
-        for path in declared:
-            os.makedirs(os.path.expanduser(path), exist_ok=True)
-        att = _att("/tmp", metadata={"write_paths": declared})
-        pairs = fence.write_set(att, adapter_paths=None)
-        guests = {dst for _src, dst, _ro in pairs}
-        for path in declared:
-            self.assertIn(os.path.expanduser(path), guests, path)
 
 
 class DarwinSandboxExecTest(unittest.TestCase):
@@ -312,43 +253,32 @@ class DarwinSandboxExecTest(unittest.TestCase):
             argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli", "--go"]))
         self.assertEqual(argv[0], fence_darwin.SANDBOX_EXEC)
         self.assertEqual(argv[1], "-p")
-        self.assertTrue(argv[2].startswith("(version 1)\n(allow default)\n(deny file-write*)\n"))
+        self.assertTrue(argv[2].startswith("(version 1)\n(allow default)\n(allow file-write*"))
         self.assertEqual(argv[3:], ["cli", "--go"])
 
-    def test_darwin_docker_home_allowed_only_when_it_exists(self):
-        with self.darwin(), \
-                patch.object(fence_darwin, "sandbox_exec_available", return_value=True):
-            docker = os.path.expanduser("~/.docker")
-            argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
-            self.assertNotIn(f'(subpath "{docker}")', argv[2])
-            os.makedirs(docker, exist_ok=True)
-            argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
-            self.assertIn(f'(subpath "{docker}")', argv[2])
-
-    def test_darwin_npm_home_allowed_only_when_it_exists(self):
-        with self.darwin(), \
-                patch.object(fence_darwin, "sandbox_exec_available", return_value=True):
-            npm = os.path.expanduser("~/.npm")
-            argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
-            self.assertNotIn(f'(subpath "{npm}")', argv[2])
-            os.makedirs(npm, exist_ok=True)
-            argv = fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
-            self.assertIn(f'(subpath "{npm}")', argv[2])
-
     def test_darwin_codex_home_allowed_only_when_it_exists(self):
-        att = _att("/tmp", metadata={"write_paths": ["~/.codex"]})
-        with self.darwin(), \
-                patch.object(fence_darwin, "sandbox_exec_available", return_value=True):
-            codex_home = os.path.expanduser("~/.codex")
-            argv = fence.launch_argv(FakeAdapter(att, ["codex"]))
-            self.assertNotIn(f'(subpath "{codex_home}")', argv[2])
-            os.makedirs(codex_home, exist_ok=True)
-            argv = fence.launch_argv(FakeAdapter(att, ["codex"]))
-            self.assertIn(f'(subpath "{codex_home}")', argv[2])
+        with tempfile.TemporaryDirectory() as base:
+            repo = os.path.join(base, "repo")
+            line = os.path.join(repo, "worktree")
+            os.makedirs(line)
+            database = os.path.join(base, "db")
+            open(database, "w").close()
+            att = _att(line)
+            att.update(protected_roots=[repo], db_paths=[database])
+            with self.darwin(), \
+                    patch.object(fence_darwin, "sandbox_exec_available", return_value=True):
+                argv = fence.launch_argv(FakeAdapter(att, ["codex"]))
+            profile = argv[2]
+            deny = profile.index("(deny file-write*")
+            allow = profile.index("(allow file-write*")
+            self.assertLess(deny, allow)
+            self.assertIn(f'(subpath "{repo}")', profile[:allow])
+            self.assertIn(f'(subpath "{database}")', profile[:allow])
+            self.assertIn(f'(subpath "{line}")', profile[allow:])
 
     def test_darwin_fence_args_apply_and_dedupe(self):
         flag = "--dangerously-bypass-approvals-and-sandbox"
-        att = _att("/tmp", metadata={"fence_args": [flag], "write_paths": []})
+        att = _att("/tmp", metadata={"fence_args": [flag]})
         with self.darwin(), \
                 patch.object(fence_darwin, "sandbox_exec_available", return_value=True):
             bare = fence.launch_argv(FakeAdapter(att, ["codex"]))
@@ -367,16 +297,17 @@ class DarwinSandboxExecTest(unittest.TestCase):
         self.assertEqual(argv[-3:], ["--", "cli", "--go"])
         self.assertIn("--unshare-user", argv)
 
-    def test_profile_denies_writes_then_reallows_only_the_write_set(self):
-        text = fence_darwin.profile(["/some/worktree"])
-        self.assertEqual(text.splitlines()[:3],
-                         ["(version 1)", "(allow default)", "(deny file-write*)"])
-        self.assertIn('(subpath "/some/worktree")', text)
+    def test_profile_denies_protected_paths_then_reallows_carveouts(self):
+        text = fence_darwin.profile(["/some/repo"], ["/some/repo/.partyline-worktrees/line"])
+        self.assertEqual(text.splitlines()[:2], ["(version 1)", "(allow default)"])
+        self.assertTrue(text.splitlines()[2].startswith("(deny file-write*"))
+        self.assertIn('(subpath "/some/repo")', text)
+        self.assertIn('(subpath "/some/repo/.partyline-worktrees/line")', text)
         self.assertIn('(subpath "/private/tmp")', text)
         self.assertIn('(literal "/dev/null")', text)
         self.assertIn('(regex #"^/dev/ttys[0-9]+$")', text)
         for outside in ("/", "/etc", "/Users", "/private/etc", "/usr", "/var",
-                        "/some", "/some/worktree-elsewhere"):
+                        "/some", "/some/repo-elsewhere"):
             self.assertNotIn(f'(subpath "{outside}")', text)
             self.assertNotIn(f'(literal "{outside}")', text)
 
@@ -385,14 +316,14 @@ class DarwinSandboxExecTest(unittest.TestCase):
             tmpdir = os.path.join(base, "T")
             os.makedirs(tmpdir)
             with patch.dict(os.environ, {"TMPDIR": tmpdir}):
-                text = fence_darwin.profile([])
+                text = fence_darwin.profile([], [])
         self.assertIn(f'(subpath "{tmpdir}")', text)
         self.assertIn(f'(subpath "{os.path.realpath(tmpdir)}")', text)
         self.assertIn('(subpath "/private/tmp")', text)
 
     def test_profile_escapes_quotes_and_backslashes(self):
         weird = '/tmp/space dir and "quote" and back\\slash'
-        text = fence_darwin.profile([weird])
+        text = fence_darwin.profile([weird], [])
         self.assertIn('(subpath "/tmp/space dir and \\"quote\\" and back\\\\slash")', text)
 
     def test_darwin_write_set_is_the_weaker_documented_git_scope(self):
@@ -408,7 +339,7 @@ class DarwinSandboxExecTest(unittest.TestCase):
             att["review_worktrees"] = [{"conv_id": "owner", "sha": sha, "path": review}]
             fence_root = os.path.join(base, "fence-root")
             with patch.object(git_fence, "FENCE_ROOT", fence_root):
-                paths = fence.darwin_write_set(att, adapter_paths=[])
+                paths = fence.darwin_write_set(att)
             self.assertFalse(os.path.exists(fence_root))  # no mirror on Darwin
             gitdir = git_fence._worktree_gitdir(fix["line_wt"])
             common = git_fence.common_gitdir(gitdir)
@@ -431,11 +362,18 @@ class DarwinSandboxExecTest(unittest.TestCase):
             text = argv[2]
             gitdir = git_fence._worktree_gitdir(fix["line_wt"])
             common = git_fence.common_gitdir(gitdir)
+            self.assertIn(f'(subpath "{common}")', text)
             self.assertIn(f'(subpath "{gitdir}")', text)
             self.assertIn(f'(subpath "{os.path.join(common, "refs")}")', text)
-            self.assertNotIn(f'(subpath "{os.path.join(common, "config")}")', text)
-            self.assertNotIn(f'(subpath "{os.path.join(common, "hooks")}")', text)
-            self.assertNotIn(f'(subpath "{os.path.join(common, "worktrees")}")', text)
+            for name in ("config", "hooks", "worktrees", "description", "HEAD", "info", "branches"):
+                path = os.path.join(common, name)
+                if os.path.lexists(path):
+                    self.assertIn(f'(subpath "{path}")', text)
+            deny_git = text.rindex("(deny file-write*")
+            allow_gitdir = text.rindex("(allow file-write*")
+            self.assertGreater(text.index(f'(subpath "{os.path.join(common, "config")}")'), deny_git)
+            self.assertLess(text.index(f'(subpath "{os.path.join(common, "config")}")'), allow_gitdir)
+            self.assertGreater(text.rindex(f'(subpath "{gitdir}")'), deny_git)
 
     def test_darwin_without_sandbox_exec_fails_closed_with_install_remedy(self):
         with self.darwin(), \
@@ -461,6 +399,68 @@ class DarwinSandboxExecTest(unittest.TestCase):
             self.assertTrue(fence_darwin.sandbox_exec_available())
         with patch("os.path.isfile", return_value=False):
             self.assertFalse(fence_darwin.sandbox_exec_available())
+
+
+class ProtectListTest(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.fix = _worktree_fixture(self.directory.name)
+        self.addCleanup(_git, "worktree", "prune", cwd=self.fix["repo"])
+        self.db = Db(os.path.join(self.directory.name, "partyline.db"))
+        self.addCleanup(self.db.close)
+
+    def test_active_lines_protect_each_repo_once_and_archived_lines_drop_out(self):
+        self.db.create_conversation("root", "root")
+        self.db.create_conversation("child", "child")
+        self.db.create_conversation("cwd-only", "cwd only")
+        self.db.create_conversation("archived", "archived")
+        self.db.add_attachment("root-att", "root", "root", "fake", ["fake"], self.fix["repo"])
+        self.db.add_attachment("child-att", "child", "child", "fake", ["fake"],
+                               self.fix["line_wt"])
+        second = os.path.join(self.directory.name, "cwd-only-repo")
+        os.makedirs(second)
+        _git("init", "-q", cwd=second)
+        self.db._exec("UPDATE conversations SET cwd=? WHERE id='cwd-only'", (second,))
+        archived = os.path.join(self.directory.name, "archived-repo")
+        os.makedirs(archived)
+        _git("init", "-q", cwd=archived)
+        self.db.add_attachment("archived-att", "archived", "archived", "fake", ["fake"], archived)
+        self.db.archive_conversation("archived")
+        self.assertEqual(fence_protect.protected_repo_roots(self.db),
+                         sorted([self.fix["repo"], second]))
+
+    def test_only_a_root_checkout_is_exempt_from_its_repository(self):
+        self.assertEqual(fence_protect.own_repo_root(self.fix["repo"]), self.fix["repo"])
+        self.assertIsNone(fence_protect.own_repo_root(self.fix["line_wt"]))
+
+    def test_database_paths_include_runtime_lock_and_sqlite_sidecars(self):
+        paths = [
+            self.db.path, self.db.runtime_lock_path, self.db.path + "-wal",
+            self.db.path + "-shm", self.db.path + "-journal",
+        ]
+        self.assertTrue(all(os.path.isfile(path) for path in paths))
+        for path in paths[1:]:
+            os.unlink(path)
+
+        paths = fence_protect.database_paths(self.db)
+        self.assertEqual(paths, [
+            self.db.path, self.db.runtime_lock_path, self.db.path + "-wal",
+            self.db.path + "-shm", self.db.path + "-journal",
+        ])
+        self.assertTrue(all(os.path.isfile(path) for path in paths))
+
+        att = _att(self.directory.name)
+        att["db_paths"] = paths
+        with patch.object(fence, "bwrap_available", return_value=True):
+            argv = fence.launch_argv(FakeAdapter(att, ["cli"]))
+        read_only_binds = {
+            (argv[index + 1], argv[index + 2])
+            for index, flag in enumerate(argv)
+            if flag == "--ro-bind"
+        }
+        self.assertTrue(all((path, path) in read_only_binds for path in paths))
+        self.db._exec("SELECT 1")  # SQLite tolerates the empty pre-created sidecars.
 
 
 class GitMirrorTest(unittest.TestCase):
@@ -523,7 +523,7 @@ class GitMirrorTest(unittest.TestCase):
                       encoding="utf-8") as real_file:
                 self.assertEqual(mirror_file.read(), real_file.read())
 
-    def test_bind_plan_never_writes_real_refs_config_hooks(self):
+    def test_bind_plan_mirrors_git_root_and_protects_shared_paths(self):
         common = git_fence.common_gitdir(self.gitdir(self.fix["line_wt"]))
         with patch.object(git_fence, "FENCE_ROOT", self.mirror_root()):
             binds = git_fence.git_binds(self.fix["line_wt"], "conv-1")
@@ -531,15 +531,39 @@ class GitMirrorTest(unittest.TestCase):
         self.assertIn(os.path.join(common, "objects"), guests)          # shared, safe
         self.assertIn(os.path.join(common, "refs"), guests)             # the mirror
         self.assertIn(self.gitdir(self.fix["line_wt"]), guests)         # own metadata
-        for forbidden in ("config", "hooks", "description", "HEAD"):
+        self.assertIn(common, guests)                                    # private root overlay
+        for forbidden in ("description", "HEAD"):
             self.assertNotIn(os.path.join(common, forbidden), guests)
         sources = {src for src, _dst, _ro in binds}
         worktrees_entry = [b for b in binds if b[1] == os.path.join(common, "worktrees")]
         self.assertEqual(worktrees_entry, [(os.path.join(common, "worktrees"),) * 2 + (True,)])
-        for real in (os.path.join(common, "refs"), os.path.join(common, "config"),
-                     os.path.join(common, "hooks"), os.path.join(common, "logs"),
-                     os.path.join(common, "packed-refs")):
-            self.assertNotIn(real, sources)
+        self.assertIn(os.path.join(common, "objects"), sources)
+        self.assertIn(os.path.join(common, "config"), sources)
+        self.assertIn(os.path.join(common, "hooks"), sources)
+        self.assertNotIn(os.path.join(common, "refs"), sources)
+        self.assertNotIn(os.path.join(common, "logs"), sources)
+        self.assertNotIn(os.path.join(common, "packed-refs"), sources)
+
+    def test_root_mirror_refreshes_real_root_files_without_config_or_hooks(self):
+        common = git_fence.common_gitdir(self.gitdir(self.fix["line_wt"]))
+        fetch_head = os.path.join(common, "FETCH_HEAD")
+        info_exclude = os.path.join(common, "info", "exclude")
+        with open(info_exclude, "a", encoding="utf-8") as file:
+            file.write("private-overlay-probe\n")
+        with open(fetch_head, "w", encoding="utf-8") as file:
+            file.write("first\n")
+        with patch.object(git_fence, "FENCE_ROOT", self.mirror_root()):
+            mirror = git_fence._mirror_dir(common, "conv-root")
+            git_fence.refresh_root_mirror(common, mirror)
+            with open(fetch_head, "w", encoding="utf-8") as file:
+                file.write("second\n")
+            git_fence.refresh_root_mirror(common, mirror)
+        with open(os.path.join(mirror, "FETCH_HEAD"), encoding="utf-8") as file:
+            self.assertEqual(file.read(), "second\n")
+        with open(os.path.join(mirror, "info", "exclude"), encoding="utf-8") as file:
+            self.assertIn("private-overlay-probe", file.read())
+        self.assertFalse(os.path.exists(os.path.join(mirror, "config")))
+        self.assertFalse(os.path.exists(os.path.join(mirror, "hooks")))
 
     def test_non_worktree_cwd_needs_no_git_binds(self):
         self.assertEqual(git_fence.git_binds(self.fix["repo"], "conv-1"), [])
@@ -598,13 +622,13 @@ class ReviewWorktreeFencePathTest(unittest.TestCase):
         row = {"conv_id": "owner", "sha": self.sha, "path": self.path}
         att = _att(self.fix["line_wt"], conv_id="owner")
         att["review_worktrees"] = [row]
-        self.assertEqual(fence._review_worktree_paths(att), [self.path])
+        self.assertEqual(fence_paths._review_worktree_paths(att), [self.path])
 
         row["conv_id"] = "sibling"
-        self.assertEqual(fence._review_worktree_paths(att), [])
+        self.assertEqual(fence_paths._review_worktree_paths(att), [])
         row["conv_id"] = "owner"
         row["path"] = os.path.join(self.directory.name, "relocated")
-        self.assertEqual(fence._review_worktree_paths(att), [])
+        self.assertEqual(fence_paths._review_worktree_paths(att), [])
 
     def test_symlinked_review_path_is_not_granted(self):
         sha = "a" * 40
@@ -612,13 +636,13 @@ class ReviewWorktreeFencePathTest(unittest.TestCase):
         os.symlink(self.fix["sibling_wt"], path)
         att = _att(self.fix["line_wt"], conv_id="owner")
         att["review_worktrees"] = [{"conv_id": "owner", "sha": sha, "path": path}]
-        self.assertEqual(fence._review_worktree_paths(att), [])
+        self.assertEqual(fence_paths._review_worktree_paths(att), [])
 
     def test_root_checkout_skips_the_mirror_over_its_own_git_dir(self):
         att = _att(self.fix["repo"], conv_id="owner")
         att["review_worktrees"] = [{"conv_id": "owner", "sha": self.sha, "path": self.path}]
         git_dir = os.path.join(self.fix["repo"], ".git")
-        pairs = fence.write_set(att, adapter_paths=[])
+        pairs = fence.write_set(att)
         for _src, dst, _ro in pairs:
             self.assertFalse(
                 dst == git_dir or dst.startswith(git_dir + os.sep), dst)
@@ -629,7 +653,7 @@ class ReviewWorktreeFencePathTest(unittest.TestCase):
         common = git_fence.common_gitdir(git_fence._worktree_gitdir(self.fix["line_wt"]))
         with patch.object(git_fence, "FENCE_ROOT",
                           os.path.join(self.directory.name, "fence-root")):
-            pairs = fence.write_set(att, adapter_paths=[])
+            pairs = fence.write_set(att)
         dests = {dst for _src, dst, _ro in pairs}
         self.assertIn(os.path.join(common, "refs"), dests)
 
@@ -654,17 +678,27 @@ class FenceIntegrationTest(unittest.TestCase):
                         ignore_errors=True)
         self.addCleanup(_git, "worktree", "prune", cwd=self.fix["repo"])
         self.att = _att(self.fix["line_wt"], conv_id="conv-int")
+        self.att["protected_roots"] = [self.fix["repo"]]
 
     def mirror_root(self):
         return os.path.join(self.directory.name, "fence-root")
 
     def run_fenced(self, *args):
-        argv = fence.launch_argv(FakeAdapter(self.att, list(args)), tmpfs_tmp=False)
+        argv = fence.launch_argv(FakeAdapter(self.att, list(args)))
         return subprocess.run(argv, capture_output=True, text=True, cwd=self.fix["line_wt"])
 
     def host_bytes(self, path):
         with open(path, "rb") as file:
             return file.read()
+
+    def common_root_files(self):
+        common = git_fence.common_gitdir(git_fence._worktree_gitdir(self.fix["line_wt"]))
+        return {
+            name: self.host_bytes(os.path.join(common, name))
+            for name in os.listdir(common)
+            if os.path.isfile(os.path.join(common, name)) and
+            not os.path.islink(os.path.join(common, name))
+        }
 
     def test_commit_works_and_protected_paths_are_untouched(self):
         common = git_fence.common_gitdir(git_fence._worktree_gitdir(self.fix["line_wt"]))
@@ -740,7 +774,7 @@ class FenceIntegrationTest(unittest.TestCase):
         self.att["review_worktrees"] = list_review_worktrees(db, "conv-int")
 
         with patch.object(git_fence, "FENCE_ROOT", self.mirror_root()):
-            pairs = fence.write_set(self.att, adapter_paths=[])
+            pairs = fence.write_set(self.att)
             own_gitdir = git_fence._worktree_gitdir(own["path"])
             sibling_gitdir = git_fence._worktree_gitdir(sibling["path"])
             review_root = os.path.join(self.fix["repo"], ".review")
@@ -779,6 +813,45 @@ class FenceIntegrationTest(unittest.TestCase):
         self.assertTrue(os.path.isfile(review_marker))
         self.assertFalse(os.path.exists(root_marker))
         self.assertFalse(os.path.exists(sibling_marker))
+
+    def test_git_root_transient_writes_stay_in_the_private_overlay(self):
+        root_file = os.path.join(self.fix["repo"], "root.txt")
+        with open(root_file, "w", encoding="utf-8") as file:
+            file.write("base\n")
+        _git("add", "root.txt", cwd=self.fix["repo"])
+        _identity("commit", "-q", "-m", "base", cwd=self.fix["repo"])
+        _git("checkout", "-q", "main", cwd=self.fix["repo"])
+        with open(root_file, "a", encoding="utf-8") as file:
+            file.write("main\n")
+        _git("commit", "-qam", "main change", cwd=self.fix["repo"])
+        _git("checkout", "-q", "line/demo", cwd=self.fix["line_wt"])
+        marker = os.path.join(self.fix["line_wt"], "child.txt")
+        with open(marker, "w", encoding="utf-8") as file:
+            file.write("child\n")
+        _git("add", "child.txt", cwd=self.fix["line_wt"])
+
+        before = self.common_root_files()
+        result = self.run_fenced(
+            "git", "-C", self.fix["line_wt"], "-c", "user.email=f@example.com",
+            "-c", "user.name=fence", "commit", "-qm", "fenced commit")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = self.run_fenced("git", "-C", self.fix["line_wt"], "rebase", "main")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = self.run_fenced(
+            "git", "-C", self.fix["line_wt"], "branch", "tmp-fence-branch")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = self.run_fenced(
+            "git", "-C", self.fix["line_wt"], "branch", "-d", "tmp-fence-branch")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = self.run_fenced("git", "-C", self.fix["line_wt"], "pack-refs", "--all")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.common_root_files(), before)
+
+    def test_unmanaged_repository_path_remains_writable(self):
+        target = os.path.join(self.directory.name, "outside-managed-repos")
+        result = self.run_fenced("touch", target)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(os.path.isfile(target))
 
 
 class WriteSetGrantApiTest(unittest.TestCase):
@@ -898,17 +971,25 @@ class WriteSetGrantApiTest(unittest.TestCase):
         self.assertEqual(listing.status_code, 200)
         self.assertEqual(listing.json(), [])
 
-    def test_a_granted_path_reaches_the_spawn_write_set(self):
+    def test_a_granted_path_is_reopened_after_the_repository_deny(self):
         target = os.path.join(self.directory.name, "granted-dir")
         os.makedirs(target)
+        line = os.path.join(self.repo, "child-worktree")
+        os.makedirs(line)
         self.client.post(f"/api/conversations/{self.kid['id']}/write-set",
                          json={"path": target})
-        att = _att(self.repo, conv_id=self.kid["id"],
+        att = _att(line, conv_id=self.kid["id"],
                    grants=list_write_grants(self.db, self.kid["id"]))
+        att["protected_roots"] = [self.repo]
         with patch.object(git_fence, "FENCE_ROOT",
                           os.path.join(self.directory.name, "fence-root")):
-            pairs = fence.write_set(att, adapter_paths=[])
-        self.assertIn((target, target, False), pairs)
+            argv = fence._bwrap_argv(att, ["cli"])
+        binds = [(argv[i], argv[i + 1], argv[i + 2]) for i, value in enumerate(argv)
+                 if value in ("--bind", "--ro-bind")]
+        self.assertIn(("--ro-bind", self.repo, self.repo), binds)
+        self.assertIn(("--bind", target, target), binds)
+        self.assertGreater(binds.index(("--bind", target, target)),
+                           binds.index(("--ro-bind", self.repo, self.repo)))
 
 
 if __name__ == "__main__":

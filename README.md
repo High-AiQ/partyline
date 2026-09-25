@@ -21,7 +21,7 @@ Attach Claude Code, Codex, Antigravity, OpenCode, Cursor, DeepSeek Harness, and 
 ## Quick start
 
 Linux or macOS · Python 3.11+ · [uv](https://docs.astral.sh/uv/) · MIT. Node not required to **run** (only to change the frontend).
-Every attached process runs fenced; on Linux install bubblewrap with your distribution's package manager, while macOS includes its backend.
+Every attached process runs fenced; managed repositories and Partyline's database are protected by default, while other host paths remain writable. On Linux install bubblewrap with your distribution's package manager; macOS includes its backend. See [the write fence](docs/write-fence.md) for scope and limits.
 
 ```bash
 git clone https://github.com/High-AiQ/partyline.git

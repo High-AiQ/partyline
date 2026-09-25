@@ -9,7 +9,6 @@ requires = ["hermes"]
 compact_paste = "/compress"
 env_unset = []
 # hermes's home (HERMES_HOME default); the claimed state.db transcript lives in it.
-write_paths = ["~/.hermes"]
 output = "read-only SQLite session transcript"
 
 update_command = ["hermes", "update"]
