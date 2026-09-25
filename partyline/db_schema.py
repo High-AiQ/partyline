@@ -284,4 +284,14 @@ MIGRATIONS = [
         granted_at REAL NOT NULL,
         PRIMARY KEY (conv_id, path)
     )""",
+    # One pending write-set request per line; approval moves the path into
+    # conversation_write_grants and clears this row.
+    """CREATE TABLE IF NOT EXISTS conversation_write_grant_requests(
+        conv_id TEXT NOT NULL PRIMARY KEY,
+        id TEXT NOT NULL,
+        path TEXT NOT NULL,
+        requester TEXT NOT NULL,
+        requester_attachment_id TEXT,
+        created_at REAL NOT NULL
+    )""",
 ]

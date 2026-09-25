@@ -24,6 +24,7 @@ from .role_delivery import bind_role_delivery
 from .review_worktrees import list_review_worktrees
 from .reattach import ResumedAttachment, adapter_can_resume
 from .transcript_delivery import TranscriptDeliveryRecord
+from .write_set_routes import list_write_grants
 
 
 @dataclass(frozen=True)
@@ -155,6 +156,7 @@ async def resume_adapter(
     att["api_token"] = ensure_api_token(runtime.db, att_id)
     att["hook_url"] = hook_url(att_id, runtime_owner)
     att["review_worktrees"] = list_review_worktrees(runtime.db, att["conv_id"])
+    att["write_grants"] = list_write_grants(runtime.db, att["conv_id"])
     provision_connection(runtime.db.path, att)
     att["digest_rider"] = lambda: ""
     bind_connection_hint(att)

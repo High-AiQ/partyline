@@ -94,6 +94,7 @@ from .restart_report import restart_report_router
 from .static_cache import install_static_cache
 from .resume_continuation import resume_with_backlog
 from .restart_requests import register_restart_request_routes
+from .write_set_requests import register_write_set_request_routes
 from .reattach import (
     ReattachCoordinator,
     RestartPlanError,
@@ -417,6 +418,9 @@ async def _resume_adapter(
         presence=presence,
         hook_url=lambda ident, token: _hook_url(ident, app.state.bind, token),
     )
+
+
+register_write_set_request_routes(app, runtime, _resume_adapter)
 
 
 @app.patch("/api/attachments/{att_id}", response_model=AttachmentResponse)

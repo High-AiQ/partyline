@@ -74,7 +74,11 @@ STAFFING_TRAITS = (
 ASK_FIRST = (
     "### Ask the person first\n"
     "Every process runs fenced; if an attach is refused with write fence unavailable, "
-    "the remedy in the banner is a person-side install, not a flag.\n"
+    "the remedy in the banner is a person-side install, not a flag. A read-only or EROFS "
+    "write inside the fence is the write set saying no: POST {root}/write-set with "
+    '{{"path":"/abs/normalized/path"}} to file a request and wait for a person — never work '
+    "around the fence (a temp npm cache is the kind of workaround that belongs in a write-set "
+    "request instead).\n"
     "Commits or pushes to shared branches, deploys, paid calls beyond a stated budget, "
     "deleting data, changing presets, and anything else that cannot be undone. On a "
     "captained line only you push: workers commit locally and hand you the SHA; you push "
@@ -216,7 +220,13 @@ WORKER = (
     "branch; do not create side branches or detach. Commit locally and hand the captain the "
     "commit SHA; do not push. Expect your commit to get an adversarial review at that exact "
     "SHA before it is accepted — a report is receipt, not acceptance. In your hand-off name "
-    "the SHA and the gates you actually ran, so the captain can reuse that evidence there."
+    "the SHA and the gates you actually ran, so the captain can reuse that evidence there.\n"
+    "### When the fence blocks a write\n"
+    "A read-only or EROFS error on a path inside the fence is the write set saying no — POST "
+    "$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/write-set with "
+    '{{"path":"/abs/normalized/path"}} and wait for a person to approve it in the banner; '
+    "never work around the fence (pointing npm at a temp cache is the kind of shortcut that "
+    "belongs in a write-set request instead)."
 )
 
 WORKER_REMINDER = (

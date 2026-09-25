@@ -263,6 +263,12 @@ class RestartRequestEvent(BaseModel):
     request: Any = None
 
 
+class WriteSetGrantRequestEvent(BaseModel):
+    """The pending write-set grant request on a line changed."""
+    type: Literal["write_set_grant_request"] = "write_set_grant_request"
+    request: Any = None
+
+
 class ReattachCommand(BaseModel):
     type: Literal["reattach"]
     token: str
@@ -284,7 +290,7 @@ Event = (
     | HelloEvent
     | ReattachOfferEvent
     | ReattachDecisionEvent
-    | RestartRequestEvent | ReactionEvent
+    | RestartRequestEvent | WriteSetGrantRequestEvent | ReactionEvent
 )
 
 
