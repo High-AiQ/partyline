@@ -118,6 +118,17 @@ class GuardrailTest(unittest.TestCase):
                                   json={**payload, "name": "grok3"})
         self.assertEqual(person.status_code, 200, person.text)
 
+    def test_an_archived_child_no_longer_blocks_its_parent_from_staffing(self):
+        payload = {"name": "grok", "adapter": "raw", "command": "sh"}
+        child = self.child("root", "finished", self.machine("root-lead"))
+        archived = self.client.delete(f"/api/conversations/{child['id']}")
+        self.assertEqual(archived.status_code, 200, archived.text)
+
+        attached = self.client.post("/api/conversations/root/attachments", json=payload,
+                                    headers=self.machine("root-lead"))
+
+        self.assertEqual(attached.status_code, 200, attached.text)
+
     def test_a_captain_handed_workers_assigns_them_instead_of_splitting(self):
         # The princess-book incident: grok staffed «delivery» with sol as captain
         # and gemini-flash as worker; sol's pack said "spin up a sub-line", so it

@@ -139,6 +139,9 @@ repository it knows about and removes any worktree whose line no longer exists i
 database, unless it is dirty; a worktree belonging to a live or archived line is never
 touched.
 
+Operational hierarchy rules ignore archived children, while purge ordering and restore traversal
+continue to include them.
+
 Work goes down, not sideways. Once a line has a child, a machine may no longer
 attach processes to that line: the root captain that could not staff a child
 otherwise hands the job to a sibling on the root line, in the checkout the

@@ -277,6 +277,16 @@ class RetirementTest(unittest.TestCase):
         self.assertEqual(allowed.status_code, 200, allowed.text)
         self.assertIn(mid["id"], allowed.json()["archived_ids"])
 
+    def test_an_archived_child_does_not_require_include_children(self):
+        mid = self.child()
+        grand = self.child("grand", parent=mid["id"])
+        self.assertEqual(self.retire(grand["id"]).status_code, 200)
+
+        retired = self.retire(mid["id"])
+
+        self.assertEqual(retired.status_code, 200, retired.text)
+        self.assertEqual(retired.json()["archived_ids"], [mid["id"]])
+
     def test_clean_merged_worktree_still_retires_normally(self):
         mid = self.child()
 
