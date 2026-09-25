@@ -1,10 +1,10 @@
 """Per-line write-set scope: the recorded grants and their API.
 
-The default write set — the line's cwd tree, its git binds, adapter
-homes, the home caches — is derived at spawn, never stored. What is
-stored here is the exception: extra scope a person or a captain above
-the line granted, each row naming its grantor, so the record is the
-audit trail and the room can see who widened what.
+The protected repositories and Partyline database are derived at spawn,
+never stored. What is stored here is the exception: extra writable scope
+a person or a captain above the line granted, each row naming its
+grantor, so the record is the audit trail and the room can see who
+widened what.
 """
 
 from __future__ import annotations

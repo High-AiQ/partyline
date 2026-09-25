@@ -9,6 +9,7 @@ from .adapter_capabilities import adapter_completion
 from .attachment_view import attachment_response
 from .auth_store import ensure_api_token
 from .fence import FenceUnavailable
+from .fence_protect import database_paths, protected_repo_roots
 from .review_worktrees import list_review_worktrees
 from .role_delivery import bind_role_delivery
 from .write_set_routes import list_write_grants
@@ -21,6 +22,8 @@ def prepare_attachment(att, runtime, hook_url, checkpoint):
     att["hook_url"] = hook_url(att["id"], att["runtime_owner"])
     att["write_grants"] = list_write_grants(runtime.db, att["conv_id"])
     att["review_worktrees"] = list_review_worktrees(runtime.db, att["conv_id"])
+    att["protected_roots"] = protected_repo_roots(runtime.db)
+    att["db_paths"] = database_paths(runtime.db)
     provision_connection(runtime.db.path, att)
     att["digest_rider"] = lambda: ""  # role delivery layers the goal and staffing on top
     bind_role_delivery(runtime.db, att)

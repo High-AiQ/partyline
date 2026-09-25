@@ -101,7 +101,7 @@ def probe() -> tuple[bool, str, str]:
     try:
         with tempfile.TemporaryDirectory(prefix="partyline-fence-") as cwd:
             if selected == "bubblewrap":
-                argv = fence._bwrap_argv({"cwd": cwd}, [], ["/usr/bin/true"], False)
+                argv = fence._bwrap_argv({"cwd": cwd}, ["/usr/bin/true"])
             elif selected == "sandbox-exec":
                 argv = [fence_darwin.SANDBOX_EXEC, "-p",
                         "(version 1)(allow default)", "/usr/bin/true"]
