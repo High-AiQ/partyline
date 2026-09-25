@@ -84,11 +84,13 @@ async def create_fresh_record(db, expected, body):
                 ).fetchone()
                 require_bounded_replay(count, characters)
             ident, owner = str(uuid.uuid4()), str(uuid.uuid4())
+            started_at = time.time()
             db.conn.execute(
                 "INSERT INTO attachments(id,conv_id,name,adapter,command,cwd,status,"
-                "runtime_owner,last_seen,created_at) VALUES(?,?,?,?,?,?,'starting',?,?,?)",
+                "runtime_owner,last_seen,created_at,runtime_started_at) "
+                "VALUES(?,?,?,?,?,?,'starting',?,?,?,?)",
                 (ident, att["conv_id"], att["name"], att["adapter"], json.dumps(att["command"]),
-                 att["cwd"], owner, cursor, time.time()),
+                 att["cwd"], owner, cursor, started_at, started_at),
             )
         return db.get_attachment(ident)
 

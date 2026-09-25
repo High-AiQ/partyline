@@ -16,9 +16,8 @@ from .contracts import (
 from .db import Db, RestartPlan
 from .continuation_delivery import deliver_continuation
 from .restart_lease import run_automatic_restart_plan
-from .restart_scope import (
-    covered_conversation_ids, planned_conversation_ids, select_attachment_ids,
-)
+from .reattach_liveness import abandon, mark_unlive_exited, report_live, report_live_refusal
+from .restart_scope import covered_conversation_ids, planned_conversation_ids, select_attachment_ids
 
 READY_TIMEOUT_SECONDS = 90.0
 MAX_AUTOMATIC_ATTEMPTS = 2
@@ -212,7 +211,9 @@ class ReattachCoordinator:
                     "system",
                     f"⚠ automatic continuation abandoned after "
                     f"{plan['attempt_count']} attempts for {mentions}. "
-                    f"The processes were left running. Debrief: {first_line}",
+                    "Unconfirmed attachments with a live current-generation adapter were "
+                    f"left active; plan-owned attachments without one were marked exited. "
+                    f"Debrief: {first_line}",
                 )
                 self.runtime.reattaching.difference_update(plan["attachment_ids"])
             return result
@@ -254,6 +255,7 @@ class ReattachCoordinator:
         slow: list[str] = []
         unconfirmed: list[str] = []
         unconfirmed_ids: set[str] = set()
+        expected_owners: dict[str, str | None] = {}
         try:
             for attachment_id in attachment_ids:
                 if ensure_owned is not None:
@@ -264,7 +266,11 @@ class ReattachCoordinator:
                     self.runtime.reattaching.discard(attachment_id)
                     continue
 
+                expected_owners[attachment_id] = attachment["runtime_owner"]
                 line, name = attachment["conv_id"], attachment["name"]
+                if await report_live(self.runtime, attachment_id, line, name):
+                    ready.append(name)
+                    continue
                 continuation_confirmed = False
                 try:
                     await turn_marker.announce_if_interrupted(self.runtime, attachment)
@@ -276,6 +282,7 @@ class ReattachCoordinator:
                     )
                     resumed = await self.resume_attachment(attachment_id, pending)
                     adapter = resumed.adapter
+                    expected_owners[attachment_id] = adapter.att.get("runtime_owner")
                     continuation_confirmed = not pending
                     if pending and resumed.startup_delivery_staged:
                         # The immutable argv removes the pty timing race, but
@@ -340,8 +347,13 @@ class ReattachCoordinator:
                     )
                     continue
                 except Exception as exc:
+                    if await report_live_refusal(
+                        self.runtime, exc, attachment_id, line, name
+                    ):
+                        ready.append(name)
+                        continue
                     failed.append(name)
-                    await self._abandon(attachment_id)
+                    await abandon(self.runtime, attachment_id)
                     await self.runtime.post_message(
                         line,
                         "system",
@@ -358,14 +370,15 @@ class ReattachCoordinator:
                     f"☏ @{name} is ready after restart; advancing to the next process",
                 )
         finally:
-            # An unconfirmed process stays queued: routing another mention to
-            # its not-yet-ready pty would repeat the same loss this guard just
-            # detected. Automatic plans remain durable and retry on restart.
+            # Keep unconfirmed processes queued to avoid routing to an unready
+            # pty; automatic plans remain durable and retry on restart.
             self.runtime.reattaching.difference_update(
                 attachment_id
                 for attachment_id in attachment_ids
                 if attachment_id not in unconfirmed_ids
             )
+
+        await mark_unlive_exited(self.runtime, attachment_ids, expected_owners)
 
         summary = f"{len(ready)} ready"
         if slow:
@@ -384,13 +397,3 @@ class ReattachCoordinator:
         return ReattachResult(
             tuple(ready), tuple(failed), tuple(slow), tuple(unconfirmed)
         )
-
-    async def _abandon(self, attachment_id: str) -> None:
-        adapter = self.runtime.live.pop(attachment_id, None)
-        if adapter is not None:
-            try:
-                await adapter.stop()
-            except Exception:
-                await self.runtime.db.set_attachment_status_async(
-                    attachment_id, "exited", adapter.att.get("runtime_owner")
-                )

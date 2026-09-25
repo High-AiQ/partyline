@@ -49,9 +49,7 @@ class RestartPlan(TypedDict):
 
 
 def _att_row(row):
-    d = dict(row)
-    d["command"] = json.loads(d["command"])
-    return d
+    return {**dict(row), "command": json.loads(row["command"])}
 
 
 def _restart_plan_row(row) -> RestartPlan:
@@ -337,9 +335,10 @@ class Db:
         ts = time.time()
         self._exec(
             "INSERT INTO attachments("
-            "id,conv_id,name,adapter,command,cwd,status,runtime_owner,last_seen,created_at)"
+            "id,conv_id,name,adapter,command,cwd,status,runtime_owner,last_seen,created_at,"
+            "runtime_started_at)"
             " VALUES(?,?,?,?,?,?,?,?,CASE WHEN ? THEN COALESCE((SELECT MAX(id) "
-            "FROM messages WHERE conv_id=?),0) ELSE 0 END,?)",
+            "FROM messages WHERE conv_id=?),0) ELSE 0 END,?,?)",
             (
                 att_id,
                 conv_id,
@@ -351,6 +350,7 @@ class Db:
                 runtime_owner,
                 start_after_history,
                 conv_id,
+                ts,
                 ts,
             ),
         )
@@ -383,13 +383,13 @@ class Db:
 
     def _claim_attachment(self, att_id: str, runtime_owner: str) -> bool:
         cur = self._exec(
-            "UPDATE attachments SET status='starting',runtime_owner=? "
+            "UPDATE attachments SET status='starting',runtime_owner=?,runtime_started_at=? "
             "WHERE id=? AND status NOT IN ('starting','running') "
             "AND NOT EXISTS (SELECT 1 FROM attachments other "
             "WHERE other.conv_id=attachments.conv_id "
             "AND lower(other.name)=lower(attachments.name) AND other.id!=attachments.id "
             "AND other.status IN ('starting','running'))",
-            (runtime_owner, att_id),
+            (runtime_owner, time.time(), att_id),
         )
         return cur.rowcount == 1
 
@@ -404,8 +404,10 @@ class Db:
 
     def _set_attachment_status(self, att_id, status, runtime_owner: str | None) -> bool:
         cur = self._exec(
-            "UPDATE attachments SET status=? WHERE id=? AND runtime_owner IS ?",
-            (status, att_id, runtime_owner),
+            "UPDATE attachments SET status=?,runtime_started_at=CASE "
+            "WHEN ? IN ('starting','running') THEN runtime_started_at ELSE NULL END "
+            "WHERE id=? AND runtime_owner IS ?",
+            (status, status, att_id, runtime_owner),
         )
         return cur.rowcount == 1
 
@@ -435,7 +437,7 @@ class Db:
                 if attachment is None:
                     return None
                 changed = self.conn.execute(
-                    "UPDATE attachments SET status='detached' "
+                    "UPDATE attachments SET status='detached',runtime_started_at=NULL "
                     "WHERE id=? AND status NOT IN ('starting','running') AND runtime_owner IS ?",
                     (att_id, runtime_owner),
                 )
@@ -482,7 +484,8 @@ class Db:
         """On server boot, anything still marked live belongs to a dead process."""
         with self._runtime_serialized():
             self._exec(
-                "UPDATE attachments SET status='exited',runtime_owner=NULL "
+                "UPDATE attachments SET status='exited',runtime_owner=NULL,"
+                "runtime_started_at=NULL "
                 "WHERE status IN ('starting','running')"
             )
 

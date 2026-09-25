@@ -9,6 +9,7 @@ owned by its CLI.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import re
 import uuid
@@ -16,6 +17,7 @@ import uuid
 from fastapi import HTTPException
 
 from .adapter_capabilities import adapter_completion
+from .activation_diagnostics import activation_context, line_name
 from .auth_store import ensure_api_token
 from .agent_connection import provision_connection, bind_connection_hint
 from .fence import FenceUnavailable
@@ -117,7 +119,64 @@ def mark_transcript_delivery(
     return inserted.rowcount == 1
 
 
+def already_live_detail(runtime, attachment: dict) -> str:
+    return (
+        f"attachment '{attachment['id']}' (@{attachment['name']}) on line "
+        f"'{line_name(runtime.db, attachment['conv_id'])}' is already live; "
+        f"nothing to resume{activation_context(runtime, attachment)}"
+    )
+
+
+def different_attachment_detail(runtime, attachment: dict, conflict: dict) -> str:
+    return (
+        f"cannot resume attachment '{attachment['id']}' (@{attachment['name']}) on line "
+        f"'{line_name(runtime.db, attachment['conv_id'])}': handle is already live as "
+        f"attachment '{conflict['id']}' (@{conflict['name']}) on line "
+        f"'{line_name(runtime.db, conflict['conv_id'])}'"
+        f"{activation_context(runtime, conflict)}"
+    )
+
+
+def claim_refusal_detail(runtime, attachment: dict) -> str:
+    current = runtime.db.get_attachment(attachment["id"])
+    if current is None:
+        return f"attachment '{attachment['id']}' disappeared before it could be resumed"
+    if current["status"] in ("starting", "running") or current["id"] in runtime.live:
+        return already_live_detail(runtime, current)
+    conflict = tree_live_name_conflict(runtime.db, current["conv_id"], current["name"])
+    if conflict is not None and conflict["id"] != current["id"]:
+        return different_attachment_detail(runtime, current, conflict)
+    return (
+        f"attachment '{current['id']}' (@{current['name']}) on line "
+        f"'{line_name(runtime.db, current['conv_id'])}' could not be claimed; "
+        f"runtime state changed{activation_context(runtime, current)}"
+    )
+
+
 async def resume_adapter(
+    att_id: str,
+    startup_messages: list[dict] | None,
+    *,
+    runtime,
+    adapter_metadata,
+    make_adapter,
+    presence,
+    hook_url,
+) -> ResumedAttachment:
+    lock = runtime.resume_locks.setdefault(att_id, asyncio.Lock())
+    async with lock:
+        return await _resume_adapter_locked(
+            att_id,
+            startup_messages,
+            runtime=runtime,
+            adapter_metadata=adapter_metadata,
+            make_adapter=make_adapter,
+            presence=presence,
+            hook_url=hook_url,
+        )
+
+
+async def _resume_adapter_locked(
     att_id: str,
     startup_messages: list[dict] | None,
     *,
@@ -130,18 +189,16 @@ async def resume_adapter(
     att = runtime.db.get_attachment(att_id)
     if not att:
         raise HTTPException(404)
+    conv = runtime.db.get_conversation(att["conv_id"])
     if att["status"] in ("starting", "running") or att_id in runtime.live:
-        raise HTTPException(409, f"'{att['name']}' is already live")
+        raise HTTPException(409, already_live_detail(runtime, att))
     capabilities = adapter_metadata.get(att["adapter"], {})
     if not adapter_can_resume(capabilities):
         raise HTTPException(400, f"the {att['adapter']} adapter has no session to resume")
     conflict = tree_live_name_conflict(runtime.db, att["conv_id"], att["name"])
     if conflict is not None:
-        other = runtime.db.get_conversation(conflict["conv_id"])
-        place = "" if other["id"] == att["conv_id"] else f" on '{other['name']}'"
-        raise HTTPException(409, f"'{att['name']}' is already attached{place}")
+        raise HTTPException(409, different_attachment_detail(runtime, att, conflict))
 
-    conv = runtime.db.get_conversation(att["conv_id"])
     if conv["archived_at"]:
         raise HTTPException(409, "restore the line before resuming its processes")
     att["conv_name"] = conv["name"]
@@ -193,7 +250,7 @@ async def resume_adapter(
     )
     startup_staged = adapter.stage_startup_delivery(startup_messages or [])
     if not await runtime.db.claim_attachment_async(att_id, runtime_owner):
-        raise HTTPException(409, f"'{att['name']}' is already live")
+        raise HTTPException(409, claim_refusal_detail(runtime, att))
     try:
         await adapter.start()
     except FenceUnavailable as exc:
