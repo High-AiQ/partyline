@@ -698,6 +698,13 @@ class CodexHomeTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(adapter.spawn_env(), {"CODEX_HOME": adapter.codex_home()})
 
+    def test_write_paths_includes_the_shared_codex_home(self):
+        """A folder-trust decision writes through codex_home()'s symlinks
+        into SHARED_HOME, so the fence must see the shared home itself."""
+        adapter = self.make(att_id="att-1")
+
+        self.assertIn(self.codex.SHARED_HOME, adapter.write_paths())
+
     def test_resume_links_the_prior_rollout_into_the_home(self):
         prior = "b6c2b3e4-1111-2222-3333-444455556666"
         name = f"rollout-2026-09-22T23-09-12-{prior}.jsonl"

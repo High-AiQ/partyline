@@ -94,7 +94,10 @@ class PartylineAdapter(BaseAdapter):
     def write_paths(self) -> list[str]:
         # The per-attachment CODEX_HOME is where this activation's CLI
         # writes sessions, history, and state; the manifest cannot name it.
-        return manifest_write_paths(self.att) + [self.codex_home()]
+        # SHARED_HOME must be writable too: codex_home()'s symlinks resolve
+        # through it, so a folder-trust decision persists to the real
+        # config.toml only if the shared home itself is in the write set.
+        return manifest_write_paths(self.att) + [self.codex_home(), SHARED_HOME]
 
     async def start(self):
         self._home = self.codex_home()

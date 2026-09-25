@@ -13,5 +13,8 @@ env_unset = []
 # write fence (verified 2026-09-22): the fence replaces it, applied only while
 # the process is actually fenced.
 fence_args = ["--dangerously-bypass-approvals-and-sandbox"]
+# The shared home the per-attachment CODEX_HOME symlinks into: a folder-trust
+# decision writes through those links to the real config.toml.
+write_paths = ["~/.codex"]
 capabilities = { resume = true, turn_end = "receipt", transcript = true }
 update_command = ["codex", "update"]
