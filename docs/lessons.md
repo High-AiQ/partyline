@@ -60,7 +60,10 @@ replaced them:
   metadata; matching one holds both the briefing and queued wakes, posts the existing attention
   notice/event, and polls until a person resolves it in the terminal viewer. The Claude fixture
   control proves no paste happens while the trust screen is present and that clearance sends the
-  briefing exactly once.
+  briefing exactly once. On 2026-09-26, Claude Code's trust wording had changed since 2.13.4:
+  its new “Quick safety check” screen did not contain the only configured phrase, and a 120-column
+  pty can wrap matching text across rows. Keep live wording in manifest-backed fixture tests and
+  collapse screen whitespace before matching.
 
 - **A live attachment row always has a current-generation adapter.** On 2026-09-25, the person
   resumed one attachment after the 2.12.0 restart while the saved plan still contained that id.
