@@ -7,8 +7,9 @@ import uuid
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .db import _att_row
+from .db import MessageRow, _att_row
 from .hierarchy import tree_live_name_conflict
+from .message_queries import as_message
 
 
 MAX_REFRESH_MESSAGES = 100
@@ -31,6 +32,49 @@ class FreshAttachmentRequest(BaseModel):
 
 def require_stopped(db, att_id):
     return _require_stopped(db.get_attachment(att_id))
+
+
+async def expire_unowned_attachment(
+    db, att_id: str, runtime_owner: str | None, body: str
+) -> MessageRow | None:
+    """Fence an unowned live row and persist its failure notice atomically."""
+    async with db._runtime_serialized_async():
+        with db.lock:
+            try:
+                attachment = db.conn.execute(
+                    "SELECT conv_id FROM attachments WHERE id=?", (att_id,)
+                ).fetchone()
+                if attachment is None:
+                    return None
+                changed = db.conn.execute(
+                    "UPDATE attachments SET status='exited',runtime_owner=NULL,"
+                    "runtime_started_at=NULL WHERE id=? AND status IN ('starting','running') "
+                    "AND runtime_owner IS ?",
+                    (att_id, runtime_owner),
+                )
+                if changed.rowcount != 1:
+                    db.conn.commit()
+                    return None
+                created_at = time.time()
+                message = db.conn.execute(
+                    "INSERT INTO messages(conv_id,sender,sender_type,body,created_at) "
+                    "VALUES(?,?,?,?,?)",
+                    (attachment["conv_id"], "system", "system", body, created_at),
+                )
+                db.conn.commit()
+            except BaseException:
+                db.conn.rollback()
+                raise
+        if message.lastrowid is None:  # pragma: no cover
+            return None
+        return as_message(MessageRow(
+            id=message.lastrowid,
+            conv_id=attachment["conv_id"],
+            sender="system",
+            sender_type="system",
+            body=body,
+            created_at=created_at,
+        ))
 
 
 def _require_stopped(att):

@@ -9,6 +9,7 @@ condition and fail on a deadline, so a slow machine is slow rather than flaky.
 import asyncio
 import json
 import os
+import signal
 import tempfile
 import types
 import time
@@ -18,6 +19,7 @@ from unittest.mock import AsyncMock, call, patch
 
 
 from partyline.adapters.base import Adapter
+from partyline.adapters.process_shutdown import stop_process_group
 from partyline.adapters.briefing import child_env
 from partyline.adapters import pty_io
 from partyline.adapters.terminal import terminal_responses
@@ -139,6 +141,29 @@ class AdapterLifecycleTest(unittest.IsolatedAsyncioTestCase):
         await adapter.stop()  # must not raise on a pid that no longer exists
 
         self.assertEqual(adapter.statuses[-1], "detached")
+
+    async def test_stop_kills_group_after_direct_child_exits(self):
+        class ExitedWrapper:
+            pid = 4321
+
+            @staticmethod
+            def poll():
+                return 0
+
+            @staticmethod
+            def wait():
+                return 0
+
+        proc = ExitedWrapper()
+        with patch("partyline.adapters.process_shutdown.os.killpg") as killpg, patch(
+            "partyline.adapters.process_shutdown.STOP_TERM_GRACE", 0
+        ), patch("partyline.adapters.process_shutdown.STOP_KILL_GRACE", 0), patch(
+            "partyline.adapters.process_shutdown.process_group_alive",
+            side_effect=[True, False],
+        ):
+            await stop_process_group(proc)
+
+        self.assertEqual(killpg.call_args_list[-1].args, (4321, signal.SIGKILL))
 
     async def test_an_unprompted_exit_is_announced_with_its_code(self):
         adapter = Recorder(["sh", "-c", "exit 3"])

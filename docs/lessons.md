@@ -966,3 +966,26 @@ exits it; Escape cancels the queued steer, not the turn.
 | Credit a wake only when the transcript's user record contains it | Advance the cursor because bytes reached the pty |
 | Send the second Enter for a mid-turn paste; one Ctrl+C for `@!`, confirmed by `turn_ended` | Fire a "turn began" receipt for a paste into a busy CLI |
 | Guard the Ctrl+C exit window | Send two Ctrl+C within five seconds |
+
+## A stopped wrapper does not prove its process group stopped
+
+On 2026-09-25, deleting a completed Claude attachment removed it from the
+runtime map before `stop()` finished. The record stayed `running`, so resume
+refused it, while a later DELETE timed out. The wrapper's `poll()` was not a
+reliable signal: bwrap can exit on TERM while its CLI child remains in the
+same process group. Escalate against the group after a bounded TERM grace even
+when the direct child has exited, verify group disappearance, and bound the
+HTTP, DB lock, and websocket broadcast waits. If a local stop cannot be
+confirmed, keep the adapter tracked with its live row and post an explicit
+failure notice. If a running row has no local adapter, expire its owner and
+report the unconfirmed stop; never leave it as an untracked running row or
+report success. If the process has stopped and a later DB step times out, do
+not restore its adapter after the status callback removed it. Control:
+`tests.test_server` covers hanging stops, stale rows, stalled websocket
+broadcasts, and timeout after a confirmed stop, while `tests.test_adapter_base`
+proves KILL escalation after wrapper exit. A missing process handle after a
+timed-out stop is unknown, not proof that there was nothing to stop.
+
+| DO | DO NOT |
+| --- | --- |
+| Verify the whole process group after TERM and KILL; keep unconfirmed live processes tracked | Infer child-process death from the wrapper's return code or remove a live attachment from runtime tracking before stop completes |
