@@ -18,7 +18,7 @@ from collections.abc import Awaitable, Callable
 
 import pyte
 
-from partyline.adapters import activation, fence, pty_io
+from partyline.adapters import activation, fence, pty_io, startup_prompt
 from partyline.adapters.process_shutdown import stop_process_group
 from partyline.adapters.jsonl_receipts import JsonlPasteReceipts, tail_jsonl
 from partyline.adapters.task_logging import log_task_deaths
@@ -38,7 +38,8 @@ Post = Callable[[str, str, str], Awaitable[None]]
 Status = Callable[[str], Awaitable[None]]
 
 
-class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter):
+class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
+              startup_prompt.StartupPromptGuard):
     """Base class for a process connected through a pseudo-terminal."""
 
     kind = "process"
@@ -71,6 +72,7 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter):
         self._terminal_query_tail = b""
         self._terminal_viewers = TerminalViewerRegistry(self.screen_text)
         self._jsonl_receipts_init()
+        self._startup_prompt_init()
 
     async def post(self, sender: str, sender_type: str, body: str):
         """Send something to the chat, unless the process is resuming mid-turn.
@@ -156,6 +158,7 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter):
 
     async def stop(self):
         self._stopping = True
+        self.abort_startup_prompt()
         self._mark_not_ready()
         self._terminal_viewers.close()
         if self.proc:
@@ -205,6 +208,7 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter):
     async def _watch_exit(self):
         assert self.proc is not None
         rc = await asyncio.get_running_loop().run_in_executor(None, self.proc.wait)
+        self.abort_startup_prompt()
         self._mark_not_ready()
         if not self._stopping:
             await self.on_status("exited")
@@ -216,6 +220,8 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter):
         """Receive bytes from the pty. Transcript adapters can ignore this."""
 
     async def deliver(self, messages: list[dict]):
+        if not await self.wait_startup_delivery():
+            return False
         # Being woken ends post-resume silence — only once the wake reached the pty:
         # clearing first lets a tail release held speech before the turn is recorded.
         text = self.format_digest(messages)

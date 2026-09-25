@@ -44,6 +44,7 @@ def _manifest(path: Path) -> dict:
     manifest.setdefault("requires", [])
     manifest.setdefault("capabilities", {})
     manifest.setdefault("env_unset", [])
+    manifest.setdefault("startup_prompts", {})
     manifest.setdefault("compact_paste", None)
     manifest.setdefault("fence_args", [])
     value = manifest["fence_args"]
@@ -54,6 +55,13 @@ def _manifest(path: Path) -> dict:
         raise ValueError("adapter command must be an argv array")
     if not isinstance(manifest["capabilities"], dict):
         raise ValueError("adapter capabilities must be a table, e.g. capabilities = { resume = true }")
+    prompts = manifest["startup_prompts"]
+    if not isinstance(prompts, dict) or any(
+        not isinstance(name, str) or not isinstance(phrases, list)
+        or not all(isinstance(phrase, str) and phrase.strip() for phrase in phrases)
+        for name, phrases in prompts.items()
+    ):
+        raise ValueError("adapter startup_prompts must map names to non-empty phrase arrays")
     compact_paste = manifest["compact_paste"]
     if compact_paste is not None and (
         not isinstance(compact_paste, str) or not compact_paste.strip()
