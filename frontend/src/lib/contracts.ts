@@ -225,6 +225,13 @@ export const PendingRestartSchema = z.object({
 });
 export type PendingRestart = z.infer<typeof PendingRestartSchema>;
 
+export {
+  PendingWriteSetGrantSchema,
+  WriteSetGrantRequestSchema,
+  type PendingWriteSetGrant,
+  type WriteSetGrantRequest,
+} from "./write-set-contracts";
+
 export const ShutdownRequestSchema = z.object({
   reattach: RestartPlanRequestSchema.optional(),
 });

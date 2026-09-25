@@ -16,7 +16,6 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from .auth_guard import request_principal
-from .hierarchy import ancestors
 from .machine_scope import deny_unless, is_human
 
 
@@ -54,6 +53,8 @@ def add_write_grant(db, conv_id: str, path: str, granted_by: str) -> dict:
 
 
 def write_set_router(runtime) -> APIRouter:
+    from .write_set_requests import file_write_set_request, make_announcer
+
     router = APIRouter()
 
     @router.get("/api/conversations/{conv_id}/write-set",
@@ -63,29 +64,24 @@ def write_set_router(runtime) -> APIRouter:
         deny_unless(runtime.db, principal, conv_id, "read")
         return list_write_grants(runtime.db, conv_id)
 
-    @router.post("/api/conversations/{conv_id}/write-set",
-                 response_model=list[WriteSetGrant])
-    async def grant_write_set(request: Request, conv_id: str, body: WriteSetIn):
+    @router.post("/api/conversations/{conv_id}/write-set")
+    async def grant_or_request_write_set(request: Request, conv_id: str, body: WriteSetIn):
         from .system_notice import post_system_notice
         db = runtime.db
         principal = request_principal(request)
         if db.get_conversation(conv_id) is None:
             raise HTTPException(404)
-        if not is_human(principal) and not (
-            principal.is_lead and principal.conv_id in ancestors(db, conv_id)
-        ):
-            # The line itself may request extra scope, never grant its own:
-            # only a person or a captain above it can widen a write set.
-            raise HTTPException(
-                403, "only a person or a captain above this line may grant write scope")
-        path = body.path.strip()
-        if not path.startswith("/") or path == "/" or os.path.normpath(path) != path:
-            raise HTTPException(
-                400, "path must be an absolute, normalized file or directory path")
-        add_write_grant(db, conv_id, path, principal.name)
-        await post_system_notice(
-            runtime, conv_id, f"☏ write-set grant for `{path}` by @{principal.name}",
-            actor=principal)
-        return list_write_grants(db, conv_id)
+        if is_human(principal):
+            path = body.path.strip()
+            if not path.startswith("/") or path == "/" or os.path.normpath(path) != path:
+                raise HTTPException(
+                    400, "path must be an absolute, normalized file or directory path")
+            add_write_grant(db, conv_id, path, principal.name)
+            await post_system_notice(
+                runtime, conv_id, f"☏ write-set grant for `{path}` by @{principal.name}",
+                actor=principal)
+            return list_write_grants(db, conv_id)
+        return await file_write_set_request(
+            runtime, conv_id, body.path, principal, announce_fn=make_announcer(runtime))
 
     return router

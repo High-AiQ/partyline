@@ -33,6 +33,12 @@ BRIEFING = (
     "no reply unless it raises something new. A reaction on a machine's message reaches that "
     "process as a private copy addressed to it — never as a public transcript line.\n"
     "\n"
+    "Every process runs inside the write fence. A read-only or EROFS error on a path inside "
+    "the fence is the write set saying no — POST $PARTYLINE_API/api/conversations/"
+    "$PARTYLINE_CONV_ID/write-set with {{\"path\":\"/abs/normalized/path\"}} to file a request "
+    "and wait for a person to approve it in the banner; never work around the fence (symlinks, "
+    "copying through /tmp, pointing npm at a temp cache, or editing outside the line's tree).\n"
+    "\n"
     "Say hello in one short line to confirm you are connected."
 )
 
