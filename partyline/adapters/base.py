@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import fcntl
 import os
-import signal
 import struct
 import subprocess
 import termios
@@ -20,6 +19,7 @@ from collections.abc import Awaitable, Callable
 import pyte
 
 from partyline.adapters import activation, fence, pty_io
+from partyline.adapters.process_shutdown import stop_process_group
 from partyline.adapters.jsonl_receipts import JsonlPasteReceipts, tail_jsonl
 from partyline.adapters.task_logging import log_task_deaths
 from partyline.adapters.briefing import (
@@ -158,17 +158,8 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter):
         self._stopping = True
         self._mark_not_ready()
         self._terminal_viewers.close()
-        if self.proc and self.proc.poll() is None:
-            try:
-                os.killpg(self.proc.pid, signal.SIGTERM)
-            except (ProcessLookupError, PermissionError):
-                pass
-            await asyncio.sleep(0.5)
-            if self.proc.poll() is None:
-                try:
-                    os.killpg(self.proc.pid, signal.SIGKILL)
-                except (ProcessLookupError, PermissionError):
-                    pass
+        if self.proc:
+            await stop_process_group(self.proc)
         for task in self._tasks:
             task.cancel()
         await self.on_status("detached")

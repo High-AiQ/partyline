@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager, contextmanager
 import os
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -897,6 +898,153 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(server.runtime.db.get_attachment("old")["status"], "detached")
         self.assertEqual(
             server.runtime.db.list_messages("line")[-1]["body"], "@opus detached"
+        )
+
+    def test_detach_timeout_keeps_unconfirmed_running_row_tracked(self):
+        self.add_attachment("old", status="running")
+        adapter = FakeAdapter(att={"runtime_owner": None})
+        adapter.proc = SimpleNamespace(pid=12345)
+
+        async def hangs_forever():
+            self.assertIs(server.runtime.live["old"], adapter)
+            await asyncio.Event().wait()
+
+        adapter.stop = hangs_forever
+        server.runtime.live["old"] = adapter
+        status_calls = []
+        original_set_status = server.runtime.db.set_attachment_status_async
+
+        async def track_status_attempt(att_id, status, owner):
+            status_calls.append((att_id, status, owner))
+            return await original_set_status(att_id, status, owner)
+
+        async def detach_while_delivery_owns_the_db_lock():
+            async with server.runtime.db.reserve_attachment_delivery("old", None):
+                with patch.object(server.runtime.db, "set_attachment_status_async",
+                                  track_status_attempt), patch(
+                    "partyline.line_process_routes.process_group_alive",
+                    return_value=False,
+                ):
+                    with self.assertRaisesRegex(
+                        HTTPException, "attachment status update is busy"
+                    ):
+                        await server.detach(self.principal_request(), "old")
+
+        self.arun(detach_while_delivery_owns_the_db_lock())
+
+        self.assertTrue(status_calls)
+        self.assertTrue(all(call == ("old", "exited", None) for call in status_calls))
+        self.assertIs(server.runtime.live["old"], adapter)
+        self.assertEqual(server.runtime.db.get_attachment("old")["status"], "running")
+        self.assertEqual(
+            server.runtime.db.list_messages("line")[-1]["body"],
+            "@terra detach failed: process stopped but status update was busy",
+        )
+
+    def test_delete_orphaned_running_row_invalidates_owner_and_fails_loudly(self):
+        self.add_attachment("old", owner="lost-generation")
+
+        with self.assertRaisesRegex(HTTPException, "no local adapter owns"):
+            self.arun(server.detach(self.principal_request(), "old"))
+
+        attachment = server.runtime.db.get_attachment("old")
+        self.assertEqual(attachment["status"], "exited")
+        self.assertIsNone(attachment["runtime_owner"])
+        self.assertNotIn("old", server.runtime.live)
+        self.assertEqual(
+            server.runtime.db.list_messages("line")[-1]["body"],
+            "@terra detach failed: no local adapter owns the running record; "
+            "process stop is unconfirmed",
+        )
+
+    def test_detach_timeout_does_not_make_a_live_process_resumable(self):
+        self.add_attachment("old")
+        adapter = FakeAdapter(att={"runtime_owner": None})
+        adapter.proc = SimpleNamespace(pid=12345)
+
+        async def hangs_forever():
+            await asyncio.Event().wait()
+
+        adapter.stop = hangs_forever
+        server.runtime.live["old"] = adapter
+
+        with patch("partyline.line_process_routes.process_group_alive", return_value=True):
+            with self.assertRaisesRegex(HTTPException, "attachment remains live"):
+                self.arun(server.detach(self.principal_request(), "old"))
+
+        self.assertEqual(server.runtime.db.get_attachment("old")["status"], "running")
+        self.assertIs(server.runtime.live["old"], adapter)
+        self.assertEqual(
+            server.runtime.db.list_messages("line")[-1]["body"],
+            "@terra detach failed: process stop was not confirmed",
+        )
+
+    def test_detach_timeout_without_a_process_handle_fails_loudly(self):
+        self.add_attachment("old")
+        adapter = FakeAdapter(att={"runtime_owner": None})
+
+        async def hangs_forever():
+            await asyncio.Event().wait()
+
+        adapter.stop = hangs_forever
+        server.runtime.live["old"] = adapter
+
+        with self.assertRaisesRegex(HTTPException, "attachment remains live"):
+            self.arun(server.detach(self.principal_request(), "old"))
+
+        self.assertEqual(server.runtime.db.get_attachment("old")["status"], "running")
+        self.assertIs(server.runtime.live["old"], adapter)
+        self.assertEqual(
+            server.runtime.db.list_messages("line")[-1]["body"],
+            "@terra detach failed: process stop was not confirmed",
+        )
+
+
+    def test_delete_does_not_wait_forever_for_a_websocket_broadcast(self):
+        self.add_attachment("old", status="exited")
+
+        async def stalled_broadcast(*_args):
+            await asyncio.Event().wait()
+
+        async def detach_with_stalled_broadcast():
+            with patch.object(server.runtime, "broadcast", stalled_broadcast):
+                started = time.monotonic()
+                result = await server.detach(self.principal_request(), "old")
+                self.assertLess(time.monotonic() - started, 2.0)
+                return result
+
+        self.assertEqual(self.arun(detach_with_stalled_broadcast()), {"ok": True})
+        self.assertEqual(server.runtime.db.get_attachment("old")["status"], "detached")
+        self.assertEqual(
+            server.runtime.db.list_messages("line")[-1]["body"], "@terra detached"
+        )
+
+    def test_detach_timeout_does_not_restore_adapter_after_confirmed_stop(self):
+        self.add_attachment("old")
+        owner = None
+        adapter = FakeAdapter(
+            att={"runtime_owner": owner},
+            on_status=server.runtime.status_callback("old", "line", owner),
+        )
+        server.runtime.live["old"] = adapter
+
+        async def stalled_transaction(*_args):
+            await asyncio.Event().wait()
+
+        async def detach_with_stalled_transaction():
+            with patch.object(
+                server.runtime.db, "detach_attachment_with_message_async", stalled_transaction
+            ):
+                with self.assertRaisesRegex(HTTPException, "detach transaction is busy"):
+                    await server.detach(self.principal_request(), "old")
+
+        self.arun(detach_with_stalled_transaction())
+
+        self.assertEqual(server.runtime.db.get_attachment("old")["status"], "detached")
+        self.assertNotIn("old", server.runtime.live)
+        self.assertEqual(
+            server.runtime.db.list_messages("line")[-1]["body"],
+            "@terra detach failed: process stopped but detach transaction was busy",
         )
 
     def test_websocket_stamps_the_credential_handle_and_ignores_client_senders(self):
