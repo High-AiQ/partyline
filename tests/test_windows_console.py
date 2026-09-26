@@ -15,6 +15,17 @@ from partyline.windows_memory import WindowsJob
 
 
 class ConsoleArgumentsTest(unittest.TestCase):
+    def test_split_and_repeated_terminal_queries_receive_replies(self):
+        with patch.object(win, 'api'):
+            console = WindowsConsole()
+        console._stream.feed(b'\x1b[')
+        self.assertEqual(console._responses, [])
+        console._stream.feed(b'c')
+        self.assertEqual(console._responses, ['\x1b[?6c'])
+        console._responses.clear()
+        console._stream.feed(b'\x1b[6n')
+        self.assertEqual(console._responses, ['\x1b[1;1R'])
+
     def test_dimensions_are_checked_before_native_calls(self):
         for columns, rows in ((0, 40), (80, -1), (32768, 40)):
             with self.assertRaises(ValueError):
@@ -45,6 +56,14 @@ class NativeConsoleTest(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.directory.cleanup)
 
     async def spawn(self, code, *args):
+        diagnostic = str(Path(self.directory.name, 'fixture-diagnostic'))
+        code = (
+            'import pathlib,traceback,sys\n'
+            f'diagnostic=pathlib.Path({diagnostic!r})\n'
+            'diagnostic.write_text(repr((sys.stdin,sys.stdout,sys.stderr)),encoding="utf-8")\n'
+            'try:\n exec(' + repr(code) + ')\n'
+            'except BaseException:\n diagnostic.write_text(traceback.format_exc(),encoding="utf-8"); raise\n'
+        )
         terminal = await WindowsConsole.spawn(
             [sys.executable, '-u', '-c', code, *args], self.directory.name,
             dict(os.environ, PARTYLINE_CONPTY_PROBE='$path %PATH% ☃'), 128 * 1024**2,
@@ -53,14 +72,20 @@ class NativeConsoleTest(unittest.IsolatedAsyncioTestCase):
         return terminal
 
     async def until(self, terminal, marker):
+        output = b''
         async def collect():
-            output = b''
+            nonlocal output
             while marker not in output:
                 chunk = await terminal.read()
                 self.assertTrue(chunk, output.decode(errors='replace'))
                 output = (output + chunk)[-1024 * 1024:]
             return output
-        return await asyncio.wait_for(collect(), 15)
+        try:
+            return await asyncio.wait_for(collect(), 15)
+        except TimeoutError:
+            diagnostic = Path(self.directory.name, 'fixture-diagnostic')
+            detail = diagnostic.read_text(encoding='utf-8') if diagnostic.exists() else 'code never started'
+            self.fail(f'console timed out: exit={terminal.poll()}, output={output!r}, fixture={detail}')
 
     async def test_real_console_resize_input_and_literal_environment(self):
         code = (

@@ -11,6 +11,8 @@ import os
 import shutil
 import subprocess
 
+import pyte
+
 from . import windows_console_api as win
 from .windows_memory import WindowsJob
 
@@ -32,6 +34,10 @@ class WindowsConsole:
         self._error = None
         self._eof = False
         self.returncode = None
+        self._screen = pyte.Screen(120, 40)
+        self._responses = []
+        self._screen.write_process_input = self._responses.append
+        self._stream = pyte.ByteStream(self._screen)
 
     @classmethod
     async def spawn(cls, argv, cwd, environment, memory_limit, *, columns=120, rows=40):
@@ -43,6 +49,7 @@ class WindowsConsole:
         if not executable or os.path.splitext(executable)[1].lower() not in {'.exe', '.com'}:
             raise OSError('ConPTY requires a native executable; invoke a script through its interpreter')
         terminal = cls()
+        terminal._screen.resize(lines=rows, columns=columns)
         input_read, output_write = w.HANDLE(), w.HANDLE()
         attributes = None
         initialized = False
@@ -133,8 +140,17 @@ class WindowsConsole:
                     self.output, buffer, len(buffer), c.byref(count), None), 'ReadFile')
                 if not count.value:
                     break
+                data = buffer.raw[:count.value]
+                self._stream.feed(data)
+                if self._responses and not self._closing:
+                    # ConPTY can query device attributes during startup. Reply
+                    # as a terminal host; these bytes are never chat speech.
+                    responses = ''.join(self._responses).encode()
+                    self._responses.clear()
+                    async with self._write_lock:
+                        await asyncio.wait_for(asyncio.to_thread(self._write, responses), 5)
                 if not self._closing:
-                    await self._queue.put(buffer.raw[:count.value])
+                    await self._queue.put(data)
         except OSError as exc:
             self._error = exc
         finally:
@@ -176,6 +192,7 @@ class WindowsConsole:
             raise OSError('ConPTY is closed')
         result = await asyncio.to_thread(self.api.ResizePseudoConsole, self.console, dimensions)
         win.hresult(result, 'ResizePseudoConsole')
+        self._screen.resize(lines=rows, columns=columns)
 
     async def close(self):
         async with self._close_lock:
