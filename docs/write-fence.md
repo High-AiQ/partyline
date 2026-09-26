@@ -77,6 +77,24 @@ Reads are not fenced: a process can still read the host. The fence bounds
 it is a fence against accidents, not a jail against malice. See
 `docs/security.md` for the trust model.
 
+On Linux, the server wraps every launch in a separate transient systemd scope
+before entering bubblewrap, even when the filesystem fence is disabled.
+`MemoryMax` defaults to `4G` and can be changed with
+`PARTYLINE_PROCESS_MEMORY_LIMIT`; swap is disabled. A verifier runs inside
+the scope and refuses to start the CLI unless it sees a finite `memory.max`
+at or below the requested limit. The boot preflight runs a harmless read-only
+probe inside a transient scope and checks `memory.max`; if the user manager
+ignores the property, startup logs the failure and attachment starts fail
+closed. Darwin applies the same configurable bound with inherited `RLIMIT_AS`,
+since it has no systemd cgroups.
+
+Partyline also checks the effective systemd unit properties at boot and in
+`partyline doctor`: `OOMPolicy=continue` and a finite `MemoryMax` below host
+RAM keep an OOM in one CLI from taking down the service. When either is
+missing, the boot log, doctor output, and attach refusal include the exact
+drop-in remedy. See [Restarting the running instance](restart.md#install-the-service-oom-guard)
+for installation instructions.
+
 ## The protected set and carve-outs
 
 At spawn and resume, Partyline reads every non-archived conversation and

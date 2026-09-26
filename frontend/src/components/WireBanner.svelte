@@ -24,9 +24,11 @@
     role="alert"
     aria-live="assertive"
   >
-    <strong>Write fence unavailable on {fence.status.platform} ({fence.status.backend})</strong>
+    <strong>Partyline preflight failed on {fence.status.platform} ({fence.status.backend})</strong>
     <span>{fence.status.reason}</span>
-    {#if fence.status.remedy}<span>Remedy: {fence.status.remedy}</span>{/if}
+    {#if fence.status.remedy}
+      <pre class="m-0 whitespace-pre-wrap break-words font-sans">Remedy: {fence.status.remedy}</pre>
+    {/if}
   </div>
 {/if}
 

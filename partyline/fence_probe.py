@@ -88,35 +88,55 @@ def _probe_note() -> str:
     return ""
 
 
-def probe() -> tuple[bool, str, str]:
-    """Run the selected backend once on a harmless command in a temporary cwd."""
+def probe(*, check_fence: bool = True,
+          service_unit: str | None = None,
+          discover_service_unit: bool = True) -> tuple[bool, str, str]:
+    """Check the filesystem fence, per-process cap, and service OOM guard."""
     from . import fence, fence_darwin
 
-    selected = fence.backend()
-    available, reason = fence.backend_available()
-    install = remedy()
+    failures, remedies = [], []
     note = _probe_note()
-    if not available:
-        return False, "; ".join(value for value in (reason, note) if value), install
-    try:
-        with tempfile.TemporaryDirectory(prefix="partyline-fence-") as cwd:
-            if selected == "bubblewrap":
-                argv = fence._bwrap_argv({"cwd": cwd}, ["/usr/bin/true"])
-            elif selected == "sandbox-exec":
-                argv = [fence_darwin.SANDBOX_EXEC, "-p",
-                        "(version 1)(allow default)", "/usr/bin/true"]
+    if check_fence:
+        selected = fence.backend()
+        available, reason = fence.backend_available()
+        if not available:
+            failures.append(reason)
+            remedies.append(remedy())
+        else:
+            try:
+                with tempfile.TemporaryDirectory(prefix="partyline-fence-") as cwd:
+                    if selected == "bubblewrap":
+                        argv = fence._bwrap_argv({"cwd": cwd}, ["/usr/bin/true"])
+                    elif selected == "sandbox-exec":
+                        argv = [fence_darwin.SANDBOX_EXEC, "-p",
+                                "(version 1)(allow default)", "/usr/bin/true"]
+                    else:
+                        raise OSError(f"no write-fence backend for platform '{sys.platform}'")
+                    completed = subprocess.run(argv, cwd=cwd, capture_output=True,
+                                               text=True, timeout=10)
+            except (OSError, subprocess.SubprocessError) as exc:
+                failures.append(f"write-fence probe could not run: {_one_line(str(exc))}")
+                remedies.append(remedy())
             else:
-                return False, f"no write-fence backend for platform '{sys.platform}'", install
-            completed = subprocess.run(argv, cwd=cwd, capture_output=True,
-                                       text=True, timeout=10)
-    except (OSError, subprocess.SubprocessError) as exc:
-        failure = f"write-fence probe could not run: {_one_line(str(exc))}"
-        return False, "; ".join(value for value in (failure, note) if value), install
-    if completed.returncode:
-        detail = _one_line(completed.stderr or completed.stdout) or "command failed"
-        failure = f"write-fence probe exited {completed.returncode}: {detail}"
-        return False, "; ".join(value for value in (failure, note) if value), install
-    return True, "", ""
+                if completed.returncode:
+                    detail = _one_line(completed.stderr or completed.stdout) or "command failed"
+                    failures.append(f"write-fence probe exited {completed.returncode}: {detail}")
+                    remedies.append(remedy())
+    from . import process_memory, service_guard
+
+    scope_ok, scope_reason = process_memory.probe_scope()
+    if not scope_ok:
+        failures.append(scope_reason)
+        remedies.append("Run partyline under a systemd user manager with transient scopes enabled")
+    guard_ok, guard_reason, guard_remedy = service_guard.probe(
+        service_unit, discover=discover_service_unit,
+    )
+    if not guard_ok:
+        failures.append(guard_reason)
+        remedies.append(guard_remedy)
+    if note and failures:
+        failures.append(note)
+    return not failures, "; ".join(failures), "\n\n".join(remedies)
 
 
 def status(result: tuple[bool, str, str] | None = None) -> dict[str, str | bool]:

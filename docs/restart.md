@@ -18,6 +18,33 @@ safety contract; the failure modes that shaped it are recorded in [lessons.md](l
 
 ## The flow
 
+### Install the service OOM guard
+
+The service must survive an OOM in one attached process. Run `partyline doctor` and
+use the exact drop-in it prints if the service does not report `OOMPolicy=continue`
+and a finite `MemoryMax` below host RAM. For the standard `partyline.service`,
+install the shipped drop-in as follows (choose a `MemoryMax` below the host's RAM;
+`40G` is the recommended value on a 64G host):
+
+```bash
+mkdir -p ~/.config/systemd/user/partyline.service.d
+cat > ~/.config/systemd/user/partyline.service.d/oom.conf <<'EOF'
+[Service]
+OOMPolicy=continue
+MemoryMax=40G
+EOF
+systemctl --user daemon-reload
+```
+
+After reloading, file a Partyline restart request and wait for a person to approve it before
+the service restarts. Follow the approved flow below.
+
+The boot preflight also starts a harmless probe inside a transient scope and reads
+`memory.max` there. If the user manager ignores the per-process `MemoryMax`, startup
+logs the failure and attachment starts are refused with the same remedy. The service
+unit's cap and each process's cap are separate: the former keeps systemd and the
+host usable, while the latter makes an OOM kill only the affected attachment.
+
 1. **Deploy first.** Merge the reviewed change. The captain fast-forwards the checkout it is
    attached to with `git pull --ff-only`; if fenced SSH is unavailable, use HTTPS with
    `git -c credential.helper='!gh auth git-credential' pull --ff-only`. Verify `git rev-parse HEAD`,

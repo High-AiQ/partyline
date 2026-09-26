@@ -149,13 +149,13 @@ def _darwin_scope(att: dict) -> tuple[list[str], list[str], list[str], list[str]
 def launch_argv(adapter) -> list[str]:
     """Build a fenced spawn argv; adapters may replace incompatible CLI sandboxes."""
     command = adapter.build_command()
-    if not features.enabled("write_fence"):
-        return command
     from . import fence_probe
 
     result = fence_probe.cached_result()
     if result is not None and not result[0]:
         raise FenceUnavailable(_refusal(result[1], result[2]))
+    if not features.enabled("write_fence"):
+        return command
     available, reason = backend_available()
     if not available:
         raise FenceUnavailable(_refusal(reason))

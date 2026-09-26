@@ -46,11 +46,44 @@ def parse_size(text: str) -> int:
     """Bytes from a `2G` / `512M` / plain-bytes string."""
     text = text.strip().upper()
     if text and text[-1] in SUFFIXES:
-        return int(float(text[:-1]) * SUFFIXES[text[-1]])
-    return int(text)
+        amount = int(float(text[:-1]) * SUFFIXES[text[-1]])
+    else:
+        amount = int(text)
+    if amount <= 0:
+        raise ValueError("memory limit must be positive")
+    return amount
 
 
-def systemd_available() -> bool:
+def display_size(amount: int) -> str:
+    for suffix, multiplier in reversed(list(SUFFIXES.items())):
+        if amount % multiplier == 0:
+            return f"{amount // multiplier}{suffix}"
+    return str(amount)
+
+
+def _read_memory_max() -> str | None:
+    """Read this probe's cgroup-v2 cap from inside the scope being checked."""
+    try:
+        with open("/proc/self/cgroup", encoding="ascii") as cgroups:
+            relative = next(line.split(":", 2)[2].strip() for line in cgroups
+                            if line.startswith("0::"))
+        with open(f"/sys/fs/cgroup{relative}/memory.max", encoding="ascii") as limit_file:
+            return limit_file.read().strip()
+    except (OSError, StopIteration):
+        return None
+
+
+def memory_max_enforced(value: str | None, limit: int) -> bool:
+    """Only trust a finite kernel limit no larger than the requested cap."""
+    if value is None or value == "max":
+        return False
+    try:
+        return 0 < int(value) <= limit
+    except ValueError:
+        return False
+
+
+def systemd_available(limit: int, env: dict[str, str] | None = None) -> bool:
     """Whether a systemd *user* manager can host a scope for us.
 
     `systemd-run` on PATH is not enough: in a container or a stripped WSL
@@ -61,23 +94,59 @@ def systemd_available() -> bool:
         return False
     if not os.environ.get("XDG_RUNTIME_DIR"):
         return False
-    probe = subprocess.run(
-        ["systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax=64M", "true"],
-        capture_output=True,
+    probe_code = (
+        "import sys; "
+        "from pathlib import Path; "
+        "cg=next((line.split(':',2)[2].strip() for line in open('/proc/self/cgroup') "
+        "if line.startswith('0::')), None); "
+        "p=Path('/sys/fs/cgroup') / cg.lstrip('/') / 'memory.max' if cg is not None else None; "
+        "v=p.read_text().strip() if p is not None else 'max'; "
+        "print(v); sys.exit(0 if v.isdigit() and 0 < int(v) <= int(sys.argv[1]) else 1)"
     )
+    try:
+        probe = subprocess.run(
+            ["systemd-run", "--user", "--scope", "-q", "-p", f"MemoryMax={limit}",
+             "-p", "MemorySwapMax=0", "--", sys.executable, "-c", probe_code, str(limit)],
+            capture_output=True, env=env,
+        )
+    except OSError:
+        return False
     return probe.returncode == 0
 
 
+def rlimit_available(limit: int) -> bool:
+    """Confirm the child sees RLIMIT_AS before trusting the fallback."""
+    check = [sys.executable, "-c",
+             "import resource,sys; sys.exit(0 if resource.getrlimit(resource.RLIMIT_AS)[0] "
+             "<= int(sys.argv[1]) else 1)", str(limit)]
+
+    def apply_limit():  # pragma: no cover - runs in the forked child
+        resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+
+    try:
+        return subprocess.run(check, preexec_fn=apply_limit, capture_output=True).returncode == 0
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return False
+
+
 def run_capped(command: list[str], limit: int, env: dict[str, str]) -> int:
-    if systemd_available():
-        print(f"capped-test: cgroup MemoryMax={limit} (whole process tree)", flush=True)
+    if systemd_available(limit, env):
+        print(f"capped-test: cgroup MemoryMax={display_size(limit)} (whole process tree)", flush=True)
         return subprocess.run(
             ["systemd-run", "--user", "--scope", "-q",
-             "-p", f"MemoryMax={limit}", "-p", "MemorySwapMax=0", *command],
+             "-p", f"MemoryMax={limit}", "-p", "MemorySwapMax=0", "--",
+             sys.executable, os.path.abspath(__file__), "--verify-memory-scope",
+             str(limit), "--", *command],
             env=env,
         ).returncode
 
-    print(f"capped-test: RLIMIT_AS={limit} (this process only)", file=sys.stderr, flush=True)
+    if not rlimit_available(limit):
+        print("capped-test: refusing to run: could not verify an effective memory cap",
+              file=sys.stderr, flush=True)
+        return 125
+
+    print(f"capped-test: RLIMIT_AS={display_size(limit)} (this process only, verified in child)",
+          file=sys.stderr, flush=True)
 
     def apply_limit():  # pragma: no cover - runs in the forked child
         resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
@@ -85,7 +154,21 @@ def run_capped(command: list[str], limit: int, env: dict[str, str]) -> int:
     return subprocess.run(command, env=env, preexec_fn=apply_limit).returncode
 
 
+def verify_scope_and_exec(limit: int, command: list[str]) -> int:
+    """Verify the actual test scope before replacing this process with the suite."""
+    value = _read_memory_max()
+    if not memory_max_enforced(value, limit):
+        print("capped-test: refusing to run: scope memory.max is not enforced "
+              f"(memory.max={value or 'unavailable'})", file=sys.stderr, flush=True)
+        return 125
+    os.execvpe(command[0], command, os.environ)
+    return 125  # pragma: no cover - execvpe replaces this process
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if len(argv) >= 4 and argv[0] == "--verify-memory-scope" and argv[2] == "--":
+        return verify_scope_and_exec(int(argv[1]), argv[3:])
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--memory", default=DEFAULT_LIMIT, help="cap, e.g. 2G (default: 2G)")
     parser.add_argument("command", nargs=argparse.REMAINDER,
