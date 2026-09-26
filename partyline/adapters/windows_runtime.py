@@ -3,7 +3,7 @@
 import asyncio
 import time
 
-from partyline import features, fence, process_memory, windows_scope
+from partyline import features, fence, process_memory, process_exit, windows_scope
 from partyline.windows_console import WindowsConsole
 from .task_logging import log_task_deaths
 
@@ -106,9 +106,7 @@ class WindowsRuntime:
         await self.close(preserve_output=True)
         adapter.abort_startup_prompt()
         adapter._mark_not_ready()
-        if not adapter._stopping:
-            await adapter.on_status('exited')
-            await adapter.post('system', 'system', f"{adapter.att['name']} exited (code {code})")
+        await process_exit.report_exit(adapter, code)
 
     async def close(self, *, preserve_output=False):
         async with self.close_lock:

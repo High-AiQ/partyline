@@ -18,6 +18,7 @@ class WindowsRuntimeTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.adapter = Adapter({'id': 'probe', 'name': 'probe', 'cwd': '.', 'command': ['probe']},
                                AsyncMock(), AsyncMock())
+        self.adapter.memory_limit = '128M'
         self.console = MagicMock()
         self.console.write = AsyncMock()
         self.console.close = AsyncMock()

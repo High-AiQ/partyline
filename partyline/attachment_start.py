@@ -10,6 +10,7 @@ from .attachment_view import attachment_response
 from .auth_store import ensure_api_token
 from .fence import FenceUnavailable
 from .process_memory import MemoryScopeUnavailable
+from .process_incidents import exit_callback
 from .fence_protect import database_paths, protected_repo_roots
 from .hook_routes import surface_attention
 from .review_worktrees import list_review_worktrees
@@ -31,6 +32,7 @@ def prepare_attachment(att, runtime, hook_url, checkpoint):
     bind_role_delivery(runtime.db, att)
     att["fresh_checkpoint"] = checkpoint
     att["startup_attention"] = lambda prompt: surface_attention(runtime, att, prompt)
+    att["on_process_exit"] = exit_callback(runtime, att)
 
 
 async def rollback_start(runtime, att):

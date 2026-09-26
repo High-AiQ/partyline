@@ -22,6 +22,7 @@ from .attachment_commands import validated_attachment_command
 from .attachment_resume import resume_adapter
 from .attachment_start import start_attachment
 from .attachment_lifecycle_routes import register_attachment_lifecycle_routes
+from .memory_routes import register_memory_routes
 from .attachment_view import attachment_response
 from .auth_guard import (
     WS_FORBIDDEN,
@@ -175,6 +176,7 @@ register_terminal_route(app, runtime)
 register_accept_route(app, runtime)
 register_review_routes(app, runtime)
 register_compact_route(app, runtime, presence)
+register_memory_routes(app, runtime)
 register_line_process_routes(app, runtime)
 register_goal_route(app, runtime)
 register_restart_request_routes(app, runtime, ADAPTER_METADATA, lambda: request_exit())
