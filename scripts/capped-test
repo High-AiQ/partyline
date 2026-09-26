@@ -33,6 +33,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 
 DEFAULT_COMMAND = [
     "uv", "run", "--locked", "coverage", "run", "-m", "unittest", "discover", "-s", "tests",
@@ -149,13 +150,33 @@ def run_capped(command: list[str], limit: int, env: dict[str, str]) -> int:
 
     if systemd_available(limit, env):
         print(f"capped-test: cgroup MemoryMax={display_size(limit)} (whole process tree)", flush=True)
-        return subprocess.run(
-            ["systemd-run", "--user", "--scope", "-q",
+        unit = f"partyline-test-{uuid.uuid4().hex}.scope"
+        code = subprocess.run(
+            ["systemd-run", "--user", "--scope", "-q", f"--unit={unit}",
+             "-p", "OOMPolicy=stop",
              "-p", f"MemoryMax={limit}", "-p", "MemorySwapMax=0", "--",
              sys.executable, os.path.abspath(__file__), "--verify-memory-scope",
              str(limit), "--", *command],
             env=env,
         ).returncode
+        # The scope launcher can receive SIGTERM when a child hits MemoryMax.
+        # Preserve and read the unit result instead of guessing from that signal.
+        try:
+            result = subprocess.run(
+                ["systemctl", "--user", "show", unit, "--property=Result", "--value"],
+                capture_output=True, text=True, timeout=3, env=env,
+            )
+            if not result.returncode and result.stdout.strip() == "oom-kill":
+                code = 137
+        except (OSError, subprocess.SubprocessError):
+            pass
+        finally:
+            try:
+                subprocess.run(["systemctl", "--user", "reset-failed", unit],
+                               capture_output=True, timeout=3, env=env)
+            except (OSError, subprocess.SubprocessError):
+                pass
+        return code
 
     if not rlimit_available(limit):
         print("capped-test: refusing to run: could not verify an effective memory cap",
@@ -212,8 +233,8 @@ def main(argv: list[str] | None = None) -> int:
     # hunting through test output for an assertion that was never there.
     if code in (137, -9):
         print(
-            f"\ncapped-test: killed at {args.memory}. A test allocated without bound — look for a "
-            "poll whose sleep is patched in the wrong module, not for a failing assertion.",
+            f"\ncapped-test: killed at {args.memory}. Inspect the workload for unbounded allocations "
+            "or oversized assertion diagnostics before increasing its memory budget.",
             file=sys.stderr,
         )
         # `subprocess` reports a signal death as a negative number, which the

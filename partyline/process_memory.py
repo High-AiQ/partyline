@@ -26,7 +26,8 @@ def process_memory_limit(env: dict[str, str] | None = None) -> str:
     return value
 
 
-def scope_argv(command: list[str], limit: str, platform: str | None = None) -> list[str]:
+def scope_argv(command: list[str], limit: str, platform: str | None = None,
+               *, unit: str | None = None) -> list[str]:
     """Place Linux CLI argv in a private systemd scope with swap disabled."""
     platform = sys.platform if platform is None else platform
     if not platform.startswith("linux"):
@@ -38,7 +39,9 @@ def scope_argv(command: list[str], limit: str, platform: str | None = None) -> l
         )
     verifier = [sys.executable, "-m", "partyline.process_memory", "--verify-exec", limit,
                 "--", *command]
-    return [systemd_run, "--user", "--scope", "-q", "--collect", "-p",
+    # Named attachment scopes retain failed results until the host records them.
+    lifetime = [f"--unit={unit}", "-p", "OOMPolicy=stop"] if unit else ["--collect"]
+    return [systemd_run, "--user", "--scope", "-q", *lifetime, "-p",
             f"MemoryMax={limit}", "-p", "MemorySwapMax=0", "--expand-environment=no", "--", *verifier]
 
 
@@ -92,9 +95,9 @@ def apply_address_space_limit(limit: str) -> None:
 
 
 def exit_notice(code: int, limit: str, name: str) -> str | None:
-    """Explain a SIGKILL as the configured OOM limit in the line."""
+    """A signal alone cannot establish that the kernel killed for memory."""
     if code in (-9, 137):
-        return f"{name} exited (code {code}): killed, most likely by the {limit} memory limit"
+        return f"{name} exited (code {code}): killed; memory-limit cause unconfirmed"
     if code == 125:
         return f"{name} refused to start: memory limit {limit} could not be verified"
     return None

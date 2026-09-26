@@ -21,7 +21,7 @@ if sys.platform != "win32":
     import fcntl
     import termios
 
-from partyline import process_memory
+from partyline import process_memory, process_exit
 from partyline.adapters import activation, fence, pty_io, startup_prompt
 from partyline.adapters.process_shutdown import stop_process_group
 from partyline.adapters.jsonl_receipts import JsonlPasteReceipts, tail_jsonl
@@ -104,9 +104,12 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
     def build_command(self) -> list[str]:
         return list(self.att["command"])
     async def start(self):
-        self.memory_limit = process_memory.process_memory_limit()
+        self.memory_limit = process_memory.process_memory_limit(
+            {"PARTYLINE_PROCESS_MEMORY_LIMIT": self.att["memory_limit"]}
+            if self.att.get("memory_limit") else None)
+        self.memory_scope = process_exit.new_scope() if sys.platform.startswith("linux") else None
         self.spawn_argv = process_memory.scope_argv(
-            fence.launch_argv(self), self.memory_limit,
+            fence.launch_argv(self), self.memory_limit, unit=self.memory_scope,
         )
         env = dict(child_env(os.environ, self.att), TERM="xterm-256color")
         env.update(self.spawn_env())
@@ -181,6 +184,7 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
             await stop_process_group(self.proc)
         for task in self._tasks:
             task.cancel()
+        await asyncio.to_thread(process_exit.release_scope, getattr(self, "memory_scope", None))
         await self.on_status("detached")
 
     async def _drain(self):
@@ -226,10 +230,7 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
         rc = await asyncio.get_running_loop().run_in_executor(None, self.proc.wait)
         self.abort_startup_prompt()
         self._mark_not_ready()
-        if not self._stopping:
-            await self.on_status("exited")
-            notice = process_memory.exit_notice(rc, self.memory_limit, self.att["name"])
-            await self.post("system", "system", notice or f"{self.att['name']} exited (code {rc})")
+        await process_exit.report_exit(self, rc)
 
     async def _run(self):
         """Adapter-specific background task."""
