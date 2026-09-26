@@ -6,7 +6,6 @@ from pathlib import Path
 import shlex
 import stat
 import sys
-import subprocess
 import tempfile
 
 from .adapters.briefing import child_env
@@ -51,8 +50,13 @@ def provision_connection(db_path: str, att: dict) -> None:
             os.unlink(scratch)
     client = Path(__file__).with_name("agent_client.py")
     att['_agent_connection_file'] = str(target)
-    quote = subprocess.list2cmdline if os.name == 'nt' else shlex.join
-    att["agent_command"] = quote([sys.executable, str(client), "--connection", str(target)])
+    arguments = [sys.executable, str(client), '--connection', str(target)]
+    if os.name == 'nt':
+        from .windows_shell import quote
+        att['agent_command'] = '& ' + ' '.join(quote(argument) for argument in arguments)
+        att['agent_shell'] = 'PowerShell'
+    else:
+        att['agent_command'] = shlex.join(arguments)
 
 
 def remove_connection(db_path: str, att_id: str) -> None:
@@ -63,8 +67,10 @@ def remove_connection(db_path: str, att_id: str) -> None:
 
 def connection_hint(att: dict) -> str:
     """Resumed contexts did not receive a new joining briefing."""
+    shell = f" Run in {att['agent_shell']}." if att.get('agent_shell') else ''
     return ("Partyline API helper (works without inherited environment): `"
-            + att["agent_command"] + "`; use `context` or `request METHOD /api/... --json-file PATH`.")
+            + att["agent_command"] + "`; use `context` or `request METHOD /api/... --json-file PATH`."
+            + shell)
 
 
 def bind_connection_hint(att: dict) -> None:

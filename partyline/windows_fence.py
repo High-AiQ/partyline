@@ -39,6 +39,9 @@ class WindowsFence:
         self.roots = list(dict.fromkeys(Path(p).resolve() for p in writable))
         self.protected = list(dict.fromkeys(Path(p).resolve() for p in protected))
         self.readable = list(dict.fromkeys(Path(p).resolve() for p in readable))
+        if os.name == 'nt':
+            from .windows_volumes import validate
+            validate([*self.roots, *self.protected, *self.readable])
         for root in self.roots:
             if not root.exists():
                 raise OSError(f'Windows write grant must be an existing file or directory: {root}')
@@ -74,12 +77,15 @@ class WindowsFence:
                     if not self.writable(path):
                         permissions[path] = 0xd0156 | (0x40 if path.is_dir() else 0)
                         inherited.add(path)
+        for root in [*self.protected, *self.roots, *self.readable]:
             for parent in root.parents:
                 if parent.exists():
-                    # Do not change system ancestors when the token already
-                    # lacks the rights that could replace a protected subtree.
-                    if not any(can_access(self.token, parent, right)
-                               for right in (0x40, 0x10000, 0x40000, 0x80000)):
+                    # Git stats leading directories even when traversal itself
+                    # is permitted. Grant read access without parent deletion.
+                    readable = can_access(self.token, parent, 0x1200a9)
+                    mutable = any(can_access(self.token, parent, right)
+                                  for right in (0x40, 0x10000, 0x40000, 0x80000))
+                    if readable and not mutable:
                         continue
                     permissions[parent] = permissions.get(parent, 0) | 0xd0040
         for path, permission in permissions.items():
