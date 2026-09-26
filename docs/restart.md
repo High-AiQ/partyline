@@ -20,6 +20,11 @@ safety contract; the failure modes that shaped it are recorded in [lessons.md](l
 
 ### Install the service OOM guard
 
+This section applies to an installed systemd service. The foreground quick start,
+`uv run partyline`, creates and verifies its own temporary memory scope automatically
+and does not need a service file. A foreground scope is not a restartable service;
+the existing foreground shutdown/relaunch behavior still applies.
+
 The service must survive an OOM in one attached process. Run `partyline doctor` and
 use the exact drop-in it prints if the service does not report `OOMPolicy=continue`
 and a finite `MemoryMax` below host RAM. For the standard `partyline.service`,
