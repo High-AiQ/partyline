@@ -1,6 +1,7 @@
 """Owner-only connection files on NTFS, using handles and explicit DACLs."""
 
 import json
+import re
 
 
 def _user():
@@ -60,8 +61,18 @@ def load_connection(path):
             raise ValueError('connection file belongs to another user')
         acl = descriptor.GetSecurityDescriptorDacl()
         allowed = (user, security.CreateWellKnownSid(security.WinLocalSystemSid, None))
-        if acl is None or any(acl.GetAce(i)[0][0] != 0 or acl.GetAce(i)[-1] not in allowed
-                              for i in range(acl.GetAceCount())):
+        import win32api
+        token = security.OpenProcessToken(win32api.GetCurrentProcess(), win32con.TOKEN_QUERY)
+        try:
+            restricted = [sid for sid, _ in security.GetTokenInformation(token, security.TokenRestrictedSids)
+                          if re.fullmatch(r'S-1-5-21-\d+-\d+-\d+-1001',
+                                          security.ConvertSidToStringSid(sid))]
+        finally:
+            token.Close()
+        def safe(ace):
+            return ace[0][0] == 0 and (ace[-1] in allowed or
+                                      (ace[-1] in restricted and ace[1] & ~0x1200a9 == 0))
+        if acl is None or any(not safe(acl.GetAce(i)) for i in range(acl.GetAceCount())):
             raise ValueError('connection file is not private')
         if win32file.GetFileSize(handle) > 65536:
             raise ValueError('connection file is too large')

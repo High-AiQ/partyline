@@ -1,5 +1,14 @@
 # Lessons: the false-assumptions ledger
 
+## A write-restricted Windows token does not cover parent deletion
+
+The initial candidate used `WRITE_RESTRICTED`, assuming every destructive file
+operation would run the restricted SID check. Native tests disproved this:
+`FILE_DELETE_CHILD` remained granted on a user-owned directory, and the child
+actually deleted a protected file despite a deny entry for its restricted SID.
+Use a fully restricted token and explicit read grants. Keep direct deletion and
+rename attempts in native acceptance tests; refusing `write_text` is insufficient.
+
 ## Windows security bindings and elevated fixtures need native proof
 
 Win32 API names do not imply matching pywin32 methods or constants. Native CI

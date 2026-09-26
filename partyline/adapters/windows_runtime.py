@@ -3,19 +3,35 @@
 import asyncio
 import time
 
-from partyline import process_memory
+from partyline import features, fence, process_memory, windows_scope
 from partyline.windows_console import WindowsConsole
 from .task_logging import log_task_deaths
 
 
 async def start(adapter, environment):
     adapter.spawned_at = time.time()
-    console = await WindowsConsole.spawn(
-        adapter.spawn_argv, adapter.att['cwd'], environment,
-        process_memory.parse_size(adapter.memory_limit),
-    )
+    scope = None
+    if fence.backend() == 'restricted-token' and features.enabled('write_fence'):
+        preparation = asyncio.create_task(asyncio.to_thread(windows_scope.prepare, adapter, environment))
+        try:
+            scope = await asyncio.shield(preparation)
+        except BaseException:
+            # Cancellation does not stop the ACL worker. Join it and undo its
+            # changes before propagating cancellation to the attach request.
+            prepared = await preparation
+            await asyncio.to_thread(prepared.close)
+            raise
+    try:
+        console = await WindowsConsole.spawn(
+            adapter.spawn_argv, adapter.att['cwd'], environment,
+            process_memory.parse_size(adapter.memory_limit), token=scope.token if scope else None,
+        )
+    except BaseException:
+        if scope:
+            await asyncio.to_thread(scope.close)
+        raise
     adapter.proc = console
-    adapter._windows = runtime = WindowsRuntime(adapter, console)
+    adapter._windows = runtime = WindowsRuntime(adapter, console, scope)
     adapter._tasks = log_task_deaths([
         asyncio.create_task(task) for task in
         (runtime.drain(), runtime.watch_exit(), runtime.write_loop(), adapter._run())
@@ -24,8 +40,10 @@ async def start(adapter, environment):
 
 
 class WindowsRuntime:
-    def __init__(self, adapter, console):
+    def __init__(self, adapter, console, scope=None):
         self.adapter, self.console = adapter, console
+        self.scope = scope
+        self.close_lock = asyncio.Lock()
         self.pending = asyncio.Queue(maxsize=64)
         self.closed = False
 
@@ -93,12 +111,16 @@ class WindowsRuntime:
             await adapter.post('system', 'system', f"{adapter.att['name']} exited (code {code})")
 
     async def close(self):
-        if self.closed:
-            return
-        self.closed = True
-        while not self.pending.empty():
-            _, receipt = self.pending.get_nowait()
-            if receipt is not None and not receipt.done():
-                receipt.set_exception(OSError('terminal closed before input was written'))
-        self.pending.put_nowait(None)
-        await self.console.close()
+        async with self.close_lock:
+            if self.closed:
+                return
+            self.closed = True
+            while not self.pending.empty():
+                _, receipt = self.pending.get_nowait()
+                if receipt is not None and not receipt.done():
+                    receipt.set_exception(OSError('terminal closed before input was written'))
+            self.pending.put_nowait(None)
+            # Stop the entire job before releasing its filesystem permissions.
+            await self.console.close()
+            if self.scope:
+                await asyncio.to_thread(self.scope.close)

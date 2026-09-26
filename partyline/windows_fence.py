@@ -35,9 +35,10 @@ def paths(root):
 
 
 class WindowsFence:
-    def __init__(self, writable, protected):
+    def __init__(self, writable, protected, readable=()):
         self.roots = list(dict.fromkeys(Path(p).resolve() for p in writable))
         self.protected = list(dict.fromkeys(Path(p).resolve() for p in protected))
+        self.readable = list(dict.fromkeys(Path(p).resolve() for p in readable))
         for root in self.roots:
             if not root.exists():
                 raise OSError(f'Windows write grant must be an existing file or directory: {root}')
@@ -46,6 +47,11 @@ class WindowsFence:
         self.token, self.sid = create_token()
         self.changed = []
         try:
+            for root in self.readable:
+                for path in paths(root):
+                    if not can_access(self.token, path, 0x1200a9):
+                        edit_grant(path, self.sid, permission=0x1200a9)
+                        self.changed.append(path)
             self.protect()
             for root in self.roots:
                 for path in paths(root):
@@ -106,7 +112,7 @@ class WindowsFence:
         self.token = None
         # Remove inherited entries on newly created files as well as originals.
         candidates = set(self.changed)
-        for root in [*self.roots, *self.protected]:
+        for root in [*self.roots, *self.protected, *self.readable]:
             if root.exists():
                 candidates.update(paths(root))
         errors = []

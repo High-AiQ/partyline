@@ -2,10 +2,12 @@
 
 from pathlib import Path
 import re
+import sys
 
 from . import fence, runtime_lock
 from .windows_fence import WindowsFence, contains
 from .windows_git import write_paths
+from .windows_command import resolve
 
 
 class Scope:
@@ -36,6 +38,25 @@ def state_paths(adapter, environment):
     return [Path(path).expanduser() for path in paths]
 
 
+def read_paths(adapter, environment):
+    roots = [Path(sys.prefix), Path(sys.base_prefix), Path(__file__).parent]
+    command = getattr(adapter, 'spawn_argv', None)
+    if command:
+        for argument in resolve(command, environment)[:2]:
+            path = Path(argument)
+            if not path.is_file():
+                continue
+            root = path.parent
+            for parent in path.parents:
+                if parent.name.lower() == 'node_modules':
+                    root = parent
+                    break
+            roots.append(root)
+    if connection := adapter.att.get('_agent_connection_file'):
+        roots.append(Path(connection))
+    return roots
+
+
 def prepare(adapter, environment):
     """Called in a worker thread; locks cover each complete ACL transaction."""
     ident = adapter.att['id']
@@ -59,4 +80,4 @@ def prepare(adapter, environment):
     writable += [Path(path) for path in fence._grant_paths(adapter.att)]
     lock = base / 'windows-acl.lock'
     with runtime_lock.exclusive(lock):
-        return Scope(WindowsFence(writable, protected), lock)
+        return Scope(WindowsFence(writable, protected, read_paths(adapter, environment)), lock)

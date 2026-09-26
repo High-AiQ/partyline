@@ -20,14 +20,15 @@ class WindowsPrivateFileTest(unittest.TestCase):
         self.security = MagicMock()
         self.security.GetSecurityInfo.return_value = self.descriptor
         self.security.CreateWellKnownSid.return_value = 'system'
+        self.security.GetTokenInformation.return_value = []
         self.file = MagicMock()
         self.file.GetFileInformationByHandle.return_value = (0,)
         self.file.GetFileSize.return_value = 2
         self.file.ReadFile.return_value = (0, b'{}')
         constants = SimpleNamespace(GENERIC_READ=1, READ_CONTROL=2, WRITE_DAC=4, WRITE_OWNER=8,
-                                    FILE_ATTRIBUTE_DIRECTORY=16, FILE_ALL_ACCESS=0x1f01ff)
+                                    FILE_ATTRIBUTE_DIRECTORY=16, FILE_ALL_ACCESS=0x1f01ff, TOKEN_QUERY=8)
         modules = patch.dict(sys.modules, win32con=constants, win32security=self.security,
-                             win32file=self.file)
+                             win32file=self.file, win32api=MagicMock())
         modules.start()
         self.addCleanup(modules.stop)
         for name, result in (('_user', 'user'), ('_open', self.handle)):
@@ -58,6 +59,18 @@ class WindowsPrivateFileTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'too large'):
             private.load_connection('fixture')
 
+    def test_only_current_random_restricted_sid_can_have_read_only_access(self):
+        self.security.GetTokenInformation.return_value = [('capability', 0)]
+        self.security.ConvertSidToStringSid.return_value = 'S-1-5-21-12-34-56-1001'
+        self.acl.GetAce.return_value = ((0, 0), 0x120089, 'capability')
+        self.assertEqual(private.load_connection('fixture'), {})
+        self.acl.GetAce.return_value = ((0, 0), 0x1f01ff, 'capability')
+        with self.assertRaisesRegex(ValueError, 'not private'):
+            private.load_connection('fixture')
+        self.security.ConvertSidToStringSid.return_value = 'S-1-1-0'
+        self.acl.GetAce.return_value = ((0, 0), 0x120089, 'capability')
+        with self.assertRaisesRegex(ValueError, 'not private'):
+            private.load_connection('fixture')
     def test_only_user_and_system_receive_acl_entries(self):
         private.secure_directory('fixture')
         acl = self.security.ACL.return_value
