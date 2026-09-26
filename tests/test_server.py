@@ -385,10 +385,13 @@ class ServerTest(unittest.TestCase):
 
         async def exercise():
             with overridden(write_fence=True), patch.object(
-                server.fence_probe, "probe", return_value=result
-            ) as probe:
+                server.service_guard, "unit_from_cgroup", return_value="partyline-lan.service"
+            ), patch.object(server.fence_probe, "probe", return_value=result) as probe:
                 async with server.lifespan(server.app):
-                    probe.assert_called_once_with()
+                    probe.assert_called_once_with(
+                        check_fence=True, service_unit="partyline-lan.service",
+                        discover_service_unit=False,
+                    )
                     status = server.fence_status()
                     self.assertFalse(status["ok"])
                     self.assertEqual(status["reason"], result[1])

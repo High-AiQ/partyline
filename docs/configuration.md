@@ -101,7 +101,8 @@ heartbeat = true   # off by default since 1.23.0
 | `PARTYLINE_HOST` | `127.0.0.1` | bind setting; see [Serving on a specific IP or port](#serving-on-a-specific-ip-or-port) and [Security](security.md) |
 | `PARTYLINE_INSTANCE_NAME` | unset | optional label shown above every line; CLI/config precedence matches bind settings |
 | `PARTYLINE_DB` | `~/.partyline.db` | conversations, messages, attachments, presets. One file per running server — do not share it across processes |
-| `PARTYLINE_PROCESS_MEMORY_LIMIT` | `8G` | `MemoryMax` for each attached process's transient systemd scope; the scope verifies the kernel limit before starting the CLI |
+| `PARTYLINE_PROCESS_MEMORY_LIMIT` | `4G` | `MemoryMax` for each attached process's transient systemd scope; the scope verifies the kernel limit before starting the CLI |
+| `PARTYLINE_SYSTEMD_UNIT` | auto-detected | Optional user service unit override for `partyline doctor` when discovery is ambiguous or the service uses a custom name |
 | `PARTYLINE_MEDIA_DIR` | `<PARTYLINE_DB stem>/media` | uploaded files, one subdirectory per line |
 | `PARTYLINE_ADAPTERS_DIR` | `~/.partyline/adapters` | where imported adapter repos are checked out |
 | `PARTYLINE_FEATURE_<NAME>` | registry default | switch one feature flag on or off (`1/true/on` or `0/false/off`); see [Feature flags](#feature-flags) |

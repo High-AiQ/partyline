@@ -5,9 +5,10 @@ from __future__ import annotations
 import os
 import resource
 import shutil
+import subprocess
 import sys
 
-DEFAULT_PROCESS_MEMORY_LIMIT = "8G"
+DEFAULT_PROCESS_MEMORY_LIMIT = "4G"
 
 
 class MemoryScopeUnavailable(RuntimeError):
@@ -20,9 +21,9 @@ def process_memory_limit(env: dict[str, str] | None = None) -> str:
         "PARTYLINE_PROCESS_MEMORY_LIMIT", DEFAULT_PROCESS_MEMORY_LIMIT,
     ).strip().upper()
     if not value or value[-1] not in "KMG" or not value[:-1].isdigit():
-        raise ValueError("PARTYLINE_PROCESS_MEMORY_LIMIT must be a positive size such as 8G")
+        raise ValueError("PARTYLINE_PROCESS_MEMORY_LIMIT must be a positive size such as 4G")
     if int(value[:-1]) <= 0:
-        raise ValueError("PARTYLINE_PROCESS_MEMORY_LIMIT must be a positive size such as 8G")
+        raise ValueError("PARTYLINE_PROCESS_MEMORY_LIMIT must be a positive size such as 4G")
     return value
 
 
@@ -96,6 +97,37 @@ def exit_notice(code: int, limit: str, name: str) -> str | None:
     if code == 125:
         return f"{name} refused to start: memory limit {limit} could not be verified"
     return None
+
+
+def probe_scope() -> tuple[bool, str]:
+    """Verify the configured Linux scope cap by reading memory.max inside it."""
+    if not sys.platform.startswith("linux"):
+        return True, ""
+    limit = process_memory_limit()
+    systemd_run = shutil.which("systemd-run")
+    if not systemd_run:
+        return False, "per-process memory scope probe failed: systemd-run is unavailable"
+    code = (
+        'while IFS=: read -r hierarchy controllers path; do '
+        '[ "$hierarchy" = 0 ] && [ -z "$controllers" ] && break; done '
+        '< /proc/self/cgroup; '
+        'value=$(cat "/sys/fs/cgroup${path}/memory.max") || exit 1; '
+        'printf "%s\\n" "$value"; '
+        'case "$value" in ""|max|*[!0-9]*) exit 1 ;; esac; '
+        '[ "$value" -gt 0 ] && [ "$value" -le "$1" ]'
+    )
+    argv = [systemd_run, "--user", "--scope", "-q", "--collect", "-p",
+            f"MemoryMax={limit}", "-p", "MemorySwapMax=0", "--",
+            "/bin/sh", "-c", code, "partyline-memory-probe", str(parse_size(limit))]
+    try:
+        done = subprocess.run(argv, capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"per-process memory scope probe failed: {exc}"
+    current = done.stdout.strip()
+    if done.returncode or not memory_max_enforced(current, limit):
+        detail = " ".join(done.stderr.split()) or f"memory.max={current or 'unavailable'}"
+        return False, f"per-process memory scope is not enforced at {limit}: {detail}"
+    return True, ""
 
 
 if __name__ == "__main__":
