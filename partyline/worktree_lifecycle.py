@@ -19,6 +19,7 @@ import subprocess
 
 from .hierarchy import parent_id_of
 from .line_worktree import WORKTREES_DIR, _git, line_cwd, repo_root
+from .worktree_paths import managed_root
 from .review_worktrees import sweep_review_worktrees
 
 logger = logging.getLogger(__name__)
@@ -27,9 +28,9 @@ logger = logging.getLogger(__name__)
 def _worktree_root(cwd: str) -> str | None:
     """The repository a worktree at ``cwd`` belongs to, or None when ``cwd``
     is not one of ours."""
-    if f"/{WORKTREES_DIR}/" not in cwd or not os.path.isdir(cwd):
+    if not os.path.isdir(cwd):
         return None
-    return cwd.split(f"/{WORKTREES_DIR}/")[0]
+    return managed_root(cwd)
 
 
 def remove_for_line(conv: dict | None) -> None:

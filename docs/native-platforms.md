@@ -8,18 +8,22 @@ install a service or write a memory-limit configuration file. Attached CLIs rema
 real interactive terminal processes; their speech still comes from structured
 transcripts. Memory protection must not silently disable the write fence.
 
-This is a platform plan, not a claim of native Windows support today. The current
-terminal runtime imports `fcntl` and `termios`, uses `os.openpty` and Unix process
-groups, and ships no Windows write-fence backend. Database ownership locks now use
-Windows byte-range locks or Unix `flock`. The native Windows CI foundation runs
-those database tests under a verified Job Object memory cap; this does not yet
-make the interactive application runnable on Windows. The standalone ConPTY
-primitive launches a native executable suspended, assigns its verified memory
-job, then resumes it. It supports terminal input, output, resize, exit status,
-and tree cleanup; native CI exercises these operations. It is not yet wired into
-attachments, which still require a Windows write-fence backend. Batch scripts
-must be invoked through an explicit interpreter; the primitive does not insert
-a command shell around arguments.
+Native Windows uses ConPTY for real interactive terminals, restricted tokens and
+filesystem ACLs for protected paths, and Job Objects for memory limits. It needs
+Windows 10 build 17763 or newer, Python 3.11+, Git, and uv. Run the usual
+`uv run partyline` in PowerShell or CMD; no WSL, service installation, elevation,
+or Developer Mode is required. Install each vendor CLI separately and sign in
+before attaching it. Vendor availability on Windows still varies.
+
+Use local drives that support persistent ACLs (normally NTFS). Network shares,
+mapped network drives, and permission paths through junctions are refused.
+Standard npm command shims resolve to Node and the installed script, preserving
+literal arguments. Custom batch scripts need an explicit interpreter.
+
+Native CI exercises console input/output, Unicode, resizing, descendant cleanup,
+memory enforcement, restricted Git commits, protected-file deletion refusal,
+credential-file permissions, shell quoting, and startup. These are fixture
+programs, not authenticated turns from every vendor CLI.
 
 ## Memory architecture
 
@@ -59,22 +63,21 @@ collectively exhausting host RAM. Linux can use a shared parent slice and Window
 parent job. macOS needs its own design and honest accounting of any monitoring delay;
 polling RSS is not an equivalent hard kernel cap.
 
-## Native Windows release blockers
+## Windows permission scope
 
-1. Introduce a terminal interface for start, resize, write, drain, wait, interrupt,
-   and stop; implement ConPTY and remove unconditional Unix imports.
-2. Add Job Object memory enforcement, including descendant accounting and cleanup
-   when the server exits unexpectedly. Keep the server outside attachment jobs.
-3. Replace Unix-only database locking and audit path, signal, executable and adapter
-   assumptions. Preserve the single-owner database lock and transcript claims.
-4. Implement and verify a Windows write-fence backend. A Job Object limits resources;
-   it does not implement the repository/database write protection. Determine a
-   Windows mechanism that can express the existing grants without changing users'
-   repository ACLs globally. If that requires extra installation or privileges,
-   document the product tradeoff before selecting it. Do not ship an unfenced default.
-5. Run native Windows and macOS CI and interactive smoke checks before expanding the
-   README's supported-platform claim. Mocked `sys.platform` tests cannot establish
-   native support.
+Each attachment receives a fresh synthetic security identity. Partyline adds
+permission entries for that identity, verifies the restricted token against the
+protected files and their ancestors, then launches the console suspended and
+assigns its memory job before resuming it. The real user's existing permissions
+remain intact. Cleanup removes the added entries after the child tree stops.
+Abrupt termination can leave inert entries; identities are never reused.
+
+Windows also restricts reads. Partyline grants access to the CLI runtime, its
+known state directories, Git configuration, and the attachment's private
+connection file. Additional private paths may need an approved grant. Existing
+public Windows permissions still apply outside the protected set; this is not
+an absolute allowlist of every writable path on the computer. See
+[the write fence](write-fence.md) for Git behavior and limitations.
 
 ## Acceptance checks
 
@@ -88,6 +91,6 @@ polling RSS is not an equivalent hard kernel cap.
 - Exercise literal dollar signs, paths with spaces, console resize, interrupts,
   transcript delivery, server exit, and attachment teardown.
 
-The immediate Linux repair supplies automatic foreground scopes and fixes the
-systemd argument-expansion regression. It does not complete the Windows port or
-claim an aggregate memory budget across all platforms.
+The Linux launch path automatically creates foreground scopes and disables
+systemd argument expansion. The platform caps do not establish one aggregate
+memory budget across all attachments.

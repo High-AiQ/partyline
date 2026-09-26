@@ -22,7 +22,8 @@ from .auth_guard import request_principal
 from .git_fence import mirror_branch_ref
 from .hierarchy import ancestors, descendants, parent_id_of
 from .hierarchy_contracts import AcceptIn, AcceptResponse
-from .line_worktree import WORKTREES_DIR, _git, line_cwd, repo_and_worktree, rev
+from .line_worktree import _git, line_cwd, repo_and_worktree, rev
+from .worktree_paths import branch_name, managed_root
 from .machine_scope import deny_unless
 from .review_worktrees import prune_accepted_review
 from .system_notice import post_system_notice
@@ -45,7 +46,7 @@ def _branch_name(cwd: str) -> str:
     belongs to the person whose checkout it is, and partyline never
     fast-forwards it.
     """
-    return f"line/{os.path.basename(cwd.rstrip('/'))}"
+    return branch_name(cwd)
 
 
 def _git_failure(done, fallback: str) -> AcceptError:
@@ -97,7 +98,7 @@ def accept_sha(db, conv_id: str, sha: str) -> dict:
         raise AcceptError(404, "line not found")
     cwd = line_cwd(db, conv_id) or ""
     root, worktree = repo_and_worktree(cwd)
-    if root is None or f"/{WORKTREES_DIR}/" not in cwd:
+    if root is None or not managed_root(cwd):
         raise AcceptError(
             409,
             "accept is for a placed line worktree: this line works in a shared checkout, "

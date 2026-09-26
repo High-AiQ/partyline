@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import subprocess
 from pathlib import Path
 
@@ -10,6 +11,9 @@ from .process_memory import parse_size
 
 
 def host_memory_bytes() -> int:
+    if sys.platform == 'win32':
+        from .windows_server import host_memory_bytes as windows_memory
+        return windows_memory()
     return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
 
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import resource
 import shutil
 import subprocess
 import sys
@@ -84,6 +83,8 @@ def verify_scope_and_exec(limit: str, command: list[str]) -> int:
 
 def apply_address_space_limit(limit: str) -> None:
     """Apply the non-Linux per-process fallback before exec."""
+    import resource
+
     unit = limit[-1]
     multiplier = {"K": 1024, "M": 1024**2, "G": 1024**3}[unit]
     amount = int(limit[:-1]) * multiplier

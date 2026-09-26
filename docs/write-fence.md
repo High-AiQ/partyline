@@ -3,7 +3,7 @@
 Every attached process runs inside a platform kernel sandbox. All
 repositories known to Partyline and Partyline's database are protected
 from writes by default. A line's own worktree and git needs are reopened
-on top; paths outside the protected set are writable. The fence is the
+on top; access outside the protected set follows the platform rules below. The fence is the
 enforcement below the text brief: the kernel decides where writes land.
 
 | DO | DO NOT |
@@ -46,6 +46,17 @@ same platform-specific person-side install remedy).
   and the `/dev/ttysNNN` pty slaves. Availability is checked the same
   way as bubblewrap's: no `sandbox-exec`, no process.
 
+- **Windows — restricted tokens and ACLs.** Requires Windows 10 build 17763+
+  and local drives with persistent ACLs. Each attachment gets a unique synthetic
+  SID with grants for its worktree, Git metadata, private temporary directory,
+  CLI state, and approved paths. Explicit denies protect repository files,
+  database files, and deletion through their ancestors. The restricted token is
+  checked before the real ConPTY process starts. Existing user permissions stay
+  intact; cleanup removes only this attachment's entries. Crashes can leave
+  inert entries whose identity is never reused. Network drives and junctions in
+  permission paths are refused. Additional private host paths may be unreadable
+  until granted. Public Windows permissions outside protected roots still apply.
+
 Known limits of the Darwin backend, documented rather than hidden: the
 profile is visible in `ps` (so is the bubblewrap argv — this is a fence
 against accidents, not a jail against malice); `/tmp` remains shared with
@@ -72,7 +83,8 @@ sandbox-exec -p <generated profile> <command>
 ```
 
 The environment, working directory, process group, and network are kept.
-Reads are not fenced: a process can still read the host. The fence bounds
+On Linux and macOS, reads are not fenced: a process can still read the host.
+Windows restricted tokens also constrain reads; see its platform notes below. The fence bounds
 **writes**, and it is not a security boundary against a hostile binary —
 it is a fence against accidents, not a jail against malice. See
 `docs/security.md` for the trust model.
@@ -98,13 +110,20 @@ caps, not a total budget for all attachments combined. Linux needs cgroup v2 and
 a working systemd user manager (systemd 254 or newer); an unavailable cap causes
 startup to fail closed.
 
+On Windows the foreground server has a verified Job Object cap with the same
+2 GiB/host-memory default. Each attachment gets a separate 4 GiB job, counting
+committed memory across its descendants. The child starts suspended and cannot
+execute before assignment succeeds. Ordinary server helpers remain in the server
+job; only explicitly managed attachments leave it. Detaching or closing an
+attachment kills its whole job. Neither WSL nor a service is required.
+
 For installed Partyline services, boot and `partyline doctor` still check
 `OOMPolicy=continue` and a finite `MemoryMax` below host RAM. Unsafe service
 settings produce the drop-in remedy documented in
 [Restarting the running instance](restart.md#install-the-service-oom-guard).
 macOS uses its existing per-process address-space limits and does not require
-systemd. Native Windows support requires a separate terminal and write-fence
-backend; see [the platform plan](native-platforms.md).
+systemd. Windows uses ConPTY, restricted tokens, and Job Objects; see
+[native platform support](native-platforms.md).
 
 ## The protected set and carve-outs
 
@@ -127,7 +146,7 @@ This follows from deriving the protected set from the database.
 | git shared state (child lines) | partially | see the mirror below |
 | Partyline's database, lock, and sidecars | no | attachment processes cannot alter Partyline state directly |
 | granted paths (`conversation_write_grants`) | yes | requested, granted, recorded, and bound last |
-| paths outside the protected set | yes | the protect list is intentionally derived from active Partyline lines |
+| paths outside the protected set | platform-dependent | the protect list is intentionally derived from active Partyline lines |
 
 For any line working in a repository, the whole canonical `<repo>/.review/`
 directory is writable, including review checkout directories created after
@@ -187,6 +206,16 @@ files are writable there.**
 A sibling can clobber this line's branch view (and vice versa); the
 acceptance flow — hand a SHA, let the captain fast-forward — is what keeps
 work trustworthy, not the filesystem.
+
+On Windows, child branches are named `line/<slug>/work`. Their private ref
+subdirectory permits Git's atomic lock files without granting sibling refs.
+The line writes its own worktree metadata, ref/reflog directory, and shared
+objects. It cannot write common Git configuration, hooks, sibling refs, or
+common transient files. Operations needing those paths (for example fetches
+that update shared refs or repository maintenance) must run through the captain.
+Windows uses real refs, so the host sees committed child progress immediately;
+there is no Linux-style ref mirror. Review the reported SHA in a managed review
+checkout on every platform.
 
 Consequences worth knowing (these describe the Linux mirror; on Darwin
 the real refs really do move):

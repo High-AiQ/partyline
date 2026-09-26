@@ -12,6 +12,7 @@ through ptys. The pty and transcript-tailing design are load-bearing. Read `READ
 | --- | --- |
 | Keep every process a real interactive process in a pty | Substitute a headless invocation or an SDK call |
 | Post assistant speech from structured transcripts | Turn terminal screen contents into chat messages |
+| Post media and service links as host-relative paths (`/api/media/<id>/slim`) or the LAN host | Post `0.0.0.0`, `127.0.0.1`, or `localhost` URLs; people reach this over LAN or HTTPS |
 | React when a reaction says it all: one on a machine's message wakes that process privately, as a note in its next digest | Expect a reaction to ring the room or leave a transcript line — a reaction on a human's message posts and wakes nothing |
 
 ## Layout
@@ -139,7 +140,7 @@ detail: `docs/write-fence.md`.
 | --- | --- |
 | Launch fenced by default and fail closed — no bubblewrap means no process | Start a process unconfined, or treat the flag as a permanent off switch |
 | Protect active managed repositories and the Partyline database by default; grant extra write scope only by person or captain-above decision | Assume an unknown repository is protected, or let a line widen its own scope |
-| Share git via the mirror: objects shared, refs/logs/packed-refs copy-on-write, sibling worktrees read-only | Bind the parent `.git`, another checkout, or a sibling line's metadata writable |
+| On Linux, share Git through the private ref mirror; on Windows, grant only the assigned `line/<slug>/work` ref directory; see the platform details in `docs/write-fence.md` | Bind the parent `.git`, another checkout, or a sibling line's metadata writable |
 | Review the child’s reported SHA in a Partyline-managed review worktree; mirrored refs are private per line and shared by its processes | Judge a child’s progress from its worktree as seen by the captain: accepted refs can make newer committed work appear uncommitted |
 | Replace a CLI sandbox that cannot nest (codex's bwrap) with `fence_args`, only while fenced | Run two sandboxes at once, or leave a CLI's sandbox as the only one on an unfenced host |
 

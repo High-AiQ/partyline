@@ -255,7 +255,7 @@ class DarwinSandboxExecTest(unittest.TestCase):
         with self.darwin():
             self.assertEqual(fence.backend(), "sandbox-exec")
         with patch.object(sys, "platform", "win32"):
-            self.assertEqual(fence.backend(), "none")
+            self.assertEqual(fence.backend(), "restricted-token")
 
     def test_darwin_argv_is_profile_then_command(self):
         with self.darwin(), \
@@ -396,10 +396,10 @@ class DarwinSandboxExecTest(unittest.TestCase):
         self.assertIn("Remedy:", str(caught.exception))
 
     def test_a_platform_with_no_backend_fails_closed(self):
-        with patch.object(sys, "platform", "win32"):
+        with patch.object(sys, "platform", "freebsd"):
             available, reason = fence.backend_available()
             self.assertFalse(available)
-            self.assertIn("win32", reason)
+            self.assertIn("freebsd", reason)
             with self.assertRaises(fence.FenceUnavailable):
                 fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
 

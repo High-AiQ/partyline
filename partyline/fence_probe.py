@@ -42,6 +42,9 @@ def remedy(sys_platform: str | None = None) -> str:
     target = sys.platform if sys_platform is None else sys_platform
     if target == "darwin":
         return "sandbox-exec ships with macOS; no install is needed"
+    if target == "win32":
+        return ("Use Windows 10 build 17763 or newer and local drives with filesystem ACLs; "
+                "run uv sync --locked and check the reported path permissions")
     if not target.startswith("linux"):
         return f"Install a write-fence backend for {target}; see {DOCS}"
     distro, like = _distribution()
@@ -95,7 +98,7 @@ def probe(*, check_fence: bool = True,
     from . import fence, fence_darwin
 
     failures, remedies = [], []
-    note = _probe_note()
+    note = _probe_note() if sys.platform.startswith('linux') else ''
     if check_fence:
         selected = fence.backend()
         available, reason = fence.backend_available()
@@ -110,10 +113,13 @@ def probe(*, check_fence: bool = True,
                     elif selected == "sandbox-exec":
                         argv = [fence_darwin.SANDBOX_EXEC, "-p",
                                 "(version 1)(allow default)", "/usr/bin/true"]
+                    elif selected == "restricted-token":
+                        argv = [sys.executable, '-m', 'partyline.windows_probe']
                     else:
                         raise OSError(f"no write-fence backend for platform '{sys.platform}'")
+                    timeout = 120 if selected == 'restricted-token' else 10
                     completed = subprocess.run(argv, cwd=cwd, capture_output=True,
-                                               text=True, timeout=10)
+                                               text=True, timeout=timeout)
             except (OSError, subprocess.SubprocessError) as exc:
                 failures.append(f"write-fence probe could not run: {_one_line(str(exc))}")
                 remedies.append(remedy())

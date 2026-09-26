@@ -1,5 +1,33 @@
 # Lessons: the false-assumptions ledger
 
+## Port adapter state paths as well as terminal operations
+
+A native console does not have a Unix master descriptor. Antigravity's pending
+paste retry checked that descriptor and would skip its Enter on Windows; the
+regression now exercises a ConPTY-backed adapter. A restricted Windows token
+also cannot assume it can read a user-private hook file outside the CLI's state
+directory. Grant Grok's own hook file read access and test the complete scope.
+
+## A write-restricted Windows token does not cover parent deletion
+
+The initial candidate used `WRITE_RESTRICTED`, assuming every destructive file
+operation would run the restricted SID check. Native tests disproved this:
+`FILE_DELETE_CHILD` remained granted on a user-owned directory, and the child
+actually deleted a protected file despite a deny entry for its restricted SID.
+Use a fully restricted token and explicit read grants. Keep direct deletion and
+rename attempts in native acceptance tests; refusing `write_text` is insufficient.
+
+## Windows security bindings and elevated fixtures need native proof
+
+Win32 API names do not imply matching pywin32 methods or constants. Native CI
+found missing `AccessCheck`, `AddAce`, and file-access constants that mocks could
+not catch. Use the binding's documented methods, or explicit ctypes signatures,
+and run real access checks. PyACL's `AddAccessDeniedAceEx` already puts deny entries
+before allows. Native fixtures must also grant their ordinary user access: an
+elevated runner's administrator-owned temp files are not representative of a
+normal user's checkout. Test that restricted children can write their granted
+files as well as refusing protected writes, ACL changes, and parent-process access.
+
 ## Native ConPTY must replace redirected parent standard handles
 
 The first Windows console implementation assumed the pseudoconsole startup

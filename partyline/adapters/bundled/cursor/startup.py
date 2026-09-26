@@ -7,6 +7,7 @@ import os
 import re
 import shlex
 import signal
+import sys
 from pathlib import Path
 
 
@@ -58,6 +59,9 @@ def startup_diagnostics(argv: list[str], cwd: str, terminal: str) -> str:
 async def terminate_process(proc, grace: float = TERMINATE_GRACE) -> None:
     """End a failed startup without marking the attachment deliberately detached."""
     if proc is None or proc.poll() is not None:
+        return
+    if sys.platform == "win32":
+        await proc.close()
         return
     try:
         os.killpg(proc.pid, signal.SIGTERM)

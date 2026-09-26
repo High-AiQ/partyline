@@ -137,3 +137,12 @@ class NativeConsoleTest(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(OSError, 'assignment denied'):
                 await asyncio.wait_for(self.spawn(code), 10)
         self.assertFalse(marker.exists())
+
+    async def test_natural_exit_preserves_the_final_console_output(self):
+        terminal = await self.spawn("print('FINAL FRAME',flush=True)")
+        self.assertEqual(await asyncio.wait_for(terminal.wait(), 10), 0)
+        await asyncio.wait_for(terminal.close(preserve_output=True), 8)
+        output = bytearray()
+        while data := await terminal.read():
+            output.extend(data)
+        self.assertIn(b'FINAL FRAME', output)

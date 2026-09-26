@@ -20,6 +20,7 @@ import subprocess
 import tempfile
 
 from .hierarchy import lead_attachment, parent_id_of
+from .worktree_paths import branch_name, managed_root
 
 WORKTREES_DIR = ".partyline-worktrees"
 REVIEW_DIR = ".review"
@@ -48,9 +49,8 @@ def repo_and_worktree(cwd: str) -> tuple[str | None, str | None]:
     after an archive still names both sides; a line in a shared checkout is
     its own worktree.
     """
-    cwd = (cwd or "").rstrip("/")
-    if f"/{WORKTREES_DIR}/" in cwd:
-        root = cwd.split(f"/{WORKTREES_DIR}/", 1)[0]
+    cwd = os.path.normpath(cwd) if cwd else ''
+    if root := managed_root(cwd):
         if not os.path.isdir(root):
             return None, None
         return root, cwd if os.path.isdir(cwd) else None
@@ -231,10 +231,10 @@ def place_child(
         name = slug(child.get("name") or child_id)
         path = os.path.join(root, WORKTREES_DIR, name)
         n = 1
-        while os.path.exists(path) or _branch_taken(root, f"line/{os.path.basename(path)}"):
+        while os.path.exists(path) or _branch_taken(root, branch_name(path)):
             n += 1
             path = f"{os.path.join(root, WORKTREES_DIR, name)}-{n}"
-        branch = f"line/{os.path.basename(path)}"
+        branch = branch_name(path)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         _exclude(root)
         if base:
@@ -278,8 +278,8 @@ def outside_worktree_note(db, conv_id: str, cwd: str) -> str | None:
         inside = False
     if inside:
         return None
-    if f"/{WORKTREES_DIR}/" in line_dir:
-        branch = f"line/{os.path.basename(line_dir.rstrip('/'))}"
+    if managed_root(line_dir):
+        branch = branch_name(line_dir)
         return (f"⚠ attached outside this line's worktree: {cwd} — this line owns exactly one "
                 f"branch ({branch}) and the parent accepts only that; commits here land off it")
     return (f"⚠ attached outside this line's working directory: {cwd} — commits there do not "
@@ -297,4 +297,3 @@ def describe(placed: dict) -> str | None:
     if placed.get("base"):
         where += f"; cut from {placed['base']} after a fetch, not from the parent's checkout"
     return where
-

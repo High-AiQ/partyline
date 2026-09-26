@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import sys
 from pathlib import Path
 
 DEFAULT_HOOKS_DIR = "~/.partyline/hooks"
@@ -61,6 +62,9 @@ def filter_command(hook_url: str, session_id: str) -> str:
         "URL,data=json.dumps(ev).encode(),method='POST',"
         "headers={'Content-Type':'application/json'}),timeout=5)\n"
     )
+    if sys.platform == 'win32':
+        from partyline.windows_shell import python_command
+        return python_command(script)
     return "python3 -c " + shlex.quote(script)
 
 
