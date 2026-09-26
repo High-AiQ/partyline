@@ -1,0 +1,15 @@
+[adapter]
+name = "OpenCode v2"
+version = "1.0.0"
+description = "Interactive OpenCode v2 with a private server and structured session transcripts."
+entrypoint = "adapter.py"
+command = ["opencode2"]
+requires = ["opencode2"]
+env_unset = []
+output = "local session transcript"
+# Update the separate install prefix explicitly; a global upgrade can replace v1.
+
+[adapter.capabilities]
+resume = true
+turn_end = "receipt"
+transcript = true

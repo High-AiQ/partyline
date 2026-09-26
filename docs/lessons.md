@@ -1,5 +1,13 @@
 # Lessons: the false-assumptions ledger
 
+## A prefilled OpenCode prompt is not a submitted prompt
+
+OpenCode v2.0.18's `--prompt` populated the real TUI but did not create a session
+in a live attachment probe. Enter submitted the same text and produced a claimed
+user record and an assistant reply. The adapter now presses Enter once after
+the claim-bearing prompt appears. Its regression test proves that the visible
+prompt alone never opens readiness or speech; only the structured user record can.
+
 ## Port adapter state paths as well as terminal operations
 
 A native console does not have a Unix master descriptor. Antigravity's pending

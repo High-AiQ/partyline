@@ -23,6 +23,8 @@ class Scope:
 def state_paths(adapter, environment):
     home = Path.home()
     kind = adapter.kind
+    if kind == 'opencode-v2':
+        kind = 'opencode'
     paths = {
         'claude': [environment.get('CLAUDE_CONFIG_DIR', home / '.claude')],
         'codex': [environment.get('CODEX_HOME', home / '.codex')],
