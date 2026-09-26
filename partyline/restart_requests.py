@@ -1,4 +1,4 @@
-"""A captain asks for a service restart; a person approves it with one click.
+"""A captain asks for a restart; a person or delegated local operator approves.
 
 The agents can carry a change all the way — implement, review, merge, pull —
 and then hit a wall: a machine credential may not plan a restart of the
@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 
 from .auth_guard import request_principal
 from .contracts import RestartPlanRequest, RestartRequestEvent, ShutdownEvent
-from . import deployment
+from . import deployment, operator_restart
 from .machine_scope import deny_unless, is_human
 from .mention_relay import post_private
 from .reattach import RestartPlanError, create_restart_plan
@@ -164,7 +164,9 @@ def register_restart_request_routes(app: FastAPI, runtime, adapter_metadata, req
     async def approve(request: Request, request_id: str):
         current = _take(request, request_id)
         principal = request_principal(request)
-        who = principal.name
+        return await approve_current(current, principal.name, principal)
+
+    async def approve_current(current, who, principal):
         unit = service_unit()
         if unit is None and request_exit is None:
             raise HTTPException(409, "partyline is not running under systemd; restart it by hand")
@@ -201,3 +203,5 @@ def register_restart_request_routes(app: FastAPI, runtime, adapter_metadata, req
         await announce(current.conversation_id, text)
         await ring_requester(current, text, actor=principal)
         return PendingRestart(request=None)
+
+    operator_restart.register(app, runtime, approve_current)
