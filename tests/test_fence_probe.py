@@ -88,6 +88,16 @@ class ProbeTest(unittest.TestCase):
         self.assertEqual(run.call_args.args[0][2], "(version 1)(allow default)")
 
     @patch("partyline.fence.backend_available", return_value=(True, ""))
+    @patch("partyline.fence.backend", return_value="restricted-token")
+    @patch("partyline.fence_probe.subprocess.run")
+    def test_windows_probe_runs_real_console_and_permissions_check(self, run, _backend, _available):
+        run.return_value = subprocess.CompletedProcess([], 0, "", "")
+        self.assertEqual(fence_probe.probe(), (True, "", ""))
+        self.assertEqual(run.call_args.args[0][-2:], ['-m', 'partyline.windows_probe'])
+        self.assertEqual(run.call_args.kwargs['timeout'], 120)
+        self.assertIn('filesystem ACLs', fence_probe.remedy('win32'))
+
+    @patch("partyline.fence.backend_available", return_value=(True, ""))
     @patch("partyline.fence.backend", return_value="none")
     @patch("partyline.fence_probe.subprocess.run")
     def test_unknown_backend_fails_without_running_a_command(self, run, _backend, _available):

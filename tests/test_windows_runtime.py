@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+from pathlib import Path
 import subprocess
 import sys
 import tempfile
@@ -81,11 +82,13 @@ class WindowsRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_windows_start_uses_console_and_still_calls_fence(self):
         with patch('partyline.adapters.base.sys.platform', 'win32'), \
+             patch('partyline.adapters.windows_runtime.windows_scope.prepare') as scope, \
              patch('partyline.adapters.base.fence.launch_argv', return_value=['fixture']) as fence, \
              patch('partyline.adapters.windows_runtime.WindowsConsole.spawn',
                    new=AsyncMock(return_value=self.console)) as spawn:
             self.console.read = AsyncMock(return_value=b'')
             self.console.wait = AsyncMock(return_value=0)
+            scope.return_value.token = None
             await self.adapter.start()
             fence.assert_called_once_with(self.adapter)
             self.assertEqual(spawn.call_args.args[0], ['fixture'])
@@ -172,10 +175,28 @@ asyncio.run(main())
         self.assertEqual(result.returncode, 0, result.stderr)
 
     async def test_shared_adapter_starts_real_console_and_stops_descendants(self):
+        from partyline.windows_private import secure_directory
         with tempfile.TemporaryDirectory() as cwd:
-            att = {'id': 'fixture', 'name': 'fixture', 'cwd': cwd, 'command': [
+            root = Path(cwd).resolve()
+            secure_directory(root)
+            work, protected = root / 'work', root / 'protected'
+            work.mkdir()
+            protected.mkdir()
+            secret = protected / 'data'
+            secret.write_text('original')
+            script = (
+                'import pathlib,sys,time\n'
+                'assert sys.stdin.isatty()\n'
+                'pathlib.Path("allowed").write_text("ok")\n'
+                'try: pathlib.Path(sys.argv[1]).unlink()\n'
+                'except PermissionError: pass\n'
+                'else: raise AssertionError("protected deletion allowed")\n'
+                'print("TTY=True",flush=True);time.sleep(60)\n'
+            )
+            att = {'id': 'fixture', 'name': 'fixture', 'cwd': str(work),
+                   'protected_roots': [str(protected)], 'command': [
                 sys.executable, '-u', '-c',
-                "import sys,time;print('TTY='+str(sys.stdin.isatty()),flush=True);time.sleep(60)",
+                script, str(secret),
             ]}
             adapter = Adapter(att, AsyncMock(), AsyncMock())
             ready = asyncio.Event()
@@ -183,7 +204,7 @@ asyncio.run(main())
                 if b'TTY=True' in data:
                     ready.set()
             adapter.on_output = output
-            with patch('partyline.adapters.base.fence.launch_argv', return_value=att['command']), \
+            with patch('partyline.windows_scope.Path.home', return_value=root / 'home'), \
                  patch.dict(os.environ, PARTYLINE_PROCESS_MEMORY_LIMIT='128M'):
                 await adapter.start()
                 try:
@@ -193,3 +214,5 @@ asyncio.run(main())
                     await adapter.stop()
                     await asyncio.gather(*adapter._tasks, return_exceptions=True)
                 self.assertFalse(adapter.alive())
+                self.assertEqual(secret.read_text(), 'original')
+                self.assertEqual((work / 'allowed').read_text(), 'ok')
