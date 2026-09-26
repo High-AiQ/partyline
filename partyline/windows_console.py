@@ -15,6 +15,7 @@ import pyte
 
 from . import windows_console_api as win
 from .windows_memory import WindowsJob
+from .windows_server import breakaway_flags
 
 
 class WindowsConsole:
@@ -75,13 +76,16 @@ class WindowsConsole:
                 'UpdateProcThreadAttribute(ConPTY)')
             startup = win.StartupEx()
             startup.StartupInfo.cb = c.sizeof(startup)
+            # Null standard handles plus STARTF_USESTDHANDLES make Windows
+            # initialize them from ConPTY, even when our own stdout is redirected.
+            startup.StartupInfo.dwFlags = 0x100
             startup.lpAttributeList = c.cast(attributes, c.c_void_p)
             command = c.create_unicode_buffer(subprocess.list2cmdline([executable, *argv[1:]]))
             # CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT
             create = (terminal.api.CreateProcessW if token is None
                       else lambda *args: win.create_as_user(token, *args))
             win.check(create(
-                executable, command, None, None, False, 0x80404, block, cwd,
+                executable, command, None, None, False, 0x80404 | breakaway_flags(), block, cwd,
                 c.byref(startup), c.byref(terminal.process)), 'CreateProcessW')
             terminal.job.assign_process(terminal.process.hProcess)
             if terminal.api.ResumeThread(terminal.process.hThread) == 0xffffffff:

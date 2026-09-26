@@ -19,7 +19,7 @@ def _open(path, access):
     import win32file
     handle = win32file.CreateFile(
         str(path), access, win32con.FILE_SHARE_READ, None, win32con.OPEN_EXISTING,
-        win32con.FILE_FLAG_OPEN_REPARSE_POINT | win32con.FILE_FLAG_BACKUP_SEMANTICS, None,
+        0x00200000 | win32con.FILE_FLAG_BACKUP_SEMANTICS, None,
     )
     if win32file.GetFileInformationByHandle(handle)[0] & win32con.FILE_ATTRIBUTE_REPARSE_POINT:
         handle.Close()

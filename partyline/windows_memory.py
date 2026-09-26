@@ -86,7 +86,7 @@ class WindowsJob:
         # The server's descendants enter separate verified jobs at suspended spawn.
         # They must not share the server's smaller memory budget.
         self.flags = (JOB_OBJECT_LIMIT_JOB_MEMORY | (0x2000 if kill_on_close else 0)
-                      | (0x1000 if server else 0))
+                      | (0x800 if server else 0))
         try:
             info = ExtendedLimits()
             info.BasicLimitInformation.LimitFlags = self.flags
