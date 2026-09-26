@@ -28,7 +28,8 @@ class ProcessMemoryTest(unittest.TestCase):
             "/usr/bin/systemd-run", "--user", "--scope", "-q", "--collect",
             "-p", "MemoryMax=4G", "-p", "MemorySwapMax=0",
         ])
-        self.assertEqual(argv[9:13], ["--", sys.executable, "-m", "partyline.process_memory"])
+        self.assertEqual(argv[9:14], ["--expand-environment=no", "--", sys.executable,
+                                    "-m", "partyline.process_memory"])
         self.assertEqual(argv[-3:], ["--", "/usr/bin/bwrap", "--die-with-parent"])
         self.assertIn("--die-with-parent", argv)
 
@@ -48,6 +49,7 @@ class ProcessMemoryTest(unittest.TestCase):
             self.assertEqual(process_memory.probe_scope(), (True, ""))
         run.assert_called_once()
         self.assertIn("MemoryMax=4G", run.call_args.args[0])
+        self.assertIn("--expand-environment=no", run.call_args.args[0])
         self.assertIn("memory.max", run.call_args.args[0][-3])
         self.assertIn('[ "$value" -le "$1" ]', run.call_args.args[0][-3])
 
@@ -122,3 +124,7 @@ class CappedTestLimitTest(unittest.TestCase):
             self.skipTest("kernel user namespaces are unavailable here")
         self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
         self.assertTrue(process_memory.memory_max_enforced(result.stdout.decode().strip(), limit))
+        # Exercise the real boot probe too: mocking subprocess.run hides systemd's
+        # expansion of shell variables before /bin/sh receives the script.
+        with patch.object(process_memory, "process_memory_limit", return_value=limit):
+            self.assertEqual(process_memory.probe_scope(), (True, ""))

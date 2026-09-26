@@ -102,6 +102,7 @@ heartbeat = true   # off by default since 1.23.0
 | `PARTYLINE_INSTANCE_NAME` | unset | optional label shown above every line; CLI/config precedence matches bind settings |
 | `PARTYLINE_DB` | `~/.partyline.db` | conversations, messages, attachments, presets. One file per running server — do not share it across processes |
 | `PARTYLINE_PROCESS_MEMORY_LIMIT` | `4G` | `MemoryMax` for each attached process's transient systemd scope; the scope verifies the kernel limit before starting the CLI |
+| `PARTYLINE_SERVER_MEMORY_LIMIT` | `2G`, or 5/8 of RAM if smaller | Cap for the automatically created Linux foreground server scope; must be positive and below host RAM. Installed services retain their unit's `MemoryMax` |
 | `PARTYLINE_SYSTEMD_UNIT` | auto-detected | Optional user service unit override for `partyline doctor` when discovery is ambiguous or the service uses a custom name |
 | `PARTYLINE_MEDIA_DIR` | `<PARTYLINE_DB stem>/media` | uploaded files, one subdirectory per line |
 | `PARTYLINE_ADAPTERS_DIR` | `~/.partyline/adapters` | where imported adapter repos are checked out |

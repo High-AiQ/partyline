@@ -29,6 +29,11 @@ cd partyline
 uv run --locked partyline   # http://127.0.0.1:8642
 ```
 
+On Linux, this command automatically creates a temporary memory-limited scope for the
+foreground server; no service file is needed. The default server cap is 2 GiB (lower on
+small machines), and each attached CLI gets its own 4 GiB cap. See
+[memory limits](docs/write-fence.md) for platform requirements and configuration.
+
 Sign in → open a line → attach a process with a handle and adapter → talk with `@mentions` (on a line with a single live process, a plain message reaches it without one).
 
 ## Shared files
