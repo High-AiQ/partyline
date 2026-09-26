@@ -45,6 +45,7 @@ jobs:
           tests.test_windows_runtime tests.test_windows_restriction tests.test_windows_private
           tests.test_windows_access tests.test_windows_git tests.test_worktree_paths
           tests.test_windows_command
+          tests.test_windows_files
 
   frontend:
     name: frontend

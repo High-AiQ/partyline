@@ -29,6 +29,7 @@ import json
 import os
 
 from partyline.adapters.base import Adapter as BaseAdapter
+from partyline.adapters.session_seed import seed
 from partyline.adapters.bundled.codex.thread_history import tail_thread_history
 from partyline.adapters.compaction import is_compaction_record
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
@@ -57,12 +58,7 @@ class PartylineAdapter(BaseAdapter):
         os.makedirs(os.path.join(home, "sessions"), exist_ok=True)
         for name in SHARED:
             link = os.path.join(home, name)
-            if os.path.lexists(link):
-                continue
-            try:
-                os.symlink(os.path.join(SHARED_HOME, name), link)
-            except OSError:
-                pass  # an entry the user does not have is not ours to invent
+            seed(os.path.join(SHARED_HOME, name), link)
         if prior := self.att.get("cli_session"):
             self._link_prior_session(home, prior)
         return home
@@ -82,10 +78,7 @@ class PartylineAdapter(BaseAdapter):
             if os.path.lexists(target):
                 continue
             os.makedirs(os.path.dirname(target), exist_ok=True)
-            try:
-                os.symlink(source, target)
-            except OSError:
-                pass
+            seed(source, target)
 
     def spawn_env(self) -> dict[str, str]:
         return {"CODEX_HOME": getattr(self, "_home", "") or self.codex_home()}

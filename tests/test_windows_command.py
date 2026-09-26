@@ -16,7 +16,7 @@ class WindowsCommandTest(unittest.TestCase):
 
     def test_npm_shim_uses_node_and_never_shell_interpolation(self):
         with tempfile.TemporaryDirectory(prefix='npm shim ') as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             script = root / 'node_modules' / 'fixture' / 'cli.js'
             script.parent.mkdir(parents=True)
             script.write_text('console.log(process.argv)')
