@@ -12,12 +12,10 @@ from partyline.db import Db
 class DbTest(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
         self.db_path = f"{self.directory.name}/partyline.db"
         self.db = Db(self.db_path)
-
-    def tearDown(self):
-        self.db.close()
-        self.directory.cleanup()
+        self.addCleanup(self.db.close)
 
     def test_conversation_lifecycle_and_message_ordering(self):
         self.db.create_conversation("first", "First")
@@ -451,6 +449,7 @@ class DbTest(unittest.TestCase):
         self.db.save_restart_plan("line", ["agent"], "continue")
         self.db.close()
         self.db = Db(f"{self.directory.name}/partyline.db")
+        self.addCleanup(self.db.close)
 
         plan = self.db.get_restart_plan()
 

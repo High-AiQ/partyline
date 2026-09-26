@@ -1,8 +1,6 @@
 """SQLite persistence for partyline. Small, synchronous, lock-guarded."""
 
-import asyncio
 from contextlib import asynccontextmanager, contextmanager
-import fcntl
 import json
 import os
 import secrets
@@ -17,6 +15,7 @@ from .db_sidecars import ensure as ensure_db_sidecars
 from .query_result import materialize
 from .conversation_queries import ACTIVE_CONVERSATIONS, ARCHIVED_CONVERSATIONS, CONVERSATION_BY_ID
 from .message_queries import MESSAGE_SELECT, as_message, select_message_page
+from . import runtime_lock
 
 
 RestartPlanMode = Literal["offer", "automatic"]
@@ -99,35 +98,17 @@ class Db:
             self.conn.commit()
             return result
 
-    def _open_runtime_lock(self) -> int:
-        return os.open(self.runtime_lock_path, os.O_CREAT | os.O_RDWR, 0o600)
-
     @contextmanager
     def _runtime_serialized(self):
         """Serialize ownership transitions with externally visible effects."""
-        descriptor = self._open_runtime_lock()
-        try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX)
+        with runtime_lock.exclusive(self.runtime_lock_path):
             yield
-        finally:
-            fcntl.flock(descriptor, fcntl.LOCK_UN)
-            os.close(descriptor)
 
     @asynccontextmanager
     async def _runtime_serialized_async(self):
         """Cancellation-safe async acquisition of the process-shared lock."""
-        descriptor = self._open_runtime_lock()
-        try:
-            while True:
-                try:
-                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break
-                except BlockingIOError:
-                    await asyncio.sleep(0.01)
+        async with runtime_lock.exclusive_async(self.runtime_lock_path):
             yield
-        finally:
-            fcntl.flock(descriptor, fcntl.LOCK_UN)
-            os.close(descriptor)
 
     @asynccontextmanager
     async def reserve_attachment_delivery(
