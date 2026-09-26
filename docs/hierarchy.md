@@ -298,6 +298,13 @@ relay it was a second wake for the same news.
 
 ## Recovery
 
+Unexpected process failures now have a separate recovery path: a durable incident
+on the failed process and a private wake to the nearest live captain. A dead
+captain is skipped in favor of its parent. The notice includes an inspection API
+and directs the captain to fix the workload or approve a finite memory override
+before resuming. Deliberate stops and normal exits do not escalate. See
+[memory failures and recovery](write-fence.md#memory-failures-and-recovery).
+
 Parent/child relationships do not replace the restart plan. A restart affects
 all attached processes, including independent lines. Use the fleet planning and
 recovery procedure in [restart.md](restart.md), and verify each line's recovery

@@ -1,5 +1,20 @@
 # Lessons: the false-assumptions ledger
 
+## A scope launcher exit code does not identify an OOM
+
+An OpenCode worker twice appeared to exit with SIGTERM while running tests. Its
+systemd scope actually recorded `oom-kill` at the 4 GiB limit. The failing test
+compared large Three.js objects; formatting the assertion failure exhausted memory.
+A boolean identity assertion in a temporary control reported the failure at about
+209 MiB instead. Raising the cap would have postponed the same failure.
+
+Retain each attachment's failed scope until the host collects its result, then
+release it. A regression drives a real 64 MiB scope to OOM and checks the retained
+evidence; fixtures prove that SIGTERM and SIGKILL alone do not establish OOM.
+The host persists an incident and wakes the nearest live captain once. Planned
+stops stay quiet, and limit changes require a stopped process and an authorized
+captain or person.
+
 ## A prefilled OpenCode prompt is not a submitted prompt
 
 OpenCode v2.0.18's `--prompt` populated the real TUI but did not create a session
