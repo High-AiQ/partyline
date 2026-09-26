@@ -43,6 +43,18 @@ class WindowsRuntimeTest(unittest.IsolatedAsyncioTestCase):
         results = await asyncio.gather(first, second, return_exceptions=True)
         self.assertTrue(all(isinstance(r, OSError) for r in results))
 
+    async def test_natural_close_wakes_idle_writer_and_cancelled_input_is_skipped(self):
+        cancelled = asyncio.create_task(self.runtime.write(b'cancelled'))
+        await asyncio.sleep(0)
+        cancelled.cancel()
+        await asyncio.gather(cancelled, return_exceptions=True)
+        pump = asyncio.create_task(self.runtime.write_loop())
+        await self.runtime.write(b'live')
+        await self.runtime.close()
+        await asyncio.wait_for(pump, 1)
+        self.console.write.assert_awaited_once_with(b'live')
+        self.console.close.assert_awaited_once()
+
     async def test_pending_input_is_bounded_and_closed_terminal_refuses_input(self):
         with self.assertRaises(OSError):
             self.runtime.write_nowait(b'x' * (1024 * 1024 + 1))

@@ -15,11 +15,12 @@ from partyline.windows_console import WindowsConsole
 class RestrictedTokenTest(unittest.IsolatedAsyncioTestCase):
     async def test_token_writes_only_granted_tree_and_cannot_rewrite_protected_acl(self):
         import win32security as security
-        from partyline.windows_private import _user
+        from partyline.windows_private import _user, secure_directory
         with tempfile.TemporaryDirectory(prefix='partyline restriction ') as root:
             root = Path(root)
             allowed, protected = root / 'allowed', root / 'protected'
             allowed.mkdir()
+            secure_directory(allowed)
             protected.write_text('protected', encoding='utf-8')
             # CI runs elevated; explicitly exercise ordinary user ownership too.
             security.SetNamedSecurityInfo(str(protected), security.SE_FILE_OBJECT,

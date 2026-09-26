@@ -16,8 +16,11 @@ class WindowsGitPathsTest(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory(prefix='partyline git ')
         self.addCleanup(directory.cleanup)
-        self.root = Path(directory.name, 'repo')
+        self.root = Path(directory.name, 'repo').resolve()
         self.root.mkdir()
+        if sys.platform == 'win32':
+            from partyline.windows_private import secure_directory
+            secure_directory(self.root)
         self.git('init', '-q', '-b', 'main')
         (self.root / 'protected').write_text('root')
         self.git('add', '.')

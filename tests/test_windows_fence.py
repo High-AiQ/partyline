@@ -28,9 +28,10 @@ class WindowsFencePolicyTest(unittest.TestCase):
             setattr(self, name, change.start())
             self.addCleanup(change.stop)
 
-    def test_grants_do_not_touch_protected_paths_and_cleanup_includes_new_children(self):
+    def test_protected_paths_get_denies_and_cleanup_includes_new_children(self):
         scope = fence.WindowsFence([self.allowed], [self.protected])
-        self.assertTrue(all(p == self.allowed for p, _ in self.calls))
+        self.assertTrue(all(p == self.allowed or kw.get('deny') for p, kw in self.calls))
+        self.assertIn((self.protected / 'data', {'deny': True, 'permission': 0xd0156}), self.calls)
         child = self.allowed / 'new'
         child.write_text('new')
         scope.close()

@@ -50,7 +50,12 @@ class WindowsRuntime:
     async def write_loop(self):
         try:
             while True:
-                data, receipt = await self.pending.get()
+                item = await self.pending.get()
+                if item is None:
+                    return
+                data, receipt = item
+                if receipt is not None and receipt.cancelled():
+                    continue
                 try:
                     await self.console.write(data)
                 except BaseException:
@@ -88,9 +93,12 @@ class WindowsRuntime:
             await adapter.post('system', 'system', f"{adapter.att['name']} exited (code {code})")
 
     async def close(self):
+        if self.closed:
+            return
         self.closed = True
         while not self.pending.empty():
             _, receipt = self.pending.get_nowait()
             if receipt is not None and not receipt.done():
                 receipt.set_exception(OSError('terminal closed before input was written'))
+        self.pending.put_nowait(None)
         await self.console.close()
