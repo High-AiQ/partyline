@@ -39,8 +39,8 @@ class WindowsFence:
         self.roots = list(dict.fromkeys(Path(p).resolve() for p in writable))
         self.protected = list(dict.fromkeys(Path(p).resolve() for p in protected))
         for root in self.roots:
-            if not root.is_dir():
-                raise OSError(f'Windows write grant must be an existing directory: {root}')
+            if not root.exists():
+                raise OSError(f'Windows write grant must be an existing file or directory: {root}')
             if any(contains(root, protected) for protected in self.protected):
                 raise OSError(f'Windows write grant contains a protected path: {root}')
         self.token, self.sid = create_token()
@@ -61,11 +61,13 @@ class WindowsFence:
 
     def protect(self):
         permissions = {}
+        inherited = set()
         for root in self.protected:
             if root.exists():
                 for path in paths(root):
                     if not self.writable(path):
                         permissions[path] = 0xd0156 | (0x40 if path.is_dir() else 0)
+                        inherited.add(path)
             for parent in root.parents:
                 if parent.exists():
                     # Do not change system ancestors when the token already
@@ -75,7 +77,7 @@ class WindowsFence:
                         continue
                     permissions[parent] = permissions.get(parent, 0) | 0xd0040
         for path, permission in permissions.items():
-            edit_grant(path, self.sid, deny=True, permission=permission)
+            edit_grant(path, self.sid, deny=True, permission=permission, inherit=path in inherited)
             self.changed.append(path)
 
     def verify(self):
@@ -104,7 +106,7 @@ class WindowsFence:
         self.token = None
         # Remove inherited entries on newly created files as well as originals.
         candidates = set(self.changed)
-        for root in self.roots:
+        for root in [*self.roots, *self.protected]:
             if root.exists():
                 candidates.update(paths(root))
         errors = []
