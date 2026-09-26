@@ -26,9 +26,9 @@ class StartupPromptGuard:
         }
 
     def startup_prompt(self) -> str | None:
-        screen = self.screen_text().casefold()
+        screen = " ".join(self.screen_text().casefold().split())
         for name, phrases in self._startup_prompts().items():
-            if any(phrase.casefold() in screen for phrase in phrases):
+            if any(" ".join(phrase.casefold().split()) in screen for phrase in phrases):
                 return name
         return None
 
