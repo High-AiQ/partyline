@@ -6,6 +6,7 @@ from pathlib import Path
 import shlex
 import stat
 import sys
+import subprocess
 import tempfile
 
 from .adapters.briefing import child_env
@@ -22,9 +23,12 @@ def provision_connection(db_path: str, att: dict) -> None:
     directory = connection_directory(db_path)
     directory.mkdir(mode=0o700, exist_ok=True)
     info = directory.lstat()
-    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+    if os.name == 'nt':
+        from .windows_private import secure_directory
+        secure_directory(directory)
+    elif not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
         raise ValueError("unsafe agent connection directory")
-    if stat.S_IMODE(info.st_mode) != 0o700:
+    if os.name != 'nt' and stat.S_IMODE(info.st_mode) != 0o700:
         raise ValueError("agent connection directory must have mode 0700")
     coordinates = child_env({}, att)
     payload = {"api": coordinates["PARTYLINE_API"], "token": att["api_token"],
@@ -39,12 +43,15 @@ def provision_connection(db_path: str, att: dict) -> None:
     try:
         with os.fdopen(fd, "w") as stream:
             json.dump(payload, stream)
+        if os.name == 'nt':
+            secure_directory(scratch, directory=False)
         os.replace(scratch, target)
     finally:
         if os.path.exists(scratch):
             os.unlink(scratch)
     client = Path(__file__).with_name("agent_client.py")
-    att["agent_command"] = shlex.join([sys.executable, str(client), "--connection", str(target)])
+    quote = subprocess.list2cmdline if os.name == 'nt' else shlex.join
+    att["agent_command"] = quote([sys.executable, str(client), "--connection", str(target)])
 
 
 def remove_connection(db_path: str, att_id: str) -> None:

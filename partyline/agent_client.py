@@ -27,6 +27,9 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 def load_connection(path: str) -> Connection:
+    if os.name == 'nt':
+        from partyline.windows_private import load_connection as load_windows
+        return _validate_connection(load_windows(path))
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     with os.fdopen(fd) as stream:
         info = os.fstat(stream.fileno())
@@ -35,6 +38,10 @@ def load_connection(path: str) -> Connection:
         if stat.S_IMODE(info.st_mode) != 0o600:
             raise ValueError("connection file must have mode 0600")
         data = json.load(stream)
+    return _validate_connection(data)
+
+
+def _validate_connection(data) -> Connection:
     if not isinstance(data, dict):
         raise ValueError("invalid connection file")
     for field in ("api", "token", "conversation_id", "attachment_id", "handle"):

@@ -13,8 +13,10 @@ import asyncio
 import json
 import logging
 import os
-import tty
 from pathlib import Path
+
+if os.name != "nt":
+    import tty
 
 from partyline.adapters import Adapter
 from partyline.adapters.receipts import BEGAN, ENDED, receipt

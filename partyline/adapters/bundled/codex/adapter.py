@@ -205,7 +205,7 @@ class PartylineAdapter(BaseAdapter):
             if self.resume:
                 continue
             if waited in (20.0, 40.0):
-                os.write(self.master, b"\r")
+                self.write_terminal(b"\r")
                 await asyncio.sleep(1.0)
                 await self.send_keys(self.briefing())
             elif waited > 90.0:

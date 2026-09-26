@@ -46,6 +46,9 @@ def main(argv: Sequence[str] | None = None):
 
     from .server import main as serve
 
+    if sys.platform == 'win32' and not any(arg in ('-h', '--help') for arg in arguments):
+        from .windows_server import serve as windows_serve
+        return windows_serve(arguments, serve)
     return serve(arguments)
 
 

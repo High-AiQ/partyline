@@ -8,16 +8,18 @@ install a service or write a memory-limit configuration file. Attached CLIs rema
 real interactive terminal processes; their speech still comes from structured
 transcripts. Memory protection must not silently disable the write fence.
 
-This is a platform plan, not a claim of native Windows support today. The current
-terminal runtime imports `fcntl` and `termios`, uses `os.openpty` and Unix process
-groups, and ships no Windows write-fence backend. Database ownership locks now use
+This is a platform plan, not a claim of native Windows support today. The shared
+adapter lifecycle now selects ConPTY on Windows and Unix PTYs elsewhere. Windows
+startup uses a verified server Job Object; attached processes use independent jobs.
+The Windows filesystem backend remains disabled pending native security tests and
+integration with repository and Git grants. Database ownership locks now use
 Windows byte-range locks or Unix `flock`. The native Windows CI foundation runs
 those database tests under a verified Job Object memory cap; this does not yet
 make the interactive application runnable on Windows. The standalone ConPTY
 primitive launches a native executable suspended, assigns its verified memory
 job, then resumes it. It supports terminal input, output, resize, exit status,
-and tree cleanup; native CI exercises these operations. It is not yet wired into
-attachments, which still require a Windows write-fence backend. Batch scripts
+and tree cleanup; native CI exercises these operations. Attachments still require
+an enabled Windows write-fence backend. Batch scripts
 must be invoked through an explicit interpreter; the primitive does not insert
 a command shell around arguments.
 
@@ -72,6 +74,13 @@ polling RSS is not an equivalent hard kernel cap.
    Windows mechanism that can express the existing grants without changing users'
    repository ACLs globally. If that requires extra installation or privileges,
    document the product tradeoff before selecting it. Do not ship an unfenced default.
+   The candidate restricted-token backend gives each attachment a random synthetic
+   SID and grants that SID writes only in approved directories. It verifies each
+   protected file and ancestor against the restricted token before launch. Those
+   permission entries do not grant access to ordinary users and are removed on
+   cleanup; abrupt termination can leave inert entries. Native validation must
+   include ACL rewriting, deletion through parents, junctions, and parent-process
+   access before this candidate may become the default.
 5. Run native Windows and macOS CI and interactive smoke checks before expanding the
    README's supported-platform claim. Mocked `sys.platform` tests cannot establish
    native support.
