@@ -72,12 +72,12 @@ def _pinned(path):
             handle.Close()
 
 
-def edit_grant(path, sid, *, remove=False, permission=0x1301bf, deny=False):
+def edit_grant(path, sid, *, remove=False, permission=0x1301bf, deny=False, inherit=True):
     with _pinned(path):
-        _edit_grant(path, sid, remove=remove, permission=permission, deny=deny)
+        _edit_grant(path, sid, remove=remove, permission=permission, deny=deny, inherit=inherit)
 
 
-def _edit_grant(path, sid, *, remove, permission, deny):
+def _edit_grant(path, sid, *, remove, permission, deny, inherit):
     """Change only our synthetic SID's ACE, on a pinned non-reparse object.
 
     SetKernelObjectSecurity avoids automatic propagation to existing children;
@@ -108,12 +108,12 @@ def _edit_grant(path, sid, *, remove, permission, deny):
             if ace[-1] == sid:
                 acl.DeleteAce(index)
         if not remove:
+            inheritance = 3 if inherit and attributes & win32con.FILE_ATTRIBUTE_DIRECTORY else 0
             if deny:
                 # PyACL canonicalizes the ACL after adding an explicit deny,
                 # placing it before allows while preserving other ACE types.
-                acl.AddAccessDeniedAceEx(security.ACL_REVISION, 0, permission, sid)
+                acl.AddAccessDeniedAceEx(security.ACL_REVISION, inheritance, permission, sid)
             else:
-                inheritance = 3 if attributes & win32con.FILE_ATTRIBUTE_DIRECTORY else 0
                 acl.AddAccessAllowedAceEx(security.ACL_REVISION, inheritance, permission, sid)
         descriptor.SetSecurityDescriptorDacl(True, acl, False)
         security.SetKernelObjectSecurity(handle, security.DACL_SECURITY_INFORMATION, descriptor)

@@ -31,7 +31,8 @@ class WindowsFencePolicyTest(unittest.TestCase):
     def test_protected_paths_get_denies_and_cleanup_includes_new_children(self):
         scope = fence.WindowsFence([self.allowed], [self.protected])
         self.assertTrue(all(p == self.allowed or kw.get('deny') for p, kw in self.calls))
-        self.assertIn((self.protected / 'data', {'deny': True, 'permission': 0xd0156}), self.calls)
+        self.assertIn((self.protected / 'data',
+                       {'deny': True, 'permission': 0xd0156, 'inherit': True}), self.calls)
         child = self.allowed / 'new'
         child.write_text('new')
         scope.close()
@@ -58,7 +59,7 @@ class WindowsFencePolicyTest(unittest.TestCase):
         with self.assertRaisesRegex(OSError, 'contains a protected'):
             fence.WindowsFence([self.root], [self.protected])
         self.create_token.assert_not_called()
-        with self.assertRaisesRegex(OSError, 'existing directory'):
+        with self.assertRaisesRegex(OSError, 'existing file or directory'):
             fence.WindowsFence([self.root / 'missing'], [self.protected])
 
     def test_carveout_inside_a_protected_tree_can_be_writable(self):

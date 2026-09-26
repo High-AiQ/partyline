@@ -13,6 +13,45 @@ from partyline.windows_console import WindowsConsole
 
 @unittest.skipUnless(sys.platform == 'win32', 'native restricted-token access checks')
 class RestrictedTokenTest(unittest.IsolatedAsyncioTestCase):
+    async def test_direct_delete_is_refused_even_with_user_owned_parent(self):
+        from partyline.windows_private import secure_directory
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            secure_directory(root)
+            allowed = root / 'allowed'
+            allowed.mkdir()
+            protected = root / 'protected'
+            protected.write_text('original')
+            token, sid = create_token()
+            edit_grant(protected, sid, deny=True, permission=0xd0156)
+            edit_grant(root, sid, deny=True, permission=0xd0156)
+            edit_grant(allowed, sid)
+            code = (
+                'import pathlib,sys\n'
+                'p=pathlib.Path(sys.argv[1])\n'
+                'try:\n p.unlink()\n'
+                'except PermissionError: pass\n'
+                'else: raise AssertionError("delete through parent escaped")\n'
+                'try:\n p.rename(p.with_name("renamed"))\n'
+                'except PermissionError: pass\n'
+                'else: raise AssertionError("rename through parent escaped")\n'
+            )
+            try:
+                console = await WindowsConsole.spawn(
+                    [sys.executable, '-u', '-c', code, str(protected)], str(allowed),
+                    dict(os.environ), 128 * 1024**2, token=token,
+                )
+                try:
+                    result = await asyncio.wait_for(console.wait(), 15)
+                finally:
+                    await console.close()
+                self.assertTrue(protected.exists(), 'restricted child deleted or renamed protected file')
+                self.assertEqual(result, 0)
+            finally:
+                token.Close()
+                for path in [*root.rglob('*'), root]:
+                    edit_grant(path, sid, remove=True)
+
     async def test_token_writes_only_granted_tree_and_cannot_rewrite_protected_acl(self):
         import win32security as security
         from partyline.windows_private import _user, secure_directory
