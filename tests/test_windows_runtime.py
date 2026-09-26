@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -137,6 +138,39 @@ class WindowsStartupTest(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform == 'win32', 'native adapter fixture')
 class NativeWindowsAdapterTest(unittest.IsolatedAsyncioTestCase):
+    async def test_attachment_leaves_server_budget_but_helpers_stay_capped(self):
+        script = '''import asyncio,ctypes as c,os,sys
+from ctypes import wintypes as w
+from partyline.windows_memory import WindowsJob
+from partyline.windows_console import WindowsConsole
+from partyline import windows_server
+async def main():
+    job=WindowsJob(128*1024**2,server=True)
+    job.assign_current_process()
+    windows_server._server_job=job
+    child=None
+    try:
+        child=await WindowsConsole.spawn([sys.executable,'-c',
+            'x=bytearray(160*1024**2)'],os.getcwd(),dict(os.environ),256*1024**2)
+        inside=w.BOOL()
+        assert job.api.IsProcessInJob(child.process.hProcess,job.handle,c.byref(inside))
+        assert not inside.value, 'attachment inherited the smaller server budget'
+        assert await asyncio.wait_for(child.wait(),20)==0
+        import subprocess
+        helper=subprocess.run([sys.executable,'-c',
+            'try: x=bytearray(160*1024**2)\\nexcept MemoryError: raise SystemExit(0)\\n'
+            'raise SystemExit(9)'],capture_output=True)
+        assert helper.returncode==0,helper.stderr
+    finally:
+        if child: await child.close()
+        windows_server._server_job=None
+        job.close()
+asyncio.run(main())
+'''
+        result = await asyncio.to_thread(subprocess.run, [sys.executable, '-c', script],
+                                         capture_output=True, text=True, timeout=45)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     async def test_shared_adapter_starts_real_console_and_stops_descendants(self):
         with tempfile.TemporaryDirectory() as cwd:
             att = {'id': 'fixture', 'name': 'fixture', 'cwd': cwd, 'command': [

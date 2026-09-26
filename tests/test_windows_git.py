@@ -49,17 +49,29 @@ class WindowsGitPathsTest(unittest.TestCase):
             with self.assertRaisesRegex(OSError, 'branch assigned'):
                 write_paths(self.att)
 
+    def test_forged_common_directory_cannot_grant_another_repository(self):
+        from partyline import git_fence
+        metadata = Path(git_fence._worktree_gitdir(str(self.work)))
+        (metadata / 'commondir').write_text(str(self.root / 'other.git'))
+        with patch('partyline.worktree_paths.sys.platform', 'win32'):
+            with self.assertRaisesRegex(OSError, 'metadata does not belong'):
+                write_paths(self.att)
+        (metadata / 'commondir').write_text('../..')
+
 
 @unittest.skipUnless(sys.platform == 'win32', 'native Git filesystem fence')
 class NativeWindowsGitTest(WindowsGitPathsTest, unittest.IsolatedAsyncioTestCase):
     async def test_child_commits_without_writing_parent_files_or_refs(self):
         before = self.git('rev-parse', 'main')
+        config = self.root / 'global-config'
+        config.write_text('[user]\nname = fixture\nemail = fixture@example.test\n')
+        environment = dict(os.environ, GIT_CONFIG_GLOBAL=str(config), GIT_CONFIG_NOSYSTEM='1')
         scope = WindowsFence(write_paths(self.att), [self.root])
         code = (
             'import pathlib,subprocess,sys\n'
             'root=pathlib.Path(sys.argv[1]); pathlib.Path("child").write_text("child")\n'
             'def git(*args): return subprocess.run(["git",*args],capture_output=True,text=True)\n'
-            'assert git("add","child").returncode==0\n'
+            'r=git("add","child"); assert r.returncode==0,r.stderr\n'
             'r=git("-c","user.name=fixture","-c","user.email=fixture@example.test",'
             '"-c","gc.auto=0","commit","-qm","child"); assert r.returncode==0,r.stderr\n'
             'assert git("update-ref","refs/heads/main","HEAD").returncode!=0\n'
@@ -70,12 +82,19 @@ class NativeWindowsGitTest(WindowsGitPathsTest, unittest.IsolatedAsyncioTestCase
         try:
             console = await WindowsConsole.spawn(
                 [sys.executable, '-u', '-c', code, str(self.root)], str(self.work),
-                dict(os.environ), 256 * 1024**2, token=scope.token,
+                environment, 256 * 1024**2, token=scope.token,
             )
             try:
-                self.assertEqual(await asyncio.wait_for(console.wait(), 30), 0)
+                output = bytearray()
+                async def drain():
+                    while data := await console.read():
+                        output.extend(data)
+                reader = asyncio.create_task(drain())
+                code = await asyncio.wait_for(console.wait(), 30)
             finally:
                 await console.close()
+            await reader
+            self.assertEqual(code, 0, output.decode(errors='replace'))
             self.assertEqual(self.git('rev-parse', 'main'), before)
             self.assertNotEqual(self.git('rev-parse', 'line/art/work'), before)
             self.assertEqual((self.root / 'protected').read_text(), 'root')

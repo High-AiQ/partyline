@@ -40,6 +40,11 @@ def state_paths(adapter, environment):
 
 def read_paths(adapter, environment):
     roots = [Path(sys.prefix), Path(sys.base_prefix), Path(__file__).parent]
+    home = Path.home()
+    personal = [home / '.gitconfig', home / '.config/git', home / '.git-credentials', home / '.ssh']
+    personal += [Path(environment[key]).expanduser() for key in ('GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM')
+                 if environment.get(key)]
+    roots.extend(path for path in personal if path.exists())
     command = getattr(adapter, 'spawn_argv', None)
     if command:
         for argument in resolve(command, environment)[:2]:

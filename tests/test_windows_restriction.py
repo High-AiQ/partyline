@@ -13,6 +13,40 @@ from partyline.windows_console import WindowsConsole
 
 @unittest.skipUnless(sys.platform == 'win32', 'native restricted-token access checks')
 class RestrictedTokenTest(unittest.IsolatedAsyncioTestCase):
+    async def test_console_launch_does_not_need_enabled_admin_privileges(self):
+        from partyline.windows_private import secure_directory
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            secure_directory(root)
+            token, sid = create_token()
+            edit_grant(root, sid)
+            script = (
+                'import asyncio,os,sys,win32api,win32con,win32security as s\n'
+                'from partyline.windows_console import WindowsConsole\n'
+                'async def run():\n'
+                ' t=s.OpenProcessToken(win32api.GetCurrentProcess(),win32con.TOKEN_ALL_ACCESS)\n'
+                ' try:\n'
+                '  p=await WindowsConsole.spawn([sys.executable,"-c","pass"],os.getcwd(),'
+                'dict(os.environ),64*1024**2,token=t)\n'
+                '  try: assert await asyncio.wait_for(p.wait(),15)==0\n'
+                '  finally: await p.close()\n'
+                ' finally: t.Close()\n'
+                'asyncio.run(run())\n'
+            )
+            try:
+                console = await WindowsConsole.spawn(
+                    [sys.executable, '-u', '-c', script], str(root), dict(os.environ),
+                    256 * 1024**2, token=token,
+                )
+                try:
+                    self.assertEqual(await asyncio.wait_for(console.wait(), 30), 0)
+                finally:
+                    await console.close()
+            finally:
+                token.Close()
+                for path in [*root.rglob('*'), root]:
+                    edit_grant(path, sid, remove=True)
+
     async def test_direct_delete_is_refused_even_with_user_owned_parent(self):
         from partyline.windows_private import secure_directory
         with tempfile.TemporaryDirectory() as directory:
