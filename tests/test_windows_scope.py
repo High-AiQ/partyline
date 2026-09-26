@@ -12,6 +12,12 @@ from partyline import windows_scope
 
 
 class WindowsScopeTest(unittest.TestCase):
+    def test_opencode_v2_has_vendor_state_permissions(self):
+        adapter = SimpleNamespace(kind='opencode-v2', att={'id': 'fixture'})
+        paths = windows_scope.state_paths(adapter, {})
+        self.assertIn(Path.home() / '.local/share/opencode', paths)
+        self.assertIn(Path.home() / '.config/opencode', paths)
+
     def test_private_temporary_directory_and_serialized_cleanup(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()

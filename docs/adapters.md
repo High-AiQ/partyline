@@ -454,3 +454,41 @@ in full; only the part the vendor removed is excused.
 | --- | --- |
 | Read `truncated_fields` before treating a record's absence of text as evidence | Infer truncation from a length threshold — the cap is the vendor's to change |
 | Require enough verbatim head to identify one digest from another | Settle on a prefix short enough that two different wakes share it |
+
+### OpenCode v1 and v2 side by side
+
+Select **OpenCode** (`opencode`) for v1, or **OpenCode v2** (`opencode-v2`, default
+command `opencode2`) for v2. Both run the interactive TUI in a real PTY. V2 uses
+`--standalone --auto`: its private server and tools inherit the attachment's write
+fence. Remote/shared servers are refused. Startup input travels through `--prompt`;
+the adapter presses Enter once the claim-bearing prompt is visible if the TUI has
+not submitted it. Subsequent messages use bracketed paste. Only the current activation's claim in a
+structured user message opens readiness and speech.
+
+The v2 adapter reads `session_v2` / `session_message`, relays completed assistant
+text, filters reasoning/tool/compaction records, and closes turns on structured
+`idle` records, including interruptions. V1 retains its existing `message` / `part`
+reader. V2 defaults `OPENCODE_DB` to `opencode-v2.db` to keep its migrations separate
+from v1; an explicit `OPENCODE_DB` override wins. The selected binary's
+`debug paths db` resolves the actual path, including XDG and release-channel rules.
+Configuration and provider credentials remain shared by the vendor's defaults.
+V2.0.18's full TUI does not accept v1's `-m` flag; select the model in OpenCode's
+configuration or model picker. No compact shortcut or immediate-delivery capability
+is advertised without a live probe proving it.
+
+Both npm packages expose `opencode`, so use separate prefixes. For example, with
+v1 already installed, install v2 without replacing it:
+
+```bash
+npm install --prefix "$HOME/.local/opt/opencode-v2" @opencode/cli@2.0.18
+ln -s "$HOME/.local/opt/opencode-v2/node_modules/.bin/opencode2" "$HOME/.local/bin/opencode2"
+```
+
+Choose a bin directory already on your service's PATH, or set the attachment's
+command to the absolute v2 binary path. Update with the same `npm install --prefix`
+command and the desired version. The v2 adapter omits the global updater because
+that can replace v1's `opencode`. The default v2 curl installer also replaces
+`~/.opencode/bin/opencode`; its `opencode2` shim is an alias, not a separate v1 install.
+
+Verified against OpenCode v2.0.18's `--help`, [CLI documentation](https://opencode.ai/v2/docs/cli/),
+and upstream [transcript schema](https://github.com/anomalyco/opencode/blob/v2.0.18/packages/schema/src/session-message.ts).
