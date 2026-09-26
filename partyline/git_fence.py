@@ -159,7 +159,7 @@ def refresh_mirror(common: str, gitdir: str, conv_id: str) -> str:
         # Re-copy live sibling refs on every launch. The own branch and its
         # reflog are excluded: their mirror value is the line's committed
         # state, and the real copies never see the line's commits.
-        keep = {os.path.relpath(own, name)} if own else set()
+        keep = {own.removeprefix("refs/") if name == "refs" else own} if own else set()
         for rel in _walk_files(mirror_dir):
             if rel in keep:
                 continue

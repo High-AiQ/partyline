@@ -66,6 +66,11 @@ def _review_git_binds(path: str, cwd: str, conv_id: str) -> list[tuple[str, str,
     gitdir = git_fence._worktree_gitdir(path)
     if gitdir is not None:
         common = os.path.realpath(git_fence.common_gitdir(gitdir))
+        primary = git_fence._worktree_gitdir(cwd)
+        if primary and os.path.realpath(git_fence.common_gitdir(primary)) == common:
+            # The primary worktree already prepared this line's shared mirror.
+            # Refreshing it for a detached review would overwrite the line tip.
+            return [(gitdir, gitdir, False)]
         cwd_real = os.path.realpath(cwd or "")
         if common == cwd_real or common.startswith(cwd_real + os.sep):
             return []
