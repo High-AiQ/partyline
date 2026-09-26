@@ -1,6 +1,6 @@
 """Conservative native write grants, verified against a restricted token.
 
-This backend is not enabled until native acceptance tests pass. Grants add ACEs
+Grants add ACEs
 for a fresh synthetic SID, never for the real user or Everyone. Cleanup removes
 only that SID. A crash can leave inert ACEs; no later token reuses that identity.
 """
