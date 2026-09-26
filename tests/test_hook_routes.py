@@ -8,7 +8,7 @@ An unseen name is a 422, not a dropped receipt — that silence is how Grok's
 import json
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 from pydantic import ValidationError
 
@@ -17,7 +17,7 @@ from partyline.adapters import ADAPTER_METADATA
 from partyline.bind import BindConfig
 from partyline.hook_contracts import parse_hook_payload
 from partyline.contracts import AttentionEvent
-from partyline.hook_routes import hook_url, surface_attention
+from partyline.hook_routes import handle_hook, hook_url, surface_attention
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "hooks"
@@ -139,6 +139,28 @@ class StartupAttentionTest(unittest.IsolatedAsyncioTestCase):
         runtime.broadcast.assert_awaited_once_with(
             "line", AttentionEvent(attachment_id="att"),
         )
+
+    async def test_began_receipt_stops_startup_screen_polling(self):
+        adapter = type("Adapter", (), {
+            "mark_startup_prompt_began": Mock(),
+        })()
+        attachment = {
+            "id": "att", "conv_id": "line", "name": "claude",
+            "runtime_owner": "token",
+        }
+        runtime = type("Runtime", (), {
+            "db": type("DB", (), {"get_attachment": lambda _self, _id: attachment})(),
+            "live": {"att": adapter},
+            "post_message": AsyncMock(), "broadcast": AsyncMock(),
+        })()
+        presence = type("Presence", (), {"began": AsyncMock()})()
+        request = type("Request", (), {
+            "json": AsyncMock(return_value={"hookEventName": "UserPromptSubmit"}),
+        })()
+
+        await handle_hook(runtime, presence, "att", "token", request)
+
+        adapter.mark_startup_prompt_began.assert_called_once_with()
 
 
 if __name__ == "__main__":
