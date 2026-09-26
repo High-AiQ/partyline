@@ -12,6 +12,7 @@ through ptys. The pty and transcript-tailing design are load-bearing. Read `READ
 | --- | --- |
 | Keep every process a real interactive process in a pty | Substitute a headless invocation or an SDK call |
 | Post assistant speech from structured transcripts | Turn terminal screen contents into chat messages |
+| Post media and service links as host-relative paths (`/api/media/<id>/slim`) or the LAN host | Post `0.0.0.0`, `127.0.0.1`, or `localhost` URLs; people reach this over LAN or HTTPS |
 | React when a reaction says it all: one on a machine's message wakes that process privately, as a note in its next digest | Expect a reaction to ring the room or leave a transcript line — a reaction on a human's message posts and wakes nothing |
 
 ## Layout
