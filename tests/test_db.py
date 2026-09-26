@@ -449,6 +449,7 @@ class DbTest(unittest.TestCase):
         self.db.save_restart_plan("line", ["agent"], "continue")
         self.db.close()
         self.db = Db(f"{self.directory.name}/partyline.db")
+        self.addCleanup(self.db.close)
 
         plan = self.db.get_restart_plan()
 
