@@ -27,6 +27,22 @@ jobs:
       - name: test with coverage
         run: uv run --locked coverage run -m unittest discover -s tests && uv run --locked coverage report
 
+  windows-foundations:
+    name: windows-foundations
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: native locks and memory limits under a verified Job Object cap
+        run: >-
+          uv run --locked python scripts/capped-test --
+          uv run --locked python -m unittest
+          tests.test_runtime_lock tests.test_windows_memory
+          tests.test_db tests.test_db_concurrency
+
   frontend:
     name: frontend
     runs-on: ubuntu-latest
@@ -123,7 +139,7 @@ jobs:
   tag-version:
     name: tag-version
     if: github.event_name == 'push'
-    needs: [backend, frontend, code-line-limits, conventional-commits, version-policy]
+    needs: [backend, windows-foundations, frontend, code-line-limits, conventional-commits, version-policy]
     runs-on: ubuntu-latest
     permissions:
       contents: write
