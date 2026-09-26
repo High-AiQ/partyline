@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -93,6 +94,7 @@ class ClaudeCommandTest(unittest.TestCase):
 
 class ClaudeStartupPromptTest(unittest.IsolatedAsyncioTestCase):
     fixture = Path(__file__).parent / "fixtures" / "claude_trust_prompt.txt"
+    current_fixture = Path(__file__).parent / "fixtures" / "claude_trust_prompt_2026.txt"
 
     def make_adapter(self, attention: AsyncMock) -> PartylineAdapter:
         async def post(*_args) -> None:
@@ -117,6 +119,24 @@ class ClaudeStartupPromptTest(unittest.IsolatedAsyncioTestCase):
             post,
             status,
         )
+
+    async def test_guard_matches_current_and_legacy_trust_prompts_only(self):
+        attention = AsyncMock()
+        adapter = self.make_adapter(attention)
+        manifest = Path(__file__).parents[1] / "partyline/adapters/bundled/claude/adapter.toml"
+        adapter.att["adapter_metadata"]["startup_prompts"] = tomllib.loads(
+            manifest.read_text(encoding="utf-8"),
+        )["adapter"]["startup_prompts"]
+
+        for fixture in (self.current_fixture, self.fixture):
+            with self.subTest(fixture=fixture.name):
+                adapter.screen_text = lambda fixture=fixture: fixture.read_text(encoding="utf-8")
+                self.assertEqual(adapter.startup_prompt(), "trust_prompt")
+
+        adapter.screen_text = lambda: "Is this a project you created or\none you trust"
+        self.assertEqual(adapter.startup_prompt(), "trust_prompt")
+        adapter.screen_text = lambda: "Claude Code is ready. What would you like to do?"
+        self.assertIsNone(adapter.startup_prompt())
 
     async def test_trust_prompt_blocks_briefing_until_person_clears_it(self):
         """The first paste must not select the trust dialog's default exit."""
