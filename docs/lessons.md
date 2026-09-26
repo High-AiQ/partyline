@@ -1,5 +1,16 @@
 # Lessons: the false-assumptions ledger
 
+## Windows security bindings and elevated fixtures need native proof
+
+Win32 API names do not imply matching pywin32 methods or constants. Native CI
+found missing `AccessCheck`, `AddAce`, and file-access constants that mocks could
+not catch. Use the binding's documented methods, or explicit ctypes signatures,
+and run real access checks. PyACL's `AddAccessDeniedAceEx` already puts deny entries
+before allows. Native fixtures must also grant their ordinary user access: an
+elevated runner's administrator-owned temp files are not representative of a
+normal user's checkout. Test that restricted children can write their granted
+files as well as refusing protected writes, ACL changes, and parent-process access.
+
 ## Native ConPTY must replace redirected parent standard handles
 
 The first Windows console implementation assumed the pseudoconsole startup

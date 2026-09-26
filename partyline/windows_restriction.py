@@ -109,13 +109,9 @@ def _edit_grant(path, sid, *, remove, permission, deny):
                 acl.DeleteAce(index)
         if not remove:
             if deny:
-                # Explicit denies must precede existing allows. They are not
-                # inherited: writable descendants retain their own grants.
-                replacement = security.ACL()
-                replacement.AddAccessDeniedAceEx(security.ACL_REVISION, 0, permission, sid)
-                for index in range(acl.GetAceCount()):
-                    replacement.AddAce(security.ACL_REVISION, index + 1, acl.GetAce(index))
-                acl = replacement
+                # PyACL canonicalizes the ACL after adding an explicit deny,
+                # placing it before allows while preserving other ACE types.
+                acl.AddAccessDeniedAceEx(security.ACL_REVISION, 0, permission, sid)
             else:
                 inheritance = 3 if attributes & win32con.FILE_ATTRIBUTE_DIRECTORY else 0
                 acl.AddAccessAllowedAceEx(security.ACL_REVISION, inheritance, permission, sid)
