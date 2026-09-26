@@ -137,6 +137,10 @@ is what let two agents sit waiting on a reply that would never come before this 
 
 ## Verifying afterward
 
+`GET /api/running` is filtered by the caller's visible conversations. An empty
+response with a machine token does not prove the instance has no live processes.
+Always use the approved request flow: it saves the recovery plan across every line.
+
 Green local tests are necessary but not sufficient. A restart is complete only when the live
 instance has restarted, recovered, and continued its own work. Record evidence for:
 

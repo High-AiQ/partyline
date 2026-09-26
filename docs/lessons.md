@@ -1049,3 +1049,23 @@ before assigning a cause or prescribing a provider change.
 | DO | DO NOT |
 | --- | --- |
 | Have a person check `dmesg` or `journalctl -k` around a pre-session CLI crash | Infer a provider failure from a generic no-session timeout or treat fence-limited kernel logs as clean |
+
+## Review mirrors rewound unaccepted line commits on resume
+
+The false assumption was that each worktree could independently refresh its Git
+mirror. Mirrors are keyed by line and repository, so detached reviews share the
+working line's mirror. Refreshing a review after the working checkout treated the
+line's own branch as a sibling and replaced its tip with the last accepted ref.
+The objects and index survived, making committed work look uncommitted without a
+Git reset or reflog entry. Review binds now reuse the prepared mirror and only
+open the review's metadata. The own reflog also needs its full `refs/heads/...`
+path relative to `logs`, unlike the branch path relative to `refs`.
+
+`tests.test_mirror_restart` reproduces both failures against the old code and
+checks that repeated launch preparation preserves the private tip and reflog
+while leaving the accepted host ref unchanged.
+
+A separate operator error treated a machine-token `/api/running` response as
+fleet-wide. It is visibility-filtered. A direct service restart bypassed the
+recovery plan and left other lines stopped. The restart instructions now call
+out this scope explicitly; use the approved request flow to save every line.
