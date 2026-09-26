@@ -13,7 +13,13 @@ terminal runtime imports `fcntl` and `termios`, uses `os.openpty` and Unix proce
 groups, and ships no Windows write-fence backend. Database ownership locks now use
 Windows byte-range locks or Unix `flock`. The native Windows CI foundation runs
 those database tests under a verified Job Object memory cap; this does not yet
-make the interactive application runnable on Windows.
+make the interactive application runnable on Windows. The standalone ConPTY
+primitive launches a native executable suspended, assigns its verified memory
+job, then resumes it. It supports terminal input, output, resize, exit status,
+and tree cleanup; native CI exercises these operations. It is not yet wired into
+attachments, which still require a Windows write-fence backend. Batch scripts
+must be invoked through an explicit interpreter; the primitive does not insert
+a command shell around arguments.
 
 ## Memory architecture
 
