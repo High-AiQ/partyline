@@ -35,7 +35,9 @@ WS_FORBIDDEN = 4403
 _EXEMPT_PREFIXES = ("/api/auth/", "/api/hooks/", "/assets/")
 # /api/restart-plan/failure carries its own capability (the plan's
 # report_token) plus a loopback check, exactly like the hooks routes.
-_EXEMPT_PATHS = {"/", "/api/version", "/api/restart-plan/failure"}
+# Operator approval has a one-use capability issued through local DB write access.
+_EXEMPT_PATHS = {"/", "/api/version", "/api/restart-plan/failure",
+                 "/api/restart-request/operator-approve"}
 
 
 @dataclass(frozen=True)

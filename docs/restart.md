@@ -2,13 +2,14 @@
 
 This project is developed through a running copy of itself, and a careless restart drops every
 participant including you. This is the single restart flow: a deployed change goes live through a
-request that a person approves, not through a manual `git pull` + Ctrl-C or an unattended trigger.
+request approved by a person or an explicitly delegated local operator. Approval saves the
+recovery plan before the service stops.
 
 | DO | DO NOT |
 | --- | --- |
 | Before planning from a stale clean checkout, the captain refreshes its attached checkout with `git pull --ff-only`; after merge, the captain fast-forwards it, verifies `git rev-parse HEAD`, runs `uv sync --locked`, then requests a restart; use HTTPS with `git -c credential.helper='!gh auth git-credential'` if fenced SSH is unavailable | Ask the person to pull; skip a dirty-checkout ask; reset, stash, or discard in a person's checkout |
 | Read `checkout_path` and `git_head` from `/api/version` to know which checkout the service serves | Assume the checkout you pulled is the one the service runs from |
-| File a restart request with a clear reason and wait for a person to approve it | Restart the service by any path other than the approved request |
+| File a restart request; have a person approve it or use explicitly delegated local operator approval | Restart without saving the fleet-wide recovery plan |
 | Trust the automatic mid-turn mark and private continue notice to resume interrupted work | Delay approval waiting for every participant to go idle first |
 | Prove recovery afterward: identity, continuation receipts, live attachment state | Report success without checking `/api/running` |
 | Find the pid that owns the port and kill that pid | Ever kill by matching the word partyline across every process's command line — it matches the room you are standing in |
@@ -96,11 +97,34 @@ The plan machinery — `restart_plan` table and columns, `reattach.py`, the clai
 lease lifecycle — is unchanged from the earlier operator-CLI-driven procedure; only that naming
 retired. Do not rename the table or its columns: live databases carry them.
 
+## Delegated local operator approval
+
+A person may authorize a trusted operator outside the attachment fence to approve
+restarts on their behalf. After filing the normal request, run:
+
+```bash
+uv run --locked python -m scripts.approve_restart \
+  --database /absolute/path/instance.db --port 8643 --request <request-id>
+```
+
+This requires write access to the existing instance database. It creates a
+one-use capability for that exact request, valid for 60 seconds, and sends it
+only to loopback. Only a hash is stored, so reading the database does not grant
+approval. The server uses the same fleet-wide recovery planning and restart
+handler as the browser and records the approver as `local-operator`. Attached
+processes cannot issue the grant through their read-only database mounts, and
+their ordinary approval route remains forbidden. No human account is impersonated.
+
+Explicit operator authorization can cover multiple deployments; record it in the
+operator's task context instead of asking the person to approve each banner.
+Verify process recovery after each restart as described below.
+
 ## Who may do what
 
 - **File a request:** the line's captain, or a person — the `assign` capability
   (`partyline/machine_scope.py`).
-- **Approve or decline:** a person only (`is_human`). A machine credential is refused with 403.
+- **Approve or decline in the browser:** a person (`is_human`). A machine credential is refused with 403.
+- **Approve as a delegated operator:** the local command above, requiring database write access.
 - **Plan a restart directly** (`POST /api/restart-plan`, used internally by approval): loopback
   only, and a machine may plan only its own line — see `allows_restart_plan`.
 
