@@ -22,13 +22,13 @@ safety contract; the failure modes that shaped it are recorded in [lessons.md](l
 
 The service must survive an OOM in one attached process. Run `partyline doctor` and
 use the exact drop-in it prints if the service does not report `OOMPolicy=continue`
-and a finite `MemoryMax` below host RAM. For the standard `partyline-lan.service`,
+and a finite `MemoryMax` below host RAM. For the standard `partyline.service`,
 install the shipped drop-in as follows (choose a `MemoryMax` below the host's RAM;
 `40G` is the recommended value on a 64G host):
 
 ```bash
-mkdir -p ~/.config/systemd/user/partyline-lan.service.d
-cat > ~/.config/systemd/user/partyline-lan.service.d/oom.conf <<'EOF'
+mkdir -p ~/.config/systemd/user/partyline.service.d
+cat > ~/.config/systemd/user/partyline.service.d/oom.conf <<'EOF'
 [Service]
 OOMPolicy=continue
 MemoryMax=40G
