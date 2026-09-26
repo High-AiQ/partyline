@@ -103,14 +103,14 @@ class WindowsRuntime:
     async def watch_exit(self):
         adapter = self.adapter
         code = await self.console.wait()
-        await self.close()
+        await self.close(preserve_output=True)
         adapter.abort_startup_prompt()
         adapter._mark_not_ready()
         if not adapter._stopping:
             await adapter.on_status('exited')
             await adapter.post('system', 'system', f"{adapter.att['name']} exited (code {code})")
 
-    async def close(self):
+    async def close(self, *, preserve_output=False):
         async with self.close_lock:
             if self.closed:
                 return
@@ -121,6 +121,6 @@ class WindowsRuntime:
                     receipt.set_exception(OSError('terminal closed before input was written'))
             self.pending.put_nowait(None)
             # Stop the entire job before releasing its filesystem permissions.
-            await self.console.close()
+            await self.console.close(preserve_output=preserve_output)
             if self.scope:
                 await asyncio.to_thread(self.scope.close)

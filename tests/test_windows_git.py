@@ -28,6 +28,11 @@ class WindowsGitPathsTest(unittest.TestCase):
                  'commit', '-qm', 'root')
         self.work = self.root / '.partyline-worktrees' / 'art'
         self.git('worktree', 'add', '-b', 'line/art/work', str(self.work))
+        if sys.platform == 'win32':
+            # Git checks the owners of the gitfile, worktree and metadata too.
+            # Elevated CI creates them as Administrators; model a normal user.
+            for path in self.root.rglob('*'):
+                secure_directory(path, directory=path.is_dir())
         self.att = {'cwd': str(self.work), 'conv_id': 'fixture'}
 
     def git(self, *args):
@@ -92,7 +97,7 @@ class NativeWindowsGitTest(WindowsGitPathsTest, unittest.IsolatedAsyncioTestCase
                 reader = asyncio.create_task(drain())
                 code = await asyncio.wait_for(console.wait(), 30)
             finally:
-                await console.close()
+                await console.close(preserve_output=True)
             await reader
             self.assertEqual(code, 0, output.decode(errors='replace'))
             self.assertEqual(self.git('rev-parse', 'main'), before)

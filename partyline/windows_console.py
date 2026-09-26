@@ -28,6 +28,7 @@ class WindowsConsole:
         self._pump_task = None
         self._queue = asyncio.Queue(maxsize=64)
         self._closing = False
+        self._preserve_output = False
         self._closed = False
         self._close_lock = asyncio.Lock()
         self._write_lock = asyncio.Lock()
@@ -151,7 +152,7 @@ class WindowsConsole:
                     self._responses.clear()
                     async with self._write_lock:
                         await asyncio.wait_for(asyncio.to_thread(self._write, responses), 5)
-                if not self._closing:
+                if not self._closing or self._preserve_output:
                     await self._queue.put(data)
         except OSError as exc:
             self._error = exc
@@ -196,13 +197,15 @@ class WindowsConsole:
         win.hresult(result, 'ResizePseudoConsole')
         self._screen.resize(lines=rows, columns=columns)
 
-    async def close(self):
+    async def close(self, *, preserve_output=False):
         async with self._close_lock:
             if self._closed:
                 return
             self._closing = True
-            while not self._queue.empty():
-                self._queue.get_nowait()
+            self._preserve_output = preserve_output
+            if not preserve_output:
+                while not self._queue.empty():
+                    self._queue.get_nowait()
             try:
                 try:
                     if self.job is not None:
@@ -214,18 +217,28 @@ class WindowsConsole:
                         # Drain output while ClosePseudoConsole emits its final frame.
                         await asyncio.wait_for(asyncio.to_thread(
                             self.api.ClosePseudoConsole, self.console), 5)
+                        if preserve_output and self._pump_task:
+                            try:
+                                await asyncio.wait_for(asyncio.shield(self._pump_task), 1)
+                            except TimeoutError:
+                                pass  # a stalled terminal viewer must not block shutdown
             finally:
                 self.console = w.HANDLE()
                 for handle in (self.input, self.output, self.process.hProcess):
                     if handle:
                         self.api.CloseHandle(handle)
                 if self._pump_task is not None:
+                    if self._queue.full():
+                        self._queue.get_nowait()
                     self._pump_task.cancel()
                     await asyncio.gather(self._pump_task, return_exceptions=True)
                 if self.job is not None:
                     self.job.close()
                 self._closed = True
                 # Wake a reader even if the output pump was cancelled during shutdown.
-                while not self._queue.empty():
+                if not preserve_output:
+                    while not self._queue.empty():
+                        self._queue.get_nowait()
+                if self._queue.full():
                     self._queue.get_nowait()
                 self._queue.put_nowait(None)
