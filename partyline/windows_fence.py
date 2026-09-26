@@ -46,6 +46,7 @@ class WindowsFence:
         self.token, self.sid = create_token()
         self.changed = []
         try:
+            self.protect()
             for root in self.roots:
                 for path in paths(root):
                     edit_grant(path, self.sid)
@@ -57,6 +58,25 @@ class WindowsFence:
 
     def writable(self, path):
         return any(contains(root, path) for root in self.roots)
+
+    def protect(self):
+        permissions = {}
+        for root in self.protected:
+            if root.exists():
+                for path in paths(root):
+                    if not self.writable(path):
+                        permissions[path] = 0xd0156 | (0x40 if path.is_dir() else 0)
+            for parent in root.parents:
+                if parent.exists():
+                    # Do not change system ancestors when the token already
+                    # lacks the rights that could replace a protected subtree.
+                    if not any(can_access(self.token, parent, right)
+                               for right in (0x40, 0x10000, 0x40000, 0x80000)):
+                        continue
+                    permissions[parent] = permissions.get(parent, 0) | 0xd0040
+        for path, permission in permissions.items():
+            edit_grant(path, self.sid, deny=True, permission=permission)
+            self.changed.append(path)
 
     def verify(self):
         for root in self.protected:

@@ -7,8 +7,6 @@ must keep refusing Windows attachments until its write fence is implemented.
 import asyncio
 import ctypes as c
 from ctypes import wintypes as w
-import os
-import shutil
 import subprocess
 
 import pyte
@@ -16,6 +14,7 @@ import pyte
 from . import windows_console_api as win
 from .windows_memory import WindowsJob
 from .windows_server import breakaway_flags
+from .windows_command import resolve
 
 
 class WindowsConsole:
@@ -44,11 +43,8 @@ class WindowsConsole:
     async def spawn(cls, argv, cwd, environment, memory_limit, *, columns=120, rows=40, token=None):
         dimensions = win.size(columns, rows)
         block = win.environment_block(environment)
-        if not argv or any('\0' in arg for arg in argv):
-            raise ValueError('expected an executable and arguments without NUL characters')
-        executable = shutil.which(argv[0], path=environment.get('PATH'))
-        if not executable or os.path.splitext(executable)[1].lower() not in {'.exe', '.com'}:
-            raise OSError('ConPTY requires a native executable; invoke a script through its interpreter')
+        argv = resolve(argv, environment)
+        executable = argv[0]
         terminal = cls()
         terminal._screen.resize(lines=rows, columns=columns)
         input_read, output_write = w.HANDLE(), w.HANDLE()

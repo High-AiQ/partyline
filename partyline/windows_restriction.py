@@ -72,12 +72,12 @@ def _pinned(path):
             handle.Close()
 
 
-def edit_grant(path, sid, *, remove=False, permission=0x1301bf):
+def edit_grant(path, sid, *, remove=False, permission=0x1301bf, deny=False):
     with _pinned(path):
-        _edit_grant(path, sid, remove=remove, permission=permission)
+        _edit_grant(path, sid, remove=remove, permission=permission, deny=deny)
 
 
-def _edit_grant(path, sid, *, remove, permission):
+def _edit_grant(path, sid, *, remove, permission, deny):
     """Change only our synthetic SID's ACE, on a pinned non-reparse object.
 
     SetKernelObjectSecurity avoids automatic propagation to existing children;
@@ -108,8 +108,17 @@ def _edit_grant(path, sid, *, remove, permission):
             if ace[-1] == sid:
                 acl.DeleteAce(index)
         if not remove:
-            inheritance = 3 if attributes & win32con.FILE_ATTRIBUTE_DIRECTORY else 0
-            acl.AddAccessAllowedAceEx(security.ACL_REVISION, inheritance, permission, sid)
+            if deny:
+                # Explicit denies must precede existing allows. They are not
+                # inherited: writable descendants retain their own grants.
+                replacement = security.ACL()
+                replacement.AddAccessDeniedAceEx(security.ACL_REVISION, 0, permission, sid)
+                for index in range(acl.GetAceCount()):
+                    replacement.AddAce(security.ACL_REVISION, index + 1, acl.GetAce(index))
+                acl = replacement
+            else:
+                inheritance = 3 if attributes & win32con.FILE_ATTRIBUTE_DIRECTORY else 0
+                acl.AddAccessAllowedAceEx(security.ACL_REVISION, inheritance, permission, sid)
         descriptor.SetSecurityDescriptorDacl(True, acl, False)
         security.SetKernelObjectSecurity(handle, security.DACL_SECURITY_INFORMATION, descriptor)
     finally:
