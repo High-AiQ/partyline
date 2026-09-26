@@ -103,6 +103,10 @@ class ClaudeStartupPromptTest(unittest.IsolatedAsyncioTestCase):
         async def status(*_args) -> None:
             return None
 
+        manifest = Path(__file__).parents[1] / "partyline/adapters/bundled/claude/adapter.toml"
+        startup_prompts = tomllib.loads(manifest.read_text(encoding="utf-8"))[
+            "adapter"
+        ]["startup_prompts"]
         return PartylineAdapter(
             {
                 "command": ["claude"],
@@ -110,9 +114,8 @@ class ClaudeStartupPromptTest(unittest.IsolatedAsyncioTestCase):
                 "name": "claude",
                 "cwd": "/work",
                 "adapter_metadata": {
-                    "startup_prompts": {
-                        "trust prompt": ["Do you trust the files in this folder?"],
-                    },
+                    "capabilities": {"transcript": True},
+                    "startup_prompts": startup_prompts,
                 },
                 "startup_attention": attention,
             },
@@ -120,7 +123,7 @@ class ClaudeStartupPromptTest(unittest.IsolatedAsyncioTestCase):
             status,
         )
 
-    async def test_guard_matches_current_and_legacy_trust_prompts_only(self):
+    async def test_guard_requires_the_structural_trust_menu(self):
         attention = AsyncMock()
         adapter = self.make_adapter(attention)
         manifest = Path(__file__).parents[1] / "partyline/adapters/bundled/claude/adapter.toml"
@@ -131,18 +134,81 @@ class ClaudeStartupPromptTest(unittest.IsolatedAsyncioTestCase):
         for fixture in (self.current_fixture, self.fixture):
             with self.subTest(fixture=fixture.name):
                 adapter.screen_text = lambda fixture=fixture: fixture.read_text(encoding="utf-8")
-                self.assertEqual(adapter.startup_prompt(), "trust_prompt")
+                expected = "trust_prompt" if fixture == self.current_fixture else None
+                self.assertEqual(adapter.startup_prompt(), expected)
 
-        adapter.screen_text = lambda: "Is this a project you created or\none you trust"
-        self.assertEqual(adapter.startup_prompt(), "trust_prompt")
+        adapter.screen_text = lambda: " ".join(self.current_fixture.read_text(
+            encoding="utf-8",
+        ).splitlines())
+        self.assertIsNone(adapter.startup_prompt())
         adapter.screen_text = lambda: "Claude Code is ready. What would you like to do?"
         self.assertIsNone(adapter.startup_prompt())
+
+    async def test_resume_prompt_polling_stops_after_claim_proof_or_began_receipt(self):
+        for release in ("claim", "began"):
+            with self.subTest(release=release):
+                attention = AsyncMock()
+                adapter = self.make_adapter(attention)
+                adapter.att["adapter_metadata"]["startup_prompts"] = {
+                    "trust_prompt": [r"^quick safety check:", r"^❯ no, exit$",
+                                     r"^yes, i trust this folder$"]
+                }
+                screen_reads = 0
+
+                def screen():
+                    nonlocal screen_reads
+                    screen_reads += 1
+                    return "Quick safety check: x\n❯ No, exit\nYes, I trust this folder"
+
+                adapter.screen_text = screen
+                adapter.alive = lambda: True
+
+                async def tick(_delay, release=release, adapter=adapter):
+                    if release == "claim":
+                        adapter._mark_claim_proven()
+                    else:
+                        adapter.mark_startup_prompt_began()
+
+                with patch("partyline.adapters.startup_prompt.asyncio.sleep", tick):
+                    self.assertTrue(await adapter.release_startup_delivery())
+
+                self.assertEqual(screen_reads, 1)
+                attention.assert_awaited_once_with("trust prompt")
+
+    async def test_began_receipt_stops_polling_without_transcript_capability(self):
+        """The BEGAN cutoff applies whether or not the adapter claims by transcript."""
+        attention = AsyncMock()
+        adapter = self.make_adapter(attention)
+        adapter.att["adapter_metadata"]["capabilities"] = {"transcript": False}
+        adapter.att["adapter_metadata"]["startup_prompts"] = {
+            "trust_prompt": [r"^quick safety check:", r"^❯ no, exit$",
+                             r"^yes, i trust this folder$"]
+        }
+        self.assertFalse(adapter.pastes_claim())
+        screen_reads = 0
+
+        def screen():
+            nonlocal screen_reads
+            screen_reads += 1
+            return "Quick safety check: x\n❯ No, exit\nYes, I trust this folder"
+
+        adapter.screen_text = screen
+        adapter.alive = lambda: True
+
+        async def tick(_delay):
+            adapter.mark_startup_prompt_began()
+
+        with patch("partyline.adapters.startup_prompt.asyncio.sleep", tick):
+            self.assertTrue(await adapter.release_startup_delivery())
+
+        self.assertEqual(screen_reads, 1)
+        attention.assert_awaited_once_with("trust prompt")
 
     async def test_trust_prompt_blocks_briefing_until_person_clears_it(self):
         """The first paste must not select the trust dialog's default exit."""
         attention = AsyncMock()
         adapter = self.make_adapter(attention)
-        prompt = self.fixture.read_text(encoding="utf-8")
+        prompt = self.current_fixture.read_text(encoding="utf-8")
         screens = iter((prompt, "Claude Code is ready"))
         adapter.screen_text = lambda: next(screens)
         adapter.alive = lambda: True
@@ -156,7 +222,7 @@ class ClaudeStartupPromptTest(unittest.IsolatedAsyncioTestCase):
     async def test_wake_waits_for_the_blocked_briefing_then_pastes_once(self):
         attention = AsyncMock()
         adapter = self.make_adapter(attention)
-        prompt = self.fixture.read_text(encoding="utf-8")
+        prompt = self.current_fixture.read_text(encoding="utf-8")
         cleared = asyncio.Event()
         adapter.screen_text = lambda: "" if cleared.is_set() else prompt
         adapter.alive = lambda: True
@@ -179,7 +245,7 @@ class ClaudeStartupPromptTest(unittest.IsolatedAsyncioTestCase):
     async def test_retry_is_held_when_the_trust_prompt_reappears(self):
         attention = AsyncMock()
         adapter = self.make_adapter(attention)
-        prompt = self.fixture.read_text(encoding="utf-8")
+        prompt = self.current_fixture.read_text(encoding="utf-8")
         screens = iter(("Claude Code is ready", prompt, "Claude Code is ready"))
         adapter.screen_text = lambda: next(screens)
         adapter.alive = lambda: True
@@ -198,7 +264,7 @@ class ClaudeStartupPromptTest(unittest.IsolatedAsyncioTestCase):
     async def test_wake_waits_while_a_retry_is_blocked_by_the_trust_prompt(self):
         attention = AsyncMock()
         adapter = self.make_adapter(attention)
-        prompt = self.fixture.read_text(encoding="utf-8")
+        prompt = self.current_fixture.read_text(encoding="utf-8")
         cleared = asyncio.Event()
         screens = iter(("Claude Code is ready",))
 
@@ -228,7 +294,7 @@ class ClaudeStartupPromptTest(unittest.IsolatedAsyncioTestCase):
     async def test_exit_releases_blocked_startup_and_wake_without_a_paste(self):
         attention = AsyncMock()
         adapter = self.make_adapter(attention)
-        adapter.screen_text = lambda: self.fixture.read_text(encoding="utf-8")
+        adapter.screen_text = lambda: self.current_fixture.read_text(encoding="utf-8")
         adapter.alive = lambda: True
         adapter.send_keys = AsyncMock()
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 
 
 class StartupPromptGuard:
@@ -12,6 +13,7 @@ class StartupPromptGuard:
         self._startup_prompt_delivery = asyncio.Event()
         self._startup_paste_lock = asyncio.Lock()
         self._startup_prompt_result: bool | None = None
+        self._startup_prompt_began = False
         if not self._startup_prompts():
             self._startup_prompt_result = True
             self._startup_prompt_delivery.set()
@@ -26,11 +28,25 @@ class StartupPromptGuard:
         }
 
     def startup_prompt(self) -> str | None:
-        screen = " ".join(self.screen_text().casefold().split())
-        for name, phrases in self._startup_prompts().items():
-            if any(" ".join(phrase.casefold().split()) in screen for phrase in phrases):
+        lines = [" ".join(line.casefold().split())
+                 for line in self.screen_text().splitlines()]
+        for name, patterns in self._startup_prompts().items():
+            matches = []
+            for pattern in patterns:
+                try:
+                    regex = re.compile(pattern)
+                except re.error:
+                    matches = []
+                    break
+                matches.append([index for index, line in enumerate(lines)
+                                if regex.search(line)])
+            if matches and _distinct_line_matches(matches):
                 return name
         return None
+
+    def mark_startup_prompt_began(self) -> None:
+        """Stop watching the startup screen once the process starts a turn."""
+        self._startup_prompt_began = True
 
     async def send_startup_briefing(self) -> bool:
         """Wait for a person to dismiss a startup dialog, then paste once."""
@@ -56,7 +72,7 @@ class StartupPromptGuard:
 
     async def _wait_for_startup_prompt(self) -> bool:
         reported = None
-        while prompt := self.startup_prompt():
+        while self._startup_prompt_polling_allowed() and (prompt := self.startup_prompt()):
             if self._startup_prompt_result is False or self._stopping or not self.alive():
                 return False
             if prompt != reported:
@@ -66,6 +82,9 @@ class StartupPromptGuard:
                 reported = prompt
             await asyncio.sleep(1.0)
         return not self._stopping and self._startup_prompt_result is not False and self.alive()
+
+    def _startup_prompt_polling_allowed(self) -> bool:
+        return not (self._claim_proven or self._startup_prompt_began)
 
     def abort_startup_prompt(self) -> None:
         """Unblock startup waiters after exit without claiming any delivery."""
@@ -77,3 +96,22 @@ class StartupPromptGuard:
         await self._startup_prompt_delivery.wait()
         async with self._startup_paste_lock:
             return self._startup_prompt_result is True
+
+
+def _distinct_line_matches(matches: list[list[int]]) -> bool:
+    """Whether every required pattern can claim a different screen line."""
+    assigned: set[int] = set()
+
+    def assign(pattern_index: int) -> bool:
+        if pattern_index == len(matches):
+            return True
+        for line_index in matches[pattern_index]:
+            if line_index in assigned:
+                continue
+            assigned.add(line_index)
+            if assign(pattern_index + 1):
+                return True
+            assigned.remove(line_index)
+        return False
+
+    return assign(0)

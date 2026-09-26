@@ -213,9 +213,16 @@ class PartylineAdapter(BaseAdapter):
             if not await self.send_startup_briefing():
                 return
         else:
+            # A resumed transcript may already prove this activation owns the
+            # session. Check before looking at the screen so an old dialog
+            # phrase quoted in terminal chat cannot hold queued wakes.
+            path = self._find_transcript()
             if not await self.release_startup_delivery():
                 return
-        path = await self._await_transcript()
+        if not self.resume:
+            path = None
+        if path is None:
+            path = await self._await_transcript()
         if path is None:
             return
 

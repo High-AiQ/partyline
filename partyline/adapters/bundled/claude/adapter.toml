@@ -10,7 +10,7 @@ requires = ["claude"]
 compact_paste = "/compact"
 # Don't let the spawned CLI think it is nested inside another harness.
 env_unset = ["CLAUDECODE", "CLAUDE_CODE_*"]
-startup_prompts = { trust_prompt = ["Do you trust the files in this folder?", "Is this a project you created or one you trust", "Yes, I trust this folder", "Quick safety check", "Accessing workspace"], login_screen = ["Log in to Claude Code", "Log in with your Anthropic account"], update_screen = ["Update available", "Update Claude Code"] }
+startup_prompts = { trust_prompt = ["^quick safety check:", "^(?:❯\\s*)?no, exit$", "^(?:❯\\s*)?yes, i trust this folder$"], login_screen = ["^log in to claude code$", "^(?:❯\\s*)?log in with your anthropic account$"], update_screen = ["^update available$", "^(?:❯\\s*)?update claude code$"] }
 # Sessions, project transcripts, and the top-level config file the CLI rewrites.
 capabilities = { resume = true, turn_end = "receipt", transcript = true }
 update_command = ["claude", "update"]

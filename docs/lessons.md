@@ -56,14 +56,18 @@ replaced them:
 
 - **A delayed startup paste necessarily reaches the CLI's input editor.** Claude Code can
   instead be waiting at its folder-trust, login, or update dialog, where a bracketed briefing
-  plus Enter selects the dialog's default and exits. Startup-prompt phrases now live in adapter
-  metadata; matching one holds both the briefing and queued wakes, posts the existing attention
-  notice/event, and polls until a person resolves it in the terminal viewer. The Claude fixture
-  control proves no paste happens while the trust screen is present and that clearance sends the
-  briefing exactly once. On 2026-09-26, Claude Code's trust wording had changed since 2.13.4:
-  its new “Quick safety check” screen did not contain the only configured phrase, and a 120-column
-  pty can wrap matching text across rows. Keep live wording in manifest-backed fixture tests and
-  collapse screen whitespace before matching.
+  plus Enter selects the dialog's default and exits. Startup prompts hold both the briefing and
+  queued wakes, post the dialog name through the existing attention notice/event, and poll only
+  until the transcript is claimed or the first turn receipt arrives. On 2026-09-26, loose
+  whole-screen phrase matching held a resumed process when ordinary chat text quoted dialog
+  wording. Match each dialog from required menu-row patterns on distinct normalized screen
+  lines; do not restore generic phrase matching. The negative control in
+  `test_guard_requires_the_structural_trust_menu` joins the real fixture into one chat-like
+  paragraph and proves it does not trigger, while the same unmodified fixture proves the real
+  selectable menu does. The claim/BEGAN polling cutoff is not conditioned on the transcript
+  capability: a BEGAN receipt fires for every adapter that reports it, so gating the cutoff on
+  `pastes_claim()` left non-transcript adapters polling the screen past that boundary.
+  `test_began_receipt_stops_polling_without_transcript_capability` covers this.
 
 - **A live attachment row always has a current-generation adapter.** On 2026-09-25, the person
   resumed one attachment after the 2.12.0 restart while the saved plan still contained that id.
