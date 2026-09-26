@@ -40,7 +40,7 @@ jobs:
         run: >-
           uv run --locked python scripts/capped-test --
           uv run --locked python -m unittest
-          tests.test_runtime_lock tests.test_windows_memory
+          tests.test_runtime_lock tests.test_windows_memory tests.test_windows_console
           tests.test_db tests.test_db_concurrency
 
   frontend:
