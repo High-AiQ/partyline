@@ -1,5 +1,15 @@
 # Lessons: the false-assumptions ledger
 
+## Native ConPTY must replace redirected parent standard handles
+
+The first Windows console implementation assumed the pseudoconsole startup
+attribute alone selected the child's standard streams. In native CI the child
+instead inherited redirected server streams: only ConPTY's mode escapes reached
+the PTY, and Python used a legacy pipe encoding. Set `STARTF_USESTDHANDLES` with
+null standard handles so Windows initializes them from the pseudoconsole. The
+native fixture checks `isatty()`, Unicode output, input and resize under CI's
+redirected parent; mocked process creation cannot prove this boundary.
+
 | DO | DO NOT |
 | --- | --- |
 | Check machine-verifiable artifact boundaries (deployed build, running pid, claimed transcript) before a restart or a proof | Trust agent memory, a clean checkout, or your own echo as evidence the right thing happened |
