@@ -1,8 +1,7 @@
 """The SQLite schema and its append-only migration history.
 
 Split from `db.py` so schema changes land here as idempotent ``MIGRATIONS``
-entries without growing the query module past its line cap. Never edit an
-already-applied entry; append a new one.
+entries without growing the query module. Never edit an applied entry; append a new one.
 """
 
 SCHEMA = """
@@ -296,4 +295,6 @@ MIGRATIONS = [
     )""",
     # The live activation start differs from attachment creation after Resume.
     "ALTER TABLE attachments ADD COLUMN runtime_started_at REAL",
+    """CREATE TABLE IF NOT EXISTS operator_restart_approvals(
+        request_id TEXT PRIMARY KEY, token_hash TEXT NOT NULL, expires_at REAL NOT NULL)""",
 ]
