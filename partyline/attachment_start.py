@@ -9,6 +9,7 @@ from .adapter_capabilities import adapter_completion
 from .attachment_view import attachment_response
 from .auth_store import ensure_api_token
 from .fence import FenceUnavailable
+from .process_memory import MemoryScopeUnavailable
 from .fence_protect import database_paths, protected_repo_roots
 from .hook_routes import surface_attention
 from .review_worktrees import list_review_worktrees
@@ -71,6 +72,12 @@ async def start_attachment(att, *, runtime, presence, make_adapter, hook_url,
         # Fail closed, loudly: no unconfined fallback exists on purpose.
         await rollback_start(runtime, att)
         raise HTTPException(409, f"write fence unavailable: {exc}") from exc
+    except MemoryScopeUnavailable as exc:
+        await rollback_start(runtime, att)
+        raise HTTPException(
+            409, f"process memory limit unavailable: {exc}. Remedy: run partyline "
+            "under a systemd user manager",
+        ) from exc
     except (Exception, asyncio.CancelledError) as exc:
         await rollback_start(runtime, att)
         if isinstance(exc, asyncio.CancelledError):

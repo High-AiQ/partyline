@@ -47,6 +47,8 @@ not when an assertion failed. The 300-line cap is a context budget, not a style 
 | Run the suite only through `./scripts/capped-test` | Run the test suite uncapped on a developer machine |
 | Clear inherited `PARTYLINE_*`, then set `PARTYLINE_DB=/tmp/<run>.db` for gates | Let imports fall through to `~/.partyline.db`, where another branch's migration can alter the schema |
 | Run tests through `./scripts/capped-test`, which clears inherited Partyline connection variables and sets a fresh temporary database | Let test imports inherit the live service's database, API coordinates, token, or media directory |
+| Refuse to run tests unless `memory.max` inside the transient scope or inherited child `RLIMIT_AS` proves the cap; put every Linux attached process in its own verified systemd scope (default 4G, configurable with `PARTYLINE_PROCESS_MEMORY_LIMIT`) | Run a suite or attached CLI when its effective memory cap cannot be verified |
+| Check at boot and in `partyline doctor` that the Partyline unit has `OOMPolicy=continue` and a finite `MemoryMax` below host RAM; verify the attached-process scope by reading `memory.max` | Rely on an operator note or an unverified systemd setting to protect the service |
 | Use a temp `PARTYLINE_DB`, FastAPI `TestClient`, and fixture transcripts | Let a test touch a real database, port, or CLI |
 | — | Run `tests.test_grok_adapter` bare on the dogfood machine |
 | Mark a genuinely uncoverable line `# pragma: no cover` with a reason | Omit files from coverage |

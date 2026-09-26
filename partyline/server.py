@@ -41,6 +41,7 @@ from .bind import (BindConfig, apply_server_config, load_bind_config, load_doten
 from .compact_routes import register_compact_route
 from . import features
 from . import fence_probe
+from . import service_guard
 from .adapters import (
     ADAPTERS,
     ADAPTER_METADATA,
@@ -134,12 +135,14 @@ async def _run_automatic_reattachment() -> None:
 @asynccontextmanager
 async def lifespan(app):
     deployment.prime()  # pin the served checkout's HEAD to this boot, before any pull
-    probe_result = (True, "", "")
-    if features.enabled("write_fence"):
-        probe_result = fence_probe.probe()
-        if not probe_result[0]:
-            logger.warning("write-fence preflight failed: %s; remedy: %s",
-                           probe_result[1], probe_result[2])
+    probe_result = fence_probe.probe(
+        check_fence=features.enabled("write_fence"),
+        service_unit=service_guard.unit_from_cgroup(),
+        discover_service_unit=False,
+    )
+    if not probe_result[0]:
+        logger.warning("memory/write-fence preflight failed: %s; remedy: %s",
+                       probe_result[1], probe_result[2])
     fence_probe.set_result(probe_result)
     app.state.fence_status = fence_probe.status(probe_result)
     runtime.db.mark_stale_attachments()

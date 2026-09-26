@@ -45,6 +45,16 @@ class RemedyTest(unittest.TestCase):
 
 
 class ProbeTest(unittest.TestCase):
+    def setUp(self):
+        self.scope_probe = patch(
+            "partyline.process_memory.probe_scope", return_value=(True, "")
+        )
+        self.guard_probe = patch("partyline.service_guard.probe", return_value=(True, "", ""))
+        self.scope_probe.start()
+        self.guard_probe.start()
+        self.addCleanup(self.guard_probe.stop)
+        self.addCleanup(self.scope_probe.stop)
+
     @patch("partyline.fence.backend_available", return_value=(True, ""))
     @patch("partyline.fence.backend", return_value="bubblewrap")
     @patch("partyline.fence_probe.subprocess.run")
@@ -107,6 +117,21 @@ class ProbeTest(unittest.TestCase):
         self.assertIn("command failed", reason)
         self.assertTrue(install)
 
+    @patch("partyline.process_memory.probe_scope", return_value=(True, ""))
+    @patch("partyline.service_guard.probe", return_value=(
+        False, "unsafe partyline unit", "drop-in: [Service]\\nOOMPolicy=continue"
+    ))
+    @patch("partyline.fence.backend_available", return_value=(True, ""))
+    @patch("partyline.fence.backend", return_value="bubblewrap")
+    @patch("partyline.fence_probe.subprocess.run")
+    def test_boot_probe_reports_service_guard_remedy(self, run, _backend, _available,
+                                                     _service_guard, _scope_probe):
+        run.return_value = subprocess.CompletedProcess([], 0, "", "")
+        ok, reason, remedy = fence_probe.probe()
+        self.assertFalse(ok)
+        self.assertIn("unsafe partyline unit", reason)
+        self.assertIn("OOMPolicy=continue", remedy)
+
 
 class DoctorTest(unittest.TestCase):
     def test_requires_are_checked_once_and_doctor_fails_closed(self):
@@ -129,6 +154,18 @@ class DoctorTest(unittest.TestCase):
             "platform": "linux", "backend": "bubblewrap"
         }), patch("partyline.doctor.shutil.which", return_value="/bin/present"):
             self.assertEqual(run(metadata, probe=lambda: (True, "", "")), 0)
+
+    def test_unit_guard_failure_is_printed_as_the_doctor_remedy(self):
+        output = io.StringIO()
+        remedy = "[Service]\nOOMPolicy=continue\nMemoryMax=48G"
+        with patch("partyline.doctor.fence_probe.status", return_value={
+            "platform": "linux", "backend": "bubblewrap"
+        }), patch("partyline.doctor.shutil.which", return_value="/bin/present"), \
+                patch("sys.stdout", output):
+            code = run({}, probe=lambda: (False, "unit guard missing", remedy))
+        self.assertEqual(code, 1)
+        self.assertIn("unit guard missing", output.getvalue())
+        self.assertIn("OOMPolicy=continue", output.getvalue())
 
 
 if __name__ == "__main__":
