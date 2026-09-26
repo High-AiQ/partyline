@@ -106,7 +106,7 @@ class WindowsRuntimeTest(unittest.IsolatedAsyncioTestCase):
             self.assertIs(spawn.call_args.kwargs['token'], scope.token)
             scope.close.assert_called_once()
         order = []
-        self.console.close.side_effect = lambda: order.append('job')
+        self.console.close.side_effect = lambda **kwargs: order.append('job')
         scope.close.side_effect = lambda: order.append('permissions')
         runtime = WindowsRuntime(self.adapter, self.console, scope)
         await asyncio.gather(runtime.close(), runtime.close())

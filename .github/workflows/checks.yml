@@ -47,6 +47,7 @@ jobs:
           tests.test_windows_command
           tests.test_windows_files
           tests.test_windows_scope tests.test_windows_shell
+          tests.test_windows_probe
 
   frontend:
     name: frontend
