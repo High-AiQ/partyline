@@ -132,6 +132,7 @@ class BundledManifestTest(unittest.TestCase):
         "codex": ["codex", "update"],
         "cursor": ["agent", "update"],
         "opencode": ["opencode", "upgrade"],
+        "opencode-v2": None,  # A global upgrade could replace the side-by-side v1 install.
         "hermes": ["hermes", "update"],
         "pi": ["pi", "update", "--self"],
         "muse": ["bash", "-lc", "curl -fsSL https://dev.meta.ai/install.sh | bash"],
