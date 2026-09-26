@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-partyline = "partyline.server:main"
+partyline = "partyline.launch:main"
 
 [dependency-groups]
 dev = [

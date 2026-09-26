@@ -40,7 +40,7 @@ def scope_argv(command: list[str], limit: str, platform: str | None = None) -> l
     verifier = [sys.executable, "-m", "partyline.process_memory", "--verify-exec", limit,
                 "--", *command]
     return [systemd_run, "--user", "--scope", "-q", "--collect", "-p",
-            f"MemoryMax={limit}", "-p", "MemorySwapMax=0", "--", *verifier]
+            f"MemoryMax={limit}", "-p", "MemorySwapMax=0", "--expand-environment=no", "--", *verifier]
 
 
 def read_memory_max() -> str | None:
@@ -116,7 +116,8 @@ def probe_scope() -> tuple[bool, str]:
         'case "$value" in ""|max|*[!0-9]*) exit 1 ;; esac; '
         '[ "$value" -gt 0 ] && [ "$value" -le "$1" ]'
     )
-    argv = [systemd_run, "--user", "--scope", "-q", "--collect", "-p",
+    # The shell owns these variables; systemd-run must not expand ${path} first.
+    argv = [systemd_run, "--user", "--scope", "-q", "--collect", "--expand-environment=no", "-p",
             f"MemoryMax={limit}", "-p", "MemorySwapMax=0", "--",
             "/bin/sh", "-c", code, "partyline-memory-probe", str(parse_size(limit))]
     try:

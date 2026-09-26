@@ -75,6 +75,7 @@ class ServiceGuardTest(unittest.TestCase):
         ), \
                 patch.object(service_guard, "_host_memory_bytes", return_value=64 * 1024**3), \
                 patch.object(service_guard.subprocess, "run", return_value=properties) as run, \
+                patch("partyline.server_memory.verify", return_value=(False, "no server cap")), \
                 patch.dict(os.environ, {"PARTYLINE_SYSTEMD_UNIT": "partyline.service"}):
             service_unit = service_guard.unit_from_cgroup()
             result = service_guard.probe(service_unit, discover=False)

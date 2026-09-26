@@ -88,12 +88,23 @@ ignores the property, startup logs the failure and attachment starts fail
 closed. Darwin applies the same configurable bound with inherited `RLIMIT_AS`,
 since it has no systemd cgroups.
 
-Partyline also checks the effective systemd unit properties at boot and in
-`partyline doctor`: `OOMPolicy=continue` and a finite `MemoryMax` below host
-RAM keep an OOM in one CLI from taking down the service. When either is
-missing, the boot log, doctor output, and attach refusal include the exact
-drop-in remedy. See [Restarting the running instance](restart.md#install-the-service-oom-guard)
-for installation instructions.
+`uv run partyline` automatically creates a temporary systemd user scope on Linux,
+preserving the foreground terminal, environment, and working directory. No service
+file is required. Its server cap defaults to the smaller of 2 GiB and 5/8 of host
+RAM; `PARTYLINE_SERVER_MEMORY_LIMIT` overrides it. Startup verifies `memory.max`
+and `memory.oom.group=0` inside that scope. Each attached CLI has its own separate
+scope, so its allocations do not consume the server's cap. These are individual
+caps, not a total budget for all attachments combined. Linux needs cgroup v2 and
+a working systemd user manager (systemd 254 or newer); an unavailable cap causes
+startup to fail closed.
+
+For installed Partyline services, boot and `partyline doctor` still check
+`OOMPolicy=continue` and a finite `MemoryMax` below host RAM. Unsafe service
+settings produce the drop-in remedy documented in
+[Restarting the running instance](restart.md#install-the-service-oom-guard).
+macOS uses its existing per-process address-space limits and does not require
+systemd. Native Windows support requires a separate terminal and write-fence
+backend; see [the platform plan](native-platforms.md).
 
 ## The protected set and carve-outs
 

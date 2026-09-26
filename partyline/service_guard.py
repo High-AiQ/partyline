@@ -122,11 +122,17 @@ def probe(unit: str | None = None, *, discover: bool = True) -> tuple[bool, str,
     host_bytes = _host_memory_bytes()
     install = remedy(actual_unit, host_bytes)
     if unit is None:
+        from . import server_memory
+
+        scope_ok, scope_reason = server_memory.verify()
+        if scope_ok:
+            return True, "", ""
         return (
             False,
             f"could not identify Partyline's systemd service unit: {lookup_reason}; "
-            "set PARTYLINE_SYSTEMD_UNIT to the active unit name",
-            install,
+            f"{scope_reason}",
+            "Start Partyline with uv run partyline to create its memory scope automatically. "
+            + install,
         )
     try:
         done = subprocess.run(
