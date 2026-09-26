@@ -37,7 +37,7 @@ class ProcessMemoryTest(unittest.TestCase):
             with self.assertRaises(process_memory.MemoryScopeUnavailable):
                 process_memory.scope_argv(["bwrap"], "4G")
         self.assertEqual(process_memory.exit_notice(-9, "4G", "codex"),
-                         "codex killed: memory limit 4G")
+                         "codex exited (code -9): killed, most likely by the 4G memory limit")
         self.assertIsNone(process_memory.exit_notice(1, "4G", "codex"))
 
     def test_boot_probe_reads_the_scope_limit_without_allocating(self):
@@ -117,7 +117,8 @@ class CappedTestLimitTest(unittest.TestCase):
                 self.skipTest(f"systemd user scope is unavailable: {exc}")
         if result.returncode == 125:
             self.skipTest("systemd user manager did not apply MemoryMax from this environment")
-        if b"No permissions to create a new namespace" in result.stderr:
-            self.skipTest("kernel user namespaces are disabled")
+        if (b"No permissions to create a new namespace" in result.stderr
+                or b"setting up uid map" in result.stderr):
+            self.skipTest("kernel user namespaces are unavailable here")
         self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
         self.assertTrue(process_memory.memory_max_enforced(result.stdout.decode().strip(), limit))

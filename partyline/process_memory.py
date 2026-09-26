@@ -93,7 +93,7 @@ def apply_address_space_limit(limit: str) -> None:
 def exit_notice(code: int, limit: str, name: str) -> str | None:
     """Explain a SIGKILL as the configured OOM limit in the line."""
     if code in (-9, 137):
-        return f"{name} killed: memory limit {limit}"
+        return f"{name} exited (code {code}): killed, most likely by the {limit} memory limit"
     if code == 125:
         return f"{name} refused to start: memory limit {limit} could not be verified"
     return None

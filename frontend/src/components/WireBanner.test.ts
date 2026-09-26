@@ -11,7 +11,7 @@ describe("wire banner preflight remedy", () => {
 
   it("keeps the person-side remedy visible while preflight is failing", () => {
     const remedy =
-      "Person: create ~/.config/systemd/user/partyline-lan.service.d/oom.conf with exactly:\n" +
+      "Person: create ~/.config/systemd/user/partyline.service.d/oom.conf with exactly:\n" +
       "[Service]\nOOMPolicy=continue\nMemoryMax=40G\n" +
       "Then run: systemctl --user daemon-reload\n" +
       "After reload, file a Partyline restart request and have a person approve it.";
