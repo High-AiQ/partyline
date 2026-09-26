@@ -199,6 +199,14 @@ class LaunchArgvTest(unittest.TestCase):
             with self.assertRaises(fence.FenceUnavailable):
                 fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
 
+    def test_memory_preflight_still_blocks_launch_when_filesystem_fence_is_disabled(self):
+        result = (False, "service memory guard missing", "install the unit drop-in")
+        with overridden(write_fence=False), patch.object(
+            fence_probe, "cached_result", return_value=result
+        ):
+            with self.assertRaisesRegex(fence.FenceUnavailable, "install the unit drop-in"):
+                fence.launch_argv(FakeAdapter(_att("/tmp"), ["cli"]))
+
     def test_failed_boot_probe_refuses_with_the_banner_remedy(self):
         result = (False, "user namespace unavailable", "apt-get install -y bubblewrap")
         with patch.object(fence, "backend_available", return_value=(True, "")), \
