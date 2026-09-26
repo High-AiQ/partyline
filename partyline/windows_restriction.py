@@ -8,6 +8,8 @@ import secrets
 from contextlib import contextmanager
 from pathlib import Path
 
+from .windows_access import check
+
 
 def create_token():
     import win32api
@@ -43,9 +45,7 @@ def can_access(token, path, permission):
     )
     impersonation = security.DuplicateToken(token, security.SecurityImpersonation)
     try:
-        _, permitted = security.AccessCheck(descriptor, impersonation, permission,
-                                            (0x120089, 0x120116, 0x1200a0, 0x1f01ff))
-        return bool(permitted)
+        return check(descriptor, impersonation, permission)
     finally:
         impersonation.Close()
 
@@ -59,7 +59,7 @@ def _pinned(path):
     try:
         for parent in reversed(Path(path).absolute().parents):
             handle = win32file.CreateFile(
-                str(parent), win32con.FILE_READ_ATTRIBUTES,
+                str(parent), 0x80,
                 win32con.FILE_SHARE_READ | win32con.FILE_SHARE_WRITE, None, win32con.OPEN_EXISTING,
                 win32con.FILE_FLAG_BACKUP_SEMANTICS | 0x00200000, None,
             )

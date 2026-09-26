@@ -36,7 +36,7 @@ def secure_directory(path, *, directory=True):
         acl = security.ACL()
         for sid in (user, security.CreateWellKnownSid(security.WinLocalSystemSid, None)):
             acl.AddAccessAllowedAceEx(security.ACL_REVISION, 3 if directory else 0,
-                                     win32con.FILE_ALL_ACCESS, sid)
+                                     0x1f01ff, sid)
         information = (security.DACL_SECURITY_INFORMATION | security.PROTECTED_DACL_SECURITY_INFORMATION
                        | security.OWNER_SECURITY_INFORMATION)
         security.SetSecurityInfo(handle, security.SE_FILE_OBJECT, information, user, None, acl, None)
