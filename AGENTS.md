@@ -21,5 +21,10 @@ changes are new idempotent entries in `partyline/db_schema.py`.
 running inside `docs/restart.md`; lessons from incidents `docs/lessons.md`; reviews
 `skills/adversarial-review/`; visual changes `skills/verify-visual-change/`.
 
+**Child-line reviews:** review the child's reported SHA in a Partyline-managed review
+worktree. With Git mirrors, refs are private per line (shared by its processes); the
+captain sees accepted refs, so newer commits can appear as uncommitted files in the
+shared worktree. Do not use that view to judge the child's progress.
+
 **Kill by pid** (`ss -ltnp | grep 864x`), never by matching the word partyline across
 command lines — that matches the room you are standing in.
