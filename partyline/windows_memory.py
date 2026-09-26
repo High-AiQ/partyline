@@ -60,6 +60,7 @@ def _api():
         "IsProcessInJob": ([wintypes.HANDLE, wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL)],
                            wintypes.BOOL),
         "GetCurrentProcess": ([], wintypes.HANDLE),
+        "TerminateJobObject": ([wintypes.HANDLE, wintypes.UINT], wintypes.BOOL),
         "CloseHandle": ([wintypes.HANDLE], wintypes.BOOL),
     }
     for name, (arguments, result) in signatures.items():
@@ -76,15 +77,16 @@ def _check(result, operation):
 
 
 class WindowsJob:
-    def __init__(self, limit: int):
+    def __init__(self, limit: int, *, kill_on_close: bool = False):
         if not 0 < limit <= ctypes.c_size_t(-1).value:
             raise ValueError("job memory limit must be positive and fit SIZE_T")
         self.api = _api()
         self.handle = _check(self.api.CreateJobObjectW(None, None), "CreateJobObjectW")
         self.limit = limit
+        self.flags = JOB_OBJECT_LIMIT_JOB_MEMORY | (0x2000 if kill_on_close else 0)
         try:
             info = ExtendedLimits()
-            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_JOB_MEMORY
+            info.BasicLimitInformation.LimitFlags = self.flags
             info.JobMemoryLimit = limit
             _check(self.api.SetInformationJobObject(
                 self.handle, JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
@@ -99,18 +101,23 @@ class WindowsJob:
         _check(self.api.QueryInformationJobObject(
             self.handle, JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
             ctypes.byref(info), ctypes.sizeof(info), None), "QueryInformationJobObject")
-        if (not info.BasicLimitInformation.LimitFlags & JOB_OBJECT_LIMIT_JOB_MEMORY
+        if (info.BasicLimitInformation.LimitFlags & self.flags != self.flags
                 or not 0 < info.JobMemoryLimit <= self.limit):
             raise OSError("Windows job memory limit is not enforced")
 
     def assign_current_process(self) -> None:
-        process = self.api.GetCurrentProcess()
+        self.assign_process(self.api.GetCurrentProcess())
+
+    def assign_process(self, process) -> None:
         _check(self.api.AssignProcessToJobObject(self.handle, process), "AssignProcessToJobObject")
         member = wintypes.BOOL()
         _check(self.api.IsProcessInJob(process, self.handle, ctypes.byref(member)), "IsProcessInJob")
         if not member.value:
-            raise OSError("current process did not enter the Windows memory job")
+            raise OSError("process did not enter the Windows memory job")
         self.verify_limit()
+
+    def terminate(self) -> None:
+        _check(self.api.TerminateJobObject(self.handle, 1), "TerminateJobObject")
 
     def close(self) -> None:
         if self.handle is not None:
