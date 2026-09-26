@@ -54,6 +54,24 @@ misleading evidence:
 These are durable false assumptions from dogfooding, paired with the evidence and guard that
 replaced them:
 
+- **Shell variables passed through `systemd-run` would reach the shell unchanged.** On
+  2026-09-26, the new boot memory probe failed because systemd expanded `${path}` before
+  the shell populated it from `/proc/self/cgroup`. It consequently read the cgroup root's
+  missing `memory.max` and suggested a systemd configuration remedy despite a working
+  4 GiB scope. Passing `--expand-environment=no` preserves the shell script. The mocked
+  boot-probe test now requires that option, and the real fenced-scope test also executes
+  the boot probe. On the affected host, the original probe failed with an unset-variable
+  warning; the corrected probe read `4294967296` successfully.
+
+- **Every Partyline instance would run as an installed systemd service.** The same
+  memory preflight rejected the README's foreground `uv run partyline` startup.
+  The entry point now establishes a temporary server scope before importing the
+  server, and verifies the kernel cap and effective OOM policy in the child. Existing
+  installed services retain their guard. `tests.test_launch` checks that a child
+  cannot bypass verification by passing the internal launch flag. Native Windows
+  remains a separate terminal, locking, and write-fence port, not a platform-string
+  exception to a Linux-only guard.
+
 - **A successful `systemd-run --scope` call meant `MemoryMax` was active.** On 2026-09-26,
   three runs of `./scripts/capped-test` coincided with the Partyline service being OOM-killed
   around 59 GB; the scope command still returned success when issued from inside bubblewrap's

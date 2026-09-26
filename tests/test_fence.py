@@ -66,6 +66,8 @@ def _worktree_fixture(base: str) -> dict:
     repo = os.path.join(base, "repo")
     os.makedirs(repo)
     _git("init", "-q", "-b", "main", cwd=repo)
+    _git("config", "user.email", "f@example.com", cwd=repo)
+    _git("config", "user.name", "fence", cwd=repo)
     _identity("commit", "-q", "--allow-empty", "-m", "root", cwd=repo)
     line_wt = os.path.join(base, "wt-line")
     sibling_wt = os.path.join(base, "wt-sibling")
@@ -805,6 +807,7 @@ class FenceIntegrationTest(unittest.TestCase):
             self.assertTrue(os.path.isfile(sibling_marker))
 
     def test_new_review_checkout_is_writable_but_repo_and_sibling_are_not(self):
+        self.att["protected_roots"].append(self.fix["sibling_wt"])
         review_root = os.path.join(self.fix["repo"], ".review")
         new_dir = os.path.join(review_root, "new-checkout")
         review_marker = os.path.join(new_dir, "gate-marker")
