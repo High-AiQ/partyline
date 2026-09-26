@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import resource
 import shutil
 import subprocess
 import sys
@@ -116,6 +115,8 @@ def systemd_available(limit: int, env: dict[str, str] | None = None) -> bool:
 
 def rlimit_available(limit: int) -> bool:
     """Confirm the child sees RLIMIT_AS before trusting the fallback."""
+    import resource
+
     check = [sys.executable, "-c",
              "import resource,sys; sys.exit(0 if resource.getrlimit(resource.RLIMIT_AS)[0] "
              "<= int(sys.argv[1]) else 1)", str(limit)]
@@ -130,6 +131,22 @@ def rlimit_available(limit: int) -> bool:
 
 
 def run_capped(command: list[str], limit: int, env: dict[str, str]) -> int:
+    if sys.platform == "win32":
+        from partyline.windows_memory import WindowsJob
+
+        job = None
+        try:
+            job = WindowsJob(limit)
+            job.assign_current_process()
+            print(f"capped-test: Windows job memory={display_size(limit)} (whole process tree)", flush=True)
+            return subprocess.run(command, env=env).returncode
+        except OSError as exc:
+            print(f"capped-test: refusing to run: {exc}", file=sys.stderr, flush=True)
+            return 125
+        finally:
+            if job is not None:
+                job.close()
+
     if systemd_available(limit, env):
         print(f"capped-test: cgroup MemoryMax={display_size(limit)} (whole process tree)", flush=True)
         return subprocess.run(
@@ -147,6 +164,8 @@ def run_capped(command: list[str], limit: int, env: dict[str, str]) -> int:
 
     print(f"capped-test: RLIMIT_AS={display_size(limit)} (this process only, verified in child)",
           file=sys.stderr, flush=True)
+
+    import resource
 
     def apply_limit():  # pragma: no cover - runs in the forked child
         resource.setrlimit(resource.RLIMIT_AS, (limit, limit))

@@ -9,8 +9,11 @@ real interactive terminal processes; their speech still comes from structured
 transcripts. Memory protection must not silently disable the write fence.
 
 This is a platform plan, not a claim of native Windows support today. The current
-runtime imports `fcntl` and `termios`, uses `os.openpty`, Unix process groups and
-`flock`, and ships no Windows write-fence backend.
+terminal runtime imports `fcntl` and `termios`, uses `os.openpty` and Unix process
+groups, and ships no Windows write-fence backend. Database ownership locks now use
+Windows byte-range locks or Unix `flock`. The native Windows CI foundation runs
+those database tests under a verified Job Object memory cap; this does not yet
+make the interactive application runnable on Windows.
 
 ## Memory architecture
 
