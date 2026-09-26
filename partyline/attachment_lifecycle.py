@@ -131,10 +131,10 @@ async def create_fresh_record(db, expected, body):
             started_at = time.time()
             db.conn.execute(
                 "INSERT INTO attachments(id,conv_id,name,adapter,command,cwd,status,"
-                "runtime_owner,last_seen,created_at,runtime_started_at) "
-                "VALUES(?,?,?,?,?,?,'starting',?,?,?,?)",
+                "runtime_owner,last_seen,created_at,runtime_started_at,memory_limit) "
+                "VALUES(?,?,?,?,?,?,'starting',?,?,?,?,?)",
                 (ident, att["conv_id"], att["name"], att["adapter"], json.dumps(att["command"]),
-                 att["cwd"], owner, cursor, started_at, started_at),
+                 att["cwd"], owner, cursor, started_at, started_at, att.get("memory_limit")),
             )
         return db.get_attachment(ident)
 

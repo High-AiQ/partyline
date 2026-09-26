@@ -23,6 +23,7 @@ from .agent_connection import provision_connection, bind_connection_hint
 from .fence import FenceUnavailable
 from .fence_protect import database_paths, protected_repo_roots
 from .hook_routes import surface_attention
+from .process_incidents import exit_callback
 from .hierarchy import tree_live_name_conflict
 from .role_delivery import bind_role_delivery
 from .review_worktrees import list_review_worktrees
@@ -234,6 +235,7 @@ async def _resume_adapter_locked(
         runtime.post_callback(att_id, conv["id"], runtime_owner, route=False),
     )
     att["startup_attention"] = lambda prompt: surface_attention(runtime, att, prompt)
+    att["on_process_exit"] = exit_callback(runtime, att)
 
     adapter = make_adapter(
         att["adapter"],
@@ -256,6 +258,7 @@ async def _resume_adapter_locked(
     startup_staged = adapter.stage_startup_delivery(startup_messages or [])
     if not await runtime.db.claim_attachment_async(att_id, runtime_owner):
         raise HTTPException(409, claim_refusal_detail(runtime, att))
+    att["memory_limit"] = runtime.db.get_attachment(att_id).get("memory_limit")
     try:
         await adapter.start()
     except FenceUnavailable as exc:

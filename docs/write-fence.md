@@ -125,7 +125,40 @@ macOS uses its existing per-process address-space limits and does not require
 systemd. Windows uses ConPTY, restricted tokens, and Job Objects; see
 [native platform support](native-platforms.md).
 
+## Memory failures and recovery
+
+A process killed by the kernel cannot catch its own OOM. The Partyline host stays
+outside the attachment's memory scope and records the failure. Linux attachment
+scopes retain their failed state until the host reads `Result=oom-kill`, the limit,
+and the peak when systemd provides it. A launcher's `-15` or `-9` exit alone is not
+proof of OOM. On other platforms, or when the evidence is unavailable, the report
+keeps the exit cause unconfirmed.
+
+An unexpected nonzero exit (or a confirmed OOM) leaves a durable incident and a
+notice on the process's line. Partyline privately wakes its nearest live captain:
+the line's captain first, then the first available ancestor captain. A captain's
+own failure goes upward. There is one incident per activation, no automatic
+restart, and no escalation for a deliberate detach or a normal exit. With no live
+captain, the line's notice and incident remain available to a person.
+
+`GET /api/attachments/<id>/memory` returns the last incident, the saved override,
+the effective limit for the next launch, and the host's maximum allowed override.
+An authorized captain or person can change a **stopped** process with
+`PUT /api/attachments/<id>/memory` and `{"limit":"6G"}`. Use `{"limit":null}` to
+restore the host default, then use the existing resume action. A worker cannot
+grant itself more memory. Overrides survive resume and fresh-session replacement.
+The API ceiling is the smaller of `PARTYLINE_MAX_PROCESS_MEMORY_LIMIT` (default
+`8G`) and 75% of host RAM. These caps do not reserve RAM or guarantee that the
+combined workload fits; the captain still needs to consider other live processes.
+
+First inspect the failed command and its error output. A failing assertion that
+prints a huge object graph needs a bounded diagnostic, not more RAM. Run uncertain
+tests under a smaller independent cap so the test can fail while the agent lives.
+The repository's `scripts/capped-test` now uses the scope result to return 137 for
+a confirmed OOM even when systemd's launcher was terminated with SIGTERM.
+
 ## The protected set and carve-outs
+
 
 At spawn and resume, Partyline reads every non-archived conversation and
 the cwd of each attachment on those lines. Each cwd inside a Git

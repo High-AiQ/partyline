@@ -38,7 +38,7 @@ class ProcessMemoryTest(unittest.TestCase):
             with self.assertRaises(process_memory.MemoryScopeUnavailable):
                 process_memory.scope_argv(["bwrap"], "4G")
         self.assertEqual(process_memory.exit_notice(-9, "4G", "codex"),
-                         "codex exited (code -9): killed, most likely by the 4G memory limit")
+                         "codex exited (code -9): killed; memory-limit cause unconfirmed")
         self.assertIsNone(process_memory.exit_notice(1, "4G", "codex"))
 
     def test_boot_probe_reads_the_scope_limit_without_allocating(self):
