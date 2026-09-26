@@ -30,6 +30,7 @@ class WindowsHookTest(unittest.TestCase):
         command = python_command('print("%PATH% & $HOME"); raise SystemExit(7)')
         for prefix in (['cmd.exe', '/d', '/s', '/c'],
                        ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command']):
-            result = subprocess.run([*prefix, command], capture_output=True, text=True, timeout=15)
-            self.assertEqual(result.returncode, 7, result.stderr)
+            invocation = command + ('; exit $LASTEXITCODE' if prefix[0] == 'powershell.exe' else '')
+            result = subprocess.run([*prefix, invocation], capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 7, (prefix, result.stdout, result.stderr))
             self.assertEqual(result.stdout.strip(), '%PATH% & $HOME')

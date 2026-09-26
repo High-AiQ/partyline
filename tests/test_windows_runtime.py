@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from partyline.adapters.base import Adapter
-from partyline.adapters.windows_runtime import WindowsRuntime
+from partyline.adapters.windows_runtime import WindowsRuntime, start
 from partyline import launch, windows_server
 
 
@@ -90,6 +90,26 @@ class WindowsRuntimeTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(spawn.call_args.args[0], ['fixture'])
             await self.adapter.stop()
             await asyncio.gather(*self.adapter._tasks, return_exceptions=True)
+
+    async def test_scope_is_removed_after_failed_spawn_and_after_job_shutdown(self):
+        self.adapter.spawn_argv = ['fixture.exe']
+        self.adapter.memory_limit = '128M'
+        scope = MagicMock()
+        with patch('partyline.adapters.windows_runtime.fence.backend', return_value='restricted-token'), \
+             patch('partyline.adapters.windows_runtime.features.enabled', return_value=True), \
+             patch('partyline.adapters.windows_runtime.windows_scope.prepare', return_value=scope), \
+             patch('partyline.adapters.windows_runtime.WindowsConsole.spawn',
+                   new=AsyncMock(side_effect=OSError('spawn refused'))) as spawn:
+            with self.assertRaisesRegex(OSError, 'spawn refused'):
+                await start(self.adapter, {})
+            self.assertIs(spawn.call_args.kwargs['token'], scope.token)
+            scope.close.assert_called_once()
+        order = []
+        self.console.close.side_effect = lambda: order.append('job')
+        scope.close.side_effect = lambda: order.append('permissions')
+        runtime = WindowsRuntime(self.adapter, self.console, scope)
+        await asyncio.gather(runtime.close(), runtime.close())
+        self.assertEqual(order, ['job', 'permissions'])
 
 
 class WindowsStartupTest(unittest.TestCase):

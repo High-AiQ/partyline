@@ -50,6 +50,7 @@ def provision_connection(db_path: str, att: dict) -> None:
         if os.path.exists(scratch):
             os.unlink(scratch)
     client = Path(__file__).with_name("agent_client.py")
+    att['_agent_connection_file'] = str(target)
     quote = subprocess.list2cmdline if os.name == 'nt' else shlex.join
     att["agent_command"] = quote([sys.executable, str(client), "--connection", str(target)])
 

@@ -25,14 +25,36 @@ def create_token():
         identity = 'S-1-5-21-' + '-'.join(str(secrets.randbits(32)) for _ in range(3)) + '-1001'
         sid = security.ConvertStringSidToSid(identity)
         world = security.CreateWellKnownSid(security.WinWorldSid, None)
-        # DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED. Do not include
-        # the user SID: that would retain its unrestricted filesystem grants.
-        token = security.CreateRestrictedToken(original, 0x0d, [], [], [
-            (world, 0), (logon[0], 0), (sid, 0),
+        users = security.CreateWellKnownSid(security.WinBuiltinUsersSid, None)
+        # Restrict every access, including FILE_DELETE_CHILD. WRITE_RESTRICTED
+        # skips that right and permits deleting through a user-owned parent.
+        # Do not include the user SID: it would retain owner WRITE_DAC rights.
+        token = security.CreateRestrictedToken(original, 0x05, [], [], [
+            (world, 0), (users, 0), (logon[0], 0), (sid, 0),
         ])
+        try:
+            _token_permissions(token, sid, security, original)
+        except BaseException:
+            token.Close()
+            raise
         return token, sid
     finally:
         original.Close()
+
+
+def _token_permissions(token, sid, security, original):
+    """The child can inspect its own token and control its own descendants."""
+    user = security.GetTokenInformation(original, security.TokenUser)[0]
+    system = security.CreateWellKnownSid(security.WinLocalSystemSid, None)
+    acl = security.ACL()
+    for identity in (user, system, sid):
+        acl.AddAccessAllowedAceEx(security.ACL_REVISION, 0, 0x10000000, identity)
+    # Prevent another restricted token from recovering implicit owner WRITE_DAC.
+    owner = security.ConvertStringSidToSid('S-1-3-4')
+    acl.AddAccessAllowedAceEx(security.ACL_REVISION, 0, 0x20000, owner)
+    security.SetTokenInformation(token, security.TokenDefaultDacl, acl)
+    security.SetSecurityInfo(token, security.SE_KERNEL_OBJECT,
+                             security.DACL_SECURITY_INFORMATION, None, None, acl, None)
 
 
 def can_access(token, path, permission):
@@ -74,6 +96,13 @@ def _pinned(path):
 
 def edit_grant(path, sid, *, remove=False, permission=0x1301bf, deny=False, inherit=True):
     with _pinned(path):
+        if remove:
+            import win32security as security
+            descriptor = security.GetNamedSecurityInfo(str(path), security.SE_FILE_OBJECT,
+                                                       security.DACL_SECURITY_INFORMATION)
+            acl = descriptor.GetSecurityDescriptorDacl()
+            if acl is None or not any(acl.GetAce(index)[-1] == sid for index in range(acl.GetAceCount())):
+                return
         _edit_grant(path, sid, remove=remove, permission=permission, deny=deny, inherit=inherit)
 
 
@@ -113,6 +142,7 @@ def _edit_grant(path, sid, *, remove, permission, deny, inherit):
                 # PyACL canonicalizes the ACL after adding an explicit deny,
                 # placing it before allows while preserving other ACE types.
                 acl.AddAccessDeniedAceEx(security.ACL_REVISION, inheritance, permission, sid)
+                acl.AddAccessAllowedAceEx(security.ACL_REVISION, inheritance, 0x1200a9, sid)
             else:
                 acl.AddAccessAllowedAceEx(security.ACL_REVISION, inheritance, permission, sid)
         descriptor.SetSecurityDescriptorDacl(True, acl, False)

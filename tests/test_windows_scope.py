@@ -10,7 +10,7 @@ from partyline import windows_scope
 class WindowsScopeTest(unittest.TestCase):
     def test_private_temporary_directory_and_serialized_cleanup(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             cwd = root / 'work'
             cwd.mkdir()
             database = root / 'partyline.db'
@@ -22,10 +22,11 @@ class WindowsScopeTest(unittest.TestCase):
             with patch.object(windows_scope.Path, 'home', return_value=root), \
                  patch.object(windows_scope, 'WindowsFence') as policy:
                 scope = windows_scope.prepare(adapter, environment)
-                writable, protected = policy.call_args.args
+                writable, protected, readable = policy.call_args.args
                 self.assertIn(cwd, writable)
                 self.assertIn(root / 'private-codex', writable)
                 self.assertEqual(protected, [str(database)])
+                self.assertTrue(readable)
                 self.assertTrue(Path(environment['TEMP']).is_dir())
                 self.assertNotEqual(environment['TEMP'], directory)
                 scope.close()
@@ -33,7 +34,7 @@ class WindowsScopeTest(unittest.TestCase):
 
     def test_cli_state_cannot_widen_scope_inside_a_protected_repository(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             adapter = SimpleNamespace(kind='grok', att={
                 'id': 'fixture', 'cwd': str(root), 'db_paths': [str(root / '.grok' / 'db')],
             })
