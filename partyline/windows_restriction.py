@@ -5,6 +5,8 @@ The policy must verify protected objects with this token before launching code.
 """
 
 import secrets
+from contextlib import contextmanager
+from pathlib import Path
 
 
 def create_token():
@@ -48,7 +50,34 @@ def can_access(token, path, permission):
         impersonation.Close()
 
 
+@contextmanager
+def _pinned(path):
+    """Keep every ancestor from becoming a junction during the ACL operation."""
+    import win32con
+    import win32file
+    handles = []
+    try:
+        for parent in reversed(Path(path).absolute().parents):
+            handle = win32file.CreateFile(
+                str(parent), win32con.FILE_READ_ATTRIBUTES,
+                win32con.FILE_SHARE_READ | win32con.FILE_SHARE_WRITE, None, win32con.OPEN_EXISTING,
+                win32con.FILE_FLAG_BACKUP_SEMANTICS | 0x00200000, None,
+            )
+            handles.append(handle)
+            if win32file.GetFileInformationByHandle(handle)[0] & win32con.FILE_ATTRIBUTE_REPARSE_POINT:
+                raise OSError(f'write grant traverses a reparse point: {parent}')
+        yield
+    finally:
+        for handle in reversed(handles):
+            handle.Close()
+
+
 def edit_grant(path, sid, *, remove=False, permission=0x1301bf):
+    with _pinned(path):
+        _edit_grant(path, sid, remove=remove, permission=permission)
+
+
+def _edit_grant(path, sid, *, remove, permission):
     """Change only our synthetic SID's ACE, on a pinned non-reparse object.
 
     SetKernelObjectSecurity avoids automatic propagation to existing children;
@@ -63,7 +92,7 @@ def edit_grant(path, sid, *, remove=False, permission=0x1301bf):
         str(path), win32con.READ_CONTROL | win32con.WRITE_DAC,
         win32con.FILE_SHARE_READ | win32con.FILE_SHARE_WRITE | win32con.FILE_SHARE_DELETE,
         None, win32con.OPEN_EXISTING,
-        win32con.FILE_FLAG_BACKUP_SEMANTICS | win32con.FILE_FLAG_OPEN_REPARSE_POINT, None,
+        win32con.FILE_FLAG_BACKUP_SEMANTICS | 0x00200000, None,
     )
     try:
         attributes = win32file.GetFileInformationByHandle(handle)[0]

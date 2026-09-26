@@ -85,12 +85,16 @@ class WindowsStartupTest(unittest.TestCase):
         with patch.object(windows_server, 'WindowsJob') as factory, \
              patch('partyline.server_memory.limit_bytes', return_value=123), \
              patch('partyline.bind.load_dotenv'):
-            callback = MagicMock(side_effect=RuntimeError('server stopped'))
+            def fail(arguments):
+                self.assertEqual(windows_server.breakaway_flags(), 0x1000000)
+                raise RuntimeError('server stopped')
+            callback = MagicMock(side_effect=fail)
             with self.assertRaisesRegex(RuntimeError, 'server stopped'):
                 windows_server.serve(['--port', '8642'], callback)
             factory.assert_called_once_with(123, server=True)
             factory.return_value.assign_current_process.assert_called_once()
             factory.return_value.close.assert_called_once()
+            self.assertEqual(windows_server.breakaway_flags(), 0)
 
     def test_launcher_delegates_windows_memory_setup(self):
         with patch.object(launch.sys, 'platform', 'win32'), \
