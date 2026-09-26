@@ -102,7 +102,7 @@ request.
 | DO | DO NOT |
 | --- | --- |
 | Before planning from a stale clean checkout, the captain refreshes its attached checkout with `git pull --ff-only`; after merge, the captain fast-forwards it, verifies `git rev-parse HEAD`, runs `uv sync --locked`, then requests a restart; use HTTPS with `git -c credential.helper='!gh auth git-credential'` if fenced SSH is unavailable | Ask the person to pull; skip a dirty-checkout ask; reset, stash, or discard in a person's checkout |
-| File a restart-request with a clear reason and wait for a person to approve it | Restart the service by any path other than the approved request |
+| File a restart request; use human approval or explicitly delegated local operator approval (`docs/restart.md`) | Restart without saving the fleet-wide recovery plan |
 | Trust the automatic mid-turn mark and private continue notice to resume interrupted work | Delay approval waiting for every participant to go idle first |
 | Prove recovery afterward: identity, continuation receipts, live attachment state | Report success without checking `/api/running` |
 
