@@ -40,7 +40,7 @@ class WindowsConsole:
         self._stream = pyte.ByteStream(self._screen)
 
     @classmethod
-    async def spawn(cls, argv, cwd, environment, memory_limit, *, columns=120, rows=40):
+    async def spawn(cls, argv, cwd, environment, memory_limit, *, columns=120, rows=40, token=None):
         dimensions = win.size(columns, rows)
         block = win.environment_block(environment)
         if not argv or any('\0' in arg for arg in argv):
@@ -78,7 +78,9 @@ class WindowsConsole:
             startup.lpAttributeList = c.cast(attributes, c.c_void_p)
             command = c.create_unicode_buffer(subprocess.list2cmdline([executable, *argv[1:]]))
             # CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT
-            win.check(terminal.api.CreateProcessW(
+            create = (terminal.api.CreateProcessW if token is None
+                      else lambda *args: win.create_as_user(token, *args))
+            win.check(create(
                 executable, command, None, None, False, 0x80404, block, cwd,
                 c.byref(startup), c.byref(terminal.process)), 'CreateProcessW')
             terminal.job.assign_process(terminal.process.hProcess)

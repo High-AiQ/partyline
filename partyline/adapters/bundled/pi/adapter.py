@@ -58,7 +58,7 @@ class PartylineAdapter(Adapter):
             elif waited in (12.0, 24.0):
                 # Probably held at a first-run or trust prompt: accept the
                 # default and re-send the briefing.
-                os.write(self.master, b"\r")
+                self.write_terminal(b"\r")
                 await asyncio.sleep(1.0)
                 await self.send_keys(self.briefing())
             elif waited > 45.0:

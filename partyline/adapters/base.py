@@ -8,16 +8,18 @@ turn process output into chat messages.
 from __future__ import annotations
 
 import asyncio
-import fcntl
 import os
 import struct
 import subprocess
 import sys
-import termios
 import time
 from collections.abc import Awaitable, Callable
 
 import pyte
+
+if sys.platform != "win32":
+    import fcntl
+    import termios
 
 from partyline import process_memory
 from partyline.adapters import activation, fence, pty_io, startup_prompt
@@ -106,8 +108,6 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
         self.spawn_argv = process_memory.scope_argv(
             fence.launch_argv(self), self.memory_limit,
         )
-        master, slave = os.openpty()
-        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
         env = dict(child_env(os.environ, self.att), TERM="xterm-256color")
         env.update(self.spawn_env())
         # Adapters declare what to strip so a spawned CLI doesn't mistake itself
@@ -119,6 +119,13 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
                     env.pop(existing, None)
             else:
                 env.pop(key, None)
+
+        if sys.platform == "win32":
+            from .windows_runtime import start
+            return await start(self, env)
+
+        master, slave = os.openpty()
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
 
         def preexec():
             os.setsid()
@@ -168,7 +175,9 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
         self.abort_startup_prompt()
         self._mark_not_ready()
         self._terminal_viewers.close()
-        if self.proc:
+        if getattr(self, "_windows", None):
+            await self._windows.close()
+        elif self.proc:
             await stop_process_group(self.proc)
         for task in self._tasks:
             task.cancel()
@@ -291,15 +300,17 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
         return self._term.columns, self._term.lines
 
     def write_terminal(self, data: bytes) -> None:
-        assert self.master is not None
-        os.write(self.master, data)
+        if getattr(self, "_windows", None):
+            self._windows.write_nowait(data)
+        else:
+            assert self.master is not None
+            os.write(self.master, data)
 
     def send_key(self, key: str):
         data = KEYS.get(key)
         if data is None:
             raise ValueError(f"unsupported key: {key}")
-        assert self.master is not None
-        os.write(self.master, data)
+        self.write_terminal(data)
 
     def briefing(self) -> str:
         text = BRIEFING.format(name=self.att["name"], conv=self.att.get("conv_name", "?"))
