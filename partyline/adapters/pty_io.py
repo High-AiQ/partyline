@@ -49,5 +49,8 @@ class PtyWriter:
     master: int | None
 
     async def _write_all(self, data: bytes) -> None:
+        if getattr(self, "_windows", None):
+            await self._windows.write(data)
+            return
         assert self.master is not None
         await write_all(self.master, data)

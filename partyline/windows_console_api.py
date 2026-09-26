@@ -63,6 +63,16 @@ def api():
     return kernel
 
 
+def create_as_user(token, *arguments):
+    security = c.WinDLL('advapi32', use_last_error=True)
+    function = security.CreateProcessAsUserW
+    function.argtypes = [w.HANDLE, w.LPCWSTR, w.LPWSTR, c.c_void_p, c.c_void_p,
+                         w.BOOL, w.DWORD, c.c_void_p, w.LPCWSTR, c.c_void_p,
+                         c.POINTER(ProcessInfo)]
+    function.restype = w.BOOL
+    return function(int(token), *arguments)
+
+
 def check(result, operation):
     if not result:
         error = c.get_last_error()

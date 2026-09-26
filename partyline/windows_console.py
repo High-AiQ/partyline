@@ -1,20 +1,19 @@
 """A real ConPTY with a verified memory job established before child execution.
 
-This terminal primitive does not provide filesystem isolation. The application
-must keep refusing Windows attachments until its write fence is implemented.
+Filesystem isolation is supplied by the restricted token from WindowsScope.
 """
 
 import asyncio
 import ctypes as c
 from ctypes import wintypes as w
-import os
-import shutil
 import subprocess
 
 import pyte
 
 from . import windows_console_api as win
 from .windows_memory import WindowsJob
+from .windows_server import breakaway_flags
+from .windows_command import resolve
 
 
 class WindowsConsole:
@@ -28,6 +27,7 @@ class WindowsConsole:
         self._pump_task = None
         self._queue = asyncio.Queue(maxsize=64)
         self._closing = False
+        self._preserve_output = False
         self._closed = False
         self._close_lock = asyncio.Lock()
         self._write_lock = asyncio.Lock()
@@ -40,14 +40,11 @@ class WindowsConsole:
         self._stream = pyte.ByteStream(self._screen)
 
     @classmethod
-    async def spawn(cls, argv, cwd, environment, memory_limit, *, columns=120, rows=40):
+    async def spawn(cls, argv, cwd, environment, memory_limit, *, columns=120, rows=40, token=None):
         dimensions = win.size(columns, rows)
         block = win.environment_block(environment)
-        if not argv or any('\0' in arg for arg in argv):
-            raise ValueError('expected an executable and arguments without NUL characters')
-        executable = shutil.which(argv[0], path=environment.get('PATH'))
-        if not executable or os.path.splitext(executable)[1].lower() not in {'.exe', '.com'}:
-            raise OSError('ConPTY requires a native executable; invoke a script through its interpreter')
+        argv = resolve(argv, environment)
+        executable = argv[0]
         terminal = cls()
         terminal._screen.resize(lines=rows, columns=columns)
         input_read, output_write = w.HANDLE(), w.HANDLE()
@@ -81,8 +78,10 @@ class WindowsConsole:
             startup.lpAttributeList = c.cast(attributes, c.c_void_p)
             command = c.create_unicode_buffer(subprocess.list2cmdline([executable, *argv[1:]]))
             # CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT
-            win.check(terminal.api.CreateProcessW(
-                executable, command, None, None, False, 0x80404, block, cwd,
+            create = (terminal.api.CreateProcessW if token is None
+                      else lambda *args: win.create_as_user(token, *args))
+            win.check(create(
+                executable, command, None, None, False, 0x80404 | breakaway_flags(), block, cwd,
                 c.byref(startup), c.byref(terminal.process)), 'CreateProcessW')
             terminal.job.assign_process(terminal.process.hProcess)
             if terminal.api.ResumeThread(terminal.process.hThread) == 0xffffffff:
@@ -152,7 +151,7 @@ class WindowsConsole:
                     self._responses.clear()
                     async with self._write_lock:
                         await asyncio.wait_for(asyncio.to_thread(self._write, responses), 5)
-                if not self._closing:
+                if not self._closing or self._preserve_output:
                     await self._queue.put(data)
         except OSError as exc:
             self._error = exc
@@ -197,13 +196,15 @@ class WindowsConsole:
         win.hresult(result, 'ResizePseudoConsole')
         self._screen.resize(lines=rows, columns=columns)
 
-    async def close(self):
+    async def close(self, *, preserve_output=False):
         async with self._close_lock:
             if self._closed:
                 return
             self._closing = True
-            while not self._queue.empty():
-                self._queue.get_nowait()
+            self._preserve_output = preserve_output
+            if not preserve_output:
+                while not self._queue.empty():
+                    self._queue.get_nowait()
             try:
                 try:
                     if self.job is not None:
@@ -215,18 +216,28 @@ class WindowsConsole:
                         # Drain output while ClosePseudoConsole emits its final frame.
                         await asyncio.wait_for(asyncio.to_thread(
                             self.api.ClosePseudoConsole, self.console), 5)
+                        if preserve_output and self._pump_task:
+                            try:
+                                await asyncio.wait_for(asyncio.shield(self._pump_task), 1)
+                            except TimeoutError:
+                                pass  # a stalled terminal viewer must not block shutdown
             finally:
                 self.console = w.HANDLE()
                 for handle in (self.input, self.output, self.process.hProcess):
                     if handle:
                         self.api.CloseHandle(handle)
                 if self._pump_task is not None:
+                    if self._queue.full():
+                        self._queue.get_nowait()
                     self._pump_task.cancel()
                     await asyncio.gather(self._pump_task, return_exceptions=True)
                 if self.job is not None:
                     self.job.close()
                 self._closed = True
                 # Wake a reader even if the output pump was cancelled during shutdown.
-                while not self._queue.empty():
+                if not preserve_output:
+                    while not self._queue.empty():
+                        self._queue.get_nowait()
+                if self._queue.full():
                     self._queue.get_nowait()
                 self._queue.put_nowait(None)

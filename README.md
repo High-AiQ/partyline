@@ -20,8 +20,8 @@ Attach Claude Code, Codex, Antigravity, OpenCode, Cursor, DeepSeek Harness, and 
 
 ## Quick start
 
-Linux or macOS · Python 3.11+ · [uv](https://docs.astral.sh/uv/) · MIT. Node not required to **run** (only to change the frontend).
-Every attached process runs fenced; managed repositories and Partyline's database are protected by default, while other host paths remain writable. On Linux install bubblewrap with your distribution's package manager; macOS includes its backend. See [the write fence](docs/write-fence.md) for scope and limits.
+Linux, macOS, or Windows 10+ (build 17763+) · Python 3.11+ · [uv](https://docs.astral.sh/uv/) · MIT. Node not required to **run** (only to change the frontend).
+Every attached process runs fenced; managed repositories and Partyline's database are protected by default, with platform-specific access outside that protected set. On Linux install bubblewrap with your distribution's package manager; macOS and Windows include their native backends. On Windows, use local drives with filesystem ACLs and install Git; WSL and administrator access are not required. See [the write fence](docs/write-fence.md) for scope and limits.
 
 ```bash
 git clone https://github.com/High-AiQ/partyline.git
@@ -30,8 +30,9 @@ uv run --locked partyline   # http://127.0.0.1:8642
 ```
 
 On Linux, this command automatically creates a temporary memory-limited scope for the
-foreground server; no service file is needed. The default server cap is 2 GiB (lower on
-small machines), and each attached CLI gets its own 4 GiB cap. See
+foreground server; Windows uses native Job Objects. No service installation is needed. The default server cap is 2 GiB (lower on
+small machines), and each attached CLI gets its own 4 GiB cap on Linux and Windows.
+macOS uses per-process address-space limits. See
 [memory limits](docs/write-fence.md) for platform requirements and configuration.
 
 Sign in → open a line → attach a process with a handle and adapter → talk with `@mentions` (on a line with a single live process, a plain message reaches it without one).

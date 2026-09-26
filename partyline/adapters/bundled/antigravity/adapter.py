@@ -114,7 +114,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
         await self._write_all(b"\r")
 
     async def deliver(self, messages: list[dict]):
-        if self.master is not None and any(
+        if (self.master is not None or getattr(self, '_windows', None)) and any(
             self._composer_shows(wake[0]) for wake in self._outstanding
         ):
             await self._write_all(b"\r")
@@ -212,7 +212,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
             if waited in (12.0, 24.0):
                 # Probably held at a first-run or trust prompt: accept the
                 # default and re-send the briefing.
-                os.write(self.master, b"\r")
+                self.write_terminal(b"\r")
                 await asyncio.sleep(1.0)
                 await self.send_keys(self.briefing())
             elif waited > 45.0:

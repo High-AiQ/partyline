@@ -22,9 +22,12 @@ def provision_connection(db_path: str, att: dict) -> None:
     directory = connection_directory(db_path)
     directory.mkdir(mode=0o700, exist_ok=True)
     info = directory.lstat()
-    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+    if os.name == 'nt':
+        from .windows_private import secure_directory
+        secure_directory(directory)
+    elif not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
         raise ValueError("unsafe agent connection directory")
-    if stat.S_IMODE(info.st_mode) != 0o700:
+    if os.name != 'nt' and stat.S_IMODE(info.st_mode) != 0o700:
         raise ValueError("agent connection directory must have mode 0700")
     coordinates = child_env({}, att)
     payload = {"api": coordinates["PARTYLINE_API"], "token": att["api_token"],
@@ -39,12 +42,21 @@ def provision_connection(db_path: str, att: dict) -> None:
     try:
         with os.fdopen(fd, "w") as stream:
             json.dump(payload, stream)
+        if os.name == 'nt':
+            secure_directory(scratch, directory=False)
         os.replace(scratch, target)
     finally:
         if os.path.exists(scratch):
             os.unlink(scratch)
     client = Path(__file__).with_name("agent_client.py")
-    att["agent_command"] = shlex.join([sys.executable, str(client), "--connection", str(target)])
+    att['_agent_connection_file'] = str(target)
+    arguments = [sys.executable, str(client), '--connection', str(target)]
+    if os.name == 'nt':
+        from .windows_shell import quote
+        att['agent_command'] = '& ' + ' '.join(quote(argument) for argument in arguments)
+        att['agent_shell'] = 'PowerShell'
+    else:
+        att['agent_command'] = shlex.join(arguments)
 
 
 def remove_connection(db_path: str, att_id: str) -> None:
@@ -55,8 +67,10 @@ def remove_connection(db_path: str, att_id: str) -> None:
 
 def connection_hint(att: dict) -> str:
     """Resumed contexts did not receive a new joining briefing."""
+    shell = f" Run in {att['agent_shell']}." if att.get('agent_shell') else ''
     return ("Partyline API helper (works without inherited environment): `"
-            + att["agent_command"] + "`; use `context` or `request METHOD /api/... --json-file PATH`.")
+            + att["agent_command"] + "`; use `context` or `request METHOD /api/... --json-file PATH`."
+            + shell)
 
 
 def bind_connection_hint(att: dict) -> None:

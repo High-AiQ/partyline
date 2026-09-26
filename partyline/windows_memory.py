@@ -77,13 +77,16 @@ def _check(result, operation):
 
 
 class WindowsJob:
-    def __init__(self, limit: int, *, kill_on_close: bool = False):
+    def __init__(self, limit: int, *, kill_on_close: bool = False, server: bool = False):
         if not 0 < limit <= ctypes.c_size_t(-1).value:
             raise ValueError("job memory limit must be positive and fit SIZE_T")
         self.api = _api()
         self.handle = _check(self.api.CreateJobObjectW(None, None), "CreateJobObjectW")
         self.limit = limit
-        self.flags = JOB_OBJECT_LIMIT_JOB_MEMORY | (0x2000 if kill_on_close else 0)
+        # The server's descendants enter separate verified jobs at suspended spawn.
+        # They must not share the server's smaller memory budget.
+        self.flags = (JOB_OBJECT_LIMIT_JOB_MEMORY | (0x2000 if kill_on_close else 0)
+                      | (0x800 if server else 0))
         try:
             info = ExtendedLimits()
             info.BasicLimitInformation.LimitFlags = self.flags

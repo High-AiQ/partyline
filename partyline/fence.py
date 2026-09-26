@@ -65,18 +65,23 @@ def bwrap_available() -> bool:
 
 def backend() -> str:
     """The fence backend this platform gets, decided at launch time:
-    bubblewrap on Linux, Apple's sandbox-exec on Darwin, none elsewhere.
+    bubblewrap on Linux, sandbox-exec on Darwin, restricted tokens on Windows.
     """
     if sys.platform.startswith("linux"):
         return "bubblewrap"
     if sys.platform == "darwin":
         return "sandbox-exec"
+    if sys.platform == "win32":
+        return "restricted-token"
     return "none"
 
 
 def backend_available() -> tuple[bool, str]:
     """Whether the platform's backend can run, with a human-readable reason."""
     name = backend()
+    if name == "restricted-token":
+        from .windows_platform import available
+        return available()
     if name == "bubblewrap":
         if bwrap_available():
             return True, ""
@@ -160,6 +165,9 @@ def launch_argv(adapter) -> list[str]:
     if not available:
         raise FenceUnavailable(_refusal(reason))
     att = adapter.att
+    if backend() == "restricted-token":
+        # WindowsRuntime establishes verified permissions before resuming ConPTY.
+        return command + _fence_args(att)
     if backend() == "sandbox-exec":
         deny, allow, deny_git, allow_git = _darwin_scope(att)
         return fence_darwin.argv(deny, allow, deny_git, allow_git,

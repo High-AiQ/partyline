@@ -5,6 +5,7 @@ import glob
 import json
 import os
 import shlex
+import sys
 
 from partyline.adapters.base import Adapter as BaseAdapter
 from partyline.adapters.compaction import is_compaction_record
@@ -25,6 +26,15 @@ class PartylineAdapter(BaseAdapter):
     _CLAIMED: set[str] = set()
 
     _transcript: str = ""
+
+    def spawn_env(self):
+        if sys.platform != 'win32':
+            return {}
+        from partyline.adapters.session_seed import seed
+        home = os.path.expanduser(os.environ.get('CLAUDE_CONFIG_DIR', '~/.claude'))
+        os.makedirs(home, exist_ok=True)
+        seed(os.path.expanduser('~/.claude.json'), os.path.join(home, '.claude.json'))
+        return {'CLAUDE_CONFIG_DIR': home}
 
     async def stop(self):
         self._CLAIMED.discard(self._transcript)
@@ -52,6 +62,8 @@ class PartylineAdapter(BaseAdapter):
         curl = (f"curl -s -m 5 -X POST {shlex.quote(hook_url)}"
                 " -H 'Content-Type: application/json' --data-binary @-")
         handler = [{"hooks": [{"type": "command", "command": curl}]}]
+        if sys.platform == 'win32':
+            handler = [{"hooks": [{"type": "http", "url": hook_url, "timeout": 5}]}]
         return {"hooks": {
             "Notification": handler,
             "UserPromptSubmit": handler,
@@ -59,7 +71,8 @@ class PartylineAdapter(BaseAdapter):
         }}
 
     def transcript_glob(self) -> str:
-        return os.path.expanduser(f"~/.claude/projects/*/{self.att['id']}.jsonl")
+        home = os.path.expanduser(os.environ.get('CLAUDE_CONFIG_DIR', '~/.claude'))
+        return os.path.join(home, 'projects', '*', f"{self.att['id']}.jsonl")
 
     def _written_since_spawn(self, path: str) -> bool:
         """Whether anything has written this file since this process started.

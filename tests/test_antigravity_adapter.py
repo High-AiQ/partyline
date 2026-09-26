@@ -1181,6 +1181,9 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(writes[0].startswith(b"\x1b[200~"))  # no flush
 
             writes.clear()
+            # ConPTY has no Unix master descriptor but needs the same flush.
+            adapter.master = None
+            adapter._windows = object()
             adapter.screen_text = lambda: "> " + stuck[-60:]
             await adapter.deliver([{"sender": "greg", "body": "third wake"}])
         self.assertEqual(writes[0], b"\r")  # the stuck wake is flushed first

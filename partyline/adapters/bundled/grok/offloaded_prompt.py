@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
 from pathlib import Path
 
 from .transcript import unwrap_user_query
@@ -90,6 +91,9 @@ def _read_bytes(path: Path) -> bytes | None:
     directory = None
     descriptor = None
     try:
+        if sys.platform == 'win32':
+            from partyline.windows_files import read_regular
+            return read_regular(path, MAX_PROMPT_BYTES)
         directory = os.open(
             path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
         )
