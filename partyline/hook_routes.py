@@ -82,6 +82,10 @@ async def handle_hook(runtime, presence, att_id: str, token: str, request: Reque
     boundary = payload.turn_boundary()
     if boundary == "began":
         await presence.began(att["conv_id"], att_id, owner=token)
+        adapter = getattr(runtime, "live", {}).get(att_id)
+        mark_began = getattr(adapter, "mark_startup_prompt_began", None)
+        if mark_began is not None:
+            mark_began()
     elif boundary == "ended":
         await presence.ended(att["conv_id"], att_id, owner=token)
     message = (payload.message or payload.title or "").strip()
