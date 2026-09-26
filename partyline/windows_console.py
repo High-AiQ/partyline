@@ -75,6 +75,9 @@ class WindowsConsole:
                 'UpdateProcThreadAttribute(ConPTY)')
             startup = win.StartupEx()
             startup.StartupInfo.cb = c.sizeof(startup)
+            # Null standard handles plus STARTF_USESTDHANDLES make Windows
+            # initialize them from ConPTY, even when our own stdout is redirected.
+            startup.StartupInfo.dwFlags = 0x100
             startup.lpAttributeList = c.cast(attributes, c.c_void_p)
             command = c.create_unicode_buffer(subprocess.list2cmdline([executable, *argv[1:]]))
             # CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT
