@@ -161,6 +161,7 @@ def connection_briefing(att: dict) -> str:
     role = "\n\n" + att["role_briefing"] if att.get("role_briefing") else ""
     if not (command := att.get("agent_command")):
         return role
+    shell = f" Run in {att['agent_shell']}." if att.get('agent_shell') else ''
     return ("\n\nAuthenticated API helper (works even if your shell filters PARTYLINE_*): `"
             + command + "` — `context` shows your identity; `request GET|POST <path> "
-            "[--json-file <file>|-]` calls the API. Never print or copy its token." + role)
+            "[--json-file <file>|-]` calls the API. Never print or copy its token." + shell + role)

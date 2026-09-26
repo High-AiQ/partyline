@@ -1,5 +1,9 @@
+import asyncio
+import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -45,3 +49,55 @@ class WindowsScopeTest(unittest.TestCase):
                 adapter.att['id'] = '../escape'
                 with self.assertRaises(ValueError):
                     windows_scope.prepare(adapter, {})
+
+
+@unittest.skipUnless(sys.platform == 'win32', 'native complete attachment permissions')
+class NativeWindowsScopeTest(unittest.IsolatedAsyncioTestCase):
+    async def test_connection_is_readable_but_not_writable_by_its_attachment(self):
+        from partyline.windows_console import WindowsConsole
+        from partyline.windows_private import secure_directory
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            secure_directory(root)
+            work = root / 'work'
+            work.mkdir()
+            database = root / 'database'
+            database.touch()
+            connections = root / 'connections'
+            connections.mkdir()
+            secure_directory(connections)
+            connection = connections / 'fixture.json'
+            connection.write_text(json.dumps({'token': 'fixture'}))
+            secure_directory(connection, directory=False)
+            script = (
+                'import pathlib,sys\n'
+                'from partyline.windows_private import load_connection\n'
+                'assert load_connection(sys.argv[1])["token"]=="fixture"\n'
+                'try:\n pathlib.Path(sys.argv[1]).write_text("changed")\n'
+                'except PermissionError: pass\n'
+                'else: raise AssertionError("credential file writable")\n'
+            )
+            command = [sys.executable, '-u', '-c', script, str(connection)]
+            adapter = SimpleNamespace(kind='process', spawn_argv=command, att={
+                'id': 'fixture', 'cwd': str(work), 'db_paths': [str(database)],
+                '_agent_connection_file': str(connection),
+            })
+            environment = dict(os.environ)
+            with patch.object(windows_scope.Path, 'home', return_value=root):
+                scope = await asyncio.to_thread(windows_scope.prepare, adapter, environment)
+            try:
+                console = await WindowsConsole.spawn(command, str(work), environment,
+                                                      256 * 1024**2, token=scope.token)
+                output = bytearray()
+                async def drain():
+                    while data := await console.read():
+                        output.extend(data)
+                reader = asyncio.create_task(drain())
+                try:
+                    result = await asyncio.wait_for(console.wait(), 30)
+                finally:
+                    await console.close(preserve_output=True)
+                    await reader
+                self.assertEqual(result, 0, output.decode(errors='replace'))
+            finally:
+                await asyncio.to_thread(scope.close)
