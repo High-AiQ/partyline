@@ -1,5 +1,13 @@
 # Lessons: the false-assumptions ledger
 
+## Port adapter state paths as well as terminal operations
+
+A native console does not have a Unix master descriptor. Antigravity's pending
+paste retry checked that descriptor and would skip its Enter on Windows; the
+regression now exercises a ConPTY-backed adapter. A restricted Windows token
+also cannot assume it can read a user-private hook file outside the CLI's state
+directory. Grant Grok's own hook file read access and test the complete scope.
+
 ## A write-restricted Windows token does not cover parent deletion
 
 The initial candidate used `WRITE_RESTRICTED`, assuming every destructive file

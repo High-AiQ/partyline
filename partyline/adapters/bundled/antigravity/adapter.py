@@ -114,7 +114,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
         await self._write_all(b"\r")
 
     async def deliver(self, messages: list[dict]):
-        if self.master is not None and any(
+        if (self.master is not None or getattr(self, '_windows', None)) and any(
             self._composer_shows(wake[0]) for wake in self._outstanding
         ):
             await self._write_all(b"\r")

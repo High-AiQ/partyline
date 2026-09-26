@@ -1,7 +1,6 @@
 """A real ConPTY with a verified memory job established before child execution.
 
-This terminal primitive does not provide filesystem isolation. The application
-must keep refusing Windows attachments until its write fence is implemented.
+Filesystem isolation is supplied by the restricted token from WindowsScope.
 """
 
 import asyncio

@@ -21,7 +21,13 @@ class LocalServer:
     def run(self):
         assert windows_server._server_job is not None
         with TestClient(server.app) as client:
-            status = client.get('/api/fence/status').json()
+            registration = client.post('/api/auth/register', json={
+                'email': 'fixture@example.test', 'password': 'fixture-password', 'handle': 'fixture'})
+            assert registration.status_code == 201, registration.text
+            token = registration.json()['access_token']
+            response = client.get('/api/fence/status', headers={'Authorization': 'Bearer ' + token})
+            assert response.status_code == 200, response.text
+            status = response.json()
             assert status['ok'], status
             assert status['backend'] == 'restricted-token', status
             assert client.get('/').status_code == 200

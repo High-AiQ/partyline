@@ -69,17 +69,24 @@ class NativeWindowsScopeTest(unittest.IsolatedAsyncioTestCase):
             connection = connections / 'fixture.json'
             connection.write_text(json.dumps({'token': 'fixture'}))
             secure_directory(connection, directory=False)
+            hooks = root / 'hooks'
+            hooks.mkdir()
+            secure_directory(hooks)
+            hook = hooks / 'grok-turn-fixture.json'
+            hook.write_text('hook fixture')
             script = (
                 'import pathlib,sys\n'
                 'from partyline.windows_private import load_connection\n'
                 'assert load_connection(sys.argv[1])["token"]=="fixture"\n'
+                'assert pathlib.Path(sys.argv[2]).read_text()=="hook fixture"\n'
                 'try:\n pathlib.Path(sys.argv[1]).write_text("changed")\n'
                 'except PermissionError: pass\n'
                 'else: raise AssertionError("credential file writable")\n'
             )
-            command = [sys.executable, '-u', '-c', script, str(connection)]
-            adapter = SimpleNamespace(kind='process', spawn_argv=command, att={
+            command = [sys.executable, '-u', '-c', script, str(connection), str(hook)]
+            adapter = SimpleNamespace(kind='grok', spawn_argv=command, att={
                 'id': 'fixture', 'cwd': str(work), 'db_paths': [str(database)],
+                'grok_hooks_dir': str(hooks), 'grok_hooks_paths': str(root / 'registry'),
                 '_agent_connection_file': str(connection),
             })
             environment = dict(os.environ)

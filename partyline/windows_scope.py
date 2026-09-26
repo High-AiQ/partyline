@@ -59,6 +59,11 @@ def read_paths(adapter, environment):
             roots.append(root)
     if connection := adapter.att.get('_agent_connection_file'):
         roots.append(Path(connection))
+    if adapter.kind == 'grok':
+        from .adapters.bundled.grok.turn_hooks import hook_file, hooks_paths_file
+        session = getattr(adapter, '_session_id', adapter.att['id'])
+        roots.extend(path for path in (hook_file(session, adapter.att), hooks_paths_file(adapter.att))
+                     if path.exists())
     return roots
 
 
