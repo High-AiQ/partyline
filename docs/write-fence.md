@@ -77,6 +77,14 @@ Reads are not fenced: a process can still read the host. The fence bounds
 it is a fence against accidents, not a jail against malice. See
 `docs/security.md` for the trust model.
 
+On Linux, the server wraps each launch in a separate transient systemd
+scope before entering bubblewrap. `MemoryMax` defaults to `8G` and can be
+changed with `PARTYLINE_PROCESS_MEMORY_LIMIT`; swap is disabled. A verifier
+runs inside the scope and refuses to start bubblewrap unless it sees a finite
+`memory.max` at or below the requested limit. If systemd is missing or ignores
+the property, the attachment fails closed. Darwin applies the same configurable
+bound with inherited `RLIMIT_AS`, since it has no systemd cgroups.
+
 ## The protected set and carve-outs
 
 At spawn and resume, Partyline reads every non-archived conversation and
