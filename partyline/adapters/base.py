@@ -12,12 +12,14 @@ import fcntl
 import os
 import struct
 import subprocess
+import sys
 import termios
 import time
 from collections.abc import Awaitable, Callable
 
 import pyte
 
+from partyline import process_memory
 from partyline.adapters import activation, fence, pty_io, startup_prompt
 from partyline.adapters.process_shutdown import stop_process_group
 from partyline.adapters.jsonl_receipts import JsonlPasteReceipts, tail_jsonl
@@ -100,7 +102,10 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
     def build_command(self) -> list[str]:
         return list(self.att["command"])
     async def start(self):
-        self.spawn_argv = fence.launch_argv(self)
+        self.memory_limit = process_memory.process_memory_limit()
+        self.spawn_argv = process_memory.scope_argv(
+            fence.launch_argv(self), self.memory_limit,
+        )
         master, slave = os.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
         env = dict(child_env(os.environ, self.att), TERM="xterm-256color")
@@ -118,6 +123,8 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
         def preexec():
             os.setsid()
             fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+            if not sys.platform.startswith("linux"):
+                process_memory.apply_address_space_limit(self.memory_limit)
 
         self.spawned_at = time.time()
         self.proc = subprocess.Popen(
@@ -212,7 +219,8 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
         self._mark_not_ready()
         if not self._stopping:
             await self.on_status("exited")
-            await self.post("system", "system", f"{self.att['name']} exited (code {rc})")
+            notice = process_memory.exit_notice(rc, self.memory_limit, self.att["name"])
+            await self.post("system", "system", notice or f"{self.att['name']} exited (code {rc})")
 
     async def _run(self):
         """Adapter-specific background task."""

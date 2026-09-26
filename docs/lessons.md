@@ -54,6 +54,17 @@ misleading evidence:
 These are durable false assumptions from dogfooding, paired with the evidence and guard that
 replaced them:
 
+- **A successful `systemd-run --scope` call meant `MemoryMax` was active.** On 2026-09-26,
+  three runs of `./scripts/capped-test` coincided with the Partyline service being OOM-killed
+  around 59 GB; the scope command still returned success when issued from inside bubblewrap's
+  user namespace, but a process in that scope read `memory.max` as `max`. Checking for the
+  executable or a zero command status proved only that a scope was created, not that its memory
+  controller setting reached the process. `capped-test` now reads `memory.max` from inside its
+  probe scope and verifies inherited `RLIMIT_AS` in a child before it starts tests; attached
+  Linux processes verify their own scope limit before bubblewrap starts. Controls in
+  `tests.test_process_memory` pin `max` as a rejection, finite caps as accepted, and read the
+  effective value from inside a fenced probe.
+
 - **A delayed startup paste necessarily reaches the CLI's input editor.** Claude Code can
   instead be waiting at its folder-trust, login, or update dialog, where a bracketed briefing
   plus Enter selects the dialog's default and exits. Startup prompts hold both the briefing and
