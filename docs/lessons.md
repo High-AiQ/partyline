@@ -1069,3 +1069,13 @@ A separate operator error treated a machine-token `/api/running` response as
 fleet-wide. It is visibility-filtered. A direct service restart bypassed the
 recovery plan and left other lines stopped. The restart instructions now call
 out this scope explicitly; use the approved request flow to save every line.
+
+## Database fixtures must close connections before removing files
+
+The first native Windows foundation run passed the lock and memory probes but
+failed two database tests during cleanup. The false assumption was that
+`tearDown` could delete the temporary directory before connections registered
+with `addCleanup` were closed. Unix allowed unlinking the open databases; Windows
+refused. Register directory removal first and connection closure afterward so
+LIFO cleanup closes every connection before deleting files. Native Windows CI
+retains these migration and concurrent-owner tests as the regression guard.
