@@ -140,7 +140,7 @@ class DeliveryCreditMixin:
         plural = "wake" if len(entry["ids"]) == 1 else "wakes"
         await self.post_message(
             conv_id, "system", "system",
-            f"⚠ {len(entry['ids'])} {plural} pasted to @{att['name']} but it has not claimed "
+            f"⚠ {len(entry['ids'])} {plural} pending for @{att['name']} but it has not claimed "
             "its transcript yet — delivery credit held until it does",
         )
 

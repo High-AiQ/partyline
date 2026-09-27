@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 class PartylineAdapter(WakeSettlement, Adapter):
     kind = "opencode-v2"
-    _CLAIMED: set[tuple[str, str]] = set()
+    _CLAIMED: dict[tuple[str, str], str] = {}
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -147,6 +147,23 @@ class PartylineAdapter(WakeSettlement, Adapter):
             self._seen.add(ident)
 
     async def _run(self):
+        try:
+            await self._tail_session()
+        except Exception as exc:
+            self._mark_not_ready()
+            logger.exception("OpenCode v2 transcript watcher failed")
+            try:
+                await self.post("system", "system", f"{self.att['name']}: OpenCode v2 "
+                                f"transcript startup or monitoring failed: {exc}. "
+                                "Stopping this process; unread messages remain pending.")
+            finally:
+                await self.stop()
+        finally:
+            # A watcher that ends must never leave a readiness waiter stranded.
+            self._mark_not_ready()
+            self._release_claim()
+
+    async def _tail_session(self):
         self._store = await asyncio.to_thread(self._resolve_store)
         submitted = False
         for attempt in range(90):
@@ -157,7 +174,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
             except sqlite3.Error:
                 pass
             if self._session_id:
-                self._CLAIMED.add((str(self._store), self._session_id))
+                self._CLAIMED[(str(self._store), self._session_id)] = self._claim_token
                 if self.on_cli_session:
                     self.on_cli_session(self._session_id)
                 break
@@ -169,9 +186,8 @@ class PartylineAdapter(WakeSettlement, Adapter):
                 submitted = True
             await asyncio.sleep(0.5)
         else:
-            await self.post("system", "system", f"{self.att['name']}: no claimed OpenCode v2 "
-                            "session appeared after 45s; check the terminal for startup errors.")
-            return
+            raise RuntimeError("no claimed OpenCode v2 session appeared after 45s; "
+                               "check the terminal for startup errors")
         while self.alive():
             try:
                 await self._poll()
@@ -179,6 +195,13 @@ class PartylineAdapter(WakeSettlement, Adapter):
                 logger.debug("OpenCode v2 poll skipped: %s", exc)
             await asyncio.sleep(0.5)
 
+    def _release_claim(self):
+        key = (str(self._store), self._session_id)
+        if self._CLAIMED.get(key) == self._claim_token:
+            del self._CLAIMED[key]
+
     async def stop(self):
-        self._CLAIMED.discard((str(self._store), self._session_id))
-        await super().stop()
+        try:
+            await super().stop()
+        finally:
+            self._release_claim()

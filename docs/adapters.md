@@ -476,6 +476,12 @@ V2.0.18's full TUI does not accept v1's `-m` flag; select the model in OpenCode'
 configuration or model picker. No compact shortcut or immediate-delivery capability
 is advertised without a live probe proving it.
 
+An unready OpenCode process leaves incoming messages pending without waiting under
+the host ownership lock. Its transcript claim triggers redelivery. If v2 cannot
+claim a session within 45 seconds or its watcher fails, it reports the failure and
+stops the process. Session claims are released on normal exit, crashes, and stop,
+so resuming the same session does not inherit a stale claim.
+
 Both npm packages expose `opencode`, so use separate prefixes. For example, with
 v1 already installed, install v2 without replacing it:
 
