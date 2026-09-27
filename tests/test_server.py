@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException, WebSocketDisconnect
 from fastapi.testclient import TestClient
 
 from partyline import resume_continuation, auth_store, auth_tokens, bind, frontend_build, server
-from partyline.auth_guard import Principal
+from partyline.auth_guard import Principal, install_auth_guard
 from partyline.attachment_resume import TranscriptDeliveryRecord, delivered_history
 from partyline.db import Db
 from partyline.hook_routes import handle_hook
@@ -1445,13 +1445,84 @@ class ServerTest(unittest.TestCase):
             TranscriptDeliveryRecord(b"fingerprint", "late relay")
         ])
         req = self.principal_request()
-        self.assertEqual(self.arun(server.attachment_screen(req, "old")), {"screen": "screen"})
+        self.assertEqual(self.arun(server.attachment_screen(req, "old", None)), {"screen": "screen"})
         self.assertEqual(self.arun(server.attachment_key(req, "old", server.KeyIn(key="x"))), {"ok": True})
         self.assertEqual(adapter.keys, ["x"])
         self.assert_http(400, server.attachment_key(self.principal_request(), "old", server.KeyIn(key="bad")))
         self.assertEqual(self.arun(server.detach(self.principal_request(), "old")), {"ok": True})
         self.assertTrue(adapter.stopped)
         self.assert_http(404, server.attachment_screen(self.principal_request(), "old"))
+
+    def screen_adapter(self, text):
+        """A live process whose pyte render is exactly `text`."""
+        if "old" not in server.runtime.live:
+            self.add_attachment("old")
+            server.runtime.live["old"] = FakeAdapter(att={"runtime_owner": None})
+        adapter = server.runtime.live["old"]
+        adapter.screen_text = lambda: text
+        return adapter
+
+    def screen_client(self):
+        """The screen route behind the real guard, as an HTTP client sees it."""
+        app = FastAPI()
+        install_auth_guard(app, server.runtime.db)
+        app.add_api_route(
+            "/api/attachments/{att_id}/screen", server.attachment_screen,
+            methods=["GET"], response_model=server.ScreenResponse,
+        )
+        client = TestClient(app)
+        self.addCleanup(client.close)
+        client.headers["Authorization"] = f"Bearer {self.user_token()}"
+        return client
+
+    def test_omitting_lines_returns_the_whole_render_byte_for_byte(self):
+        self.screen_adapter("alpha\n\n  indented\n\ngamma")
+        rendered = "alpha\n\n  indented\n\ngamma"
+        req = self.principal_request()
+        self.assertEqual(
+            self.arun(server.attachment_screen(req, "old", None)), {"screen": rendered})
+        client = self.screen_client()
+        self.assertEqual(client.get("/api/attachments/old/screen").json(), {"screen": rendered})
+
+    def test_lines_returns_the_last_n_non_empty_rendered_lines(self):
+        self.screen_adapter("one\n\n   \ntwo\nthree\n\nfour")
+        req = self.principal_request()
+        self.assertEqual(self.arun(server.attachment_screen(req, "old", 1)), {"screen": "four"})
+        self.assertEqual(
+            self.arun(server.attachment_screen(req, "old", 2)), {"screen": "three\nfour"})
+        self.assertEqual(
+            self.arun(server.attachment_screen(req, "old", 3)), {"screen": "two\nthree\nfour"})
+        client = self.screen_client()
+        self.assertEqual(
+            client.get("/api/attachments/old/screen?lines=2").json(),
+            {"screen": "three\nfour"},
+        )
+
+    def test_lines_larger_than_the_screen_returns_every_non_empty_line(self):
+        self.screen_adapter("one\n\ntwo\n")
+        self.assertEqual(
+            self.arun(server.attachment_screen(self.principal_request(), "old", 99)),
+            {"screen": "one\ntwo"},
+        )
+
+    def test_lines_over_a_blank_screen_reads_an_empty_screen_back(self):
+        for blank in ("", "\n", "\n\n   \n"):
+            with self.subTest(blank=blank):
+                self.screen_adapter(blank)
+                self.assertEqual(
+                    self.arun(server.attachment_screen(self.principal_request(), "old", 5)),
+                    {"screen": ""},
+                )
+
+    def test_a_zero_negative_or_non_integer_lines_is_a_422_never_a_clamped_read(self):
+        self.screen_adapter("one\ntwo")
+        client = self.screen_client()
+        for bad in ("0", "-3", "1.5", "many"):
+            with self.subTest(lines=bad):
+                response = client.get(f"/api/attachments/old/screen?lines={bad}")
+                self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            client.get("/api/attachments/old/screen").json(), {"screen": "one\ntwo"})
 
     def test_a_clean_process_exit_leaves_the_attachment_resumable(self):
         self.add_attachment("old", status="running")

@@ -226,3 +226,25 @@ class RoleBriefingTests(unittest.TestCase):
         self.assertNotIn("\n", WORKER_REMINDER)
         self.assertIn("edit only on your captain's @mention", WORKER_REMINDER)
         self.assertIn("the goal above is context, not your assignment", WORKER_REMINDER)
+
+    def test_every_captain_variant_carries_the_reclaim_duty_and_the_stuck_process_peek(self):
+        packs = {
+            "splitting": role_instructions(
+                ["assign", "create_child", "read_reports"], "root", None),
+            "leaf": role_instructions(["assign", "report"], "leaf", "parent", 2),
+            "staffed": role_instructions(["assign", "report"], "line", "parent", 1, staffed=True),
+        }
+        for label, text in packs.items():
+            with self.subTest(label):
+                self.assertIn("Reclaim the line when the work is delivered", text)
+                # Both halves of the duty: detach the idle, retire the finished child.
+                self.assertIn("attachments/close", text)
+                self.assertIn("?stop_processes=true", text)
+                # The read that says what is still live, then the peek before a detach.
+                self.assertIn("/process-overview", text)
+                self.assertIn("/screen?lines=40", text)
+                self.assertIn("detach only when sure it is stuck", text)
+
+    def test_the_reclaim_duty_reaches_no_one_who_cannot_act_on_it(self):
+        self.assertEqual(role_instructions(["read", "write"], "line", "parent"), "")
+        self.assertNotIn("Reclaim the line", worker_instructions(captained=True))
