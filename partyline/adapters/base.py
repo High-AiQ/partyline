@@ -183,7 +183,8 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
         elif self.proc:
             await stop_process_group(self.proc)
         for task in self._tasks:
-            task.cancel()
+            if task is not asyncio.current_task():
+                task.cancel()
         await asyncio.to_thread(process_exit.release_scope, getattr(self, "memory_scope", None))
         await self.on_status("detached")
 

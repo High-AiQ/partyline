@@ -540,13 +540,14 @@ class OpenCodeAdapterTest(RecordingAdapterTest):
             running = asyncio.create_task(adapter._run())
             await asyncio.wait_for(prompt_sent.wait(), timeout=1.0)
             await asyncio.wait_for(old_session_polled.wait(), timeout=1.0)
-            self.assertFalse(pending.done())
+            self.assertTrue(pending.done())
+            self.assertFalse(pending.result())  # host retains the wake without waiting
             self.assertEqual(len(sent), 2)  # the first probe was retried
             self.assertIsNone(adapter._ready_result)  # old session row is insufficient
 
             allow_retry.set()
             await asyncio.wait_for(third_probe_sent.wait(), timeout=1.0)
-            self.assertFalse(pending.done())
+            self.assertTrue(pending.done())
             self.assertEqual(len(sent), 3)  # repeated probes still do not count as proof
             self.assertIsNone(adapter._ready_result)
 
@@ -569,6 +570,7 @@ class OpenCodeAdapterTest(RecordingAdapterTest):
             await asyncio.gather(running, pending)
 
         self.assertTrue(await adapter.wait_ready())
+        self.assertFalse(await adapter.deliver([wake]))  # host retries after claim
         self.assertEqual(len(sent), 4)
         self.assertTrue(sent[3].startswith("[partyline-paste: "))
         self.assertIn(adapter.format_digest([wake]), sent[3])
@@ -582,7 +584,9 @@ class OpenCodeAdapterTest(RecordingAdapterTest):
         adapter.send_keys.assert_not_awaited()
 
         adapter.mark_ready()
-        self.assertFalse(await pending)  # paste is not delivery proof
+        self.assertFalse(await pending)  # unready delivery never waits or pastes
+        adapter.send_keys.assert_not_awaited()
+        self.assertFalse(await adapter.deliver([message]))  # retry is not delivery proof
         adapter.send_keys.assert_awaited_once()
         self.assertEqual(adapter._wake_receipts[0]["ids"], [4])
 

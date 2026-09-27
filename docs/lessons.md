@@ -1140,3 +1140,21 @@ with `addCleanup` were closed. Unix allowed unlinking the open databases; Window
 refused. Register directory removal first and connection closure afterward so
 LIFO cleanup closes every connection before deleting files. Native Windows CI
 retains these migration and concurrent-owner tests as the regression guard.
+
+## 2026-09-27 — An unready OpenCode resume blocked every attachment
+
+A v2 worker crashed and retained its in-memory transcript claim. Its resumed CLI
+wrote the new claim, but the watcher rejected that session as already owned and
+returned after 45 seconds without resolving readiness. A later captain mention
+waited for readiness while holding the instance-wide ownership lock. Messages,
+new attaches, and detach status updates then queued behind that one worker;
+processes killed by detach could remain visibly running.
+
+OpenCode delivery now returns pending immediately until readiness is proven, so
+it never waits for startup under the ownership lock. A failed v2 watcher resolves
+readiness, posts the failure, and stops its process. Claims are released when the
+watcher ends and are keyed by activation, so late cleanup cannot release a newer
+claim. Regression tests cover the production delivery lock, unrelated attach and
+detach, delayed-claim redelivery, crash/resume claim reuse, and watcher self-stop.
+Do not treat a live PTY or a written claim as proof that the transcript watcher
+is still running or that a queued message was delivered.
