@@ -123,6 +123,14 @@ EXAMPLE = (
     "```"
 )
 
+RECLAIM = (
+    "**Reclaim the line when the work is delivered.** Once the person has the result and the goal is "
+    "cleared, detach the idle processes (POST {root}/attachments/close) and retire finished child lines "
+    "(DELETE /api/conversations/<child-id>?stop_processes=true). Before detaching an unresponsive process, "
+    "GET {root}/process-overview, then peek at GET /api/attachments/<att-id>/screen?lines=40 or its "
+    "transcript tail: detach only when sure it is stuck."
+)
+
 SPLIT = (
     "**Split only independent slices.** One child line per slice, born briefed: POST "
     '{root}/children with {{"name":"slice","goal":"what its manager sees through","topic":'
@@ -272,11 +280,9 @@ def role_instructions(
         "You manage this line and its delegated child projects. Use the authenticated API "
         "helper from your briefing; `request GET /api/capabilities` shows your permissions, "
         "depth and the depth cap.",
-        ROLE,
-        PROCEDURE.format(root=root, staffing=staffing, top=top),
-        STAFFING_TRAITS.format(root=root),
-        ASK_FIRST.format(root=root),
-        EXAMPLE,
+        ROLE, PROCEDURE.format(root=root, staffing=staffing, top=top),
+        STAFFING_TRAITS.format(root=root), ASK_FIRST.format(root=root),
+        EXAMPLE, RECLAIM.format(root=root),
     ]
     if "read_reports" in actions:
         blocks.append(
