@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request, WebSocket
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
@@ -466,12 +466,22 @@ def _hook_url(att_id: str, bind: BindConfig | None = None, token: str = "") -> s
     return hook_url(att_id, bind or app.state.bind, token)
 
 @app.get("/api/attachments/{att_id}/screen", response_model=ScreenResponse)
-async def attachment_screen(request: Request, att_id: str):
+async def attachment_screen(
+    request: Request, att_id: str, lines: int | None = Query(default=None, ge=1)
+):
+    # `ge=1` answers a zero, a negative, or a non-integer `lines` the way the
+    # message routes answer a bad `limit`: a 422 from the same validation, never
+    # a silently clamped read that hides what was asked for. Omitted, the screen
+    # is byte-for-byte what it has always been.
     deny_unless_attachment(runtime.db, request_principal(request), att_id, "read")
     adapter = runtime.live.get(att_id)
     if adapter is None:
         raise HTTPException(404, "attachment is not live")
-    return {"screen": adapter.screen_text()}
+    screen = adapter.screen_text()
+    if lines is None:
+        return {"screen": screen}
+    non_empty = [line for line in screen.splitlines() if line.strip()]
+    return {"screen": "\n".join(non_empty[-lines:])}
 
 
 @app.post("/api/attachments/{att_id}/keys", response_model=OkResponse)
