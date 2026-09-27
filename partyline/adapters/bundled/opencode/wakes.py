@@ -28,8 +28,12 @@ class WakeSettlement:
         await super().stop()  # type: ignore[misc]
 
     async def deliver(self, messages: list[dict]):
-        """Wait for structured readiness, then keep this paste uncredited."""
-        if self._ready_result is not True and not await self.wait_ready():  # type: ignore[attr-defined]
+        """Leave unready wakes pending; the host retries after a transcript claim.
+
+        Delivery runs under the host ownership lock. Waiting for readiness here
+        would block every attachment if startup never claims its transcript.
+        """
+        if self._ready_result is not True:  # type: ignore[attr-defined]
             return False
         digest = self.format_digest(messages)  # type: ignore[attr-defined]
         ids = [m["id"] for m in messages if isinstance(m.get("id"), int)]

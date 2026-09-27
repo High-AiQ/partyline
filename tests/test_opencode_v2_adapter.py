@@ -1,5 +1,6 @@
 """OpenCode v2 fixtures mirror its session_v2/session_message store."""
 
+import asyncio
 import json
 import sqlite3
 import tempfile
@@ -90,7 +91,7 @@ class OpenCodeV2Tests(unittest.IsolatedAsyncioTestCase):
         self.claim()
         self.assertEqual(self.adapter._session_id, "ours")
         self.assertTrue(self.adapter._claim_proven)
-        PartylineAdapter._CLAIMED.add((str(self.store), "ours"))
+        PartylineAdapter._CLAIMED[(str(self.store), "ours")] = "other-owner"
         self.assertIsNone(self.adapter._find_session())
         self.assertIsNone(self.make()._find_session())
 
@@ -153,7 +154,7 @@ class OpenCodeV2Tests(unittest.IsolatedAsyncioTestCase):
         with patch("partyline.adapters.bundled.opencode.v2.asyncio.sleep", new_callable=AsyncMock):
             await self.adapter._run()
         self.adapter.on_cli_session.assert_called_once_with("ours")
-        self.assertIn((str(self.store), "ours"), PartylineAdapter._CLAIMED)
+        self.assertNotIn((str(self.store), "ours"), PartylineAdapter._CLAIMED)
         with patch("partyline.adapters.base.Adapter.stop", new_callable=AsyncMock):
             await self.adapter.stop()
         self.assertNotIn((str(self.store), "ours"), PartylineAdapter._CLAIMED)
@@ -177,6 +178,32 @@ class OpenCodeV2Tests(unittest.IsolatedAsyncioTestCase):
             await self.adapter._run()
         self.adapter._poll.assert_awaited_once()
 
+    async def test_natural_exit_releases_session_for_a_new_resume_claim(self):
+        self.claim()
+        self.adapter._resolve_store = Mock(return_value=self.store)
+        self.adapter.alive = Mock(side_effect=[True, False])
+        await self.adapter._run()
+        resumed = self.make(resume=True, cli_session="ours")
+        self.row("resume", "user", {"text": resumed._claim_token}, seq=20)
+        self.assertEqual(resumed._find_session(), "ours")
+        self.assertEqual(resumed._claim_seq, 20)
+
+    async def test_late_cleanup_cannot_release_another_activation_claim(self):
+        self.adapter._session_id = "ours"
+        key = (str(self.store), "ours")
+        PartylineAdapter._CLAIMED[key] = "new-activation"
+        with patch("partyline.adapters.base.Adapter.stop", new_callable=AsyncMock):
+            await self.adapter.stop()
+        self.assertEqual(PartylineAdapter._CLAIMED[key], "new-activation")
+
+    async def test_watcher_can_stop_itself_without_cancelling_status_cleanup(self):
+        self.adapter._resolve_store = Mock(side_effect=OSError("missing store"))
+        task = asyncio.create_task(self.adapter._run())
+        self.adapter._tasks = [task]
+        await task
+        self.adapter.on_status.assert_awaited_once_with("detached")
+        self.assertFalse(task.cancelled())
+
     async def test_prefilled_prompt_gets_one_enter_but_screen_never_proves_claim(self):
         self.adapter._resolve_store = Mock(return_value=self.store)
         self.adapter.alive = Mock(return_value=True)
@@ -186,7 +213,7 @@ class OpenCodeV2Tests(unittest.IsolatedAsyncioTestCase):
             await self.adapter._run()
         self.adapter._write_all.assert_awaited_once_with(b"\r")
         self.assertFalse(self.adapter._claim_proven)
-        self.assertIsNone(self.adapter._ready_result)
+        self.assertFalse(self.adapter._ready_result)
         self.assertTrue(all(call.args[1] == "system" for call in self.post.call_args_list))
 
     async def test_compaction_rewrite_does_not_replay_speech_or_adopt_sibling(self):
