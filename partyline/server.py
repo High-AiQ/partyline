@@ -82,6 +82,7 @@ from .reaction_routes import reaction_router
 from .accept_sha import register_accept_route
 from .review_worktrees import register_review_routes
 from .goal import register_goal_route
+from .process_overview import register_process_overview_route
 from .presence import Presence
 from .media import MediaStore, media_root
 from .conversation_routes import register_conversation_routes
@@ -179,6 +180,7 @@ register_compact_route(app, runtime, presence)
 register_memory_routes(app, runtime)
 register_line_process_routes(app, runtime)
 register_goal_route(app, runtime)
+register_process_overview_route(app, runtime)
 register_restart_request_routes(app, runtime, ADAPTER_METADATA, lambda: request_exit())
 app.include_router(auth_router(runtime.db, on_handle_change=user_sockets.close_all))
 app.include_router(media_router(runtime, media))
