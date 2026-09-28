@@ -244,6 +244,11 @@ class RoleBriefingTests(unittest.TestCase):
                 self.assertIn("/process-overview", text)
                 self.assertIn("/screen?lines=40", text)
                 self.assertIn("detach only when sure it is stuck", text)
+                # Persist and read back before any clear, detach, or retire.
+                self.assertIn("persist all deliverables, assets and unfinished work", text)
+                self.assertIn("verify read-back", text)
+                self.assertIn("no sole copy", text)
+                self.assertIn("report blockers before cleanup", text)
 
     def test_the_reclaim_duty_reaches_no_one_who_cannot_act_on_it(self):
         self.assertEqual(role_instructions(["read", "write"], "line", "parent"), "")
