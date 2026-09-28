@@ -55,7 +55,9 @@ Apple's current [resource-limit implementation](https://github.com/apple-oss-dis
 passes `RLIMIT_AS` to its VM subsystem. A real Mac test must still prove the bound,
 inheritance and CLI compatibility. JavaScript runtimes can reserve much more virtual
 address space than resident memory, so the existing 4G address-space setting must
-not be assumed equivalent to Linux's cgroup memory accounting.
+not be assumed equivalent to Linux's cgroup memory accounting. The non-Linux
+fallback is best-effort: it reads the inherited hard limit and clamps to it (or
+skips), so a lower macOS hard limit can never abort the spawn.
 
 An additional aggregate budget is needed if the goal includes bounding the sum of
 many simultaneous attachments. Separate 4 GiB caps alone do not prevent many CLIs

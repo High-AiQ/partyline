@@ -5,6 +5,7 @@ import runpy
 import shutil
 import subprocess
 import sys
+import types
 import unittest
 from contextlib import redirect_stderr
 from io import StringIO
@@ -52,6 +53,72 @@ class ProcessMemoryTest(unittest.TestCase):
         self.assertIn("--expand-environment=no", run.call_args.args[0])
         self.assertIn("memory.max", run.call_args.args[0][-3])
         self.assertIn('[ "$value" -le "$1" ]', run.call_args.args[0][-3])
+
+
+class AddressSpaceFallbackTest(unittest.TestCase):
+    """The non-Linux preexec fallback must never kill the spawn.
+
+    macOS can carry a hard ``RLIMIT_AS`` below the configured cap; the old
+    unclamped ``setrlimit(RLIMIT_AS, (amount, amount))`` then raised
+    ``ValueError: current limit exceeds maximum limit`` between fork and exec,
+    which subprocess surfaces as "Exception occurred in preexec_fn".
+    """
+
+    RLIMIT_AS = 6
+    RLIM_INFINITY = -1
+
+    def fake(self, soft: int, hard: int, *, fail: bool = False):
+        module = types.SimpleNamespace(
+            RLIMIT_AS=self.RLIMIT_AS,
+            RLIM_INFINITY=self.RLIM_INFINITY,
+            calls=[],
+        )
+
+        def getrlimit(_which):
+            return (soft, hard)
+
+        def setrlimit(_which, limits):
+            new_soft, new_hard = limits
+            if fail or (hard != self.RLIM_INFINITY
+                        and (new_soft > hard or new_hard > hard)):
+                raise ValueError("current limit exceeds maximum limit")
+            module.calls.append((new_soft, new_hard))
+
+        module.getrlimit = getrlimit
+        module.setrlimit = setrlimit
+        return module
+
+    def apply(self, module, limit: str = "4G") -> None:
+        with patch.dict(sys.modules, {"resource": module}):
+            process_memory.apply_address_space_limit(limit)
+
+    def test_a_hard_limit_below_the_request_is_clamped_not_failed(self):
+        hard = 2 * 1024**3
+        module = self.fake(hard, hard)
+        self.apply(module)  # must not raise
+        self.assertEqual(module.calls, [(hard, hard)])
+
+    def test_c_requested_below_the_hard_limit_is_applied_as_before(self):
+        hard = 8 * 1024**3
+        module = self.fake(hard, hard)
+        self.apply(module)
+        self.assertEqual(module.calls, [(4 * 1024**3, 4 * 1024**3)])
+
+    def test_b_setrlimit_valueerror_cannot_kill_the_fallback(self):
+        module = self.fake(8 * 1024**3, 8 * 1024**3, fail=True)
+        self.apply(module)  # must not raise
+        self.assertEqual(module.calls, [])
+
+    def test_an_infinite_hard_limit_leaves_the_request_alone(self):
+        module = self.fake(self.RLIM_INFINITY, self.RLIM_INFINITY)
+        self.apply(module)
+        self.assertEqual(module.calls, [(4 * 1024**3, 4 * 1024**3)])
+
+    def test_a_getrlimit_failure_is_swallowed(self):
+        module = self.fake(0, 0)
+        module.getrlimit = lambda _which: (_ for _ in ()).throw(OSError("no rlimit"))
+        self.apply(module)  # must not raise
+        self.assertEqual(module.calls, [])
 
 
 class CappedTestLimitTest(unittest.TestCase):

@@ -85,13 +85,28 @@ def verify_scope_and_exec(limit: str, command: list[str]) -> int:
 
 
 def apply_address_space_limit(limit: str) -> None:
-    """Apply the non-Linux per-process fallback before exec."""
-    import resource
+    """Apply the non-Linux per-process fallback before exec.
 
-    unit = limit[-1]
-    multiplier = {"K": 1024, "M": 1024**2, "G": 1024**3}[unit]
-    amount = int(limit[:-1]) * multiplier
-    resource.setrlimit(resource.RLIMIT_AS, (amount, amount))
+    This runs between fork and exec, so it is best-effort and must never raise:
+    a failure here becomes ``Exception occurred in preexec_fn`` and kills the
+    spawn. On darwin the inherited hard ``RLIMIT_AS`` can sit below the
+    configured cap; asking ``setrlimit`` to raise it fails with "current limit
+    exceeds maximum limit", so clamp the request to the kernel's hard limit.
+    """
+    try:
+        import resource
+    except ImportError:  # pragma: no cover - only reached off Unix
+        return
+    try:
+        amount = parse_size(limit)
+        _soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+        if hard != resource.RLIM_INFINITY:
+            amount = min(amount, hard)
+        if amount <= 0:
+            return
+        resource.setrlimit(resource.RLIMIT_AS, (amount, amount))
+    except (OSError, ValueError):
+        return
 
 
 def exit_notice(code: int, limit: str, name: str) -> str | None:
