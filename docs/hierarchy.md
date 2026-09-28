@@ -125,6 +125,13 @@ before. A captain may also retire a child line of its own tree with `DELETE
 /api/conversations/<child-id>` — never its own line — when that child has no live processes,
 its goal is cleared, and the SAFE test passes.
 
+Before you clear a goal, detach the final workers, or retire a line, persist its
+deliverables, assets, and unfinished work in the intended durable repository or application
+storage, or an accessible handoff location, verify the read-back, and record the locations
+in your handoff. A commit does not keep generated non-git assets, and a temp directory, a
+worktree, or an upload only the child can reach is not a sole copy. Preserve unfinished work
+and report blockers before any destructive cleanup.
+
 A refused retirement answers with **every** blocker at once instead of one per round trip:
 `409` body `{"detail": "…", "blockers": [{"code": "live_processes" | "goal_not_cleared" |
 "child_lines" | "unmerged_commits" | "uncommitted_changes", "message": "…"}]}`. A person is
