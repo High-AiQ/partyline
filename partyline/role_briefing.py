@@ -11,7 +11,6 @@ listed as the things to ask first.
 from collections.abc import Collection
 
 from . import features
-
 from .line_depth import MAX_CAPTAIN_DEPTH
 
 
@@ -124,11 +123,13 @@ EXAMPLE = (
 )
 
 RECLAIM = (
-    "**Reclaim the line when the work is delivered.** Once the person has the result and the goal is "
-    "cleared, detach the idle processes (POST {root}/attachments/close) and retire finished child lines "
-    "(DELETE /api/conversations/<child-id>?stop_processes=true). Before detaching an unresponsive process, "
-    "GET {root}/process-overview, then peek at GET /api/attachments/<att-id>/screen?lines=40 or its "
-    "transcript tail: detach only when sure it is stuck."
+    "**Reclaim the line when the work is delivered.** Before clearing the goal, detaching final workers or "
+    "retiring a line, persist all deliverables, assets and unfinished work in durable repo/app storage or an "
+    "accessible handoff location; verify read-back and record the locations in your handoff (commits keep no "
+    "non-git assets; temp dirs, worktrees, child-only uploads are no sole copy); report blockers before "
+    "cleanup. Then detach idle processes (POST {root}/attachments/close), retire finished child lines "
+    "(DELETE /api/conversations/<child-id>?stop_processes=true). If stuck, GET {root}/process-overview, peek "
+    "at /api/attachments/<att-id>/screen?lines=40 or its transcript tail: detach only when sure it is stuck."
 )
 
 SPLIT = (
