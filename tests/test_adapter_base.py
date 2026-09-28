@@ -10,6 +10,7 @@ import asyncio
 import json
 import os
 import signal
+import sys
 import tempfile
 import types
 import time
@@ -189,6 +190,65 @@ class AdapterLifecycleTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_alive_is_false_before_anything_is_spawned(self):
         self.assertFalse(Recorder(["true"]).alive())
+
+
+class DarwinPreexecFallbackTest(unittest.IsolatedAsyncioTestCase):
+    """The real spawn path must survive a clamped macOS ``RLIMIT_AS``.
+
+    Nothing reproduced the darwin branch, so the unclamped fallback slipped
+    through: a hard limit below the request raised ``ValueError`` inside
+    ``preexec_fn`` and every capped macOS attachment failed with
+    "Exception occurred in preexec_fn" before it could start.
+    """
+
+    HARD = 2 * 1024**3
+    RLIMIT_AS = 6
+    RLIM_INFINITY = -1
+
+    def resource(self, *, fail: bool = False):
+        """A stand-in that behaves like macOS's hard ``RLIMIT_AS``."""
+        module = types.SimpleNamespace(
+            RLIMIT_AS=self.RLIMIT_AS, RLIM_INFINITY=self.RLIM_INFINITY)
+        hard = self.HARD
+
+        def getrlimit(_which):
+            return (hard, hard)
+
+        def setrlimit(_which, limits):
+            soft, new_hard = limits
+            if fail or soft > hard or new_hard > hard:
+                raise ValueError("current limit exceeds maximum limit")
+
+        module.getrlimit = getrlimit
+        module.setrlimit = setrlimit
+        return module
+
+    async def start_darwin(self, module):
+        adapter = Recorder(["sh", "-c", "sleep 30"], memory_limit="4G")
+        with patch.object(sys, "platform", "darwin"), \
+                patch.dict(sys.modules, {"resource": module}):
+            await adapter.start()
+        self.addAsyncCleanup(adapter.stop)
+        self.assertTrue(adapter.alive())
+        return adapter
+
+    async def test_a_hard_limit_below_the_request_still_spawns(self):
+        await self.start_darwin(self.resource())
+
+    async def test_a_valueerror_from_setrlimit_still_spawns(self):
+        await self.start_darwin(self.resource(fail=True))
+
+    async def test_linux_spawn_never_applies_the_address_space_fallback(self):
+        """(d) Linux keeps its verified systemd scope, not the darwin fallback."""
+        adapter = Recorder(["sh", "-c", "sleep 30"], memory_limit="4G")
+        with patch("partyline.adapters.base.process_memory.apply_address_space_limit") as fallback, \
+                patch("partyline.adapters.base.process_memory.scope_argv",
+                      side_effect=lambda command, _limit, **_kwargs: list(command)), \
+                patch("partyline.adapters.base.process_exit.new_scope", return_value="unit-1"):
+            await adapter.start()
+        self.addAsyncCleanup(adapter.stop)
+        fallback.assert_not_called()
+        self.assertTrue(adapter.alive())
 
 
 class AdapterEnvironmentTest(unittest.IsolatedAsyncioTestCase):
