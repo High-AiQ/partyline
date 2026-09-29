@@ -93,6 +93,7 @@ from .write_set_routes import write_set_router
 from .media_routes import media_router
 from .preset_routes import presets_router
 from .staffing_routes import staffing_router
+from .settings_routes import settings_router
 from .restart_report import restart_report_router
 from .static_cache import install_static_cache
 from .resume_continuation import resume_with_backlog
@@ -192,6 +193,7 @@ app.include_router(heartbeat_router(runtime))
 app.include_router(hooks_router(runtime, presence))
 app.include_router(presets_router(runtime, ADAPTERS))
 app.include_router(staffing_router(runtime))
+app.include_router(settings_router(runtime))
 app.include_router(restart_report_router(runtime, lambda r: require_loopback(r)))
 
 # -- REST ------------------------------------------------------------------

@@ -273,4 +273,9 @@ MIGRATIONS = [
     )""",
     """CREATE TRIGGER IF NOT EXISTS delete_process_incidents AFTER DELETE ON attachments
         BEGIN DELETE FROM process_incidents WHERE attachment_id=OLD.id; END""",
+    # Instance-wide preferences; a general key/value table avoids one-off columns.
+    """CREATE TABLE IF NOT EXISTS settings(
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    )""",
 ]
