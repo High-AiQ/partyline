@@ -315,7 +315,13 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
         self.write_terminal(data)
 
     def briefing(self) -> str:
-        text = BRIEFING.format(name=self.att["name"], conv=self.att.get("conv_name", "?"))
+        text = BRIEFING.format(
+            name=self.att["name"], conv=self.att.get("conv_name", "?"),
+        )
+        if (global_prose := self.att.get("global_prose")) and global_prose.strip():
+            intro, separator, remainder = text.partition("\n\n")
+            if separator:
+                text = intro + separator + global_prose + separator + remainder
         text += connection_briefing(self.att)
         if topic := (self.att.get("topic") or "").strip():
             text += TOPIC_BRIEFING.format(topic=topic)

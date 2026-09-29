@@ -21,7 +21,7 @@ from unittest.mock import AsyncMock, call, patch
 
 from partyline.adapters.base import Adapter
 from partyline.adapters.process_shutdown import stop_process_group
-from partyline.adapters.briefing import child_env
+from partyline.adapters.briefing import BRIEFING, child_env
 from partyline.adapters import pty_io
 from partyline.adapters.terminal import terminal_responses
 from datetime import UTC
@@ -689,6 +689,22 @@ class ResumeSilenceTest(unittest.IsolatedAsyncioTestCase):
 
 
 class BriefingTest(unittest.TestCase):
+    def test_empty_global_prose_keeps_the_briefing_template_unchanged(self):
+        text = Recorder(["cat"]).briefing()
+        expected = BRIEFING.format(name="dummy", conv="a line")
+        self.assertEqual(text, expected)
+        self.assertNotIn(
+            "To make the room remember something, propose a DO / DO NOT row for AGENTS.md",
+            text,
+        )
+
+    def test_global_prose_is_inserted_as_data_before_the_remaining_briefing(self):
+        prose = "Use {id}, literal {{braces}}, and %s unchanged."
+        text = Recorder(["cat"], global_prose=prose).briefing()
+        intro, rest = BRIEFING.format(name="dummy", conv="a line").split("\n\n", 1)
+        self.assertIn(intro + "\n\n" + prose + "\n\n" + rest, text)
+        self.assertIn("Use {id}, literal {{braces}}, and %s unchanged.", text)
+
     def test_briefing_names_the_process_and_its_line(self):
         text = Recorder(["cat"]).briefing()
         self.assertIn('You are "dummy"', text)

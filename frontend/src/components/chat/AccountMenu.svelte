@@ -4,9 +4,16 @@
   import { session } from "../../state/session.svelte.js";
   import { tooltip } from "../../lib/tooltip";
   import ChangeHandleDialog from "../dialogs/ChangeHandleDialog.svelte";
+  import SettingsDialog from "../dialogs/SettingsDialog.svelte";
 </script>
 
 <div class="account flex shrink-0 items-center gap-1.5">
+  <button
+    class="topbar-action px-[9px] py-0 min-h-[34px]"
+    type="button"
+    use:tooltip={{ label: "settings" }}
+    onclick={() => dialogs.open(SettingsDialog)}>settings</button
+  >
   <button
     class="handle topbar-action topbar-action-accented max-w-[150px] truncate px-[9px] py-0 min-h-[34px]"
     type="button"
