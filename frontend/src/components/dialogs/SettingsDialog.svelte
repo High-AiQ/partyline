@@ -57,6 +57,7 @@
       id="globalProse"
       bind:this={field}
       bind:value
+      rows={8}
       maxlength={MAX}
       disabled={loading || saving}
       placeholder="shared instructions for every process…"></textarea>
