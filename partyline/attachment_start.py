@@ -21,6 +21,7 @@ from .write_set_routes import list_write_grants
 def prepare_attachment(att, runtime, hook_url, checkpoint):
     conv = runtime.db.get_conversation(att["conv_id"])
     att["api_token"] = ensure_api_token(runtime.db, att["id"])
+    att["global_prose"] = runtime.db.get_setting("global_prose")
     att["conv_name"], att["topic"] = conv["name"], conv["topic"]
     att["hook_url"] = hook_url(att["id"], att["runtime_owner"])
     att["write_grants"] = list_write_grants(runtime.db, att["conv_id"])
