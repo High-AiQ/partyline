@@ -150,6 +150,22 @@ class Db:
         self._exec("UPDATE conversations SET topic=? WHERE id=?", (topic, conv_id))
         return self.get_conversation(conv_id)
 
+    def get_setting(self, key):
+        cur = self._exec("SELECT value FROM settings WHERE key=?", (key,))
+        row = cur.fetchone()
+        return row["value"] if row else None
+
+    def set_setting(self, key, value):
+        if value is None or not value.strip():
+            self._exec("DELETE FROM settings WHERE key=?", (key,))
+            return None
+        self._exec(
+            "INSERT INTO settings(key,value) VALUES(?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, value),
+        )
+        return value
+
     def rename_conversation(self, conv_id, name):
         self._exec("UPDATE conversations SET name=? WHERE id=?", (name, conv_id))
         return self.get_conversation(conv_id)

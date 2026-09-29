@@ -218,6 +218,7 @@ async def _resume_adapter_locked(
     att["review_worktrees"] = list_review_worktrees(runtime.db, att["conv_id"])
     att["write_grants"] = list_write_grants(runtime.db, att["conv_id"])
     att["protected_roots"] = protected_repo_roots(runtime.db)
+    att["global_prose"] = runtime.db.get_setting("global_prose")
     att["db_paths"] = database_paths(runtime.db)
     provision_connection(runtime.db.path, att)
     att["digest_rider"] = lambda: ""

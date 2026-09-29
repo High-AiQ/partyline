@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from partyline.adapters.briefing import fresh_checkpoint_briefing
+from partyline.adapters.base import Adapter
 from partyline.attachment_lifecycle import (FreshAttachmentRequest, create_fresh_record,
                                            remove_stopped_record)
 from partyline.attachment_lifecycle_routes import register_attachment_lifecycle_routes
@@ -79,7 +80,10 @@ class LifecycleTest(unittest.TestCase):
     def factory(self, adapter_id, att, post, status, **kwargs):
         if self.make_failure:
             raise RuntimeError("factory failed")
-        adapter = SimpleNamespace(att=att, deliveries=[], stopped=False)
+        adapter = SimpleNamespace(
+            att=att, deliveries=[], stopped=False,
+            briefing=Adapter(att, post, status).briefing,
+        )
 
         async def start():
             if self.spawn_failure:
@@ -132,6 +136,24 @@ class LifecycleTest(unittest.TestCase):
         self.assertIn({"type": "attachment_removed", "attachment_id": "old",
                        "conversation_id": "line"}, events)
         self.assertEqual(events[-1]["attachment"]["id"], new["id"])
+
+    def test_fresh_process_briefing_receives_saved_and_empty_global_prose(self):
+        prose = "Start every task by checking the line topic."
+        self.db.set_setting("global_prose", prose)
+        response = self.fresh()
+        self.assertEqual(response.status_code, 200, response.text)
+        adapter = self.adapters[-1]
+        self.assertEqual(adapter.att["global_prose"], prose)
+        self.assertIn(prose, adapter.briefing())
+
+        self.add_old()
+        self.db._exec("UPDATE attachments SET name='worker-empty' WHERE id='old'")
+        self.db.set_setting("global_prose", " \n ")
+        cleared = self.fresh()
+        self.assertEqual(cleared.status_code, 200, cleared.text)
+        adapter = self.adapters[-1]
+        self.assertIsNone(adapter.att["global_prose"])
+        self.assertNotIn(prose, adapter.briefing())
 
     def test_checkpoint_boundary_delivers_gap_once_and_never_prior_context(self):
         for index in range(20):
