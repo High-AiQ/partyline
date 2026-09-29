@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from fastapi import HTTPException
 
+from partyline.adapters.base import Adapter
 from partyline.attachment_resume import (
     TranscriptDeliveryRecord,
     delivered_bodies,
@@ -141,6 +142,8 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
 
     def make_adapter(self, _adapter, att, *_args, **_kwargs):
         self.captured["write_grants"] = att.get("write_grants")
+        self.captured["att"] = att
+        self.captured["briefing"] = Adapter(att, lambda *_: None, lambda *_: None).briefing()
         return FakeAdapter(att=att)
 
     class _Presence:
@@ -168,6 +171,25 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
     async def test_resume_adapter_loads_write_grants(self, *_mocks):
         await resume_adapter("one", None, **self.resume_arguments())
         self.assertEqual([row["path"] for row in self.captured["write_grants"]], [self.grant])
+
+    @patch("partyline.attachment_resume.bind_role_delivery")
+    @patch("partyline.attachment_resume.bind_connection_hint")
+    @patch("partyline.attachment_resume.provision_connection")
+    async def test_resumed_process_briefing_receives_saved_global_prose(self, *_mocks):
+        prose = "Keep the saved release notes in view."
+        self.db.set_setting("global_prose", prose)
+        await resume_adapter("one", None, **self.resume_arguments())
+        self.assertEqual(self.captured["att"]["global_prose"], prose)
+        self.assertIn(prose, self.captured["briefing"])
+
+    @patch("partyline.attachment_resume.bind_role_delivery")
+    @patch("partyline.attachment_resume.bind_connection_hint")
+    @patch("partyline.attachment_resume.provision_connection")
+    async def test_resumed_process_briefing_gets_none_for_empty_global_prose(self, *_mocks):
+        self.db.set_setting("global_prose", " \n ")
+        await resume_adapter("one", None, **self.resume_arguments())
+        self.assertIsNone(self.captured["att"]["global_prose"])
+        self.assertNotIn("Keep the saved release notes in view.", self.captured["briefing"])
 
     @patch("partyline.attachment_resume.bind_role_delivery")
     @patch("partyline.attachment_resume.bind_connection_hint")
