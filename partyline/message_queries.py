@@ -20,6 +20,13 @@ def as_message(row) -> dict:
     return data
 
 
+def select_message_by_id(execute, conv_id: str, message_id: int) -> dict | None:
+    row = execute(
+        MESSAGE_SELECT + " WHERE m.conv_id=? AND m.id=?", (conv_id, message_id)
+    ).fetchone()
+    return as_message(row) if row else None
+
+
 def select_message_page(execute, conv_id, before_id=None, after_id=None, limit=20):
     if before_id is not None and after_id is not None:
         raise ValueError("choose before_id or after_id, not both")

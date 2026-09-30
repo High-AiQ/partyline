@@ -2,7 +2,7 @@
 
 import { ChatMessageSchema, type ChatMessage } from "./contracts";
 import { request } from "./http";
-import { MessagePageSchema, type MessagePage } from "./message-page";
+import { AroundMessageSchema, MessagePageSchema, type AroundMessage, type MessagePage } from "./message-page";
 
 export interface MessagePageRequest {
   beforeId?: number;
@@ -17,6 +17,13 @@ export function messagePage(id: string, page: MessagePageRequest = {}): Promise<
   if (page.limit !== undefined) query.set("limit", String(page.limit));
   const suffix = query.size ? `?${query.toString()}` : "";
   return request(`/api/conversations/${id}/messages${suffix}`, { schema: MessagePageSchema });
+}
+
+export function messagesAround(id: string, messageId: number, limit = 10): Promise<AroundMessage> {
+  const query = new URLSearchParams({ message_id: String(messageId), limit: String(limit) });
+  return request(`/api/conversations/${id}/messages/around?${query.toString()}`, {
+    schema: AroundMessageSchema,
+  });
 }
 
 export function postMessage(convId: string, body: string): Promise<ChatMessage> {

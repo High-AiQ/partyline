@@ -37,6 +37,16 @@
     }
   }
 
+  async function loadNewer(): Promise<void> {
+    const conversationId = room.conversation?.id;
+    if (!conversationId) return;
+    try {
+      await room.history.loadNewer(conversationId);
+    } catch {
+      room.showNotice("could not load newer messages", "error");
+    }
+  }
+
   function onscroll(): void {
     if (feed && feed.scrollTop <= HISTORY_PX) void loadOlder();
   }
@@ -51,7 +61,9 @@
    */
   $effect.pre(() => {
     void room.messages.length;
-    wasFollowing = !feed || feed.scrollHeight - feed.scrollTop - feed.clientHeight < STICK_PX;
+    wasFollowing =
+      !room.history.highlightedId &&
+      (!feed || feed.scrollHeight - feed.scrollTop - feed.clientHeight < STICK_PX);
   });
 
   $effect(() => {
@@ -67,16 +79,58 @@
     if (feed) feed.scrollTop = feed.scrollHeight;
   });
 
+  $effect(() => {
+    const request = room.history.scrollRequest;
+    const messageId = room.history.highlightedId;
+    if (!request || !feed) return;
+    const element = feed;
+    if (room.history.scrollToLive) {
+      element.scrollTop = element.scrollHeight;
+      return;
+    }
+    if (messageId === null) return;
+    void tick().then(() => {
+      if (room.history.scrollRequest !== request) return;
+      const target = element.querySelector(`[data-message-id="${String(messageId)}"]`);
+      target?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    });
+  });
+
   // A short first page may not create a scrollbar. Keep paging until the
   // viewport fills, then ordinary upward scrolling takes over.
   $effect(() => {
     void room.messages.length;
     void room.history.hasOlder;
-    if (feed && feed.scrollHeight <= feed.clientHeight) queueMicrotask(() => void loadOlder());
+    if (feed && feed.scrollHeight <= feed.clientHeight) {
+      queueMicrotask(() => {
+        void loadOlder();
+      });
+    }
   });
 </script>
 
 <div id="feed" class="min-h-0 flex-1 overflow-y-auto px-7 pt-[22px] pb-2.5" bind:this={feed} {onscroll}>
+  {#if room.history.jumpedAway}
+    <div class="sticky top-0 z-10 flex justify-center gap-2 pb-2">
+      {#if room.history.hasNewer}
+        <button
+          class="rounded border border-line bg-panel px-2 py-1 font-mono text-[10px] text-cream-faint shadow hover:border-copper hover:text-copper-hot"
+          type="button"
+          onclick={() => void loadNewer()}>load newer messages ↓</button
+        >
+      {/if}
+      <button
+        class="rounded border border-copper/50 bg-panel px-2 py-1 font-mono text-[10px] text-copper-hot shadow hover:bg-copper hover:text-ink"
+        type="button"
+        onclick={() => {
+          room.history.returnToLive();
+        }}>back to live bottom ↓</button
+      >
+    </div>
+  {/if}
   {#if !room.conversation}
     <div class="empty mt-[12vh] text-center text-[12.5px] text-cream-faint">
       <div class="art mb-2.5 font-serif text-[26px] italic text-cream-dim">no line selected</div>

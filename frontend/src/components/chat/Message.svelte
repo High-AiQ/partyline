@@ -9,11 +9,10 @@
   import { renderMessage, senderColor } from "../../lib/markdown";
   import { enhanceMarkdown } from "../../lib/message-enhancers";
   import { visibleMessageBody } from "../../lib/files";
-  import { copyText } from "../../lib/clipboard";
-  import { tooltip } from "../../lib/tooltip";
   import ImageGrid from "./ImageGrid.svelte";
   import FileAttachments from "./FileAttachments.svelte";
   import Reactions from "./Reactions.svelte";
+  import MessageActions from "./MessageActions.svelte";
   import { room } from "../../state/room.svelte.js";
   import type { ReactionEmoji } from "../../lib/reaction-contracts";
   import type { ChatMessage } from "../../lib/contracts";
@@ -23,25 +22,6 @@
   }
 
   let { message }: Props = $props();
-
-  // The control copies the wire markdown (`message.body`) verbatim — exactly
-  // what another line or an archive would want — never the rendered HTML.
-  let copied = $state(false);
-  let revertTimer: ReturnType<typeof setTimeout> | undefined;
-
-  async function copy(): Promise<void> {
-    if (await copyText(message.body)) {
-      copied = true;
-      clearTimeout(revertTimer);
-      revertTimer = setTimeout(() => {
-        copied = false;
-      }, 1500);
-    }
-  }
-
-  $effect(() => () => {
-    clearTimeout(revertTimer);
-  });
 
   const isSystem = $derived(message.sender_type === "system");
   const body = $derived(renderMessage(visibleMessageBody(message), message.sender_type === "agent"));
@@ -68,7 +48,11 @@
   const isPrivate = $derived(Boolean(message.audience_attachment_id));
 </script>
 
-<div class="msg group relative animate-[arrive_0.28s_ease_both] {rootClass}">
+<div
+  class="msg group relative animate-[arrive_0.28s_ease_both] {rootClass}"
+  class:jump-highlighted={room.history.highlightedId === message.id}
+  data-message-id={message.id}
+>
   {#if !isSystem}
     <div class="head mb-0.5 flex items-baseline gap-2.5">
       <span
@@ -84,37 +68,13 @@
       {#if isPrivate}
         <span class="direct text-[10px] text-cream-faint">· direct</span>
       {/if}
-      <span class="message-actions ml-auto flex items-center gap-1">
-        <Reactions
-          messageId={message.id}
-          reactions={message.reactions ?? []}
-          showChips={false}
-          onToggle={(emoji: ReactionEmoji) => room.toggleReaction(message.id, emoji)}
-        />
-        <button
-          class="copy grid size-7 place-items-center rounded border border-line bg-ink-2 p-0 text-[13px] leading-none text-cream-faint opacity-0 pointer-events-none transition-opacity hover:bg-copper hover:text-ink group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
-          type="button"
-          use:tooltip={{ label: copied ? "Copied" : "copy message" }}
-          aria-label="copy message"
-          onclick={copy}
-        >
-          {#if copied}
-            <svg
-              class="size-[13px] fill-none stroke-current stroke-2 [stroke-linecap:round] [stroke-linejoin:round]"
-              viewBox="0 0 24 24"
-              aria-hidden="true"><path d="m5 13 4 4L19 7" /></svg
-            >
-          {:else}
-            <svg
-              class="size-[13px] fill-none stroke-current stroke-2 [stroke-linecap:round] [stroke-linejoin:round]"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-              ><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg
-            >
-          {/if}
-        </button>
-      </span>
+      {#if room.pins.has(message.id)}
+        <span class="rounded border border-copper/40 px-1 text-[9px] text-copper-hot">pinned</span>
+      {/if}
+      <MessageActions {message} {isSystem} />
     </div>
+  {:else}
+    <MessageActions {message} {isSystem} />
   {/if}
   <div class="body {bodyClass}" use:enhanceMarkdown={body}>
     <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitised in renderMessage -->
@@ -137,15 +97,6 @@
 </div>
 
 <style>
-  /* A touch screen has no hover to reveal the copy control with, and Tailwind
-     has no `(hover: none)` media-query variant. */
-  @media (hover: none) {
-    .copy {
-      opacity: 1;
-      pointer-events: auto;
-    }
-  }
-
   /* A process gets a patch-cable arrow, so the eye can sort people from
        machines without reading a single name. */
   .who.agent::before {
@@ -196,6 +147,14 @@
   }
   .body :global(.katex-display) {
     margin: 8px 0;
+  }
+
+  .msg.jump-highlighted {
+    outline: 2px solid var(--color-copper-hot);
+    outline-offset: 4px;
+    border-radius: 4px;
+    background: rgb(217 142 74 / 0.08);
+    transition: background-color 0.35s ease;
   }
 
   /* Headings stay close to body size: this is a chat line, not a document, and

@@ -2,6 +2,7 @@
 
 import { SvelteSet } from "svelte/reactivity";
 import { api } from "../lib/api";
+import { messagesAround } from "../lib/message-api";
 import type { ChatMessage, ReactionResponse } from "../lib/contracts";
 
 const PAGE_SIZE = 20;
@@ -11,10 +12,17 @@ export class MessageHistory {
   hasOlder = $state(false);
   loadingOlder = $state(false);
   olderError = $state(false);
+  hasNewer = $state(false);
+  highlightedId = $state<number | null>(null);
+  jumpedAway = $state(false);
+  scrollRequest = $state(0);
+  scrollToLive = $state(false);
   humans = new SvelteSet<string>();
 
   #seen = new SvelteSet<number>();
   #generation = 0;
+  #newerCursor = 0;
+  #highlightTimer: ReturnType<typeof setTimeout> | undefined;
   #currentHandle: () => string | null;
 
   constructor(currentHandle: () => string | null) {
@@ -35,6 +43,12 @@ export class MessageHistory {
     this.hasOlder = false;
     this.loadingOlder = false;
     this.olderError = false;
+    this.hasNewer = false;
+    this.highlightedId = null;
+    this.jumpedAway = false;
+    this.scrollToLive = false;
+    this.#newerCursor = 0;
+    clearTimeout(this.#highlightTimer);
     this.#seen = new SvelteSet<number>();
     this.humans.clear();
   }
@@ -104,5 +118,50 @@ export class MessageHistory {
       if (!page.has_more || next === undefined) return;
       cursor = next;
     }
+  }
+
+  async jumpAround(conversationId: string, messageId: number): Promise<void> {
+    const generation = this.#generation;
+    const previouslyNewest = this.newestId;
+    if (!this.#seen.has(messageId)) {
+      const window = await messagesAround(conversationId, messageId, 10);
+      if (generation !== this.#generation) return;
+      const cursor = window.messages.at(-1)?.id ?? messageId;
+      this.#newerCursor = cursor;
+      this.hasOlder = this.hasOlder || window.has_more_before;
+      this.hasNewer = window.has_more_after && cursor < previouslyNewest;
+      this.merge(window.messages);
+    } else {
+      this.#newerCursor = messageId;
+      this.hasNewer = false;
+    }
+    this.highlightedId = messageId;
+    this.jumpedAway = true;
+    this.scrollToLive = false;
+    this.scrollRequest++;
+    clearTimeout(this.#highlightTimer);
+    this.#highlightTimer = setTimeout(() => {
+      if (this.highlightedId === messageId) this.highlightedId = null;
+    }, 2400);
+  }
+
+  async loadNewer(conversationId: string): Promise<number> {
+    if (!this.hasNewer || !this.#newerCursor) return 0;
+    const page = await api.messagePage(conversationId, {
+      afterId: this.#newerCursor,
+      limit: PAGE_SIZE,
+    });
+    const next = page.messages.at(-1)?.id;
+    if (next !== undefined) this.#newerCursor = next;
+    this.hasNewer = page.has_more && (next ?? 0) < this.newestId;
+    return this.merge(page.messages);
+  }
+
+  returnToLive(): void {
+    this.hasNewer = false;
+    this.jumpedAway = false;
+    this.highlightedId = null;
+    this.scrollToLive = true;
+    this.scrollRequest++;
   }
 }
