@@ -124,3 +124,36 @@ class MessageRoutesTest(unittest.TestCase):
             ).status_code,
             422,
         )
+
+    def test_around_window_includes_target_and_reports_first_and_last_edges(self):
+        first = self.messages[0]["id"]
+        last = self.messages[-1]["id"]
+        at_first = self.client.get(
+            "/api/conversations/line/messages/around", params={"message_id": first}
+        )
+        at_last = self.client.get(
+            "/api/conversations/line/messages/around", params={"message_id": last}
+        )
+        self.assertEqual(at_first.status_code, 200)
+        self.assertEqual(self.ids(at_first)[:2], [first, self.messages[1]["id"]])
+        self.assertFalse(at_first.json()["has_more_before"])
+        self.assertTrue(at_first.json()["has_more_after"])
+        self.assertEqual(self.ids(at_last)[-2:], [self.messages[-2]["id"], last])
+        self.assertTrue(at_last.json()["has_more_before"])
+        self.assertFalse(at_last.json()["has_more_after"])
+
+    def test_around_window_missing_id_and_size_clamps(self):
+        missing = self.client.get(
+            "/api/conversations/line/messages/around", params={"message_id": 999999}
+        )
+        self.assertEqual(missing.status_code, 404)
+        capped = self.client.get(
+            "/api/conversations/line/messages/around",
+            params={"message_id": self.messages[22]["id"], "limit": 500},
+        )
+        self.assertEqual(len(capped.json()["messages"]), 45)
+        narrow = self.client.get(
+            "/api/conversations/line/messages/around",
+            params={"message_id": self.messages[22]["id"], "limit": 0},
+        )
+        self.assertEqual(len(narrow.json()["messages"]), 3)

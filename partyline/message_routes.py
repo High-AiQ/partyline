@@ -9,7 +9,8 @@ from .auth_guard import request_principal
 from .contracts import MessageResponse
 from .hierarchy_contracts import MessageIn
 from .machine_scope import deny_unless, is_human
-from .message_contracts import MessagePageResponse
+from .message_contracts import AroundMessageResponse, MessagePageResponse
+from .message_queries import select_message_by_id
 from .message_routing import post_identified
 from .reaction_store import attach
 
@@ -56,6 +57,37 @@ def message_router(runtime, media) -> APIRouter:
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         return {"messages": attach(runtime.db, media.attach(rows), principal), "has_more": has_more}
+
+    @router.get(
+        "/api/conversations/{conv_id}/messages/around",
+        response_model=AroundMessageResponse,
+    )
+    async def messages_around(
+        request: Request,
+        conv_id: str,
+        message_id: int = Query(ge=1),
+        limit: int = Query(default=10),
+    ):
+        if runtime.db.get_conversation(conv_id) is None:
+            raise HTTPException(404)
+        principal = request_principal(request)
+        deny_unless(runtime.db, principal, conv_id, "read")
+        limit = max(1, min(limit, 50))
+        target = select_message_by_id(runtime.db._exec, conv_id, message_id)
+        if target is None:
+            raise HTTPException(404, "message not found on this line")
+        before, has_before = runtime.db.message_page(
+            conv_id, before_id=message_id, limit=limit
+        )
+        after, has_after = runtime.db.message_page(
+            conv_id, after_id=message_id, limit=limit
+        )
+        rows = [*before, target, *after]
+        return {
+            "messages": attach(runtime.db, media.attach(rows), principal),
+            "has_more_before": has_before,
+            "has_more_after": has_after,
+        }
 
     @router.post(
         "/api/conversations/{conv_id}/messages",

@@ -12,6 +12,7 @@ import {
 } from "./contracts";
 import { WriteSetGrantRequestSchema } from "./write-set-contracts";
 import { ReactionResponseSchema } from "./reaction-contracts";
+import { PinsChangedEventSchema } from "./pin-contracts";
 
 export const HelloEventSchema = z.object({
   type: z.literal("hello"),
@@ -176,6 +177,7 @@ const CurrentWireEventSchema = z.discriminatedUnion("type", [
   ReattachDecisionEventSchema,
   RestartRequestEventSchema,
   WriteSetGrantRequestEventSchema,
+  PinsChangedEventSchema,
 ]);
 
 /** Normalize the boolean-only presence frame emitted by older servers. */
