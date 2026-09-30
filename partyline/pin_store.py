@@ -12,10 +12,17 @@ def _pin_row(row) -> dict:
 
 
 def list_pins(db, conv_id: str) -> list[dict]:
+    has_images = db._exec(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='images'"
+    ).fetchone() is not None
+    file_count = (
+        "(SELECT count(*) FROM images i WHERE i.message_id=p.message_id "
+        "AND i.conv_id=p.conv_id)"
+        if has_images else "0"
+    )
     rows = db._exec(
         "SELECT p.conv_id AS conversation_id, p.message_id, p.alias, p.created_at, m.body, "
-        "(SELECT count(*) FROM images i WHERE i.message_id=p.message_id "
-        "AND i.conv_id=p.conv_id) AS file_count "
+        f"{file_count} AS file_count "
         "FROM message_pins p LEFT JOIN messages m "
         "ON m.id=p.message_id AND m.conv_id=p.conv_id "
         "WHERE p.conv_id=? ORDER BY p.created_at, p.message_id",

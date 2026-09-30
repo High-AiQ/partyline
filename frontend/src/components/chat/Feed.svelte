@@ -130,7 +130,7 @@
 
 <div id="feed" class="min-h-0 flex-1 overflow-y-auto px-7 pt-[22px] pb-2.5" bind:this={feed} {onscroll}>
   {#if room.history.jumpedAway}
-    <div class="sticky top-0 z-10 flex justify-center gap-2 pb-5" data-history-controls>
+    <div class="sticky top-0 z-10 flex justify-center gap-2 bg-panel pb-5" data-history-controls>
       {#if room.history.hasNewer}
         <button
           class="rounded border border-line bg-panel px-2 py-1 font-mono text-[10px] text-cream-faint shadow hover:border-copper hover:text-copper-hot"
