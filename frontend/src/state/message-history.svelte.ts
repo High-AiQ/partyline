@@ -1,11 +1,16 @@
 /** Bounded human history with stable ids across pages, wire events, and reconnects. */
 
-import { SvelteSet } from "svelte/reactivity";
+import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { api } from "../lib/api";
 import { messagesAround } from "../lib/message-api";
 import type { ChatMessage, ReactionResponse } from "../lib/contracts";
 
 const PAGE_SIZE = 20;
+
+export interface HistoryGap {
+  afterId: number;
+  beforeId: number | null;
+}
 
 export class MessageHistory {
   messages = $state<ChatMessage[]>([]);
@@ -13,6 +18,8 @@ export class MessageHistory {
   loadingOlder = $state(false);
   olderError = $state(false);
   hasNewer = $state(false);
+  gaps = $state<HistoryGap[]>([]);
+  loadingGapAfterId = $state<number | null>(null);
   highlightedId = $state<number | null>(null);
   jumpedAway = $state(false);
   scrollRequest = $state(0);
@@ -21,7 +28,6 @@ export class MessageHistory {
 
   #seen = new SvelteSet<number>();
   #generation = 0;
-  #newerCursor = 0;
   #highlightTimer: ReturnType<typeof setTimeout> | undefined;
   #currentHandle: () => string | null;
 
@@ -44,10 +50,11 @@ export class MessageHistory {
     this.loadingOlder = false;
     this.olderError = false;
     this.hasNewer = false;
+    this.gaps = [];
+    this.loadingGapAfterId = null;
     this.highlightedId = null;
     this.jumpedAway = false;
     this.scrollToLive = false;
-    this.#newerCursor = 0;
     clearTimeout(this.#highlightTimer);
     this.#seen = new SvelteSet<number>();
     this.humans.clear();
@@ -122,19 +129,20 @@ export class MessageHistory {
 
   async jumpAround(conversationId: string, messageId: number): Promise<void> {
     const generation = this.#generation;
-    const previouslyNewest = this.newestId;
     if (!this.#seen.has(messageId)) {
       const window = await messagesAround(conversationId, messageId, 10);
       if (generation !== this.#generation) return;
-      const cursor = window.messages.at(-1)?.id ?? messageId;
-      this.#newerCursor = cursor;
-      this.hasOlder = this.hasOlder || window.has_more_before;
-      this.hasNewer = window.has_more_after && cursor < previouslyNewest;
+      const firstId = window.messages.at(0)?.id;
+      const lastId = window.messages.at(-1)?.id;
+      if (firstId !== undefined && lastId !== undefined) {
+        if (this.oldestId === null || firstId <= this.oldestId) {
+          this.hasOlder = window.has_more_before;
+        }
+        this.#recordGaps(firstId, lastId, window.has_more_before, window.has_more_after);
+      }
       this.merge(window.messages);
-    } else {
-      this.#newerCursor = messageId;
-      this.hasNewer = false;
     }
+    this.hasNewer = this.gaps.length > 0;
     this.highlightedId = messageId;
     this.jumpedAway = true;
     this.scrollToLive = false;
@@ -145,23 +153,87 @@ export class MessageHistory {
     }, 2400);
   }
 
-  async loadNewer(conversationId: string): Promise<number> {
-    if (!this.hasNewer || !this.#newerCursor) return 0;
-    const page = await api.messagePage(conversationId, {
-      afterId: this.#newerCursor,
-      limit: PAGE_SIZE,
-    });
-    const next = page.messages.at(-1)?.id;
-    if (next !== undefined) this.#newerCursor = next;
-    this.hasNewer = page.has_more && (next ?? 0) < this.newestId;
-    return this.merge(page.messages);
+  async loadNewer(conversationId: string, afterId = this.gaps[0]?.afterId): Promise<number> {
+    const gap = this.gaps.find((candidate) => candidate.afterId === afterId);
+    if (!gap || this.loadingGapAfterId !== null) return 0;
+    const generation = this.#generation;
+    let cursor = gap.afterId;
+    let added = 0;
+    this.loadingGapAfterId = gap.afterId;
+    try {
+      for (;;) {
+        const page = await api.messagePage(conversationId, { afterId: cursor, limit: PAGE_SIZE });
+        if (generation !== this.#generation) return 0;
+        const next = page.messages.at(-1)?.id;
+        if (next === undefined || next <= cursor) {
+          this.#removeGap(gap.afterId);
+          return added;
+        }
+        added += this.merge(page.messages);
+        if (!page.has_more || (gap.beforeId !== null && next >= gap.beforeId)) {
+          this.#removeGap(gap.afterId);
+          return added;
+        }
+        cursor = next;
+      }
+    } finally {
+      if (generation === this.#generation) this.loadingGapAfterId = null;
+    }
   }
 
-  returnToLive(): void {
+  async returnToLive(conversationId: string): Promise<void> {
+    const generation = ++this.#generation;
+    this.loadingOlder = false;
+    this.loadingGapAfterId = null;
+    const page = await api.messagePage(conversationId, { limit: PAGE_SIZE });
+    if (generation !== this.#generation) return;
+    const newestTailId = page.messages.at(-1)?.id ?? 0;
+    const newer = this.messages.filter((message) => message.id > newestTailId);
+    this.messages = [];
+    this.#seen = new SvelteSet<number>();
+    this.gaps = [];
+    this.hasNewer = false;
+    this.loadingGapAfterId = null;
+    this.loadingOlder = false;
+    this.olderError = false;
+    this.hasOlder = page.has_more;
+    this.merge([...page.messages, ...newer]);
     this.hasNewer = false;
     this.jumpedAway = false;
     this.highlightedId = null;
     this.scrollToLive = true;
     this.scrollRequest++;
+    clearTimeout(this.#highlightTimer);
+  }
+
+  #recordGaps(firstId: number, lastId: number, hasBefore: boolean, hasAfter: boolean): void {
+    const overlapping = this.gaps.filter(
+      (gap) => gap.afterId < lastId && (gap.beforeId === null || gap.beforeId > firstId),
+    );
+    const retained = this.gaps.filter((gap) => !overlapping.includes(gap));
+    for (const gap of overlapping) {
+      if (hasBefore && firstId > gap.afterId) {
+        retained.push({ afterId: gap.afterId, beforeId: firstId });
+      }
+      if (hasAfter && (gap.beforeId === null || lastId < gap.beforeId)) {
+        retained.push({ afterId: lastId, beforeId: gap.beforeId });
+      }
+    }
+    const nextLoadedId = this.messages.find((message) => message.id > lastId)?.id ?? null;
+    if (hasAfter && !overlapping.length) {
+      retained.push({ afterId: lastId, beforeId: nextLoadedId });
+    }
+    const unique = new SvelteMap<string, HistoryGap>();
+    for (const gap of retained) {
+      const key = `${String(gap.afterId)}:${gap.beforeId === null ? "end" : String(gap.beforeId)}`;
+      unique.set(key, gap);
+    }
+    this.gaps = [...unique.values()].sort((left, right) => left.afterId - right.afterId);
+    this.hasNewer = this.gaps.length > 0;
+  }
+
+  #removeGap(afterId: number): void {
+    this.gaps = this.gaps.filter((gap) => gap.afterId !== afterId);
+    this.hasNewer = this.gaps.length > 0;
   }
 }

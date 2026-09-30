@@ -19,6 +19,7 @@ class PinResponse(BaseModel):
     created_at: float
     message_available: bool
     message_text: str | None = None
+    file_count: int = 0
 
 
 class PinsChangedEvent(BaseModel):

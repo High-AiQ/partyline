@@ -7,6 +7,7 @@ export const PinSchema = z.object({
   created_at: z.number(),
   message_available: z.boolean(),
   message_text: z.string().nullable(),
+  file_count: z.number().int().nonnegative(),
 });
 export type Pin = z.infer<typeof PinSchema>;
 

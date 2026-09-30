@@ -20,7 +20,9 @@ const DIGEST_PREFIXES = ["📷 ", "🎵 ", "🎬 ", "📎 "];
 /** Agent-facing file metadata rides in the durable body but not the human UI.
  *  The server appends exactly one digest line per file, so the strip is
  *  bounded: a real sentence that happens to start with a prefix survives. */
-export function visibleMessageBody(message: ChatMessage): string {
+export function visibleMessageBody(
+  message: Pick<ChatMessage, "body"> & { files: { length: number } },
+): string {
   if (!message.files.length) return message.body;
   const lines = message.body.split("\n");
   let end = lines.length;

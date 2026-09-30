@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from partyline import auth_store, auth_tokens
 from partyline.auth_guard import install_auth_guard
 from partyline.db import Db
+from partyline.media_rows import SCHEMA as MEDIA_SCHEMA
 from partyline.pin_routes import pin_router
 from partyline.runtime import ChatRuntime
 
@@ -18,6 +19,7 @@ class MessagePinsTest(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.db = Db(Path(self.directory.name) / "partyline.db")
+        self.db.conn.executescript(MEDIA_SCHEMA)
         self.db.create_conversation("line", "Line")
         self.db.create_conversation("other", "Other")
         self.runtime = ChatRuntime(self.db)

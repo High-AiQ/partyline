@@ -13,7 +13,9 @@ def _pin_row(row) -> dict:
 
 def list_pins(db, conv_id: str) -> list[dict]:
     rows = db._exec(
-        "SELECT p.conv_id AS conversation_id, p.message_id, p.alias, p.created_at, m.body "
+        "SELECT p.conv_id AS conversation_id, p.message_id, p.alias, p.created_at, m.body, "
+        "(SELECT count(*) FROM images i WHERE i.message_id=p.message_id "
+        "AND i.conv_id=p.conv_id) AS file_count "
         "FROM message_pins p LEFT JOIN messages m "
         "ON m.id=p.message_id AND m.conv_id=p.conv_id "
         "WHERE p.conv_id=? ORDER BY p.created_at, p.message_id",
