@@ -1,5 +1,6 @@
 <script lang="ts">
   import { ApiError } from "../../lib/http";
+  import { visibleMessageBody } from "../../lib/files";
   import { storePinAccordionOpen, storedPinAccordionOpen } from "../../lib/pin-accordion-state";
   import { tooltip } from "../../lib/tooltip";
   import type { Pin } from "../../lib/pin-contracts";
@@ -65,7 +66,13 @@
   {#if room.pins.items.length}
     <ul class="m-0 grid list-none gap-1 p-0">
       {#each room.pins.items as pin (pin.message_id)}
-        {@const label = pin.alias ?? pin.message_text ?? "message unavailable"}
+        {@const source = pin.message_available
+          ? visibleMessageBody({
+              body: pin.message_text ?? "",
+              files: { length: pin.file_count },
+            })
+          : "message unavailable"}
+        {@const label = pin.alias ?? source}
         <li
           class="grid grid-cols-[minmax(0,1fr)_auto_auto] items-start gap-1 rounded border border-line bg-ink-3 px-2 py-1.5"
           data-pin-row={pin.message_id}
@@ -98,7 +105,7 @@
               }}
             >
               <span
-                class="line-clamp-2 [overflow-wrap:anywhere]"
+                class="{pin.alias ? 'line-clamp-2' : 'line-clamp-1'} [overflow-wrap:anywhere]"
                 use:tooltip={{ label: pin.message_available ? label : `${label} · source unavailable` }}
                 >{label}{pin.message_available ? "" : " · source unavailable"}</span
               >

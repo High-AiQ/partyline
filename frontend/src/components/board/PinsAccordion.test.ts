@@ -1,5 +1,5 @@
 import { mount, unmount } from "svelte";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { pinAccordionStorageKey } from "../../lib/pin-accordion-state";
 import { room } from "../../state/room.svelte.js";
 import PinsAccordion from "./PinsAccordion.svelte";
@@ -17,6 +17,7 @@ const conversation = {
 };
 
 afterEach(() => {
+  vi.restoreAllMocks();
   localStorage.clear();
   room.conversation = null;
   room.pins.clear();
@@ -35,6 +36,7 @@ describe("pinned message accordion", () => {
         created_at: 1,
         message_available: true,
         message_text: "Original message body should be replaced by its alias",
+        file_count: 0,
       },
     ]);
     const view = mount(PinsAccordion, { target: document.body });
@@ -76,14 +78,39 @@ describe("pinned message accordion", () => {
         created_at: 1,
         message_available: true,
         message_text:
-          "A long source message that should clip in the pin row but remain available in its tooltip",
+          "A long source message that should clip in the pin row but remain available in its tooltip\n📎 [file digest]",
+        file_count: 1,
       },
     ]);
     const view = mount(PinsAccordion, { target: document.body });
     try {
       await Promise.resolve();
       expect(document.querySelector("details")?.open).toBe(false);
-      expect(document.querySelector("[data-pin-row] span")?.textContent).toContain("A long source message");
+      const label = document.querySelector("[data-pin-row] span");
+      expect(label?.textContent).toContain("A long source message");
+      expect(label?.textContent).not.toContain("[file digest]");
+      expect(label?.classList.contains("line-clamp-1")).toBe(true);
+    } finally {
+      await unmount(view);
+    }
+  });
+
+  it("renders and toggles when local storage is unavailable", async () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("storage blocked");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("storage blocked");
+    });
+    room.conversation = conversation;
+    const view = mount(PinsAccordion, { target: document.body });
+    try {
+      await Promise.resolve();
+      const details = document.querySelector("details");
+      expect(details?.open).toBe(true);
+      details?.querySelector("summary")?.click();
+      details?.dispatchEvent(new Event("toggle"));
+      expect(details?.open).toBe(false);
     } finally {
       await unmount(view);
     }
