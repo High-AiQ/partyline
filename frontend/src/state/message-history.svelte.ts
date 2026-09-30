@@ -6,6 +6,7 @@ import { messagesAround } from "../lib/message-api";
 import type { ChatMessage, ReactionResponse } from "../lib/contracts";
 
 const PAGE_SIZE = 20;
+const GAP_PAGES_PER_LOAD = 2;
 
 export interface HistoryGap {
   afterId: number;
@@ -161,21 +162,25 @@ export class MessageHistory {
     let added = 0;
     this.loadingGapAfterId = gap.afterId;
     try {
-      for (;;) {
+      let currentAfterId = gap.afterId;
+      for (let loadedPages = 0; loadedPages < GAP_PAGES_PER_LOAD; loadedPages++) {
         const page = await api.messagePage(conversationId, { afterId: cursor, limit: PAGE_SIZE });
         if (generation !== this.#generation) return 0;
         const next = page.messages.at(-1)?.id;
         if (next === undefined || next <= cursor) {
-          this.#removeGap(gap.afterId);
+          this.#removeGap(currentAfterId);
           return added;
         }
         added += this.merge(page.messages);
         if (!page.has_more || (gap.beforeId !== null && next >= gap.beforeId)) {
-          this.#removeGap(gap.afterId);
+          this.#removeGap(currentAfterId);
           return added;
         }
         cursor = next;
+        this.#moveGap(currentAfterId, cursor, gap.beforeId);
+        currentAfterId = cursor;
       }
+      return added;
     } finally {
       if (generation === this.#generation) this.loadingGapAfterId = null;
     }
@@ -220,7 +225,7 @@ export class MessageHistory {
       }
     }
     const nextLoadedId = this.messages.find((message) => message.id > lastId)?.id ?? null;
-    if (hasAfter && !overlapping.length) {
+    if (hasAfter && !overlapping.length && !this.#seen.has(lastId)) {
       retained.push({ afterId: lastId, beforeId: nextLoadedId });
     }
     const unique = new SvelteMap<string, HistoryGap>();
@@ -234,6 +239,11 @@ export class MessageHistory {
 
   #removeGap(afterId: number): void {
     this.gaps = this.gaps.filter((gap) => gap.afterId !== afterId);
+    this.hasNewer = this.gaps.length > 0;
+  }
+
+  #moveGap(afterId: number, nextAfterId: number, beforeId: number | null): void {
+    this.gaps = this.gaps.filter((gap) => gap.afterId !== afterId).concat({ afterId: nextAfterId, beforeId });
     this.hasNewer = this.gaps.length > 0;
   }
 }

@@ -71,6 +71,22 @@ describe("history jumps to pinned messages", () => {
     expect(history.gaps).toEqual([{ afterId: 11, beforeId: 121 }]);
   });
 
+  it("does not mark an overlapping around-window as a gap", async () => {
+    const history = new MessageHistory(() => "greg");
+    history.seed(messages(121, 140), true);
+    vi.spyOn(messageApi, "messagesAround").mockResolvedValue({
+      messages: messages(108, 128),
+      has_more_before: true,
+      has_more_after: true,
+    });
+
+    await history.jumpAround("line", 118);
+
+    expect(history.messages.map((item) => item.id)).toEqual(Array.from({ length: 33 }, (_, i) => i + 108));
+    expect(history.gaps).toEqual([]);
+    expect(history.hasNewer).toBe(false);
+  });
+
   it("splits gaps across repeated far jumps and fills both in order", async () => {
     const history = new MessageHistory(() => "greg");
     history.seed(messages(121, 140), true);
@@ -101,10 +117,34 @@ describe("history jumps to pinned messages", () => {
     await history.loadNewer("line", 11);
     expect(history.gaps).toEqual([{ afterId: 70, beforeId: 121 }]);
     await history.loadNewer("line", 70);
+    expect(history.gaps).toEqual([{ afterId: 110, beforeId: 121 }]);
+    await history.loadNewer("line", 110);
 
     expect(history.messages.map((item) => item.id)).toEqual(Array.from({ length: 140 }, (_, i) => i + 1));
     expect(history.gaps).toEqual([]);
     expect(pages).toHaveBeenCalledTimes(5);
+  });
+
+  it("limits one gap fill to two pages and advances the remaining gap", async () => {
+    const history = new MessageHistory(() => "greg");
+    history.seed(messages(19_981, 20_000), true);
+    vi.spyOn(messageApi, "messagesAround").mockResolvedValue({
+      messages: messages(1, 11),
+      has_more_before: false,
+      has_more_after: true,
+    });
+    const pages = vi.spyOn(api, "messagePage").mockImplementation((_line, args) => {
+      const first = (args?.afterId ?? 0) + 1;
+      return Promise.resolve(page(first, first + 19, true));
+    });
+    await history.jumpAround("line", 1);
+
+    const added = await history.loadNewer("line", 11);
+
+    expect(pages).toHaveBeenCalledTimes(2);
+    expect(added).toBe(40);
+    expect(history.gaps).toEqual([{ afterId: 51, beforeId: 19_981 }]);
+    expect(history.messages).toHaveLength(71);
   });
 
   it("ignores a newer-page response after switching lines", async () => {
