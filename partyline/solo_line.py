@@ -7,11 +7,13 @@ protected nothing. So a human message with no mention and no colon-address
 on a line whose only live process is X reaches X as if it said @X. Only
 humans get this shortcut: an agent's plain speech is a reply for the room,
 and turning it into a wake would let two processes ring each other forever.
+An unknown @word in human prose does not name a colleague and does not cancel
+the shortcut; a known handle or ``@all`` does.
 """
 
 from __future__ import annotations
 
-from .mentions import addresses, line_addressed, mentioned_names
+from .mentions import addresses, known_mention_names, line_addressed, mentioned_names
 
 _LIVE = ("starting", "running")
 
@@ -27,7 +29,7 @@ def implied_addressee(db, message: dict) -> str | None:
     if message.get("sender_type") != "human" or message.get("audience_attachment_id"):
         return None
     body = str(message.get("body") or "")
-    if mentioned_names(body):
+    if known_mention_names(db, message["conv_id"], mentioned_names(body)):
         return None
     alone = solo_process(db, message["conv_id"])
     if alone is None:
