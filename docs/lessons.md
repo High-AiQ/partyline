@@ -215,7 +215,9 @@ replaced them:
   live process. `turn_return.py` rings the requester with the last words when nothing did, and
   `mention_relay.py` lets a manager's mention cross lines as a private copy so "@lead" from a
   sub-manager means something. Control: `tests/test_return_path.py` fails against the old
-  behaviour — a silent turn end used to produce no message anywhere.
+  behaviour — a silent turn end used to produce no message anywhere. A delivered hand-off also
+  covers its line and ancestors from duplicate goal-stall wakes until new activity; an
+  undeliverable closing mention leaves the stall wake armed.
 - **A process posting through the API and then saying the same thing is two messages.** Codex
   leads used the authenticated helper to `POST /messages` on their own line and then said the
   same words in the terminal; the rollout held each message once, the room twice. The tailed

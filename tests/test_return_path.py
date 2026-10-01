@@ -423,6 +423,44 @@ class ReturnPathTest(Tree):
             [],
         )
 
+    async def test_a_child_captain_handing_off_to_parent_covers_both_goals(self):
+        self.goal("parent", "Ship it")
+        self.goal("child", "Finish the child review")
+
+        await self.turn("sub", "@lead the review is ready")
+
+        wakes = [
+            body for adapter in self.adapters.values() for body in adapter.bodies()
+            if body.startswith("☏ goal still open")
+        ]
+        self.assertEqual(wakes, [])
+        self.assertIn("child", self.presence.goal_stall.notified)
+        self.assertIn("parent", self.presence.goal_stall.notified)
+
+    async def test_a_child_captain_handing_off_to_a_same_line_worker_covers_the_goal(self):
+        self.goal("child", "Finish the child review")
+
+        await self.turn("sub", "@builder please review the page")
+
+        wakes = [
+            body for adapter in self.adapters.values() for body in adapter.bodies()
+            if body.startswith("☏ goal still open")
+        ]
+        self.assertEqual(wakes, [])
+        self.assertIn("child", self.presence.goal_stall.notified)
+
+    async def test_an_undeliverable_child_captain_mention_does_not_cover_the_goal(self):
+        self.goal("child", "Finish the child review")
+
+        await self.turn("sub", "@nobody the review is ready")
+
+        wakes = [
+            body for adapter in self.adapters.values() for body in adapter.bodies()
+            if body.startswith("☏ goal still open")
+        ]
+        self.assertEqual(len(wakes), 1)
+
+
     async def test_a_child_captain_return_notice_suppresses_its_duplicate_goal_wake(self):
         self.goal("child", "Finish the child review")
         await self.say("lead", "@sub review page one")
