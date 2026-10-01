@@ -113,6 +113,21 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         self.db.close()
         self.directory.cleanup()
 
+    async def _run_with_backlogs(self, plan=None):
+        pending_by_name = {}
+
+        async def resume(attachment_id, pending):
+            attachment = self.db.get_attachment(attachment_id)
+            name = attachment["name"]
+            pending_by_name[name] = pending
+            adapter = ReadyAdapter(self.order, name)
+            adapter.att["runtime_owner"] = attachment["runtime_owner"]
+            self.runtime.live[attachment_id] = adapter
+            return ResumedAttachment(adapter, False)
+
+        await ReattachCoordinator(self.runtime, resume).run(plan or self.plan, "greg")
+        return pending_by_name
+
     async def test_each_process_is_delivered_and_ready_before_the_next_starts(self):
         adapters = {}
 
@@ -139,6 +154,121 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result.ready, ("sol", "terra"))
         self.assertIn("Continuation debrief", adapters["one"].deliveries[0][0]["body"])
+
+    async def test_restart_resume_filters_sibling_speech_when_alpha_speaks_last(self):
+        self.db.add_message("line", "terra", "agent", "terra says hello")
+        self.db.add_message("line", "sol", "agent", "sol speaks last")
+
+        backlogs = await self._run_with_backlogs()
+
+        self.assertFalse(any(m["sender"] == "terra" for m in backlogs["sol"]))
+        self.assertFalse(any(m["sender"] == "sol" for m in backlogs["terra"]))
+        self.assertTrue(any("Continuation debrief" in m["body"] for m in backlogs["sol"]))
+        self.assertTrue(any("Continuation debrief" in m["body"] for m in backlogs["terra"]))
+
+    async def test_restart_resume_filters_sibling_speech_when_beta_speaks_last(self):
+        self.db.add_message("line", "sol", "agent", "sol says hello")
+        self.db.add_message("line", "terra", "agent", "terra speaks last")
+
+        backlogs = await self._run_with_backlogs()
+
+        self.assertFalse(any(m["sender"] == "terra" for m in backlogs["sol"]))
+        self.assertFalse(any(m["sender"] == "sol" for m in backlogs["terra"]))
+
+    async def test_empty_manual_debrief_does_not_wake_finished_siblings(self):
+        empty_debrief_plan = {**self.plan, "debrief": "  "}
+
+        backlogs = await self._run_with_backlogs(empty_debrief_plan)
+
+        self.assertEqual(backlogs, {"sol": [], "terra": []})
+
+    async def test_restart_resume_notice_is_private_to_the_process_cut_mid_turn(self):
+        empty_debrief_plan = {**self.plan, "debrief": ""}
+        self.db._exec("UPDATE attachments SET turn_open=1 WHERE id='one'")
+        self.db.add_message("line", "terra", "agent", "hello")
+
+        backlogs = await self._run_with_backlogs(empty_debrief_plan)
+
+        self.assertTrue(any("after the dogfood restart" in m["body"] for m in backlogs["sol"]))
+        self.assertTrue(any("restarted in the middle of a turn" in m["body"]
+                            for m in backlogs["sol"]))
+        self.assertFalse(any(m["body"] == "hello" for m in backlogs["sol"]))
+        self.assertFalse(any("restarted in the middle of a turn" in m["body"]
+                             for m in backlogs["terra"]))
+        self.assertEqual(backlogs["terra"], [])
+        self.assertFalse(any(m["body"] == "hello" for m in backlogs["terra"]))
+
+    async def test_explicit_debrief_reaches_siblings_on_the_plan_line(self):
+        plan = {**self.plan, "debrief": "Continue the line's review."}
+
+        backlogs = await self._run_with_backlogs(plan)
+
+        for name in ("sol", "terra"):
+            self.assertTrue(any(
+                "Continuation debrief: Continue the line's review." in m["body"]
+                for m in backlogs[name]
+            ))
+
+    async def test_fleet_debrief_does_not_wake_finished_processes_on_other_lines(self):
+        self.db.create_conversation("other", "Other")
+        self.db.add_attachment("three", "other", "mira", "fake", ["fake"], self.directory.name)
+        self.db.set_attachment_status("three", "exited", None)
+        plan = {
+            **self.plan,
+            "attachment_ids": ["one", "two", "three"],
+            "debrief": "Continue the requesting line's work.",
+        }
+
+        backlogs = await self._run_with_backlogs(plan)
+
+        for name in ("sol", "terra"):
+            self.assertTrue(any("Continuation debrief:" in m["body"]
+                                for m in backlogs[name]))
+        self.assertEqual(backlogs["mira"], [])
+
+    async def test_restart_resume_sibling_hellos_are_not_delivered_as_wakes(self):
+        self.db.add_message("line", "sol", "agent", "hello")
+        self.db.add_message("line", "terra", "agent", "hello")
+
+        backlogs = await self._run_with_backlogs()
+
+        self.assertFalse(any(m["body"] == "hello" for m in backlogs["sol"]))
+        self.assertFalse(any(m["body"] == "hello" for m in backlogs["terra"]))
+
+    async def test_restart_resume_keeps_addressed_mail_and_the_forced_worker_pack(self):
+        private = self.db.add_message("line", "system", "system", "private note")
+        self.db._exec(
+            "UPDATE messages SET audience_attachment_id='one' WHERE id=?", (private["id"],)
+        )
+        self.db.add_message("line", "greg", "human", "@sol please continue")
+        self.db.add_message("line", "greg", "human", "@all read this")
+        self.db.add_message(
+            "line", "system", "system",
+            "☏ workers @sol: captain is assigned; wait for your captain",
+        )
+
+        backlogs = await self._run_with_backlogs()
+        sol_bodies = [m["body"] for m in backlogs["sol"]]
+        terra_bodies = [m["body"] for m in backlogs["terra"]]
+
+        self.assertIn("private note", sol_bodies)
+        self.assertIn("@sol please continue", sol_bodies)
+        self.assertIn("@all read this", sol_bodies)
+        self.assertTrue(any(body.startswith("☏ workers @sol:") for body in sol_bodies))
+        self.assertNotIn("private note", terra_bodies)
+        self.assertNotIn("@sol please continue", terra_bodies)
+        self.assertIn("@all read this", terra_bodies)
+
+    async def test_restart_resume_keeps_plain_person_message_for_a_solo_attachment(self):
+        self.db.create_conversation("solo", "Solo")
+        self.db.add_attachment("solo", "solo", "solo", "fake", ["fake"], self.directory.name)
+        self.db.set_attachment_status("solo", "exited", None)
+        plan = self.db.save_restart_plan("solo", ["solo"], "Continue alone.")
+        self.db.add_message("solo", "greg", "human", "please inspect the result")
+
+        backlogs = await self._run_with_backlogs(plan)
+
+        self.assertIn("please inspect the result", [m["body"] for m in backlogs["solo"]])
 
     async def test_attachment_already_live_before_its_turn_is_ready_without_resume(self):
         self.db.claim_attachment("one", "skip-generation")
