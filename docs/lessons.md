@@ -1,5 +1,17 @@
 # Lessons: the false-assumptions ledger
 
+## Resume backlog is not a room-history replay
+
+Explicit resume and restart reattachment used the same unseen-message cursor
+as live delivery and handed every sibling post to the resumed process, even
+when nobody addressed it. A sibling's ordinary update could therefore look
+like a fresh assignment after both processes resumed. Keep resume backlogs to
+messages that address the attachment, plus private recovery context and the
+restart plan's recorded notice. Keep the mid-turn notice private to the
+process that was interrupted. `tests.test_resume_continuation` and
+`tests.test_reattach` cover sibling order, greetings, addressed backlog, and
+one interrupted process beside one finished process.
+
 ## A turn ending may precede useful pty silence
 
 Subagent counters and spinners redraw about once a second. Delay return and
