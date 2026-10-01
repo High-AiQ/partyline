@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .mentions import line_addressed, mentioned_names
+from .mentions import known_mention_names, line_addressed, mentioned_names
 
 WORKER_PACK_NOTICE_PREFIX = "☏ workers "
 
@@ -35,7 +35,7 @@ def addressed_backlog(runtime, att: dict, *, include_message_ids=()) -> list[dic
             solo
             and message.get("sender_type") == "human"
             and not message.get("audience_attachment_id")
-            and not names
+            and not known_mention_names(runtime.db, att["conv_id"], names)
         )
 
     return [message for message in pending if addressed(message)]

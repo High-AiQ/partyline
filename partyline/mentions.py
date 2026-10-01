@@ -10,6 +10,8 @@ interrupt, and only when a human wrote it.
 import re
 import unicodedata
 
+from .hierarchy import ancestors, descendants, tree_live_name_conflict
+
 MENTION_RE = re.compile(r"(?<![A-Za-z0-9_])@(!?)([A-Za-z0-9][A-Za-z0-9_.-]*)")
 
 
@@ -46,6 +48,38 @@ def mentioned_names(body: str) -> set[str]:
     for _, name in _found(body):
         names |= _handles(name)
     return names
+
+
+def known_mention_names(db, conv_id: str, names: set[str]) -> set[str]:
+    """Names that have a person or process meaning from this line.
+
+    Local attachment rows count in every status so an absent colleague is
+    still addressed. Related processes count only when a human could relay to
+    them: any live process below this line, or a live captain above it.
+    """
+    wanted = {name.lower() for name in names}
+    if not wanted:
+        return set()
+    known = {
+        att["name"].lower()
+        for att in db.list_attachments(conv_id)
+    }
+    known.update(
+        str(row["handle"]).lower()
+        for row in db._exec("SELECT handle FROM users").fetchall()
+    )
+    known.add("all")
+
+    below = set(descendants(db, conv_id))
+    above = set(ancestors(db, conv_id))
+    for name in wanted - known:
+        target = tree_live_name_conflict(db, conv_id, name)
+        if target is None:
+            continue
+        target_line = target["conv_id"]
+        if target_line in below or (target_line in above and target.get("is_lead")):
+            known.add(name)
+    return wanted & known
 
 
 def interrupt_names(body: str) -> set[str]:

@@ -12,6 +12,7 @@ from .mentions import (
     addressees,
     interrupt_names,
     line_addressed,
+    known_mention_names,
     mentioned_names,
 )
 from .solo_line import implied_addressee
@@ -188,6 +189,23 @@ async def route_message(
             "system",
             f"⚠ @{name} was mentioned but is not attached — nothing was delivered",
         )
+    if (
+        message["sender_type"] == "human"
+        and not delivered
+        and not queued
+        and not elsewhere
+        and "all" not in names
+    ):
+        mentioned = mentioned_names(message["body"])
+        unrecognized = mentioned - known_mention_names(runtime.db, conv_id, mentioned)
+        if unrecognized:
+            handles = ", ".join(f"@{name}" for name in sorted(unrecognized))
+            await runtime.post_message(
+                conv_id,
+                "system",
+                "system",
+                f"⚠ nobody live on this line is named {handles} — nothing was delivered",
+            )
     for name in failed:
         await runtime.post_message(
             conv_id,

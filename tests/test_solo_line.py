@@ -3,7 +3,9 @@
 import tempfile
 import unittest
 from partyline.db import Db
+from partyline.hierarchy import create_child_conversation
 from partyline.runtime import ChatRuntime
+from partyline.resume_backlog import addressed_backlog
 from partyline.solo_line import implied_addressee, solo_process
 
 
@@ -64,6 +66,95 @@ class SoloLineTest(unittest.IsolatedAsyncioTestCase):
                          ["please read the checkpoint and tell me the ledger"])
         self.assertEqual(solo_process(self.db, "line")["name"], "fable")
 
+    async def test_literal_14852_body_wakes_the_solo_process(self):
+        body = ('yes please do the follow-up so a child captain\'s @mention '
+                'hand-off stops the extra "goal still open" wake')
+        await self.say(body)
+        self.assertEqual([m["body"] for m in self.fable.delivered], [body])
+
+    async def test_unknown_at_words_and_email_prose_still_wake_solo_process(self):
+        for body in ("@mention is literal prose", "@param is a placeholder",
+                     "email greg@example.com about it"):
+            with self.subTest(body=body):
+                self.fable.delivered.clear()
+                self.fable.wakes = 0
+                await self.say(body)
+                self.assertEqual([m["body"] for m in self.fable.delivered], [body])
+
+    async def test_known_but_exited_mention_does_not_redirect_to_solo_process(self):
+        self.attach("lead-att", "lead", status="exited")
+        await self.say("@lead please review")
+        self.assertEqual(self.fable.delivered, [])
+
+    async def test_all_still_reaches_the_solo_process(self):
+        await self.say("@all please read this")
+        self.assertEqual([m["body"] for m in self.fable.delivered],
+                         ["@all please read this"])
+
+    async def test_unknown_mention_on_a_multi_process_line_reports_nobody_reached(self):
+        self.attach("grok-att", "grok")
+        await self.say("@missing please review")
+        self.assertEqual((self.fable.delivered, self.runtime.live["grok-att"].delivered),
+                         ([], []))
+        self.assertIn(
+            "nobody live on this line is named @missing",
+            self.db.list_messages("line")[-1]["body"])
+        notices = [m for m in self.db.list_messages("line")
+                   if "nobody live on this line" in m["body"]]
+        self.assertEqual(len(notices), 1)
+
+    async def test_a_reachable_related_process_is_a_known_mention(self):
+        create_child_conversation(self.db, "line", "child", "Child")
+        self.db.add_attachment("worker-att", "child", "worker", "fake", ["fake"],
+                               self.tmp.name, "owner")
+        self.db.set_attachment_status("worker-att", "running", "owner")
+        worker = Recorder(self.db.get_attachment("worker-att"))
+        self.runtime.live["worker-att"] = worker
+        await self.say("@worker please review")
+        self.assertEqual(self.fable.delivered, [])
+        self.assertEqual([m["body"] for m in worker.delivered], ["@worker please review"])
+
+    async def test_a_user_handle_is_a_known_mention(self):
+        self.add_user("greg")
+        await self.say("@greg please review")
+        self.assertEqual(self.fable.delivered, [])
+        self.assertFalse(any("nobody live on this line" in m["body"]
+                             for m in self.db.list_messages("line")))
+
+    async def test_a_user_handle_on_a_multi_process_line_posts_no_notice(self):
+        self.add_user("greg")
+        self.attach("grok-att", "grok")
+        await self.say("@greg can you look at this?")
+        self.assertEqual(self.fable.delivered, [])
+        self.assertEqual(self.runtime.live["grok-att"].delivered, [])
+        self.assertFalse(any("nobody live on this line" in m["body"]
+                             for m in self.db.list_messages("line")))
+
+    async def test_unknown_name_with_user_handle_reports_only_the_unknown(self):
+        self.add_user("greg")
+        self.attach("grok-att", "grok")
+        await self.say("@missing @greg can you look at this?")
+        notices = [m["body"] for m in self.db.list_messages("line")
+                   if "nobody live on this line" in m["body"]]
+        self.assertEqual(len(notices), 1)
+        self.assertIn("@missing", notices[0])
+        self.assertNotIn("@greg", notices[0])
+
+    def add_user(self, handle: str):
+        self.db._exec(
+            "INSERT INTO users(email, handle, password_hash, created_at) "
+            "VALUES(?,?,?,?)",
+            (f"{handle}@example.com", handle, "unused", 0),
+        )
+
+    def test_resume_backlog_uses_the_same_solo_prose_rule(self):
+        body = "please do the follow-up; a captain's @mention hand-off"
+        message = self.db.add_message("line", "greg", "human", body)
+        self.assertEqual(
+            [row["id"] for row in addressed_backlog(self.runtime, self.db.get_attachment("fable-att"))],
+            [message["id"]],
+        )
+
     async def test_a_second_live_process_restores_the_mention_rule(self):
         grok = self.attach("grok-att", "grok")
         await self.say("who has the ledger?")
@@ -87,6 +178,7 @@ class SoloLineTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(implied_addressee(self.db, row))
 
     async def test_an_explicit_mention_of_someone_else_is_not_redirected(self):
+        self.attach("grok-att", "grok", status="exited")
         await self.say("@grok are you there?")
         self.assertEqual(self.fable.delivered, [])
 
