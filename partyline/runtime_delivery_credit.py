@@ -109,6 +109,9 @@ class DeliveryCreditMixin:
             ids = set(message_ids)
             entry["ids"].update(ids)
             entry["confirmed"].update(ids)
+            attachment = self.db.get_attachment(att_id)
+            if attachment is None or attachment.get("runtime_owner") != runtime_owner:
+                return False
             unresolved = entry["ids"] - entry["confirmed"]
             frontier = min(unresolved) - 1 if unresolved else max(entry["ids"])
             eligible = entry["confirmed"] & {mid for mid in entry["ids"] if mid <= frontier}

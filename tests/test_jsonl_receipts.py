@@ -89,6 +89,57 @@ class ClaudeJsonlReceiptTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.db.get_attachment("att")["last_seen"], 0)
         self.assertEqual(len(adapter._jsonl_receipts), 1)
 
+    async def test_claude_queued_command_attachment_proves_mid_turn_paste(self):
+        adapter = self.make_adapter()
+        message_id = self.add_wake()
+        await adapter.deliver([{"id": message_id}])
+        receipt = adapter._jsonl_receipts[0]
+        queued_command = {
+            "type": "attachment",
+            "attachment": {
+                "type": "queued_command",
+                "prompt": f"{receipt['marker']}\n{receipt['digest']}",
+            },
+        }
+
+        await adapter._observe_jsonl_paste(queued_command)
+
+        self.assertEqual(self.db.get_attachment("att")["last_seen"], message_id)
+        self.assertEqual(adapter._jsonl_receipts, [])
+
+    async def test_claude_queue_enqueue_is_not_a_paste_receipt(self):
+        adapter = self.make_adapter()
+        message_id = self.add_wake()
+        await adapter.deliver([{"id": message_id}])
+        receipt = adapter._jsonl_receipts[0]
+        queued = {
+            "type": "queue-operation", "operation": "enqueue",
+            "content": f"{receipt['marker']}\n{receipt['digest']}",
+        }
+
+        await adapter._observe_jsonl_paste(queued)
+
+        self.assertEqual(self.db.get_attachment("att")["last_seen"], 0)
+        self.assertEqual(len(adapter._jsonl_receipts), 1)
+
+    async def test_codex_response_item_user_message_proves_paste(self):
+        adapter = self.make_adapter()
+        message_id = self.add_wake()
+        await adapter.deliver([{"id": message_id}])
+        receipt = adapter._jsonl_receipts[0]
+        record = {
+            "type": "response_item",
+            "payload": {
+                "type": "message", "role": "user",
+                "content": [{"type": "input_text", "text": receipt["marker"]}],
+            },
+        }
+
+        await adapter._observe_jsonl_paste(record)
+
+        self.assertEqual(self.db.get_attachment("att")["last_seen"], message_id)
+        self.assertEqual(adapter._jsonl_receipts, [])
+
     async def test_later_claim_token_does_not_prove_a_lost_earlier_paste(self):
         adapter = self.make_adapter()
         adapter.format_digest = lambda _messages: f"same digest\n{adapter._claim_token}"
