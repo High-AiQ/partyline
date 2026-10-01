@@ -65,6 +65,7 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
         self.proc: subprocess.Popen | None = None
         self.master: int | None = None
         self.spawned_at = 0.0
+        self.last_output_at = 0.0
         self._tasks: list[asyncio.Task] = []
         self._stopping = False
         self._ready = asyncio.Event()
@@ -208,6 +209,7 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
         loop.add_reader(self.master, readable)
         try:
             while (data := await queue.get()) is not None:
+                self.last_output_at = time.monotonic()
                 try:
                     self._term_stream.feed(data)
                 except Exception:

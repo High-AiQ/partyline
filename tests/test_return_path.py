@@ -6,8 +6,10 @@ worker whose turn ended without handing off to anyone. Both used to leave the
 tree idle with every process correct and nobody woken.
 """
 
+import asyncio
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from partyline.adapters.briefing import format_digest
 from partyline.db import Db
@@ -32,6 +34,21 @@ class Recorder:
         return [m["body"] for batch in self.delivered for m in batch]
 
 
+class FakeClock:
+    def __init__(self):
+        self.now = 0.0
+        self.on_sleep = None
+
+    def monotonic(self):
+        return self.now
+
+    async def sleep(self, delay):
+        self.now += delay
+        if self.on_sleep:
+            self.on_sleep(self.now)
+        await asyncio.sleep(0)
+
+
 class Tree(unittest.IsolatedAsyncioTestCase):
     """Line «Parent» (manager lead, implementer worker) over line «Child»
     (manager sub, implementer builder)."""
@@ -43,6 +60,9 @@ class Tree(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.db.close)
         self.runtime = ChatRuntime(self.db)
         self.presence = Presence(self.runtime)
+        self.clock = FakeClock()
+        self.runtime.returns.clock = self.clock.monotonic
+        self.runtime.returns.sleep = self.clock.sleep
         self.db.create_conversation("parent", "Parent")
         create_child_conversation(self.db, "parent", "child", "Child")
         self.speakers = {}
@@ -202,6 +222,11 @@ class ReturnPathTest(Tree):
         for body in after:
             await self.say(att_id, body)
         await self.runtime.returns.drain()
+        await self.drain_goal()
+
+    async def drain_goal(self):
+        while self.presence.goal_stall.pending:
+            await asyncio.gather(*list(self.presence.goal_stall.pending.values()))
 
     async def test_speech_that_lands_after_the_receipt_is_what_gets_quoted(self):
         await self.say("lead", "@builder count the functions")
@@ -209,6 +234,235 @@ class ReturnPathTest(Tree):
 
         [notice] = [b for b in self.adapters["lead"].bodies() if b.startswith("↩")]
         self.assertIn("last said: «Two functions: add and mul.»", notice)
+
+    def goal(self, line="parent", text="Finish the review"):
+        self.db._exec("UPDATE conversations SET goal=? WHERE id=?", (text, line))
+
+    async def test_an_idle_line_with_an_open_goal_wakes_its_captain_once(self):
+        self.goal()
+        await self.turn("worker", "The build is ready.")
+
+        notices = [b for b in self.adapters["lead"].bodies() if b.startswith("☏ goal still open")]
+        self.assertEqual(len(notices), 1)
+        self.assertIn("Finish the review", notices[0])
+
+        await self.runtime.presence.goal_stall.check("parent")
+        await self.drain_goal()
+        self.assertEqual(
+            len([b for b in self.adapters["lead"].bodies() if b.startswith("☏ goal still open")]),
+            1,
+        )
+
+    async def test_an_idle_line_without_a_goal_gets_no_stall_notice(self):
+        await self.turn("worker", "The build is ready.")
+        self.assertEqual(
+            [b for b in self.adapters["lead"].bodies() if b.startswith("☏ goal still open")], []
+        )
+
+    async def test_a_goal_wake_waits_until_every_process_is_idle(self):
+        self.goal()
+        await self.presence.began("parent", "worker")
+        await self.presence.goal_stall.check("parent")
+        self.assertEqual(self.adapters["lead"].bodies(), [])
+
+        await self.presence.ended("parent", "worker")
+        await self.drain_goal()
+        self.assertEqual(
+            len([b for b in self.adapters["lead"].bodies() if b.startswith("☏ goal still open")]), 1
+        )
+
+    async def test_a_working_descendant_blocks_the_parent_goal_wake_until_idle(self):
+        self.goal()
+        await self.presence.began("child", "builder")
+        await self.turn("worker", "The build is ready.")
+        self.assertEqual(
+            [b for b in self.adapters["lead"].bodies() if b.startswith("☏ goal still open")], []
+        )
+
+        await self.presence.ended("child", "builder")
+        await self.drain_goal()
+        self.assertEqual(
+            len([b for b in self.adapters["lead"].bodies() if b.startswith("☏ goal still open")]), 1
+        )
+
+    async def test_setting_a_goal_on_an_idle_line_wakes_once_after_quiet_gate(self):
+        self.goal()
+        await self.presence.goal_stall.check("parent")
+        await self.drain_goal()
+        notices = [b for b in self.adapters["lead"].bodies() if b.startswith("☏ goal still open")]
+        self.assertEqual(len(notices), 1)
+        self.assertEqual(self.clock.now, 10)
+
+    async def test_a_captain_does_not_wake_itself_after_setting_a_goal(self):
+        self.goal()
+        await self.presence.goal_stall.check("parent", "lead")
+        self.assertEqual(self.presence.goal_stall.pending, {})
+        self.assertEqual(
+            [b for b in self.adapters["lead"].bodies() if b.startswith("☏ goal still open")], []
+        )
+
+    async def test_parent_and_child_goals_wake_once_and_notice_turns_do_not_rearm(self):
+        self.goal("parent", "Ship it")
+        self.goal("child", "Finish the child review")
+        await self.turn("sub", "The child review is ready.")
+
+        def wakes():
+            return [b for b in self.adapters["lead"].bodies() if b.startswith("☏ goal still open")]
+
+        self.assertEqual(len(wakes()), 1)
+        for _ in range(4):
+            await self.presence.began("parent", "lead")
+            await self.presence.ended("parent", "lead")
+            await self.runtime.returns.drain()
+            await self.drain_goal()
+        self.assertEqual(len(wakes()), 1)
+
+    async def test_a_child_return_settle_rechecks_parent_goal(self):
+        self.goal("parent", "Ship it")
+        await self.human("parent", "@builder check this")
+        await self.presence.began("child", "builder")
+        await self.say("builder", "The check is complete.")
+        await self.presence.ended("child", "builder")
+        self.assertIn("builder", self.runtime.returns.pending)
+        self.assertEqual(self.adapters["lead"].bodies(), [])
+
+        await self.runtime.returns.drain()
+        await self.drain_goal()
+        self.assertEqual(
+            len([b for b in self.adapters["lead"].bodies() if b.startswith("☏ goal still open")]), 1
+        )
+
+    async def test_a_goal_wake_waits_for_continuous_pty_output_until_the_cap(self):
+        self.goal()
+        self.clock.on_sleep = lambda now: setattr(self.adapters["worker"], "last_output_at", now)
+        await self.turn("worker", "The build is ready.")
+
+        self.assertEqual(self.clock.now, 1200)
+        self.assertEqual(
+            len([b for b in self.adapters["lead"].bodies() if b.startswith("☏ goal still open")]), 1
+        )
+
+    async def test_a_quiet_turn_return_waits_10_seconds(self):
+        await self.say("lead", "@worker review the build")
+        await self.presence.began("parent", "worker")
+        await self.say("worker", "The build is ready.")
+        await self.presence.ended("parent", "worker")
+        await self.runtime.returns.drain()
+        self.assertEqual(self.clock.now, 10)
+        self.assertEqual(len(self.returns_to("lead")), 1)
+
+    async def test_a_changing_pty_delays_the_return_until_the_20_minute_cap(self):
+        await self.say("lead", "@worker review the build")
+        self.clock.on_sleep = lambda now: setattr(self.adapters["worker"], "last_output_at", now)
+        await self.turn("worker", "The build is ready.")
+
+        self.assertEqual(self.clock.now, 1200)
+        self.assertEqual(len(self.returns_to("lead")), 1)
+
+    async def test_a_new_turn_cancels_a_waiting_return_notice(self):
+        await self.say("lead", "@worker review the build")
+        gate = asyncio.Event()
+
+        async def wait_for_release(_delay):
+            await gate.wait()
+
+        self.runtime.returns.sleep = wait_for_release
+        await self.presence.began("parent", "worker")
+        await self.say("worker", "Still working.")
+        await self.presence.ended("parent", "worker")
+        await asyncio.sleep(0)
+        await self.presence.began("parent", "worker")
+        gate.set()
+        await asyncio.sleep(0)
+
+        self.assertEqual(self.returns_to("lead"), [])
+
+    async def test_a_working_transition_does_not_strand_a_return_task(self):
+        await self.say("lead", "@worker run this")
+        await self.presence.began("parent", "worker")
+        await self.say("worker", "Done.")
+        await self.presence.ended("parent", "worker")
+        task = self.runtime.returns.pending["worker"]
+
+        with patch.object(self.presence, "is_working", return_value=True):
+            await task
+        self.assertNotIn("worker", self.runtime.returns.pending)
+
+        await self.runtime.returns.turn_ended("worker")
+        await self.runtime.returns.drain()
+        self.assertEqual(len(self.returns_to("lead")), 1)
+
+    async def test_a_quiet_goal_line_wakes_once_and_an_empty_goal_does_not(self):
+        self.goal()
+        await self.turn("worker", "The build is ready.")
+        await self.presence.goal_stall.check("parent")
+        await self.drain_goal()
+        self.assertEqual(
+            len([b for b in self.adapters["lead"].bodies() if b.startswith("☏ goal still open")]), 1
+        )
+
+        self.db._exec("UPDATE conversations SET goal='' WHERE id='parent'")
+        await self.presence.goal_stall.check("parent")
+        await self.drain_goal()
+        self.assertEqual(
+            len([b for b in self.adapters["lead"].bodies() if b.startswith("☏ goal still open")]), 1
+        )
+
+    async def test_a_stalled_child_captain_wakes_its_parent_captain(self):
+        self.goal("child", "Finish the child review")
+        await self.turn("sub", "The child review is ready.")
+
+        parent_notices = [
+            body for body in self.adapters["lead"].bodies()
+            if body.startswith("☏ goal still open")
+        ]
+        self.assertEqual(len(parent_notices), 1)
+        self.assertIn("Finish the child review", parent_notices[0])
+        self.assertEqual(
+            [body for body in self.adapters["sub"].bodies() if body.startswith("☏ goal still open")],
+            [],
+        )
+
+    async def test_a_child_captain_return_notice_suppresses_its_duplicate_goal_wake(self):
+        self.goal("child", "Finish the child review")
+        await self.say("lead", "@sub review page one")
+        await self.turn("sub", "The child review is ready.")
+
+        wakes = [
+            body for body in self.adapters["lead"].bodies()
+            if body.startswith(("↩", "☏ goal still open"))
+        ]
+        self.assertEqual(len(wakes), 1)
+        self.assertTrue(wakes[0].startswith("↩"))
+
+    async def test_a_deferred_child_return_notice_suppresses_its_duplicate_goal_wake(self):
+        self.goal("child", "Finish the child review")
+        await self.turn("lead", "@sub review page one")
+        await self.presence.began("parent", "lead")
+        await self.turn("sub", "The child review is ready.")
+        await self.presence.ended("parent", "lead")
+        await self.drain_goal()
+
+        wakes = [
+            body for body in self.adapters["lead"].bodies()
+            if body.startswith(("↩", "☏ goal still open"))
+        ]
+        self.assertEqual(len(wakes), 1)
+        self.assertTrue(wakes[0].startswith("↩"))
+
+    async def test_a_notice_only_captain_turn_does_not_repeat_the_goal_wake(self):
+        self.goal()
+        await self.turn("worker", "The build is ready.")
+        self.assertEqual(
+            len([b for b in self.adapters["lead"].bodies() if b.startswith("☏ goal still open")]), 1
+        )
+
+        await self.presence.began("parent", "lead")
+        await self.presence.ended("parent", "lead")
+        await self.drain_goal()
+        self.assertEqual(
+            len([b for b in self.adapters["lead"].bodies() if b.startswith("☏ goal still open")]), 1
+        )
 
     async def test_a_hand_off_that_lands_after_the_receipt_cancels_the_notice(self):
         await self.say("lead", "@sub take page one")

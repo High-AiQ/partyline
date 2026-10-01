@@ -39,6 +39,7 @@ from .presence_contracts import WorkingEvent
 from .presence_queue import DeliveryQueue
 from .speech_echo import is_api_echo
 from .turn_return import ReturnPath
+from .goal_stall import GoalStallGuard
 
 WORKING = "working"
 SPEAKING = "speaking"
@@ -86,6 +87,7 @@ class Presence:
         self.lines: dict[str, str] = {}
         self.completions: dict[str, str] = {}
         self.queue = DeliveryQueue()
+        self.goal_stall = GoalStallGuard(runtime, self)
         runtime.returns = self.returns = ReturnPath(runtime, self)
 
     def register(self, att_id: str, completion: str) -> None:
@@ -164,6 +166,8 @@ class Presence:
         yet). A second wake mid-turn is not a new turn."""
         if att_id in self.turns:
             return
+        self.returns.cancel_check(att_id)
+        self.goal_stall.activity(conv_id, att_id)
         self.counts[att_id] = self.counts.get(att_id, 0) + 1
         self.lines[att_id] = conv_id
         self.turns[att_id] = Turn(
@@ -202,6 +206,7 @@ class Presence:
             await self.runtime.broadcast_attachment(conv_id, att_id)
             await self.returns.turn_ended(att_id)
             await self.queue.flush(att_id, turn_ended=True)
+            await self.goal_stall.check_tree(conv_id)
 
     async def spoke(self, conv_id: str, att_id: str) -> None:
         """The process said something. It is still working, just audible.
