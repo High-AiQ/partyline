@@ -66,6 +66,14 @@ class GoalStallGuard:
                 if recipient_id:
                     self.woken.setdefault(recipient_id, set()).update(covered)
 
+    def handed_off(self, finisher: dict) -> None:
+        """Cover this line and its ancestors after a delivered turn hand-off."""
+        if getattr(self.runtime, "db", None) is None:
+            return
+        line = finisher.get("conv_id")
+        if line and self.runtime.db.get_conversation(line):
+            self.notified.update([line, *ancestors(self.runtime.db, line)])
+
     def _blocked(self, conv_id: str) -> bool:
         lines = subtree_conversation_ids(self.runtime.db, conv_id)
         return any(
