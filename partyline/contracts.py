@@ -9,6 +9,7 @@ from .media_contracts import FileRef
 from .line_process_contracts import LineLiveEvent
 from .presence_contracts import WorkingEvent
 from .reaction_contracts import ReactionEvent, ReactionResponse
+from .pin_contracts import PinsChangedEvent
 
 RestartPlanMode = Literal["offer", "automatic"]
 RestartPlanScope = Literal["line", "all"]
@@ -290,9 +291,8 @@ Event = (
     | HelloEvent
     | ReattachOfferEvent
     | ReattachDecisionEvent
-    | RestartRequestEvent | WriteSetGrantRequestEvent | ReactionEvent
+    | RestartRequestEvent | WriteSetGrantRequestEvent | ReactionEvent | PinsChangedEvent
 )
-
 
 class HookEventRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")

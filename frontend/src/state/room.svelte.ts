@@ -27,6 +27,7 @@ import { isLive, withoutForgotten } from "../lib/attachments";
 import { MessageHistory } from "./message-history.svelte";
 import { presenceSync } from "./presence-coordinator.svelte.js";
 import { draft } from "./draft.svelte.js";
+import { LinePins } from "./line-pins.svelte.js";
 
 export interface RoomNotice {
   message: string;
@@ -54,6 +55,7 @@ class Room {
   captains = $state<Record<string, string | null>>({});
   reattachOffer = $state<ReattachOfferEvent | null>(null);
   history = new MessageHistory(() => session.handle);
+  pins = new LinePins();
   attention = new SvelteSet<string>();
   #removed = new Set<string>();
 
@@ -110,6 +112,7 @@ class Room {
     writeSet.activate(conversation.id);
     draft.openLine(conversation.id);
     this.history.reset();
+    this.pins.clear();
     this.attachments = [];
     this.attention.clear();
     this.#removed.clear();
@@ -143,6 +146,7 @@ class Room {
     this.attachments = withoutForgotten(detail.attachments, this.#removed);
     presenceSync.finish(presenceFetch, detail.presence, detail.working);
     this.history.seed(detail.messages, detail.has_more_messages);
+    void this.pins.load(conversation.id).catch(ignoreBackgroundFailure);
     openPendingBanners(conversation.id);
     void this.loadConversations().catch(ignoreBackgroundFailure);
   }
@@ -177,6 +181,11 @@ class Room {
     return conversation ? this.history.loadOlder(conversation.id) : Promise.resolve(0);
   }
 
+  jumpToMessage(messageId: number): Promise<void> {
+    const conversation = this.conversation;
+    return conversation ? this.history.jumpAround(conversation.id, messageId) : Promise.resolve();
+  }
+
   /** Step off the current line without choosing another. */
   leave({ clearRoute = true }: LeaveOptions = {}): void {
     this.#epoch++;
@@ -185,6 +194,7 @@ class Room {
     this.conversation = null;
     draft.leaveLine();
     this.history.reset();
+    this.pins.clear();
     this.attachments = [];
     this.attention.clear();
     this.#removed.clear();

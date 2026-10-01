@@ -5,6 +5,7 @@ import { handleWireError, type RefusalTarget } from "./room-wire-error";
 import type { WireContext } from "./wire.svelte.js";
 import { presenceSync } from "./presence-coordinator.svelte.js";
 import { applyPendingWireEvent, ignoreBackgroundFailure } from "./room-pending-sync.js";
+import type { Pin } from "../lib/pin-contracts";
 
 export interface RoomWireSink extends RefusalTarget {
   conversation: Conversation | null;
@@ -20,6 +21,7 @@ export interface RoomWireSink extends RefusalTarget {
   loadConversations(): Promise<void>;
   refreshArchiveIfOpen(): void;
   history: { updateReactions(messageId: number, reactions: unknown[]): void };
+  pins: { replace(pins: Pin[]): void };
 }
 
 export function onRoomWireEvent(room: RoomWireSink, event: WireEvent, context: WireContext): void {
@@ -30,6 +32,9 @@ export function onRoomWireEvent(room: RoomWireSink, event: WireEvent, context: W
       break;
     case "reaction":
       room.history.updateReactions(event.message_id, event.reactions);
+      break;
+    case "pins_changed":
+      if (event.conversation_id === convId) room.pins.replace(event.pins);
       break;
     case "attachment":
       room.upsertAttachment(event.attachment);
