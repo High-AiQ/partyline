@@ -3,10 +3,10 @@ import { z } from "zod";
 export const PinSchema = z.object({
   conversation_id: z.string(),
   message_id: z.number().int().positive(),
-  alias: z.string().nullable(),
+  alias: z.string().nullable().default(null),
   created_at: z.number(),
   message_available: z.boolean(),
-  message_text: z.string().nullable(),
+  message_text: z.string().nullable().default(null),
   file_count: z.number().int().nonnegative(),
 });
 export type Pin = z.infer<typeof PinSchema>;
