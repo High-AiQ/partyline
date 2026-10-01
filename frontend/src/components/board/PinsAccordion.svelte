@@ -5,6 +5,7 @@
   import { tooltip } from "../../lib/tooltip";
   import type { Pin } from "../../lib/pin-contracts";
   import { room } from "../../state/room.svelte.js";
+  import PinIcon from "../PinIcon.svelte";
 
   let expanded = $state(true);
   let editingId = $state<number | null>(null);
@@ -60,7 +61,7 @@
   <summary
     class="flex cursor-pointer list-none items-center justify-between px-2 py-2 font-serif text-[16px] italic text-cream-dim"
   >
-    <span>pinned messages</span>
+    <span class="flex items-center gap-1"><PinIcon pinned class="size-4" /> pinned messages</span>
     <span class="font-mono text-[10px] not-italic text-cream-faint">{room.pins.items.length}</span>
   </summary>
   {#if room.pins.items.length}
@@ -104,11 +105,14 @@
                 jump(pin);
               }}
             >
-              <span
-                class="{pin.alias ? 'line-clamp-2' : 'line-clamp-1'} [overflow-wrap:anywhere]"
-                use:tooltip={{ label: pin.message_available ? label : `${label} · source unavailable` }}
-                >{label}{pin.message_available ? "" : " · source unavailable"}</span
-              >
+              <span class="flex min-w-0 items-start gap-1">
+                <PinIcon pinned class="mt-px size-3 shrink-0 text-copper-hot" />
+                <span
+                  class="min-w-0 {pin.alias ? 'line-clamp-2' : 'line-clamp-1'} [overflow-wrap:anywhere]"
+                  use:tooltip={{ label: pin.message_available ? label : `${label} · source unavailable` }}
+                  >{label}{pin.message_available ? "" : " · source unavailable"}</span
+                >
+              </span>
             </button>
             <button
               class="grid size-6 place-items-center rounded border border-line text-[11px] text-cream-faint hover:bg-copper hover:text-ink"

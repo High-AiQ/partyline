@@ -6,6 +6,7 @@
   import type { ReactionEmoji } from "../../lib/reaction-contracts";
   import { room } from "../../state/room.svelte.js";
   import { session } from "../../state/session.svelte.js";
+  import PinIcon from "../PinIcon.svelte";
   import Reactions from "./Reactions.svelte";
 
   interface Props {
@@ -45,19 +46,7 @@
   });
 </script>
 
-{#if isSystem}
-  {#if session.signedIn}
-    <button
-      class="pin absolute right-1 top-1 z-10 grid size-7 place-items-center rounded border p-0 text-[13px] leading-none {pinned
-        ? 'border-copper/60 bg-copper/15 text-copper-hot'
-        : 'border-line bg-ink-2 text-cream-faint opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto'}"
-      type="button"
-      use:tooltip={{ label: pinned ? "unpin message" : "pin message" }}
-      aria-label={pinned ? "unpin message" : "pin message"}
-      onclick={() => void togglePin()}>★</button
-    >
-  {/if}
-{:else}
+{#if !isSystem}
   <span class="message-actions ml-auto flex items-center gap-1">
     <Reactions
       messageId={message.id}
@@ -73,7 +62,7 @@
         type="button"
         use:tooltip={{ label: pinned ? "unpin message" : "pin message" }}
         aria-label={pinned ? "unpin message" : "pin message"}
-        onclick={() => void togglePin()}>★</button
+        onclick={() => void togglePin()}><PinIcon {pinned} /></button
       >
     {/if}
     <button

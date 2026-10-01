@@ -50,11 +50,14 @@ describe("pinned message accordion", () => {
       expect(details?.open).toBe(false);
       expect(localStorage.getItem(pinAccordionStorageKey(conversation.id))).toBe("true");
 
-      const label = document.querySelector("[data-pin-row] span");
+      const label = document.querySelector("[data-pin-row] .line-clamp-2");
       expect(label?.textContent).toContain("A carefully written alias");
       expect(label?.textContent).not.toContain("Original message body");
       expect(label?.classList.contains("line-clamp-2")).toBe(true);
       expect(label?.getAttribute("aria-describedby")).toBeTruthy();
+      const rowContent = document.querySelector("[data-pin-row] button > .flex");
+      expect(rowContent?.querySelector("svg")).not.toBeNull();
+      expect(rowContent?.querySelector(".line-clamp-2")).not.toBeNull();
       expect(document.querySelector("[data-pin-row]")?.hasAttribute("aria-describedby")).toBe(false);
       expect(
         document.querySelector('[aria-label="edit pin alias"]')?.getAttribute("aria-describedby"),
@@ -86,7 +89,7 @@ describe("pinned message accordion", () => {
     try {
       await Promise.resolve();
       expect(document.querySelector("details")?.open).toBe(false);
-      const label = document.querySelector("[data-pin-row] span");
+      const label = document.querySelector("[data-pin-row] .line-clamp-1");
       expect(label?.textContent).toContain("A long source message");
       expect(label?.textContent).not.toContain("[file digest]");
       expect(label?.classList.contains("line-clamp-1")).toBe(true);

@@ -13,6 +13,7 @@
   import FileAttachments from "./FileAttachments.svelte";
   import Reactions from "./Reactions.svelte";
   import MessageActions from "./MessageActions.svelte";
+  import PinIcon from "../PinIcon.svelte";
   import { room } from "../../state/room.svelte.js";
   import type { ReactionEmoji } from "../../lib/reaction-contracts";
   import type { ChatMessage } from "../../lib/contracts";
@@ -69,7 +70,10 @@
         <span class="direct text-[10px] text-cream-faint">· direct</span>
       {/if}
       {#if room.pins.has(message.id)}
-        <span class="rounded border border-copper/40 px-1 text-[9px] text-copper-hot">pinned</span>
+        <span
+          class="flex items-center gap-0.5 rounded border border-copper/40 px-1 text-[9px] text-copper-hot"
+          ><PinIcon pinned class="size-3" /> pinned</span
+        >
       {/if}
       <MessageActions {message} {isSystem} />
     </div>

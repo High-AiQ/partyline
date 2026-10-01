@@ -42,8 +42,11 @@ def pin_router(runtime) -> APIRouter:
     async def post_pin(request: Request, conv_id: str, body: PinCreateIn):
         principal = readable(request, conv_id)
         writable(principal)
-        if runtime.db.message_by_id(conv_id, body.message_id) is None:
+        message = runtime.db.message_by_id(conv_id, body.message_id)
+        if message is None:
             raise HTTPException(404, "message not found on this line")
+        if message["sender_type"] == "system":
+            raise HTTPException(400, "system messages cannot be pinned")
         pin = create_pin(runtime.db, conv_id, body.message_id)
         await publish(conv_id)
         return pin
