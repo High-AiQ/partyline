@@ -12,6 +12,19 @@ process that was interrupted. `tests.test_resume_continuation` and
 `tests.test_reattach` cover sibling order, greetings, addressed backlog, and
 one interrupted process beside one finished process.
 
+Claude records an accepted mid-turn paste as an `attachment` with type
+`queued_command`, not as a `user` record. Treating that input as unproved kept
+its addressed messages behind `last_seen`, so resume replayed work the model
+had already received. Read the queued command's `prompt` as proof, but never
+credit `queue-operation/enqueue`, which only means it can still be removed.
+Codex rollout input also appears as `response_item` / `message` / `user` with
+`input_text` content; retain its later `event_msg/item_completed/UserMessage`
+receipt path as well. Only messages that were actually pasted belong in the
+unproved set: adding unread addressed messages there suppresses their live
+delivery while a prior receipt is pending. `tests.test_jsonl_receipts` and
+`tests.test_return_path.DeliveryCursorTest` cover both receipt shapes, replay,
+and that held-message delivery case.
+
 ## A turn ending may precede useful pty silence
 
 Subagent counters and spinners redraw about once a second. Delay return and

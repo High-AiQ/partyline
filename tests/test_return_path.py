@@ -12,10 +12,13 @@ import unittest
 from unittest.mock import patch
 
 from partyline.adapters.briefing import format_digest
+from partyline.adapters.jsonl_receipts import JsonlPasteReceipts
 from partyline.db import Db
 from partyline.hierarchy import create_child_conversation, set_lead
 from partyline.mention_relay import post_private
 from partyline.presence import Presence
+from partyline.reattach import ResumedAttachment
+from partyline.resume_continuation import drain, resume_with_backlog
 from partyline.runtime import ChatRuntime
 from partyline.return_notice import excerpt
 
@@ -32,6 +35,26 @@ class Recorder:
 
     def bodies(self):
         return [m["body"] for batch in self.delivered for m in batch]
+
+
+class ReceiptRecorder(Recorder, JsonlPasteReceipts):
+    """A transcript adapter that waits for structured paste evidence."""
+
+    jsonl_paste_receipts = True
+
+    def __init__(self, owner):
+        super().__init__(owner)
+        self._jsonl_receipts_init()
+
+    async def deliver(self, messages):
+        self.delivered.append(messages)
+        self._track_jsonl_paste("private digest", messages, self._new_paste_marker())
+        return False
+
+
+class StartupRecorder(Recorder):
+    async def wait_startup_delivery_received(self):
+        return True
 
 
 class FakeClock:
@@ -204,6 +227,125 @@ class CrossLineMentionTest(Tree):
         self.assertTrue(
             format_digest(self.adapters["lead"].delivered[0]).startswith("[worker]: @lead local")
         )
+
+
+class DeliveryCursorTest(Tree):
+    def use_unproved_lead(self):
+        adapter = ReceiptRecorder("own")
+        adapter.att.update(id="lead", name="lead", adapter_metadata={
+            "capabilities": {"transcript": True},
+        })
+        adapter._ready_result = True
+        self.runtime.live["lead"] = self.presence.watch(
+            adapter, "parent", "lead", "receipt",
+            *self.runtime.held_wake_hooks("parent", "lead", "lead"),
+        )
+        self.adapters["lead"] = adapter
+        return adapter
+
+    async def prove_queued_command(self, adapter, message_ids=None):
+        receipt = next(
+            entry for entry in reversed(adapter._jsonl_receipts)
+            if message_ids is None or set(entry["ids"]) == set(message_ids)
+        )
+        await adapter._observe_jsonl_paste({
+            "type": "attachment",
+            "attachment": {
+                "type": "queued_command",
+                "prompt": f"{receipt['marker']}\n{receipt['digest']}",
+            },
+        })
+
+    async def assert_resume_has_no_copy(self, *, mid_turn):
+        adapter = self.use_unproved_lead() if mid_turn else self.adapters["lead"]
+        if mid_turn:
+            await self.presence.began("parent", "lead")
+        copy = await post_private(
+            self.runtime, "parent", "sub", "agent", "@lead work is ready",
+            audience="lead", source=("sub", "child"),
+        )
+        if mid_turn:
+            await self.prove_queued_command(adapter, [copy["id"]])
+        observed = {}
+        adapter = StartupRecorder("own")
+        adapter.att.update(id="lead", name="lead")
+
+        async def resume(_att_id, pending):
+            observed["pending"] = pending
+            return ResumedAttachment(adapter, True)
+
+        await resume_with_backlog(self.runtime, "lead", resume)
+        self.assertEqual(
+            [message["id"] for message in observed["pending"] if message["id"] == copy["id"]],
+            [],
+        )
+        if mid_turn:
+            self.assertEqual(len(observed["pending"]), 1)
+            self.assertIn("restarted in the middle of a turn", observed["pending"][0]["body"])
+        else:
+            self.assertEqual(observed["pending"], [])
+        self.assertGreaterEqual(self.db.get_attachment("lead")["last_seen"], copy["id"])
+
+    async def test_idle_cross_line_copy_is_not_replayed_on_resume(self):
+        await self.assert_resume_has_no_copy(mid_turn=False)
+
+    async def test_mid_turn_cross_line_copy_is_not_replayed_on_resume(self):
+        await self.assert_resume_has_no_copy(mid_turn=True)
+
+    async def test_mid_turn_copy_without_receipt_stays_in_resume_backlog(self):
+        adapter = self.use_unproved_lead()
+        await self.presence.began("parent", "lead")
+        copy = await post_private(
+            self.runtime, "parent", "sub", "agent", "@lead work is ready",
+            audience="lead", source=("sub", "child"),
+        )
+        self.assertLess(self.db.get_attachment("lead")["last_seen"], copy["id"])
+        observed = {}
+        adapter = StartupRecorder("own")
+        adapter.att.update(id="lead", name="lead")
+
+        async def resume(_att_id, pending):
+            observed["pending"] = pending
+            return ResumedAttachment(adapter, True)
+
+        await resume_with_backlog(self.runtime, "lead", resume)
+        await drain()
+        self.assertIn(copy["id"], [message["id"] for message in observed["pending"]])
+        self.assertGreaterEqual(self.db.get_attachment("lead")["last_seen"], copy["id"])
+
+    async def test_new_addressed_message_is_delivered_while_prior_proof_is_pending(self):
+        adapter = self.use_unproved_lead()
+        first = self.db.add_message("parent", "greg", "human", "@lead first")
+        await self.runtime.deliver_pending(
+            "parent", self.db.get_attachment("lead"), self.runtime.live["lead"]
+        )
+        second = self.db.add_message("parent", "greg", "human", "@lead second")
+
+        await self.prove_queued_command(adapter, [first["id"]])
+        await self.runtime.deliver_pending(
+            "parent", self.db.get_attachment("lead"), self.runtime.live["lead"]
+        )
+
+        self.assertEqual(
+            [[message["id"] for message in batch] for batch in adapter.delivered],
+            [[first["id"]], [second["id"]]],
+        )
+
+    async def test_earlier_unproved_assignment_still_blocks_a_later_copy(self):
+        adapter = self.use_unproved_lead()
+        earlier = self.db.add_message("parent", "greg", "human", "@lead first assignment")
+        await self.runtime.deliver_pending(
+            "parent", self.db.get_attachment("lead"), self.runtime.live["lead"]
+        )
+        copy = await post_private(
+            self.runtime, "parent", "sub", "agent", "@lead second assignment",
+            audience="lead", source=("sub", "child"),
+        )
+
+        await self.prove_queued_command(adapter, [copy["id"]])
+        self.assertLess(self.db.get_attachment("lead")["last_seen"], earlier["id"])
+        await self.prove_queued_command(adapter, [earlier["id"]])
+        self.assertGreaterEqual(self.db.get_attachment("lead")["last_seen"], copy["id"])
 
 
 class ReturnPathTest(Tree):
