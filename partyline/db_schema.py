@@ -278,4 +278,16 @@ MIGRATIONS = [
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
     )""",
+    # Per-line bookmarks. Message ownership is checked by the API because the
+    # legacy messages table has no foreign keys; purge explicitly removes pins.
+    """CREATE TABLE IF NOT EXISTS message_pins(
+        conv_id TEXT NOT NULL,
+        message_id INTEGER NOT NULL,
+        alias TEXT,
+        created_at REAL NOT NULL,
+        PRIMARY KEY(conv_id, message_id)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_message_pins_line ON message_pins(conv_id, created_at)",
+    """CREATE TRIGGER IF NOT EXISTS delete_message_pins AFTER DELETE ON messages
+        BEGIN DELETE FROM message_pins WHERE conv_id=OLD.conv_id AND message_id=OLD.id; END""",
 ]

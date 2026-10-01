@@ -26,3 +26,9 @@ class ConversationDetailResponse(BaseModel):
 class MessagePageResponse(BaseModel):
     messages: list[MessageResponse]
     has_more: bool
+
+
+class AroundMessageResponse(BaseModel):
+    messages: list[MessageResponse]
+    has_more_before: bool
+    has_more_after: bool

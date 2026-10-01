@@ -79,6 +79,7 @@ from .line_process_routes import detach_attachment, register_line_process_routes
 from .worktree_lifecycle import sweep_orphaned_worktrees
 from .message_routes import message_router
 from .reaction_routes import reaction_router
+from .pin_routes import pin_router
 from .accept_sha import register_accept_route
 from .review_worktrees import register_review_routes
 from .goal import register_goal_route
@@ -187,6 +188,7 @@ app.include_router(auth_router(runtime.db, on_handle_change=user_sockets.close_a
 app.include_router(media_router(runtime, media))
 app.include_router(message_router(runtime, media))
 app.include_router(reaction_router(runtime))
+app.include_router(pin_router(runtime))
 app.include_router(hierarchy_router(runtime))
 app.include_router(write_set_router(runtime))
 app.include_router(heartbeat_router(runtime))

@@ -2,6 +2,7 @@
   /** The right rail: who is on the line, and how to patch someone in. */
   import JackCard from "./JackCard.svelte";
   import AttachForm from "./AttachForm.svelte";
+  import PinsAccordion from "./PinsAccordion.svelte";
   import { canResumeJack, latestJacks } from "../../lib/attachments";
   import { hierarchyApi } from "../../lib/hierarchy-api";
   import { room } from "../../state/room.svelte.js";
@@ -55,6 +56,8 @@
       {/each}
     {/if}
   </div>
+
+  <PinsAccordion />
 
   <h3 class="font-serif italic font-normal text-[17px] text-cream-dim px-[18px] pt-5 pb-2.5">
     patch in a process
