@@ -152,6 +152,8 @@ class ReturnPath:
             finisher and said and is_undeliverable_closing(self.runtime.db, finisher, said)
         )
         handed_off = att_id in self.addressed and not undeliverable
+        if handed_off and self.presence is not None:
+            self.presence.goal_stall.handed_off(finisher)
         if handed_off:
             owed = []  # it handed off during the turn; the stale notices are superseded
         for line_id, body, source_att in owed:
