@@ -109,8 +109,13 @@
                 <PinIcon pinned class="mt-px size-3 shrink-0 text-copper-hot" />
                 <span
                   class="min-w-0 {pin.alias ? 'line-clamp-2' : 'line-clamp-1'} [overflow-wrap:anywhere]"
-                  use:tooltip={{ label: pin.message_available ? label : `${label} · source unavailable` }}
-                  >{label}{pin.message_available ? "" : " · source unavailable"}</span
+                  use:tooltip={{
+                    label: !pin.message_available
+                      ? "source unavailable"
+                      : pin.alias
+                        ? pin.alias.slice(0, 60)
+                        : null,
+                  }}>{label}{pin.message_available ? "" : " · source unavailable"}</span
                 >
               </span>
             </button>
