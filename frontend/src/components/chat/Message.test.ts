@@ -2,6 +2,8 @@ import { mount, unmount } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Message from "./Message.svelte";
 import type { ChatMessage } from "../../lib/contracts";
+import { room } from "../../state/room.svelte.js";
+import { session } from "../../state/session.svelte.js";
 
 function systemMessage(body: string): ChatMessage {
   return {
@@ -52,6 +54,9 @@ function copyTip(): HTMLElement | null {
 
 afterEach(() => {
   setClipboard(undefined);
+  session.user = null;
+  session.authReady = false;
+  room.pins.clear();
   document.body.replaceChildren();
 });
 
@@ -77,8 +82,29 @@ describe("system message", () => {
       expect(document.querySelector("button.copy")).toBeNull();
       expect(document.querySelector("button.reaction-add")).toBeNull();
       expect(document.querySelector(".reaction-chips")).toBeNull();
+      expect(document.querySelector("button.pin")).toBeNull();
     } finally {
       await unmount(message);
+    }
+  });
+
+  it("offers pinning on normal messages but never on system notices", async () => {
+    session.user = { id: 1, email: "greg@example.com", handle: "greg" };
+    session.authReady = true;
+    const notice = mount(Message, { target: document.body, props: { message: systemMessage("connected") } });
+    try {
+      expect(document.querySelector("button.pin")).toBeNull();
+    } finally {
+      await unmount(notice);
+    }
+
+    const ordinary = mount(Message, { target: document.body, props: { message: agentMessage("ready") } });
+    try {
+      const control = document.querySelector<HTMLButtonElement>("button.pin");
+      expect(control?.getAttribute("aria-label")).toBe("pin message");
+      expect(control?.querySelector("svg")?.getAttribute("fill")).toBe("none");
+    } finally {
+      await unmount(ordinary);
     }
   });
 });
