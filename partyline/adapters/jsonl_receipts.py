@@ -27,6 +27,10 @@ def _text(value) -> str:
 
 def _user_text(record: dict) -> str | None:
     kind = record.get("type")
+    if kind == "attachment":  # Claude mid-turn queued command
+        attachment = record.get("attachment") or {}
+        if attachment.get("type") == "queued_command":
+            return _text(attachment.get("prompt"))
     if kind == "user":  # Claude
         content = (record.get("message") or {}).get("content")
         if isinstance(content, str):
@@ -45,6 +49,10 @@ def _user_text(record: dict) -> str | None:
         return _text((record.get("message") or {}).get("content"))  # Pi
     if kind == "USER_INPUT" and record.get("source") == "USER_EXPLICIT":
         return _text(record.get("content"))  # Antigravity
+    if kind == "response_item":  # Codex rollout
+        item = record.get("payload") or {}
+        if item.get("type") == "message" and item.get("role") == "user":
+            return _text(item.get("content"))
     payload = record.get("payload") or {}
     if kind == "event_msg" and payload.get("type") == "user_message":
         return _text(payload.get("message"))  # Codex
