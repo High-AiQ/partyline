@@ -1,5 +1,12 @@
 # Lessons: the false-assumptions ledger
 
+## A turn ending may precede useful pty silence
+
+Subagent counters and spinners redraw about once a second. Delay return and
+open-goal notices until pty output has been quiet for 10 seconds, with a
+20-minute cap so an animated wedge is still reported. The working badge stays
+receipt-based; this quiet gate controls notices only and cannot generate speech.
+
 ## A scope launcher exit code does not identify an OOM
 
 An OpenCode worker twice appeared to exit with SIGTERM while running tests. Its

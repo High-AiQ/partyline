@@ -74,8 +74,12 @@ def register_goal_route(app: FastAPI, runtime) -> None:
         if goal == (conv.get("goal") or ""):
             return conv
         conv = set_goal(db, conv_id, goal)
+        if getattr(runtime, "presence", None) is not None:
+            runtime.presence.goal_stall.activity(conv_id, principal.attachment_id)
         who = f" by @{principal.name}"
         notice = f"☏ goal set{who}: {goal}" if goal else f"☏ goal cleared{who}"
         await post_system_notice(runtime, conv_id, notice, actor=principal)
+        if goal and getattr(runtime, "presence", None) is not None:
+            await runtime.presence.goal_stall.check(conv_id, principal.attachment_id)
         await runtime.broadcast(conv_id, ConversationEvent(conversation=conv))
         return conv
