@@ -79,6 +79,15 @@ class MessagePinsTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 404)
 
+    def test_system_messages_cannot_be_pinned(self):
+        notice = self.db.add_message("line", "system", "system", "connected")
+        response = self.client.post(
+            "/api/conversations/line/pins", json={"message_id": notice["id"]}
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "system messages cannot be pinned")
+        self.assertEqual(self.client.get("/api/conversations/line/pins").json(), [])
+
     def test_machines_can_read_pins_but_cannot_write(self):
         self.client.post(
             "/api/conversations/line/pins", json={"message_id": self.message["id"]}
