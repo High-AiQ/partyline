@@ -92,3 +92,133 @@ class ResumeContinuationTest(unittest.IsolatedAsyncioTestCase):
         await resume_with_backlog(self.runtime, "one", resume)
         await asyncio.sleep(0)
         self.assertEqual(seen["pending"], [])
+
+    async def test_a_plain_human_message_is_delivered_to_a_stopped_solo_process(self):
+        self.db.add_message("line", "greg", "human", "please look at this")
+        adapter = StagingAdapter("owner-1")
+        resume, seen = self._resume(adapter, staged=True)
+
+        await resume_with_backlog(self.runtime, "one", resume)
+        await drain()
+
+        self.assertEqual(
+            [message["body"] for message in seen["pending"]],
+            ["@luna finish the adapter", "please look at this"],
+        )
+
+
+class SiblingResumeTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.db = Db(f"{self.directory.name}/partyline.db")
+        self.runtime = ChatRuntime(self.db)
+        self.db.create_conversation("line", "Line")
+        for att_id, name in (("a", "alpha"), ("b", "beta")):
+            self.db.add_attachment(att_id, "line", name, "fake", ["fake"], "/tmp", att_id)
+            self.db.set_attachment_status(att_id, "exited", att_id)
+
+    async def asyncTearDown(self):
+        self.db.close()
+        self.directory.cleanup()
+
+    async def _resume(self, att_id):
+        adapter = StagingAdapter(att_id)
+        observed = {}
+
+        async def resume(_, pending):
+            observed["pending"] = pending
+            return ResumedAttachment(adapter, True)
+
+        await resume_with_backlog(self.runtime, att_id, resume)
+        await drain()
+        return [message["body"] for message in observed["pending"]]
+
+    async def test_alpha_speaks_last_then_both_resume_without_each_others_speech(self):
+        self.db.add_message("line", "beta", "agent", "beta's earlier update")
+        self.db.add_message("line", "alpha", "agent", "alpha speaks last")
+
+        self.assertEqual(await self._resume("a"), [])
+        self.assertEqual(await self._resume("b"), [])
+
+    async def test_beta_speaks_last_then_both_resume_without_each_others_speech(self):
+        self.db.add_message("line", "alpha", "agent", "alpha's earlier update")
+        self.db.add_message("line", "beta", "agent", "beta speaks last")
+
+        self.assertEqual(await self._resume("a"), [])
+        self.assertEqual(await self._resume("b"), [])
+
+    async def test_two_siblings_do_not_receive_a_plain_human_message(self):
+        self.db.add_message("line", "greg", "human", "anyone seen the notes?")
+
+        self.assertEqual(await self._resume("a"), [])
+        self.assertEqual(await self._resume("b"), [])
+
+    async def test_a_finished_process_does_not_get_an_assignment_it_already_answered(self):
+        assignment = self.db.add_message("line", "greg", "human", "@alpha please finish")
+        self.db.set_last_seen("a", assignment["id"], "a")
+        self.db.add_message("line", "alpha", "agent", "finished")
+
+        self.assertEqual(await self._resume("a"), [])
+
+    async def test_a_public_system_notice_mention_is_not_an_instruction_on_resume(self):
+        self.db.add_message("line", "system", "system", "⚠ 2 wakes pending for @alpha")
+        self.db.add_message("line", "alpha", "agent", "finished")
+
+        self.assertEqual(await self._resume("a"), [])
+
+    async def test_a_forced_worker_pack_rider_is_resume_mail_to_its_named_worker(self):
+        self.db.add_message(
+            "line",
+            "system",
+            "system",
+            "☏ workers @alpha: opus is now this line's captain — wait for your captain",
+        )
+
+        self.assertEqual(
+            await self._resume("a"),
+            ["☏ workers @alpha: opus is now this line's captain — wait for your captain"],
+        )
+        self.assertEqual(await self._resume("b"), [])
+
+    async def test_only_the_cut_mid_turn_sibling_gets_a_notice(self):
+        self.db._exec("UPDATE attachments SET turn_open=1 WHERE id='a'")
+        self.db.add_message("line", "beta", "agent", "hello")
+
+        alpha = await self._resume("a")
+        beta = await self._resume("b")
+
+        self.assertEqual(len(alpha), 1)
+        self.assertIn("restarted in the middle of a turn", alpha[0])
+        self.assertEqual(beta, [])
+
+    async def test_a_sibling_hello_does_not_wake_the_other_process(self):
+        class RecordingAdapter:
+            def __init__(self, owner):
+                self.att = {"runtime_owner": owner}
+                self.deliveries = []
+
+            async def deliver(self, messages):
+                self.deliveries.extend(messages)
+
+        for att_id in ("a", "b"):
+            self.db.set_attachment_status(att_id, "running", att_id)
+        alpha, beta = RecordingAdapter("a"), RecordingAdapter("b")
+        self.runtime.live.update({"a": alpha, "b": beta})
+        hello = self.db.add_message("line", "alpha", "agent", "hello")
+
+        await self.runtime.route_mentions("line", hello)
+
+        self.assertEqual(alpha.deliveries, [])
+        self.assertEqual(beta.deliveries, [])
+
+    async def test_resume_delivers_an_unread_message_that_addresses_only_its_recipient(self):
+        self.db.add_message("line", "greg", "human", "@beta please continue")
+
+        self.assertEqual(await self._resume("a"), [])
+        self.assertEqual(await self._resume("b"), ["@beta please continue"])
+
+    async def test_resume_delivers_an_unread_room_wide_mention_to_both_siblings(self):
+        self.db.add_message("line", "greg", "human", "@all please read this")
+
+        self.assertEqual(await self._resume("a"), ["@all please read this"])
+        self.assertEqual(await self._resume("b"), ["@all please read this"])

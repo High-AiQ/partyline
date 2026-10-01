@@ -18,6 +18,7 @@ from .continuation_delivery import deliver_continuation
 from .restart_lease import run_automatic_restart_plan
 from .reattach_liveness import abandon, mark_unlive_exited, report_live, report_live_refusal
 from .restart_scope import covered_conversation_ids, planned_conversation_ids, select_attachment_ids
+from .resume_backlog import addressed_backlog
 
 READY_TIMEOUT_SECONDS = 90.0
 MAX_AUTOMATIC_ATTEMPTS = 2
@@ -238,15 +239,15 @@ class ReattachCoordinator:
         # A line whose processes are recovering hears about it on that line,
         # even when another line asked for the restart.
         covered = covered_conversation_ids(self.runtime.db, attachment_ids) or [conv_id]
+        restart_notice_ids = {}
         try:
             for line in covered:
-                await self.runtime.post_message(
-                    line,
-                    "system",
-                    "system",
+                notice = await self.runtime.post_message(
+                    line, "system", "system",
                     f"☏ {start} after the dogfood restart\n\n"
                     f"Continuation debrief: {debrief}",
                 )
+                restart_notice_ids[line] = notice["id"]
         except BaseException:
             self.runtime.reattaching.difference_update(attachment_ids)
             raise
@@ -273,13 +274,12 @@ class ReattachCoordinator:
                     continue
                 continuation_confirmed = False
                 try:
+                    cut = turn_marker.was_interrupted(self.runtime.db, attachment_id)
                     await turn_marker.announce_if_interrupted(self.runtime, attachment)
-                    pending = self.runtime.db.messages_after(
-                        line,
-                        attachment["last_seen"],
-                        exclude_sender=name,
-                        exclude_attachment_id=attachment_id,
-                    )
+                    notice_ids = (restart_notice_ids[line],) if cut or (
+                        plan["debrief"].strip() and line == conv_id
+                    ) else ()
+                    pending = addressed_backlog(self.runtime, attachment, include_message_ids=notice_ids)
                     resumed = await self.resume_attachment(attachment_id, pending)
                     adapter = resumed.adapter
                     expected_owners[attachment_id] = adapter.att.get("runtime_owner")
