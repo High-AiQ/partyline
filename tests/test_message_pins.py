@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from partyline import auth_store, auth_tokens
 from partyline.auth_guard import install_auth_guard
 from partyline.db import Db
+from partyline.pin_contracts import PinResponse, PinsChangedEvent
 from partyline.pin_routes import pin_router
 from partyline.runtime import ChatRuntime
 
@@ -116,3 +117,20 @@ class MessagePinsTest(unittest.TestCase):
         self.assertEqual(
             self.db._exec("SELECT * FROM message_pins WHERE conv_id='line'").fetchall(), []
         )
+
+    def test_wire_pin_event_omits_null_alias_and_deleted_message_text(self):
+        event = PinsChangedEvent(
+            conversation_id="line",
+            pins=[
+                PinResponse(
+                    conversation_id="line",
+                    message_id=999,
+                    created_at=1,
+                    message_available=False,
+                )
+            ],
+        )
+
+        pin = event.model_dump(exclude_none=True)["pins"][0]
+        self.assertNotIn("alias", pin)
+        self.assertNotIn("message_text", pin)
