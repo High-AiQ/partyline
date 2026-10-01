@@ -105,12 +105,14 @@
                 jump(pin);
               }}
             >
-              <PinIcon pinned class="mr-1 inline size-3 text-copper-hot" />
-              <span
-                class="{pin.alias ? 'line-clamp-2' : 'line-clamp-1'} [overflow-wrap:anywhere]"
-                use:tooltip={{ label: pin.message_available ? label : `${label} · source unavailable` }}
-                >{label}{pin.message_available ? "" : " · source unavailable"}</span
-              >
+              <span class="flex min-w-0 items-start gap-1">
+                <PinIcon pinned class="mt-px size-3 shrink-0 text-copper-hot" />
+                <span
+                  class="min-w-0 {pin.alias ? 'line-clamp-2' : 'line-clamp-1'} [overflow-wrap:anywhere]"
+                  use:tooltip={{ label: pin.message_available ? label : `${label} · source unavailable` }}
+                  >{label}{pin.message_available ? "" : " · source unavailable"}</span
+                >
+              </span>
             </button>
             <button
               class="grid size-6 place-items-center rounded border border-line text-[11px] text-cream-faint hover:bg-copper hover:text-ink"
