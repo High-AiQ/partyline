@@ -34,6 +34,7 @@ from .contracts import MessageEvent, MessageResponse
 from .hierarchy import ancestors, descendants, lead_attachment, tree_live_name_conflict
 from .line_depth import live_workers
 from .message_visibility import is_reaction_notice
+from .resume_backlog import WORKER_PACK_NOTICE_PREFIX
 
 LIVE = ("starting", "running")
 
@@ -175,7 +176,7 @@ async def ring_workers(runtime, line_id: str, captain: dict) -> dict | None:
     names = " ".join(f"@{att['name']}" for att in workers)
     msg = await runtime.post_message(  # the captain is named bare: every @ rings
         line_id, "system", "system",
-        f"☏ workers {names}: {captain['name']} is now this line's captain — wait for your "
+        f"{WORKER_PACK_NOTICE_PREFIX}{names}: {captain['name']} is now this line's captain — wait for your "
         "captain's @mention before editing anything; the worker pack rides this wake",
     )
     await runtime.route_mentions(line_id, msg, force=True)
