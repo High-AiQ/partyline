@@ -106,7 +106,8 @@ file is required. Its server cap defaults to the smaller of 2 GiB and 5/8 of hos
 RAM; `PARTYLINE_SERVER_MEMORY_LIMIT` overrides it. Startup verifies `memory.max`
 and `memory.oom.group=0` inside that scope. Each attached CLI has its own separate
 scope, so its allocations do not consume the server's cap. These are individual
-caps, not a total budget for all attachments combined. Linux needs cgroup v2 and
+caps; Partyline also applies a portable host-wide admission budget based on declared
+leases (see [fleet resource budget](resource-budget.md)). Linux needs cgroup v2 and
 a working systemd user manager (systemd 254 or newer); an unavailable cap causes
 startup to fail closed.
 

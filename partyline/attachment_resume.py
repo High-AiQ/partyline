@@ -30,6 +30,7 @@ from .review_worktrees import list_review_worktrees
 from .reattach import ResumedAttachment, adapter_can_resume
 from .transcript_delivery import TranscriptDeliveryRecord
 from .write_set_routes import list_write_grants
+from .resource_budget import claim_resume, format_limit, lease_bytes, settings
 
 
 @dataclass(frozen=True)
@@ -257,9 +258,17 @@ async def _resume_adapter_locked(
         ),
     )
     startup_staged = adapter.stage_startup_delivery(startup_messages or [])
-    if not await runtime.db.claim_attachment_async(att_id, runtime_owner):
+    att["memory_limit"] = att.get("memory_limit") or format_limit(
+        settings(runtime.db)["default_process_memory_bytes"]
+    )
+    lease = lease_bytes(att, settings(runtime.db))
+    # ReattachCoordinator fills this set from the stored plan before calling
+    # the resume path; API callers cannot supply a grandfathering flag.
+    grandfathered = att_id in runtime.reattaching
+    if not await claim_resume(
+        runtime.db, att_id, runtime_owner, lease, grandfathered=grandfathered
+    ):
         raise HTTPException(409, claim_refusal_detail(runtime, att))
-    att["memory_limit"] = runtime.db.get_attachment(att_id).get("memory_limit")
     try:
         await adapter.start()
     except FenceUnavailable as exc:

@@ -40,6 +40,15 @@ async def report_live_refusal(runtime, exc, attachment_id: str, line: str, name:
     return await report_live(runtime, attachment_id, line, name)
 
 
+async def report_reattach_failure(runtime, exc, attachment_id: str, line: str, name: str) -> str:
+    """Report a failed resume; planned live processes bypass admission caps."""
+    if await report_live_refusal(runtime, exc, attachment_id, line, name):
+        return "ready"
+    await abandon(runtime, attachment_id)
+    await runtime.post_message(line, "system", "system", f"⚠ @{name} could not reattach safely: {exc}")
+    return "failed"
+
+
 async def abandon(runtime, attachment_id: str) -> None:
     adapter = runtime.live.pop(attachment_id, None)
     if adapter is None:

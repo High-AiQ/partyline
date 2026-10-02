@@ -36,11 +36,19 @@ def current_role(db, attachment_id: str) -> RoleState:
                      has_captain(db, att["conv_id"]))
 
 
-def _instructions(state: RoleState) -> str:
+def _instructions(state: RoleState, db=None) -> str:
     """The pack for a state: the captain's, else the worker's when a captain is live."""
-    return role_instructions(
+    pack = role_instructions(
         state.actions, state.conv_id, state.parent_id, state.depth, state.staffed
     ) or worker_instructions(state.captained)
+    if state.role == "lead" and state.parent_id is None and hasattr(db, "get_setting"):
+        from .resource_budget import snapshot
+        capacity = snapshot(db)
+        leased = capacity["memory_leased_bytes"] / 1024**3
+        budget = capacity["memory_budget_bytes"] / 1024**3
+        pack += (f"\n\nInstance capacity: {capacity['live_processes']}/"
+                 f"{capacity['max_live_processes']} processes, {leased:.0f} of {budget:.0f} GB leased.")
+    return pack
 
 
 def briefing_pointer(conv_id: str) -> str:
@@ -49,7 +57,7 @@ def briefing_pointer(conv_id: str) -> str:
 
 def bind_role_delivery(db, att: dict) -> None:
     initial = current_role(db, att["id"])
-    att["role_briefing"] = _instructions(initial)
+    att["role_briefing"] = _instructions(initial, db)
     original_rider = att["digest_rider"]
     # The startup briefing already carries the pack for both fresh and resumed
     # attachments.  A resume therefore starts at the current role just like a
@@ -74,7 +82,7 @@ def bind_role_delivery(db, att: dict) -> None:
             demoted = previous is not None and previous.role == "lead" and current.role != "lead"
             previous = current
             if captain_transition or (worker_now and worker_transition):
-                update = _instructions(current)
+                update = _instructions(current, db)
             if demoted and update:
                 update += ("\nYour current role is ordinary participant, not captain. "
                            "Use only your own line's tools.")

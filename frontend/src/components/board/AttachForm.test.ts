@@ -1,8 +1,10 @@
 import { mount, tick, unmount } from "svelte";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import AttachForm from "./AttachForm.svelte";
-import type { Adapter, Preset } from "../../lib/contracts";
+import { ApiError, api } from "../../lib/api";
+import type { Adapter, Conversation, Preset } from "../../lib/contracts";
 import { session } from "../../state/session.svelte.js";
+import { room } from "../../state/room.svelte.js";
 
 const adapter: Adapter = {
   id: "codex",
@@ -28,6 +30,9 @@ const preset: Preset = {
 afterEach(() => {
   session.adapters = [];
   session.presets = [];
+  room.conversation = null;
+  room.attachments = [];
+  vi.restoreAllMocks();
   document.body.replaceChildren();
 });
 
@@ -110,6 +115,38 @@ describe("AttachForm process traits", () => {
       expect(implementsBox.checked).toBe(false);
     } finally {
       void unmount(form);
+    }
+  });
+
+  it("shows a capacity refusal inline in the attach form", async () => {
+    session.adapters = [adapter];
+    room.conversation = {
+      id: "line",
+      name: "Line",
+      topic: "",
+      created_at: 1,
+      archived_at: null,
+      live_count: 0,
+    } satisfies Conversation;
+    vi.spyOn(api, "attach").mockRejectedValue(
+      new ApiError("24 of 24 live processes in use; stop one or raise the limit in settings", 409),
+    );
+    const form = mount(AttachForm, { target: document.body });
+    try {
+      const name = document.querySelector("#aName");
+      if (!(name instanceof HTMLInputElement)) throw new Error("missing name input");
+      name.value = "budget-check";
+      name.dispatchEvent(new Event("input", { bubbles: true }));
+      const attachForm = document.querySelector("#attach");
+      if (!(attachForm instanceof HTMLFormElement)) throw new Error("missing attach form");
+      attachForm.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await vi.waitFor(() => {
+        expect(document.querySelector('#attach [role="alert"]')?.textContent).toContain(
+          "24 of 24 live processes in use",
+        );
+      });
+    } finally {
+      await unmount(form);
     }
   });
 });

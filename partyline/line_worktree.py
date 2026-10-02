@@ -96,12 +96,13 @@ def line_cwd(db, conv_id: str) -> str | None:
     return line_cwd(db, parent) if parent else None
 
 
-def ensure_placed(db, conv_id: str) -> dict | None:
+def ensure_placed(db, conv_id: str, *, ignore_attachment_id: str | None = None) -> dict | None:
     """Place a child line that was born before placement existed, on its
     first machine attach; returns the placement when one was made."""
     conv = db.get_conversation(conv_id) or {}
     parent = parent_id_of(conv)
-    if conv.get("cwd") or not parent or db.list_attachments(conv_id):
+    attachments = [att for att in db.list_attachments(conv_id) if att["id"] != ignore_attachment_id]
+    if conv.get("cwd") or not parent or attachments:
         return None
     return place_child(db, parent, conv_id)
 
