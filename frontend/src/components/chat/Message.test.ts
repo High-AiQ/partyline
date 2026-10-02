@@ -2,6 +2,7 @@ import { mount, unmount } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Message from "./Message.svelte";
 import type { ChatMessage } from "../../lib/contracts";
+import { renderMessage } from "../../lib/markdown";
 import { room } from "../../state/room.svelte.js";
 import { session } from "../../state/session.svelte.js";
 
@@ -50,6 +51,33 @@ function copyButton(): HTMLButtonElement {
 
 function copyTip(): HTMLElement | null {
   return document.getElementById(copyButton().getAttribute("aria-describedby") ?? "");
+}
+
+function copyMenu(): HTMLElement {
+  const menu = document.querySelector<HTMLElement>("[role=menu]");
+  if (!menu) throw new Error("copy menu not rendered");
+  return menu;
+}
+
+async function openCopyMenu(): Promise<void> {
+  copyButton().click();
+  await vi.waitFor(() => {
+    expect(document.querySelector("[role=menu]")).not.toBeNull();
+  });
+}
+
+function blobText(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      if (typeof reader.result === "string") resolve(reader.result);
+      else reject(new Error("clipboard blob was not text"));
+    });
+    reader.addEventListener("error", () => {
+      reject(new Error("could not read clipboard blob"));
+    });
+    reader.readAsText(blob);
+  });
 }
 
 afterEach(() => {
@@ -209,21 +237,290 @@ describe("copy control", () => {
     }
   });
 
-  it("copies the wire markdown, not the rendered html", async () => {
+  it("opens a keyboard menu and copies the raw markdown item", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     setClipboard({ writeText });
     const body = "**bold** `code`\n\n\\(E=mc^2\\)";
     const message = mount(Message, { target: document.body, props: { message: agentMessage(body) } });
     try {
-      copyButton().click();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
+      await openCopyMenu();
+      const items = copyMenu().querySelectorAll<HTMLElement>("[role=menuitem]");
+      expect(items).toHaveLength(2);
+      const markdownItem = items.item(0);
+      const formattedItem = items.item(1);
+      expect(markdownItem.textContent.trim()).toBe("copy markdown");
+      expect(formattedItem.textContent.trim()).toBe("copy formatted text");
+      items[0]?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      expect(document.activeElement).toBe(items[1]);
+      items[0]?.click();
+      await vi.waitFor(() => {
+        expect(writeText).toHaveBeenCalledTimes(1);
+      });
       expect(writeText).toHaveBeenCalledTimes(1);
       expect(writeText).toHaveBeenCalledWith(body);
       expect(document.querySelector(".body")?.innerHTML).toContain("<strong>");
+      expect(document.querySelector("[role=menu]")).toBeNull();
+      expect(document.activeElement).toBe(copyButton());
     } finally {
       await unmount(message);
+    }
+  });
+
+  it("closes on Escape, outside click, and focus leaving", async () => {
+    const message = mount(Message, { target: document.body, props: { message: agentMessage("hello") } });
+    try {
+      await openCopyMenu();
+      copyMenu().dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await vi.waitFor(() => {
+        expect(document.querySelector("[role=menu]")).toBeNull();
+      });
+      expect(document.activeElement).toBe(copyButton());
+      await openCopyMenu();
+      document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      await vi.waitFor(() => {
+        expect(document.querySelector("[role=menu]")).toBeNull();
+      });
+      await openCopyMenu();
+      const outside = document.createElement("button");
+      document.body.append(outside);
+      outside.focus();
+      await vi.waitFor(() => {
+        expect(document.querySelector("[role=menu]")).toBeNull();
+      });
+    } finally {
+      await unmount(message);
+    }
+  });
+
+  it("copies exact contents from plain and language-tagged human code blocks", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    setClipboard({ writeText });
+    const first = "<tag> &\tvalue";
+    const second = "line one\nline two\n";
+    const body = "before\n\n```\n" + first + "\n```\n\n```typescript\n" + second + "\n```";
+    const message = mount(Message, { target: document.body, props: { message: humanMessage(body) } });
+    try {
+      const buttons = await vi.waitFor(() => {
+        const found = [...document.querySelectorAll<HTMLButtonElement>("button.code-copy")];
+        expect(found).toHaveLength(2);
+        return found;
+      });
+      buttons[0]?.click();
+      await vi.waitFor(() => {
+        expect(writeText).toHaveBeenCalledTimes(1);
+      });
+      expect(writeText).toHaveBeenLastCalledWith(first);
+      await vi.waitFor(() => {
+        expect(buttons[0]?.getAttribute("aria-label")).toBe("copied");
+      });
+      expect(document.querySelector(".code-copy-status")?.getAttribute("aria-live")).toBe("polite");
+      buttons[1]?.click();
+      await vi.waitFor(() => {
+        expect(writeText).toHaveBeenCalledTimes(2);
+      });
+      expect(writeText).toHaveBeenLastCalledWith(second);
+    } finally {
+      await unmount(message);
+    }
+  });
+
+  it("copies Marked's exact code text for truncated, indented, and blank-line-ending blocks", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    setClipboard({ writeText });
+    const cases = [
+      { body: "```\na\nb", expected: "a\nb" },
+      { body: "    x = 1\n    y = 2", expected: "x = 1\ny = 2", agent: true },
+      { body: "  ```\n  a\n    b\n  ```", expected: "a\n  b" },
+      { body: "```\na\nb\n```", expected: "a\nb" },
+      { body: "```\na\nb\n\n```", expected: "a\nb\n" },
+    ];
+
+    let copyCount = 0;
+    for (const { body, expected, agent } of cases) {
+      const content = agent ? agentMessage(body) : humanMessage(body);
+      const message = mount(Message, { target: document.body, props: { message: content } });
+      try {
+        const button = await vi.waitFor(() => {
+          const found = document.querySelector<HTMLButtonElement>("button.code-copy");
+          expect(found).not.toBeNull();
+          if (!found) throw new Error("code copy button missing");
+          return found;
+        });
+        button.click();
+        copyCount += 1;
+        await vi.waitFor(() => {
+          expect(writeText).toHaveBeenCalledTimes(copyCount);
+        });
+        expect(writeText).toHaveBeenLastCalledWith(expected);
+      } finally {
+        await unmount(message);
+      }
+    }
+  });
+
+  it("keeps human headings, lists, and tables in the original inline-only layout", async () => {
+    const body = "paragraph first line\nparagraph second line\n# x\n1. y\n| a | b |\n|---|---|\n| c | d |";
+    const message = mount(Message, { target: document.body, props: { message: humanMessage(body) } });
+    try {
+      const rendered = document.querySelector<HTMLElement>(".body");
+      expect(rendered).not.toBeNull();
+      expect(rendered?.innerHTML).toBe(renderMessage(body, false));
+      expect(rendered?.classList.contains("whitespace-pre-wrap")).toBe(true);
+      expect(rendered?.querySelector("h1, ol, ul, table")).toBeNull();
+      expect(rendered?.textContent).toContain("paragraph first line\nparagraph second line\n# x\n1. y");
+    } finally {
+      await unmount(message);
+    }
+  });
+
+  it("keeps indented human logs as pre-wrapped text instead of code blocks", async () => {
+    const body = "hi\n\n    indented log line\n    second\n\nbye";
+    const message = mount(Message, { target: document.body, props: { message: humanMessage(body) } });
+    try {
+      const rendered = document.querySelector<HTMLElement>(".body");
+      expect(rendered?.innerHTML).toBe(renderMessage(body, false));
+      expect(rendered?.classList.contains("whitespace-pre-wrap")).toBe(true);
+      expect(rendered?.querySelector("pre, button.code-copy")).toBeNull();
+      expect(rendered?.textContent).toContain("    indented log line\n    second");
+    } finally {
+      await unmount(message);
+    }
+  });
+
+  it("adds a copyable highlighted fence to human inline text", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    setClipboard({ writeText });
+    const prose = "paragraph first line\nparagraph second line\n# x\n1. y\n| a | b |";
+    const source = "const output = '<tag> & ok';";
+    const body = `${prose}\n\n\`\`\`typescript\n${source}\n\`\`\``;
+    const message = mount(Message, { target: document.body, props: { message: humanMessage(body) } });
+    try {
+      const block = await vi.waitFor(() => {
+        const found = document.querySelector<HTMLElement>(".body pre code[data-code-language='typescript']");
+        expect(found).not.toBeNull();
+        return found;
+      });
+      expect(document.querySelector(".body h1, .body ol, .body ul, .body table")).toBeNull();
+      const copy = await vi.waitFor(() => {
+        const found = document.querySelector<HTMLButtonElement>(".body button.code-copy");
+        expect(found).not.toBeNull();
+        return found;
+      });
+      expect(document.querySelectorAll(".body button.code-copy")).toHaveLength(1);
+      copy?.click();
+      await vi.waitFor(() => {
+        expect(writeText).toHaveBeenCalledWith(source);
+      });
+      expect(block?.textContent).toContain("<tag> & ok");
+    } finally {
+      await unmount(message);
+    }
+  });
+
+  it("adds a copy button to an unclosed human fence", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    setClipboard({ writeText });
+    const source = "print('still open')";
+    const message = mount(Message, {
+      target: document.body,
+      props: { message: humanMessage(`before fence\n\n\`\`\`python\n${source}`) },
+    });
+    try {
+      const button = await vi.waitFor(() => {
+        const found = document.querySelector<HTMLButtonElement>(".body button.code-copy");
+        expect(found).not.toBeNull();
+        return found;
+      });
+      expect(document.querySelector(".body code[data-code-language='python']")).not.toBeNull();
+      button?.click();
+      await vi.waitFor(() => {
+        expect(writeText).toHaveBeenCalledWith(source);
+      });
+    } finally {
+      await unmount(message);
+    }
+  });
+
+  it("resets the code-block copied state after about 1.5 seconds", async () => {
+    setClipboard({ writeText: vi.fn().mockResolvedValue(undefined) });
+    const message = mount(Message, {
+      target: document.body,
+      props: { message: humanMessage("```\nhello\n```") },
+    });
+    try {
+      await vi.waitFor(() => {
+        expect(document.querySelector("button.code-copy")).not.toBeNull();
+      });
+      vi.useFakeTimers();
+      const button = document.querySelector<HTMLButtonElement>("button.code-copy");
+      if (!button) throw new Error("code copy button missing");
+      button.click();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(button.getAttribute("aria-label")).toBe("copied");
+      expect(document.querySelector(".code-copy-status")?.textContent).toBe("copied");
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(button.getAttribute("aria-label")).toBe("copy code block");
+      expect(document.querySelector(".code-copy-status")?.textContent).toBe("");
+    } finally {
+      vi.useRealTimers();
+      await unmount(message);
+    }
+  });
+
+  it("copies formatted HTML and plain text without copy controls", async () => {
+    class TestClipboardItem {
+      constructor(readonly values: Record<string, Blob>) {}
+    }
+    vi.stubGlobal("ClipboardItem", TestClipboardItem);
+    let copiedItem: TestClipboardItem | undefined;
+    const write = vi.fn((items: ClipboardItem[]): Promise<void> => {
+      copiedItem = items[0] as unknown as TestClipboardItem;
+      return Promise.resolve();
+    });
+    setClipboard({ write });
+    const body = "**bold**\n\n```js\nconst x = 1;\n```";
+    const message = mount(Message, { target: document.body, props: { message: humanMessage(body) } });
+    try {
+      await vi.waitFor(() => {
+        expect(document.querySelector(".code-copy")).not.toBeNull();
+      });
+      await openCopyMenu();
+      copyMenu().querySelectorAll<HTMLElement>("[role=menuitem]")[1]?.click();
+      await vi.waitFor(() => {
+        expect(write).toHaveBeenCalledTimes(1);
+      });
+      const item = copiedItem;
+      if (!item) throw new Error("clipboard item missing");
+      const htmlBlob = item.values["text/html"];
+      const textBlob = item.values["text/plain"];
+      if (!htmlBlob || !textBlob) throw new Error("clipboard formats missing");
+      const html = await blobText(htmlBlob);
+      const text = await blobText(textBlob);
+      expect(html).toContain("<strong>bold</strong>");
+      expect(html).toContain('class="hljs-keyword"');
+      expect(html).not.toContain("code-copy");
+      expect(html).not.toContain("copy code block");
+      expect(text).toContain("bold");
+      expect(text).toContain("const x = 1;");
+    } finally {
+      await unmount(message);
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("reports when copying is unavailable", async () => {
+    setClipboard(undefined);
+    Object.defineProperty(document, "execCommand", { value: () => false, configurable: true });
+    const message = mount(Message, { target: document.body, props: { message: agentMessage("hello") } });
+    try {
+      await openCopyMenu();
+      copyMenu().querySelector<HTMLElement>("[role=menuitem]")?.click();
+      await vi.waitFor(() => {
+        expect(room.notice?.message).toContain("Could not copy");
+      });
+    } finally {
+      await unmount(message);
+      delete (document as { execCommand?: unknown }).execCommand;
     }
   });
 
@@ -238,6 +535,9 @@ describe("copy control", () => {
       try {
         const button = copyButton();
         button.click();
+        await vi.advanceTimersByTimeAsync(0);
+        await Promise.resolve();
+        copyMenu().querySelector<HTMLElement>("[role=menuitem]")?.click();
         await vi.advanceTimersByTimeAsync(0);
         button.dispatchEvent(new MouseEvent("mouseenter"));
         expect(copyTip()?.textContent).toBe("Copied");
