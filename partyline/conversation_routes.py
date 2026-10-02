@@ -32,6 +32,8 @@ from .machine_scope import (
 from .message_contracts import ConversationDetailResponse
 from .message_routes import conversation_detail_response
 from .runtime import NAME_RE, RESERVED_NAMES
+from .resource_budget import reserve_new_attachment
+from .attachment_lifecycle import remove_stopped_record
 from .system_notice import post_system_notice
 
 
@@ -257,26 +259,32 @@ def register_conversation_routes(
             raise HTTPException(400, str(exc)) from exc
         # A machine works where its line works; a person may choose.
         chosen = "" if not is_human(principal) else body.cwd.strip()
-        if not chosen and (placed := ensure_placed(db, conv_id)) and describe(placed):
-            await runtime.post_message(conv_id, "system", "system", describe(placed))
         cwd = os.path.abspath(os.path.expanduser(
             chosen or line_cwd(db, conv_id) or os.getcwd()))
         if not os.path.isdir(cwd):
             raise HTTPException(400, f"cwd does not exist: {cwd}")
-        if warning := outside_worktree_note(db, conv_id, cwd):
-            await runtime.post_message(conv_id, "system", "system", warning)
         att_id = str(uuid.uuid4())
         runtime_owner = str(uuid.uuid4())
-        att = db.add_attachment(
-            att_id,
-            conv_id,
-            name,
-            body.adapter,
-            command,
-            cwd,
-            runtime_owner,
+        att = await reserve_new_attachment(
+            db, att_id=att_id, conv_id=conv_id, name=name, adapter=body.adapter,
+            command=command, cwd=cwd, runtime_owner=runtime_owner,
             start_after_history=True,
         )
+        try:
+            placed = ensure_placed(db, conv_id, ignore_attachment_id=att_id)
+            if placed and describe(placed):
+                await runtime.post_message(conv_id, "system", "system", describe(placed))
+            cwd = os.path.abspath(os.path.expanduser(chosen or line_cwd(db, conv_id) or cwd))
+            if not os.path.isdir(cwd):
+                raise HTTPException(400, f"cwd does not exist: {cwd}")
+            db._exec("UPDATE attachments SET cwd=? WHERE id=?", (cwd, att_id))
+            att["cwd"] = cwd
+            if warning := outside_worktree_note(db, conv_id, cwd):
+                await runtime.post_message(conv_id, "system", "system", warning)
+        except BaseException:
+            await db.set_attachment_status_async(att_id, "exited", runtime_owner)
+            await remove_stopped_record(db, att_id, missing_ok=True)
+            raise
         if update_argv:
             await apply_update(runtime.post_message, conv_id, name, update_argv)
         return await s._start_attachment(att)

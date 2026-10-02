@@ -20,6 +20,7 @@ from partyline.attachment_resume import (
 from partyline.db import Db
 from partyline.runtime import ChatRuntime
 from partyline.attachment_resume import resume_adapter
+from partyline.resource_budget import GIB, Host, claim_resume
 from partyline.write_set_routes import add_write_grant
 from tests.test_server import FakeAdapter
 
@@ -126,6 +127,12 @@ class DeliveredBodiesTest(unittest.TestCase):
 
 class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        self.host_patch = patch(
+            "partyline.resource_budget.host_resources",
+            return_value=Host(cpus=8, ram_bytes=8 * GIB),
+        )
+        self.host_patch.start()
+        self.addCleanup(self.host_patch.stop)
         self.directory = tempfile.TemporaryDirectory()
         self.db = Db(f"{self.directory.name}/partyline.db")
         self.runtime = ChatRuntime(self.db)
@@ -216,9 +223,16 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
     @patch("partyline.attachment_resume.bind_connection_hint")
     @patch("partyline.attachment_resume.provision_connection")
     async def test_claim_refusal_refreshes_same_attachment_liveness(self, *_mocks):
-        claim_attachment = self.db.claim_attachment_async
+        self.db.set_setting("max_live_processes", "4")
+        for ident in ("other-a", "other-b", "other-c"):
+            self.db.add_attachment(
+                ident, "line", ident, "fake", ["fake"], self.directory.name, ident
+            )
+            self.db.set_attachment_status(ident, "running", ident)
 
-        async def competing_resume(att_id, runtime_owner):
+        async def competing_resume(
+            db, att_id, runtime_owner, requested_lease, *, grandfathered=False
+        ):
             self.assertTrue(self.db.claim_attachment(att_id, "manual-generation"))
             self.assertTrue(
                 self.db.set_attachment_status(att_id, "running", "manual-generation")
@@ -230,11 +244,13 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
             self.runtime.live[att_id] = FakeAdapter(
                 att={"runtime_owner": "manual-generation"}
             )
-            return await claim_attachment(att_id, runtime_owner)
+            return await claim_resume(
+                db, att_id, runtime_owner, requested_lease, grandfathered=grandfathered
+            )
 
-        self.db.claim_attachment_async = competing_resume
-        with self.assertRaises(HTTPException) as raised:
-            await resume_adapter("one", None, **self.resume_arguments())
+        with patch("partyline.attachment_resume.claim_resume", side_effect=competing_resume):
+            with self.assertRaises(HTTPException) as raised:
+                await resume_adapter("one", None, **self.resume_arguments())
 
         self.assertEqual(raised.exception.status_code, 409)
         self.assertEqual(
@@ -247,10 +263,49 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
     @patch("partyline.attachment_resume.bind_role_delivery")
     @patch("partyline.attachment_resume.bind_connection_hint")
     @patch("partyline.attachment_resume.provision_connection")
-    async def test_claim_refusal_identifies_a_different_live_attachment(self, *_mocks):
-        claim_attachment = self.db.claim_attachment_async
+    async def test_explicit_resume_of_long_stopped_process_is_refused_at_capacity(self, *_mocks):
+        self.db.set_setting("max_live_processes", "4")
+        for index in range(4):
+            ident = f"active-{index}"
+            self.db.add_attachment(
+                ident, "line", ident, "fake", ["fake"], self.directory.name, ident,
+                memory_limit="4G",
+            )
+            self.db.set_attachment_status(ident, "running", ident)
 
-        async def competing_handle(att_id, runtime_owner):
+        with self.assertRaises(HTTPException) as raised:
+            await resume_adapter("one", None, **self.resume_arguments())
+
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertIn("4 of 4 live processes", raised.exception.detail)
+        self.assertEqual(self.db.get_attachment("one")["status"], "exited")
+
+    @patch("partyline.attachment_resume.bind_role_delivery")
+    @patch("partyline.attachment_resume.bind_connection_hint")
+    @patch("partyline.attachment_resume.provision_connection")
+    async def test_restart_plan_member_is_grandfathered_at_capacity(self, *_mocks):
+        self.db.set_setting("max_live_processes", "4")
+        self.runtime.reattaching.add("one")
+        for index in range(4):
+            ident = f"active-{index}"
+            self.db.add_attachment(
+                ident, "line", ident, "fake", ["fake"], self.directory.name, ident,
+                memory_limit="4G",
+            )
+            self.db.set_attachment_status(ident, "running", ident)
+
+        await resume_adapter("one", None, **self.resume_arguments())
+
+        self.assertEqual(self.db.get_attachment("one")["status"], "starting")
+        self.assertIn("one", self.runtime.live)
+
+    @patch("partyline.attachment_resume.bind_role_delivery")
+    @patch("partyline.attachment_resume.bind_connection_hint")
+    @patch("partyline.attachment_resume.provision_connection")
+    async def test_claim_refusal_identifies_a_different_live_attachment(self, *_mocks):
+        async def competing_handle(
+            db, att_id, runtime_owner, requested_lease, *, grandfathered=False
+        ):
             self.db.add_attachment(
                 "other", "line", "luna", "fake", ["fake"], self.directory.name
             )
@@ -266,11 +321,13 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
             self.runtime.live["other"] = FakeAdapter(
                 att={"runtime_owner": "other-generation"}
             )
-            return await claim_attachment(att_id, runtime_owner)
+            return await claim_resume(
+                db, att_id, runtime_owner, requested_lease, grandfathered=grandfathered
+            )
 
-        self.db.claim_attachment_async = competing_handle
-        with self.assertRaises(HTTPException) as raised:
-            await resume_adapter("one", None, **self.resume_arguments())
+        with patch("partyline.attachment_resume.claim_resume", side_effect=competing_handle):
+            with self.assertRaises(HTTPException) as raised:
+                await resume_adapter("one", None, **self.resume_arguments())
 
         self.assertEqual(raised.exception.status_code, 409)
         self.assertEqual(

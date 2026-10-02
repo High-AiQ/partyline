@@ -6,9 +6,11 @@ import tempfile
 import threading
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
+from partyline.auth_guard import Principal
 from partyline.conversation_routes import unique_handle
 from partyline.db import Db
 from partyline.reattach import (
@@ -19,6 +21,8 @@ from partyline.reattach import (
 from partyline.reattach import create_restart_plan
 from partyline.contracts import RestartPlanRequest
 from partyline.restart_lease import RestartPlanLeaseLost
+from partyline.resource_budget import GIB, Host, claim_resume, reserve_new_attachment
+from partyline.resource_routes import register_resource_routes
 from partyline.runtime import ChatRuntime
 
 
@@ -154,6 +158,108 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result.ready, ("sol", "terra"))
         self.assertIn("Continuation debrief", adapters["one"].deliveries[0][0]["body"])
+
+    async def test_restart_plan_grandfathers_over_budget_fleet_and_refuses_new_starts(self):
+        max_live = 8
+        self.db.set_setting("max_live_processes", str(max_live))
+        self.db.set_setting("memory_reserve_bytes", str(7 * GIB))
+        self.db.set_setting("default_process_memory_bytes", str(4 * GIB))
+        ids = []
+        for index in range(14):
+            ident = f"fleet-{index:02d}"
+            ids.append(ident)
+            self.db.add_attachment(
+                ident, "line", f"worker-{index:02d}", "fake", ["fake"],
+                self.directory.name, ident, memory_limit="4G",
+            )
+            self.db.set_attachment_status(ident, "running", ident)
+        self.db.save_restart_plan("line", ids, "resume all", mode="automatic")
+
+        async def resume(attachment_id, _pending):
+            owner = f"new-{attachment_id}"
+            attachment = self.db.get_attachment(attachment_id)
+            admitted = await claim_resume(
+                self.db, attachment_id, owner, 4 * GIB,
+                grandfathered=attachment_id in self.runtime.reattaching,
+            )
+            self.assertTrue(admitted, attachment_id)
+            adapter = ReadyAdapter(self.order, attachment["name"])
+            adapter.att["runtime_owner"] = owner
+            self.runtime.live[attachment_id] = adapter
+            return ResumedAttachment(adapter, False)
+
+        app = FastAPI()
+
+        @app.middleware("http")
+        async def identify(request, call_next):
+            request.state.principal = Principal(kind="user", name="operator")
+            return await call_next(request)
+
+        register_resource_routes(app, self.runtime)
+        host = Host(cpus=10, ram_bytes=8 * GIB)
+        with patch("partyline.resource_budget.host_resources", return_value=host):
+            result = await ReattachCoordinator(self.runtime, resume).run_automatic()
+            self.assertIsNotNone(result)
+            self.assertEqual(len(result.ready), 14)
+            view = TestClient(app).get("/api/resources").json()
+            self.assertEqual(view["live_processes"], 14)
+            self.assertEqual(view["max_live_processes"], 8)
+            self.assertEqual(view["memory_reserved_bytes"], 14 * GIB)
+            self.assertEqual(view["memory_cap_bytes"], 56 * GIB)
+            self.assertEqual(view["memory_budget_bytes"], GIB)
+
+            with self.assertRaises(HTTPException) as first_refusal:
+                await reserve_new_attachment(
+                    self.db, att_id="new-one", conv_id="line", name="new-one",
+                    adapter="fake", command=["fake"], cwd=self.directory.name,
+                    runtime_owner="new-one",
+                )
+            self.assertEqual(first_refusal.exception.status_code, 409)
+            self.assertIn("14 of 8 live processes", first_refusal.exception.detail)
+            self.assertIsNone(self.db.get_attachment("new-one"))
+
+            for ident in ids[:2]:
+                owner = self.runtime.live[ident].att["runtime_owner"]
+                await self.db.set_attachment_status_async(ident, "exited", owner)
+                self.runtime.live.pop(ident)
+            with self.assertRaises(HTTPException) as second_refusal:
+                await reserve_new_attachment(
+                    self.db, att_id="new-two", conv_id="line", name="new-two",
+                    adapter="fake", command=["fake"], cwd=self.directory.name,
+                    runtime_owner="new-two",
+                )
+            self.assertEqual(second_refusal.exception.status_code, 409)
+            self.assertIn("12 of 8 live processes", second_refusal.exception.detail)
+
+    async def test_reattach_offer_grandfathers_plan_members(self):
+        self.db.set_setting("max_live_processes", "4")
+        self.db.set_setting("memory_reserve_bytes", str(7 * GIB))
+        self.db.set_setting("default_process_memory_bytes", str(4 * GIB))
+        for ident in ("one", "two"):
+            self.db._exec("UPDATE attachments SET memory_limit='4G' WHERE id=?", (ident,))
+            self.db.set_attachment_status(ident, "running", None)
+
+        async def resume(attachment_id, _pending):
+            self.assertIn(attachment_id, self.runtime.reattaching)
+            attachment = self.db.get_attachment(attachment_id)
+            owner = f"offer-{attachment_id}"
+            self.assertTrue(await claim_resume(
+                self.db, attachment_id, owner, 4 * GIB,
+                grandfathered=attachment_id in self.runtime.reattaching,
+            ))
+            adapter = ReadyAdapter(self.order, attachment["name"])
+            adapter.att["runtime_owner"] = owner
+            self.runtime.live[attachment_id] = adapter
+            return ResumedAttachment(adapter, False)
+
+        host = Host(cpus=10, ram_bytes=8 * GIB)
+        with patch("partyline.resource_budget.host_resources", return_value=host):
+            coordinator = ReattachCoordinator(self.runtime, resume)
+            await coordinator.choose(
+                "line", {"token": self.plan["token"], "action": "accept"}, "operator"
+            )
+        self.assertEqual(self.db.get_attachment("one")["status"], "running")
+        self.assertEqual(self.db.get_attachment("two")["status"], "running")
 
     async def test_restart_resume_filters_sibling_speech_when_alpha_speaks_last(self):
         self.db.add_message("line", "terra", "agent", "terra says hello")

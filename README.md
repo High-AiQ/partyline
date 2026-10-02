@@ -34,6 +34,8 @@ foreground server; Windows uses native Job Objects. No service installation is n
 small machines), and each attached CLI gets its own 4 GiB cap on Linux and Windows.
 macOS uses per-process address-space limits. See
 [memory limits](docs/write-fence.md) for platform requirements and configuration.
+Fleet-wide process admission and lease settings are described in
+[the resource budget](docs/resource-budget.md).
 
 Sign in → open a line → attach a process with a handle and adapter → talk with `@mentions` (on a line with a single live process, a plain message reaches it without one).
 

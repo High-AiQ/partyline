@@ -328,17 +328,15 @@ class Db:
         )
 
     # -- attachments -------------------------------------------------------
-    def add_attachment(
-        self, att_id, conv_id, name, adapter, command, cwd, runtime_owner=None,
-        *, start_after_history=False,
-    ):
+    def add_attachment(self, att_id, conv_id, name, adapter, command, cwd, runtime_owner=None,
+                       *, start_after_history=False, memory_limit=None):
         ts = time.time()
         self._exec(
             "INSERT INTO attachments("
             "id,conv_id,name,adapter,command,cwd,status,runtime_owner,last_seen,created_at,"
-            "runtime_started_at)"
+            "runtime_started_at,memory_limit)"
             " VALUES(?,?,?,?,?,?,?,?,CASE WHEN ? THEN COALESCE((SELECT MAX(id) "
-            "FROM messages WHERE conv_id=?),0) ELSE 0 END,?,?)",
+            "FROM messages WHERE conv_id=?),0) ELSE 0 END,?,?,?)",
             (
                 att_id,
                 conv_id,
@@ -352,6 +350,7 @@ class Db:
                 conv_id,
                 ts,
                 ts,
+                memory_limit,
             ),
         )
         return self.get_attachment(att_id)

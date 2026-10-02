@@ -20,6 +20,7 @@
   let updateCli = $state(false);
   let traits = $state(defaultPresetTraits());
   let attaching = $state(false);
+  let attachError = $state("");
 
   const selectedAdapter = $derived(session.adapters.find((option) => option.id === adapter));
   const updateCommand = $derived(selectedAdapter?.update_command ?? null);
@@ -68,6 +69,7 @@
     }
 
     attaching = true;
+    attachError = "";
     try {
       const attached = await api.attach(room.conversation.id, {
         name: name.trim(),
@@ -86,7 +88,7 @@
       updateCli = false;
       traits = defaultPresetTraits();
     } catch (error) {
-      room.showNotice(error instanceof ApiError ? error.message : "attach failed", "error");
+      attachError = error instanceof ApiError ? error.message : "attach failed";
     } finally {
       attaching = false;
     }
@@ -190,5 +192,8 @@
   </details>
 
   <button class="primary" type="submit" disabled={attaching}>{attaching ? "attaching…" : "attach"}</button>
+  <p class="min-h-0 text-[10px] text-red" class:hidden={!attachError} role="alert" aria-live="polite">
+    {attachError}
+  </p>
   <div class="note text-[10px] italic text-cream-faint">the real interactive process is spawned in a pty</div>
 </form>
