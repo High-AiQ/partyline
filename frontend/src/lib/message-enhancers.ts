@@ -33,7 +33,7 @@ function loadMathModule(): Promise<MathEnhancerModule> {
 
 export async function enhanceMessage(root: HTMLElement, isCurrent: EnhancementGuard): Promise<void> {
   const jobs: Promise<void>[] = [];
-  if (root.querySelector("code[data-code-language]")) {
+  if (root.querySelector("pre > code, code[data-code-language]")) {
     jobs.push(loadCodeModule().then((module) => module.enhanceCode(root, isCurrent)));
   }
   if (root.querySelector("[data-math]")) {
