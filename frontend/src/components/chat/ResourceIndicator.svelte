@@ -52,7 +52,7 @@
 <div class="resource-wrap">
   <button
     class="resource-trigger topbar-action"
-    class:open={resources.popoverOpen}
+    class:topbar-action-selected={resources.popoverOpen}
     class:warning={percent >= 70 && percent < 100}
     class:full={blocked || overLimit}
     class:over-limit={overLimit}
@@ -100,7 +100,6 @@
     gap: 4px;
     min-height: 34px;
     padding: 0 7px;
-    color: var(--color-green);
     font: inherit;
     font-size: 11px;
     font-variant-numeric: tabular-nums;
@@ -108,29 +107,16 @@
       color 180ms ease,
       border-color 180ms ease;
   }
-  .resource-trigger.warning {
+  .resource-trigger:not(:hover):not(:active):not(:focus-visible):not(.topbar-action-selected) {
+    color: var(--color-green);
+  }
+  .resource-trigger.warning:not(:hover):not(:active):not(:focus-visible):not(.topbar-action-selected) {
     color: var(--color-copper-hot);
   }
-  .resource-trigger.full {
+  .resource-trigger.full:not(:hover):not(:active):not(:focus-visible):not(.topbar-action-selected) {
     color: var(--color-red);
   }
-  .resource-trigger.open,
-  .resource-trigger.open:hover:not(:disabled),
-  .resource-trigger.open:active:not(:disabled) {
-    background: var(--color-ink-2);
-    border-color: var(--color-line);
-  }
-  .resource-trigger.open.warning,
-  .resource-trigger.open.warning:hover:not(:disabled),
-  .resource-trigger.open.warning:active:not(:disabled) {
-    color: var(--color-copper-hot);
-  }
-  .resource-trigger.open.full,
-  .resource-trigger.open.full:hover:not(:disabled),
-  .resource-trigger.open.full:active:not(:disabled) {
-    color: var(--color-red);
-  }
-  .resource-trigger.over-limit {
+  .resource-trigger.over-limit:not(:hover):not(:active):not(:focus-visible):not(.topbar-action-selected) {
     color: var(--color-red);
   }
   .resource-ring {
@@ -144,7 +130,8 @@
     stroke-width: 2.5;
   }
   .resource-ring .track {
-    stroke: var(--color-line);
+    stroke: currentColor;
+    stroke-opacity: 0.3;
   }
   .resource-ring .fill {
     stroke: currentColor;
