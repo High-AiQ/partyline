@@ -7,7 +7,8 @@
     background: var(--color-ink-2);
     border-color: var(--color-line);
   }
-  .topbar-action:hover:not(:disabled) {
+  .topbar-action:hover:not(:disabled),
+  .topbar-action:focus-visible:not(:disabled) {
     color: var(--color-ink);
     background: var(--color-copper);
     border-color: var(--color-copper);
@@ -17,12 +18,13 @@
     background: var(--color-copper-hot);
     border-color: var(--color-copper-hot);
   }
-  .topbar-action-accented:not(:hover):not(:active):not(:disabled),
-  .topbar-action-selected:not(:hover):not(:active):not(:disabled) {
+  .topbar-action-accented:not(:hover):not(:active):not(:focus-visible):not(:disabled),
+  .topbar-action-selected:not(:hover):not(:active):not(:focus-visible):not(:disabled) {
     color: var(--color-copper-hot);
     border-color: rgb(217 142 74 / 0.5);
   }
   .topbar-action-danger:hover:not(:disabled),
+  .topbar-action-danger:focus-visible:not(:disabled),
   .topbar-action-danger:active:not(:disabled) {
     color: var(--color-ink);
     background: var(--color-red);
@@ -35,6 +37,7 @@
     border-color: var(--color-line);
   }
   .topbar-action:hover:not(:disabled) .led,
+  .topbar-action:focus-visible:not(:disabled) .led,
   .topbar-action:active:not(:disabled) .led,
   .topbar-action[aria-expanded="true"].drawer-toggle .led {
     background: currentcolor;
