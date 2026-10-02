@@ -27,7 +27,11 @@ class ClaudeCommandTest(unittest.TestCase):
     def make_adapter(self, *, command: list[str], resume: bool, hook_url: str | None = None):
         """Build only the pure argv seam; no pty or Claude CLI is involved."""
         adapter = PartylineAdapter.__new__(PartylineAdapter)
-        adapter.att = {"command": command, "id": "attachment-1"}
+        adapter.att = {
+            "command": command, "id": "attachment-1", "name": "claude",
+            "conv_name": "line", "cwd": "/work", "conv_id": "conv-1",
+            "adapter_metadata": {"capabilities": {"transcript": True}},
+        }
         if hook_url is not None:
             adapter.att["hook_url"] = hook_url
         adapter.resume = resume
@@ -36,17 +40,22 @@ class ClaudeCommandTest(unittest.TestCase):
     def test_fresh_command_gets_one_session_id(self):
         adapter = self.make_adapter(command=["claude", "--model", "opus"], resume=False)
 
+        command = adapter.build_command()
         self.assertEqual(
-            adapter.build_command(),
+            command[:5],
             ["claude", "--model", "opus", "--session-id", "attachment-1"],
         )
+        self.assertEqual(command[-2], "--append-system-prompt")
+        self.assertIn("You are \"claude\" on the chat line \"line\"", command[-1])
 
     def test_existing_session_id_is_not_duplicated(self):
         adapter = self.make_adapter(
             command=["claude", "--session-id", "chosen-by-user"], resume=False,
         )
 
-        self.assertEqual(adapter.build_command(), ["claude", "--session-id", "chosen-by-user"])
+        command = adapter.build_command()
+        self.assertEqual(command[:3], ["claude", "--session-id", "chosen-by-user"])
+        self.assertEqual(command[-2], "--append-system-prompt")
 
     def test_resume_command_uses_the_attachment_id(self):
         adapter = self.make_adapter(command=["claude", "--model", "opus"], resume=True)
@@ -86,10 +95,24 @@ class ClaudeCommandTest(unittest.TestCase):
             hook_url="https://hooks.example.test/notify",
         )
 
-        self.assertEqual(
-            adapter.build_command(),
-            ["claude", "--settings", "existing.json", "--session-id", "attachment-1"],
+        command = adapter.build_command()
+        self.assertEqual(command[:5], [
+            "claude", "--settings", "existing.json", "--session-id", "attachment-1",
+        ])
+        self.assertEqual(command[-2], "--append-system-prompt")
+
+    def test_existing_system_prompt_is_kept_and_extended(self):
+        adapter = self.make_adapter(
+            command=["claude", "--append-system-prompt", "operator instruction"],
+            resume=False,
         )
+
+        command = adapter.build_command()
+
+        appended = command[command.index("--append-system-prompt") + 1]
+        self.assertEqual(command.count("--append-system-prompt"), 1)
+        self.assertIn("operator instruction", appended)
+        self.assertIn("You are \"claude\" on the chat line \"line\"", appended)
 
 
 class ClaudeStartupPromptTest(unittest.IsolatedAsyncioTestCase):
@@ -431,6 +454,7 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
         posts: list[tuple[str, str, str]] = []
         adapter = self.make_adapter(posts)
         adapter.resume = False
+        adapter.build_command()
         polls = iter(range(200))
         adapter.alive = lambda: next(polls, None) is not None
         adapter._fresh = lambda timestamp: True
@@ -464,8 +488,9 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
             patch.object(adapter, "send_keys", AsyncMock()) as mock_keys,
         ):
             await adapter._run()
-        # briefing sent once at start, and transcript found
-        self.assertTrue(mock_keys.called)
+        # The system prompt carries the role; the receipt-bearing briefing is
+        # still sent after the configured startup dialog has cleared.
+        mock_keys.assert_awaited_once_with(adapter.briefing())
         self.assertEqual(posts, [("claude", "agent", "hi")])
 
     async def test_run_exits_when_process_dies_before_transcript(self):
@@ -489,6 +514,7 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
         posts: list[tuple[str, str, str]] = []
         adapter = self.make_adapter(posts)
         adapter.resume = False
+        adapter.build_command()
         adapter.master = 1
         # The CLI outlives the 45s mark by a long way, then exits. Without a
         # bound the search would now run for as long as it is alive.
@@ -556,6 +582,7 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
         posts: list[tuple[str, str, str]] = []
         adapter = self.make_adapter(posts)
         adapter.resume = False
+        adapter.build_command()
         lifetime = iter(range(200))
         adapter.alive = lambda: next(lifetime, None) is not None
         adapter._fresh = lambda timestamp: True
@@ -598,9 +625,8 @@ class ClaudeTranscriptTest(unittest.IsolatedAsyncioTestCase):
             patch.object(adapter, "send_keys", AsyncMock()) as mock_keys,
         ):
             await adapter._run()
-        # Should have retried at 12
         mock_write.assert_not_called()
-        self.assertEqual(mock_keys.call_count, 2)  # initial + 1 retry
+        self.assertEqual(mock_keys.call_count, 2)  # initial + one retry
         self.assertEqual(posts, [("claude", "agent", "after retry")])
 
 
