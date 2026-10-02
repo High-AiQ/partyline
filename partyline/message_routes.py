@@ -99,6 +99,11 @@ def message_router(runtime, media) -> APIRouter:
             "write" if principal.conv_id == conv_id or is_human(principal) else "assign"
         )
         deny_unless(runtime.db, principal, conv_id, capability)
+        if is_human(principal) and not any(
+            attachment["status"] in ("starting", "running")
+            for attachment in runtime.db.list_attachments(conv_id)
+        ):
+            raise HTTPException(409, "attach a process to this line before sending")
         return await post_identified(runtime, conv_id, principal, body.body)
 
     return router
