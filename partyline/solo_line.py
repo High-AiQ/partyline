@@ -18,20 +18,27 @@ from .mentions import addresses, known_mention_names, line_addressed, mentioned_
 _LIVE = ("starting", "running")
 
 
-def solo_process(db, conv_id: str) -> dict | None:
+def solo_process(db, conv_id: str, *, include_attachment_id: str | None = None) -> dict | None:
     """The line's one live process, or None when there are none or several."""
-    live = [att for att in db.list_attachments(conv_id) if att["status"] in _LIVE]
+    live = [
+        att for att in db.list_attachments(conv_id)
+        if att["status"] in _LIVE or att["id"] == include_attachment_id
+    ]
     return live[0] if len(live) == 1 else None
 
 
-def implied_addressee(db, message: dict) -> str | None:
+def implied_addressee(
+    db, message: dict, *, include_attachment_id: str | None = None
+) -> str | None:
     """The lower-cased handle a plain human message reaches on a solo line."""
     if message.get("sender_type") != "human" or message.get("audience_attachment_id"):
         return None
     body = str(message.get("body") or "")
     if known_mention_names(db, message["conv_id"], mentioned_names(body)):
         return None
-    alone = solo_process(db, message["conv_id"])
+    alone = solo_process(
+        db, message["conv_id"], include_attachment_id=include_attachment_id
+    )
     if alone is None:
         return None
     # ``name:`` is how a weak model addresses a colleague when it forgets the

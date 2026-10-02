@@ -10,6 +10,7 @@ from partyline import auth_store, auth_tokens
 from partyline.auth_guard import install_auth_guard
 from partyline.db import Db
 from partyline.media import MediaStore
+from partyline.media_routes import media_router
 from partyline.message_routes import conversation_detail_response, message_router
 from partyline.runtime import ChatRuntime
 
@@ -29,6 +30,8 @@ class MessageRoutesTest(unittest.TestCase):
         self.db.create_conversation("line", "Line")
         self.runtime = ChatRuntime(self.db)
         self.media = MediaStore(self.db, Path(self.directory.name) / "media")
+        self.db.add_attachment("worker", "line", "sol", "fake", ["fake"], "/tmp", "owner")
+        self.db.set_attachment_status("worker", "running", "owner")
         self.messages = [
             self.db.add_message("line", "greg", "human", f"message {number}")
             for number in range(1, 46)
@@ -36,12 +39,13 @@ class MessageRoutesTest(unittest.TestCase):
         app = FastAPI()
         install_auth_guard(app, self.db)
         app.include_router(message_router(self.runtime, self.media))
+        app.include_router(media_router(self.runtime, self.media))
         self.client = TestClient(app)
         user = auth_store.create_user(
             self.db, "greg@example.com", "greg", auth_tokens.hash_password("hunter2222"))
-        token = auth_tokens.create_access_token(
+        self.human_token = auth_tokens.create_access_token(
             auth_tokens.signing_secret(self.db), user["id"])
-        self.client.headers["Authorization"] = f"Bearer {token}"
+        self.client.headers["Authorization"] = f"Bearer {self.human_token}"
 
     def tearDown(self):
         self.client.close()
@@ -108,6 +112,83 @@ class MessageRoutesTest(unittest.TestCase):
         self.assertEqual(body["sender"], "greg")
         self.assertEqual(body["sender_type"], "human")
         self.assertEqual(body["body"], "hello from REST")
+
+    def test_human_post_is_blocked_when_only_stopped_or_exited_processes_remain(self):
+        self.db.set_attachment_status("worker", "exited", "owner")
+        self.db.add_attachment("old-worker", "line", "terra", "fake", ["fake"], "/tmp")
+        self.db.set_attachment_status("old-worker", "detached", None)
+
+        response = self.client.post(
+            "/api/conversations/line/messages", json={"body": "please help"}
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"], "attach a process to this line before sending")
+
+    def test_a_starting_process_allows_a_human_message(self):
+        self.db.set_attachment_status("worker", "starting", "owner")
+        response = self.client.post(
+            "/api/conversations/line/messages", json={"body": "@sol get ready"}
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+
+    def test_child_process_does_not_make_parent_line_live(self):
+        self.db.create_conversation("child", "Child")
+        self.db._exec("UPDATE conversations SET parent_id='line' WHERE id='child'")
+        self.db.set_attachment_status("worker", "exited", "owner")
+        self.db.add_attachment("child-worker", "child", "terra", "fake", ["fake"], "/tmp")
+        self.db.set_attachment_status("child-worker", "running", None)
+
+        response = self.client.post(
+            "/api/conversations/line/messages", json={"body": "hello parent"}
+        )
+
+        self.assertEqual(response.status_code, 409)
+
+    def test_all_and_multiple_processes_are_allowed(self):
+        self.db.add_attachment("worker-2", "line", "terra", "fake", ["fake"], "/tmp")
+        self.db.set_attachment_status("worker-2", "running", None)
+
+        response = self.client.post(
+            "/api/conversations/line/messages", json={"body": "@all please read"}
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+
+    def test_agent_posts_and_system_notices_do_not_require_a_live_attachment(self):
+        self.db.set_attachment_status("worker", "exited", "owner")
+        self.client.headers["Authorization"] = "Bearer " + auth_store.ensure_api_token(
+            self.db, "worker"
+        )
+        agent = self.client.post(
+            "/api/conversations/line/messages", json={"body": "agent update"}
+        )
+        self.assertEqual(agent.status_code, 200, agent.text)
+        system = asyncio.run(self.runtime.post_message("line", "system", "system", "notice"))
+        self.assertEqual(system["sender_type"], "system")
+
+    def test_file_upload_is_not_blocked_when_no_process_is_live(self):
+        self.db.set_attachment_status("worker", "exited", "owner")
+        self.client.headers["Authorization"] = f"Bearer {self.human_token}"
+
+        response = self.client.post(
+            "/api/conversations/line/files",
+            files={"file": ("note.txt", b"shared note", "text/plain")},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+
+    def test_file_upload_with_human_text_is_blocked_when_no_process_is_live(self):
+        self.db.set_attachment_status("worker", "exited", "owner")
+
+        response = self.client.post(
+            "/api/conversations/line/files",
+            data={"body": "please review this"},
+            files={"file": ("note.txt", b"shared note", "text/plain")},
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"], "attach a process to this line before sending")
 
     def test_invalid_page_shapes_are_rejected(self):
         both = self.client.get(
