@@ -8,6 +8,9 @@ command = []
 requires = []
 env_unset = []
 output = "quiescent terminal output"
+delivery_proof = "receipt-boundary"
+delivery_proof_reason = "Raw has no transcript user record; a completed quiet-period output flush is weaker evidence and never a bare pty write."
+delivery_proof_test = "tests/test_raw_delivery_boundary.py::test_quiescence_flush_reports_the_weaker_delivery_boundary"
 
 [adapter.capabilities]
 # A bare process has no session of its own to reopen.

@@ -11,6 +11,7 @@ from .adapters import Adapter
 
 logger = logging.getLogger(__name__)
 CLAIM_RETRY_DIAGNOSTIC_SECONDS = 5.0
+UNCREDITED_DELIVERY_WARNING_SECONDS = 300.0
 
 
 class DeliveryCreditMixin:
@@ -29,11 +30,82 @@ class DeliveryCreditMixin:
 
     def _record_unproved(self, att: dict, adapter: Adapter, pending: list[dict]) -> None:
         """Suppress repeat pastes until their own transcript proof or retry."""
+        now = time.monotonic()
         entry = self.uncredited.setdefault(
-            att["id"], {"owner": adapter.att.get("runtime_owner"), "ids": set(), "confirmed": set()}
+            att["id"], {
+                "owner": adapter.att.get("runtime_owner"), "ids": set(),
+                "confirmed": set(), "uncredited_since": now, "warned_ids": set(),
+            }
         )
         entry.setdefault("confirmed", set())
-        entry["ids"].update(m["id"] for m in pending)
+        entry.setdefault("uncredited_since", now)
+        entry.setdefault("warned_ids", set())
+        entry["delivery_proof"] = (adapter.att.get("adapter_metadata") or {}).get(
+            "delivery_proof"
+        )
+        ids = {m["id"] for m in pending}
+        entry["ids"].update(ids)
+        try:
+            asyncio.get_running_loop().create_task(
+                self._diagnose_uncredited_delivery(
+                    att["id"], adapter.att.get("runtime_owner"), ids,
+                    entry["uncredited_since"],
+                )
+            )
+        except RuntimeError:
+            pass
+
+    async def _diagnose_uncredited_delivery(
+        self, att_id: str, runtime_owner: str | None, message_ids: set[int], since: float
+    ) -> None:
+        await asyncio.sleep(UNCREDITED_DELIVERY_WARNING_SECONDS)
+        entry = self.uncredited.get(att_id)
+        attachment = self.db.get_attachment(att_id)
+        if (
+            attachment is None
+            or attachment.get("runtime_owner") != runtime_owner
+            or entry is None
+            or entry.get("owner") != runtime_owner
+        ):
+            return
+        pending = sorted((message_ids & entry["ids"]) - entry.get("confirmed", set()))
+        fresh = [message_id for message_id in pending
+                 if message_id not in entry["warned_ids"]]
+        if not fresh:
+            return
+        entry["warned_ids"].update(fresh)
+        logger.warning(
+            "transcript delivery remains uncredited: attachment=%s adapter=%s ids=%s age=%.0fs",
+            att_id, attachment.get("adapter", "unknown"), fresh,
+            time.monotonic() - since,
+        )
+
+    async def credit_at_turn_end(self, att_id: str, runtime_owner: str | None) -> None:
+        """Use a structured turn-end receipt as weaker proof for fallback adapters."""
+        attachment = self.db.get_attachment(att_id)
+        adapter = self.live.get(att_id)
+        entry = self.uncredited.get(att_id)
+        if (
+            attachment is None or attachment.get("runtime_owner") != runtime_owner
+            or adapter is None or adapter.att.get("runtime_owner") != runtime_owner
+            or entry is None or entry.get("owner") != runtime_owner
+            or entry.get("delivery_proof") not in {"receipt-boundary", "none-with-reason"}
+        ):
+            return
+        ids = sorted(entry["ids"])
+        if not ids:
+            return
+        metadata = adapter.att.get("adapter_metadata") or {}
+        warned = getattr(adapter, "_delivery_boundary_warning_logged", False)
+        if not warned:
+            adapter._delivery_boundary_warning_logged = True
+            logger.warning(
+                "delivery credited at turn-end boundary without transcript proof: "
+                "attachment=%s adapter=%s ids=%s reason=%s",
+                att_id, attachment.get("adapter", "unknown"), ids,
+                metadata.get("delivery_proof_reason", "transcript user input is unavailable"),
+            )
+        await self.confirm_delivery_ids(att_id, ids, runtime_owner, _boundary=True)
 
     def credit_unclaimed(self, att_id: str, runtime_owner: str | None) -> list[int] | None:
         """Release pre-claim pastes for retry; a claim alone credits none."""
@@ -121,10 +193,15 @@ class DeliveryCreditMixin:
                 entry.pop("claim_retry_pending", None)
 
     async def confirm_delivery_ids(
-        self, att_id: str, message_ids: list[int], runtime_owner: str | None
+        self, att_id: str, message_ids: list[int], runtime_owner: str | None,
+        *, _boundary: bool = False,
     ) -> bool:
         """Credit proven ids without letting a later proof jump an earlier gap."""
         if not message_ids:
+            return False
+        adapter = self.live.get(att_id)
+        metadata = (adapter.att.get("adapter_metadata") or {}) if adapter else {}
+        if metadata.get("delivery_proof") == "none-with-reason" and not _boundary:
             return False
         async with self.db.reserve_attachment_delivery(att_id, runtime_owner) as reserved:
             if not reserved:
@@ -167,7 +244,19 @@ class DeliveryCreditMixin:
             }
         )
         entry["claim_pending"] = True
-        entry["ids"].update(m["id"] for m in pending)
+        entry.setdefault("uncredited_since", time.monotonic())
+        entry.setdefault("warned_ids", set())
+        ids = {m["id"] for m in pending}
+        entry["ids"].update(ids)
+        try:
+            asyncio.get_running_loop().create_task(
+                self._diagnose_uncredited_delivery(
+                    att["id"], adapter.att.get("runtime_owner"), ids,
+                    entry["uncredited_since"],
+                )
+            )
+        except RuntimeError:
+            pass
         if att["id"] in self.unclaimed_noticed:
             return
         self.unclaimed_noticed.add(att["id"])

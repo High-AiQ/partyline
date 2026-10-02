@@ -41,6 +41,12 @@ class RawAdapter(Adapter):
                 self._buffer.clear()
                 if body.strip():
                     await self.post(self.att["name"], "agent", body)
+                    # Raw has no structured input transcript. Its only usable
+                    # boundary is a completed quiet-period output flush; this
+                    # is explicitly weaker than a turn-end transcript record.
+                    boundary = self.att.get("credit_delivery_boundary")
+                    if boundary is not None:
+                        await boundary()
 
     def format_digest(self, messages: list[dict]) -> str:
         mention = re.compile(rf"@{re.escape(self.att['name'])}\b[,:]?\s*", re.IGNORECASE)

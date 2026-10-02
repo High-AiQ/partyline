@@ -11,4 +11,7 @@ compact_paste = "/compact"
 env_unset = []
 # muse's session logs live under the XDG data home's muse subtree.
 capabilities = { resume = true, transcript = true }
+delivery_proof = "none-with-reason"
+delivery_proof_reason = "No local Muse session was available to validate a user-input record; committed assistant records provide the weaker delivery boundary."
+delivery_proof_test = "tests/test_muse_adapter.py::test_assistant_rows_credit_without_ending_presence"
 update_command = ["bash", "-lc", "curl -fsSL https://dev.meta.ai/install.sh | bash"]

@@ -193,15 +193,41 @@ class DeepSeekAdapterTest(unittest.IsolatedAsyncioTestCase):
         adapter = self.make()
         adapter._session_id = "session-1"
         adapter.format_digest = lambda _messages: "wake"
+        adapter._new_paste_marker = lambda: "[partyline-paste: 00000000-0000-4000-8000-000000000003]"
         adapter._write_frame = AsyncMock()
         adapter._silent_until_wake = True
-        await adapter.deliver([{"id": 4, "body": "wake"}])
+        self.assertFalse(await adapter.deliver([{"id": 4, "body": "wake"}]))
         adapter._write_frame.assert_awaited_once_with({
             "jsonrpc": "2.0", "id": 1, "method": "session/prompt",
             "params": {"sessionId": "session-1",
-                       "prompt": [{"type": "text", "text": "wake"}]},
+                       "prompt": [{"type": "text", "text":
+                                   "[partyline-paste: 00000000-0000-4000-8000-000000000003]\n\nwake"}]},
         })
         self.assertFalse(adapter._silent_until_wake)
+
+    async def test_user_message_marker_proves_paste(self):
+        adapter = self.make()
+        confirm = AsyncMock(return_value=True)
+        adapter.att["confirm_delivery_ids"] = confirm
+        adapter._session_id = "session-1"
+        adapter.format_digest = lambda _messages: "<redacted user text>"
+        adapter._new_paste_marker = lambda: "[partyline-paste: 00000000-0000-4000-8000-000000000003]"
+        adapter._write_frame = AsyncMock()
+        self.assertFalse(await adapter.deliver([{"id": 41, "body": "wake"}]))
+
+        record = {
+            "seq": 8,
+            "type": "user/message", "data": {
+                "role": "user",
+                "content": [{
+                    "type": "text",
+                    "text": "[partyline-paste: 00000000-0000-4000-8000-000000000003]",
+                }],
+            },
+        }
+        await adapter._handle_record(record)
+        confirm.assert_awaited_once_with([41])
+        self.assertEqual(adapter._jsonl_confirmed_ids, {41})
 
     async def test_delivery_returns_when_the_prompt_is_sent_not_when_the_turn_ends(self):
         """The prompt's result arrives at turn end, minutes later for a local

@@ -40,9 +40,14 @@ def delivery_hooks(runtime, conv_id: str, att_id: str):
         """Credit transcript-evidenced ids only to the activation that pasted them."""
         return await runtime.confirm_delivery_ids(att_id, message_ids, runtime_owner)
 
+    async def credit_boundary() -> None:
+        """Credit pending fallback deliveries at an adapter-declared boundary."""
+        await runtime.credit_at_turn_end(att_id, runtime_owner)
+
     return (
         flush_held,
         lambda: runtime.db.queued_delivery_ids(att_id),
         persist_ids,
         confirm_ids,
+        credit_boundary,
     )
