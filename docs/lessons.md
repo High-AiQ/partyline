@@ -1,5 +1,15 @@
 # Lessons: the false-assumptions ledger
 
+## A transcript claim can precede its retry hook
+
+`Adapter.start()` starts the transcript tail before it awaits the running-status
+broadcast. A fast tail can claim its transcript while that await is in progress,
+before `Presence.watch()` installs `on_transcript_claimed`. The original paste
+then keeps its cursor credit held until another message happens to trigger a
+retry. When registering the hook, check whether the adapter already claimed and
+invoke it once if so. `tests.test_delivery_gate` covers both claim-before-watch
+and claim-after-watch orderings.
+
 ## Resume backlog is not a room-history replay
 
 Explicit resume and restart reattachment used the same unseen-message cursor
