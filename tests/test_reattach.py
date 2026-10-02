@@ -264,7 +264,8 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         self.db.add_attachment("solo", "solo", "solo", "fake", ["fake"], self.directory.name)
         self.db.set_attachment_status("solo", "exited", None)
         plan = self.db.save_restart_plan("solo", ["solo"], "Continue alone.")
-        self.db.add_message("solo", "greg", "human", "please inspect the result")
+        message = self.db.add_message("solo", "greg", "human", "please inspect the result")
+        self.db.set_last_seen("solo", message["id"], None)
 
         backlogs = await self._run_with_backlogs(plan)
 
