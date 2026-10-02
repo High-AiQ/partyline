@@ -23,7 +23,9 @@ from .attachment_resume import resume_adapter
 from .attachment_start import start_attachment
 from .attachment_lifecycle_routes import register_attachment_lifecycle_routes
 from .memory_routes import register_memory_routes
-from .attachment_view import attachment_response
+from .memory_requests import register_memory_request_routes
+from .memory_sampler import run as run_memory_sampler
+from .attachment_view import attach_memory_usage, attachment_response
 from .auth_guard import (
     WS_FORBIDDEN,
     UserSocketRegistry,
@@ -158,7 +160,7 @@ async def lifespan(app):
     # lead had configured — including an unsettled wake, which stays unsettled.
     # Behind the `heartbeat` flag (off by default since 1.23.0): a switched-off
     # server neither ticks nor answers the routes.
-    tasks = [automatic_task]
+    tasks = [automatic_task, asyncio.create_task(run_memory_sampler(runtime))]
     if features.enabled("heartbeat"):
         tasks.append(asyncio.create_task(heartbeat_scheduler.run(runtime)))
     try:
@@ -419,7 +421,9 @@ async def resume_attachment(request: Request, att_id: str):
     # attached" warning and the room hears nothing. Nothing else cleared it, so
     # the flag outlived the recovery it belonged to.
     runtime.reattaching.discard(att_id)
-    return await attachment_response(runtime.db.get_attachment(att_id))
+    return attach_memory_usage(
+        await attachment_response(runtime.db.get_attachment(att_id)), runtime.memory_usage.get(att_id)
+    )
 
 
 async def _resume_adapter(
@@ -434,6 +438,7 @@ async def _resume_adapter(
 
 
 register_write_set_request_routes(app, runtime, _resume_adapter)
+register_memory_request_routes(app, runtime, _resume_adapter)
 
 
 @app.patch("/api/attachments/{att_id}", response_model=AttachmentResponse)
@@ -456,7 +461,7 @@ async def edit_attachment(
     updated = await runtime.db.update_inactive_attachment_command(att_id, command)
     if updated is None:
         raise HTTPException(409, f"'{att['name']}' became live; refresh and try again")
-    response = await attachment_response(updated)
+    response = attach_memory_usage(await attachment_response(updated), runtime.memory_usage.get(att_id))
     await runtime.broadcast(att["conv_id"], AttachmentEvent(attachment=response))
     return response
 

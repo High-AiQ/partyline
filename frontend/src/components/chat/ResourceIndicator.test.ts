@@ -15,6 +15,8 @@ const snapshot: ResourceSnapshot = {
   memory_reserve_bytes: 2 * 1024 ** 3,
   default_process_memory_bytes: 4 * 1024 ** 3,
   memory_reservation_bytes: 1024 ** 3,
+  memory_warn_percent: 80,
+  memory_captain_ceiling_bytes: 8 * 1024 ** 3,
   host_ram_bytes: 64 * 1024 ** 3,
   memory_budget_bytes: 58 * 1024 ** 3,
   memory_ceiling_bytes: 8 * 1024 ** 3,

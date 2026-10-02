@@ -8,7 +8,7 @@ from .resource_contracts import ResourceSettings, ResourceSettingsIn, ResourceSn
 
 KEYS = (
     "max_live_processes", "memory_reserve_bytes", "default_process_memory_bytes",
-    "memory_reservation_bytes",
+    "memory_reservation_bytes", "memory_warn_percent", "memory_captain_ceiling_bytes",
 )
 
 
@@ -37,6 +37,10 @@ def register_resource_routes(app, runtime) -> None:
         _require_person(request)
         host = _host()
         values = body.model_dump()
+        if values["memory_captain_ceiling_bytes"] is None:
+            values["memory_captain_ceiling_bytes"] = min(
+                values["default_process_memory_bytes"] * 2, memory_ceiling(host)
+            )
         try:
             validate_settings(values, host)
         except ValueError as exc:

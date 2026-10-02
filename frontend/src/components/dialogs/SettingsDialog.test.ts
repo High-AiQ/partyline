@@ -56,6 +56,8 @@ describe("SettingsDialog", () => {
       memory_reserve_bytes: 2 * 1024 ** 3,
       default_process_memory_bytes: 4 * 1024 ** 3,
       memory_reservation_bytes: 1024 ** 3,
+      memory_warn_percent: 80,
+      memory_captain_ceiling_bytes: 8 * 1024 ** 3,
       host_ram_bytes: 64 * 1024 ** 3,
       memory_budget_bytes: 62 * 1024 ** 3,
       memory_ceiling_bytes: 8 * 1024 ** 3,
@@ -64,6 +66,8 @@ describe("SettingsDialog", () => {
         memory_reserve_bytes: 2 * 1024 ** 3,
         default_process_memory_bytes: 4 * 1024 ** 3,
         memory_reservation_bytes: 1024 ** 3,
+        memory_warn_percent: 80,
+        memory_captain_ceiling_bytes: 8 * 1024 ** 3,
       },
     };
     vi.spyOn(resourceApi, "getResourceSettings").mockResolvedValue(budget);
@@ -102,6 +106,8 @@ describe("SettingsDialog", () => {
           memory_reserve_bytes: 2 * 1024 ** 3,
           default_process_memory_bytes: 4 * 1024 ** 3,
           memory_reservation_bytes: 512 * 1024 ** 2,
+          memory_warn_percent: 80,
+          memory_captain_ceiling_bytes: 8 * 1024 ** 3,
         });
       });
       await vi.waitFor(() => {
@@ -130,6 +136,8 @@ describe("SettingsDialog", () => {
       memory_reserve_bytes: reserveBytes,
       default_process_memory_bytes: capBytes,
       memory_reservation_bytes: reservationBytes,
+      memory_warn_percent: 80,
+      memory_captain_ceiling_bytes: 8 * gib,
       host_ram_bytes: 64 * gib,
       memory_budget_bytes: 64 * gib - reserveBytes,
       memory_ceiling_bytes: 8 * gib,
@@ -138,6 +146,8 @@ describe("SettingsDialog", () => {
         memory_reserve_bytes: Math.floor((64 * gib) / 10),
         default_process_memory_bytes: 4 * gib,
         memory_reservation_bytes: gib,
+        memory_warn_percent: 80,
+        memory_captain_ceiling_bytes: 8 * gib,
       },
     };
     vi.spyOn(resourceApi, "getResourceSettings").mockResolvedValue(budget);
@@ -169,7 +179,14 @@ describe("SettingsDialog", () => {
           const start = hint.indexOf("default:");
           return start < 0 ? [] : [hint.slice(start).replace(/\.$/, "")];
         });
-      expect(hints).toEqual(["default: 24", "default: 6.4 GB", "default: 4 GB", "default: 1 GB"]);
+      expect(hints).toEqual([
+        "default: 24",
+        "default: 6.4 GB",
+        "default: 4 GB",
+        "default: 1 GB",
+        "default: 80%",
+        "default: twice the process cap, up to the host ceiling",
+      ]);
 
       document.querySelector<HTMLButtonElement>('#resource-budget button[type="submit"]')?.click();
       await vi.waitFor(() => {
@@ -178,6 +195,8 @@ describe("SettingsDialog", () => {
           memory_reserve_bytes: reserveBytes,
           default_process_memory_bytes: capBytes,
           memory_reservation_bytes: reservationBytes,
+          memory_warn_percent: 80,
+          memory_captain_ceiling_bytes: 8 * gib,
         });
       });
     } finally {

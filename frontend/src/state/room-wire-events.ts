@@ -45,6 +45,18 @@ export function onRoomWireEvent(room: RoomWireSink, event: WireEvent, context: W
       resources.scheduleRefresh();
       room.removeAttachment(event.attachment_id);
       break;
+    case "memory_usage": {
+      const attachment = room.attachments.find((item) => item.id === event.attachment_id);
+      if (attachment) {
+        room.upsertAttachment({
+          ...attachment,
+          memory_usage_bytes: event.usage_bytes,
+          memory_cap_bytes: event.cap_bytes,
+          memory_percent: event.percent,
+        });
+      }
+      break;
+    }
     case "line_live":
       resources.scheduleRefresh();
       room.conversations = applyLineLive(room.conversations, event);
@@ -81,6 +93,7 @@ export function onRoomWireEvent(room: RoomWireSink, event: WireEvent, context: W
       break;
     case "restart_request":
     case "write_set_grant_request":
+    case "memory_request":
       applyPendingWireEvent(event);
       break;
     case "error":
