@@ -44,10 +44,12 @@ def _instructions(state: RoleState, db=None) -> str:
     if state.role == "lead" and state.parent_id is None and hasattr(db, "get_setting"):
         from .resource_budget import snapshot
         capacity = snapshot(db)
-        leased = capacity["memory_leased_bytes"] / 1024**3
+        reserved = capacity["memory_reserved_bytes"] / 1024**3
+        capped = capacity["memory_cap_bytes"] / 1024**3
         budget = capacity["memory_budget_bytes"] / 1024**3
         pack += (f"\n\nInstance capacity: {capacity['live_processes']}/"
-                 f"{capacity['max_live_processes']} processes, {leased:.0f} of {budget:.0f} GB leased.")
+                 f"{capacity['max_live_processes']} processes, {reserved:.0f} of {budget:.0f} GB reserved "
+                 f"({capped:.0f} GB cap).")
     return pack
 
 

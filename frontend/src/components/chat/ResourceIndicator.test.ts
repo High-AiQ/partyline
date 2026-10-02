@@ -11,11 +11,13 @@ const snapshot: ResourceSnapshot = {
   max_live_processes: 24,
   memory_reserve_bytes: 2 * 1024 ** 3,
   default_process_memory_bytes: 4 * 1024 ** 3,
+  memory_reservation_bytes: 1024 ** 3,
   host_ram_bytes: 64 * 1024 ** 3,
   memory_budget_bytes: 58 * 1024 ** 3,
   memory_ceiling_bytes: 8 * 1024 ** 3,
   live_processes: 18,
-  memory_leased_bytes: 36 * 1024 ** 3,
+  memory_reserved_bytes: 18 * 1024 ** 3,
+  memory_cap_bytes: 36 * 1024 ** 3,
   remaining_processes: 6,
   remaining_memory_bytes: 22 * 1024 ** 3,
   busiest_line: "resource line",
@@ -50,7 +52,8 @@ describe("ResourceIndicator", () => {
       await vi.waitFor(() => {
         expect(document.querySelector(".resource-popover")).not.toBeNull();
       });
-      expect(document.querySelector(".resource-popover")?.textContent).toContain("36 GB / 58 GB");
+      expect(document.querySelector(".resource-popover")?.textContent).toContain("18 GB / 58 GB");
+      expect(document.querySelector(".resource-popover")?.textContent).toContain("cap 36 GB");
       expect(document.body.textContent).toContain("resource line");
     } finally {
       await unmount(component);
@@ -99,7 +102,8 @@ describe("ResourceIndicator", () => {
       max_live_processes: 8,
       live_processes: 14,
       memory_budget_bytes: 1024 ** 3,
-      memory_leased_bytes: 56 * 1024 ** 3,
+      memory_reserved_bytes: 14 * 1024 ** 3,
+      memory_cap_bytes: 56 * 1024 ** 3,
     });
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
@@ -119,12 +123,14 @@ describe("ResourceIndicator", () => {
           "New attaches are blocked until usage drops or the limit is raised.",
         );
       });
-      expect(document.querySelector(".resource-popover")?.textContent).toContain("56 GB / 1.0 GB");
+      expect(document.querySelector(".resource-popover")?.textContent).toContain("14 GB / 1.0 GB");
+      expect(document.querySelector(".resource-popover")?.textContent).toContain("cap 56 GB");
       load.mockResolvedValue({
         ...snapshot,
         live_processes: 7,
         memory_budget_bytes: 1024 ** 3,
-        memory_leased_bytes: 56 * 1024 ** 3,
+        memory_reserved_bytes: 7 * 1024 ** 3,
+        memory_cap_bytes: 28 * 1024 ** 3,
       });
       await resources.load();
       await vi.waitFor(() => {

@@ -192,7 +192,7 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
 
         @app.middleware("http")
         async def identify(request, call_next):
-            request.state.principal = Principal(kind="user", name="greg")
+            request.state.principal = Principal(kind="user", name="operator")
             return await call_next(request)
 
         register_resource_routes(app, self.runtime)
@@ -204,7 +204,8 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
             view = TestClient(app).get("/api/resources").json()
             self.assertEqual(view["live_processes"], 14)
             self.assertEqual(view["max_live_processes"], 8)
-            self.assertEqual(view["memory_leased_bytes"], 56 * GIB)
+            self.assertEqual(view["memory_reserved_bytes"], 14 * GIB)
+            self.assertEqual(view["memory_cap_bytes"], 56 * GIB)
             self.assertEqual(view["memory_budget_bytes"], GIB)
 
             with self.assertRaises(HTTPException) as first_refusal:
@@ -255,7 +256,7 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         with patch("partyline.resource_budget.host_resources", return_value=host):
             coordinator = ReattachCoordinator(self.runtime, resume)
             await coordinator.choose(
-                "line", {"token": self.plan["token"], "action": "accept"}, "greg"
+                "line", {"token": self.plan["token"], "action": "accept"}, "operator"
             )
         self.assertEqual(self.db.get_attachment("one")["status"], "running")
         self.assertEqual(self.db.get_attachment("two")["status"], "running")
