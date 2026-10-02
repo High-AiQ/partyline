@@ -1,6 +1,7 @@
 """Live presentation facts derived from an attachment's exact cwd."""
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import os
 import subprocess
 from collections.abc import Mapping
@@ -8,6 +9,9 @@ from collections.abc import Mapping
 from .attachment_contracts import AttachmentResponse, CwdGitState
 
 GIT_TIMEOUT_SECONDS = 3
+GIT_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="partyline-git")
+GIT_LOOKUP_TIMEOUT_SECONDS = 0.75
+GIT_LOOKUPS = {}
 
 
 def _git(cwd: str, *args: str) -> subprocess.CompletedProcess[str]:
@@ -44,9 +48,26 @@ def cwd_git_state(cwd: str) -> CwdGitState | None:
 async def attachment_response(attachment: Mapping[str, object]) -> dict[str, object]:
     """Add live cwd identity at the HTTP/WebSocket presentation boundary."""
     payload = dict(attachment)
-    payload["cwd_git"] = await asyncio.to_thread(
-        cwd_git_state, str(attachment.get("cwd", ""))
-    )
+    loop = asyncio.get_running_loop()
+    cwd = str(attachment.get("cwd", ""))
+    key = (loop, cwd)
+    lookup = GIT_LOOKUPS.get(key)
+    if lookup is None:
+        lookup = loop.run_in_executor(GIT_EXECUTOR, cwd_git_state, cwd)
+        GIT_LOOKUPS[key] = lookup
+
+        def forget(completed):
+            if GIT_LOOKUPS.get(key) is completed:
+                del GIT_LOOKUPS[key]
+
+        lookup.add_done_callback(forget)
+    try:
+        payload["cwd_git"] = await asyncio.wait_for(
+            asyncio.shield(lookup),
+            GIT_LOOKUP_TIMEOUT_SECONDS,
+        )
+    except TimeoutError:
+        payload["cwd_git"] = None
     return AttachmentResponse.model_validate(payload).model_dump()
 
 

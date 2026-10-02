@@ -7,11 +7,13 @@ condition and fail on a deadline, so a slow machine is slow rather than flaky.
 """
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import signal
 import sys
 import tempfile
+import threading
 import types
 import time
 import unittest
@@ -76,6 +78,53 @@ class Recorder(Adapter):
 
 
 class AdapterLifecycleTest(unittest.IsolatedAsyncioTestCase):
+    async def test_many_child_waits_do_not_starve_shared_executor_and_reap_once(self):
+        class SleepingChild:
+            def __init__(self, pid, release, lock, entered):
+                self.pid = pid
+                self.release = release
+                self.lock = lock
+                self.entered = entered
+                self.wait_calls = 0
+
+            def wait(self):
+                with self.lock:
+                    self.wait_calls += 1
+                    self.entered[0] += 1
+                self.release.wait()
+                return self.pid
+
+        loop = asyncio.get_running_loop()
+        executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="asyncio")
+        loop.set_default_executor(executor)
+        self.addCleanup(executor.shutdown, wait=True)
+        release = threading.Event()
+        lock = threading.Lock()
+        entered = [0]
+        children = [SleepingChild(i, release, lock, entered) for i in range(64)]
+        adapters = [Recorder(["true"]) for _ in children]
+        for adapter, child in zip(adapters, children, strict=True):
+            adapter.proc = child
+            adapter.memory_limit = "4G"
+        with patch("partyline.adapters.base.process_exit.report_exit", new_callable=AsyncMock) as report:
+            watchers = [asyncio.create_task(adapter._watch_exit()) for adapter in adapters]
+            try:
+                await until(lambda: entered[0] == len(children), timeout=1,
+                            what="all dedicated child waiters to start")
+                start = time.monotonic()
+                await asyncio.wait_for(asyncio.to_thread(lambda: "available"), timeout=0.5)
+                self.assertLess(time.monotonic() - start, 0.5)
+                self.assertLessEqual(
+                    sum(thread.name.startswith("asyncio_") for thread in threading.enumerate()), 1
+                )
+            finally:
+                release.set()
+            await asyncio.gather(*watchers)
+
+        self.assertEqual([child.wait_calls for child in children], [1] * len(children))
+        self.assertEqual(report.await_count, len(children))
+        self.assertEqual(sorted(call.args[1] for call in report.await_args_list), list(range(64)))
+
     async def test_wait_ready_completes_only_after_adapter_marks_ready(self):
         adapter = Recorder(["sh", "-c", "sleep 30"])
         await adapter.start()
@@ -169,12 +218,17 @@ class AdapterLifecycleTest(unittest.IsolatedAsyncioTestCase):
     async def test_an_unprompted_exit_is_announced_with_its_code(self):
         adapter = Recorder(["sh", "-c", "exit 3"])
         await adapter.start()
+        pid = adapter.proc.pid
 
         await until(lambda: adapter.posts, what="the exit notice")
 
         self.assertIn("exited", adapter.statuses)
         self.assertEqual(adapter.posts[0][:2], ("system", "system"))
         self.assertEqual(adapter.posts[0][2], "dummy exited (code 3)")
+        self.assertIsNotNone(adapter.proc.returncode)
+        if os.name != "nt":
+            with self.assertRaises(ChildProcessError):
+                os.waitpid(pid, os.WNOHANG)
         await adapter.stop()
 
     async def test_stopping_suppresses_the_exit_notice(self):
