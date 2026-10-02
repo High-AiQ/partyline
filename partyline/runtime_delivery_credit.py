@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 
 from .adapter_capabilities import transcript_claimed
 from .adapters import Adapter
+
+logger = logging.getLogger(__name__)
+CLAIM_RETRY_DIAGNOSTIC_SECONDS = 5.0
 
 
 class DeliveryCreditMixin:
@@ -44,6 +49,7 @@ class DeliveryCreditMixin:
             return None
         entry["claim_pending"] = False
         entry["claim_retry_pending"] = True
+        entry["claim_retry_at"] = time.monotonic()
         message_ids = sorted(entry["ids"])
         return message_ids
 
@@ -57,6 +63,31 @@ class DeliveryCreditMixin:
         except RuntimeError:
             return
         loop.create_task(self._retry_after_claim(att_id, runtime_owner, message_ids))
+        loop.create_task(
+            self._diagnose_unretried_claim(att_id, runtime_owner, set(message_ids))
+        )
+
+    async def _diagnose_unretried_claim(
+        self, att_id: str, runtime_owner: str | None, message_ids: set[int]
+    ) -> None:
+        await asyncio.sleep(CLAIM_RETRY_DIAGNOSTIC_SECONDS)
+        attachment = self.db.get_attachment(att_id)
+        entry = self.uncredited.get(att_id)
+        if (
+            attachment is None
+            or attachment.get("runtime_owner") != runtime_owner
+            or entry is None
+            or entry["owner"] != runtime_owner
+        ):
+            return
+        pending = message_ids & entry["ids"]
+        if pending:
+            logger.warning(
+                "transcript claim retry still uncredited: attachment=%s pending=%d age=%.1fs",
+                att_id,
+                len(pending),
+                time.monotonic() - entry.get("claim_retry_at", time.monotonic()),
+            )
 
     async def _retry_after_claim(
         self, att_id: str, runtime_owner: str | None, message_ids: list[int]
