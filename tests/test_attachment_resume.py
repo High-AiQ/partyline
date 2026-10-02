@@ -20,7 +20,7 @@ from partyline.attachment_resume import (
 from partyline.db import Db
 from partyline.runtime import ChatRuntime
 from partyline.attachment_resume import resume_adapter
-from partyline.resource_budget import claim_resume
+from partyline.resource_budget import GIB, Host, claim_resume
 from partyline.write_set_routes import add_write_grant
 from tests.test_server import FakeAdapter
 
@@ -127,6 +127,12 @@ class DeliveredBodiesTest(unittest.TestCase):
 
 class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        self.host_patch = patch(
+            "partyline.resource_budget.host_resources",
+            return_value=Host(cpus=8, ram_bytes=8 * GIB),
+        )
+        self.host_patch.start()
+        self.addCleanup(self.host_patch.stop)
         self.directory = tempfile.TemporaryDirectory()
         self.db = Db(f"{self.directory.name}/partyline.db")
         self.runtime = ChatRuntime(self.db)

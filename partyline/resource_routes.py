@@ -3,10 +3,13 @@
 from fastapi import HTTPException, Request
 
 from .auth_guard import request_principal
-from .resource_budget import memory_ceiling, settings, snapshot, validate_settings
+from .resource_budget import defaults, memory_ceiling, settings, snapshot, validate_settings
 from .resource_contracts import ResourceSettings, ResourceSettingsIn, ResourceSnapshot
 
-KEYS = ("max_live_processes", "memory_reserve_bytes", "default_process_memory_bytes")
+KEYS = (
+    "max_live_processes", "memory_reserve_bytes", "default_process_memory_bytes",
+    "memory_reservation_bytes",
+)
 
 
 def register_resource_routes(app, runtime) -> None:
@@ -26,6 +29,7 @@ def register_resource_routes(app, runtime) -> None:
             "host_ram_bytes": host.ram_bytes,
             "memory_budget_bytes": max(0, host.ram_bytes-current["memory_reserve_bytes"]),
             "memory_ceiling_bytes": memory_ceiling(host),
+            "computed_defaults": defaults(host),
         }
 
     @app.put("/api/settings/resources", response_model=ResourceSettings)
@@ -50,6 +54,25 @@ def register_resource_routes(app, runtime) -> None:
             "host_ram_bytes": host.ram_bytes,
             "memory_budget_bytes": host.ram_bytes-values["memory_reserve_bytes"],
             "memory_ceiling_bytes": memory_ceiling(host),
+            "computed_defaults": defaults(host),
+        }
+
+    @app.post("/api/settings/resources/reset", response_model=ResourceSettings)
+    async def reset_resource_settings(request: Request):
+        _require_person(request)
+        host = _host()
+        async with runtime.db._runtime_serialized_async():
+            with runtime.db.lock, runtime.db.conn:
+                runtime.db.conn.executemany(
+                    "DELETE FROM settings WHERE key=?", ((key,) for key in KEYS)
+                )
+        current = defaults(host)
+        return {
+            **current,
+            "host_ram_bytes": host.ram_bytes,
+            "memory_budget_bytes": host.ram_bytes-current["memory_reserve_bytes"],
+            "memory_ceiling_bytes": memory_ceiling(host),
+            "computed_defaults": current,
         }
 
     def _host():

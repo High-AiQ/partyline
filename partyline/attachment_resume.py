@@ -30,7 +30,7 @@ from .review_worktrees import list_review_worktrees
 from .reattach import ResumedAttachment, adapter_can_resume
 from .transcript_delivery import TranscriptDeliveryRecord
 from .write_set_routes import list_write_grants
-from .resource_budget import claim_resume, format_limit, lease_bytes, settings
+from .resource_budget import cap_bytes, claim_resume, format_limit, settings
 
 
 @dataclass(frozen=True)
@@ -261,7 +261,7 @@ async def _resume_adapter_locked(
     att["memory_limit"] = att.get("memory_limit") or format_limit(
         settings(runtime.db)["default_process_memory_bytes"]
     )
-    lease = lease_bytes(att, settings(runtime.db))
+    lease = cap_bytes(att, settings(runtime.db))
     # ReattachCoordinator fills this set from the stored plan before calling
     # the resume path; API callers cannot supply a grandfathering flag.
     grandfathered = att_id in runtime.reattaching

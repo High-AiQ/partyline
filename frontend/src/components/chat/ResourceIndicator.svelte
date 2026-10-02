@@ -13,13 +13,14 @@
     Boolean(
       view &&
       (view.live_processes >= view.max_live_processes ||
-        view.memory_leased_bytes >= view.memory_budget_bytes),
+        view.memory_reserved_bytes >= view.memory_budget_bytes),
     ),
   );
   const overLimit = $derived(
     Boolean(
       view &&
-      (view.live_processes > view.max_live_processes || view.memory_leased_bytes > view.memory_budget_bytes),
+      (view.live_processes > view.max_live_processes ||
+        view.memory_reserved_bytes > view.memory_budget_bytes),
     ),
   );
 
@@ -43,7 +44,7 @@
 
   const tooltipLabel = $derived(
     view
-      ? `processes ${String(view.live_processes)}/${String(view.max_live_processes)}\nmemory leased ${gb(view.memory_leased_bytes)} of ${gb(view.memory_budget_bytes)}\nmost processes: ${view.busiest_line ?? "none"}${blocked ? "\nnew attaches are blocked until usage drops or the limit is raised" : ""}`
+      ? `processes ${String(view.live_processes)}/${String(view.max_live_processes)}\nmemory reserved ${gb(view.memory_reserved_bytes)} of ${gb(view.memory_budget_bytes)} · cap ${gb(view.memory_cap_bytes)}\nmost processes: ${view.busiest_line ?? "none"}${blocked ? "\nnew attaches are blocked until usage drops or the limit is raised" : ""}`
       : "resource capacity loading",
   );
 </script>
@@ -77,7 +78,8 @@
   {#if resources.popoverOpen && view}
     <div class="resource-popover" role="dialog" aria-label="resource capacity">
       <div>processes <strong>{view.live_processes}/{view.max_live_processes}</strong></div>
-      <div>memory <strong>{gb(view.memory_leased_bytes)} / {gb(view.memory_budget_bytes)}</strong></div>
+      <div>reserved <strong>{gb(view.memory_reserved_bytes)} / {gb(view.memory_budget_bytes)}</strong></div>
+      <div>cap <strong>{gb(view.memory_cap_bytes)}</strong></div>
       <div>most processes <strong>{view.busiest_line ?? "none"}</strong></div>
       {#if blocked}
         <p class="capacity-blocked">New attaches are blocked until usage drops or the limit is raised.</p>
