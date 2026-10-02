@@ -10,6 +10,18 @@ retry. When registering the hook, check whether the adapter already claimed and
 invoke it once if so. `tests.test_delivery_gate` covers both claim-before-watch
 and claim-after-watch orderings.
 
+## Keep the Claude briefing behind its trust dialog
+
+Claude Code wraps bracketed-paste input in `pasted_content`, which can make a
+fresh captain or worker briefing look like instructions copied from an
+untrusted source. Put the fresh session's role briefing in
+`--append-system-prompt`, then send the user-facing briefing through the pty
+only after the trust dialog clears. Claude's default system-prompt snapshot
+records that addition for later `--resume` launches. Retain the claim marker
+and retry the pty briefing until the transcript proves it; later wakes keep
+their paste receipts. `tests.test_claude_adapter` covers the system prompt,
+trust dialog, retries, and unchanged resume command.
+
 ## Resume backlog is not a room-history replay
 
 Explicit resume and restart reattachment used the same unseen-message cursor
