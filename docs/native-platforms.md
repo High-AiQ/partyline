@@ -59,11 +59,11 @@ not be assumed equivalent to Linux's cgroup memory accounting. The non-Linux
 fallback is best-effort: it reads the inherited hard limit and clamps to it (or
 skips), so a lower macOS hard limit can never abort the spawn.
 
-An additional aggregate budget is needed if the goal includes bounding the sum of
-many simultaneous attachments. Separate 4 GiB caps alone do not prevent many CLIs
-collectively exhausting host RAM. Linux can use a shared parent slice and Windows a
-parent job. macOS needs its own design and honest accounting of any monitoring delay;
-polling RSS is not an equivalent hard kernel cap.
+Partyline admission accounting now reserves each process's declared lease against a
+host-wide memory budget on Linux, macOS, and Windows. That admission check is
+enforced on every platform. It is accounting rather than an aggregate kernel cap:
+the individual macOS `RLIMIT_AS` remains best-effort and does not bound resident
+memory. Polling RSS is not an equivalent hard kernel cap.
 
 ## Windows permission scope
 

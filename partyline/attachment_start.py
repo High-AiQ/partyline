@@ -16,11 +16,15 @@ from .hook_routes import surface_attention
 from .review_worktrees import list_review_worktrees
 from .role_delivery import bind_role_delivery
 from .write_set_routes import list_write_grants
+from .resource_budget import format_limit, settings
 
 
 def prepare_attachment(att, runtime, hook_url, checkpoint):
     conv = runtime.db.get_conversation(att["conv_id"])
     att["api_token"] = ensure_api_token(runtime.db, att["id"])
+    att["memory_limit"] = att.get("memory_limit") or format_limit(
+        settings(runtime.db)["default_process_memory_bytes"]
+    )
     att["global_prose"] = runtime.db.get_setting("global_prose")
     att["conv_name"], att["topic"] = conv["name"], conv["topic"]
     att["hook_url"] = hook_url(att["id"], att["runtime_owner"])

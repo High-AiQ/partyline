@@ -15,6 +15,7 @@
   import AccountMenu from "./AccountMenu.svelte";
   import ColumnToggle from "./ColumnToggle.svelte";
   import ThemeToggle from "./ThemeToggle.svelte";
+  import ResourceIndicator from "./ResourceIndicator.svelte";
   import { tooltip } from "../../lib/tooltip";
 
   const topic = $derived((room.conversation?.topic ?? "").trim());
@@ -63,6 +64,7 @@
   {/if}
 
   <ThemeToggle />
+  <ResourceIndicator />
   <AccountMenu />
   <ColumnToggle side="board" count={liveJacks} />
 
@@ -82,6 +84,17 @@
 </div>
 
 <style>
+  @media (min-width: 1200px) {
+    #topbar {
+      gap: 8px;
+      padding-left: 16px;
+      padding-right: 16px;
+    }
+    #convmeta {
+      display: none;
+    }
+  }
+
   /* Tailwind's `max-*` variants are exclusive of the boundary, so the
        documented `(max-width: 899px)` narrow breakpoint stays hand-written —
        at exactly 899px it must keep agreeing with `NARROW_MAX_WIDTH`. The
@@ -108,12 +121,12 @@
     #topbar {
       padding: 10px 12px;
       align-items: center;
-      gap: 10px;
+      gap: 4px;
     }
     #convname {
       font-size: 19px;
       min-width: 0;
-      flex: 1;
+      flex: 1 1 0%;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -147,6 +160,12 @@
     .jacks .led {
       width: 6px;
       height: 6px;
+    }
+  }
+
+  @media (max-width: 450px) {
+    #convname {
+      display: none;
     }
   }
 </style>

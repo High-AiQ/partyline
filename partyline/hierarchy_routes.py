@@ -77,7 +77,7 @@ def hierarchy_router(runtime) -> APIRouter:
         state = current_role(db, principal.attachment_id)
         if state.role != "lead":
             raise HTTPException(403, "the captain pack is only available to captains")
-        return {"briefing": _instructions(state)}
+        return {"briefing": _instructions(state, db)}
 
     @router.get("/api/conversations/{conv_id}/lead", response_model=LeadOut)
     def get_lead(request: Request, conv_id: str):

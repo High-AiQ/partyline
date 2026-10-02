@@ -26,7 +26,7 @@ function setField(field: HTMLTextAreaElement, value: string): void {
 }
 
 function saveButton(): HTMLButtonElement {
-  const button = document.querySelector('button[type="submit"]');
+  const button = document.querySelector('#globalProseForm button[type="submit"]');
   if (!(button instanceof HTMLButtonElement)) throw new Error("missing save settings button");
   return button;
 }
