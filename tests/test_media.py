@@ -227,6 +227,11 @@ class ImageApiTest(unittest.TestCase):
         app.include_router(media_router(self.runtime, self.store))
         self.client = TestClient(app)
         self.db.create_conversation("line", "Line")
+        self.db.add_attachment(
+            "fixture-live", "line", "fixture-live", "fake", ["fake"], "/tmp", "owner"
+        )
+        self.db.set_attachment_status("fixture-live", "running", "owner")
+        self.runtime.live["fixture-live"] = RecordingAdapter({"runtime_owner": "owner"})
         self.socket = CollectingSocket()
         self.runtime.sockets["line"] = {self.socket}
         user = auth_store.create_user(

@@ -20,6 +20,7 @@
   import type { FileIntake, PendingFiles } from "../../lib/files";
   import { applyMention, mentionCandidates, mentionToken } from "../../lib/mentions";
   import type { MentionToken, MentionCandidate } from "../../lib/mentions";
+  import { isLive } from "../../lib/attachments";
   import { tooltip } from "../../lib/tooltip";
 
   let box = $state<HTMLTextAreaElement | null>(null);
@@ -49,6 +50,7 @@
     token ? mentionCandidates(token.prefix, room.attachments, room.history.humans, session.adapters) : [],
   );
   const popoverOpen = $derived(Boolean(token) && candidates.length > 0);
+  const hasLiveProcess = $derived(room.attachments.some(isLive));
   const placeholder = $derived(composerPlaceholder(layout.narrow));
 
   /** Grow with the text, up to a point; past that it scrolls. */
@@ -88,7 +90,9 @@
 
   async function send(): Promise<void> {
     if (uploading) return;
+    if (!hasLiveProcess && draft.text.trim()) return;
     if (!pendingFiles.files.length) {
+      if (!hasLiveProcess) return;
       if (!(await room.say(draft.text))) return;
       draft.clear();
       closeToken();
@@ -224,13 +228,19 @@
       id="send"
       class="primary min-h-11 self-end disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-line disabled:hover:bg-ink-3 disabled:hover:text-cream-dim"
       type="button"
-      disabled={uploading || (!draft.text.trim() && !pendingFiles.files.length)}
+      disabled={uploading ||
+        (!hasLiveProcess && Boolean(draft.text.trim())) ||
+        (!pendingFiles.files.length && !draft.text.trim())}
       onclick={() => void send()}>{uploading ? "uploading…" : "send"}</button
     >
   </div>
-  <div class="hint mt-1.5 text-[10px] text-cream-faint">
-    enter to send · shift+enter or ctrl+j for a new line · agents only wake when @mentioned · @all rings every
-    running agent
+  <div class="hint mt-1.5 text-[10px] text-cream-faint" class:blocked={!hasLiveProcess} aria-live="polite">
+    {#if !hasLiveProcess}
+      attach a process to message this line
+    {:else}
+      enter to send · shift+enter or ctrl+j for a new line · agents only wake when @mentioned · @all rings
+      every running agent
+    {/if}
   </div>
 </ComposerDropZone>
 
@@ -240,7 +250,7 @@
   @media (max-width: 899px) {
     /* Three lines of keyboard advice, none of which applies to a touch
        keyboard, on the screen with the least room to spare. */
-    .hint {
+    .hint:not(.blocked) {
       display: none;
     }
   }
