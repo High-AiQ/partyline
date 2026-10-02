@@ -1,6 +1,7 @@
 /** Lazy, explicitly allowlisted code highlighting for sanitized message nodes. */
 
 import type { LanguageFn } from "highlight.js";
+import { copyText } from "./clipboard";
 import {
   byteLength,
   CODE_BLOCK_MAX_BYTES,
@@ -77,12 +78,68 @@ async function highlightNode(node: HTMLElement, isCurrent: EnhancementGuard): Pr
   }
 }
 
+function codeCopyButton(pre: HTMLElement, code: HTMLElement): void {
+  if (pre.parentElement?.classList.contains("code-block-shell")) return;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "code-copy";
+  button.setAttribute("aria-label", "copy code block");
+  button.dataset.copyUi = "true";
+  button.innerHTML =
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h10"></path></svg>';
+  const status = document.createElement("span");
+  status.className = "code-copy-status sr-only";
+  status.setAttribute("role", "status");
+  status.setAttribute("aria-live", "polite");
+  status.dataset.copyUi = "true";
+  let revert: ReturnType<typeof setTimeout> | undefined;
+  const copyCode = async (): Promise<void> => {
+    let source = code.textContent;
+    try {
+      source = decodeURIComponent(code.getAttribute("data-code-source") ?? encodeURIComponent(source));
+    } catch {
+      // If the marker is malformed, the unhighlighted text remains safe to copy.
+    }
+    const success = await copyText(source);
+    status.textContent = success ? "copied" : "copy failed: clipboard unavailable";
+    button.setAttribute("aria-label", success ? "copied" : "copy failed");
+    button.title = success ? "Copied" : "Could not copy: clipboard unavailable";
+    button.innerHTML = success
+      ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 13 4 4L19 7"></path></svg>'
+      : '<span aria-hidden="true">!</span>';
+    clearTimeout(revert);
+    if (success) {
+      revert = setTimeout(() => {
+        status.textContent = "";
+        button.setAttribute("aria-label", "copy code block");
+        button.removeAttribute("title");
+        button.innerHTML =
+          '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h10"></path></svg>';
+      }, 1500);
+    }
+  };
+  button.addEventListener("click", () => {
+    void copyCode();
+  });
+  const shell = document.createElement("div");
+  shell.className = "code-block-shell";
+  const parent = pre.parentElement;
+  if (!parent) return;
+  parent.insertBefore(shell, pre);
+  shell.append(pre, button, status);
+}
+
 export async function enhanceCode(
   root: HTMLElement,
   isCurrent: EnhancementGuard = () => true,
 ): Promise<void> {
-  const nodes = [...root.querySelectorAll<HTMLElement>("code[data-code-language]")];
+  const nodes = [...new Set(root.querySelectorAll<HTMLElement>("pre > code, code[data-code-language]"))];
   await Promise.all(nodes.map((node) => highlightNode(node, isCurrent)));
+  if (!isCurrent()) return;
+  for (const code of nodes) {
+    const pre = code.parentElement;
+    if (pre?.tagName === "PRE") codeCopyButton(pre, code);
+  }
 }
 
 interface HighlightLoaderOverrides {

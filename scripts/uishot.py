@@ -183,14 +183,13 @@ SETTLE_ANIMATIONS = """
 
 @contextlib.contextmanager
 def ui_session(lines=(), *, out_dir="/tmp/partyline-ui", headless=True, viewport=None,
-               handle="screenshot", freeze_animations=False):
+               handle="screenshot", freeze_animations=False, is_mobile=False, has_touch=False):
     """Start a throwaway partyline, open it in a browser, yield a UiSession.
 
     `lines` are conversation names to create before the page loads, so the UI
     has something to render. `handle` names the throwaway account registered
     for the browser session.
-    Everything is torn down on exit, including the server process and the temp
-    database.
+    The server process and temporary database are torn down on exit.
     """
     from playwright.sync_api import sync_playwright
 
@@ -216,7 +215,8 @@ def ui_session(lines=(), *, out_dir="/tmp/partyline-ui", headless=True, viewport
 
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=headless)
-            context = browser.new_context(viewport=viewport or VIEWPORT)
+            context = browser.new_context(viewport=viewport or VIEWPORT,
+                                          is_mobile=is_mobile, has_touch=has_touch)
             context.add_init_script(browser_auth_script(tokens))
             page = context.new_page()
             page.goto(base_url)
