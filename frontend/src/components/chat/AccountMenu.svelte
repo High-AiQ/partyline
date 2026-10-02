@@ -53,18 +53,38 @@
      documented `(max-width: 899px)` narrow breakpoint stays hand-written —
      at exactly 899px it must keep agreeing with `NARROW_MAX_WIDTH`. The
      tablet band lives here with it so the breakpoints read as one block. */
-  @media (min-width: 900px) and (max-width: 1199px) {
+  @media (min-width: 900px) and (max-width: 1200px) {
     .account {
       gap: 4px;
     }
-    .account button {
-      padding: 0 7px;
+    .settings,
+    .logout {
+      display: flex;
+      align-items: center;
+      width: 30px;
+      min-width: 30px;
+      justify-content: center;
+      padding: 0;
+      font-size: 0;
+    }
+    .settings-icon,
+    .logout-icon {
+      display: block;
+      width: 16px;
+      height: 16px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.7;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .button-label {
+      display: none;
     }
     .handle {
-      max-width: 60px;
-    }
-    .logout {
-      font-size: 9px;
+      max-width: 40px;
+      padding: 0 5px;
+      font-size: 10px;
     }
   }
   @media (max-width: 899px) {
