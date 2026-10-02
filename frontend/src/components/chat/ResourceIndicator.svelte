@@ -73,7 +73,11 @@
         stroke-dashoffset={50.27 * (1 - ratio)}
       />
     </svg>
-    <span>{view ? `${String(view.live_processes)}/${String(view.max_live_processes)}` : "—/—"}</span>
+    <span>
+      {view ? String(view.live_processes) : "—"}<span class="resource-limit"
+        >/{view ? String(view.max_live_processes) : "—"}</span
+      >
+    </span>
   </button>
   {#if resources.popoverOpen && view}
     <div class="resource-popover" role="dialog" aria-label="resource capacity">
@@ -172,6 +176,11 @@
     }
     .resource-popover {
       right: -66px;
+    }
+  }
+  @media (max-width: 1200px) {
+    .resource-limit {
+      display: none;
     }
   }
 </style>

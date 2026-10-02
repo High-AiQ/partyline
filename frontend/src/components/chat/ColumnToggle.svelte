@@ -51,10 +51,12 @@
      documented `(max-width: 899px)` narrow breakpoint stays hand-written —
      at exactly 899px it must keep agreeing with `NARROW_MAX_WIDTH`. The
      tablet band lives here with it so the breakpoints read as one block. */
-  @media (min-width: 900px) and (max-width: 1199px) {
+  @media (min-width: 900px) and (max-width: 1200px) {
     button {
+      width: 34px;
       min-width: 34px;
-      padding: 0 7px;
+      gap: 4px;
+      padding: 0;
     }
     button > span:not(.led) {
       position: absolute;
