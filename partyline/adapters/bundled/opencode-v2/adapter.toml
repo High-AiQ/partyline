@@ -7,6 +7,8 @@ command = ["opencode2"]
 requires = ["opencode2"]
 env_unset = []
 output = "local session transcript"
+delivery_proof = "transcript-user-record"
+delivery_proof_test = "tests/test_opencode_v2_adapter.py::test_wake_receipt_requires_recorded_user_marker"
 # Update the separate install prefix explicitly; a global upgrade can replace v1.
 
 [adapter.capabilities]

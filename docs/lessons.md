@@ -1231,3 +1231,5 @@ claim. Regression tests cover the production delivery lock, unrelated attach and
 detach, delayed-claim redelivery, crash/resume claim reuse, and watcher self-stop.
 Do not treat a live PTY or a written claim as proof that the transcript watcher
 is still running or that a queued message was delivered.
+
+The Grok `[partyline-paste:]` marker has never appeared in a real transcript record; on the first live Grok wake after deploy, run `grep -F '[partyline-paste:' ~/.grok/sessions/<cwd>/<session>/chat_history.jsonl` and check service logs for `wake receipt: … matched=wake#N` rather than `unmatched`.

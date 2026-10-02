@@ -140,6 +140,24 @@ class ClaudeJsonlReceiptTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.db.get_attachment("att")["last_seen"], message_id)
         self.assertEqual(adapter._jsonl_receipts, [])
 
+    async def test_pi_user_message_proves_paste(self):
+        adapter = self.make_adapter()
+        message_id = self.add_wake()
+        await adapter.deliver([{"id": message_id}])
+        receipt = adapter._jsonl_receipts[0]
+        record = {
+            "type": "message",
+            "message": {
+                "role": "user",
+                "content": [{"type": "text", "text": receipt["marker"]}],
+            },
+        }
+
+        await adapter._observe_jsonl_paste(record)
+
+        self.assertEqual(self.db.get_attachment("att")["last_seen"], message_id)
+        self.assertEqual(adapter._jsonl_receipts, [])
+
     async def test_later_claim_token_does_not_prove_a_lost_earlier_paste(self):
         adapter = self.make_adapter()
         adapter.format_digest = lambda _messages: f"same digest\n{adapter._claim_token}"

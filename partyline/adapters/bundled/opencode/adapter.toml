@@ -10,6 +10,8 @@ env_unset = []
 output = "local session transcript"
 
 update_command = ["opencode", "upgrade"]
+delivery_proof = "transcript-user-record"
+delivery_proof_test = "tests/test_bundled_adapters.py::test_user_part_observed_during_write_settles_opencode_paste"
 
 [adapter.capabilities]
 resume = true
