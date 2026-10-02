@@ -24,6 +24,7 @@ if sys.platform != "win32":
 from partyline import process_memory, process_exit
 from partyline.adapters import activation, fence, pty_io, startup_prompt
 from partyline.adapters.process_shutdown import stop_process_group
+from partyline.adapters.process_wait import wait_for_process
 from partyline.adapters.jsonl_receipts import JsonlPasteReceipts, tail_jsonl
 from partyline.adapters.task_logging import log_task_deaths
 from partyline.adapters.briefing import (
@@ -230,7 +231,7 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
 
     async def _watch_exit(self):
         assert self.proc is not None
-        rc = await asyncio.get_running_loop().run_in_executor(None, self.proc.wait)
+        rc = await wait_for_process(self.proc)
         self.abort_startup_prompt()
         self._mark_not_ready()
         await process_exit.report_exit(self, rc)
