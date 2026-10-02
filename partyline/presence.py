@@ -32,6 +32,7 @@ from . import turn_marker
 from .solo_line import addressed
 from .presence_contracts import WorkingEvent
 from .presence_queue import DeliveryQueue
+from .presence_delivery import credit_at_turn_end
 from .speech_echo import is_api_echo
 from .turn_return import ReturnPath
 from .goal_stall import GoalStallGuard
@@ -196,6 +197,7 @@ class Presence:
             return
         open_turn.open = max(0, open_turn.open - 1)
         if open_turn.open == 0:
+            await credit_at_turn_end(self.runtime, att_id, open_turn.owner)
             turn_marker.clear(getattr(self.runtime, "db", None), att_id)
             await self.finished(conv_id, att_id)
             await self.runtime.broadcast_attachment(conv_id, att_id)
@@ -235,6 +237,7 @@ class Presence:
         persisted_ids: Callable[[], list[int]] | None = None,
         persist_ids: Callable[[list[int]], Awaitable[bool]] | None = None,
         confirm_ids: Callable[[list[int]], Awaitable[bool]] | None = None,
+        credit_boundary: Callable[[], Awaitable[None]] | None = None,
     ):
         """Wrap deliver so a receipt fires only after the digest reaches the pty."""
         deliver = adapter.deliver
@@ -249,7 +252,7 @@ class Presence:
             att_id, ids, lambda: self.is_working(att_id),
             lambda: self._announce(conv_id, att_id, self.phase(att_id)),
         )
-        att["confirm_delivery_ids"] = confirm_ids
+        att.update(confirm_delivery_ids=confirm_ids, credit_delivery_boundary=credit_boundary)
         att["on_transcript_claimed"] = lambda: self.runtime.transcript_claimed(att_id, owner)
         if getattr(adapter, "_ready_result", None) is True:
             att["on_transcript_claimed"]()

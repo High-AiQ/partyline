@@ -187,7 +187,10 @@ class WakeCreditTest(unittest.IsolatedAsyncioTestCase):
                     )
                 )
                 self.assertEqual(db.get_attachment(SESSION_ID)["last_seen"], 0)
-                adapter.send_keys.assert_awaited_once_with("the exact wake digest")
+                marker = adapter._wake_receipts.pending[0].marker
+                adapter.send_keys.assert_awaited_once_with(
+                    f"{marker}\nthe exact wake digest"
+                )
 
                 # Routing again while the cursor correctly stays behind must
                 # not paste the identical outstanding batch twice.
@@ -202,7 +205,7 @@ class WakeCreditTest(unittest.IsolatedAsyncioTestCase):
                 await adapter._note_user_record({
                     "type": "user",
                     "prompt_index": 466,
-                    "content": [{"type": "text", "text": "the exact wake digest"}],
+                    "content": [{"type": "text", "text": f"{marker}\nthe exact wake digest"}],
                 })
                 self.assertEqual(db.get_attachment(SESSION_ID)["last_seen"], 0)
 
@@ -212,6 +215,16 @@ class WakeCreditTest(unittest.IsolatedAsyncioTestCase):
                     "content": [{
                         "type": "text",
                         "text": "<user_query>\nthe exact wake digest\n</user_query>",
+                    }],
+                })
+                self.assertEqual(db.get_attachment(SESSION_ID)["last_seen"], 0)
+
+                await adapter._note_user_record({
+                    "type": "user",
+                    "prompt_index": 468,
+                    "content": [{
+                        "type": "text",
+                        "text": f"<user_query>\n{marker}\nthe exact wake digest\n</user_query>",
                     }],
                 })
                 self.assertEqual(
@@ -231,8 +244,8 @@ class WakeCreditTest(unittest.IsolatedAsyncioTestCase):
                 )
                 await adapter._note_user_record({
                     "type": "user",
-                    "prompt_index": 468,
-                    "content": [{"type": "text", "text": "the exact wake digest"}],
+                    "prompt_index": 469,
+                    "content": [{"type": "text", "text": f"{marker}\nthe exact wake digest"}],
                 })
                 self.assertEqual(
                     db.get_attachment(SESSION_ID)["last_seen"], message["id"]
@@ -252,7 +265,8 @@ class WakeCreditTest(unittest.IsolatedAsyncioTestCase):
 
         adapter.send_keys = AsyncMock()
         self.assertFalse(await adapter.deliver([{"id": 41}]))
-        adapter.send_keys.assert_awaited_once_with("retry this wake")
+        self.assertIn("retry this wake", adapter.send_keys.await_args.args[0])
+        self.assertTrue(adapter.send_keys.await_args.args[0].startswith("[partyline-paste: "))
 
     async def test_confirmed_superset_covers_a_swallowed_earlier_wake(self):
         adapter = make_adapter()
@@ -265,12 +279,13 @@ class WakeCreditTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(await adapter.deliver([{"id": 41}]))
         self.assertFalse(await adapter.deliver([{"id": 41}, {"id": 42}]))
+        marker = adapter._wake_receipts.pending[1].marker
         await adapter._note_user_record({
             "type": "user",
             "prompt_index": 1,
             "content": [{
                 "type": "text",
-                "text": "<user_query>\nwake 41,42\n</user_query>",
+                "text": f"<user_query>\n{marker}\nwake 41,42\n</user_query>",
             }],
         })
 
@@ -289,17 +304,18 @@ class WakeCreditTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(await adapter.deliver([{"id": 41}]))
         self.assertFalse(await adapter.deliver([{"id": 42}]))
+        first_marker, second_marker = [wake.marker for wake in adapter._wake_receipts.pending]
         await adapter._note_user_record({
             "type": "user",
             "prompt_index": 1,
-            "content": [{"type": "text", "text": "wake 42"}],
+            "content": [{"type": "text", "text": f"{second_marker}\nwake 42"}],
         })
         credited.assert_not_awaited()
 
         await adapter._note_user_record({
             "type": "user",
             "prompt_index": 2,
-            "content": [{"type": "text", "text": "wake 41"}],
+            "content": [{"type": "text", "text": f"{first_marker}\nwake 41"}],
         })
         credited.assert_awaited_once_with([41, 42])
 
@@ -312,17 +328,18 @@ class WakeCreditTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(await adapter.deliver([{"id": 41}]))
         self.assertFalse(await adapter.deliver([{"id": 42}]))
+        first_marker, second_marker = [wake.marker for wake in adapter._wake_receipts.pending]
         await adapter._note_user_record({
             "type": "user",
             "prompt_index": 1,
-            "content": [{"type": "text", "text": "same digest"}],
+            "content": [{"type": "text", "text": f"{first_marker}\nsame digest"}],
         })
         credited.assert_awaited_once_with([41])
 
         await adapter._note_user_record({
             "type": "user",
             "prompt_index": 2,
-            "content": [{"type": "text", "text": "same digest"}],
+            "content": [{"type": "text", "text": f"{second_marker}\nsame digest"}],
         })
         self.assertEqual(credited.await_args_list[-1].args[0], [42])
 
@@ -348,7 +365,8 @@ class WakeCreditTest(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(await adapter.deliver([{"id": 51}]))
             transcript.write_text(
                 '{"type":"user","prompt_index":1,"content":['
-                '{"type":"text","text":"tail-confirmed digest"}]}\n',
+                '{"type":"text","text":"' + adapter._wake_receipts.pending[0].marker
+                + '\\ntail-confirmed digest"}]}\n',
                 encoding="utf-8",
             )
 
@@ -378,10 +396,13 @@ class ReceiptDiagnosticsTest(unittest.IsolatedAsyncioTestCase):
         adapter.format_digest = lambda _messages: "the exact wake digest"
         receipts.seed(seed_before)
         await receipts.deliver(adapter, [{"id": 1}])
+        marker = receipts.pending[0].marker
         if seed_after is not None:
             receipts.seed(seed_after)
         with self.assertLogs(RECEIPT_LOGGER, level="INFO") as logs:
-            await receipts.observe(adapter, self.record(record_index, record_text))
+            await receipts.observe(adapter, self.record(
+                record_index, f"{marker}\n{record_text}"
+            ))
         return receipts, "\n".join(logs.output)
 
     async def test_the_anti_replay_branch_says_so(self):
@@ -417,7 +438,9 @@ class ReceiptDiagnosticsTest(unittest.IsolatedAsyncioTestCase):
                 await receipts.deliver(adapter, [{"id": 1}])
                 with self.assertLogs(RECEIPT_LOGGER, level="INFO") as logs:
                     await receipts.observe(
-                        adapter, self.record(5, "the exact wake digest")
+                        adapter, self.record(
+                            5, f"{receipts.pending[0].marker}\nthe exact wake digest"
+                        )
                     )
                 output = "\n".join(logs.output)
 
@@ -437,13 +460,50 @@ class ReceiptDiagnosticsTest(unittest.IsolatedAsyncioTestCase):
         with self.assertLogs(RECEIPT_LOGGER, level="INFO") as logs:
             receipts.seed(1, adapter)
             await receipts.deliver(adapter, [{"id": 1}])
-            await receipts.observe(adapter, self.record(5, "the exact wake digest"))
+            await receipts.observe(adapter, self.record(
+                5, f"{receipts.pending[0].marker}\nthe exact wake digest"
+            ))
         lines = [line for line in logs.output if "wake receipt:" in line]
 
         self.assertTrue(any("seed" in line for line in lines))
         for line in lines:
             self.assertIn(f"att={SESSION_ID}", line)
             self.assertIn("owner=activation-1", line)
+
+    async def test_real_grok_native_content_list_is_readable(self):
+        fixture = Path(__file__).parent / "fixtures/transcripts/grok/incident_user_input.jsonl"
+        record = json.loads(fixture.read_text(encoding="utf-8").splitlines()[0])
+        parsed = user_input(record)
+        self.assertIsNotNone(parsed)
+        assert parsed is not None
+        self.assertEqual(parsed[0], 2)
+        self.assertEqual(
+            parsed[1],
+            "[system]: @grok joined [redacted]\n[redacted remaining wake and briefing]",
+        )
+        self.assertIsInstance(record["content"], list)
+
+    async def test_marked_real_grok_record_credits_its_paste(self):
+        fixture = Path(__file__).parent / "fixtures/transcripts/grok/incident_user_input.jsonl"
+        record = json.loads(fixture.read_text(encoding="utf-8").splitlines()[0])
+        parsed = user_input(record)
+        assert parsed is not None
+        adapter = make_adapter()
+        adapter.format_digest = lambda _messages: parsed[1]
+        adapter.send_keys = AsyncMock()
+        credited = AsyncMock(return_value=True)
+        adapter.att["confirm_delivery_ids"] = credited
+        receipts = WakeReceipts()
+        receipts.seed(parsed[0])
+
+        self.assertFalse(await receipts.deliver(adapter, [{"id": 49}]))
+        marker = receipts.pending[0].marker
+        marked = dict(record)
+        marked["prompt_index"] = parsed[0] + 1
+        marked["content"] = [{"type": "text", "text": f"{marker}\n{parsed[1]}"}]
+        await receipts.observe(adapter, marked)
+
+        credited.assert_awaited_once_with([49])
 
     def test_configuration_runs_after_dotenv_not_at_import(self):
         """`.env` in the checkout is the supported switch.
@@ -560,6 +620,20 @@ class TurnHookTest(unittest.TestCase):
 
 
 class TranscriptTest(unittest.TestCase):
+    def test_real_grok_native_list_record_is_read(self):
+        fixture = Path(__file__).parent / "fixtures/transcripts/grok/incident_user_input.jsonl"
+        record = json.loads(fixture.read_text(encoding="utf-8").splitlines()[0])
+        parsed = user_input(record)
+
+        self.assertIsNotNone(parsed)
+        assert parsed is not None
+        self.assertEqual(parsed[0], 2)
+        self.assertEqual(
+            parsed[1],
+            "[system]: @grok joined [redacted]\n[redacted remaining wake and briefing]",
+        )
+        self.assertIsInstance(record["content"], list)
+
     def test_user_input_requires_a_real_prompt_ordinal(self):
         fixture = Path(__file__).parent / "fixtures" / "grok_user_delivery.jsonl"
         record = json.loads(fixture.read_text().splitlines()[0])

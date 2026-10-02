@@ -327,6 +327,61 @@ class ReadinessDeliveryGateTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.db.get_attachment("att")["last_seen"], only)
         self.assertEqual(self.messages, [])
 
+    async def test_unproven_adapter_keeps_cursor_and_reports_a_stall(self):
+        adapter = self.adapter(transcript=False)
+        adapter._ready_result = True
+        adapter.att["adapter_metadata"] = {
+            "delivery_proof": "none-with-reason",
+            "delivery_proof_reason": "test adapter has no structured receipt",
+        }
+        message_id = self.say("wake without proof")
+        with patch("partyline.runtime_delivery_credit.UNCREDITED_DELIVERY_WARNING_SECONDS", 0.01):
+            with self.assertLogs("partyline.runtime", level="WARNING"):
+                self.assertFalse(await self.runtime.deliver_pending(
+                    "line", self.attachment(), adapter
+                ))
+            with self.assertLogs("partyline.runtime_delivery_credit", level="WARNING"):
+                await asyncio.sleep(0.02)
+        self.assertEqual(self.db.get_attachment("att")["last_seen"], 0)
+        self.assertIn(message_id, self.runtime.uncredited["att"]["ids"])
+        confirm = adapter.att["confirm_delivery_ids"]
+        self.assertFalse(await confirm([message_id]))
+        self.assertEqual(self.db.get_attachment("att")["last_seen"], 0)
+
+    async def test_fallback_credits_only_at_structured_turn_end(self):
+        adapter = self.adapter(transcript=False, completion="receipt")
+        adapter.att["adapter_metadata"] = {
+            "delivery_proof": "none-with-reason",
+            "delivery_proof_reason": "no user record is available",
+        }
+        message_id = self.say("weakly proven wake")
+        with self.assertLogs("partyline.runtime", level="WARNING"):
+            self.assertFalse(await self.runtime.deliver_pending(
+                "line", self.attachment(), adapter
+            ))
+        self.assertEqual(self.db.get_attachment("att")["last_seen"], 0)
+
+        await self.presence.started("line", "att", "owner")
+        with self.assertLogs("partyline.runtime_delivery_credit", level="WARNING"):
+            await self.presence.ended("line", "att", "owner")
+        self.assertEqual(self.db.get_attachment("att")["last_seen"], message_id)
+        self.assertNotIn("att", self.runtime.uncredited)
+
+    async def test_transcript_adapter_write_does_not_advance_without_user_record(self):
+        adapter = self.adapter(transcript=True)
+        adapter._ready_result = True
+        adapter.att["adapter_metadata"] = {
+            "delivery_proof": "transcript-user-record",
+            "capabilities": {"transcript": True},
+        }
+        message_id = self.say("write is not proof")
+
+        self.assertFalse(await self.runtime.deliver_pending(
+            "line", self.attachment(), adapter
+        ))
+        self.assertEqual(self.db.get_attachment("att")["last_seen"], 0)
+        self.assertIn(message_id, self.runtime.uncredited["att"]["ids"])
+
 
 if __name__ == "__main__":
     unittest.main()

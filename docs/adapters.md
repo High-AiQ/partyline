@@ -61,6 +61,9 @@ update_command = ["example-process", "update"]
 | `capabilities` | table; `resume = true` only if re-attaching genuinely reopens the previous session; `immediate_mentions = true` only if a mention reaches a turn that is *already running* (below) |
 | `update_command` | optional argv to check/install CLI updates before a fresh attach; omit or `[]` if the process has no updater. Never a shell string. A pipe install belongs in one `bash -lc` argument. |
 | `fence_args` | optional argv appended to the command only while the process actually runs fenced — for a CLI whose own sandbox cannot nest under the fence |
+| `delivery_proof` | Required for bundled adapters: `transcript-user-record`, `receipt-boundary`, or `none-with-reason`. Transcript proof matches the paste marker in a structured user record. `receipt-boundary` credits at an explicit turn-end receipt. `none-with-reason` records the missing user record; it still uses the weaker turn-end fallback when that adapter emits a receipt. |
+| `delivery_proof_test` | Required unittest reference (`tests/test_*.py::test_name`); bundled conformance resolves and runs the named test |
+| `delivery_proof_fixture` | `none-local` only for the audited adapters with no local capture; new transcript adapters need real redacted fixtures under `tests/fixtures/transcripts/<adapter>/` |
 
 Never put secrets or machine-specific paths in a manifest.
 
@@ -99,6 +102,58 @@ Rules that hold for every adapter:
 - Prefer the process's own structured transcript. Screen scraping is a last resort; the `raw`
   adapter's quiescence flush exists for line-oriented programs with no transcript at all.
 - Don't replay history after a resume, and cancel background tasks on stop.
+
+### Paste delivery proof inventory
+
+The cursor may advance when the adapter observes the pasted digest's marker in a structured
+user-input record. If that record is unavailable, a paste can be credited only at the adapter's
+next adapter-provided delivery boundary; this is weaker evidence because it does not identify
+which input the process consumed. A terminal write or composer echo is never proof.
+`none-with-reason` must document the missing user record, and it does not suppress a fallback
+when an adapter provides a boundary. Hermes and Muse use each committed assistant record only
+for delivery credit; they do not declare turn-end receipts or change presence state. The raw
+adapter uses its existing completed quiescence flush. The conformance test checks that each
+bundled manifest declares proof and exercises the receipt reader or fallback.
+
+The table records what the adapter code and locally available transcript samples establish.
+“No local sample” means this audit found no local record proving the stated user-input shape or
+marker survival; the vendor state tree may still exist. Modal/trust-screen records cannot be
+inferred from an idle transcript.
+
+| Adapter | Transcript path | Idle user-input shape | Queued user-input shape | Marker survives | Modal/trust-screen record | Status | Verification |
+|---|---|---|---|---|---|---|---|
+| Claude Code | `~/.claude/projects/<project>/*.jsonl` | `user.message.content` text blocks | `attachment.queued_command.prompt` | Yes in sampled records | Trust screen gates startup briefing; modal transcript shape not captured | Transcript proof; redacted idle and queued fixtures cite their source records | verified from a real transcript |
+| Codex | `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl` | `response_item/message/user/content` | `event_msg/item_completed/UserMessage` can also carry the user input | Yes in sampled `response_item` and `UserMessage` records | Not captured | Transcript proof; redacted fixtures cite source lines 9 and 33 | verified from a real transcript |
+| Cursor | `~/.cursor/projects/<project>/agent-transcripts/<id>/<id>.jsonl` | User `role` record with `<user_query>` text | Same user-record shape after a busy-turn steer is submitted | No local marker-bearing fixture | Not captured | `transcript-user-record`; existing receipt tests; fixture: none local | inferred, no local transcript |
+| Grok Build | `$GROK_HOME/sessions/<encoded-cwd>/<session>/chat_history.jsonl` | `type=user`, integer `prompt_index`, native list `content` with text blocks inside `<user_query>` | Same native-list shape; a newer ordinal is required | Not observed for a sent marker; the incident records are markerless | Not captured | Transcript proof requires a sent marker plus digest; fixture records the markerless replay | verified from a real transcript |
+| Antigravity | `~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl` | `USER_INPUT`, `source=USER_EXPLICIT`, `content` | A later turn's `USER_INPUT`; a log echo alone is not proof | Yes in sampled complete input records | Not captured | Transcript proof; redacted idle and queued records cite source lines 9 and 29 | verified from a real transcript |
+| OpenCode v1 | `~/.local/share/opencode/opencode.db` | `part` row belonging to a user `message` | Same user-part shape when queued input is admitted | Yes in sampled user parts | Not captured | Transcript proof; redacted user-part records cite SQLite rowids 5351 and 5352 | verified from a real transcript |
+| OpenCode v2 | `~/.local/share/opencode/opencode-v2.db` | `session_message(type=user).data.text` | Same user-message shape after a queued prompt is admitted | Yes in sampled user messages | Not captured | Transcript proof; redacted records cite rowids 3 and 7 | verified from a real transcript |
+| Hermes | `$HERMES_HOME/state.db` | No Hermes DB found under home | Not verified | Not verifiable locally | Not captured | `none-with-reason`; each assistant transcript row credits pending deliveries through the weaker boundary callback, without ending presence; no local fixture | weaker boundary fallback |
+| Muse Code | `${XDG_DATA_HOME:-~/.local/share}/muse/sessions/<id>/session.jsonl` | Muse installed; no local session log found | Not verified | Not verifiable locally | Not captured | `none-with-reason`; each committed assistant record credits pending deliveries through the weaker boundary callback, without ending presence; no local fixture | weaker boundary fallback |
+| Pi | `~/.partyline/sessions/pi/<attachment-id>/*.jsonl` | No Pi session transcript found under home | Not verified | Not verifiable locally | Not captured | Transcript proof; the JSONL `message/role=user` reader is tested; fixture: none local | inferred, no local transcript |
+| DeepSeek Harness | `$DSH_HOME/sessions/<project>/<session>/session.v3.jsonl` | Expected `user/message`, `data.role=user`, text in `data.content`; no local session found | Not verified locally | Not observed locally | Not captured | Transcript proof reader test; no local fixture | inferred, no local transcript |
+| raw | No structured transcript | None | None | No marker oracle | Not applicable | `receipt-boundary`; completed quiescence output flush credits pending pastes with a warning; weaker than a transcript user record | weaker boundary fallback |
+
+Startup dialogs are adapter-specific. Claude holds the briefing and queued wakes behind its
+known trust/login/update prompts, and Grok waits for its session transcript to appear. The other
+rows do not claim that modal or trust screens create user-input transcript records. If a process
+is stopped at such a screen, its delivery remains unproved until the structured input record or
+the explicitly documented fallback boundary arrives.
+
+The Oct 2 Grok incident attachment is `7f6df154-5395-4627-8af4-0f0a13d04003`, confirmed by the
+Partyline attachment row and Grok's `session_search.sqlite` index. The real transcript's user
+records at JSONL lines 8 and 42 both contain the `@grok joined` wake; their prompt indexes are 1
+and 2, and each `content` value is a native list of text blocks. Neither record has a paste marker.
+Line 42 is the repeated wake. The earlier stringified-Python-list explanation was false: Grok
+never wrote that shape. The incident's evidence gap was that no per-delivery marker survived,
+leaving the reader to infer credit from a digest and prompt boundary. The service journal has no
+`wake receipt:` diagnostics for that window, so the exact failed comparison cannot be
+reconstructed. Partyline also reposted 31 Grok assistant records at IDs 15473–15506 that
+duplicated earlier records in IDs 15436–15472 after resume; those are transcript-tail replays,
+separate from the repeated user wake. Current Grok delivery sends a unique marker and requires
+that marker plus the exact normalized digest in a later native-list user record before crediting.
+The real redacted fixture preserves line 42's native-list shape and missing marker.
 
 ### ACP protocol adapters
 

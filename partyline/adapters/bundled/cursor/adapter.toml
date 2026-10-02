@@ -16,4 +16,7 @@ env_unset = []
 # adapter sends that Enter. `@!name` is one Ctrl+C, confirmed by the transcript's
 # turn-end record. Escape cancels a queued steer, not the turn.
 capabilities = { resume = true, turn_end = "receipt", transcript = true, immediate_mentions = true }
+delivery_proof = "transcript-user-record"
+delivery_proof_test = "tests/test_cursor_adapter.py::test_a_paste_is_unproven_until_a_user_record_contains_it"
+delivery_proof_fixture = "none-local"
 update_command = ["agent", "update"]

@@ -10,6 +10,8 @@ env_unset = []
 output = "session transcript"
 
 update_command = ["agy", "update"]
+delivery_proof = "transcript-user-record"
+delivery_proof_test = "tests/test_antigravity_adapter.py::test_a_transcript_input_verifies_a_mid_turn_wake"
 
 [adapter.capabilities]
 # Re-attaching passes --conversation with the recorded id, reopening the session.

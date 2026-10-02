@@ -323,10 +323,52 @@ class TranscriptTest(StoreFixture, unittest.IsolatedAsyncioTestCase):
             assistant("message-1", "finished reply"),
         ])
         adapter.alive = lambda: False
+        credited_after_rows = []
+        pending_wake_ids = {702}
+        credited_wake_ids = []
 
-        await adapter._tail(path, 0)
+        async def credit_boundary():
+            credited_wake_ids.extend(pending_wake_ids)
+            pending_wake_ids.clear()
+            credited_after_rows.append((len(posts), sorted(credited_wake_ids)))
+
+        adapter.att["credit_delivery_boundary"] = credit_boundary
+
+        with patch(
+            "partyline.adapters.bundled.muse.adapter.receipt", new=AsyncMock(), create=True
+        ) as receipt:
+            await adapter._tail(path, 0)
 
         self.assertEqual(posts, [("musey", "agent", "finished reply")])
+        self.assertEqual(credited_after_rows, [(1, [702])])
+        self.assertEqual(pending_wake_ids, set())
+        receipt.assert_not_awaited()
+
+    async def test_assistant_rows_credit_without_ending_presence(self):
+        adapter, posts, _ = make_adapter()
+        path = self.write_session(SESSION_ID, [
+            assistant("message-1", "first reply"),
+            assistant("message-2", "second reply"),
+        ])
+        adapter.alive = lambda: False
+        credited_after_rows = []
+        pending_wake_ids = {702}
+        credited_wake_ids = []
+
+        async def credit_boundary():
+            credited_wake_ids.extend(pending_wake_ids)
+            pending_wake_ids.clear()
+            credited_after_rows.append((len(posts), sorted(credited_wake_ids)))
+
+        adapter.att["credit_delivery_boundary"] = credit_boundary
+        with patch(
+            "partyline.adapters.bundled.muse.adapter.receipt", new=AsyncMock(), create=True
+        ) as receipt:
+            await adapter._tail(path, 0)
+
+        self.assertEqual(credited_after_rows, [(1, [702]), (2, [702])])
+        self.assertEqual(pending_wake_ids, set())
+        receipt.assert_not_awaited()
 
     async def test_resume_offsets_prevent_old_messages_from_replaying(self):
         adapter, posts, _ = make_adapter(resume=True, session_id=SESSION_ID)

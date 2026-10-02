@@ -11,6 +11,9 @@ compact_paste = "/compact"
 env_unset = []
 # Sessions are pinned under partyline; ~/.pi is the agent's own state home.
 output = "session transcript"
+delivery_proof = "transcript-user-record"
+delivery_proof_test = "tests/test_jsonl_receipts.py::test_pi_user_message_proves_paste"
+delivery_proof_fixture = "none-local"
 
 update_command = ["pi", "update", "--self"]
 

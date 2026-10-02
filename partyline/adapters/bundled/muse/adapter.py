@@ -245,6 +245,9 @@ class PartylineAdapter(Adapter):
                 if message_id:
                     self._seen_messages.add(message_id)
                 await self.post(self.att["name"], "agent", body)
+                boundary = self.att.get("credit_delivery_boundary")
+                if boundary is not None:
+                    await boundary()
 
     async def _run(self):
         try:

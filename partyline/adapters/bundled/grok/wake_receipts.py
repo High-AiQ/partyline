@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import uuid
 from dataclasses import dataclass
 
 from . import offloaded_prompt
@@ -62,6 +63,7 @@ def _who(adapter) -> str:
 @dataclass
 class PendingWake:
     digest: str
+    marker: str
     message_ids: tuple[int, ...]
     after_prompt: int
     confirmed: bool = False
@@ -114,7 +116,8 @@ class WakeReceipts:
                 await adapter.send_keys(digest)
             adapter._silent_until_wake = False
             return None
-        pending = PendingWake(digest, message_ids, self.prompt_index)
+        marker = f"[partyline-paste: {uuid.uuid4().hex}]"
+        pending = PendingWake(digest, marker, message_ids, self.prompt_index)
         self.pending.append(pending)
         logger.info(
             "wake receipt: %s paste boundary=%s digest=%s len=%d messages=%d",
@@ -126,7 +129,7 @@ class WakeReceipts:
             self._waiters[message_ids] = asyncio.Event()
         try:
             if digest.strip():
-                await adapter.send_keys(digest)
+                await adapter.send_keys(f"{marker}\n{digest}")
         except BaseException:
             self.pending.remove(pending)
             self._waiters.pop(message_ids, None)
@@ -173,11 +176,17 @@ class WakeReceipts:
         self.prompt_index = prompt_index
         content = self._full_content(adapter, prompt_index, content)
         matched_index: int | None = None
+        fingerprint_content = content
         for index, wake in enumerate(self.pending):
+            marker_seen = wake.marker in content
+            candidate = content.replace(wake.marker, "", 1) if marker_seen else content
+            if marker_seen:
+                fingerprint_content = candidate
             if (
                 not wake.confirmed
                 and wake.after_prompt < prompt_index
-                and _matches(content, wake.digest)
+                and marker_seen
+                and _matches(candidate, wake.digest)
             ):
                 wake.confirmed = True
                 matched_index = index
@@ -186,18 +195,19 @@ class WakeReceipts:
         # callback accepts, and those are separate failures with separate fixes.
         logger.info(
             "wake receipt: %s record %s observed content=%s matched=%s",
-            _who(adapter), prompt_index, fingerprint(content),
+            _who(adapter), prompt_index, fingerprint(fingerprint_content),
             "none" if matched_index is None else f"wake#{matched_index}",
         )
         if matched_index is None:
             for index, wake in enumerate(self.pending):
                 if not wake.confirmed:
+                    candidate = content.replace(wake.marker, "", 1)
                     logger.info(
                         "wake receipt: %s unmatched wake#%d boundary=%s digest=%s "
                         "same_content=%s after_paste=%s",
                         _who(adapter), index, wake.after_prompt,
                         fingerprint(wake.digest),
-                        _matches(content, wake.digest),
+                        wake.marker in content and _matches(candidate, wake.digest),
                         wake.after_prompt < prompt_index,
                     )
 
