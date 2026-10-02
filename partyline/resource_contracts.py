@@ -8,6 +8,8 @@ class ResourceSettingsIn(BaseModel):
     memory_reserve_bytes: int = Field(ge=0)
     default_process_memory_bytes: int = Field(gt=0)
     memory_reservation_bytes: int = Field(ge=256 * 1024**2)
+    memory_warn_percent: int = Field(default=80, ge=50, le=95)
+    memory_captain_ceiling_bytes: int | None = Field(default=None, gt=0)
 
 
 class ResourceDefaults(BaseModel):
@@ -15,6 +17,8 @@ class ResourceDefaults(BaseModel):
     memory_reserve_bytes: int
     default_process_memory_bytes: int
     memory_reservation_bytes: int
+    memory_warn_percent: int = 80
+    memory_captain_ceiling_bytes: int
 
 
 class ResourceSettings(BaseModel):
@@ -22,6 +26,8 @@ class ResourceSettings(BaseModel):
     memory_reserve_bytes: int
     default_process_memory_bytes: int
     memory_reservation_bytes: int
+    memory_warn_percent: int
+    memory_captain_ceiling_bytes: int
     host_ram_bytes: int
     memory_budget_bytes: int
     memory_ceiling_bytes: int
@@ -33,6 +39,8 @@ class ResourceSnapshot(BaseModel):
     memory_reserve_bytes: int
     default_process_memory_bytes: int
     memory_reservation_bytes: int
+    memory_warn_percent: int = 80
+    memory_captain_ceiling_bytes: int
     host_ram_bytes: int
     memory_budget_bytes: int
     memory_ceiling_bytes: int

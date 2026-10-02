@@ -31,6 +31,8 @@
   let reserveGb = $state(2);
   let leaseGb = $state(4);
   let reservationGb = $state(1);
+  let warnPercent = $state(80);
+  let captainCeilingGb = $state(8);
   let budgetLoading = $state(true);
   let budgetSaving = $state(false);
   let resettingBudget = $state(false);
@@ -63,6 +65,8 @@
       reserveGb = displayGb(budget.memory_reserve_bytes);
       leaseGb = displayGb(budget.default_process_memory_bytes);
       reservationGb = displayGb(budget.memory_reservation_bytes);
+      warnPercent = budget.memory_warn_percent;
+      captainCeilingGb = displayGb(budget.memory_captain_ceiling_bytes);
       if (focusBudget) {
         await tick();
         budgetSection?.scrollIntoView({ block: "center" });
@@ -85,6 +89,11 @@
         memory_reserve_bytes: bytesForSave(reserveGb, budget?.memory_reserve_bytes ?? 0),
         default_process_memory_bytes: bytesForSave(leaseGb, budget?.default_process_memory_bytes ?? 0),
         memory_reservation_bytes: bytesForSave(reservationGb, budget?.memory_reservation_bytes ?? 0),
+        memory_warn_percent: warnPercent,
+        memory_captain_ceiling_bytes: bytesForSave(
+          captainCeilingGb,
+          budget?.memory_captain_ceiling_bytes ?? 0,
+        ),
       });
       await resources.load();
     } catch (failure: unknown) {
@@ -104,6 +113,8 @@
       reserveGb = displayGb(budget.memory_reserve_bytes);
       leaseGb = displayGb(budget.default_process_memory_bytes);
       reservationGb = displayGb(budget.memory_reservation_bytes);
+      warnPercent = budget.memory_warn_percent;
+      captainCeilingGb = displayGb(budget.memory_captain_ceiling_bytes);
       await resources.load();
     } catch (failure: unknown) {
       budgetError = failure instanceof ApiError ? failure.message : "could not reset resource settings";
@@ -197,6 +208,29 @@
           )} GB
         </p>
       {/if}
+      <label for="memoryWarnPercent">early memory warning (%)</label>
+      <input
+        id="memoryWarnPercent"
+        type="number"
+        min="50"
+        max="95"
+        step="1"
+        bind:value={warnPercent}
+        disabled={budgetLoading || budgetSaving || resettingBudget}
+      />
+      <p class="dialog-note">People only · default: 80%</p>
+      <label for="memoryCaptainCeiling">captain approval ceiling (GB)</label>
+      <input
+        id="memoryCaptainCeiling"
+        type="number"
+        min="0.25"
+        step="0.01"
+        bind:value={captainCeilingGb}
+        disabled={budgetLoading || budgetSaving || resettingBudget}
+      />
+      <p class="dialog-note">
+        Requests above this ceiling need a person · default: twice the process cap, up to the host ceiling
+      </p>
       <div class="line-status" class:error={Boolean(budgetError)} aria-live="polite">
         {budgetLoading ? "loading resource settings…" : budgetError}
       </div>

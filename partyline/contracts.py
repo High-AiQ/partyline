@@ -3,6 +3,7 @@
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from .memory_contracts import MemoryEvent
 
 from .attachment_contracts import AttachmentResponse
 from .media_contracts import FileRef
@@ -291,9 +292,8 @@ Event = (
     | HelloEvent
     | ReattachOfferEvent
     | ReattachDecisionEvent
-    | RestartRequestEvent | WriteSetGrantRequestEvent | ReactionEvent | PinsChangedEvent
+    | RestartRequestEvent | WriteSetGrantRequestEvent | MemoryEvent | ReactionEvent | PinsChangedEvent
 )
-
 class HookEventRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
     message: str | None = None

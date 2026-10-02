@@ -47,6 +47,7 @@ class ChatRuntime(DeliveryCreditMixin):
         # may advance the durable cursor.
         self.uncredited: dict[str, dict] = {}
         self.unclaimed_noticed: set[str] = set()
+        self.memory_usage: dict[str, dict] = {}
 
     @staticmethod
     def activation_matches(adapter: Adapter, attachment: dict) -> bool:

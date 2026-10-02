@@ -10,6 +10,7 @@ import {
   ReattachCandidateSchema,
   RestartRequestSchema,
 } from "./contracts";
+import { MemoryRequestSchema } from "./memory-request-contracts";
 import { WriteSetGrantRequestSchema } from "./write-set-contracts";
 import { ReactionResponseSchema } from "./reaction-contracts";
 import { PinsChangedEventSchema } from "./pin-contracts";
@@ -156,6 +157,22 @@ export const WriteSetGrantRequestEventSchema = z.object({
     .default(null),
 });
 export type WriteSetGrantRequestEvent = z.infer<typeof WriteSetGrantRequestEventSchema>;
+
+export const MemoryRequestEventSchema = z.object({
+  type: z.literal("memory_request"),
+  request: z
+    .lazy(() => MemoryRequestSchema)
+    .nullable()
+    .default(null),
+});
+export const MemoryUsageEventSchema = z.object({
+  type: z.literal("memory_usage"),
+  attachment_id: z.string(),
+  usage_bytes: z.number().int().nonnegative(),
+  cap_bytes: z.number().int().positive(),
+  percent: z.number().int().min(0).max(100),
+});
+export type MemoryRequestEvent = z.infer<typeof MemoryRequestEventSchema>;
 export type ConversationsChangedEvent = z.infer<typeof ConversationsChangedEventSchema>;
 
 const CurrentWireEventSchema = z.discriminatedUnion("type", [
@@ -177,6 +194,8 @@ const CurrentWireEventSchema = z.discriminatedUnion("type", [
   ReattachDecisionEventSchema,
   RestartRequestEventSchema,
   WriteSetGrantRequestEventSchema,
+  MemoryRequestEventSchema,
+  MemoryUsageEventSchema,
   PinsChangedEventSchema,
 ]);
 

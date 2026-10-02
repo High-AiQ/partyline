@@ -1,6 +1,6 @@
 """Memory controls and host-observed exit evidence."""
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -28,3 +28,21 @@ class MemorySettings(BaseModel):
     effective_limit: str
     maximum_bytes: int
     last_incident: MemoryIncident | None = None
+
+
+class MemoryRequestEvent(BaseModel):
+    """The pending memory limit request on a line changed."""
+    type: Literal["memory_request"] = "memory_request"
+    request: Any = None
+
+
+class MemoryUsageEvent(BaseModel):
+    """Best-effort memory reading for one live attachment."""
+    type: Literal["memory_usage"] = "memory_usage"
+    attachment_id: str
+    usage_bytes: int
+    cap_bytes: int
+    percent: int
+
+
+MemoryEvent = MemoryRequestEvent | MemoryUsageEvent

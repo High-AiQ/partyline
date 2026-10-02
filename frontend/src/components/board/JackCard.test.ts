@@ -72,6 +72,21 @@ describe("JackCard badge treatments", () => {
     });
   }
 
+  it("shows a thin advisory memory meter for a sampled live process", async () => {
+    const card = mountCard({
+      memory_usage_bytes: 3 * 1024 ** 3,
+      memory_cap_bytes: 4 * 1024 ** 3,
+      memory_percent: 75,
+    });
+    try {
+      const meter = document.querySelector('[role="meter"][aria-label="memory usage"]');
+      expect(meter?.getAttribute("aria-valuenow")).toBe("75");
+      expect(meter?.firstElementChild?.getAttribute("style")).toContain("75%");
+    } finally {
+      await unmount(card);
+    }
+  });
+
   it("solidifies the dot when speaking but keeps the working label", async () => {
     const card = mountCard();
     try {

@@ -134,6 +134,7 @@ async def detach_attachment(runtime, att_id: str) -> dict:
         ))
         if adapter is not None and runtime.live.get(att_id) is adapter:
             runtime.live.pop(att_id, None)
+        runtime.memory_usage.pop(att_id, None)
         return {"ok": True}
     finally:
         lock.release()

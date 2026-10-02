@@ -45,7 +45,9 @@ def cwd_git_state(cwd: str) -> CwdGitState | None:
     return CwdGitState(sha=sha, dirty=bool(status.stdout))
 
 
-async def attachment_response(attachment: Mapping[str, object]) -> dict[str, object]:
+async def attachment_response(
+    attachment: Mapping[str, object],
+) -> dict[str, object]:
     """Add live cwd identity at the HTTP/WebSocket presentation boundary."""
     payload = dict(attachment)
     loop = asyncio.get_running_loop()
@@ -69,6 +71,19 @@ async def attachment_response(attachment: Mapping[str, object]) -> dict[str, obj
     except TimeoutError:
         payload["cwd_git"] = None
     return AttachmentResponse.model_validate(payload).model_dump()
+
+
+def attach_memory_usage(
+    payload: dict[str, object], memory_usage: Mapping[str, object] | None,
+) -> dict[str, object]:
+    """Attach the latest advisory sample without changing the response builder API."""
+    if memory_usage:
+        payload.update({
+            "memory_usage_bytes": memory_usage.get("usage_bytes"),
+            "memory_cap_bytes": memory_usage.get("cap_bytes"),
+            "memory_percent": memory_usage.get("percent"),
+        })
+    return payload
 
 
 def cwd_git_digest(cwd: str) -> str:

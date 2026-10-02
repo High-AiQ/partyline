@@ -4,7 +4,7 @@ import asyncio
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from .attachment_view import attachment_response
+from .attachment_view import attach_memory_usage, attachment_response
 from .auth_guard import request_principal
 from .contracts import MessageResponse
 from .hierarchy_contracts import MessageIn
@@ -25,11 +25,17 @@ async def conversation_detail_response(runtime, presence, media, conv_id: str, p
         "messages": attach(runtime.db, media.attach(messages), principal),
         "has_more_messages": has_more,
         "attachments": await asyncio.gather(
-            *(attachment_response(att) for att in runtime.db.list_attachments(conv_id))
+            *(_attachment_response(runtime, att) for att in runtime.db.list_attachments(conv_id))
         ),
         "working": presence.working_ids(conv_id),
         "presence": presence.snapshot(conv_id),
     }
+
+
+async def _attachment_response(runtime, attachment):
+    return attach_memory_usage(
+        await attachment_response(attachment), runtime.memory_usage.get(attachment["id"])
+    )
 
 
 def message_router(runtime, media) -> APIRouter:

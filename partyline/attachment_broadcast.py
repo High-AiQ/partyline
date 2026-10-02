@@ -1,6 +1,6 @@
 """Keep same-line jack state and every tab's line rail in one broadcast path."""
 
-from .attachment_view import attachment_response
+from .attachment_view import attach_memory_usage, attachment_response
 from .contracts import AttachmentEvent, LineLiveEvent
 
 
@@ -12,7 +12,9 @@ async def broadcast_attachment_state(runtime, conv_id: str, att_id: str) -> None
     # A claim that lands between mentions releases old probes and immediately
     # retries their backlog through the normal readiness/idle delivery path.
     runtime.transcript_claimed(att_id, attachment.get("runtime_owner"))
-    response = await attachment_response(attachment)
+    response = attach_memory_usage(
+        await attachment_response(attachment), runtime.memory_usage.get(att_id)
+    )
     if runtime.db.get_attachment(att_id) is None:
         return  # Removal may have completed while the git lookup was in flight.
     await runtime.broadcast(conv_id, AttachmentEvent(attachment=response))
