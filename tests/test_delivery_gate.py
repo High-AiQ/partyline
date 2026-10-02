@@ -11,6 +11,7 @@ An unadvanced cursor is the durable record of what was never proved ingested.
 import asyncio
 import tempfile
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from partyline.adapters.base import Adapter
 from partyline.db import Db
@@ -208,6 +209,46 @@ class ReadinessDeliveryGateTest(unittest.IsolatedAsyncioTestCase):
 
         await adapter.att["confirm_delivery_ids"]([only])
         self.assertEqual(self.db.get_attachment("att")["last_seen"], only)
+
+    async def test_claim_before_presence_watch_retries_preclaim_paste(self):
+        """A fast transcript claim cannot outrun registration of its retry hook."""
+        adapter = RecordingAdapter("owner", transcript=True)
+        adapter.delivery_result = False
+        self.runtime.live["att"] = adapter
+        only = self.say("wake during start")
+        self.assertFalse(await self.runtime.deliver_pending("line", self.attachment(), adapter))
+        self.assertEqual(len(adapter.deliveries), 1)
+        self.assertEqual(self.db.get_attachment("att")["last_seen"], 0)
+
+        adapter.delivery_event.clear()
+        adapter.mark_ready()  # start's background tail can claim before start returns
+        watched = self.presence.watch(
+            adapter, "line", "att", "receipt",
+            *self.runtime.held_wake_hooks("line", "att", "composer"),
+        )
+        self.runtime.live["att"] = watched
+
+        await asyncio.wait_for(adapter.delivery_event.wait(), timeout=1.0)
+        self.assertEqual(len(adapter.deliveries), 2)
+        self.assertEqual([m["id"] for m in adapter.deliveries[1]], [only])
+        self.assertEqual(self.db.get_attachment("att")["last_seen"], 0)
+
+    async def test_unretried_claim_logs_after_diagnostic_delay(self):
+        adapter = self.adapter(transcript=True)
+        adapter.delivery_result = False
+        only = self.say("wake still pending")
+        self.assertFalse(await self.runtime.deliver_pending("line", self.attachment(), adapter))
+        adapter.att["repool_message_ids"] = AsyncMock(return_value=False)
+
+        with (
+            patch("partyline.runtime_delivery_credit.CLAIM_RETRY_DIAGNOSTIC_SECONDS", 0.01),
+            self.assertLogs("partyline.runtime_delivery_credit", level="WARNING") as captured,
+        ):
+            adapter.mark_ready()
+            await asyncio.sleep(0.03)
+
+        self.assertEqual(self.runtime.uncredited["att"]["ids"], {only})
+        self.assertIn("transcript claim retry still uncredited", captured.output[0])
 
     async def test_claim_retry_holds_addressed_wake_until_briefing_turn_ends(self):
         adapter = self.adapter(transcript=True, completion="receipt")

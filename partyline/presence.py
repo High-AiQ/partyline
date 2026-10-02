@@ -5,13 +5,9 @@ writes reaches the line until its turn ends. For an evening's worst
 failures — a lead reassigning work mid-build, two agents writing the same
 files — the room could not tell thinking from dead.
 
-**A process can never post its own liveness**, which is the whole point: a
-signal the subject can forge is not evidence (`docs/lessons.md`).
-
-The subtler version of that mistake is what this module used to do: speech
-was treated as the end of a turn, so "ack, on it" cleared the badge while
-the work had not started. **Speech never ends a turn.** A turn ends when
-the harness says it ended, or when the process dies.
+A process cannot post its own liveness: that signal would be forgeable
+(`docs/lessons.md`). Speech never ends a turn; only the harness or process
+exit does.
 
 Those receipts come in pairs: ``began`` when the CLI starts a turn, ``ended``
 when it finishes. Pairing makes them robust to a CLI that folds two digests
@@ -25,7 +21,6 @@ turn ended is a new way to be wrong.
 The turn boundary is also where the return path (`turn_return.py`) decides
 whether a finished turn answered whoever asked for it.
 """
-
 
 from __future__ import annotations
 
@@ -256,6 +251,8 @@ class Presence:
         )
         att["confirm_delivery_ids"] = confirm_ids
         att["on_transcript_claimed"] = lambda: self.runtime.transcript_claimed(att_id, owner)
+        if getattr(adapter, "_ready_result", None) is True:
+            att["on_transcript_claimed"]()
 
         async def delivering(messages):
             holding = self.completions.get(att_id) == RECEIPT and self.is_working(att_id)
