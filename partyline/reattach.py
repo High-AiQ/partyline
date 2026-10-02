@@ -16,9 +16,10 @@ from .contracts import (
 from .db import Db, RestartPlan
 from .continuation_delivery import deliver_continuation
 from .restart_lease import run_automatic_restart_plan
-from .reattach_liveness import abandon, mark_unlive_exited, report_live, report_live_refusal
+from .reattach_liveness import mark_unlive_exited, report_live, report_reattach_failure
 from .restart_scope import covered_conversation_ids, planned_conversation_ids, select_attachment_ids
 from .resume_backlog import addressed_backlog
+from .resource_budget import clear_stale_restart_rows
 
 READY_TIMEOUT_SECONDS = 90.0
 MAX_AUTOMATIC_ATTEMPTS = 2
@@ -258,6 +259,7 @@ class ReattachCoordinator:
         unconfirmed_ids: set[str] = set()
         expected_owners: dict[str, str | None] = {}
         try:
+            await clear_stale_restart_rows(self.runtime, attachment_ids)
             for attachment_id in attachment_ids:
                 if ensure_owned is not None:
                     ensure_owned()
@@ -347,19 +349,13 @@ class ReattachCoordinator:
                     )
                     continue
                 except Exception as exc:
-                    if await report_live_refusal(
+                    outcome = await report_reattach_failure(
                         self.runtime, exc, attachment_id, line, name
-                    ):
+                    )
+                    if outcome == "ready":
                         ready.append(name)
                         continue
                     failed.append(name)
-                    await abandon(self.runtime, attachment_id)
-                    await self.runtime.post_message(
-                        line,
-                        "system",
-                        "system",
-                        f"⚠ @{name} could not reattach safely: {exc}",
-                    )
                     continue
 
                 ready.append(name)
@@ -381,8 +377,7 @@ class ReattachCoordinator:
         await mark_unlive_exited(self.runtime, attachment_ids, expected_owners)
 
         summary = f"{len(ready)} ready"
-        if slow:
-            summary += f", {len(slow)} still settling"
+        summary += f", {len(slow)} still settling" if slow else ""
         if failed:
             summary += f", {len(failed)} failed"
         if unconfirmed:

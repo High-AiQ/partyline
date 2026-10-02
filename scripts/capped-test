@@ -36,7 +36,8 @@ import tempfile
 import uuid
 
 DEFAULT_COMMAND = [
-    "uv", "run", "--locked", "coverage", "run", "-m", "unittest", "discover", "-s", "tests",
+    "uv", "run", "--locked", "coverage", "run", "-m", "unittest", "discover",
+    "-s", "tests", "-t", ".",
 ]
 DEFAULT_LIMIT = "2G"
 SUFFIXES = {"K": 1024, "M": 1024**2, "G": 1024**3}

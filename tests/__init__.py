@@ -14,7 +14,21 @@ import os
 import shutil
 import tempfile
 
+from partyline import resource_budget as _resource_budget
+from partyline.resource_budget import GIB, Host
+
 _SANDBOX = tempfile.mkdtemp(prefix="partyline-tests-")
 os.environ["PARTYLINE_DB"] = os.path.join(_SANDBOX, "partyline.db")
+# Pin runtime-derived capacity for every ordinary test. Tests of host discovery
+# and admission policy explicitly use their own fake Host values.
+PINNED_TEST_HOST = Host(cpus=32, ram_bytes=1024 * GIB)
+REAL_HOST_RESOURCES = _resource_budget.host_resources
+
+
+def _pinned_host_resources():
+    return PINNED_TEST_HOST
+
+
+_resource_budget.host_resources = _pinned_host_resources
 # The media directory follows the database path, so it lands in the sandbox too.
 atexit.register(shutil.rmtree, _SANDBOX, True)

@@ -1,28 +1,28 @@
 """Inspect failures and set the next activation's finite memory budget."""
 
-import os
-
 from fastapi import HTTPException, Request
 
 from .auth_guard import request_principal
 from .machine_scope import deny_unless_attachment
 from .memory_contracts import MemoryLimitRequest, MemorySettings
 from .process_incidents import last_incident
-from .process_memory import parse_size, process_memory_limit
+from .process_memory import parse_size
+from .resource_budget import format_limit, memory_ceiling, settings
 from .server_memory import host_memory_bytes
 from .system_notice import post_system_notice
 
 
 def maximum_bytes():
-    configured = process_memory_limit({"PARTYLINE_PROCESS_MEMORY_LIMIT": os.environ.get(
-        "PARTYLINE_MAX_PROCESS_MEMORY_LIMIT", "8G")})
-    return min(parse_size(configured), host_memory_bytes() * 3 // 4)
+    from .resource_budget import Host
+    return memory_ceiling(Host(cpus=1, ram_bytes=host_memory_bytes()))
 
 
 def memory_settings(db, att):
     return MemorySettings(
         configured_limit=att.get("memory_limit"),
-        effective_limit=att.get("memory_limit") or process_memory_limit(),
+        effective_limit=att.get("memory_limit") or format_limit(
+            settings(db)["default_process_memory_bytes"]
+        ),
         maximum_bytes=maximum_bytes(), last_incident=last_incident(db, att["id"]),
     )
 
