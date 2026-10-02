@@ -1,4 +1,5 @@
 import { mount, unmount } from "svelte";
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dialogs } from "../../state/dialogs.svelte.js";
 import * as resourceApi from "../../lib/resource-api";
@@ -6,6 +7,8 @@ import type { ResourceSnapshot } from "../../lib/resource-api";
 import { resources } from "../../state/resources.svelte.js";
 import ResourceIndicator from "./ResourceIndicator.svelte";
 import SettingsDialog from "../dialogs/SettingsDialog.svelte";
+
+const topbarActionsCss = readFileSync("src/styles/topbar-actions.css", "utf8");
 
 const snapshot: ResourceSnapshot = {
   max_live_processes: 24,
@@ -31,6 +34,40 @@ describe("ResourceIndicator", () => {
     document.body.replaceChildren();
   });
 
+  it("uses shared topbar interaction styling without state colours on hover", async () => {
+    vi.spyOn(resourceApi, "getResources").mockResolvedValue(snapshot);
+    const component = mount(ResourceIndicator, { target: document.body });
+    try {
+      const trigger = document.querySelector(".resource-trigger");
+      expect(trigger?.classList.contains("topbar-action")).toBe(true);
+      expect(trigger?.classList.contains("open")).toBe(false);
+      resources.popoverOpen = true;
+      await vi.waitFor(() => {
+        expect(trigger?.classList.contains("topbar-action-selected")).toBe(true);
+      });
+
+      const indicatorCss = readFileSync("src/components/chat/ResourceIndicator.svelte", "utf8");
+      expect(indicatorCss).toMatch(
+        /\.resource-trigger:not\(:hover\):not\(:active\):not\(:focus-visible\):not\(\.topbar-action-selected\)/,
+      );
+      expect(indicatorCss).toMatch(
+        /\.resource-trigger\.warning:not\(:hover\):not\(:active\):not\(:focus-visible\):not\(\.topbar-action-selected\)/,
+      );
+      expect(indicatorCss).toMatch(
+        /\.resource-trigger\.full:not\(:hover\):not\(:active\):not\(:focus-visible\):not\(\.topbar-action-selected\)/,
+      );
+      expect(indicatorCss).toMatch(
+        /\.resource-trigger\.over-limit:not\(:hover\):not\(:active\):not\(:focus-visible\):not\(\.topbar-action-selected\)/,
+      );
+      expect(indicatorCss).toMatch(
+        /\.resource-ring \.track \{\s*stroke: currentColor;\s*stroke-opacity: 0\.3;/,
+      );
+      expect(topbarActionsCss).toContain(".topbar-action:focus-visible:not(:disabled)");
+    } finally {
+      await unmount(component);
+    }
+  });
+
   it("shows fleet details in a tap popover when hover tooltips are disabled", async () => {
     vi.spyOn(resourceApi, "getResources").mockResolvedValue(snapshot);
     Object.defineProperty(window, "matchMedia", {
@@ -47,7 +84,7 @@ describe("ResourceIndicator", () => {
       trigger?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       expect(resources.popoverOpen).toBe(true);
       await vi.waitFor(() => {
-        expect(trigger?.classList.contains("open")).toBe(true);
+        expect(trigger?.classList.contains("topbar-action-selected")).toBe(true);
       });
       await vi.waitFor(() => {
         expect(document.querySelector(".resource-popover")).not.toBeNull();
