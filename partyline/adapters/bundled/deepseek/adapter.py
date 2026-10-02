@@ -19,6 +19,7 @@ if os.name != "nt":
     import tty
 
 from partyline.adapters import Adapter
+from partyline.adapters.acp_receipts import deliver_prompt
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 class PartylineAdapter(Adapter):
     kind = "deepseek"
+    jsonl_paste_receipts = True
     _CLAIMED: set[str] = set()
 
     def __init__(self, *args, **kwargs):
@@ -261,6 +263,7 @@ class PartylineAdapter(Adapter):
         if not isinstance(seq, int) or seq in self._seen:
             return
         self._seen.add(seq)
+        await self._observe_jsonl_paste(record)
         kind = record.get("type")
         if kind == "turn/start":
             await receipt(self.att, BEGAN)
@@ -282,10 +285,4 @@ class PartylineAdapter(Adapter):
                 await self.post(self.att["name"], "agent", body)
 
     async def deliver(self, messages: list[dict]):
-        if not self._session_id:
-            raise RuntimeError("dsh ACP session is not ready")
-        self._silent_until_wake = False
-        await self._send_request("session/prompt", {
-            "sessionId": self._session_id,
-            "prompt": [{"type": "text", "text": self.format_digest(messages)}],
-        })
+        return await deliver_prompt(self, messages)

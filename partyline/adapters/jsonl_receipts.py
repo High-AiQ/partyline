@@ -49,6 +49,10 @@ def _user_text(record: dict) -> str | None:
         return _text((record.get("message") or {}).get("content"))  # Pi
     if kind == "USER_INPUT" and record.get("source") == "USER_EXPLICIT":
         return _text(record.get("content"))  # Antigravity
+    if kind == "user/message":  # DeepSeek Harness persisted ACP transcript
+        data = record.get("data") or {}
+        if data.get("role") == "user":
+            return _text(data.get("content"))
     if kind == "response_item":  # Codex rollout
         item = record.get("payload") or {}
         if item.get("type") == "message" and item.get("role") == "user":

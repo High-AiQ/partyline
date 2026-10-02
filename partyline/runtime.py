@@ -1,6 +1,7 @@
 """Live chat state and behavior underneath the HTTP/WebSocket routes."""
 
 import asyncio
+import logging
 import re
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -18,6 +19,7 @@ from .runtime_delivery_credit import DeliveryCreditMixin
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
 RESERVED_NAMES = {"all", "system"}  # @all rings everyone; system is the notice sender
+logger = logging.getLogger(__name__)
 
 
 def handle_error(handle: str) -> str | None:
@@ -130,10 +132,25 @@ class ChatRuntime(DeliveryCreditMixin):
             if not pending:
                 return not bool(ours)
             pasted = await adapter.deliver(pending)
+            metadata = adapter.att.get("adapter_metadata") or {}
+            proof = metadata.get("delivery_proof")
+            if proof == "transcript-user-record" and pasted is not False:
+                pasted = False  # a successful pty write is never transcript evidence
+            if proof in {"none-with-reason", "receipt-boundary"}:
+                if not getattr(adapter, "_delivery_proof_warning_logged", False):
+                    adapter._delivery_proof_warning_logged = True
+                    logger.warning(
+                        "delivery has no user-record proof; waiting for turn-end boundary: "
+                        "attachment=%s adapter=%s ids=%s reason=%s",
+                        att["id"], att.get("adapter", "unknown"),
+                        [message["id"] for message in pending],
+                        metadata.get("delivery_proof_reason", "unspecified"),
+                    )
+                pasted = False
             if pasted is False:
-                if claims_transcript(adapter.att):
+                if claims_transcript(adapter.att) or proof in {"none-with-reason", "receipt-boundary"}:
                     self._record_unproved(att, adapter, pending)
-                    if not transcript_claimed(adapter):
+                    if claims_transcript(adapter.att) and not transcript_claimed(adapter):
                         await self._hold_credit(conv_id, att, adapter, pending)
                 return False
             if claims_transcript(adapter.att) and not transcript_claimed(adapter):

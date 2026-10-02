@@ -8,6 +8,9 @@ requires = ["dsh"]
 env_unset = []
 # dsh's home (DSH_HOME default): sessions, profiles, and patched models live here.
 output = "read-only plain JSONL session transcript"
+delivery_proof = "transcript-user-record"
+delivery_proof_test = "tests/test_deepseek_adapter.py::test_user_message_marker_proves_paste"
+delivery_proof_fixture = "none-local"
 update_command = ["npm", "install", "--global", "@deepseek-ai/dsh@0.1.5-rc.1"]
 
 [adapter.capabilities]

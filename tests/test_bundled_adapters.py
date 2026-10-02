@@ -213,8 +213,53 @@ class HermesAdapterTest(RecordingAdapterTest):
             adapter.proc.stop()
 
         adapter.post = stop_after_post
-        await adapter._tail("s", 0)
+        boundary = AsyncMock()
+        adapter.att["credit_delivery_boundary"] = boundary
+        with patch(
+            "partyline.adapters.bundled.hermes.adapter.receipt", new=AsyncMock(), create=True
+        ) as receipt:
+            await adapter._tail("s", 0)
         self.assertEqual(self.messages, [("agent", "agent", "answer")])
+        boundary.assert_awaited_once_with()
+        receipt.assert_not_awaited()
+        adapter._db.close()
+
+    async def test_assistant_rows_credit_without_ending_presence(self):
+        db = self.make_store()
+        db.executemany(
+            "INSERT INTO messages(id,session_id,role,content,active) VALUES(?,?,?,?,?)",
+            [(1, "s", "assistant", "first", 1), (2, "s", "assistant", "second", 1)],
+        )
+        db.commit()
+        db.close()
+        adapter = self.make(HermesAdapter)
+        adapter._db = adapter._open_db()
+        adapter.proc = Process()
+        credited_after_rows = []
+        pending_wake_ids = {701}
+        credited_wake_ids = []
+
+        async def stop_after_second(*args):
+            self.messages.append(args)
+            if len(self.messages) == 2:
+                adapter.proc.stop()
+
+        async def credit_boundary():
+            credited_wake_ids.extend(pending_wake_ids)
+            pending_wake_ids.clear()
+            credited_after_rows.append((len(self.messages), sorted(credited_wake_ids)))
+
+        adapter.post = stop_after_second
+        adapter.att["credit_delivery_boundary"] = credit_boundary
+        with patch(
+            "partyline.adapters.bundled.hermes.adapter.receipt", new=AsyncMock(), create=True
+        ) as receipt:
+            await adapter._tail("s", 0)
+
+        self.assertEqual([message[2] for message in self.messages], ["first", "second"])
+        self.assertEqual(credited_after_rows, [(1, [701]), (2, [701])])
+        self.assertEqual(pending_wake_ids, set())
+        receipt.assert_not_awaited()
         adapter._db.close()
 
     async def test_tail_follows_compression_child_without_replaying_snapshot(self):

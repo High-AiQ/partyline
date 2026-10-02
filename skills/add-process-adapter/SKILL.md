@@ -36,6 +36,8 @@ env_unset = []
 capabilities = { resume = false, turn_end = "receipt" }
 update_command = ["example-process", "update"]
 compact_paste = "/compact"
+delivery_proof = "transcript-user-record"
+delivery_proof_test = "tests/test_example_adapter.py::test_paste_marker_is_confirmed_from_user_record"
 ```
 
 | DO | DO NOT |
@@ -46,6 +48,7 @@ compact_paste = "/compact"
 | Set `turn_end = "receipt"` when the adapter reports turn boundaries from transcript events | — |
 | Provide `update_command` as an argv the host runs before a fresh attach when the operator ticks "update CLI first" | Guess an update command for another vendor; omit it when the process has no updater |
 | Live-probe `compact_paste` in the real TUI, record the probed CLI version beside the field, and re-probe after `update_command` — unknown slash commands can fuzzy-match a different action (OpenCode 1.18.21 turned `/compact` into `/review`) instead of failing closed | Ship an unprobed compact command; omit the field when the TUI exposes no verified one |
+| Declare `delivery_proof` as `transcript-user-record`, `receipt-boundary`, or `none-with-reason`; check in redacted real-record fixtures with a sibling README naming source file and line, and make the conformance test resolve and run the declared unittest proof | Treat a successful pty write as proof, use a declaration-only test, or omit fixtures |
 | Include an embedded newline in `compact_paste` only when a live probe proves the slash menu needs it to select the item | — |
 | Point `entrypoint` at a file inside the package; the exported class defaults to `PartylineAdapter` (override with `class = "..."`) | — |
 | Use `env_unset` only for inherited variables that would interfere with a child process (a trailing `*` clears every variable with that prefix) | Put secrets or machine-specific paths in the manifest |
@@ -55,6 +58,15 @@ compact_paste = "/compact"
 Export the adapter class from `adapter.py`, subclassing the framework adapter base, and use
 the attachment working directory and inherited environment.
 
+`transcript-user-record` is the preferred proof: match the Partyline paste marker in a
+structured user-input record and credit only those ids. If the CLI does not preserve a usable
+user record, use `receipt-boundary` only when the adapter observes an explicit turn-end receipt;
+the fallback credits pending pastes at the next such boundary and logs a warning because it
+proves a turn completed after the paste, not which input was consumed. `none-with-reason` must
+state what is unavailable; when a receipt is available it still uses that weaker fallback. Never
+advance the cursor on the pty write alone. Each bundled adapter must have a conformance test that
+loads its fixture and demonstrates the receipt reader credits the fixture's marker.
+
 | DO | DO NOT |
 | --- | --- |
 | Start the actual interactive executable in the supplied pty | Substitute a headless mode or an SDK call |
@@ -63,6 +75,7 @@ the attachment working directory and inherited environment.
 | Post assistant replies from structured transcripts or logs | Turn a terminal screen into chat messages |
 | Report turn boundaries as receipts: `BEGAN` (`UserPromptSubmit`) when user input is recorded, `ENDED` (`Stop`) when turns finish — including aborted turns, so badges clear | — |
 | On positive vendor evidence that a pasted digest was skipped, retain that delivery's integer message ids and call `await repool(message_ids)` when `repool = self.att.get("repool_message_ids")` is present — the host persists the exact batch across restarts and replays it ordered and deduplicated | Rewind `last_seen`, rescan mentions, or copy message bodies into adapter-owned retry state |
+| Put a unique `[partyline-paste: id]` marker in each delivery and advance the cursor only after the claimed transcript records it as user input; if no usable user record exists, use the next observed turn-end receipt as an explicitly weaker fallback and log that fallback loudly | Credit a bare pty write, screen echo, assistant text, or a record from another attachment |
 | Let a manifest `compact_paste` ride the host's idle gate (idle pastes immediately; mid-turn occupies one latest-wins slot fired on a real `ENDED`) | Intercept a chat mention or add a second queue for compaction |
 | Identify the vendor's structured compaction record or transcript rewrite, filter summaries from assistant speech, and follow session-id rotation | Replay the replacement snapshot |
 | Start observing output after this attachment starts; snapshot existing records on open as seen when records carry no timestamps, and survive rewrites or compactions by re-anchoring on the record sequence | Use timestamp-based `_fresh` on records that carry no timestamps; replay prior records after a resume |

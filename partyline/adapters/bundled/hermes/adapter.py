@@ -164,6 +164,9 @@ class PartylineAdapter(Adapter):
                 self.observe_claim(row["content"])
                 if body := self._assistant_text(row):
                     await self.post(self.att["name"], "agent", body)
+                    boundary = self.att.get("credit_delivery_boundary")
+                    if boundary is not None:
+                        await boundary()
             await asyncio.sleep(self.POLL_SECONDS)
 
     async def _run(self):

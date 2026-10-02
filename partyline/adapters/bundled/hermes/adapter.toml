@@ -10,6 +10,9 @@ compact_paste = "/compress"
 env_unset = []
 # hermes's home (HERMES_HOME default); the claimed state.db transcript lives in it.
 output = "read-only SQLite session transcript"
+delivery_proof = "none-with-reason"
+delivery_proof_reason = "No local Hermes session was available to validate a user-input record; assistant transcript rows provide the weaker delivery boundary."
+delivery_proof_test = "tests/test_bundled_adapters.py::test_assistant_rows_credit_without_ending_presence"
 
 update_command = ["hermes", "update"]
 

@@ -222,7 +222,10 @@ class OffloadedWakeCreditTest(unittest.IsolatedAsyncioTestCase):
 
     def write_prompt(self, prompt_index: int, text: str) -> Path:
         path = session_prompt_path(self.transcript, prompt_index)
-        path.write_text(f"<user_query>\n{text}\n</user_query>", encoding="utf-8")
+        marker = self.adapter._wake_receipts.pending[0].marker
+        path.write_text(
+            f"<user_query>\n{marker}\n{text}\n</user_query>", encoding="utf-8"
+        )
         return path
 
     async def test_an_offloaded_record_credits_the_wake_it_carried(self):
