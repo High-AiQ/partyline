@@ -38,7 +38,9 @@
     }}>☰</button
   >
 
-  <span id="convname" class="flex-none font-serif text-[24px] font-normal text-cream italic"
+  <span
+    id="convname"
+    class="min-w-0 max-w-[40%] flex-[0_1_auto] truncate font-serif text-[24px] font-normal text-cream italic"
     >{room.conversation?.name ?? "—"}</span
   >
   {#if room.conversation}
@@ -84,14 +86,11 @@
 </div>
 
 <style>
-  @media (min-width: 1200px) {
+  @media (min-width: 1201px) {
     #topbar {
       gap: 8px;
       padding-left: 16px;
       padding-right: 16px;
-    }
-    #convmeta {
-      display: none;
     }
   }
 
@@ -99,21 +98,23 @@
        documented `(max-width: 899px)` narrow breakpoint stays hand-written —
        at exactly 899px it must keep agreeing with `NARROW_MAX_WIDTH`. The
        tablet band lives here with it so the breakpoints read as one block. */
-  @media (min-width: 900px) and (max-width: 1199px) {
+  @media (min-width: 900px) and (max-width: 1200px) {
     #topbar {
       padding: 12px;
       align-items: center;
-      gap: 8px;
+      gap: 4px;
     }
+  }
+
+  @media (min-width: 961px) and (max-width: 1200px) {
     #convname {
-      min-width: 0;
-      flex: 1;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      max-width: 30%;
     }
-    #convmeta {
-      display: none;
+  }
+
+  @media (min-width: 1201px) and (max-width: 1440px) {
+    #convname {
+      max-width: 23%;
     }
   }
 
@@ -125,17 +126,6 @@
     }
     #convname {
       font-size: 19px;
-      min-width: 0;
-      flex: 1 1 0%;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    /* The topic is a whole line of prose competing for a width that no longer
-         exists. It stays editable from the line's own row in the drawer; it does
-         not get to push the controls off screen. */
-    #convmeta {
-      display: none;
     }
     .drawer-toggle {
       display: flex;
@@ -163,9 +153,25 @@
     }
   }
 
-  @media (max-width: 450px) {
+  @media (max-width: 450px), (min-width: 900px) and (max-width: 960px) {
+    #topbar {
+      flex-wrap: wrap;
+      row-gap: 2px;
+    }
+    #convname,
+    #convmeta {
+      order: 2;
+      flex: 1 1 calc(50% - 2px);
+      max-width: none;
+    }
     #convname {
-      display: none;
+      font-size: 19px;
+    }
+  }
+
+  @media (min-width: 900px) and (max-width: 960px) {
+    #convname {
+      font-size: 24px;
     }
   }
 </style>
