@@ -1,0 +1,232 @@
+/* Rendered message markdown and the interactive code-copy control. */
+/* A process gets a patch-cable arrow, so the eye can sort people from
+       machines without reading a single name. */
+.who.agent::before {
+  content: "▸ ";
+  color: var(--color-copper);
+  font-weight: 400;
+}
+
+/* ── rendered message bodies ──
+       These target markup produced by renderMessage, so they are :global — but
+       scoped under .body, which only this component draws. The classes come
+       from the markdown renderer, not from markup we can put utilities on, so
+       they stay hand-written like the shared vocabulary in app.css. */
+.body .mention {
+  color: var(--color-copper-hot);
+  background: rgb(217 142 74 / 0.09);
+  border-radius: 3px;
+  padding: 0 3px;
+}
+.body code {
+  background: var(--color-ink-3);
+  border: 1px solid var(--color-line);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 12.5px;
+}
+.body pre {
+  background: var(--color-ink-2);
+  border: 1px solid var(--color-line);
+  border-left: 2px solid var(--color-copper);
+  border-radius: 4px;
+  padding: 10px 14px;
+  margin: 8px 0;
+  overflow-x: auto;
+  font-size: 12.5px;
+  white-space: pre;
+}
+.body pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+}
+.body .code-block-shell {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 25px;
+  column-gap: 10px;
+  align-items: start;
+  background: var(--color-ink-2);
+  border: 1px solid var(--color-line);
+  border-left: 2px solid var(--color-copper);
+  border-radius: 4px;
+  padding: 0;
+  margin: 8px 0;
+  min-height: 40px;
+}
+.body .code-block-shell pre {
+  grid-column: 1;
+  min-width: 0;
+  background: none;
+  border: 0;
+  padding: 10px 14px;
+  margin: 0;
+  overflow-x: auto;
+  font-size: 12.5px;
+  white-space: pre;
+}
+.body .code-block-shell pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+}
+.body .code-copy {
+  position: absolute;
+  z-index: 1;
+  top: 7px;
+  right: 8px;
+  display: grid;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  margin: 0;
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  background: var(--color-ink-3);
+  color: var(--color-cream-faint);
+  opacity: 0;
+  cursor: pointer;
+}
+.body .code-copy:hover,
+.body .code-copy:focus-visible {
+  background: var(--color-copper);
+  color: var(--color-ink);
+  opacity: 1;
+  outline: 2px solid var(--color-copper-hot);
+  outline-offset: 1px;
+}
+.body .code-copy svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+.body .code-block-shell:hover .code-copy {
+  opacity: 1;
+}
+@media (hover: none) {
+  .body .code-copy {
+    opacity: 1;
+  }
+}
+.body [data-math="display"] {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.body .katex-display {
+  margin: 8px 0;
+}
+
+.msg.jump-highlighted {
+  outline: 2px solid var(--color-copper-hot);
+  outline-offset: 4px;
+  border-radius: 4px;
+  background: rgb(217 142 74 / 0.08);
+  transition: background-color 0.35s ease;
+}
+
+/* Headings stay close to body size: this is a chat line, not a document, and
+       a 28px h1 in a message bubble reads as shouting. */
+.body .md-h {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  color: var(--color-cream);
+  margin: 10px 0 2px;
+  line-height: 1.3;
+}
+.body .md-h1 {
+  font-size: 19px;
+}
+.body .md-h2 {
+  font-size: 17px;
+}
+.body .md-h3 {
+  font-size: 15px;
+  font-style: normal;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--color-cream-dim);
+  letter-spacing: 0.02em;
+}
+.body .md-h:first-child {
+  margin-top: 0;
+}
+
+.body p {
+  margin: 0 0 8px;
+}
+.body p:last-child {
+  margin-bottom: 0;
+}
+/* Tailwind's preflight sets `list-style: none` on ul/ol, which is right for
+       navigation and wrong for prose. A process writing a list means a list. */
+.body ul {
+  list-style: disc;
+  margin: 6px 0 6px 4px;
+  padding-left: 18px;
+}
+.body ol {
+  list-style: decimal;
+  margin: 6px 0 6px 4px;
+  padding-left: 18px;
+}
+.body li {
+  margin: 1px 0;
+}
+.body ul li::marker {
+  color: var(--color-copper);
+}
+.body ol li::marker {
+  color: var(--color-copper);
+  font-size: 11px;
+}
+.body blockquote {
+  margin: 8px 0;
+  padding: 2px 0 2px 12px;
+  border-left: 2px solid var(--color-line);
+  color: var(--color-cream-dim);
+  font-style: italic;
+}
+.body hr {
+  border: 0;
+  border-top: 1px dashed var(--color-line);
+  margin: 12px 0;
+}
+.body a {
+  color: var(--color-copper-hot);
+  text-decoration: none;
+  border-bottom: 1px solid rgb(217 142 74 / 0.35);
+}
+.body a:hover {
+  border-bottom-color: var(--color-copper-hot);
+}
+.body table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 12.5px;
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.body th,
+.body td {
+  border: 1px solid var(--color-line);
+  padding: 4px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+.body th {
+  background: var(--color-ink-3);
+  color: var(--color-cream-dim);
+  font-weight: 600;
+}
+.body s {
+  color: var(--color-cream-faint);
+}

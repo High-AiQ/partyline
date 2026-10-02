@@ -1,7 +1,7 @@
 /**
  * Message body rendering: escape first, then `marked`, then DOMPurify, then
- * mention highlighting on text nodes. Block markdown and math/code markers are
- * for process messages only; humans keep inline-only formatting.
+ * mention highlighting on text nodes. Processes get rich block rendering;
+ * humans keep inline rendering with fenced code blocks added to that pipeline.
  */
 
 import { Marked, type Token, type RendererThis } from "marked";
@@ -61,6 +61,27 @@ function renderCodeBlock(text: string, lang: string | undefined): string {
   return `<pre><code${marker}>${text}</code></pre>`;
 }
 
+function encodeAttribute(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => {
+    const entities: Record<string, string> = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    };
+    return entities[character] ?? character;
+  });
+}
+
+function decodeEscapedSource(value: string): string {
+  return value.replace(/&lt;|&quot;|&amp;/g, (entity) => {
+    if (entity === "&lt;") return "<";
+    if (entity === "&quot;") return '"';
+    return "&";
+  });
+}
+
 const inlineMarked = new Marked({
   gfm: true,
   breaks: false,
@@ -71,9 +92,25 @@ const richMarkedForMessage = (): Marked =>
   createRichMarked({
     ...headingRenderer,
     code({ text, lang }: { text: string; lang?: string }) {
-      return renderCodeBlock(text, lang);
+      const source = encodeAttribute(encodeURIComponent(decodeEscapedSource(text)));
+      return renderCodeBlock(text, lang).replace("<code", `<code data-code-source="${source}"`);
     },
   });
+
+function parseHumanSource(source: string, parser: Marked): string {
+  const parts: string[] = [];
+  for (const token of parser.lexer(source)) {
+    const part =
+      token.type === "code" && token.codeBlockStyle !== "indented"
+        ? parser.parse(token.raw)
+        : inlineMarked.parseInline(token.raw);
+    if (typeof part !== "string") {
+      throw new Error("the message renderer requires synchronous Marked extensions");
+    }
+    parts.push(part);
+  }
+  return parts.join("");
+}
 
 DOMPurify.addHook("afterSanitizeAttributes", (node) => {
   if (!(node instanceof Element)) return;
@@ -85,6 +122,7 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
     if (
       attribute.name.startsWith("data-") &&
       attribute.name !== "data-code-language" &&
+      attribute.name !== "data-code-source" &&
       attribute.name !== "data-math"
     ) {
       node.removeAttribute(attribute.name);
@@ -127,7 +165,7 @@ const PURIFY_CONFIG = {
     "th",
     "td",
   ],
-  ALLOWED_ATTR: ["href", "class", "target", "rel", "data-code-language", "data-math"],
+  ALLOWED_ATTR: ["href", "class", "target", "rel", "data-code-language", "data-code-source", "data-math"],
   ALLOWED_URI_REGEXP: /^(?:https?|mailto):/i,
   RETURN_DOM_FRAGMENT: true,
 } as const satisfies DomPurifyConfig;
@@ -164,10 +202,15 @@ function highlightMentions(root: HTMLElement, doc: Document): HTMLElement {
   return root;
 }
 
-export function renderMessage(body: string | undefined, rich = false): string {
+export function renderMessage(body: string | undefined, rich: boolean | "human" = false): string {
   const source = escapeHtml(body ?? "");
   const parser = rich ? richMarkedForMessage() : inlineMarked;
-  const parsed = rich ? parser.parse(source) : parser.parseInline(source);
+  const parsed =
+    rich === "human"
+      ? parseHumanSource(source, parser)
+      : rich
+        ? parser.parse(source)
+        : parser.parseInline(source);
   if (typeof parsed !== "string") {
     throw new Error("the message renderer requires synchronous Marked extensions");
   }
