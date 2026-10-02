@@ -1159,6 +1159,15 @@ timed-out stop is unknown, not proof that there was nothing to stop.
 | --- | --- |
 | Verify the whole process group after TERM and KILL; keep unconfirmed live processes tracked | Infer child-process death from the wrapper's return code or remove a live attachment from runtime tracking before stop completes |
 
+## Keep the topic edit path in the responsive top bar
+
+The resource-budget layout hid `#convmeta` at every width and hid `#convname`
+on phones. The topic button is the only direct way to view and edit a line's
+topic, so tightening the toolbar cannot make it optional. Keep the name and
+topic as shrinking, truncating flex items; compact the controls or give the
+identity row its own line on the narrowest screens. `TopBar.test.ts` guards
+against hiding either identity element again.
+
 ## A no-session timeout does not identify why a CLI stopped
 
 Two earlier glm-flash attaches reached Partyline's 45-second no-session notice,
