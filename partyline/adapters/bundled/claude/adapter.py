@@ -49,6 +49,14 @@ class PartylineAdapter(BaseAdapter):
         hook_url = self.att.get("hook_url")
         if hook_url and "--settings" not in cmd:
             cmd += ["--settings", json.dumps(self._hook_settings(hook_url))]
+        if not self.resume:
+            # Claude snapshots this system prompt with the session and reapplies
+            # it on resume. Keep the user-facing briefing for after startup dialogs.
+            if "--append-system-prompt" in cmd:
+                position = cmd.index("--append-system-prompt") + 1
+                cmd[position] += "\n\n" + self.briefing()
+            else:
+                cmd += ["--append-system-prompt", self.briefing()]
         return cmd
 
     @staticmethod
