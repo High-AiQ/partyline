@@ -73,6 +73,26 @@ def parse_size(value: str) -> int:
     return int(value[:-1]) * multiplier
 
 
+def format_memory_bytes(amount: int | None) -> str:
+    """Show sampled memory in compact binary units for people."""
+    if amount is None:
+        return "unavailable"
+    gib = 1024**3
+    if amount >= gib:
+        tenths = (amount * 10 + gib // 2) // gib
+        return f"{tenths // 10}.{tenths % 10} GiB"
+    mib = 1024**2
+    return f"{(amount + mib // 2) // mib} MiB"
+
+
+def suggested_memory_limit(cap: int, ceiling: int) -> str | None:
+    """Return a valid whole-MiB request no higher than twice cap or ceiling."""
+    mib = min(cap * 2, ceiling) // 1024**2
+    if mib <= cap // 1024**2:
+        return None
+    return f"{mib // 1024}G" if mib % 1024 == 0 else f"{mib}M"
+
+
 def verify_scope_and_exec(limit: str, command: list[str]) -> int:
     """Refuse to start the fenced CLI unless the enclosing scope enforces its cap."""
     current = read_memory_max()

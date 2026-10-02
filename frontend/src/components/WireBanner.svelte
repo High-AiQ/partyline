@@ -12,9 +12,35 @@
   import { dialogs } from "../state/dialogs.svelte";
   import { restart } from "../state/restart.svelte.js";
   import { writeSet } from "../state/write-set.svelte.js";
+  import { memoryRequest } from "../state/memory-request.svelte.js";
+  import { memoryRequestApi } from "../lib/memory-request-api";
   import { room } from "../state/room.svelte.js";
   import { wire } from "../state/wire.svelte.js";
   import { fence } from "../state/fence.svelte.js";
+
+  let decidingMemory = $state(false);
+
+  function memoryLimit(bytes: number | null | undefined): string {
+    if (!bytes) return "default";
+    const mib = Math.floor(bytes / 1024 / 1024);
+    return mib % 1024 === 0 ? `${String(mib / 1024)}G` : `${String(mib)}M`;
+  }
+
+  async function decideMemory(approve: boolean): Promise<void> {
+    const pending = memoryRequest.request;
+    if (!pending || decidingMemory) return;
+    decidingMemory = true;
+    try {
+      const result = approve
+        ? await memoryRequestApi.approve(pending.id)
+        : await memoryRequestApi.decline(pending.id);
+      memoryRequest.apply(result.request);
+    } catch (error: unknown) {
+      room.showNotice(error instanceof Error ? error.message : "could not decide memory request", "error");
+    } finally {
+      decidingMemory = false;
+    }
+  }
 </script>
 
 {#if fence.status && !fence.status.ok}
@@ -29,6 +55,34 @@
     {#if fence.status.remedy}
       <pre class="m-0 whitespace-pre-wrap break-words font-sans">Remedy: {fence.status.remedy}</pre>
     {/if}
+  </div>
+{/if}
+
+{#if memoryRequest.request && !wire.outage}
+  <div
+    id="memoryRequest"
+    class="fixed left-1/2 top-[90px] z-69 flex w-[min(640px,92vw)] max-w-[min(640px,92vw)] -translate-x-1/2 flex-wrap items-start gap-2 rounded-[5px] border border-copper/60 bg-ink-2 px-[14px] py-2 text-[11px] text-cream-dim shadow-[0_12px_30px_rgb(0_0_0/0.45)]"
+    role="status"
+    aria-live="polite"
+  >
+    <span class="min-w-[180px] flex-1 whitespace-normal break-words"
+      >@{memoryRequest.request.requester} requests more memory for @{room.attachments.find(
+        (item) => item.id === memoryRequest.request?.attachment_id,
+      )?.name ?? "process"}: {memoryLimit(
+        room.attachments.find((item) => item.id === memoryRequest.request?.attachment_id)?.memory_cap_bytes,
+      )} → {memoryRequest.request.requested_limit}. {memoryRequest.request.reason}</span
+    >
+    <button
+      type="button"
+      class="primary flex-none"
+      disabled={decidingMemory}
+      onclick={() => void decideMemory(true)}
+    >
+      {decidingMemory ? "applying…" : "approve"}
+    </button>
+    <button type="button" class="flex-none" disabled={decidingMemory} onclick={() => void decideMemory(false)}
+      >decline</button
+    >
   </div>
 {/if}
 
