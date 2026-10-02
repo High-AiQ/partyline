@@ -24,3 +24,6 @@ class AttachmentResponse(BaseModel):
     created_at: float
     cli_session: str | None = None
     cwd_git: CwdGitState | None = None
+    memory_usage_bytes: int | None = Field(default=None, ge=0)
+    memory_cap_bytes: int | None = Field(default=None, gt=0)
+    memory_percent: int | None = Field(default=None, ge=0, le=100)

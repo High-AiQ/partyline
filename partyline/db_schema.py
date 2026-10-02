@@ -5,6 +5,7 @@ entries without growing the query module. Never edit an applied entry; append a 
 """
 
 from .db_schema_base import SCHEMA  # noqa: F401
+from .memory_schema import MIGRATIONS as MEMORY_MIGRATIONS
 
 MIGRATIONS = [
     # cli_session: optional process session id, for adapters that support resume
@@ -291,3 +292,5 @@ MIGRATIONS = [
     """CREATE TRIGGER IF NOT EXISTS delete_message_pins AFTER DELETE ON messages
         BEGIN DELETE FROM message_pins WHERE conv_id=OLD.conv_id AND message_id=OLD.id; END""",
 ]
+
+MIGRATIONS.extend(MEMORY_MIGRATIONS)

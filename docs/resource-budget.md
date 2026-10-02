@@ -46,7 +46,8 @@ at most 8 GiB and 75% of host RAM. Existing attachment memory settings remain
 available through the per-attachment memory endpoint. An unset cap is resolved
 from the global default and saved on the attachment at admission, so later
 edits to the cap do not change a live process. People can change the saved cap
-while it is stopped.
+while it is stopped. The advisory early-warning sampler posts when a live
+process approaches its cap; it does not stop the process or change its cap.
 
 The cap is the per-process kernel kill threshold; exceeding it can OOM-kill
 that process scope. Partyline records an incident with reason `oom`, posts a
@@ -97,17 +98,30 @@ one line also sees changes on another; refreshes are debounced by 300 ms.
 | Process-count admission across all lines | Enforced by Partyline on Linux, macOS, and Windows |
 | Sum of declared memory reservations against host RAM minus reserve | Enforced by Partyline admission on Linux, macOS, and Windows |
 | Per-process memory cap | Linux cgroup scope and Windows Job Object are kernel enforced; macOS `RLIMIT_AS` is best-effort address-space limiting and does not guarantee resident-memory use |
-| Process overview RSS | Advisory visibility only; Linux `/proc` reading, absent on other platforms |
+| Process overview RSS | Advisory visibility only; best effort across supported platforms |
+| Early memory warning | Advisory; one server sampler checks live process trees every five seconds and warns at the people-configured threshold (default 80%), re-arming below 65% and rate-limiting each process to one notice per ten minutes |
 | Resource snapshots and captain briefing | Advisory visibility; they describe current reservations and do not reserve a slot |
+
+Linux warning samples prefer the process scope's cgroup-v2 `memory.current` and
+`memory.peak`. On macOS and Windows, Partyline sums RSS across the observed process
+tree from a process listing. These readings are estimates: child creation and exit
+can race a sample, RSS may count shared pages more than once, and inaccessible or
+short-lived children may be missed. Warnings never stop a process or change its cap.
 
 The global accounting is portable and follows declared reservations. In particular,
 macOS admission is still enforced even though its per-process kernel limit is
 best-effort. A running process can use more resident memory than its cap on
 platforms whose kernel limit does not enforce resident memory.
 
-## Follow-up: larger caps
+## Requesting a larger cap
 
-The existing stopped-attachment memory endpoint can set a cap within its
-ceiling. A future workflow should let a process request a larger cap with a
-reason, have the root captain approve within the configured ceiling, and require
-the person above that ceiling. This change does not add that approval workflow.
+A process, its captain, or a person can file `POST /api/attachments/{id}/memory-requests`
+with `requested_limit` and a reason. A captain can approve within the configurable
+captain ceiling (default twice the process cap, bounded by the host ceiling); a
+person decides above it. Approval stores the new cap and replaces the activation
+through the normal resume path. The old admission lease is released first and the
+replacement is grandfathered through admission. A process cannot approve the
+request for its own cap. Only one memory request can be pending on a line at a
+time; further requests receive HTTP 409 until it is approved or declined. The
+warning threshold and captain ceiling are people-only settings in the resource
+budget dialog.

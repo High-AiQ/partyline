@@ -7,6 +7,8 @@ from .contracts import MessageEvent, MessageResponse
 from .hierarchy import ancestors
 from .mention_relay import live_manager, post_private
 from .process_exit import exit_notice
+from .process_memory import format_memory_bytes, suggested_memory_limit
+from .resource_budget import memory_ceiling
 
 
 def exit_callback(runtime, att):
@@ -20,6 +22,9 @@ async def record_exit(runtime, att, evidence):
     db = runtime.db
     ident, owner = att["id"], att["runtime_owner"]
     if evidence.code == 0 and evidence.reason == "exit":
+        current = db.get_attachment(ident)
+        if current is not None and current.get("runtime_owner") == owner:
+            runtime.memory_usage.pop(ident, None)
         await runtime.post_callback(ident, att["conv_id"], owner)(
             "system", "system", exit_notice(att["name"], evidence))
         return
@@ -27,6 +32,7 @@ async def record_exit(runtime, att, evidence):
         current = db.get_attachment(ident)
         if current is None or current.get("runtime_owner") != owner:
             return
+        runtime.memory_usage.pop(ident, None)
         saved = db._exec(
             "INSERT OR IGNORE INTO process_incidents "
             "(attachment_id,runtime_owner,evidence,created_at) VALUES(?,?,?,?)",
@@ -35,6 +41,17 @@ async def record_exit(runtime, att, evidence):
         if not saved.rowcount:
             return
         detail = exit_notice(att["name"], evidence)
+        if evidence.reason == "oom":
+            peak = format_memory_bytes(evidence.peak_bytes)
+            cap = format_memory_bytes(evidence.limit_bytes)
+            requested = suggested_memory_limit(evidence.limit_bytes, memory_ceiling())
+            hint = (
+                f'POST /api/attachments/{ident}/memory-requests with '
+                f'{{"requested_limit":"{requested}","reason":"…"}}.'
+                if requested else "The host ceiling prevents a larger cap."
+            )
+            detail += (f" Incident {saved.lastrowid}; recorded peak {peak} versus cap "
+                       f"{cap}. Request more with {hint}")
         detail += (f" Inspect GET /api/attachments/{ident}/memory. "
                    "Review the failed workload before resuming; the process remains stopped.")
         message = db.add_owned_message(ident, owner, att["conv_id"], "system", "system", detail)

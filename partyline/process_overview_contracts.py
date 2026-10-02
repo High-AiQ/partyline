@@ -15,6 +15,9 @@ class ProcessOverviewAttachment(BaseModel):
     phase: Literal["working", "speaking", "idle"] = "idle"
     # Best-effort Linux VmRSS; None when unknown (dead pid, no /proc, non-Linux).
     rss_bytes: int | None = Field(default=None, ge=0)
+    memory_usage_bytes: int | None = Field(default=None, ge=0)
+    memory_cap_bytes: int | None = Field(default=None, ge=1)
+    memory_percent: int | None = Field(default=None, ge=0, le=100)
     runtime_started_at: float | None = None
 
 

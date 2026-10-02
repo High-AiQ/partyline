@@ -7,6 +7,8 @@ export const ResourceDefaultsSchema = z.object({
   memory_reserve_bytes: z.number().int(),
   default_process_memory_bytes: z.number().int(),
   memory_reservation_bytes: z.number().int(),
+  memory_warn_percent: z.number().int(),
+  memory_captain_ceiling_bytes: z.number().int(),
 });
 
 export const ResourceSnapshotSchema = z.object({
@@ -14,6 +16,8 @@ export const ResourceSnapshotSchema = z.object({
   memory_reserve_bytes: z.number().int(),
   default_process_memory_bytes: z.number().int(),
   memory_reservation_bytes: z.number().int(),
+  memory_warn_percent: z.number().int(),
+  memory_captain_ceiling_bytes: z.number().int(),
   host_ram_bytes: z.number().int(),
   memory_budget_bytes: z.number().int(),
   memory_ceiling_bytes: z.number().int(),
@@ -31,6 +35,8 @@ export const ResourceSettingsSchema = ResourceSnapshotSchema.pick({
   memory_reserve_bytes: true,
   default_process_memory_bytes: true,
   memory_reservation_bytes: true,
+  memory_warn_percent: true,
+  memory_captain_ceiling_bytes: true,
   host_ram_bytes: true,
   memory_budget_bytes: true,
   memory_ceiling_bytes: true,
@@ -53,6 +59,8 @@ export function setResourceSettings(
     | "memory_reserve_bytes"
     | "default_process_memory_bytes"
     | "memory_reservation_bytes"
+    | "memory_warn_percent"
+    | "memory_captain_ceiling_bytes"
   >,
 ): Promise<ResourceSettings> {
   return request("/api/settings/resources", {

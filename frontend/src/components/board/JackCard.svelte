@@ -152,6 +152,26 @@
     {attachment.command.join(" ")} · {attachment.status}
   </div>
 
+  {#if live && attachment.memory_percent != null && attachment.memory_usage_bytes != null && attachment.memory_cap_bytes != null}
+    <div
+      class="mt-1 h-[3px] overflow-hidden rounded-full bg-panel-line"
+      role="meter"
+      aria-label="memory usage"
+      aria-valuemin="0"
+      aria-valuemax="100"
+      aria-valuenow={attachment.memory_percent}
+      use:tooltip={{
+        label: `${String(Math.round(attachment.memory_usage_bytes / 1024 ** 2))} MiB of ${String(Math.round(attachment.memory_cap_bytes / 1024 ** 2))} MiB`,
+      }}
+    >
+      <div
+        class="h-full rounded-full bg-green"
+        class:bg-copper-hot={attachment.memory_percent >= 80}
+        style={`width: ${String(attachment.memory_percent)}%`}
+      ></div>
+    </div>
+  {/if}
+
   {#if live}
     <button
       class="resume peek-btn mt-1.5 px-[9px] py-0.5 text-[10px] {needsYou

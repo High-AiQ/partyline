@@ -54,6 +54,7 @@ def _attachment(runtime, att: dict) -> ProcessOverviewAttachment:
     adapter = runtime.live.get(att["id"])
     proc = getattr(adapter, "proc", None)
     pid = getattr(proc, "pid", None) if proc is not None else None
+    measured = runtime.memory_usage.get(att["id"], {})
     return ProcessOverviewAttachment(
         id=att["id"],
         handle=att["name"],
@@ -61,6 +62,9 @@ def _attachment(runtime, att: dict) -> ProcessOverviewAttachment:
         pid=pid,
         phase=_phase(runtime, att["id"]),
         rss_bytes=read_rss_bytes(pid),
+        memory_usage_bytes=measured.get("usage_bytes"),
+        memory_cap_bytes=measured.get("cap_bytes"),
+        memory_percent=measured.get("percent"),
         runtime_started_at=att.get("runtime_started_at"),
     )
 

@@ -40,6 +40,8 @@ def defaults(host: Host | None = None) -> dict[str, int]:
         "memory_reserve_bytes": reserve,
         "default_process_memory_bytes": lease,
         "memory_reservation_bytes": min(lease, DEFAULT_RESERVATION),
+        "memory_warn_percent": 80,
+        "memory_captain_ceiling_bytes": min(lease * 2, memory_ceiling(host)),
     }
 
 
@@ -49,6 +51,9 @@ def settings(db, host: Host | None = None) -> dict[str, int]:
         value = db.get_setting(key)
         if value is not None:
             result[key] = int(value)
+    result["memory_captain_ceiling_bytes"] = min(
+        result["memory_captain_ceiling_bytes"], memory_ceiling(host)
+    )
     return result
 
 
@@ -85,6 +90,11 @@ def validate_settings(values: dict[str, int], host: Host | None = None) -> None:
         raise ValueError("memory reservation must be between 256 MB and the default process lease")
     if host.ram_bytes - reserve < reservation:
         raise ValueError("memory budget must leave at least one default process reservation")
+    if not 50 <= values.get("memory_warn_percent", 80) <= 95:
+        raise ValueError("memory warning threshold must be between 50 and 95 percent")
+    captain_ceiling = values.get("memory_captain_ceiling_bytes", min(lease * 2, memory_ceiling(host)))
+    if not lease <= captain_ceiling <= memory_ceiling(host):
+        raise ValueError("captain memory ceiling must be between the default cap and host ceiling")
 
 
 def live_rows(db) -> list[dict]:

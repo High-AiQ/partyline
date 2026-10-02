@@ -224,6 +224,16 @@ class ResourceBudgetTest(unittest.IsolatedAsyncioTestCase):
                 "memory_reserve_bytes": GIB,
                 "default_process_memory_bytes": 4 * GIB,
                 "memory_reservation_bytes": GIB,
+                "memory_warn_percent": 75,
+                "memory_captain_ceiling_bytes": 6 * GIB,
+            })
+            invalid_warning = client.put("/api/settings/resources", headers={"x-kind": "user"}, json={
+                "max_live_processes": 8,
+                "memory_reserve_bytes": GIB,
+                "default_process_memory_bytes": 4 * GIB,
+                "memory_reservation_bytes": GIB,
+                "memory_warn_percent": 49,
+                "memory_captain_ceiling_bytes": 6 * GIB,
             })
             reset_denied = client.post("/api/settings/resources/reset")
             reset = client.post("/api/settings/resources/reset", headers={"x-kind": "user"})
@@ -234,6 +244,9 @@ class ResourceBudgetTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(denied.status_code, 403)
         self.assertEqual(saved.status_code, 200, saved.text)
         self.assertEqual(saved.json()["max_live_processes"], 8)
+        self.assertEqual(saved.json()["memory_warn_percent"], 75)
+        self.assertEqual(saved.json()["memory_captain_ceiling_bytes"], 6 * GIB)
+        self.assertEqual(invalid_warning.status_code, 422)
         self.assertEqual(saved.json()["computed_defaults"]["default_process_memory_bytes"], 2 * GIB)
         self.assertEqual(reset_denied.status_code, 403)
         self.assertEqual(reset.status_code, 200, reset.text)

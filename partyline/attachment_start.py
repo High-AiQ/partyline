@@ -6,7 +6,7 @@ from fastapi import HTTPException
 
 from .agent_connection import provision_connection
 from .adapter_capabilities import adapter_completion
-from .attachment_view import attachment_response
+from .attachment_view import attach_memory_usage, attachment_response
 from .auth_store import ensure_api_token
 from .fence import FenceUnavailable
 from .process_memory import MemoryScopeUnavailable
@@ -74,7 +74,10 @@ async def start_attachment(att, *, runtime, presence, make_adapter, hook_url,
             *runtime.held_wake_hooks(conv_id, ident, att["name"]),
         )
         await announce_attachment(runtime, att, fresh=fresh)
-        return await attachment_response(runtime.db.get_attachment(ident))
+        return attach_memory_usage(
+            await attachment_response(runtime.db.get_attachment(ident)),
+            runtime.memory_usage.get(ident),
+        )
     except FenceUnavailable as exc:
         # Fail closed, loudly: no unconfined fallback exists on purpose.
         await rollback_start(runtime, att)
