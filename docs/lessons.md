@@ -1,5 +1,13 @@
 # Lessons: the false-assumptions ledger
 
+## Child exit waits must not use the shared executor
+
+`Popen.wait()` lasts for the whole child lifetime. Putting one wait in asyncio's
+default executor per attachment can consume every worker and stall unrelated
+thread-backed requests. Reap each child on a dedicated daemon waiter thread;
+bound fan-out probes such as per-attachment Git status with a separate capped
+executor and a presentation deadline.
+
 ## A transcript claim can precede its retry hook
 
 `Adapter.start()` starts the transcript tail before it awaits the running-status
