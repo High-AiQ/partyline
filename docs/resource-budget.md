@@ -49,13 +49,22 @@ edits to the cap do not change a live process. People can change the saved cap
 while it is stopped. The advisory early-warning sampler privately tells a live
 process when it approaches its cap — save work, find what is growing, or request
 more with a reason — and sends a private copy to the nearest live captain on its
-line or an ancestor line. People read both copies on those lines. The warning
+line or an ancestor line. People read both copies on those lines. Going over
+the cap is told once more, even inside the ten-minute cooldown. The warning
 does not stop the process or change its cap.
 
-The cap is the per-process kernel kill threshold; exceeding it can OOM-kill
-that process scope. Partyline records an incident with reason `oom`, posts a
-notice, and leaves the process stopped. On Linux (cgroup scope) and Windows
-(Job Object), the cap is kernel-enforced; on macOS, `RLIMIT_AS` is best-effort
+On Linux the cap is a soft budget, not a cliff: the sampler warns at the warning
+percentage and again once usage passes the cap, but nothing slows or stops the
+process there. The scope's only kernel limit is `MemoryMax` at an emergency
+backstop above the cap — 1.5× the cap or the cap plus 1 GiB, whichever is
+larger, within 3/4 of host RAM — that exists so one runaway cannot take the host
+down. `MemoryHigh` throttling was tried and rejected: with swap disabled the
+kernel cannot reclaim a CLI's anonymous memory, so a process past `MemoryHigh`
+crawls instead of saving its work. Fast growth can still reach the backstop
+before anyone acts. Crossing it OOM-kills that process scope; Partyline records an incident with reason `oom`, posts a notice, and
+leaves the process stopped. Admission still counts reservations, not backstops,
+so the backstops together may exceed RAM. On Windows (Job Object) the cap is a
+hard limit; on macOS, `RLIMIT_AS` is best-effort
 address-space limiting and does not guarantee resident-memory use. A person or
 captain can change an attachment's cap for its next activation with
 `PUT /api/attachments/{id}/memory`; a process cannot grant itself more. The

@@ -127,10 +127,12 @@ class ExitReportingTest(unittest.IsolatedAsyncioTestCase):
         with patch.object(process_memory, 'scope_argv', side_effect=RuntimeError('before spawn')) as scope:
             with self.assertRaises(RuntimeError):
                 await adapter.start()
-        self.assertEqual(scope.call_args.args[1], '6G')
+        self.assertEqual(adapter.memory_limit, '6G')
         if sys.platform.startswith('linux'):
+            self.assertEqual(scope.call_args.args[1], process_memory.backstop_limit('6G'))
             self.assertTrue(process_exit.SCOPE.fullmatch(adapter.memory_scope))
         else:
+            self.assertEqual(scope.call_args.args[1], '6G')
             self.assertIsNone(adapter.memory_scope)
 
     async def test_windows_unknown_exit_does_not_claim_memory_cause(self):

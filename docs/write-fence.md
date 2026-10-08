@@ -91,10 +91,13 @@ it is a fence against accidents, not a jail against malice. See
 
 On Linux, the server wraps every launch in a separate transient systemd scope
 before entering bubblewrap, even when the filesystem fence is disabled.
-`MemoryMax` defaults to `4G` and can be changed with
-`PARTYLINE_PROCESS_MEMORY_LIMIT`; swap is disabled. A verifier runs inside
-the scope and refuses to start the CLI unless it sees a finite `memory.max`
-at or below the requested limit. The boot preflight runs a harmless read-only
+The per-process memory budget defaults to `4G` and can be changed with
+`PARTYLINE_PROCESS_MEMORY_LIMIT`. The budget is advisory — the memory sampler
+warns as a process nears and passes it — and the scope's `MemoryMax` is an
+emergency backstop above it (1.5× or +1 GiB, within 3/4 of host RAM; see
+`docs/resource-budget.md`); swap is disabled. A verifier runs inside the scope
+and refuses to start the CLI unless it sees a finite `memory.max` at or below
+the backstop. The boot preflight runs a harmless read-only
 probe inside a transient scope and checks `memory.max`; if the user manager
 ignores the property, startup logs the failure and attachment starts fail
 closed. Darwin applies the same configurable bound with inherited `RLIMIT_AS`,
