@@ -38,8 +38,11 @@ class ProcessMemoryTest(unittest.TestCase):
         gib = 1024**3
         self.assertEqual(process_memory.backstop_limit("4G", 64 * gib), "6G")
         self.assertEqual(process_memory.backstop_limit("1G", 64 * gib), "2G")
-        self.assertEqual(process_memory.backstop_limit("8G", 8 * gib), "8G")
+        # The host ceiling wins over an oversized saved budget, and over rounding.
+        self.assertEqual(process_memory.backstop_limit("8G", 8 * gib), "6G")
         self.assertEqual(process_memory.backstop_limit("4G", 7 * gib), "5376M")
+        odd_host = 8 * gib - 4096
+        self.assertLessEqual(process_memory.backstop_bytes(4 * gib, odd_host), odd_host * 3 // 4)
         with patch("partyline.server_memory.host_memory_bytes", return_value=64 * gib):
             self.assertEqual(process_memory.backstop_limit("2G"), "3G")
 

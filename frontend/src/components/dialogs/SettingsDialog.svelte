@@ -176,7 +176,7 @@
           default: {displayGb(budget.computed_defaults.memory_reserve_bytes)} GB
         </p>
       {/if}
-      <label for="defaultLease">default process memory cap (GB)</label>
+      <label for="defaultLease">default process memory budget (GB)</label>
       <input
         id="defaultLease"
         type="number"
@@ -187,7 +187,9 @@
       />
       {#if budget}
         <p class="dialog-note">
-          Per-process kernel kill threshold; default: {displayGb(
+          Per-process soft budget: warnings fire as a process nears and passes it. On Linux the kernel kills
+          only at a higher emergency backstop (1.5× or +1 GB, within ¾ of RAM); Windows enforces it as a hard
+          limit; macOS is best-effort; default: {displayGb(
             budget.computed_defaults.default_process_memory_bytes,
           )} GB
         </p>

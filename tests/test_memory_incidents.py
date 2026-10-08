@@ -45,6 +45,10 @@ class IncidentTest(unittest.IsolatedAsyncioTestCase):
         await exit_callback(self.runtime, att)(self.evidence)
 
     async def test_confirmed_oom_is_durable_and_wakes_only_own_captain_once(self):
+        # Sol's repro: a 6 GiB budget killed at its 9 GiB backstop, 8 GiB ceiling.
+        self.db._exec("UPDATE attachments SET memory_limit='6G' WHERE id='worker'")
+        self.evidence = ProcessExit(code=-15, reason='oom', limit_bytes=9 * 1024**3,
+                                    peak_bytes=9 * 1024**3, result='oom-kill')
         with patch("partyline.process_incidents.memory_ceiling", return_value=8 * 1024**3):
             await self.exit(self.worker)
             await record_exit(self.runtime, self.worker, self.evidence)
@@ -53,7 +57,7 @@ class IncidentTest(unittest.IsolatedAsyncioTestCase):
         detail = self.db.list_messages('child')[-1]['body']
         self.assertIn(f"Incident {incident['id']}", detail)
         self.assertIn('/api/attachments/worker/memory-requests', detail)
-        self.assertIn('recorded peak 4.0 GiB versus cap 4.0 GiB', detail)
+        self.assertIn('recorded peak 9.0 GiB at the 9.0 GiB emergency backstop (budget 6.0 GiB)', detail)
         self.assertIn('"requested_limit":"8G"', detail)
         self.assertEqual(incident['code'], -15)
         self.assertEqual(self.db.get_attachment('worker')['status'], 'exited')
@@ -62,6 +66,7 @@ class IncidentTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(messages[-1]['audience_attachment_id'], 'captain')
         self.assertEqual(messages[-1]['source_attachment_id'], 'worker')
         self.assertIn('Do not blindly restart', messages[-1]['body'])
+        self.assertIn('{"limit":"8G"}', messages[-1]['body'])
         self.runtime.live['captain'].deliver.assert_awaited_once()
         self.runtime.live['parent'].deliver.assert_not_awaited()
         self.runtime.live['sibling'].deliver.assert_not_awaited()
