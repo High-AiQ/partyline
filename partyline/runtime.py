@@ -13,6 +13,7 @@ from .contracts import ErrorEvent, Event, MessageEvent, MessageResponse
 from .handshake import hello_payload
 from .db import Db
 from .delivery_hooks import delivery_hooks
+from .delivery_reservation import reserve_delivery
 from .message_routing import post_human_message, route_message
 from .reattach import ReattachCoordinator
 from .runtime_delivery_credit import DeliveryCreditMixin
@@ -117,7 +118,7 @@ class ChatRuntime(DeliveryCreditMixin):
         """
         await self._credit_claimed(att, adapter)
         runtime_owner = adapter.att.get("runtime_owner")
-        async with self.db.reserve_attachment_delivery(att["id"], runtime_owner) as reserved:
+        async with reserve_delivery(self.db, adapter, att["id"], runtime_owner) as reserved:
             if not reserved:
                 return False
             current = self.db.get_attachment(att["id"])
