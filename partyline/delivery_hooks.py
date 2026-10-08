@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .delivery_reservation import reserve_delivery
+
 
 def delivery_hooks(runtime, conv_id: str, att_id: str):
     """Build one activation's held-wake and evidence-credit callbacks."""
@@ -12,7 +14,7 @@ def delivery_hooks(runtime, conv_id: str, att_id: str):
         live = runtime.live.get(att_id)
         if live is None:
             return False
-        async with runtime.db.reserve_attachment_delivery(att_id, runtime_owner) as reserved:
+        async with reserve_delivery(runtime.db, live, att_id, runtime_owner) as reserved:
             if not reserved:
                 return False
             att = runtime.db.get_attachment(att_id) or {}
