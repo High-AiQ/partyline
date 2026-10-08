@@ -42,3 +42,71 @@ describe("conversation rail live state", () => {
     }
   });
 });
+
+describe("conversation rail bulk select", () => {
+  it("selects a subtree in select mode and hands the lines to bulk archive", async () => {
+    room.conversations = [
+      {
+        id: "root",
+        name: "root",
+        topic: "",
+        created_at: 1,
+        archived_at: null,
+        live_count: 0,
+        parent_id: null,
+      },
+      {
+        id: "kid",
+        name: "kid",
+        topic: "",
+        created_at: 2,
+        archived_at: null,
+        live_count: 0,
+        parent_id: "root",
+      },
+      {
+        id: "solo",
+        name: "solo",
+        topic: "",
+        created_at: 3,
+        archived_at: null,
+        live_count: 0,
+        parent_id: null,
+      },
+    ];
+    const open = vi.spyOn(room, "open").mockResolvedValue(undefined);
+    const onarchivemany = vi.fn();
+    const list = mount(ConversationList, {
+      target: document.body,
+      props: {
+        onmanagement: vi.fn(),
+        onrename: vi.fn(),
+        oncloseprocesses: vi.fn(),
+        ondelete: vi.fn(),
+        onarchivemany,
+      },
+    });
+    try {
+      document.querySelector<HTMLButtonElement>(".bulk-select")?.click();
+      await vi.waitFor(() => {
+        expect(document.querySelectorAll(".bulk-check")).toHaveLength(3);
+      });
+      expect(document.querySelector(".conv-more")).toBeNull();
+      document.querySelector<HTMLButtonElement>(".conv")?.click();
+      await vi.waitFor(() => {
+        expect(document.body.textContent).toContain("2 selected");
+      });
+      expect(open).not.toHaveBeenCalled();
+      document.querySelector<HTMLButtonElement>(".bulk-archive")?.click();
+      const [lines, done] = onarchivemany.mock.calls[0] as [{ id: string }[], () => void];
+      expect(lines.map((line) => line.id)).toEqual(["root", "kid"]);
+      done();
+      await vi.waitFor(() => {
+        expect(document.querySelector(".bulk-check")).toBeNull();
+      });
+    } finally {
+      await unmount(list);
+      vi.restoreAllMocks();
+    }
+  });
+});

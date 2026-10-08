@@ -44,7 +44,7 @@
 
   const tooltipLabel = $derived(
     view
-      ? `processes ${String(view.live_processes)}/${String(view.max_live_processes)}\nmemory reserved ${gb(view.memory_reserved_bytes)} of ${gb(view.memory_budget_bytes)} · cap ${gb(view.memory_cap_bytes)}\nmost processes: ${view.busiest_line ?? "none"}${blocked ? "\nnew attaches are blocked until usage drops or the limit is raised" : ""}`
+      ? `processes ${String(view.live_processes)}/${String(view.max_live_processes)}\nadmission reservation ${gb(view.memory_reserved_bytes)} of ${gb(view.memory_budget_bytes)} · per-process caps ${gb(view.memory_cap_bytes)}\nmost processes (line + child lines): ${view.busiest_line ?? "none"}${blocked ? "\nnew attaches are blocked until usage drops or the limit is raised" : ""}`
       : "resource capacity loading",
   );
 </script>
@@ -82,9 +82,13 @@
   {#if resources.popoverOpen && view}
     <div class="resource-popover" role="dialog" aria-label="resource capacity">
       <div>processes <strong>{view.live_processes}/{view.max_live_processes}</strong></div>
-      <div>reserved <strong>{gb(view.memory_reserved_bytes)} / {gb(view.memory_budget_bytes)}</strong></div>
-      <div>cap <strong>{gb(view.memory_cap_bytes)}</strong></div>
-      <div>most processes <strong>{view.busiest_line ?? "none"}</strong></div>
+      <div>
+        admission reservation <strong
+          >{gb(view.memory_reserved_bytes)} / {gb(view.memory_budget_bytes)}</strong
+        >
+      </div>
+      <div>per-process caps <strong>{gb(view.memory_cap_bytes)}</strong></div>
+      <div>most processes (line + child lines) <strong>{view.busiest_line ?? "none"}</strong></div>
       {#if blocked}
         <p class="capacity-blocked">New attaches are blocked until usage drops or the limit is raised.</p>
       {/if}

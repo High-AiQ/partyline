@@ -11,6 +11,7 @@
   import ManagementDialog from "../dialogs/ManagementDialog.svelte";
   import RenameLineDialog from "../dialogs/RenameLineDialog.svelte";
   import DeleteLineDialog from "../dialogs/DeleteLineDialog.svelte";
+  import BulkArchiveDialog from "../dialogs/BulkArchiveDialog.svelte";
   import PurgeLineDialog from "../dialogs/PurgeLineDialog.svelte";
   import PurgeAllDialog from "../dialogs/PurgeAllDialog.svelte";
   import StopServerDialog from "../dialogs/StopServerDialog.svelte";
@@ -41,6 +42,10 @@
 
   function deleteLine(conversation: Conversation): void {
     dialogs.open(DeleteLineDialog, { conversation });
+  }
+
+  function archiveMany(lines: Conversation[], done: () => void): void {
+    dialogs.open(BulkArchiveDialog, { lines, ondone: done });
   }
 
   function closeProcesses(conversation: Conversation): void {
@@ -78,6 +83,7 @@
     onrename={renameLine}
     oncloseprocesses={closeProcesses}
     ondelete={deleteLine}
+    onarchivemany={archiveMany}
   />
 
   <form id="newconv" class="flex gap-2 border-t border-dashed border-line px-5 py-[14px]" onsubmit={openLine}>

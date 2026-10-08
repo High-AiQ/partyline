@@ -92,7 +92,7 @@ describe("ResourceIndicator", () => {
         expect(document.querySelector(".resource-popover")).not.toBeNull();
       });
       expect(document.querySelector(".resource-popover")?.textContent).toContain("18 GB / 58 GB");
-      expect(document.querySelector(".resource-popover")?.textContent).toContain("cap 36 GB");
+      expect(document.querySelector(".resource-popover")?.textContent).toContain("per-process caps 36 GB");
       expect(document.body.textContent).toContain("resource line");
     } finally {
       await unmount(component);
@@ -163,7 +163,7 @@ describe("ResourceIndicator", () => {
         );
       });
       expect(document.querySelector(".resource-popover")?.textContent).toContain("14 GB / 1.0 GB");
-      expect(document.querySelector(".resource-popover")?.textContent).toContain("cap 56 GB");
+      expect(document.querySelector(".resource-popover")?.textContent).toContain("per-process caps 56 GB");
       load.mockResolvedValue({
         ...snapshot,
         live_processes: 7,

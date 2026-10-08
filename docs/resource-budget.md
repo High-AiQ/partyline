@@ -46,8 +46,11 @@ at most 8 GiB and 75% of host RAM. Existing attachment memory settings remain
 available through the per-attachment memory endpoint. An unset cap is resolved
 from the global default and saved on the attachment at admission, so later
 edits to the cap do not change a live process. People can change the saved cap
-while it is stopped. The advisory early-warning sampler posts when a live
-process approaches its cap; it does not stop the process or change its cap.
+while it is stopped. The advisory early-warning sampler privately tells a live
+process when it approaches its cap — save work, find what is growing, or request
+more with a reason — and sends a private copy to the nearest live captain on its
+line or an ancestor line. People read both copies on those lines. The warning
+does not stop the process or change its cap.
 
 The cap is the per-process kernel kill threshold; exceeding it can OOM-kill
 that process scope. Partyline records an incident with reason `oom`, posts a
@@ -56,8 +59,9 @@ notice, and leaves the process stopped. On Linux (cgroup scope) and Windows
 address-space limiting and does not guarantee resident-memory use. A person or
 captain can change an attachment's cap for its next activation with
 `PUT /api/attachments/{id}/memory`; a process cannot grant itself more. The
-ceiling is `min(8 GiB, 3/4 of host RAM)`. Early warning and a one-click process
-request-more-memory workflow are not built; they remain follow-up work.
+ceiling is `min(8 GiB, 3/4 of host RAM)`. A process or captain asks for more with
+`POST /api/attachments/{id}/memory-requests`; approval restarts the process with
+the new cap.
 
 Admission counts `starting` as live. The check and row reservation share the
 runtime ownership lock, so parallel starts cannot both take the same last slot.

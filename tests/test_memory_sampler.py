@@ -33,9 +33,31 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
         with patch("partyline.memory_sampler.memory_ceiling", return_value=6 * 1024**3):
             text = warning_text({"id": "worker", "name": "worker"},
                                 3_600_000_000, 4 * 1024**3)
-        self.assertIn("3.4 GiB of its 4.0 GiB memory cap (83%)", text)
+        self.assertIn("3.4 GiB of its 4.0 GiB per-process memory cap (83%)", text)
+        self.assertIn("approval restarts the process", text)
         self.assertIn('/api/attachments/worker/memory-requests', text)
         self.assertIn('"requested_limit":"6G"', text)
+
+    def test_own_warning_says_what_the_host_does_at_the_cap(self):
+        row = {"id": "worker", "name": "worker"}
+        cases = {"linux": "may kill this process if it cannot reclaim",
+                 "win32": "allocations past it fail",
+                 "darwin": "cannot enforce the cap on resident memory"}
+        for platform, phrase in cases.items():
+            with self.subTest(platform), patch("partyline.memory_sampler.sys.platform", platform):
+                text = warning_text(row, 9, 10, own=True)
+            self.assertIn(phrase, text)
+            self.assertIn("Commit or save your work now", text)
+
+    async def test_self_warning_really_rings_the_warned_process(self):
+        self.db._exec("UPDATE attachments SET is_lead=1 WHERE id='worker'")
+        runtime = ChatRuntime(self.db)
+        runtime.live["worker"] = SimpleNamespace(att=self.db.get_attachment("worker"))
+        runtime.deliver_pending = AsyncMock(return_value=True)
+        row = {"id": "worker", "name": "worker", "conv_id": "line"}
+        await _warn(runtime, row, 3 * 1024**3, 4 * 1024**3)
+        rung = [call.args[1]["id"] for call in runtime.deliver_pending.await_args_list]
+        self.assertEqual(rung, ["worker"])
 
     async def test_warning_is_private_to_the_line_captain_and_people_can_read_it(self):
         worker = {"id": "worker", "name": "worker", "conv_id": "line"}
@@ -43,15 +65,26 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
         self.db._exec("UPDATE attachments SET is_lead=1,status='running' WHERE id='captain'")
         runtime = ChatRuntime(self.db)
         runtime.live["captain"] = SimpleNamespace(att=self.db.get_attachment("captain"))
-        with patch("partyline.memory_sampler.post_private", new_callable=AsyncMock) as private, \
-                patch("partyline.memory_sampler.post_system_notice", new_callable=AsyncMock) as public:
+        with patch("partyline.memory_sampler.post_private", new_callable=AsyncMock) as private:
             await _warn(runtime, worker, 3 * 1024**3, 4 * 1024**3)
-        self.assertEqual(private.await_count, 1)
-        self.assertEqual(private.await_args.kwargs["audience"], "captain")
-        self.assertIn("worker", private.await_args.args[4])
-        self.assertEqual(public.await_count, 0)
+        audiences = [call.kwargs["audience"] for call in private.await_args_list]
+        self.assertEqual(audiences, ["worker", "captain"])
+        self.assertIn("you are using", private.await_args_list[0].args[4])
+        self.assertIn("worker is using", private.await_args_list[1].args[4])
+        self.assertIn("As its captain, decide now", private.await_args_list[1].args[4])
 
-    async def test_captain_warning_is_public_and_copied_to_parent_captain(self):
+    async def test_root_captain_warning_rings_the_captain_itself(self):
+        self.db._exec("UPDATE attachments SET is_lead=1,status='running' WHERE id='worker'")
+        self.db._exec("UPDATE attachments SET is_lead=0 WHERE id='captain'")
+        runtime = ChatRuntime(self.db)
+        runtime.live["worker"] = SimpleNamespace(att=self.db.get_attachment("worker"))
+        row = {"id": "worker", "name": "captain", "conv_id": "line"}
+        with patch("partyline.memory_sampler.post_private", new_callable=AsyncMock) as private:
+            await _warn(runtime, row, 3 * 1024**3, 4 * 1024**3)
+        self.assertEqual([call.kwargs["audience"] for call in private.await_args_list], ["worker"])
+        self.assertEqual(private.await_args.args[1], "line")
+
+    async def test_captain_warning_rings_itself_and_the_parent_captain(self):
         self.db.create_conversation("parent", "Parent")
         self.db._exec("UPDATE conversations SET parent_id='parent' WHERE id='line'")
         self.db.add_attachment("parent-captain", "parent", "boss", "fake", ["fake"], self.temp.name)
@@ -62,13 +95,10 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
         runtime.live["worker"] = SimpleNamespace(att=self.db.get_attachment("worker"))
         runtime.live["parent-captain"] = SimpleNamespace(att=self.db.get_attachment("parent-captain"))
         row = {"id": "worker", "name": "captain", "conv_id": "line"}
-        with patch("partyline.memory_sampler.post_private", new_callable=AsyncMock) as private, \
-                patch("partyline.memory_sampler.post_system_notice", new_callable=AsyncMock) as public:
+        with patch("partyline.memory_sampler.post_private", new_callable=AsyncMock) as private:
             await _warn(runtime, row, 3 * 1024**3, 4 * 1024**3)
-        self.assertEqual(public.await_count, 1)
-        self.assertEqual(public.await_args.args[1], "line")
-        self.assertEqual(private.await_count, 1)
-        self.assertEqual(private.await_args.kwargs["audience"], "parent-captain")
+        calls = [(call.args[1], call.kwargs["audience"]) for call in private.await_args_list]
+        self.assertEqual(calls, [("line", "worker"), ("parent", "parent-captain")])
 
     async def test_sampler_continues_after_bad_tick_and_prunes_stopped_usage(self):
         values = iter([RuntimeError("sample failed"), (800 * 1024**2, None, "fake")])
