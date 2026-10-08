@@ -6,7 +6,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from partyline.db import Db
-from partyline.memory_sampler import _warn, crosses_warning, process_tree_rss, run, warning_text
+from partyline.memory_sampler import (
+    _warn, crosses_warning, process_tree_rss, run, warning_limit, warning_text,
+)
 from partyline.runtime import ChatRuntime
 
 
@@ -58,6 +60,49 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
         await _warn(runtime, row, 3 * 1024**3, 4 * 1024**3)
         rung = [call.args[1]["id"] for call in runtime.deliver_pending.await_args_list]
         self.assertEqual(rung, ["worker"])
+
+    def test_host_clamp_changes_linux_warning_limit_and_both_warning_copies(self):
+        gib = 1024**3
+        row = {'id': 'worker', 'name': 'worker'}
+        with patch('partyline.server_memory.host_memory_bytes', return_value=8 * gib):
+            for platform in ('linux', 'win32', 'darwin'):
+                with self.subTest(platform=platform), \
+                        patch('partyline.memory_sampler.sys.platform', platform):
+                    self.assertEqual(warning_limit(8 * gib), (6 if platform == 'linux' else 8) * gib)
+                    self.assertEqual(warning_limit(4 * gib), 4 * gib)
+            with patch('partyline.memory_sampler.sys.platform', 'linux'):
+                for budget in (6 * gib, 8 * gib):
+                    for own in (True, False):
+                        text = warning_text(row, 5 * gib, budget, own=own)
+                        self.assertIn('6.0 GiB emergency backstop is at or below', text)
+                        self.assertIn('Warnings use the backstop', text)
+                        self.assertNotIn('nothing stops you there', text)
+
+    async def test_oversized_budget_warns_and_routes_before_the_backstop(self):
+        gib = 1024**3
+        self.db._exec("UPDATE attachments SET memory_limit='8G',is_lead=1 WHERE id='worker'")
+        runtime = ChatRuntime(self.db)
+        runtime.live['worker'] = SimpleNamespace(att=self.db.get_attachment('worker'))
+        runtime.deliver_pending = AsyncMock(return_value=True)
+        usage = 6 * gib * 80 // 100 + 1
+
+        class StopSampling(Exception):
+            pass
+
+        async def tick(_seconds):
+            raise StopSampling
+
+        with patch('partyline.server_memory.host_memory_bytes', return_value=8 * gib), \
+                patch('partyline.memory_sampler.sys.platform', 'linux'), \
+                patch('partyline.memory_sampler.asyncio.sleep', tick):
+            with self.assertRaises(StopSampling):
+                await run(runtime, sampler=lambda _: (usage, None, 'fake'))
+        self.assertLess(usage, 6 * gib)
+        runtime.deliver_pending.assert_awaited_once()
+        text = self.db.list_messages('line')[-1]['body']
+        self.assertIn('8.0 GiB per-process memory budget (60%)', text)
+        self.assertIn('6.0 GiB emergency backstop is at or below', text)
+        self.assertEqual(runtime.memory_usage['worker']['cap_bytes'], 8 * gib)
 
     async def test_warning_is_private_to_the_line_captain_and_people_can_read_it(self):
         worker = {"id": "worker", "name": "worker", "conv_id": "line"}

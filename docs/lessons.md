@@ -1,5 +1,16 @@
 # Lessons: the false-assumptions ledger
 
+## A saved memory budget can exceed the host's backstop
+
+Warnings assumed the saved budget was below the enforced limit. Restoring an
+8 GiB budget on an 8 GiB host clamps the backstop to 6 GiB, so warning at 80%
+of the budget arrives after the kill point. On Linux, base warning thresholds,
+hysteresis and escalation on the smaller of budget and backstop; keep the saved
+budget for display and requests. Explain the clamp in both private warning
+copies. `tests.test_memory_sampler` checks early delivery before 6 GiB, equality,
+and unchanged Windows/macOS thresholds. When no budget increase fits, recovery
+advice must omit update examples; `tests.test_memory_incidents` covers it.
+
 ## Child exit waits must not use the shared executor
 
 `Popen.wait()` lasts for the whole child lifetime. Putting one wait in asyncio's
