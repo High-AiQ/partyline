@@ -9,6 +9,7 @@
    */
   import LineMenu from "./LineMenu.svelte";
   import { orderedLines } from "../../lib/line-hierarchy";
+  import { toggleSelection } from "../../lib/bulk-select";
   import { tooltip } from "../../lib/tooltip";
   import type { Conversation } from "../../lib/contracts";
   import { room } from "../../state/room.svelte";
@@ -18,6 +19,7 @@
     onmanagement: (conversation: Conversation) => void;
     oncloseprocesses: (conversation: Conversation) => void;
     ondelete: (conversation: Conversation) => void;
+    onarchivemany?: (conversations: Conversation[], done: () => void) => void;
   }
 
   interface MenuState {
@@ -25,7 +27,17 @@
     conversation: Conversation;
   }
 
-  let { onrename, onmanagement, oncloseprocesses, ondelete }: Props = $props();
+  let { onrename, onmanagement, oncloseprocesses, ondelete, onarchivemany }: Props = $props();
+
+  /** Bulk select mode: rows toggle a checkbox instead of opening the line. */
+  let selecting = $state(false);
+  let selected = $state<Set<string>>(new Set());
+  const chosen = $derived(room.conversations.filter((line) => selected.has(line.id)));
+
+  function stopSelecting(): void {
+    selecting = false;
+    selected = new Set();
+  }
 
   /** `{anchor, conversation}` while a menu is open, else null. */
   let menu = $state<MenuState | null>(null);
@@ -42,6 +54,31 @@
      propagation, so this cannot fight with the toggle above. -->
 <svelte:body on:click={() => (menu = null)} />
 
+{#if onarchivemany && room.conversations.length}
+  <div class="bulk-bar flex items-center justify-end gap-1.5 px-5 pt-2 text-[11px] text-cream-faint">
+    {#if selecting}
+      <span class="mr-auto">{chosen.length} selected</span>
+      <button
+        type="button"
+        class="bulk-archive px-2 py-0.5 text-[11px]"
+        disabled={chosen.length === 0}
+        onclick={() => {
+          onarchivemany(chosen, stopSelecting);
+        }}>archive {chosen.length || ""}</button
+      >
+      <button type="button" class="bulk-cancel px-2 py-0.5 text-[11px]" onclick={stopSelecting}>cancel</button
+      >
+    {:else}
+      <button
+        type="button"
+        class="bulk-select px-2 py-0.5 text-[11px]"
+        use:tooltip={{ label: "select several lines to archive at once" }}
+        onclick={() => (selecting = true)}>select</button
+      >
+    {/if}
+  </div>
+{/if}
+
 <nav id="convs" class="min-h-0 flex-1 overflow-y-auto py-2.5" aria-label="lines">
   {#each orderedLines(room.conversations) as { line: conversation, depth } (conversation.id)}
     {@const open = menu?.conversation.id === conversation.id}
@@ -54,8 +91,19 @@
         class:active={room.conversation?.id === conversation.id}
         style:padding-left="{20 + Math.min(depth, 4) * 16}px"
         use:tooltip={{ label: conversation.name }}
-        onclick={() => room.open(conversation)}
+        aria-pressed={selecting ? selected.has(conversation.id) : undefined}
+        onclick={() => {
+          if (selecting) selected = toggleSelection(selected, conversation.id, room.conversations);
+          else void room.open(conversation);
+        }}
       >
+        {#if selecting}<input
+            class="bulk-check pointer-events-none"
+            type="checkbox"
+            tabindex="-1"
+            aria-hidden="true"
+            checked={selected.has(conversation.id)}
+          />{/if}
         {#if depth > 0}<span class="text-cream-faint" aria-label="child line">↳</span>{/if}
         <span class="conv-name min-w-0 truncate">{conversation.name}</span>
         {#if conversation.live_count > 0}
@@ -67,20 +115,22 @@
           >
         {/if}
       </button>
-      <div
-        class="conv-actions absolute top-1/2 right-2 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto group-[.menu-open]:opacity-100 group-[.menu-open]:pointer-events-auto"
-      >
-        <button
-          class="conv-more size-8 bg-ink-2 p-0 text-[15px] leading-none text-cream-faint hover:bg-copper hover:text-ink aria-expanded:bg-copper aria-expanded:text-ink"
-          type="button"
-          use:tooltip={{ label: "line actions" }}
-          aria-label="line actions for {conversation.name}"
-          aria-expanded={open}
-          onclick={(event) => {
-            toggle(event, conversation);
-          }}>⋯</button
+      {#if !selecting}
+        <div
+          class="conv-actions absolute top-1/2 right-2 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto group-[.menu-open]:opacity-100 group-[.menu-open]:pointer-events-auto"
         >
-      </div>
+          <button
+            class="conv-more size-8 bg-ink-2 p-0 text-[15px] leading-none text-cream-faint hover:bg-copper hover:text-ink aria-expanded:bg-copper aria-expanded:text-ink"
+            type="button"
+            use:tooltip={{ label: "line actions" }}
+            aria-label="line actions for {conversation.name}"
+            aria-expanded={open}
+            onclick={(event) => {
+              toggle(event, conversation);
+            }}>⋯</button
+          >
+        </div>
+      {/if}
     </div>
   {/each}
 </nav>
