@@ -1,5 +1,24 @@
 # Lessons: the false-assumptions ledger
 
+## A startup dialog must not hold the instance's ownership lock
+
+On 2026-10-08, appointing the hero-benchmark captain rang a Claude worker
+before it had created its transcript. Delivery waited for the worker's
+startup gate while holding the database's process-shared runtime lock.
+The worker stayed at startup; unrelated captain messages and detach status
+updates waited behind it. Stopping that worker released the wait, explaining
+the delayed "wakes pending" notice and the captain's stale running card.
+
+The false assumption was that an adapter's delivery wait is always a short
+pty write. Startup and briefing retries can wait for a person indefinitely.
+Acquire the startup paste reservation first, then the ownership reservation;
+keep the startup reservation through the paste so a retry cannot intervene.
+Recheck ownership after waiting, and keep transcript receipts responsible for
+delivery credit. `tests.test_startup_delivery_lock` covers ordinary mentions,
+held wakes and resume continuations, a blocked retry, cancellation, stop,
+owner replacement, and delivery to and detachment of another line's captain.
+The startup and retry regressions time out with the old reservation order.
+
 ## A saved memory budget can exceed the host's backstop
 
 Warnings assumed the saved budget was below the enforced limit. Restoring an

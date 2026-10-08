@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 
+from .delivery_reservation import reserve_delivery
+
 
 async def deliver_continuation(runtime, adapter, att_id: str, messages: list[dict], timeout: float):
     """Write under the owner lock, then await any structured receipt outside it."""
     owner = adapter.att.get("runtime_owner")
     message_ids = [message["id"] for message in messages]
-    async with runtime.db.reserve_attachment_delivery(att_id, owner) as reserved:
+    async with reserve_delivery(runtime.db, adapter, att_id, owner) as reserved:
         if not reserved:
             raise RuntimeError("attachment ownership changed before continuation delivery")
         prepare = getattr(adapter, "prepare_delivery_receipt", None)
