@@ -3,10 +3,11 @@
    * Archive several lines at once.
    *
    * One typed word stands in for typing every line name: the list above the
-   * form is the thing being confirmed. Lines go one top-most line at a time,
-   * each with its children, and a failure keeps the dialog open with what is
-   * left, so a retry never re-sends a line that is already gone.
+   * form is the thing being confirmed. Exactly those lines go deepest first,
+   * one at a time, never with include_children. A failure keeps the dialog
+   * open, so a retry never re-sends a line that is already gone.
    */
+  import { untrack } from "svelte";
   import Modal from "../Modal.svelte";
   import ConfirmForm from "./ConfirmForm.svelte";
   import { ApiError, api } from "../../lib/api";
@@ -26,7 +27,9 @@
   let live = $state<Attachment[]>([]);
   const done: string[] = [];
   // Frozen when the dialog opens: the confirmed list is the whole scope.
-  const order = archiveOrder(new Set(lines.map((line) => line.id)), [...room.conversations, ...lines]);
+  const order = untrack(() =>
+    archiveOrder(new Set(lines.map((line) => line.id)), [...room.conversations, ...lines]),
+  );
 
   $effect(() => {
     Promise.all(lines.map((line) => api.conversation(line.id)))

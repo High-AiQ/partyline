@@ -130,6 +130,11 @@ def crosses_warning(usage: int, cap: int, threshold: int) -> bool:
     return cap > 0 and usage >= required
 
 
+def warning_limit(budget: int) -> int:
+    """Warn before a Linux host clamp can kill below a saved budget."""
+    return min(budget, backstop_bytes(budget)) if sys.platform.startswith("linux") else budget
+
+
 async def _warn(runtime, row: dict, usage: int, cap: int) -> None:
     """Tell the process itself, then the nearest captain above it, privately.
 
@@ -154,7 +159,12 @@ async def _warn(runtime, row: dict, usage: int, cap: int) -> None:
 def cap_enforcement(platform: str, cap: int) -> str:
     """Say honestly what reaching the cap does on this host."""
     if platform.startswith("linux"):
-        backstop = format_memory_bytes(backstop_bytes(cap))
+        hard = backstop_bytes(cap)
+        backstop = format_memory_bytes(hard)
+        if hard <= cap:
+            return (f"On this host the {backstop} emergency backstop is at or below the "
+                    f"{format_memory_bytes(cap)} budget. Warnings use the backstop; the kernel "
+                    "may kill this process there if it cannot reclaim enough memory.")
         return ("The budget is advisory, so nothing stops you there, but at the "
                 f"{backstop} emergency backstop the kernel kills this process.")
     if platform.startswith("win"):
@@ -182,7 +192,9 @@ def warning_text(row: dict, usage: int, cap: int, *, own: bool = False) -> str:
                 "now, then find and stop what is growing (a build, test run, or cache). If "
                 "the work genuinely needs more, file a request with a reason for a person to "
                 f"approve: {request_hint}")
-    return (f"⚠ {row['name']} is using {used}. It has been told to save its work. As its "
+    clamp = (cap_enforcement(sys.platform, cap) + " "
+             if sys.platform.startswith("linux") and backstop_bytes(cap) <= cap else "")
+    return (f"⚠ {row['name']} is using {used}. {clamp}It has been told to save its work. As its "
             "captain, decide now: have it cut what is growing, or file a justified higher budget "
             f"for a person to approve, and tell the person which you chose. {request_hint}")
 
@@ -190,7 +202,7 @@ def warning_text(row: dict, usage: int, cap: int, *, own: bool = False) -> str:
 async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
     """Sample in small slices, never creating a worker thread per process."""
     armed: dict[str, bool] = {}
-    # Going over the soft cap is told once per climb, outside the cooldown.
+    # Crossing the warning limit is told once per climb, outside the cooldown.
     over: dict[str, bool] = {}
     # Warning state belongs to one activation: a resumed process starts fresh.
     activation: dict[str, object] = {}
@@ -244,15 +256,16 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
                             activation[row["id"]] = adapter
                         usage = sample[0]
                         cap = cap_bytes(row, config)
-                        if usage < cap * REARM_RATIO:
+                        effective = warning_limit(cap)
+                        if usage < effective * REARM_RATIO:
                             armed[row["id"]] = True
                             over[row["id"]] = False
-                        elif usage >= cap > 0 and not over.get(row["id"]):
+                        elif usage >= effective > 0 and not over.get(row["id"]):
                             over[row["id"]] = True
                             armed[row["id"]] = False
                             notified[row["id"]] = clock()
                             await _warn(runtime, row, usage, cap)
-                        elif crosses_warning(usage, cap, config["memory_warn_percent"]):
+                        elif crosses_warning(usage, effective, config["memory_warn_percent"]):
                             now = clock()
                             inside_window = now - notified.get(row["id"], -NOTICE_WINDOW) < NOTICE_WINDOW
                             if armed.get(row["id"], True) and not inside_window:
