@@ -8,7 +8,7 @@ from .hierarchy import ancestors
 from .mention_relay import live_manager, post_private
 from .process_exit import exit_notice
 from .process_memory import format_memory_bytes, suggested_memory_limit
-from .resource_budget import memory_ceiling
+from .resource_budget import cap_bytes, memory_ceiling, settings
 
 
 def exit_callback(runtime, att):
@@ -41,17 +41,20 @@ async def record_exit(runtime, att, evidence):
         if not saved.rowcount:
             return
         detail = exit_notice(att["name"], evidence)
+        budget_bytes = cap_bytes(current, settings(db))
+        requested = suggested_memory_limit(budget_bytes, memory_ceiling())
         if evidence.reason == "oom":
             peak = format_memory_bytes(evidence.peak_bytes)
-            cap = format_memory_bytes(evidence.limit_bytes)
-            requested = suggested_memory_limit(evidence.limit_bytes, memory_ceiling())
+            # The kill happened at the scope's backstop; a request raises the budget.
+            backstop = format_memory_bytes(evidence.limit_bytes)
+            budget = format_memory_bytes(budget_bytes)
             hint = (
                 f'POST /api/attachments/{ident}/memory-requests with '
                 f'{{"requested_limit":"{requested}","reason":"…"}}.'
                 if requested else "The host ceiling prevents a larger cap."
             )
-            detail += (f" Incident {saved.lastrowid}; recorded peak {peak} versus cap "
-                       f"{cap}. Request more with {hint}")
+            detail += (f" Incident {saved.lastrowid}; recorded peak {peak} at the {backstop} "
+                       f"emergency backstop (budget {budget}). Request a larger budget with {hint}")
         detail += (f" Inspect GET /api/attachments/{ident}/memory. "
                    "Review the failed workload before resuming; the process remains stopped.")
         message = db.add_owned_message(ident, owner, att["conv_id"], "system", "system", detail)
@@ -69,7 +72,8 @@ async def record_exit(runtime, att, evidence):
                  "The exit cause is unconfirmed. Inspect the terminal and structured transcript; ")
         advice = (check +
                   "reduce its memory use or explicitly grant a larger finite limit if justified. "
-                  "PUT the memory endpoint with {\"limit\":\"6G\"} (or null for the default), "
+                  f"PUT the memory endpoint with {{\"limit\":\"{requested or 'a larger size'}\"}} "
+                  "(or null for the default), "
                   "then use the normal resume endpoint. Do not blindly restart the same failing command.")
         await post_private(runtime, line, "system", "system", f"{detail} Captain action: {advice}",
                            audience=captain["id"], source=(ident, att["conv_id"]))
