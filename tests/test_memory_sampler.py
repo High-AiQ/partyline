@@ -40,7 +40,7 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
 
     def test_own_warning_says_what_the_host_does_at_the_cap(self):
         row = {"id": "worker", "name": "worker"}
-        cases = {"linux": "may kill this process if it cannot reclaim",
+        cases = {"linux": "emergency backstop the kernel kills this process",
                  "win32": "allocations past it fail",
                  "darwin": "cannot enforce the cap on resident memory"}
         for platform, phrase in cases.items():
@@ -176,6 +176,31 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
         snapshot.assert_not_called()
         self.assertEqual(self.runtime.memory_usage["worker"]["source"], "cgroup")
         self.assertEqual(self.runtime.memory_usage["worker2"]["source"], "cgroup")
+
+    async def test_going_over_the_soft_cap_is_told_once_despite_the_cooldown(self):
+        # 1G cap: warn at 81%, then over the cap a minute later, then stay over.
+        values = iter([0.81, 1.05, 1.10, 1.20])
+        notices = AsyncMock()
+
+        def sample(_adapter):
+            return int(next(values) * 1024**3), None, "fake"
+
+        class StopSampling(Exception):
+            pass
+
+        ticks = []
+
+        async def tick(_seconds):
+            ticks.append(_seconds)
+            if len(ticks) == 4:
+                raise StopSampling
+
+        with patch("partyline.memory_sampler._warn", notices), \
+                patch("partyline.memory_sampler.asyncio.sleep", tick):
+            with self.assertRaises(StopSampling):
+                await run(self.runtime, clock=lambda: 60, sampler=sample)
+        self.assertEqual(notices.await_count, 2)
+        self.assertGreater(notices.await_args_list[1].args[2], 1024**3)
 
     async def test_hysteresis_and_one_notice_per_ten_minute_window(self):
         values = [0.81, 0.90, 0.60, 0.81, 0.81, 0.60, 0.81]

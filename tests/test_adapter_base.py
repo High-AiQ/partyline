@@ -295,13 +295,22 @@ class DarwinPreexecFallbackTest(unittest.IsolatedAsyncioTestCase):
     async def test_linux_spawn_never_applies_the_address_space_fallback(self):
         """(d) Linux keeps its verified systemd scope, not the darwin fallback."""
         adapter = Recorder(["sh", "-c", "sleep 30"], memory_limit="4G")
+        limits = []
+
+        def scope(command, limit, **_kwargs):
+            limits.append(limit)
+            return list(command)
+
         with patch("partyline.adapters.base.process_memory.apply_address_space_limit") as fallback, \
-                patch("partyline.adapters.base.process_memory.scope_argv",
-                      side_effect=lambda command, _limit, **_kwargs: list(command)), \
+                patch("partyline.adapters.base.process_memory.scope_argv", side_effect=scope), \
+                patch("partyline.server_memory.host_memory_bytes", return_value=64 * 1024**3), \
+                patch.object(sys, "platform", "linux"), \
                 patch("partyline.adapters.base.process_exit.new_scope", return_value="unit-1"):
             await adapter.start()
         self.addAsyncCleanup(adapter.stop)
         fallback.assert_not_called()
+        # The 4G cap is a soft budget; the scope's hard limit is the backstop.
+        self.assertEqual(limits, ["6G"])
         self.assertTrue(adapter.alive())
 
 

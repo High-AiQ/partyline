@@ -34,6 +34,15 @@ class ProcessMemoryTest(unittest.TestCase):
         self.assertEqual(argv[-3:], ["--", "/usr/bin/bwrap", "--die-with-parent"])
         self.assertIn("--die-with-parent", argv)
 
+    def test_backstop_sits_above_the_soft_cap_within_three_quarters_of_ram(self):
+        gib = 1024**3
+        self.assertEqual(process_memory.backstop_limit("4G", 64 * gib), "6G")
+        self.assertEqual(process_memory.backstop_limit("1G", 64 * gib), "2G")
+        self.assertEqual(process_memory.backstop_limit("8G", 8 * gib), "8G")
+        self.assertEqual(process_memory.backstop_limit("4G", 7 * gib), "5376M")
+        with patch("partyline.server_memory.host_memory_bytes", return_value=64 * gib):
+            self.assertEqual(process_memory.backstop_limit("2G"), "3G")
+
     def test_linux_refuses_to_launch_without_systemd_scope(self):
         with patch.object(process_memory.shutil, "which", return_value=None):
             with self.assertRaises(process_memory.MemoryScopeUnavailable):

@@ -110,9 +110,9 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
             {"PARTYLINE_PROCESS_MEMORY_LIMIT": self.att["memory_limit"]}
             if self.att.get("memory_limit") else None)
         self.memory_scope = process_exit.new_scope() if sys.platform.startswith("linux") else None
-        self.spawn_argv = process_memory.scope_argv(
-            fence.launch_argv(self), self.memory_limit, unit=self.memory_scope,
-        )
+        # Soft cap: the scope's only kernel limit is the backstop above it.
+        hard = process_memory.backstop_limit(self.memory_limit) if self.memory_scope else self.memory_limit
+        self.spawn_argv = process_memory.scope_argv(fence.launch_argv(self), hard, unit=self.memory_scope)
         env = dict(child_env(os.environ, self.att), TERM="xterm-256color")
         env.update(self.spawn_env())
         # Adapters declare what to strip so a spawned CLI doesn't mistake itself

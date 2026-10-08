@@ -12,7 +12,7 @@ from .hierarchy import ancestors
 from .memory_contracts import MemoryUsageEvent
 from .mention_relay import live_manager, post_private
 from .resource_budget import cap_bytes, live_rows, memory_ceiling, settings
-from .process_memory import format_memory_bytes, suggested_memory_limit
+from .process_memory import backstop_bytes, format_memory_bytes, suggested_memory_limit
 
 INTERVAL = 5.0
 CHUNK = 8
@@ -151,11 +151,12 @@ async def _warn(runtime, row: dict, usage: int, cap: int) -> None:
             return
 
 
-def cap_enforcement(platform: str) -> str:
+def cap_enforcement(platform: str, cap: int) -> str:
     """Say honestly what reaching the cap does on this host."""
     if platform.startswith("linux"):
-        return ("Past the cap the kernel may kill this process if it cannot reclaim "
-                "enough memory.")
+        backstop = format_memory_bytes(backstop_bytes(cap))
+        return ("The cap is a soft budget, so nothing stops you there, but at the "
+                f"{backstop} emergency backstop the kernel kills this process.")
     if platform.startswith("win"):
         return "The cap is a hard limit: allocations past it fail and the process may exit."
     # macOS gets only a best-effort address-space limit, not a resident one.
@@ -173,10 +174,10 @@ def warning_text(row: dict, usage: int, cap: int, *, own: bool = False) -> str:
         "approval restarts the process with the new cap."
         if request_limit else "The host ceiling prevents a larger cap."
     )
-    used = (f"{format_memory_bytes(usage)} of its {format_memory_bytes(cap)} "
+    used = (f"{format_memory_bytes(usage)} of {'your' if own else 'its'} {format_memory_bytes(cap)} "
             f"per-process memory cap ({percent}%)")
     if own:
-        fate = cap_enforcement(sys.platform)
+        fate = cap_enforcement(sys.platform, cap)
         return (f"⚠ {row['name']}, you are using {used}. {fate} Commit or save your work "
                 "now, then find and stop what is growing (a build, test run, or cache). If "
                 "the work genuinely needs more, file a request with a reason for a person to "
@@ -189,6 +190,8 @@ def warning_text(row: dict, usage: int, cap: int, *, own: bool = False) -> str:
 async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
     """Sample in small slices, never creating a worker thread per process."""
     armed: dict[str, bool] = {}
+    # Going over the soft cap is told once per climb, outside the cooldown.
+    over: dict[str, bool] = {}
     notified: dict[str, float] = {}
     cursor = 0
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="memory-sampler")
@@ -201,6 +204,7 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
                 for attachment_id in set(runtime.memory_usage) - live_ids:
                     runtime.memory_usage.pop(attachment_id, None)
                     armed.pop(attachment_id, None)
+                    over.pop(attachment_id, None)
                     notified.pop(attachment_id, None)
                 if rows:
                     start = cursor % len(rows)
@@ -237,6 +241,12 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
                         cap = cap_bytes(row, config)
                         if usage < cap * REARM_RATIO:
                             armed[row["id"]] = True
+                            over[row["id"]] = False
+                        elif usage >= cap > 0 and not over.get(row["id"]):
+                            over[row["id"]] = True
+                            armed[row["id"]] = False
+                            notified[row["id"]] = clock()
+                            await _warn(runtime, row, usage, cap)
                         elif crosses_warning(usage, cap, config["memory_warn_percent"]):
                             now = clock()
                             inside_window = now - notified.get(row["id"], -NOTICE_WINDOW) < NOTICE_WINDOW
