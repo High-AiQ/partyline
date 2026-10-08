@@ -73,6 +73,26 @@ def parse_size(value: str) -> int:
     return int(value[:-1]) * multiplier
 
 
+def backstop_bytes(cap: int, host_ram: int | None = None) -> int:
+    """The hard kill point above a soft cap: 1.5x or +1 GiB, never past 3/4 of host RAM.
+
+    The host clamp wins even over an oversized saved budget: the backstop exists
+    to protect the host, so a budget restored onto a smaller host is killed at
+    the host ceiling rather than allowed to exceed it. Whole MiB, rounded down.
+    """
+    if host_ram is None:
+        from .server_memory import host_memory_bytes
+        host_ram = host_memory_bytes()
+    wanted = min(max(cap * 3 // 2, cap + 1024**3), host_ram * 3 // 4)
+    return max(1, wanted // 1024**2) * 1024**2
+
+
+def backstop_limit(limit: str, host_ram: int | None = None) -> str:
+    """``backstop_bytes`` for a size string."""
+    mib = backstop_bytes(parse_size(limit), host_ram) // 1024**2
+    return f"{mib // 1024}G" if mib % 1024 == 0 else f"{mib}M"
+
+
 def format_memory_bytes(amount: int | None) -> str:
     """Show sampled memory in compact binary units for people."""
     if amount is None:
