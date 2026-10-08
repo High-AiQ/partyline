@@ -12,7 +12,6 @@ from .hierarchy import ancestors
 from .memory_contracts import MemoryUsageEvent
 from .mention_relay import live_manager, post_private
 from .resource_budget import cap_bytes, live_rows, memory_ceiling, settings
-from .system_notice import post_system_notice
 from .process_memory import format_memory_bytes, suggested_memory_limit
 
 INTERVAL = 5.0
@@ -132,38 +131,59 @@ def crosses_warning(usage: int, cap: int, threshold: int) -> bool:
 
 
 async def _warn(runtime, row: dict, usage: int, cap: int) -> None:
+    """Tell the process itself, then the nearest captain above it, privately.
+
+    Private copies still reach people on each line. A process near its cap is
+    always told: a notice no process is rung for is one nobody acts on.
+    """
+    # The copy to the process itself must not name it as the speaker: routing
+    # never rings a process with its own words.
+    await post_private(runtime, row["conv_id"], "system", "system",
+                       warning_text(row, usage, cap, own=True),
+                       audience=row["id"], source=(None, row["conv_id"]))
+    source = (row["id"], row["conv_id"])
     detail = warning_text(row, usage, cap)
-    own_captain = live_manager(runtime, row["conv_id"])
-    if own_captain is not None and own_captain["id"] != row["id"]:
-        await post_private(runtime, row["conv_id"], "system", "system", detail,
-                           audience=own_captain["id"], source=(row["id"], row["conv_id"]))
-        return
-    if own_captain is not None:
-        # People see the line notice; the parent captain gets a private copy.
-        await post_system_notice(runtime, row["conv_id"], detail)
-    for line in ancestors(runtime.db, row["conv_id"]):
+    for line in [row["conv_id"], *ancestors(runtime.db, row["conv_id"])]:
         captain = live_manager(runtime, line)
         if captain is not None and captain["id"] != row["id"]:
             await post_private(runtime, line, "system", "system", detail,
-                               audience=captain["id"], source=(row["id"], row["conv_id"]))
+                               audience=captain["id"], source=source)
             return
-    if own_captain is None:
-        await post_system_notice(runtime, row["conv_id"], detail)
 
 
-def warning_text(row: dict, usage: int, cap: int) -> str:
-    """Build the same visible notice used by runtime warnings and visual captures."""
+def cap_enforcement(platform: str) -> str:
+    """Say honestly what reaching the cap does on this host."""
+    if platform.startswith("linux"):
+        return ("Past the cap the kernel may kill this process if it cannot reclaim "
+                "enough memory.")
+    if platform.startswith("win"):
+        return "The cap is a hard limit: allocations past it fail and the process may exit."
+    # macOS gets only a best-effort address-space limit, not a resident one.
+    return ("This host cannot enforce the cap on resident memory, so growth past it "
+            "eats into memory every other process needs.")
+
+
+def warning_text(row: dict, usage: int, cap: int, *, own: bool = False) -> str:
+    """Build the warning; ``own`` words it for the process that is near its cap."""
     percent = usage * 100 // max(cap, 1)
     request_limit = suggested_limit(cap)
     request_hint = (
         f'POST /api/attachments/{row["id"]}/memory-requests with '
-        f'{{"requested_limit":"{request_limit}","reason":"…"}}.'
+        f'{{"requested_limit":"{request_limit}","reason":"…"}}; '
+        "approval restarts the process with the new cap."
         if request_limit else "The host ceiling prevents a larger cap."
     )
-    detail = (f"⚠ {row['name']} is using {format_memory_bytes(usage)} of its "
-              f"{format_memory_bytes(cap)} memory cap ({percent}%). A line captain or person "
-              f"can request or approve a higher cap: {request_hint}")
-    return detail
+    used = (f"{format_memory_bytes(usage)} of its {format_memory_bytes(cap)} "
+            f"per-process memory cap ({percent}%)")
+    if own:
+        fate = cap_enforcement(sys.platform)
+        return (f"⚠ {row['name']}, you are using {used}. {fate} Commit or save your work "
+                "now, then find and stop what is growing (a build, test run, or cache). If "
+                "the work genuinely needs more, file a request with a reason for a person to "
+                f"approve: {request_hint}")
+    return (f"⚠ {row['name']} is using {used}. It has been told to save its work. As its "
+            "captain, decide now: have it cut what is growing, or file a justified higher cap "
+            f"for a person to approve, and tell the person which you chose. {request_hint}")
 
 
 async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:

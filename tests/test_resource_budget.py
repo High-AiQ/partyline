@@ -77,7 +77,29 @@ class ResourceBudgetTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(view["live_processes"], 3)
         self.assertEqual(view["memory_reserved_bytes"], 3 * 256 * 1024**2)
         self.assertEqual(view["memory_cap_bytes"], 3 * 256 * 1024**2)
-        self.assertEqual(view["busiest_line"], "child line")
+        self.assertEqual(view["busiest_line"], "root line")
+
+    def test_busiest_line_sums_the_whole_family_under_its_top_level_line(self):
+        self.attach("captain-a", "root")
+        self.attach("captain-b", "root")
+        for index in range(3):
+            line = f"sub{index}"
+            self.db.create_conversation(line, f"sub line {index}")
+            self.db._exec("UPDATE conversations SET parent_id='root' WHERE id=?", (line,))
+            self.attach(f"{line}-a", line)
+            self.attach(f"{line}-b", line)
+        self.db.create_conversation("grandchild", "grandchild line")
+        self.db._exec("UPDATE conversations SET parent_id='sub0' WHERE id='grandchild'")
+        self.attach("deep", "grandchild")
+        self.db.create_conversation("solo", "solo line")
+        for index in range(4):
+            self.attach(f"solo-{index}", "solo")
+        self.assertEqual(snapshot(self.db, self.host)["busiest_line"], "root line")
+
+    def test_busiest_family_survives_a_parent_cycle(self):
+        self.db._exec("UPDATE conversations SET parent_id='child' WHERE id='root'")
+        self.attach("one", "child")
+        self.assertIn(snapshot(self.db, self.host)["busiest_line"], {"root line", "child line"})
 
     def test_root_captain_briefing_reports_current_capacity(self):
         self.db.set_setting("max_live_processes", "24")

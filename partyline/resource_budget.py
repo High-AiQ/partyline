@@ -107,6 +107,31 @@ def live_rows(db) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def family_roots(db) -> dict[str, tuple[str, str]]:
+    """Map every line id to its top-level line as ``(id, name)``."""
+    with db.lock:
+        rows = db.conn.execute("SELECT id,name,parent_id FROM conversations").fetchall()
+    lines = {row["id"]: (row["name"], row["parent_id"]) for row in rows}
+    roots: dict[str, tuple[str, str]] = {}
+    for line_id in lines:
+        current, seen = line_id, {line_id}
+        while (parent := lines[current][1]) in lines and parent not in seen:
+            seen.add(parent)
+            current = parent
+        roots[line_id] = (current, lines[current][0])
+    return roots
+
+
+def busiest_family(db, rows: list[dict]) -> str | None:
+    """Name the top-level line whose whole family runs the most processes."""
+    roots = family_roots(db)
+    families: dict[str, list] = {}
+    for row in rows:
+        root_id, name = roots.get(row["conv_id"], (row["conv_id"], row["line_name"]))
+        families.setdefault(root_id, [name, 0])[1] += 1
+    return max(families.values(), key=lambda pair: pair[1], default=(None, 0))[0]
+
+
 def cap_bytes(row: dict, config: dict[str, int]) -> int:
     if row.get("memory_limit"):
         try:
@@ -126,11 +151,7 @@ def snapshot(db, host: Host | None = None) -> dict:
     config = settings(db, host)
     rows = live_rows(db)
     budget = max(0, host.ram_bytes - config["memory_reserve_bytes"])
-    lines: dict[str, tuple[str, int]] = {}
-    for row in rows:
-        line, count = lines.get(row["conv_id"], (row["line_name"], 0))
-        lines[row["conv_id"]] = (line, count + 1)
-    busiest = max(lines.values(), key=lambda pair: pair[1], default=(None, 0))[0]
+    busiest = busiest_family(db, rows)
     reserved = sum(lease_bytes(row, config) for row in rows)
     capped = sum(cap_bytes(row, config) for row in rows)
     return {
