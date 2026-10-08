@@ -58,7 +58,11 @@ percentage and again once usage passes the cap, but nothing slows or stops the
 process there. The scope's only kernel limit is `MemoryMax` at an emergency
 backstop above the cap — 1.5× the cap or the cap plus 1 GiB, whichever is
 larger, within 3/4 of host RAM — that exists so one runaway cannot take the host
-down. `MemoryHigh` throttling was tried and rejected: with swap disabled the
+down. A saved budget restored onto a smaller host can be at or above this
+backstop. Linux warnings, re-arming and the second notice use the smaller of
+budget and backstop, while usage displays and memory requests retain the saved
+budget. Both private warning copies explain when the host clamps the backstop.
+`MemoryHigh` throttling was tried and rejected: with swap disabled the
 kernel cannot reclaim a CLI's anonymous memory, so a process past `MemoryHigh`
 crawls instead of saving its work. Fast growth can still reach the backstop
 before anyone acts. Crossing it OOM-kills that process scope; Partyline records an incident with reason `oom`, posts a notice, and

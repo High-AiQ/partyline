@@ -51,10 +51,10 @@ async def record_exit(runtime, att, evidence):
             hint = (
                 f'POST /api/attachments/{ident}/memory-requests with '
                 f'{{"requested_limit":"{requested}","reason":"…"}}.'
-                if requested else "The host ceiling prevents a larger cap."
+                if requested else "No larger budget fits under the host ceiling."
             )
             detail += (f" Incident {saved.lastrowid}; recorded peak {peak} at the {backstop} "
-                       f"emergency backstop (budget {budget}). Request a larger budget with {hint}")
+                       f"emergency backstop (budget {budget}). {hint}")
         detail += (f" Inspect GET /api/attachments/{ident}/memory. "
                    "Review the failed workload before resuming; the process remains stopped.")
         message = db.add_owned_message(ident, owner, att["conv_id"], "system", "system", detail)
@@ -70,11 +70,15 @@ async def record_exit(runtime, att, evidence):
         check = ("Check the last tool/test for unbounded allocations or huge error output; "
                  if evidence.reason == "oom" else
                  "The exit cause is unconfirmed. Inspect the terminal and structured transcript; ")
-        advice = (check +
-                  "reduce its memory use or explicitly grant a larger finite limit if justified. "
-                  f"PUT the memory endpoint with {{\"limit\":\"{requested or 'a larger size'}\"}} "
-                  "(or null for the default), "
-                  "then use the normal resume endpoint. Do not blindly restart the same failing command.")
+        increase = (
+            "Reduce its memory use or explicitly grant a larger budget if justified. "
+            f'PUT the memory endpoint with {{"limit":"{requested}"}} '
+            "(or null for the default), then use the normal resume endpoint. "
+            if requested else
+            "No larger budget fits under the host ceiling. Reduce the workload's memory use "
+            "before using the normal resume endpoint. "
+        )
+        advice = check + increase + "Do not blindly restart the same failing command."
         await post_private(runtime, line, "system", "system", f"{detail} Captain action: {advice}",
                            audience=captain["id"], source=(ident, att["conv_id"]))
         break
