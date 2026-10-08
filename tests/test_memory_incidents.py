@@ -83,6 +83,22 @@ class IncidentTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(messages[-1]['source_conv_id'], 'child')
         self.runtime.live['parent'].deliver.assert_awaited_once()
 
+    async def test_no_headroom_advice_omits_memory_update_examples(self):
+        self.db._exec("UPDATE attachments SET memory_limit='8G' WHERE id='worker'")
+        self.evidence = ProcessExit(code=-9, reason='oom', limit_bytes=12 * 1024**3,
+                                    result='oom-kill')
+        with patch('partyline.process_incidents.memory_ceiling', return_value=8 * 1024**3):
+            await self.exit(self.worker)
+        messages = self.db.list_messages('child')
+        for message in messages:
+            self.assertIn('No larger budget fits under the host ceiling.', message['body'])
+            self.assertNotIn('a larger size', message['body'])
+            self.assertNotIn('"limit":', message['body'])
+            self.assertNotIn('/memory-requests', message['body'])
+        self.assertIn("Reduce the workload's memory use", messages[-1]['body'])
+        self.assertIn('Do not blindly restart', messages[-1]['body'])
+        self.runtime.live['captain'].deliver.assert_awaited_once()
+
     async def test_unavailable_captain_is_skipped_and_no_captains_is_still_durable(self):
         self.runtime.live.pop('captain')
         await self.exit(self.worker)
