@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 import re
 
 
@@ -12,6 +13,7 @@ class StartupPromptGuard:
     def _startup_prompt_init(self) -> None:
         self._startup_prompt_delivery = asyncio.Event()
         self._startup_paste_lock = asyncio.Lock()
+        self._startup_delivery_task = None
         self._startup_prompt_result: bool | None = None
         self._startup_prompt_began = False
         if not self._startup_prompts():
@@ -93,9 +95,22 @@ class StartupPromptGuard:
 
     async def wait_startup_delivery(self) -> bool:
         """Hold wakes queued while the initial briefing is blocked by a dialog."""
+        if self._startup_delivery_task is asyncio.current_task():
+            return self._startup_prompt_result is True
         await self._startup_prompt_delivery.wait()
         async with self._startup_paste_lock:
             return self._startup_prompt_result is True
+
+    @asynccontextmanager
+    async def reserve_startup_delivery(self):
+        """Wait outside the ownership lock; exclude briefing retries through the paste."""
+        await self._startup_prompt_delivery.wait()
+        async with self._startup_paste_lock:
+            self._startup_delivery_task = asyncio.current_task()
+            try:
+                yield self._startup_prompt_result is True
+            finally:
+                self._startup_delivery_task = None
 
 
 def _distinct_line_matches(matches: list[list[int]]) -> bool:
