@@ -33,7 +33,8 @@ def register_attachment_lifecycle_routes(app, runtime, *, start, require_loopbac
         if att.get("is_lead"):
             # The fresh record carries the old identity but not its role: a
             # replaced captain is still this line's captain. The old row gives
-            # up the one-lead flag first — the index allows exactly one.
+            # up the one-lead flag first — the index allows exactly one — and
+            # the role binds at start, so it must be on the new row before.
             runtime.db._exec("UPDATE attachments SET is_lead=0 WHERE id=?", (att["id"],))
             runtime.db._exec(
                 "UPDATE attachments SET is_lead=1 WHERE id=?", (replacement["id"],))
@@ -49,6 +50,11 @@ def register_attachment_lifecycle_routes(app, runtime, *, start, require_loopbac
             )
             await remove_stopped_record(runtime.db, replacement["id"], missing_ok=True)
             await _removed_event(replacement)
+            if att.get("is_lead"):
+                # The replacement never started: the old row is the captain
+                # again, or the line is left with none.
+                runtime.db._exec(
+                    "UPDATE attachments SET is_lead=1 WHERE id=?", (att["id"],))
             if isinstance(exc, (HTTPException, asyncio.CancelledError)):
                 raise
             raise HTTPException(500, f"failed to start fresh: {exc}") from exc
@@ -105,7 +111,8 @@ def register_attachment_lifecycle_routes(app, runtime, *, start, require_loopbac
         from .rebrief import render_rebrief
 
         response = await _start_replacement(
-            stopped, FreshAttachmentRequest(checkpoint=render_rebrief(db, stopped)))
+            stopped, FreshAttachmentRequest(checkpoint=render_rebrief(
+                db, stopped, reason=body.reason.strip())))
         await post_system_notice(
             runtime, stopped["conv_id"],
             f"↻ @{stopped['name']} replaced with a fresh instance "

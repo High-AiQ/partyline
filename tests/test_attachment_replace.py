@@ -71,6 +71,8 @@ class ReplaceAttachmentTest(unittest.TestCase):
         return {"Authorization": "Bearer " + auth_store.ensure_api_token(self.db, att_id)}
 
     async def start(self, att, **kwargs):
+        if getattr(self, "start_failure", False):
+            raise RuntimeError("spawn failed")
         self.spawned.append(dict(att, **kwargs))
         return att
 
@@ -92,6 +94,22 @@ class ReplaceAttachmentTest(unittest.TestCase):
         # the fresh session started with the re-briefing as its checkpoint
         checkpoint = self.spawned[-1].get("checkpoint") or ""
         self.assertIn("@worker", checkpoint)
+
+    def test_a_failed_start_leaves_the_captain_in_place(self):
+        # the captain replaces itself and the start fails: the old row must
+        # keep the lead flag, or the line is left with no captain at all
+        self.db._exec("UPDATE attachments SET runtime_owner='cap-owner', "
+                      "status='detached' WHERE id='cap'")
+        self.runtime.live.pop("cap")
+        headers = {"Authorization": "Bearer " + auth_store.ensure_api_token(self.db, "cap")}
+        self.start_failure = True
+        failed = self.replace(att_id="cap",
+                              body={"reason": "thrashing on compaction"}, headers=headers)
+        self.assertEqual(failed.status_code, 500, failed.text)
+        old = self.db.get_attachment("cap")
+        self.assertIsNotNone(old)
+        self.assertTrue(old["is_lead"])
+        self.assertFalse(self.spawned)
 
     def test_the_captain_role_survives_the_replacement(self):
         # the captain replaces itself: the fresh instance is still the captain
@@ -135,6 +153,10 @@ class ReplaceAttachmentTest(unittest.TestCase):
         checkpoint = self.spawned[-1].get("checkpoint") or ""
         self.assertIn("gates: pytest tests/test_parser.py", checkpoint)
         self.assertIn("@worker the lexer tests are yours", checkpoint)
+        # a replaced process was not compacted: the header names the replacement
+        self.assertIn("You are a fresh instance replacing the previous @worker: "
+                      "thrashing on compaction", checkpoint)
+        self.assertNotIn("just compacted", checkpoint)
 
     def test_a_live_process_is_detached_then_replaced(self):
         self.db._exec("UPDATE attachments SET status='running' WHERE id='old'")
