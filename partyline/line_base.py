@@ -96,11 +96,16 @@ def refresh_mirror_ref(cwd: str, conv_id: str, branch: str) -> str | None:
 
     Branch views are launch-time fresh, so a long-lived line merges
     yesterday's parent branch; this re-copies exactly that one ref into the
-    mirror. The line's own branch and every other mirror ref are untouched.
-    Returns the new value, or None when there is nothing to refresh — not a
-    linked worktree, no mirror (an unfenced line already reads the real
-    refs), or a branch the host does not have.
+    mirror. The line's own branch and every other mirror ref are untouched —
+    a caller naming the line's own branch is refused outright, so no path
+    through here can overwrite the line's committed state with the real ref,
+    which never sees the line's commits. Returns the new value, or None when
+    there is nothing to refresh — not a linked worktree, no mirror (an
+    unfenced line already reads the real refs), or a branch the host does
+    not have.
     """
+    if branch == branch_name(cwd):
+        return None
     gitdir = _worktree_gitdir(cwd)
     if gitdir is None:
         return None
