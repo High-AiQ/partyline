@@ -115,10 +115,13 @@ class AcceptShaTest(unittest.TestCase):
         sha = self.commit(message, filename)
         return sha
 
-    def accept(self, sha, headers=None, conv_id=None):
+    def accept(self, sha, headers=None, conv_id=None, allow_descendant=None):
+        body = {"sha": sha}
+        if allow_descendant is not None:
+            body["allow_descendant"] = allow_descendant
         return self.client.post(
             f"/api/conversations/{conv_id or self.kid['id']}/accept",
-            json={"sha": sha}, headers=headers or self.root_captain(),
+            json=body, headers=headers or self.root_captain(),
         )
 
     def system_messages(self, conv_id):
@@ -314,6 +317,98 @@ class AcceptShaTest(unittest.TestCase):
         self.assertIn("stray", response.json()["detail"])
         self.assertNotEqual(self.branch_head(), fenced)
         self.assertIsNone(self.db.get_conversation(self.kid["id"])["accepted_sha"])
+
+    def test_allow_descendant_lands_the_branch_on_the_line_s_newer_tip(self):
+        # Finding 2.1: the worker commits again after the review, so the
+        # reviewed SHA is now an ancestor of the fenced tip. With the flag,
+        # accept fast-forwards to the tip instead of refusing the reviewed
+        # SHA as a stray, and names both SHAs.
+        real = self.branch_head()
+        reviewed = self.commit("the reviewed work")
+        tip = self.commit("work past the review")
+        self.mirror(tip)
+        _git("update-ref", "refs/heads/line/kid", real, tip, cwd=self.repo)
+        response = self.accept(reviewed, allow_descendant=True)
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["reviewed_sha"], reviewed)
+        self.assertEqual(body["sha"], tip)
+        self.assertTrue(body["moved"])
+        self.assertEqual(self.branch_head(), tip)
+        self.assertEqual(
+            self.db.get_conversation(self.kid["id"])["accepted_sha"], tip)
+        self.assertIn(
+            f"reviewed {reviewed[:12]}, fast-forwarded to the line's newer tip",
+            " ".join(self.system_messages(self.kid["id"])),
+        )
+
+    def test_without_the_flag_a_sha_behind_the_tip_still_refuses(self):
+        # the same shape as the flag's happy case, but flagless: the refusal
+        # stands so a silent descent can never sneak past a reviewer
+        real = self.branch_head()
+        reviewed = self.commit("the reviewed work")
+        tip = self.commit("work past the review")
+        self.mirror(tip)
+        _git("update-ref", "refs/heads/line/kid", real, tip, cwd=self.repo)
+        response = self.accept(reviewed)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("stray", response.json()["detail"])
+        self.assertEqual(self.branch_head(), real)
+        self.assertIsNone(self.db.get_conversation(self.kid["id"])["accepted_sha"])
+
+    def test_a_tip_diverged_from_the_reviewed_sha_refuses_even_with_the_flag(self):
+        # the flag covers descent only: a mirror tip that shares no line of
+        # descent with the reviewed SHA is still a stray
+        real = self.branch_head()
+        reviewed = self.commit("the reviewed work")
+        _git("update-ref", "refs/heads/line/kid", real, reviewed, cwd=self.repo)
+        diverged = _identity("commit-tree", EMPTY_TREE, "-p", real, "-m", "diverged",
+                             cwd=self.repo).stdout.strip()
+        self.mirror(diverged)
+        response = self.accept(reviewed, allow_descendant=True)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("stray", response.json()["detail"])
+        self.assertNotEqual(self.branch_head(), diverged)
+        self.assertIsNone(self.db.get_conversation(self.kid["id"])["accepted_sha"])
+
+    # -- the tip read ---------------------------------------------------------
+
+    def tip(self, conv_id=None):
+        return self.client.get(
+            f"/api/conversations/{conv_id or self.kid['id']}/tip",
+            headers=self.root_captain(),
+        )
+
+    def test_tip_reports_the_branch_and_the_fenced_tip(self):
+        real = self.branch_head()
+        fenced = self.commit("the real work")
+        self.mirror(fenced)
+        _git("update-ref", "refs/heads/line/kid", real, fenced, cwd=self.repo)
+        seen = self.tip()
+        self.assertEqual(seen.status_code, 200, seen.text)
+        body = seen.json()
+        self.assertEqual(body["branch"], "line/kid")
+        self.assertEqual(body["branch_sha"], real)
+        self.assertEqual(body["fenced_tip"], fenced)
+
+    def test_tip_without_a_mirror_reports_a_null_fenced_tip(self):
+        self.commit("first")
+        seen = self.tip()
+        self.assertEqual(seen.status_code, 200, seen.text)
+        body = seen.json()
+        self.assertEqual(body["branch"], "line/kid")
+        self.assertEqual(body["branch_sha"], self.branch_head())
+        self.assertIsNone(body["fenced_tip"])
+
+    def test_tip_of_an_unplaced_or_unknown_line(self):
+        # no placed worktree: nothing to read, all nulls, never a crash
+        self.db.create_conversation("det", "det")
+        self.db._exec("UPDATE conversations SET parent_id='root', cwd=? WHERE id='det'",
+                      (self.repo,))
+        seen = self.tip("det")
+        self.assertEqual(seen.status_code, 200, seen.text)
+        self.assertEqual(seen.json(), {"branch": None, "branch_sha": None, "fenced_tip": None})
+        self.assertEqual(self.tip("missing").status_code, 404)
 
     def test_a_fenced_accept_moves_the_real_ref_by_cas(self):
         # the checked-out fenced worktree is already at the mirror tip: the

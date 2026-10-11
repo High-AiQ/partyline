@@ -21,7 +21,7 @@ from fastapi import HTTPException, Request
 from .auth_guard import request_principal
 from .git_fence import mirror_branch_ref
 from .hierarchy import ancestors, descendants, parent_id_of
-from .hierarchy_contracts import AcceptIn, AcceptResponse
+from .hierarchy_contracts import AcceptIn, AcceptResponse, TipResponse
 from .line_worktree import _git, line_cwd, repo_and_worktree, rev
 from .worktree_paths import branch_name, managed_root
 from .machine_scope import deny_unless
@@ -83,15 +83,18 @@ def _move_branch(
         raise _git_failure(done, f"cannot move {branch} to the accepted SHA")
 
 
-def accept_sha(db, conv_id: str, sha: str) -> dict:
+def accept_sha(db, conv_id: str, sha: str, allow_descendant: bool = False) -> dict:
     """Verify the SHA, fast-forward the line's branch to it, and record it.
 
-    Returns ``{"branch": name, "sha": full, "moved": bool}`` — ``moved`` is
-    False when the branch already pointed at the SHA, so re-accepting is a
-    clean no-op that leaves the record in place. Under the write fence the
-    line commits to its mirror branch, so when a mirror exists its tip must
-    be the SHA or an ancestor of it — a mirror holding work the SHA does not
-    include is refused as a stray.
+    Returns ``{"branch": name, "sha": full, "moved": bool, "reviewed_sha": ...}``
+    — ``moved`` is False when the branch already pointed at the SHA, so
+    re-accepting is a clean no-op that leaves the record in place. Under the
+    write fence the line commits to its mirror branch, so when a mirror
+    exists its tip must be the SHA or an ancestor of it — a mirror holding
+    work the SHA does not include is refused as a stray. A reviewed SHA the
+    mirror tip descends *from* — the worker committed again after the review
+    — is refused too, unless ``allow_descendant`` lands the branch on the
+    newer tip instead, naming both SHAs in the response.
     """
     conv = db.get_conversation(conv_id)
     if conv is None:
@@ -115,6 +118,15 @@ def accept_sha(db, conv_id: str, sha: str) -> dict:
     head = rev(root, "rev-parse", "--verify", "--quiet", branch)
     if head is None:
         raise AcceptError(409, f"no branch {branch} to accept onto")
+    mirror_head = mirror_branch_ref(cwd, conv_id, branch)
+    reviewed = full
+    if (allow_descendant and mirror_head is not None and mirror_head != full
+            and _descends(root, full, mirror_head)):
+        # The line kept committing after the reviewed hand-off: the fenced
+        # tip descends from the reviewed SHA. Accept by fast-forwarding to
+        # the tip instead of refusing the reviewed SHA as a stray; the
+        # response names both.
+        full = mirror_head
     base = rev(root, "merge-base", branch, full)
     moved = head != full
     if moved:
@@ -136,7 +148,6 @@ def accept_sha(db, conv_id: str, sha: str) -> dict:
         # accepted SHA carries every commit the line actually made; a mirror
         # ahead of or diverging from the SHA is a stray commit. With no
         # mirror the old refusal stands: land the work on the branch first.
-        mirror_head = mirror_branch_ref(cwd, conv_id, branch)
         if mirror_head is not None:
             if mirror_head != full and not _descends(root, mirror_head, full):
                 raise AcceptError(
@@ -159,7 +170,10 @@ def accept_sha(db, conv_id: str, sha: str) -> dict:
                      fenced=mirror_head is not None)
     db._exec("UPDATE conversations SET accepted_sha=? WHERE id=?", (full, conv_id))
     pruned = prune_accepted_review(db, conv_id, full)
-    return {"branch": branch, "sha": full, "moved": moved, "pruned_reviews": pruned}
+    return {
+        "branch": branch, "sha": full, "moved": moved, "pruned_reviews": pruned,
+        "reviewed_sha": reviewed if reviewed != full else None,
+    }
 
 
 def accepted_note(db, conv_id: str) -> str:
@@ -205,24 +219,52 @@ def handoff_rider(db, conv_id: str) -> str:
     return "(hand-off: " + "; ".join(parts) + ")"
 
 
+def _tip_response(db, conv_id: str) -> TipResponse:
+    """Where the line's branch and its fence mirror point, read-only.
+
+    A captain needs the fenced tip to plan a hand-off without learning it
+    from an accept refusal; the mirror lookup is the one accept uses.
+    """
+    cwd = line_cwd(db, conv_id) or ""
+    root, _worktree = repo_and_worktree(cwd) if cwd else (None, None)
+    branch = _branch_name(cwd) if root and managed_root(cwd) else None
+    return TipResponse(
+        branch=branch,
+        branch_sha=rev(root, "rev-parse", "--verify", "--quiet", branch)
+        if branch else None,
+        fenced_tip=mirror_branch_ref(cwd, conv_id, branch) if branch else None,
+    )
+
+
 def register_accept_route(app, runtime) -> None:
+    @app.get("/api/conversations/{conv_id}/tip", response_model=TipResponse)
+    async def line_tip(request: Request, conv_id: str):
+        db = runtime.db
+        deny_unless(db, request_principal(request), conv_id, "read")
+        return _tip_response(db, conv_id)
+
     @app.post("/api/conversations/{conv_id}/accept", response_model=AcceptResponse)
     async def accept(request: Request, conv_id: str, body: AcceptIn):
         db = runtime.db
         principal = request_principal(request)
         deny_unless(db, principal, conv_id, "accept")
         try:
-            done = accept_sha(db, conv_id, body.sha)
+            done = accept_sha(db, conv_id, body.sha, body.allow_descendant)
         except AcceptError as exc:
             raise HTTPException(exc.status_code, exc.detail) from exc
         state = "already at" if not done["moved"] else "moved to"
+        tail = " — the hand-off is the SHA on the line's branch"
+        if done["reviewed_sha"]:
+            tail = (f" — reviewed {done['reviewed_sha'][:12]}, fast-forwarded "
+                    "to the line's newer tip")
         await post_system_notice(
             runtime,
             conv_id,
             f"☏ hand-off accepted by @{principal.name}: {done['branch']} {state} "
-            f"{done['sha'][:12]} — the hand-off is the SHA on the line's branch",
+            f"{done['sha'][:12]}{tail}",
             actor=principal,
         )
         return AcceptResponse(
-            conv_id=conv_id, branch=done["branch"], sha=done["sha"], moved=done["moved"]
+            conv_id=conv_id, branch=done["branch"], sha=done["sha"], moved=done["moved"],
+            reviewed_sha=done["reviewed_sha"],
         )
