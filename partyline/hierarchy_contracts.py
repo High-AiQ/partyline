@@ -47,6 +47,12 @@ class AcceptIn(BaseModel):
     allow_descendant: bool = False
 
 
+class TreeSyncOut(BaseModel):
+    ok: bool
+    worktree: str | None = None
+    detail: str = ""
+
+
 class AcceptResponse(BaseModel):
     conv_id: str
     branch: str
@@ -55,6 +61,30 @@ class AcceptResponse(BaseModel):
     # Set when allow_descendant landed the branch on the line's newer fenced
     # tip; null when the branch holds the reviewed SHA itself.
     reviewed_sha: str | None = None
+    # The deterministic post-accept check: any worktree holding the branch is
+    # at the accepted SHA with a clean status. Reporting only.
+    tree_sync: TreeSyncOut | None = None
+
+
+class PrereviewIn(BaseModel):
+    sha: str = Field(min_length=4, max_length=64)
+    # Tree prefixes (or single files) whose ``.json`` blobs are scanned for
+    # path-like references, e.g. ["data/", "assets/cues.json"].
+    data_paths: list[str] = Field(default_factory=list, max_length=64)
+    checks: list[str] = Field(default_factory=lambda: ["referenced-paths"])
+    repository: str = Field(default="", max_length=4096)
+
+
+class PrereviewRef(BaseModel):
+    file: str  # the .json blob in the commit that names the reference
+    ref: str  # the referenced path, exactly as the table spells it
+    ignored: bool = False  # real on disk, hidden from git by the ignore rules
+
+
+class PrereviewOut(BaseModel):
+    ok: bool
+    missing: list[PrereviewRef] = Field(default_factory=list)
+    checked: int = 0
 
 
 class TipResponse(BaseModel):

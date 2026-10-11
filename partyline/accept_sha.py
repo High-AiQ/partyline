@@ -21,10 +21,11 @@ from fastapi import HTTPException, Request
 from .auth_guard import request_principal
 from .git_fence import mirror_branch_ref
 from .hierarchy import ancestors, descendants, parent_id_of
-from .hierarchy_contracts import AcceptIn, AcceptResponse, TipResponse
+from .hierarchy_contracts import AcceptIn, AcceptResponse, TipResponse, TreeSyncOut
 from .line_worktree import _git, line_cwd, repo_and_worktree, rev
 from .worktree_paths import branch_name, managed_root
 from .machine_scope import deny_unless
+from .prereview import tree_sync_check
 from .review_worktrees import prune_accepted_review
 from .system_notice import post_system_notice
 from .worktree_lifecycle import _base_ref
@@ -170,6 +171,7 @@ def accept_sha(db, conv_id: str, sha: str, allow_descendant: bool = False) -> di
                 )
         _move_branch(root, worktree, branch, full, head,
                      fenced=mirror_head is not None)
+    sync = tree_sync_check(root, branch, full)
     db._exec("UPDATE conversations SET accepted_sha=? WHERE id=?", (full, conv_id))
     pruned = prune_accepted_review(db, conv_id, full)
     if reviewed != full:
@@ -179,7 +181,7 @@ def accept_sha(db, conv_id: str, sha: str, allow_descendant: bool = False) -> di
     return {
         "branch": branch, "sha": full, "moved": moved, "pruned_reviews": pruned,
         "reviewed_sha": reviewed if reviewed != full else None,
-        "past_review": past_review,
+        "past_review": past_review, "tree_sync": sync,
     }
 
 
@@ -264,6 +266,9 @@ def register_accept_route(app, runtime) -> None:
         if done["reviewed_sha"]:
             tail = (f" — reviewed {done['reviewed_sha'][:12]}, fast-forwarded to the line's "
                     f"newer tip ({done['past_review']} commit(s) past the review)")
+        sync = done["tree_sync"]
+        if not sync["ok"]:
+            tail += f" ⚠ tree not in sync: {sync['detail']}"
         await post_system_notice(
             runtime,
             conv_id,
@@ -273,5 +278,5 @@ def register_accept_route(app, runtime) -> None:
         )
         return AcceptResponse(
             conv_id=conv_id, branch=done["branch"], sha=done["sha"], moved=done["moved"],
-            reviewed_sha=done["reviewed_sha"],
+            reviewed_sha=done["reviewed_sha"], tree_sync=TreeSyncOut(**sync),
         )

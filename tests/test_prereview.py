@@ -1,0 +1,180 @@
+"""Deterministic pre-review checks that need no model (finding 2.6).
+
+``referenced-paths`` reads exactly a commit's bytes and reports path-like
+JSON references the commit does not track, flagging the ones a gitignore
+hides; ``tree_sync_check`` reports a worktree left stale or dirty by an
+accept.
+"""
+
+import json
+import os
+import subprocess
+import tempfile
+import unittest
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from partyline import auth_store, auth_tokens, server
+from partyline.auth_guard import install_auth_guard
+from partyline.conversation_routes import register_conversation_routes
+from partyline.db import Db
+from partyline.hierarchy_routes import hierarchy_router
+from partyline.media import MediaStore
+from partyline.prereview import register_prereview_route
+from partyline.runtime import ChatRuntime
+
+
+def _git(*args, cwd):
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
+
+
+def _identity(*args, cwd):
+    return _git("-c", "user.email=t@example.com", "-c", "user.name=t", *args, cwd=cwd)
+
+
+class PrereviewTest(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.repo = os.path.join(self.directory.name, "repo")
+        os.makedirs(self.repo)
+        _git("init", "-q", "-b", "main", cwd=self.repo)
+        _identity("commit", "-q", "--allow-empty", "-m", "root", cwd=self.repo)
+        self.db = Db(f"{self.directory.name}/partyline.db")
+        self.addCleanup(self.db.close)
+        self.runtime = ChatRuntime(self.db)
+        app = FastAPI()
+        install_auth_guard(app, self.db)
+        app.include_router(hierarchy_router(self.runtime))
+        register_prereview_route(app, self.runtime)
+
+        async def fake_start(att, **kwargs):
+            return att
+
+        register_conversation_routes(
+            app, self.runtime, MediaStore(self.db, self.directory.name + "/media"),
+            None, {}, {}, fake_start,
+        )
+        self.client = TestClient(app)
+        self.addCleanup(self.client.close)
+        self.addCleanup(setattr, server, "runtime", server.runtime)
+        server.runtime = self.runtime
+        self.db.create_conversation("root", "Root")
+        self.db.add_attachment("root-lead", "root", "terra", "fake", ["fake"], self.repo)
+        self.db._exec("UPDATE attachments SET is_lead=1, status='running' WHERE id='root-lead'")
+        user = auth_store.create_user(
+            self.db, "person@example.com", "person", auth_tokens.hash_password("hunter2222"))
+        self.human = {"Authorization": "Bearer " + auth_tokens.create_access_token(
+            auth_tokens.signing_secret(self.db), user["id"])}
+        self.captain = {"Authorization": "Bearer " + auth_store.ensure_api_token(
+            self.db, "root-lead")}
+        self.client.headers.update(self.human)
+        made = self.client.post("/api/conversations/root/children", json={"name": "kid"})
+        self.assertEqual(made.status_code, 201, made.text)
+        self.kid = made.json()["conversation"]
+        self.worktree = self.kid["cwd"]
+
+    def commit_table(self, table, extra_files=None, gitignore=None):
+        """Write data/cues.json (+friends) in the worktree and commit them."""
+        os.makedirs(os.path.join(self.worktree, "data"), exist_ok=True)
+        with open(os.path.join(self.worktree, "data", "cues.json"), "w") as fh:
+            json.dump(table, fh)
+        for name, content in (extra_files or {}).items():
+            path = os.path.join(self.worktree, name)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as fh:
+                fh.write(content)
+        if gitignore is not None:
+            with open(os.path.join(self.worktree, ".gitignore"), "w") as fh:
+                fh.write(gitignore)
+        _git("add", "-A", cwd=self.worktree)
+        _identity("commit", "-q", "-m", "table", cwd=self.worktree)
+        return _git("rev-parse", "HEAD", cwd=self.worktree).stdout.strip()
+
+    def check(self, sha, data_paths=("data/",), **body):
+        return self.client.post(f"/api/conversations/{self.kid['id']}/prereview", json={
+            "sha": sha, "data_paths": list(data_paths),
+            "checks": ["referenced-paths"], **body,
+        }, headers=self.captain)
+
+    def test_an_untracked_reference_is_reported_and_a_clean_table_passes(self):
+        clean = self.commit_table({"cue": {"file": "audio/tracked.ogg"}},
+                                  extra_files={"audio/tracked.ogg": "sound"})
+        seen = self.check(clean)
+        self.assertEqual(seen.status_code, 200, seen.text)
+        self.assertTrue(seen.json()["ok"])
+        self.assertEqual(seen.json()["missing"], [])
+        self.assertEqual(seen.json()["checked"], 1)
+        dirty = self.commit_table({"cue": {"file": "audio/ghost.ogg",
+                                           "sheet": "sprites/ghost.png"}})
+        seen = self.check(dirty)
+        self.assertEqual(seen.status_code, 200, seen.text)
+        body = seen.json()
+        self.assertFalse(body["ok"])
+        self.assertEqual(sorted((m["file"], m["ref"]) for m in body["missing"]),
+                         [("data/cues.json", "audio/ghost.ogg"),
+                          ("data/cues.json", "sprites/ghost.png")])
+        self.assertEqual(body["checked"], 2)
+
+    def test_an_ignored_reference_is_flagged_as_ignored(self):
+        # the out/ incident: real in the worktree, hidden from every commit
+        sha = self.commit_table({"cue": {"file": "out/built.ogg"}},
+                                gitignore="out/\n")
+        seen = self.check(sha)
+        self.assertEqual(seen.status_code, 200, seen.text)
+        body = seen.json()
+        self.assertFalse(body["ok"])
+        self.assertEqual(len(body["missing"]), 1)
+        self.assertEqual(body["missing"][0]["ref"], "out/built.ogg")
+        self.assertTrue(body["missing"][0]["ignored"])
+
+    def test_urls_and_plain_words_are_not_counted_as_paths(self):
+        sha = self.commit_table({
+            "url": "https://example.com/sounds/ghost.ogg",
+            "scheme": "mailto:someone@example.com",
+            "word": "loudly",
+            "version": "1.2.3",
+            "nested": ["deeper/voice.ogg", 42, {"again": "notes/flute.ogg"}],
+        })
+        seen = self.check(sha)
+        self.assertEqual(seen.status_code, 200, seen.text)
+        body = seen.json()
+        self.assertEqual(body["checked"], 2)  # the two real-looking paths only
+        self.assertEqual(sorted(m["ref"] for m in body["missing"]),
+                         ["deeper/voice.ogg", "notes/flute.ogg"])
+
+    def test_outside_the_subtree_and_unknown_checks_are_refused(self):
+        stranger = os.path.join(self.directory.name, "stranger")
+        os.makedirs(stranger)
+        _git("init", "-q", "-b", "main", cwd=stranger)
+        # a distinct commit: two same-second empty root commits hash alike
+        with open(os.path.join(stranger, "stranger.txt"), "w") as fh:
+            fh.write("not this repository's work\n")
+        _git("add", "-A", cwd=stranger)
+        _identity("commit", "-q", "-m", "stranger work", cwd=stranger)
+        sha = _git("rev-parse", "HEAD", cwd=stranger).stdout.strip()
+        made = self.check(sha, repository=stranger)
+        self.assertEqual(made.status_code, 403, made.text)
+        self.assertIn("subtree", made.json()["detail"])
+        made = self.check(sha, checks=["vibes"])
+        self.assertEqual(made.status_code, 422, made.text)
+        self.assertIn("unknown checks", made.json()["detail"])
+        made = self.check(sha)
+        self.assertEqual(made.status_code, 400, made.text)  # no such commit here
+
+    def test_a_machine_without_read_on_the_line_is_refused(self):
+        self.db.add_attachment("root-worker", "root", "dig", "fake", ["fake"], self.repo)
+        self.db._exec("UPDATE attachments SET status='running' WHERE id='root-worker'")
+        outsider = {"Authorization": "Bearer " + auth_store.ensure_api_token(
+            self.db, "root-worker")}
+        sha = self.commit_table({"cue": {"file": "audio/tracked.ogg"}},
+                                extra_files={"audio/tracked.ogg": "sound"})
+        made = self.client.post(f"/api/conversations/{self.kid['id']}/prereview", json={
+            "sha": sha, "data_paths": ["data/"], "checks": ["referenced-paths"]},
+            headers=outsider)
+        self.assertEqual(made.status_code, 403, made.text)
+
+
+if __name__ == "__main__":
+    unittest.main()
