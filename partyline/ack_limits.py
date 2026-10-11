@@ -13,18 +13,40 @@ says why.
 
 Exemptions are the design, not an omission: assignments and hand-offs must
 always ring, so anything involving a captain is never limited, and people
-never are. A streak breaks on any real message, and on a file, a reaction,
-or an accept since it began; a silent commit with none of those does not
-break it, and saying anything at all does.
+never are. A streak breaks on any real message — one carrying a commit SHA,
+or substantive past 280 characters, counts as work even when it mentions
+the peer — and on a file, a reaction, or an accept since it began; a
+silent commit with none of those does not break it.
 """
 
 from __future__ import annotations
 
+import re
 import sqlite3
 
 from .mentions import mentioned_names
 
 SCAN = 12
+SUBSTANTIVE_CHARS = 280
+_SHA_RE = re.compile(r"\b[0-9a-f]{7,40}\b")
+
+
+def _real_work(body: str) -> bool:
+    """A SHA hand-off or a substantive reply is work, not an ack.
+
+    Two workers genuinely collaborating — reviewing a slice, trading findings
+    and SHAs — alternate mentions exactly like ack ping-pong, and a refused
+    hand-off between peers is worse than an extra wake. Bare acks ("standing
+    by", "suite at 13 of 61", "ok") stay short and carry no SHA, so the
+    observed failure shape is still caught.
+    """
+    if len(" ".join(body.split())) > SUBSTANTIVE_CHARS:
+        return True
+    return any(
+        any(char in "0123456789" for char in token)
+        and any(char in "abcdef" for char in token)
+        for token in _SHA_RE.findall(body)
+    )
 
 
 def _live(db, conv_id: str) -> dict:
@@ -55,6 +77,8 @@ def pingpong_refusal(db, conv_id: str, sender: str, body: str,
                if name in live and name != me["name"].lower()]
     if len(targets) != 1 or targets[0].get("is_lead"):
         return None  # several addressees is conversation, a captain is exempt
+    if _real_work(body):
+        return None  # this message itself carries work: a SHA, or real content
     target = targets[0]["name"].lower()
     sql = ("SELECT id, sender, sender_type, body, created_at, audience_attachment_id"
            " FROM messages WHERE conv_id=?")
@@ -76,6 +100,8 @@ def pingpong_refusal(db, conv_id: str, sender: str, body: str,
         other = me["name"].lower() if who == target else target
         if other not in mentioned_names(row["body"]):
             break  # said something new rather than echoing back
+        if _real_work(row["body"]):
+            break  # a SHA hand-off or a substantive reply is collaboration, not an ack
         if _has_files(db, row["id"]):
             break  # a file upload is real activity
         streak += 1

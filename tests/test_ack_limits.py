@@ -102,14 +102,41 @@ class AckLimitsTest(unittest.TestCase):
 
     def test_differing_texts_still_count_until_something_real_happens(self):
         # The observed failure was two *different* texts alternating ("standing
-        # by" / "suite at 13 of 61"); the detector is content-blind by design —
-        # only real events (file, reaction, person, third process, accept)
-        # break the streak.
+        # by" / "suite at 13 of 61"); the detector only spares work, not
+        # novelty — bare acks stay refused.
         self.bare_exchange()
 
         after = self.post("@haiku the build is red", self.sol)
 
         self.assertEqual(after.status_code, 429, after.text)
+
+    def test_a_sha_in_the_middle_of_the_chain_is_not_refused(self):
+        # Two workers trading findings and SHAs are collaborating: a refused
+        # hand-off between peers costs more than the wake it saves. The middle
+        # exchange carries the SHA, so the third bare ack starts a fresh streak.
+        self.post("@haiku ok, starting the review", self.sol)
+        self.post("@sol reviewed 5e8bb9432562 — the diff is sound", self.haiku)
+
+        after = self.post("@haiku thanks", self.sol)
+
+        self.assertEqual(after.status_code, 200, after.text)
+
+    def test_a_substantive_message_is_not_refused(self):
+        long_note = "@haiku " + ("the terrain regression traces to the scatter seed " * 8)
+        self.assertGreater(len(" ".join(long_note.split())), 280)
+        self.bare_exchange()
+
+        self.post(long_note, self.sol)
+        after = self.post("@sol splitting the fix now", self.haiku)
+
+        self.assertEqual(after.status_code, 200, after.text)
+
+    def test_a_sha_alone_in_the_incoming_message_is_not_refused(self):
+        self.bare_exchange()
+
+        after = self.post("@haiku accepted as 46f1832afebb", self.sol)
+
+        self.assertEqual(after.status_code, 200, after.text)
 
     def test_a_third_process_in_between_breaks_the_streak(self):
         self.bare_exchange()
