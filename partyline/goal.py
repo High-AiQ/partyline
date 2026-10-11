@@ -21,6 +21,7 @@ from .machine_scope import deny_unless
 from .system_notice import post_system_notice
 
 MAX_GOAL = 3000
+MAX_TOPIC = 20000
 
 
 class GoalIn(BaseModel):

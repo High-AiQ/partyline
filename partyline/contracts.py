@@ -102,6 +102,8 @@ class MessageResponse(BaseModel):
     source_conv_name: str | None = None
     audience_attachment_id: str | None = None
     reactions: list[ReactionResponse] = Field(default_factory=list)
+    # True when a client_key replay answered with an already-stored message.
+    replayed: bool = False
 
 
 class FileUploadResponse(BaseModel):
@@ -117,8 +119,7 @@ class ReattachCandidateResponse(BaseModel):
     id: str
     name: str
     adapter: str
-    # The line this process lives on; a fleet plan spans lines. Defaulted so an
-    # older server that does not send it still parses.
+    # The line this process lives on; defaulted so an older server still parses.
     conversation_id: str = ""
 
 
@@ -126,9 +127,8 @@ class RestartPlanRequest(BaseModel):
     conversation_id: str
     debrief: str = Field(default="", max_length=10_000)
     mode: RestartPlanMode = "offer"
-    # "line" plans the requesting line; "all" plans every live resumable process
-    # on every unarchived line. A manual offer is shown to one tab, so only an
-    # automatic plan may be fleet-wide.
+    # "line" plans the requesting line; "all" plans every live resumable process.
+    # A manual offer is shown to one tab, so only an automatic plan is fleet-wide.
     scope: RestartPlanScope = "line"
 
 

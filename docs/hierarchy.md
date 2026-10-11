@@ -149,6 +149,14 @@ touched.
 Operational hierarchy rules ignore archived children, while purge ordering and restore traversal
 continue to include them.
 
+Requests that need a person bubble to the root. A write-set, memory-cap or restart request
+filed on a child line posts its ordinary notice there plus one `⚑ approval pending` line on the
+tree's root, naming the line, the requester and the approve call, and @mentions the root's
+captain so that process wakes and can explain the request in context — the person talks to the
+root captain and never reads sublines. A request filed on the root itself does not bubble, and
+the staffing wake line counts what is still waiting anywhere below:
+`approvals pending: N («line» write-set, «line2» memory)`, falling as each request is decided.
+
 Work goes down, not sideways. Once a line has a child, a machine may no longer
 attach processes to that line: the root captain that could not staff a child
 otherwise hands the job to a sibling on the root line, in the checkout the
@@ -237,7 +245,18 @@ it there. Under the write fence the line commits to its mirror branch, so
 accept also reads that mirror when one exists: a SHA equal to the mirror tip
 or descended from it is landed on the real branch with a compare-and-swap ref
 update, while a mirror tip the SHA does not carry (ahead of it or diverging
-from it) is refused as a stray. Accepting only fast-forwards: a branch that carries commits the SHA
+from it) is refused as a stray. A worker often commits again after the review,
+so the reviewed SHA is then an ancestor of the mirror tip rather than the tip
+itself: `{"sha": "...", "allow_descendant": true}` accepts such a hand-off by
+fast-forwarding to the tip instead of refusing it. The response names both
+SHAs (`reviewed_sha` and `sha`), the ☏ notice counts what went in unreviewed
+(`N commit(s) past the review`), and the reviewed SHA's review worktrees are
+pruned along with the tip's — accepting work nobody reviewed stays visible in
+the record, never silent. `GET /api/conversations/<id>/tip` returns
+`{"branch", "branch_sha", "fenced_tip"}` — where the line's branch and its
+fence mirror point (`fenced_tip` null with no mirror) — so a captain reads
+the fenced tip before accepting instead of learning it from a 409. Accepting
+only fast-forwards: a branch that carries commits the SHA
 does not include, or a SHA from an unrelated history, is refused with 409
 rather than merged or rebased, so accepting never orphans a commit. Nothing is
 pushed; the captain still pushes after its own review, as before. The recorded
@@ -262,7 +281,15 @@ captain, the parent's captain) — or the documented CLI form, `python -m
 scripts.review_worktree --database <db> create --conversation <id>
 --sha <sha>`. Either checks the SHA out detached at
 `<repo>/.review/<full sha>`, records it on the line, and announces it there.
-`GET .../review-worktrees` lists a line's recorded reviews. The records drive
+`GET .../review-worktrees` lists a line's recorded reviews. The body may also
+name `"repository": "/abs/path"`: the checkout is placed in that repository's
+`.review` when the line itself — or any line of its subtree — works in it
+(finding 2.2: a captain verifies a toolkit candidate against the repository
+it actually affects), and any other repository is refused. The record stays on
+the calling line, so retirement, archiving and the startup sweep prune it in
+whichever repository it was created, and a write-set request may grant a
+review checkout by the same pair (`{"repository": ..., "sha": ...}`) — the
+server derives `<repo>/.review/<full sha>`, so nobody types the path. The records drive
 the cleanup: every review worktree of a line is pruned when the line is
 retired, archived, or purged, and the accepted SHA's review goes when that SHA
 is accepted (reviews of other SHAs stay until the line retires — they may
@@ -272,6 +299,56 @@ whose line is gone or that no record claims — only full-SHA directories, since
 partyline owns the directory but nothing else in a repository's `.review`.
 Review checkouts are disposable by contract: pruning is forced, and the SHAs
 themselves stay in the repository, so no reviewed work is ever lost.
+
+## Pre-review checks and the tree sync
+
+Some findings need no judgment, so they run without a model. `POST
+/api/conversations/<id>/prereview` with `{"sha": "...", "data_paths":
+["data/"]}` reads exactly the commit's bytes — `git ls-tree` and `git show`,
+never a worktree — and reports every path-like string in the JSON tables
+under `data_paths` that the commit does not track, flagging the ones the
+checkout's ignore rules hide (the `out/` incident: real on disk, absent from
+every commit, gone on any other machine). It returns `{"ok", "missing":
+[{"file", "ref", "ignored"}], "checked"}`, needs only `read` on the line, and
+resolves the SHA under the same subtree rule as review worktrees — probing
+ignore rules in that subtree line's own checkout. A reference counts as
+present when it resolves from the repository root or from the naming table's
+own directory, or when it names a tracked directory — a reference ending in
+a slash is read as that directory — and engine schemes are
+checked through `res_roots` (e.g. `{"res://": "game/"}`), so a game's
+`res://` tables are checked in the tree they ship from. After an
+accept, the response and the ☏ notice carry `tree_sync`: any worktree holding
+the accepted branch must sit at the accepted SHA with a clean status — a
+stale or dirty checkout is reported (`⚠ tree not in sync: …`) in the accept
+response, never fixed automatically.
+
+## Partyline docs for captains
+
+Partyline's own documentation is readable over the API, in shelves rather
+than one dump: `GET /api/docs` lists the categories (captaining, attachments,
+review-and-accept, fence-and-write-set, memory-and-resources, restart,
+best-practices, lessons), `GET /api/docs/<category>` lists a category's
+topics, and `GET /api/docs/<category>/<topic>` returns one section — sliced
+live from the repository's `docs/*.md`, so there is no second copy to drift;
+a mapped heading that disappears is refused, not paraphrased. People and
+current captains read them; workers and ordinary participants are refused.
+A captain's wake carries the pointer `(partyline docs: GET /api/docs — …)`
+roughly every N line messages since the last one — a setting,
+`docs_reminder_every_messages`, default 40 — and never on every wake.
+
+## Compaction as a line event
+
+A worker's context compaction used to show only on its own screen. On an
+adapter that declares the `compaction_hooks` capability (Claude Code today),
+the harness's `PreCompact` hook posts `⚠ @<handle> compacted (auto, Nth
+time)` on the line and bumps a persisted counter that the staffing line
+shows as `×N compactions`. The third `auto` compaction within five hook
+turns rings the line's live captain once — that is thrash, and the remedy
+is a fresh instance of the same preset, never a re-prompt.
+`SessionStart(compact)` folds a partyline re-briefing back into the worker's
+context: the goal, the line's topic, and the latest captain-or-person
+message that @mentions the process, verbatim. Adapters without the
+capability get no hooks, no counting, and a 403 from the rebrief endpoint.
 
 ## The goal
 

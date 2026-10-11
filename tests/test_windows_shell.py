@@ -25,6 +25,24 @@ class WindowsHookTest(unittest.TestCase):
             hook = settings['hooks'][event][0]['hooks'][0]
             self.assertEqual(hook, {'type': 'http', 'url': 'http://fixture.invalid/receipt', 'timeout': 5})
 
+    def test_claude_windows_compaction_hooks_keep_the_printing_rebrief(self):
+        # PreCompact rides the native http handler on Windows, but the
+        # SessionStart(compact) re-briefing only works as a printing command:
+        # its stdout is what the harness folds back into context.
+        with patch('partyline.adapters.bundled.claude.adapter.sys.platform', 'win32'):
+            settings = PartylineAdapter._hook_settings(
+                'http://fixture.invalid/receipt', with_compaction=True)
+        for entry in settings['hooks']['PreCompact']:
+            self.assertEqual(entry['matcher'] in ('auto', 'manual'), True)
+            self.assertEqual(entry['hooks'][0], {
+                'type': 'http', 'url': 'http://fixture.invalid/receipt', 'timeout': 5})
+        session = settings['hooks']['SessionStart'][0]
+        self.assertEqual(session['matcher'], 'compact')
+        command = session['hooks'][0]
+        self.assertEqual(command['type'], 'command')
+        self.assertEqual(
+            command['command'], 'curl -s -m 5 http://fixture.invalid/receipt/rebrief')
+
     @unittest.skipUnless(sys.platform == 'win32', 'native PowerShell/CMD hook command')
     def test_cmd_and_powershell_keep_literal_arguments_and_exit_status(self):
         command = python_command('print("%PATH% & $HOME"); raise SystemExit(7)')

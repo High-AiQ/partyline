@@ -24,6 +24,8 @@ KNOWN_EVENTS = frozenset({
     *TURN_BOUNDARIES,
     "notification",
     "subagentstop",
+    "precompact",
+    "sessionstart",
 })
 
 TurnBoundary = Literal["began", "ended"]
@@ -42,6 +44,10 @@ class HookPayload(BaseModel):
     event: str = Field(validation_alias=AliasChoices("hookEventName", "hook_event_name"))
     message: str | None = None
     title: str | None = None
+    # PreCompact names its trigger: "auto" (the context filled) or "manual".
+    # Claude spells it `trigger`; a matcher-shaped dialect folds in too.
+    trigger: str | None = Field(
+        default=None, validation_alias=AliasChoices("trigger", "matcher"))
 
     @field_validator("event", mode="before")
     @classmethod

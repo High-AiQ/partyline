@@ -120,6 +120,87 @@ class ReviewWorktreesTest(unittest.TestCase):
     def review_dir(self, sha):
         return os.path.join(self.repo, ".review", sha)
 
+    def _other_repo_with_port(self):
+        """A second repository with a child line of kid working in it."""
+        other = os.path.join(self.directory.name, "other")
+        os.makedirs(other)
+        _git("init", "-q", "-b", "main", cwd=other)
+        _identity("commit", "-q", "--allow-empty", "-m", "root", cwd=other)
+        made = self.client.post(
+            f"/api/conversations/{self.kid['id']}/children",
+            json={"name": "port", "repository": other})
+        self.assertEqual(made.status_code, 201, made.text)
+        port = made.json()["conversation"]
+        self.assertTrue(port["cwd"].startswith(
+            os.path.join(other, ".partyline-worktrees") + os.sep))
+        with open(os.path.join(port["cwd"], "p.txt"), "w") as fh:
+            fh.write("portable work\n")
+        _git("add", "-A", cwd=port["cwd"])
+        _identity("commit", "-q", "-m", "port work", cwd=port["cwd"])
+        sha = _git("rev-parse", "HEAD", cwd=port["cwd"]).stdout.strip()
+        return other, sha, port["id"]
+
+    def test_a_parent_line_reviews_work_in_a_child_s_other_repository(self):
+        other, sha, port_id = self._other_repo_with_port()
+        created = self.client.post(
+            f"/api/conversations/{self.kid['id']}/review-worktrees",
+            json={"sha": sha, "repository": other}, headers=self.root_captain())
+        self.assertEqual(created.status_code, 201, created.text)
+        body = created.json()
+        self.assertEqual(body["path"], os.path.join(other, ".review", sha))
+        self.assertTrue(os.path.isdir(body["path"]))
+        self.assertEqual(
+            _git("rev-parse", "HEAD", cwd=body["path"]).stdout.strip(), sha)
+        # recorded on the calling line, wherever the checkout physically is
+        listed = self.client.get(
+            f"/api/conversations/{self.kid['id']}/review-worktrees",
+            headers=self.root_captain())
+        self.assertEqual([row["path"] for row in listed.json()], [body["path"]])
+        # the child's retirement keeps it; the caller's prunes it. Port's own
+        # branch is unmerged, so the person retires it — a machine captain is
+        # held to the SAFE test, a person is not.
+        self.assertEqual(self.client.delete(
+            f"/api/conversations/{port_id}", headers=self.human).status_code, 200)
+        self.assertTrue(os.path.isdir(body["path"]))
+        self.assertEqual(self.client.delete(
+            f"/api/conversations/{self.kid['id']}",
+            headers=self.root_captain()).status_code, 200, self.db.list_messages("root"))
+        self.assertFalse(os.path.isdir(body["path"]))
+        rows = self.db._exec("SELECT path FROM review_worktrees").fetchall()
+        self.assertEqual(rows, [])
+
+    def test_a_review_worktree_outside_the_subtree_is_refused(self):
+        stranger = os.path.join(self.directory.name, "stranger")
+        os.makedirs(stranger)
+        _git("init", "-q", "-b", "main", cwd=stranger)
+        _identity("commit", "-q", "--allow-empty", "-m", "root", cwd=stranger)
+        sha = _git("rev-parse", "HEAD", cwd=stranger).stdout.strip()
+        made = self.client.post(
+            f"/api/conversations/{self.kid['id']}/review-worktrees",
+            json={"sha": sha, "repository": stranger}, headers=self.root_captain())
+        self.assertEqual(made.status_code, 403, made.text)
+        self.assertIn("subtree", made.json()["detail"])
+        self.assertFalse(os.path.isdir(os.path.join(stranger, ".review")))
+        self.assertEqual(self.client.get(
+            f"/api/conversations/{self.kid['id']}/review-worktrees",
+            headers=self.root_captain()).json(), [])
+
+    def test_the_startup_sweep_rules_a_cross_repository_review_by_its_line(self):
+        from partyline.worktree_lifecycle import sweep_orphaned_worktrees
+
+        other, sha, _port_id = self._other_repo_with_port()
+        created = self.client.post(
+            f"/api/conversations/{self.kid['id']}/review-worktrees",
+            json={"sha": sha, "repository": other}, headers=self.root_captain())
+        path = created.json()["path"]
+        sweep_orphaned_worktrees(self.db)
+        self.assertTrue(os.path.isdir(path))  # kid is live and still reviewing here
+        self.db.archive_conversation(self.kid["id"])
+        sweep_orphaned_worktrees(self.db)
+        self.assertFalse(os.path.isdir(path))  # the line is gone: swept in the other repo
+        rows = self.db._exec("SELECT path FROM review_worktrees").fetchall()
+        self.assertEqual(rows, [])
+
     def system_messages(self, conv_id):
         rows = self.db._exec(
             "SELECT body FROM messages WHERE conv_id=? AND sender_type='system' ORDER BY id",

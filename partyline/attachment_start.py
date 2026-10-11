@@ -34,7 +34,7 @@ def prepare_attachment(att, runtime, hook_url, checkpoint):
     att["db_paths"] = database_paths(runtime.db)
     provision_connection(runtime.db.path, att)
     att["digest_rider"] = lambda: ""  # role delivery layers the goal and staffing on top
-    bind_role_delivery(runtime.db, att)
+    bind_role_delivery(runtime.db, att, runtime)
     att["fresh_checkpoint"] = checkpoint
     att["startup_attention"] = lambda prompt: surface_attention(runtime, att, prompt)
     att["on_process_exit"] = exit_callback(runtime, att)

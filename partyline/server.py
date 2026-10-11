@@ -84,6 +84,9 @@ from .reaction_routes import reaction_router
 from .pin_routes import pin_router
 from .accept_sha import register_accept_route
 from .review_worktrees import register_review_routes
+from .prereview import register_prereview_route
+from .captain_docs import register_docs_route
+from .line_base import register_line_base_route
 from .goal import register_goal_route
 from .process_overview import register_process_overview_route
 from .presence import Presence
@@ -181,6 +184,9 @@ install_static_cache(app)
 register_terminal_route(app, runtime)
 register_accept_route(app, runtime)
 register_review_routes(app, runtime)
+register_prereview_route(app, runtime)
+register_docs_route(app, runtime)
+register_line_base_route(app, runtime)
 register_compact_route(app, runtime, presence)
 register_memory_routes(app, runtime)
 register_line_process_routes(app, runtime)

@@ -6,6 +6,7 @@ from fastapi import HTTPException
 
 from .contracts import MessageEvent, MessageResponse
 from .hierarchy import stamp_source, tree_conversation_ids
+from .idempotent_posts import original_for_key, remember_key
 from .interrupts import interrupt_for
 from .mention_relay import relay_mentions
 from .mentions import (
@@ -16,6 +17,7 @@ from .mentions import (
     mentioned_names,
 )
 from .solo_line import implied_addressee
+from .speech_echo import capture_echo
 
 logger = logging.getLogger(__name__)
 
@@ -72,14 +74,32 @@ async def post_human_message(runtime, conv_id: str, handle: str, body: str) -> d
     return await runtime.post_message(conv_id, handle, "human", text)
 
 
-async def post_identified(runtime, conv_id, principal, body: str) -> dict:
-    """A machine or person speaking through the API, mentions routed."""
+async def post_identified(runtime, conv_id, principal, body: str, client_key: str | None = None) -> dict:
+    """A machine or person speaking through the API, mentions routed.
+
+    ``client_key`` makes a retry idempotent: the same sender presenting the
+    same key within the window gets the original message back instead of a
+    second copy (finding 2.7 — a false `connection/request failed` sent
+    processes re-POSTing text that had already landed).
+    """
     if (reason := self_mention_reason(runtime.db, principal, conv_id, body)) is not None:
         raise HTTPException(422, reason)
+    if client_key and (
+        original := original_for_key(runtime.db, principal.name, client_key, conv_id)
+    ) is not None:
+        return {**original, "replayed": True}
     if principal.kind != "machine":
-        return await post_human_message(runtime, conv_id, principal.name, body)
+        stored = await post_human_message(runtime, conv_id, principal.name, body)
+        if client_key:
+            remember_key(runtime.db, principal.name, client_key, conv_id, stored["id"])
+        return stored
+    if (capture := capture_echo(runtime.db, principal.name, conv_id, body)) is not None:
+        # The tail posted these words first; the API copy is the twin (2.7).
+        return {**capture, "replayed": True}
     stored = runtime.db.add_message(conv_id, principal.name, "agent", body)
     stored = {**stored, **stamp_source(runtime.db, stored["id"], principal)}
+    if client_key:
+        remember_key(runtime.db, principal.name, client_key, conv_id, stored["id"])
     if (returns := getattr(runtime, "returns", None)) is not None:
         # An API post is the process speaking: a hand-off here settles its turn
         # exactly as one said through its own pty would.

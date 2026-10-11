@@ -12,6 +12,7 @@ from collections.abc import Collection
 
 from . import features
 from .line_depth import MAX_CAPTAIN_DEPTH
+from .worker_pack import WORKER_REMINDER, worker_instructions  # noqa: F401  (re-exported)
 
 
 ROLE = (
@@ -49,7 +50,10 @@ PROCEDURE = (
     '--conversation <line-id> --sha <sha>`, which checks it out at <repo>/.review/<sha>, '
     "records it on the line, and prunes it when the line retires or the SHA is accepted — "
     "whole diff from its intended base, gates run, hunting what the report omits "
-    "(skills/adversarial-review/SKILL.md). Run it or delegate it, but hold its findings; "
+    "(skills/adversarial-review/SKILL.md). Add "
+    '{{"repository":"<abs path>"}} to review a commit in any repository of this subtree, '
+    'and a write-set request may name {{"repository","sha"}} instead of the path. '
+    "Run it or delegate it, but hold its findings; "
     "never accept on a bare 'done'. Work accepted below still gets fresh scrutiny here, at "
     "your own scope: a lower captain's acceptance is input, never a substitute. Commission "
     "the inspection if you like, but the acceptance decision is yours and cannot be "
@@ -67,7 +71,14 @@ STAFFING_TRAITS = (
     "Favor can_manage captains, implements workers, and reads_images for visual work. "
     "GET {root}/staffing lists preset traits and live processes; a match is only the "
     "unique handle+adapter+command agreement — never infer the rest. Mix models when "
-    "you can; this is advice, not a gate."
+    "you can; this is advice, not a gate. A request that needs a person's approval "
+    "anywhere below your subtree arrives on the root line as a ⚑ approval pending "
+    "notice and is counted as approvals pending in the staffing line; the root "
+    "captain explains it to the person in context. Partyline's own docs are "
+    "category-indexed for captains at GET {root}/docs — request a category, then a "
+    "topic, instead of guessing. Assign in small reads, scoped test runs and files by "
+    "name: a worker whose compactions badge climbs is thrashing, and a thrashing "
+    "worker is replaced with a fresh instance of the same preset, never re-prompted."
 )
 
 ASK_FIRST = (
@@ -132,10 +143,24 @@ RECLAIM = (
     "at /api/attachments/<att-id>/screen?lines=40 or its transcript tail: detach only when sure it is stuck."
 )
 
+FENCE = (
+    "**The fence, in one paragraph.** A line's branch ref moves only on accept: the worktree "
+    "HEAD (the fenced mirror) is the real tip, so `git log <branch>` from outside shows the "
+    "old SHA until the accept lands. Create review worktrees through the API — POST "
+    "{root}/review-worktrees — never a raw `git worktree add`, which fails inside the fence. "
+    "A line's view of its parent branch is also launch-time fresh: GET {root}/base reports "
+    "the parent SHA as the host sees it and how far behind the line is, and POST "
+    "{root}/refresh-base re-copies it before merging main."
+)
+
 SPLIT = (
     "**Split only independent slices.** One child line per slice, born briefed: POST "
     '{root}/children with {{"name":"slice","goal":"what its manager sees through","topic":'
-    '"the context that line needs — where things are, budget, gates, acceptance"}}. The goal '
+    '"the context that line needs — where things are, budget, gates, acceptance"}}. Both '
+    "fields are capped differently: the goal at 3,000 characters (it rides the manager's "
+    "every wake), the topic at 20,000 — still put a longer "
+    "brief in a repo file at the child's base — `docs/contracts/<line>.md` works well — then "
+    "name that file in the topic. The goal "
     "rides its manager's every wake and the topic is standing context for everyone there; a "
     "captain cannot read your line, so what is not in that brief it does not know. Each child "
     "is born in its own git worktree, on branch `line/<name>` (`line/<name>/work` on Windows): its "
@@ -162,7 +187,11 @@ SPLIT = (
     "was fulfilled and whether the piece integrates. When you accept the work, record the "
     "hand-off: POST /api/conversations/<child-id>/accept with {{\"sha\":\"<full sha>\"}} — "
     "partyline verifies the SHA exists and fast-forwards the child's branch to it, and the "
-    "hand-off is the SHA on the line's branch; nothing else counts. Accepting only "
+    "hand-off is the SHA on the line's branch; nothing else counts. If the line's tip has "
+    "moved past the SHA you reviewed, send {{\"allow_descendant\": true}}: the accept "
+    "fast-forwards to that newer tip when it descends from the reviewed SHA and the notice "
+    "counts the commits that went in unreviewed. GET /api/conversations/<child-id>/tip "
+    "shows the branch and the fenced tip before you accept. Accepting only "
     "fast-forwards: a side-branch or detached tip the branch cannot reach is refused, never "
     "merged in. Once the branch carries the accepted SHA and the child's captain is done, "
     "retire the child: DELETE /api/conversations/<child-id>?stop_processes=true; its "
@@ -170,6 +199,8 @@ SPLIT = (
     "stop its live processes first, POST /api/conversations/<child-id>/attachments/close. A "
     "refused retirement answers with every blocker at once (live processes, an uncleared "
     "goal, child lines, unmerged commits, uncommitted changes) so you fix them in one pass. "
+    "Pass ?clear_goal=true to waive the goal blocker — a goal on its own no longer blocks "
+    "the retirement, and the goal is cleared only once every other blocker is gone. "
     "A merged branch's dirty worktree is the one you may throw away: pass ?discard=true with "
     "the DELETE; partyline refuses it for an unmerged branch, whose commits live only there."
 )
@@ -213,44 +244,6 @@ HEARTBEAT = (
 )
 
 
-WORKER = (
-    "### On a captained line you act only on your captain's @mention\n"
-    "This line has a captain. Until your captain @mentions you with an explicit assignment "
-    "you NEVER edit files, run mutating commands, or start work of any kind. The line's goal "
-    "and topic are standing context, not an assignment. Until assigned: say hello, read, "
-    "wait. An @mention from anyone else — a person, another worker — is not an assignment "
-    "either unless the captain has said so: reply, do not act.\n"
-    "```\n"
-    "[captain]: @worker add sub(a, b) to calc.py. Acceptance: `python -m unittest`.\n"
-    "[worker]: (only now edits calc.py, runs the acceptance, hands off the SHA)\n"
-    "```\n"
-    "### On a captained line you do not push\n"
-    "The captain owns the push. Work on the line's assigned branch — one line, one "
-    "branch; do not create side branches or detach. Commit locally and hand the captain the "
-    "commit SHA; do not push. Expect your commit to get an adversarial review at that exact "
-    "SHA before it is accepted — a report is receipt, not acceptance. In your hand-off name "
-    "the SHA and the gates you actually ran, so the captain can reuse that evidence there.\n"
-    "### When the fence blocks a write\n"
-    "A read-only or EROFS error on a path inside the fence is the write set saying no — POST "
-    "$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/write-set with "
-    '{{"path":"/abs/normalized/path"}} and wait for a person to approve it in the banner; '
-    "never work around the fence (pointing npm at a temp cache is the kind of shortcut that "
-    "belongs in a write-set request instead)."
-)
-
-WORKER_REMINDER = (
-    "(you are a worker on a captained line: edit only on your captain's @mention; the goal "
-    "above is context, not your assignment)"
-)
-
-
-def worker_instructions(captained: bool) -> str:
-    """The worker pack — wait for the captain's @mention, never push; empty without a captain."""
-    if not captained:
-        return ""
-    return "\n\n## Worker pack\n" + WORKER
-
-
 def role_instructions(
     actions: Collection[str], conv_id: str, parent_id: str | None, depth: int = 0,
     staffed: bool = False,
@@ -283,7 +276,7 @@ def role_instructions(
         "depth and the depth cap.",
         ROLE, PROCEDURE.format(root=root, staffing=staffing, top=top),
         STAFFING_TRAITS.format(root=root), ASK_FIRST.format(root=root),
-        EXAMPLE, RECLAIM.format(root=root),
+        EXAMPLE, RECLAIM.format(root=root), FENCE.format(root=root),
     ]
     if "read_reports" in actions:
         blocks.append(
