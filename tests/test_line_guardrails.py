@@ -114,6 +114,8 @@ class GuardrailTest(unittest.TestCase):
         self.assertEqual(second.status_code, 409, second.text)
         self.assertIn("parallel slices mean parallel lines", second.json()["detail"])
         self.assertIn("allow_shared_branch", second.json()["detail"])
+        self.assertIn("close the old one first (DELETE /api/attachments/<id>)",
+                      second.json()["detail"])
         # the override is the captain's explicit call, and the line hears it
         overridden = self.client.post(
             f"/api/conversations/{mid['id']}/attachments",

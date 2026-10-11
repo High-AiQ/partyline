@@ -183,7 +183,8 @@ def parallel_worker_reason(db: Db, conv_id: str) -> bool:
 PARALLEL_WORKERS_REFUSAL = (
     "parallel slices mean parallel lines: this line has a captain and a live worker, and "
     "one branch accepts all-or-nothing — give the new slice its own line with POST "
-    "…/children, or pass {\"allow_shared_branch\": true} to share the branch anyway")
+    "…/children, pass {\"allow_shared_branch\": true} to share the branch anyway — or, to "
+    "replace a worker, close the old one first (DELETE /api/attachments/<id>)")
 
 
 def deny_sideways_attach(db: Db, principal: Principal, conv_id: str) -> None:
