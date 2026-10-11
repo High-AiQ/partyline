@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .approval_bubble import pending_approvals
 from .hierarchy import descendants, subtree_conversation_ids
 from .preset_traits import coerce_preset, coerce_traits, match_preset
 
@@ -60,15 +61,18 @@ def staffing_report(db, conv_id: str) -> dict:
     }
 
 
-def staffing_line(db, conv_id: str) -> str:
+def staffing_line(db, conv_id: str, *, runtime=None) -> str:
     """One line for a captain's wake: subtree use and globally free presets.
 
     Rides every captain wake next to the goal, unconditionally: the endpoint
     is advice a captain has to remember to call, and a captain choosing its
-    next sub-line should see the board without asking.
+    next sub-line should see the board without asking. Pending human
+    approvals across the subtree ride it too, so a captain (at the root, the
+    person's own captain) sees a child stopped on a gate without peeking.
     """
     presets = [row for row in (coerce_preset(p) for p in db.list_presets()) if row]
-    if not presets:
+    pending = pending_approvals(db, conv_id, runtime=runtime)
+    if not presets and not pending:
         return ""
     in_use: list[str] = []
     used_ids: set[str] = set()
@@ -89,4 +93,8 @@ def staffing_line(db, conv_id: str) -> str:
     captains = ", ".join(p["name"] for p in free if traits[p["id"]]["can_manage"]) or "none"
     workers = ", ".join(p["name"] for p in free if traits[p["id"]]["implements"]) or "none"
     busy = "; ".join(in_use) or "nobody"
-    return f"(staffing — in use: {busy}. free captains: {captains}. free workers: {workers})"
+    parts = [f"in use: {busy}", f"free captains: {captains}", f"free workers: {workers}"]
+    if pending:
+        counted = ", ".join(f"«{name}» {kind}" for name, kind in pending)
+        parts.append(f"approvals pending: {len(pending)} ({counted})")
+    return "(staffing — " + ". ".join(parts) + ")"

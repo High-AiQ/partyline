@@ -149,6 +149,14 @@ touched.
 Operational hierarchy rules ignore archived children, while purge ordering and restore traversal
 continue to include them.
 
+Requests that need a person bubble to the root. A write-set, memory-cap or restart request
+filed on a child line posts its ordinary notice there plus one `⚑ approval pending` line on the
+tree's root, naming the line, the requester and the approve call, and @mentions the root's
+captain so that process wakes and can explain the request in context — the person talks to the
+root captain and never reads sublines. A request filed on the root itself does not bubble, and
+the staffing wake line counts what is still waiting anywhere below:
+`approvals pending: N («line» write-set, «line2» memory)`, falling as each request is decided.
+
 Work goes down, not sideways. Once a line has a child, a machine may no longer
 attach processes to that line: the root captain that could not staff a child
 otherwise hands the job to a sibling on the root line, in the checkout the
