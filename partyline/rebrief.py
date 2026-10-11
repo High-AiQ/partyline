@@ -119,7 +119,11 @@ def render_rebrief(db, att: dict, limit: int = REBRIEF_LIMIT, reason: str = "") 
         reminder = briefing_pointer(conv_id)
     else:
         reminder = WORKER_REMINDER
-    fixed = [part for part in (header, assignment, reminder) if part]
+    # The nudge rides every re-briefing: PreCompact stdout cannot reach the
+    # model, so this is where the worker is told to refresh its notes (5.1).
+    from .line_notes import NUDGE
+
+    fixed = [part for part in (header, assignment, reminder, NUDGE) if part]
     # Two more parts (context, notes) may join the join, so reserve their
     # separators up front: the budget must cover the "\n\n" between parts.
     remaining = max(0, limit - sum(len(part) for part in fixed)
@@ -136,5 +140,5 @@ def render_rebrief(db, att: dict, limit: int = REBRIEF_LIMIT, reason: str = "") 
         context += ("\n\n" if context else "") + f"Standing context (the line's topic):\n{topic}"
     if context and len(context) + len(pointer) + 2 > context_budget:
         context = context[:max(0, context_budget - len(pointer) - 2)].rstrip() + "\n" + pointer
-    parts = [part for part in (header, context, notes, assignment, reminder) if part]
+    parts = [part for part in (header, context, notes, assignment, reminder, NUDGE) if part]
     return "\n\n".join(parts)

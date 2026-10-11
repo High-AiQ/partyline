@@ -38,6 +38,19 @@ def bump_turn(db, att_id: str, owner: str) -> int:
     return row["turns"]
 
 
+def current_turns(db, att_id: str) -> int:
+    """The harness turn counter for this attachment; 0 when it isn't counted.
+
+    A minimal db — the hook tests' fake runtime — counts nothing.
+    """
+    try:
+        row = db._exec(
+            "SELECT turns FROM hook_turns WHERE attachment_id=?", (att_id,)).fetchone()
+    except AttributeError:
+        return 0
+    return row["turns"] if row else 0
+
+
 def compaction_count(db, att_id: str) -> int:
     row = db._exec(
         "SELECT COUNT(*) AS n FROM compaction_events WHERE attachment_id=?",

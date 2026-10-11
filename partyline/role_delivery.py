@@ -7,6 +7,7 @@ from typing import NamedTuple
 from .goal import goal_rider
 from .accept_sha import handoff_rider
 from .captain_docs import reminder_line
+from .compaction_events import current_turns
 from .line_depth import depth as line_depth, has_captain, staffed_split_reason
 from .role_briefing import WORKER_REMINDER, role_instructions, worker_instructions
 from .staffing import staffing_line
@@ -142,6 +143,12 @@ def bind_role_delivery(db, att: dict, runtime=None) -> None:
             if not worker_reminder_sent or (worker_now and not worker_was):
                 worker = WORKER_REMINDER
             worker_reminder_sent = True
+            from .line_notes import notes_nudge
+
+            nudge = notes_nudge(db, current.conv_id, att["id"],
+                                current_turns(db, att["id"]))
+            if nudge:
+                worker = f"{worker}\n{nudge}" if worker else nudge
         else:
             worker_reminder_sent = False
         return "\n".join(
