@@ -20,4 +20,8 @@ MIGRATIONS = [
         expires_at REAL NOT NULL,
         PRIMARY KEY(name, holder_attachment)
     )""",
+    # 2.10 review: a waiter's renewal polls must not inflate its lease time,
+    # so the requested TTL rides the row; promotion grants exactly it, capped
+    # at the module's maximum.
+    "ALTER TABLE resource_leases ADD COLUMN ttl_s INTEGER NOT NULL DEFAULT 900",
 ]

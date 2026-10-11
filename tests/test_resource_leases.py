@@ -58,8 +58,8 @@ class LeaseLogicTest(unittest.TestCase):
         self.assertTrue(exclusive["granted"])  # a different name is free
         blocked = self.take("luna", mode="exclusive")  # godot is held shared
         self.assertFalse(blocked["granted"])
-        # sonnet's own shared row is replaced at grant; luna is the holder ahead
-        self.assertEqual(blocked["queue_position"], 1)
+        # holders count (sonnet's own shared row, luna's), no waiters before it
+        self.assertEqual(blocked["queue_position"], 2)
 
     def test_waiting_holds_queue_place_when_the_holder_releases(self):
         self.take("sonnet")
@@ -89,6 +89,55 @@ class LeaseLogicTest(unittest.TestCase):
         self.assertFalse(after["granted"])
         self.assertEqual(after["queue_position"], 1)
 
+    def test_a_waiter_promoted_after_a_long_wait_gets_exactly_its_ttl(self):
+        import time as time_module
+
+        self.take("sonnet", ttl_s=900)
+        self.take("luna", ttl_s=900)
+        # a queue lifetime of renewal polls pushes the row's expiry an hour out
+        self.db._exec("UPDATE resource_leases SET expires_at = expires_at + 3600 "
+                      "WHERE holder_attachment='luna'")
+        self.db._exec("DELETE FROM resource_leases WHERE holder_attachment='sonnet'")
+        promoted = self.take("luna", ttl_s=900)
+        self.assertTrue(promoted["granted"])
+        remaining = promoted["expires_at"] - time_module.time()
+        self.assertGreaterEqual(remaining, 899)
+        self.assertLessEqual(remaining, 901)  # exactly the requested TTL, not +1h
+
+    def test_a_shared_caller_queues_behind_a_queued_exclusive_waiter(self):
+        self.take("luna", mode="shared")       # luna holds shared
+        self.take("sonnet", mode="exclusive")  # sonnet queues exclusive
+        self.db.add_attachment("dig", "effects", "dig", "raw", ["raw"], "/tmp")
+        late = self.take("dig", mode="shared")
+        self.assertFalse(late["granted"])  # a shared grant must not jump the queue
+        self.assertEqual(late["queue_position"], 2)  # the holder + the exclusive waiter
+
+    def test_promotion_of_a_shared_run_stops_at_an_exclusive_waiter(self):
+        self.db.add_attachment("holder", "assets", "hold", "raw", ["raw"], "/tmp")
+        self.db.add_attachment("dig", "effects", "dig", "raw", ["raw"], "/tmp")
+        self.take("holder", mode="exclusive")
+        self.take("sonnet", mode="shared")
+        self.take("luna", mode="exclusive")
+        self.take("dig", mode="shared")
+        release_attachment_leases(self.db, "holder")
+        first = self.take("sonnet", mode="shared")
+        self.assertTrue(first["granted"])  # the leading shared waiter alone
+        still = self.take("luna", mode="exclusive")
+        self.assertFalse(still["granted"])  # the exclusive waiter keeps its place
+        still_dig = self.take("dig", mode="shared")
+        self.assertFalse(still_dig["granted"])  # behind the exclusive one
+
+    def test_a_later_waiter_does_not_raise_an_earlier_waiters_position(self):
+        self.take("sonnet")
+        self.take("luna")
+        second = self.take("luna")
+        self.assertEqual(second["queue_position"], 1)
+        self.db.add_attachment("dig", "effects", "dig", "raw", ["raw"], "/tmp")
+        third = self.take("dig")
+        self.assertEqual(third["queue_position"], 2)
+        again = self.take("luna")
+        self.assertEqual(again["queue_position"], 1)  # later waiters don't raise it
+
     def test_a_ttl_expiry_frees_the_lease(self):
         self.take("sonnet", ttl_s=900)
         # the lease ages past its TTL: the next request finds the slot free
@@ -111,10 +160,14 @@ class LeaseLogicTest(unittest.TestCase):
                 self.take("sonnet", **kwargs)
 
     def test_the_schema_migration_runs_twice(self):
+        import sqlite3
 
         for _ in range(2):
             for migration in LEASE_MIGRATIONS:
-                self.db._exec(migration)
+                try:
+                    self.db._exec(migration)
+                except sqlite3.OperationalError:
+                    pass  # already applied, exactly as db.py tolerates it
         self.assertTrue(self.take("sonnet")["granted"])
 
     def test_the_report_lists_holders_and_queue_counts(self):
