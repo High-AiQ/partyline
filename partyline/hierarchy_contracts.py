@@ -52,12 +52,23 @@ class AcceptIn(BaseModel):
     # findings of at most 300 characters each, listed by GET …/accepts.
     findings: list[Annotated[str, StringConstraints(max_length=300)]] = Field(
         default_factory=list, max_length=20)
+    # 5.6: run the line's declared gates in a fenced scratch checkout at the
+    # SHA before the branch moves; a failure refuses the accept with 409.
+    run_gates: bool = False
 
 
 class TreeSyncOut(BaseModel):
     ok: bool
     worktree: str | None = None
     detail: str = ""
+
+
+class GateResult(BaseModel):
+    command: str
+    exit: int | str
+    tail: str = ""
+
+
 
 
 class AcceptResponse(BaseModel):
@@ -71,6 +82,8 @@ class AcceptResponse(BaseModel):
     # The deterministic post-accept check: any worktree holding the branch is
     # at the accepted SHA with a clean status. Reporting only.
     tree_sync: TreeSyncOut | None = None
+    # Gate results when the accept was asked to run them (5.6).
+    gates: list[GateResult] = Field(default_factory=list)
 
 
 class PrereviewIn(BaseModel):

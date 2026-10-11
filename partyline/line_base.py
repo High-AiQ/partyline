@@ -24,14 +24,20 @@ from .git_fence import (
     _mirror_dir,
     _read_ref,
     _worktree_gitdir,
+    _write_mirror_text,
     common_gitdir,
     mirror_branch_ref,
-    _write_mirror_text,
 )
 from .hierarchy import child_ids, parent_id_of
-from .line_worktree import branch_name, line_cwd, repo_and_worktree, rev
+from .hierarchy_contracts import TipResponse
+from .line_worktree import (
+    branch_name,
+    line_cwd,
+    managed_root,
+    repo_and_worktree,
+    rev,
+)
 from .machine_scope import deny_unless
-from .worktree_paths import managed_root
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +154,15 @@ def refresh_children_views(db, conv_id: str, branch: str) -> int:
     return refreshed
 
 
+def _refresh_children_views_quietly(db, conv_id: str, branch: str) -> None:
+    """Best-effort refresh of the children's fenced views; never fail an accept."""
+    try:
+        refresh_children_views(db, conv_id, branch)
+    except Exception:
+        logger.exception(
+            "could not refresh children's base views after accepting on %s", conv_id)
+
+
 def register_line_base_route(app, runtime) -> None:
     @app.get("/api/conversations/{conv_id}/base")
     async def get_base(request: Request, conv_id: str):
@@ -160,6 +175,20 @@ def register_line_base_route(app, runtime) -> None:
         except Exception:
             logger.exception("base report failed for %s", conv_id)
             raise HTTPException(409, "cannot read the line's base") from None
+
+    @app.get("/api/conversations/{conv_id}/tip", response_model=TipResponse)
+    async def line_tip(request: Request, conv_id: str):
+        db = runtime.db
+        deny_unless(db, request_principal(request), conv_id, "read")
+        cwd = line_cwd(db, conv_id) or ""
+        root, _worktree = repo_and_worktree(cwd) if cwd else (None, None)
+        branch = branch_name(cwd) if root and managed_root(cwd) else None
+        return TipResponse(
+            branch=branch,
+            branch_sha=rev(root, "rev-parse", "--verify", "--quiet", branch)
+            if branch else None,
+            fenced_tip=mirror_branch_ref(cwd, conv_id, branch) if branch else None,
+        )
 
     @app.post("/api/conversations/{conv_id}/refresh-base")
     async def post_refresh_base(request: Request, conv_id: str):

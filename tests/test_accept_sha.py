@@ -25,6 +25,7 @@ from partyline.conversation_routes import register_conversation_routes
 from partyline.db import Db
 from partyline.goal import register_goal_route
 from partyline.hierarchy_routes import hierarchy_router
+from partyline.line_base import register_line_base_route
 from partyline.media import MediaStore
 from partyline.review_worktrees import register_review_routes
 from partyline.runtime import ChatRuntime
@@ -60,6 +61,7 @@ class AcceptShaTest(unittest.TestCase):
         register_goal_route(app, self.runtime)
         register_accept_route(app, self.runtime)
         register_accept_history_route(app, self.runtime)
+        register_line_base_route(app, self.runtime)
         register_review_routes(app, self.runtime)
         app.include_router(staffing_router(self.runtime))
 
