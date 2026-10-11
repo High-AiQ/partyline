@@ -316,6 +316,18 @@ class WriteSetRequestTest(unittest.TestCase):
                                   headers=self.captain).json()["request"]
         self.assertEqual(pending["path"], os.path.join(repo, ".review", sha))
 
+    def test_a_person_can_grant_a_review_checkout_by_repository_and_sha(self):
+        # the person approving should not type the path either: the pair
+        # resolves to the review checkout before the absolute-path check
+        repo, sha = self._subtree_repo_with_commit()
+        made = self.client.post("/api/conversations/line/write-set",
+                                json={"repository": repo, "sha": sha},
+                                headers=self.human)
+        self.assertEqual(made.status_code, 200, made.text)
+        grants = list_write_grants(self.db, "line")
+        self.assertEqual([g["path"] for g in grants], [os.path.join(repo, ".review", sha)])
+        self.assertEqual(grants[0]["granted_by"], "person")
+
     def test_review_worktree_grant_names_are_refused_outside_their_shape(self):
         repo, sha = self._subtree_repo_with_commit()
         stranger = os.path.join(self.directory.name, "stranger")

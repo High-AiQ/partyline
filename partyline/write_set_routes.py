@@ -82,7 +82,7 @@ def write_set_router(runtime) -> APIRouter:
         if db.get_conversation(conv_id) is None:
             raise HTTPException(404)
         if is_human(principal):
-            path = body.path.strip()
+            path = resolve_write_set_path(db, conv_id, body)
             if not path.startswith("/") or path == "/" or os.path.normpath(path) != path:
                 raise HTTPException(
                     400, "path must be an absolute, normalized file or directory path")
