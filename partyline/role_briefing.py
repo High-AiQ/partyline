@@ -152,7 +152,8 @@ SPLIT = (
     "**Split only independent slices.** One child line per slice, born briefed: POST "
     '{root}/children with {{"name":"slice","goal":"what its manager sees through","topic":'
     '"the context that line needs — where things are, budget, gates, acceptance"}}. Both '
-    "fields are capped at 3,000 characters: keep the goal and topic short, and put a longer "
+    "fields are capped differently: the goal at 3,000 characters (it rides the manager's "
+    "every wake), the topic at 20,000 — still put a longer "
     "brief in a repo file at the child's base — `docs/contracts/<line>.md` works well — then "
     "name that file in the topic. The goal "
     "rides its manager's every wake and the topic is standing context for everyone there; a "

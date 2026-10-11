@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from .contracts import ConversationResponse
+from .goal import MAX_GOAL, MAX_TOPIC
 
 MAX_REPORT_BODY = 2000
 MAX_MESSAGE_BODY = 8000
@@ -28,8 +29,8 @@ class ChildIn(BaseModel):
     """
 
     name: str = Field(min_length=1, max_length=120)
-    goal: str = Field(default="", max_length=3000)
-    topic: str = Field(default="", max_length=3000)
+    goal: str = Field(default="", max_length=MAX_GOAL)
+    topic: str = Field(default="", max_length=MAX_TOPIC)
     base: Literal["checkout", "upstream"] = "checkout"
     # Absolute path to a git repository this machine has: the child's worktree
     # is placed under that repository's .partyline-worktrees instead of the

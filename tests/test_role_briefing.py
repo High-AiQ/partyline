@@ -265,7 +265,8 @@ class RoleBriefingTests(unittest.TestCase):
         # Only the splitting pack POSTs /children; a leaf or staffed captain
         # cannot, so the cap text belongs to that variant alone.
         text = role_instructions(["assign", "create_child"], "root", None)
-        self.assertIn("capped at 3,000 characters", text)
+        self.assertIn("the goal at 3,000 characters", text)
+        self.assertIn("the topic at 20,000", text)
         self.assertIn("docs/contracts/<line>.md", text)
         self.assertIn("name that file in the topic", text)
         for label, other in {

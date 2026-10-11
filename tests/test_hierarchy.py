@@ -318,6 +318,23 @@ class HierarchyApiTest(unittest.TestCase):
         for line_id in body["archived_ids"]:
             self.assertIsNotNone(self.db.get_conversation(line_id)["archived_at"])
 
+    def test_a_topic_is_accepted_to_20000_and_refused_past_it(self):
+        made = self.client.post(
+            "/api/conversations/parent/children",
+            json={"name": "Long", "topic": "x" * 19000}, headers=self.lead)
+        self.assertEqual(made.status_code, 201, made.text)
+        self.assertEqual(made.json()["conversation"]["topic"], "x" * 19000)
+        refused = self.client.post(
+            "/api/conversations/parent/children",
+            json={"name": "TooLong", "topic": "x" * 20001}, headers=self.lead)
+        self.assertEqual(refused.status_code, 422, refused.text)
+        cleared = self.client.put(f"/api/conversations/{made.json()['conversation']['id']}/topic",
+                                  json={"topic": "y" * 19000}, headers=self.lead)
+        self.assertEqual(cleared.status_code, 200, cleared.text)
+        refused = self.client.put(f"/api/conversations/{made.json()['conversation']['id']}/topic",
+                                  json={"topic": "y" * 20001}, headers=self.lead)
+        self.assertEqual(refused.status_code, 400, refused.text)
+
     async def _noop(self):
         return None
 
