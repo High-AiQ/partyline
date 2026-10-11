@@ -1,6 +1,5 @@
 """Scratch worktrees: writable checkouts for integration builds (finding 2.15)."""
 
-import json
 import os
 import subprocess
 import tempfile
@@ -95,10 +94,12 @@ class ScratchWorktreesTest(unittest.TestCase):
         _identity("commit", "-q", "-m", message, cwd=self.repo)
         return self.rev("main")
 
-    def create(self, sha, repository=None, conv_id=None):
+    def create(self, sha, repository=None, conv_id=None, merge_onto=None):
         body = {"sha": sha}
         if repository is not None:
             body["repository"] = repository
+        if merge_onto is not None:
+            body["merge_onto"] = merge_onto
         return self.client.post(
             f"/api/conversations/{conv_id or self.kid['id']}/scratch-worktrees",
             json=body, headers=self.captain)
@@ -171,6 +172,7 @@ class ScratchWorktreesTest(unittest.TestCase):
         gitdir = os.path.realpath(
             subprocess.run(["git", "rev-parse", "--git-dir"], cwd=path,
                            capture_output=True, text=True, check=True).stdout.strip())
+        writable = [src for src, _dst, read_only in write_set(att) if not read_only]
         self.assertIn(gitdir, writable)
         scratch_carve = [src for src in writable
                          if src == self.scratch_dir_root() or f"/{SCRATCH_DIR}/" in src]
@@ -206,6 +208,36 @@ class ScratchWorktreesTest(unittest.TestCase):
         self.assertEqual(sorted(row["sha"] for row in listed),
                          sorted([body["sha"], candidate]))
 
+    def test_the_fence_binds_recorded_trial_merge_checkouts_writable(self):
+        sha = self.commit("buildable work")
+        self.move_main()
+        made = self.client.post(
+            f"/api/conversations/{self.kid['id']}/scratch-worktrees",
+            json={"sha": sha, "merge_onto": "main"}, headers=self.captain)
+        self.assertEqual(made.status_code, 201, made.text)
+        merged_path = made.json()["path"]
+        merged_key = made.json()["sha"]
+        att = {"conv_id": self.kid["id"], "cwd": self.worktree,
+               "scratch_worktrees": [
+                   {"conv_id": self.kid["id"], "sha": merged_key,
+                    "path": merged_path}]}
+        from partyline.fence_paths import _recorded_checkouts, _scratch_worktree_paths
+
+        self.assertEqual(_scratch_worktree_paths(att), [merged_path])
+        review_only = _recorded_checkouts(
+            att, "review_worktrees", os.path.realpath(self.repo), ".review")
+        self.assertEqual(review_only, [])  # review rows are never scratch carve-outs
+        gitdir = os.path.realpath(subprocess.run(
+            ["git", "rev-parse", "--git-dir"], cwd=merged_path,
+            capture_output=True, text=True, check=True).stdout.strip())
+        writable = [src for src, _dst, read_only in write_set(att) if not read_only]
+        # the .scratch root is bound writable (covering the build tree inside
+        # it) and the checkout's own git metadata is bound beside it
+        self.assertIn(os.path.join(self.repo, SCRATCH_DIR), writable)
+        self.assertIn(gitdir, writable)
+        review_only = [src for src in writable if f"/{SCRATCH_DIR}/" in src]
+        self.assertEqual(review_only, [])  # scratch carve-outs, not review ones
+
     def test_a_conflicting_trial_merge_answers_409_and_leaves_it_clean(self):
         self.move_main()
         candidate = self.commit("candidate touches main.txt")
@@ -218,15 +250,23 @@ class ScratchWorktreesTest(unittest.TestCase):
             f"/api/conversations/{self.kid['id']}/scratch-worktrees",
             json={"sha": candidate, "merge_onto": "main"}, headers=self.captain)
         self.assertEqual(made.status_code, 409, made.text)
-        detail = made.json()["detail"]
-        conflicts = json.loads(detail)["merge"]["conflicts"]
-        self.assertEqual(conflicts, ["main.txt"])
+        detail = made.json()["detail"]  # an object, not a JSON string
+        self.assertEqual(detail["merge"]["onto"], self.rev("main"))
+        self.assertEqual(detail["merge"]["conflicts"], ["main.txt"])
         path = self.scratch_dir(f"{candidate}-onto-{self.rev('main')}")
         # nothing half-merged: the checkout sits clean at the ref
         self.assertTrue(os.path.isdir(path))
         self.assertEqual(
             _git("rev-parse", "HEAD", cwd=path).stdout.strip(), self.rev("main"))
         self.assertEqual(_git("status", "--porcelain", cwd=path).stdout, "")
+
+    def test_merge_onto_is_validated_before_it_touches_git(self):
+        sha = self.commit("buildable work")
+        for bad in ("--upload-pack=x", "not a ref", "main; rm -rf"):
+            made = self.create(sha, merge_onto=bad)
+            self.assertEqual(made.status_code, 422, f"{bad}: {made.text}")
+            self.assertIn("not a valid ref or SHA", made.json()["detail"])
+        self.assertEqual(self.create(sha, merge_onto="main").status_code, 201)
 
     def test_retirement_prunes_and_delete_drops_one_early(self):
         first = self.commit("first build")
