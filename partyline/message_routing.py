@@ -87,7 +87,7 @@ async def post_identified(runtime, conv_id, principal, body: str, client_key: st
     if client_key and (
         original := original_for_key(runtime.db, principal.name, client_key, conv_id)
     ) is not None:
-        return original
+        return {**original, "replayed": True}
     if principal.kind != "machine":
         stored = await post_human_message(runtime, conv_id, principal.name, body)
         if client_key:
@@ -95,7 +95,7 @@ async def post_identified(runtime, conv_id, principal, body: str, client_key: st
         return stored
     if (capture := capture_echo(runtime.db, principal.name, conv_id, body)) is not None:
         # The tail posted these words first; the API copy is the twin (2.7).
-        return capture
+        return {**capture, "replayed": True}
     stored = runtime.db.add_message(conv_id, principal.name, "agent", body)
     stored = {**stored, **stamp_source(runtime.db, stored["id"], principal)}
     if client_key:
