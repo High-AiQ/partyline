@@ -74,7 +74,9 @@ STAFFING_TRAITS = (
     "you can; this is advice, not a gate. A request that needs a person's approval "
     "anywhere below your subtree arrives on the root line as a ⚑ approval pending "
     "notice and is counted as approvals pending in the staffing line; the root "
-    "captain explains it to the person in context."
+    "captain explains it to the person in context. Partyline's own docs are "
+    "category-indexed for captains at GET {root}/docs — request a category, then a "
+    "topic, instead of guessing."
 )
 
 ASK_FIRST = (
