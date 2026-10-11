@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .approval_bubble import pending_approvals
+from .compaction_events import compaction_counts
 from .hierarchy import descendants, subtree_conversation_ids
 from .preset_traits import coerce_preset, coerce_traits, match_preset
 
@@ -77,6 +78,7 @@ def staffing_line(db, conv_id: str, *, runtime=None) -> str:
     in_use: list[str] = []
     used_ids: set[str] = set()
     subtree = set(subtree_conversation_ids(db, conv_id))
+    compacted = compaction_counts(db)
     for conv in db.list_conversations():
         for att in db.list_attachments(conv["id"]):
             if att["status"] not in LIVE:
@@ -87,7 +89,11 @@ def staffing_line(db, conv_id: str, *, runtime=None) -> str:
             if conv["id"] not in subtree:
                 continue
             role = " captain" if att.get("is_lead") else ""
-            in_use.append(f"{att['name']} «{conv['name']}»{role}")
+            label = f"{att['name']} «{conv['name']}»{role}"
+            compactions = compacted.get(att["id"])
+            if compactions:
+                label += f" ×{compactions} compactions"
+            in_use.append(label)
     free = [p for p in presets if p["id"] not in used_ids]
     traits = {p["id"]: coerce_traits(p) for p in free}
     captains = ", ".join(p["name"] for p in free if traits[p["id"]]["can_manage"]) or "none"

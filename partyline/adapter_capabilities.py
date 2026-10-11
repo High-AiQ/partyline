@@ -29,6 +29,22 @@ def adapter_completion(kind: str) -> str:
     return "receipt" if turn_end == "receipt" else "none"
 
 
+def compaction_hooks(att: dict) -> bool:
+    """Whether this attachment's harness exposes partyline compaction hooks.
+
+    Only Claude Code today: its `PreCompact` and `SessionStart(compact)`
+    hooks are visible to the hook endpoint. Generic code checks this rather
+    than the adapter name; another harness opts in by declaring the
+    capability and wiring the same hooks. A database row carries the adapter
+    kind, not the stamped metadata, so the kind's manifest answers there.
+    """
+    capabilities = (att.get("adapter_metadata") or {}).get("capabilities")
+    if capabilities is None:
+        metadata = ADAPTER_METADATA.get(att.get("adapter") or "") or {}
+        capabilities = metadata.get("capabilities")
+    return bool((capabilities or {}).get("compaction_hooks"))
+
+
 def claims_transcript(att: dict) -> bool:
     """Whether this attachment's harness owns a structured transcript that it
     must claim before anything typed at it counts as delivered.

@@ -7,6 +7,7 @@ entries without growing the query module. Never edit an applied entry; append a 
 from .db_schema_base import SCHEMA  # noqa: F401
 from .idempotency_schema import MIGRATIONS as IDEMPOTENCY_MIGRATIONS
 from .memory_schema import MIGRATIONS as MEMORY_MIGRATIONS
+from .compaction_schema import MIGRATIONS as COMPACTION_MIGRATIONS
 
 MIGRATIONS = [
     # cli_session: optional process session id, for adapters that support resume
@@ -296,3 +297,4 @@ MIGRATIONS = [
 
 MIGRATIONS.extend(MEMORY_MIGRATIONS)
 MIGRATIONS.extend(IDEMPOTENCY_MIGRATIONS)
+MIGRATIONS.extend(COMPACTION_MIGRATIONS)

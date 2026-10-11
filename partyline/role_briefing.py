@@ -76,7 +76,9 @@ STAFFING_TRAITS = (
     "notice and is counted as approvals pending in the staffing line; the root "
     "captain explains it to the person in context. Partyline's own docs are "
     "category-indexed for captains at GET {root}/docs — request a category, then a "
-    "topic, instead of guessing."
+    "topic, instead of guessing. Assign in small reads, scoped test runs and files by "
+    "name: a worker whose compactions badge climbs is thrashing, and a thrashing "
+    "worker is replaced with a fresh instance of the same preset, never re-prompted."
 )
 
 ASK_FIRST = (

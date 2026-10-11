@@ -8,6 +8,7 @@ import shlex
 import sys
 
 from partyline.adapters.base import Adapter as BaseAdapter
+from partyline.adapter_capabilities import compaction_hooks as has_compaction_hooks
 from partyline.adapters.compaction import is_compaction_record
 
 # A session that recorded our claim token recorded it near the top, in the
@@ -48,7 +49,8 @@ class PartylineAdapter(BaseAdapter):
             cmd += ["--session-id", self.att["id"]]
         hook_url = self.att.get("hook_url")
         if hook_url and "--settings" not in cmd:
-            cmd += ["--settings", json.dumps(self._hook_settings(hook_url))]
+            cmd += ["--settings", json.dumps(self._hook_settings(
+                hook_url, has_compaction_hooks(self.att)))]
         if not self.resume:
             # Claude snapshots this system prompt with the session and reapplies
             # it on resume. Keep the user-facing briefing for after startup dialogs.
@@ -60,23 +62,37 @@ class PartylineAdapter(BaseAdapter):
         return cmd
 
     @staticmethod
-    def _hook_settings(hook_url: str) -> dict:
+    def _hook_settings(hook_url: str, with_compaction: bool) -> dict:
         """Process-scoped harness receipts plus the existing attention hook.
 
         ``UserPromptSubmit`` / ``Stop`` are the paired turn boundaries. The
         same curl posts the event JSON; ``SubagentStop`` is omitted so a child
-        finishing cannot clear the parent jack.
+        finishing cannot clear the parent jack. With the ``compaction_hooks``
+        capability, ``PreCompact`` (matchers auto and manual) reports every
+        compaction to the same endpoint, and ``SessionStart(compact)`` GETs
+        the re-briefing: its stdout is appended to the model's context, so
+        that hook stays a printing command curl on every platform — an http
+        hook cannot add anything to context.
         """
         curl = (f"curl -s -m 5 -X POST {shlex.quote(hook_url)}"
                 " -H 'Content-Type: application/json' --data-binary @-")
         handler = [{"hooks": [{"type": "command", "command": curl}]}]
         if sys.platform == 'win32':
             handler = [{"hooks": [{"type": "http", "url": hook_url, "timeout": 5}]}]
-        return {"hooks": {
+        hooks = {
             "Notification": handler,
             "UserPromptSubmit": handler,
             "Stop": handler,
-        }}
+        }
+        if with_compaction:
+            rebrief = f"curl -s -m 5 {shlex.quote(hook_url + '/rebrief')}"
+            printer = [{"type": "command", "command": rebrief}]
+            hooks["PreCompact"] = [
+                {"matcher": "auto", "hooks": handler[0]["hooks"]},
+                {"matcher": "manual", "hooks": handler[0]["hooks"]},
+            ]
+            hooks["SessionStart"] = [{"matcher": "compact", "hooks": printer}]
+        return {"hooks": hooks}
 
     def transcript_glob(self) -> str:
         home = os.path.expanduser(os.environ.get('CLAUDE_CONFIG_DIR', '~/.claude'))
