@@ -4,6 +4,7 @@ from typing import NamedTuple
 
 from .goal import goal_rider
 from .accept_sha import handoff_rider
+from .captain_docs import reminder_line
 from .line_depth import depth as line_depth, has_captain, staffed_split_reason
 from .role_briefing import WORKER_REMINDER, role_instructions, worker_instructions
 from .staffing import staffing_line
@@ -57,7 +58,7 @@ def briefing_pointer(conv_id: str) -> str:
     return f"(captain pack: GET /api/conversations/{conv_id}/briefing)"
 
 
-def bind_role_delivery(db, att: dict) -> None:
+def bind_role_delivery(db, att: dict, runtime=None) -> None:
     initial = current_role(db, att["id"])
     att["role_briefing"] = _instructions(initial, db)
     original_rider = att["digest_rider"]
@@ -66,10 +67,12 @@ def bind_role_delivery(db, att: dict) -> None:
     # fresh attachment; a later role change still produces a new pack.
     previous = initial
     last_goal = last_staffing = last_handoff = None
+    last_docs_id = None
     worker_reminder_sent = False
 
     def rider() -> str:
         nonlocal previous, last_goal, last_staffing, last_handoff, worker_reminder_sent
+        nonlocal last_docs_id
         current = current_role(db, att["id"])
         update = ""
         captain_transition = previous is None or (
@@ -91,16 +94,17 @@ def bind_role_delivery(db, att: dict) -> None:
             elif not update and (demoted or (worker_was and not worker_now)):
                 update = ("Your current role is ordinary participant, not captain. "
                           "Use only your own line's tools.")
-        goal = staffing = handoff = worker = pointer = ""
+        goal = staffing = handoff = worker = pointer = docs = ""
         if current.role == "lead":
             current_goal = goal_rider(db, current.conv_id)
-            current_staffing = staffing_line(db, current.conv_id)
+            current_staffing = staffing_line(db, current.conv_id, runtime=runtime)
             current_handoff = handoff_rider(db, current.conv_id)
             goal = _delta(current_goal, last_goal, "goal")
             staffing = _delta(current_staffing, last_staffing, "staffing")
             handoff = _delta(current_handoff, last_handoff, "hand-offs")
             last_goal, last_staffing, last_handoff = (
                 current_goal, current_staffing, current_handoff)
+            docs, last_docs_id = reminder_line(db, current.conv_id, last_docs_id)
             if not captain_transition:
                 pointer = briefing_pointer(current.conv_id)
         elif current.captained:
@@ -110,7 +114,8 @@ def bind_role_delivery(db, att: dict) -> None:
         else:
             worker_reminder_sent = False
         return "\n".join(
-            part for part in (original_rider(), goal, staffing, handoff, update, worker, pointer)
+            part for part in (original_rider(), goal, staffing, handoff, update, worker,
+                              pointer, docs)
             if part)
 
     att["digest_rider"] = rider

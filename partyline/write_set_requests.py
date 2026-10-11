@@ -10,6 +10,7 @@ widened bind applies without a service restart.
 from __future__ import annotations
 
 import logging
+import os
 import time
 import uuid
 
@@ -17,14 +18,17 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
 from .adapters import ADAPTER_METADATA
+from .approval_bubble import bubble_approval
 from .auth_guard import request_principal
 from .contracts import WriteSetGrantRequestEvent
 from .hierarchy import ancestors
 from .line_process_routes import detach_attachment, live_attachments
+from .line_worktree import REVIEW_DIR, rev
 from .machine_scope import deny_unless, is_human
 from .mention_relay import post_private
 from .resume_continuation import resume_with_backlog
 from .reattach import adapter_can_resume
+from .review_worktrees import ReviewError, subtree_repository
 from .system_notice import post_system_notice
 from .write_set_routes import add_write_grant
 
@@ -81,6 +85,38 @@ def validate_path(path: str) -> str:
     if not path.startswith("/") or path == "/" or os.path.normpath(path) != path:
         raise HTTPException(
             400, "path must be an absolute, normalized file or directory path")
+    return path
+
+
+def resolve_write_set_path(db, conv_id: str, body) -> str:
+    """The path one write-set request grants: typed, or named by its review.
+
+    ``{"repository": ..., "sha": ...}`` grants the review checkout at
+    ``<repository>/.review/<full sha>`` — the path is derived, never typed,
+    and the repository is resolved under the same subtree rule a review
+    worktree obeys, so a line grants scope in the repositories it actually
+    works in and no stranger's checkout (finding 2.2). The pair and a typed
+    path are exclusive; so are half a pair and empty hands.
+    """
+    path = (body.path or "").strip()
+    repository = (body.repository or "").strip()
+    sha = (body.sha or "").strip()
+    if path and (repository or sha):
+        raise HTTPException(422, "name a path, or a repository and sha — not both")
+    if not path:
+        if not repository and not sha:
+            raise HTTPException(422, "name the path to grant")
+        if not (repository and sha):
+            raise HTTPException(
+                422, "a review worktree grant needs both the repository and the sha")
+        try:
+            root = subtree_repository(db, conv_id, repository)
+        except ReviewError as exc:
+            raise HTTPException(exc.status_code, exc.detail) from exc
+        full = rev(root, "rev-parse", "--verify", "--quiet", f"{sha.lower()}^{{commit}}")
+        if full is None:
+            raise HTTPException(400, f"no commit {sha} in this repository")
+        return os.path.realpath(os.path.join(root, REVIEW_DIR, full))
     return path
 
 
@@ -228,6 +264,12 @@ async def file_write_set_request(
         conv_id,
         f"☏ @{principal.name} asks a person to grant write-set scope for `{path}` — "
         "approve or decline from the banner",
+        actor=principal,
+    )
+    await bubble_approval(
+        runtime, conv_id, kind="write-set", requester=principal.name,
+        detail=f"grant write scope for `{path}`",
+        approve=f"POST /api/conversations/{conv_id}/write-set/request/{request.id}/approve",
         actor=principal,
     )
     return request

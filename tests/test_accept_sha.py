@@ -25,6 +25,7 @@ from partyline.db import Db
 from partyline.goal import register_goal_route
 from partyline.hierarchy_routes import hierarchy_router
 from partyline.media import MediaStore
+from partyline.review_worktrees import register_review_routes
 from partyline.runtime import ChatRuntime
 from partyline.staffing import staffing_report
 from partyline.staffing_routes import staffing_router
@@ -52,10 +53,12 @@ class AcceptShaTest(unittest.TestCase):
         self.addCleanup(self.db.close)
         self.runtime = ChatRuntime(self.db)
         app = FastAPI()
+        self.app = app
         install_auth_guard(app, self.db)
         app.include_router(hierarchy_router(self.runtime))
         register_goal_route(app, self.runtime)
         register_accept_route(app, self.runtime)
+        register_review_routes(app, self.runtime)
         app.include_router(staffing_router(self.runtime))
 
         async def fake_start(att, **kwargs):
@@ -115,10 +118,13 @@ class AcceptShaTest(unittest.TestCase):
         sha = self.commit(message, filename)
         return sha
 
-    def accept(self, sha, headers=None, conv_id=None):
+    def accept(self, sha, headers=None, conv_id=None, allow_descendant=None):
+        body = {"sha": sha}
+        if allow_descendant is not None:
+            body["allow_descendant"] = allow_descendant
         return self.client.post(
             f"/api/conversations/{conv_id or self.kid['id']}/accept",
-            json={"sha": sha}, headers=headers or self.root_captain(),
+            json=body, headers=headers or self.root_captain(),
         )
 
     def system_messages(self, conv_id):
@@ -315,6 +321,122 @@ class AcceptShaTest(unittest.TestCase):
         self.assertNotEqual(self.branch_head(), fenced)
         self.assertIsNone(self.db.get_conversation(self.kid["id"])["accepted_sha"])
 
+    def test_allow_descendant_lands_the_branch_on_the_line_s_newer_tip(self):
+        # Finding 2.1: the worker commits again after the review, so the
+        # reviewed SHA is now an ancestor of the fenced tip. With the flag,
+        # accept fast-forwards to the tip instead of refusing the reviewed
+        # SHA as a stray, and names both SHAs.
+        real = self.branch_head()
+        reviewed = self.commit("the reviewed work")
+        tip = self.commit("work past the review")
+        self.mirror(tip)
+        _git("update-ref", "refs/heads/line/kid", real, tip, cwd=self.repo)
+        response = self.accept(reviewed, allow_descendant=True)
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["reviewed_sha"], reviewed)
+        self.assertEqual(body["sha"], tip)
+        self.assertTrue(body["moved"])
+        self.assertEqual(self.branch_head(), tip)
+        self.assertEqual(
+            self.db.get_conversation(self.kid["id"])["accepted_sha"], tip)
+        self.assertIn(
+            f"reviewed {reviewed[:12]}, fast-forwarded to the line's newer tip "
+            "(1 commit(s) past the review)",
+            " ".join(self.system_messages(self.kid["id"])),
+        )
+
+    def test_allow_descendant_prunes_the_reviewed_sha_s_review_worktrees_too(self):
+        # the tip settles the review of the SHA it descends from: the worktree
+        # that was actually reviewed is pruned with the tip's, not left to
+        # linger until the line retires
+        real = self.branch_head()
+        reviewed = self.commit("the reviewed work")
+        tip = self.commit("work past the review")
+        self.mirror(tip)
+        _git("update-ref", "refs/heads/line/kid", real, tip, cwd=self.repo)
+        for sha in (reviewed, tip):
+            made = self.client.post(
+                f"/api/conversations/{self.kid['id']}/review-worktrees",
+                json={"sha": sha}, headers=self.root_captain())
+            self.assertEqual(made.status_code, 201, made.text)
+        response = self.accept(reviewed, allow_descendant=True)
+        self.assertEqual(response.status_code, 200, response.text)
+        for sha in (reviewed, tip):
+            self.assertFalse(os.path.isdir(os.path.join(self.repo, ".review", sha)))
+        listed = self.client.get(
+            f"/api/conversations/{self.kid['id']}/review-worktrees",
+            headers=self.root_captain())
+        self.assertEqual(listed.json(), [])
+
+    def test_without_the_flag_a_sha_behind_the_tip_still_refuses(self):
+        # the same shape as the flag's happy case, but flagless: the refusal
+        # stands so a silent descent can never sneak past a reviewer
+        real = self.branch_head()
+        reviewed = self.commit("the reviewed work")
+        tip = self.commit("work past the review")
+        self.mirror(tip)
+        _git("update-ref", "refs/heads/line/kid", real, tip, cwd=self.repo)
+        response = self.accept(reviewed)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("stray", response.json()["detail"])
+        self.assertEqual(self.branch_head(), real)
+        self.assertIsNone(self.db.get_conversation(self.kid["id"])["accepted_sha"])
+
+    def test_a_tip_diverged_from_the_reviewed_sha_refuses_even_with_the_flag(self):
+        # the flag covers descent only: a mirror tip that shares no line of
+        # descent with the reviewed SHA is still a stray
+        real = self.branch_head()
+        reviewed = self.commit("the reviewed work")
+        _git("update-ref", "refs/heads/line/kid", real, reviewed, cwd=self.repo)
+        diverged = _identity("commit-tree", EMPTY_TREE, "-p", real, "-m", "diverged",
+                             cwd=self.repo).stdout.strip()
+        self.mirror(diverged)
+        response = self.accept(reviewed, allow_descendant=True)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("stray", response.json()["detail"])
+        self.assertNotEqual(self.branch_head(), diverged)
+        self.assertIsNone(self.db.get_conversation(self.kid["id"])["accepted_sha"])
+
+    # -- the tip read ---------------------------------------------------------
+
+    def tip(self, conv_id=None):
+        return self.client.get(
+            f"/api/conversations/{conv_id or self.kid['id']}/tip",
+            headers=self.root_captain(),
+        )
+
+    def test_tip_reports_the_branch_and_the_fenced_tip(self):
+        real = self.branch_head()
+        fenced = self.commit("the real work")
+        self.mirror(fenced)
+        _git("update-ref", "refs/heads/line/kid", real, fenced, cwd=self.repo)
+        seen = self.tip()
+        self.assertEqual(seen.status_code, 200, seen.text)
+        body = seen.json()
+        self.assertEqual(body["branch"], "line/kid")
+        self.assertEqual(body["branch_sha"], real)
+        self.assertEqual(body["fenced_tip"], fenced)
+
+    def test_tip_without_a_mirror_reports_a_null_fenced_tip(self):
+        self.commit("first")
+        seen = self.tip()
+        self.assertEqual(seen.status_code, 200, seen.text)
+        body = seen.json()
+        self.assertEqual(body["branch"], "line/kid")
+        self.assertEqual(body["branch_sha"], self.branch_head())
+        self.assertIsNone(body["fenced_tip"])
+
+    def test_tip_of_an_unplaced_or_unknown_line(self):
+        # no placed worktree: nothing to read, all nulls, never a crash
+        self.db.create_conversation("det", "det")
+        self.db._exec("UPDATE conversations SET parent_id='root', cwd=? WHERE id='det'",
+                      (self.repo,))
+        seen = self.tip("det")
+        self.assertEqual(seen.status_code, 200, seen.text)
+        self.assertEqual(seen.json(), {"branch": None, "branch_sha": None, "fenced_tip": None})
+        self.assertEqual(self.tip("missing").status_code, 404)
+
     def test_a_fenced_accept_moves_the_real_ref_by_cas(self):
         # the checked-out fenced worktree is already at the mirror tip: the
         # real ref must move by update-ref compare-and-swap against the
@@ -338,6 +460,83 @@ class AcceptShaTest(unittest.TestCase):
         self.assertNotIn(("merge", "--ff-only", "--quiet", fenced), calls)
         self.assertEqual(self.branch_head(), fenced)
         self.assertEqual(_git("status", "--porcelain", cwd=self.worktree).stdout, "")
+
+    # -- the tree sync --------------------------------------------------------
+
+    def tree_sync(self, response):
+        return response.json()["tree_sync"]
+
+    def test_a_clean_accept_reports_the_worktree_in_sync(self):
+        real = self.branch_head()
+        fenced = self.commit("the real work")
+        self.mirror(fenced)
+        _git("update-ref", "refs/heads/line/kid", real, fenced, cwd=self.repo)
+        response = self.accept(fenced)
+        self.assertEqual(response.status_code, 200, response.text)
+        sync = self.tree_sync(response)
+        self.assertTrue(sync["ok"])
+        self.assertEqual(sync["worktree"], self.worktree)
+        notices = " ".join(self.system_messages(self.kid["id"]))
+        self.assertNotIn("⚠ tree not in sync", notices)
+
+    def test_a_dirty_worktree_is_reported_in_sync_terms_not_fixed(self):
+        # the stale-exports shape: the fenced accept moves the ref by CAS, so
+        # a dirty checkout sails through the hand-off — reported, not fixed
+        real = self.branch_head()
+        fenced = self.commit("the real work")
+        self.mirror(fenced)
+        _git("update-ref", "refs/heads/line/kid", real, fenced, cwd=self.repo)
+        with open(os.path.join(self.worktree, "scratch.txt"), "w") as fh:
+            fh.write("uncommitted scratch\n")
+        response = self.accept(fenced)
+        self.assertEqual(response.status_code, 200, response.text)
+        sync = self.tree_sync(response)
+        self.assertFalse(sync["ok"])
+        self.assertEqual(sync["worktree"], self.worktree)
+        self.assertIn("uncommitted change", sync["detail"])
+        self.assertEqual(self.branch_head(), fenced)  # accept itself succeeded
+        self.assertIn("⚠ tree not in sync: 1 uncommitted change(s)",
+                      " ".join(self.system_messages(self.kid["id"])))
+
+    def test_a_stale_reported_head_names_both_shas(self):
+        # porcelain HEAD tracks the branch ref, so a behind HEAD is rare —
+        # but when it is reported, it names both the worktree's and the
+        # accepted SHA, which is what makes the ⚠ actionable
+        from partyline import prereview as prereview_module
+
+        real = self.branch_head()
+        first = self.commit("reviewed work")
+        self.commit("work past the review")
+        fenced = self.branch_head()
+        self.mirror(fenced)
+        _git("update-ref", "refs/heads/line/kid", real, fenced, cwd=self.repo)
+        porcelain = (f"worktree {self.worktree}\nHEAD {first}\n"
+                     "branch refs/heads/line/kid\n")
+        original = prereview_module._git
+
+        def stale_head(*args, cwd):
+            if args[:3] == ("worktree", "list", "--porcelain"):
+                return subprocess.CompletedProcess(args, 0, porcelain, "")
+            return original(*args, cwd=cwd)
+
+        with patch.object(prereview_module, "_git", side_effect=stale_head):
+            response = self.accept(fenced)
+        self.assertEqual(response.status_code, 200, response.text)
+        sync = self.tree_sync(response)
+        self.assertFalse(sync["ok"])
+        self.assertIn("worktree HEAD is", sync["detail"])
+        self.assertIn(first[:12], sync["detail"])
+        self.assertIn("⚠ tree not in sync", " ".join(self.system_messages(self.kid["id"])))
+
+    def test_no_worktree_holding_the_branch_is_in_sync_by_default(self):
+        self.commit("first")
+        accepted = self.commit_side("work parked on a side branch")
+        response = self.accept(accepted)
+        self.assertEqual(response.status_code, 200, response.text)
+        sync = self.tree_sync(response)
+        self.assertTrue(sync["ok"])
+        self.assertIsNone(sync["worktree"])
+        self.assertIn("no worktree holds line/kid", sync["detail"])
 
     # -- refusals ------------------------------------------------------------
 

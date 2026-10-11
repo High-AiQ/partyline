@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -34,6 +35,14 @@ class Recorder:
         self.stopped = True
         if self._on_stop is not None:
             await self._on_stop()
+
+
+def _git(*args, cwd):
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
+
+
+def _identity(*args, cwd):
+    return _git("-c", "user.email=t@example.com", "-c", "user.name=t", *args, cwd=cwd)
 
 
 class WriteSetRequestTest(unittest.TestCase):
@@ -279,6 +288,65 @@ class WriteSetRequestTest(unittest.TestCase):
         self.assertEqual(len(self.audience_copies("cap")), 1)
         ringed = [m for m in cap.delivered if m.get("audience_attachment_id") == "cap"]
         self.assertEqual(len(ringed), 1)
+
+    def _subtree_repo_with_commit(self):
+        """A second repository, with a line of the subtree working in it."""
+        repo = os.path.join(self.directory.name, "other")
+        os.makedirs(repo)
+        _git("init", "-q", "-b", "main", cwd=repo)
+        _identity("commit", "-q", "--allow-empty", "-m", "root", cwd=repo)
+        port = os.path.join(repo, ".partyline-worktrees", "port")
+        os.makedirs(port)
+        self.db.create_conversation("port", "Port")
+        self.db._exec("UPDATE conversations SET parent_id='line', cwd=? WHERE id='port'",
+                      (port,))
+        with open(os.path.join(repo, "f.txt"), "w") as fh:
+            fh.write("portable work\n")
+        _git("add", "-A", cwd=repo)
+        _identity("commit", "-q", "-m", "portable work", cwd=repo)
+        return repo, _git("rev-parse", "HEAD", cwd=repo).stdout.strip()
+
+    def test_a_request_can_name_a_review_worktree_by_repository_and_sha(self):
+        repo, sha = self._subtree_repo_with_commit()
+        made = self.client.post("/api/conversations/line/write-set",
+                                json={"repository": repo, "sha": sha},
+                                headers=self.worker)
+        self.assertEqual(made.status_code, 200, made.text)
+        pending = self.client.get("/api/conversations/line/write-set/request",
+                                  headers=self.captain).json()["request"]
+        self.assertEqual(pending["path"], os.path.join(repo, ".review", sha))
+
+    def test_a_person_can_grant_a_review_checkout_by_repository_and_sha(self):
+        # the person approving should not type the path either: the pair
+        # resolves to the review checkout before the absolute-path check
+        repo, sha = self._subtree_repo_with_commit()
+        made = self.client.post("/api/conversations/line/write-set",
+                                json={"repository": repo, "sha": sha},
+                                headers=self.human)
+        self.assertEqual(made.status_code, 200, made.text)
+        grants = list_write_grants(self.db, "line")
+        self.assertEqual([g["path"] for g in grants], [os.path.join(repo, ".review", sha)])
+        self.assertEqual(grants[0]["granted_by"], "person")
+
+    def test_review_worktree_grant_names_are_refused_outside_their_shape(self):
+        repo, sha = self._subtree_repo_with_commit()
+        stranger = os.path.join(self.directory.name, "stranger")
+        os.makedirs(stranger)
+        cases = [
+            ({"path": self.target, "repository": repo, "sha": sha}, 422, "not both"),
+            ({}, 422, "name the path"),
+            ({"repository": repo}, 422, "both the repository and the sha"),
+            ({"sha": sha}, 422, "both the repository and the sha"),
+            ({"repository": stranger, "sha": sha}, 403, "subtree"),
+            ({"repository": repo, "sha": "deadbeef"}, 400, "no commit deadbeef"),
+        ]
+        for body, status, phrase in cases:
+            made = self.client.post("/api/conversations/line/write-set",
+                                    json=body, headers=self.worker)
+            self.assertEqual(made.status_code, status, f"{body}: {made.text}")
+            self.assertIn(phrase, made.json()["detail"])
+        self.assertEqual(self.client.get("/api/conversations/line/write-set/request",
+                                         headers=self.captain).json()["request"], None)
 
 
 if __name__ == "__main__":

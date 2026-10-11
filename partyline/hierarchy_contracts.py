@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from .contracts import ConversationResponse
+from .goal import MAX_GOAL, MAX_TOPIC
 
 MAX_REPORT_BODY = 2000
 MAX_MESSAGE_BODY = 8000
@@ -28,8 +29,8 @@ class ChildIn(BaseModel):
     """
 
     name: str = Field(min_length=1, max_length=120)
-    goal: str = Field(default="", max_length=3000)
-    topic: str = Field(default="", max_length=3000)
+    goal: str = Field(default="", max_length=MAX_GOAL)
+    topic: str = Field(default="", max_length=MAX_TOPIC)
     base: Literal["checkout", "upstream"] = "checkout"
     # Absolute path to a git repository this machine has: the child's worktree
     # is placed under that repository's .partyline-worktrees instead of the
@@ -40,6 +41,17 @@ class ChildIn(BaseModel):
 
 class AcceptIn(BaseModel):
     sha: str = Field(min_length=4, max_length=64)
+    # A worker often commits after the review: the reviewed SHA is then an
+    # ancestor of the line's newer fenced tip instead of the tip itself. With
+    # this flag, accept fast-forwards to that tip instead of refusing the
+    # reviewed SHA as a stray; the response names both SHAs.
+    allow_descendant: bool = False
+
+
+class TreeSyncOut(BaseModel):
+    ok: bool
+    worktree: str | None = None
+    detail: str = ""
 
 
 class AcceptResponse(BaseModel):
@@ -47,10 +59,58 @@ class AcceptResponse(BaseModel):
     branch: str
     sha: str  # the full SHA recorded on the line
     moved: bool  # False when the branch already pointed at it
+    # Set when allow_descendant landed the branch on the line's newer fenced
+    # tip; null when the branch holds the reviewed SHA itself.
+    reviewed_sha: str | None = None
+    # The deterministic post-accept check: any worktree holding the branch is
+    # at the accepted SHA with a clean status. Reporting only.
+    tree_sync: TreeSyncOut | None = None
+
+
+class PrereviewIn(BaseModel):
+    sha: str = Field(min_length=4, max_length=64)
+    # Tree prefixes (or single files) whose ``.json`` blobs are scanned for
+    # path-like references, e.g. ["data/", "assets/cues.json"].
+    data_paths: list[str] = Field(default_factory=list, max_length=64)
+    checks: list[str] = Field(default_factory=lambda: ["referenced-paths"])
+    repository: str = Field(default="", max_length=4096)
+    # Engine scheme prefixes mapped into the tree, e.g. {"res://": "game/"}:
+    # a `res://audio/x.ogg` reference is checked at `game/audio/x.ogg` (an
+    # empty tree prefix means the repository root). Unmapped schemes —
+    # https:, user:, mailto: — are never file references and stay out.
+    res_roots: dict[str, str] = Field(default_factory=dict, max_length=16)
+
+
+class PrereviewRef(BaseModel):
+    file: str  # the .json blob in the commit that names the reference
+    ref: str  # the referenced path, exactly as the table spells it
+    ignored: bool = False  # real on disk, hidden from git by the ignore rules
+
+
+class PrereviewOut(BaseModel):
+    ok: bool
+    missing: list[PrereviewRef] = Field(default_factory=list)
+    checked: int = 0
+
+
+class TipResponse(BaseModel):
+    """Where the line's hand-off branch and its fence mirror point.
+
+    ``fenced_tip`` is null when no mirror exists (an unfenced line), and all
+    three are null when the line has no placed worktree to read.
+    """
+
+    branch: str | None = None
+    branch_sha: str | None = None
+    fenced_tip: str | None = None
 
 
 class ReviewWorktreeIn(BaseModel):
     sha: str = Field(min_length=4, max_length=64)
+    # Another repository this machine hosts: the review checkout is placed in
+    # ``<repository>/.review/<sha>`` when a line of this line's subtree works
+    # there. Empty means the line's own repository, as before.
+    repository: str = Field(default="", max_length=4096)
 
 
 class ReviewWorktreeOut(BaseModel):
@@ -112,6 +172,9 @@ class CapabilityState(BaseModel):
 
 class MessageIn(BaseModel):
     body: str = Field(min_length=1, max_length=MAX_MESSAGE_BODY)
+    # A retry-safe identity the client makes up: the same sender presenting
+    # the same key within the window gets the original message back (2.7).
+    client_key: str | None = Field(default=None, max_length=64)
 
 
 class ChildCreatedResponse(BaseModel):

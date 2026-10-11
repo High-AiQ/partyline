@@ -52,6 +52,13 @@ class RoleBriefingTests(unittest.TestCase):
         mid = role_instructions(["assign", "create_child"], "mid", "root", 1)
         self.assertIn("depth 1 of 2; a child of yours is a leaf", mid)
 
+    def test_the_captain_pack_points_at_the_captain_docs(self):
+        root = role_instructions(["assign", "create_child"], "root", None, 0)
+        self.assertIn("GET /api/conversations/root/docs", root)
+        self.assertIn("request a category, then a topic", root)
+        worker = worker_instructions(True)
+        self.assertNotIn("/docs", worker)  # the docs are a captain's shelf
+
     def test_a_leaf_captain_keeps_the_pack_and_staffs_its_own_line(self):
         text = role_instructions(["assign", "report"], "leaf", "mid", 2)
         self.assertIn("### You are the captain; you do not implement", text)
@@ -253,3 +260,63 @@ class RoleBriefingTests(unittest.TestCase):
     def test_the_reclaim_duty_reaches_no_one_who_cannot_act_on_it(self):
         self.assertEqual(role_instructions(["read", "write"], "line", "parent"), "")
         self.assertNotIn("Reclaim the line", worker_instructions(captained=True))
+
+    def test_the_split_brief_states_the_goal_and_topic_caps_and_points_at_a_brief_file(self):
+        # Only the splitting pack POSTs /children; a leaf or staffed captain
+        # cannot, so the cap text belongs to that variant alone.
+        text = role_instructions(["assign", "create_child"], "root", None)
+        self.assertIn("the goal at 3,000 characters", text)
+        self.assertIn("the topic at 20,000", text)
+        self.assertIn("docs/contracts/<line>.md", text)
+        self.assertIn("name that file in the topic", text)
+        for label, other in {
+            "leaf": role_instructions(["assign", "report"], "leaf", "mid", 2),
+            "staffed": role_instructions(
+                ["assign", "report"], "mid", "root", 1, staffed=True),
+        }.items():
+            with self.subTest(label):
+                self.assertNotIn("/children", other)
+
+    def test_retirement_takes_clear_goal_and_still_offers_the_discard(self):
+        text = role_instructions(["assign", "create_child"], "root", None)
+        self.assertIn("?clear_goal=true", text)
+        self.assertIn("no longer blocks the retirement", text)
+        self.assertIn("cleared only once every other blocker is gone", text)
+        self.assertIn("?discard=true", text)  # the existing relief stays documented
+
+    def test_the_accept_text_covers_allow_descendant_and_the_tip_read(self):
+        text = role_instructions(["assign", "create_child"], "root", None)
+        self.assertIn('"allow_descendant": true', text)
+        self.assertIn("descends from the reviewed SHA", text)
+        self.assertIn("counts the commits that went in unreviewed", text)
+        self.assertIn("/api/conversations/<child-id>/tip", text)
+        self.assertIn("shows the branch and the fenced tip before you accept", text)
+
+    def test_the_review_text_covers_cross_repository_worktrees_and_the_pair(self):
+        text = role_instructions(["assign", "create_child"], "root", None)
+        self.assertIn('"repository":"<abs path>"', text)
+        self.assertIn("any repository of this subtree", text)
+        self.assertIn('"repository","sha"', text)
+        self.assertIn("instead of the path", text)
+
+    def test_the_staffing_text_tells_the_captain_about_bubbled_approvals(self):
+        text = role_instructions(["assign", "create_child"], "root", None)
+        self.assertIn("⚑ approval pending", text)
+        self.assertIn("approvals pending in the staffing line", text)
+        self.assertIn("the root captain explains it to the person in context", text)
+
+    def test_every_captain_variant_carries_the_fence_paragraph(self):
+        packs = {
+            "splitting": role_instructions(
+                ["assign", "create_child"], "root", None),
+            "leaf": role_instructions(["assign", "report"], "leaf", "mid", 2),
+            "staffed": role_instructions(["assign", "report"], "mid", "root", 1, staffed=True),
+        }
+        for label, text in packs.items():
+            with self.subTest(label):
+                self.assertIn("The fence, in one paragraph", text)
+                self.assertIn("branch ref moves only on accept", text)
+                self.assertIn("worktree HEAD (the fenced mirror) is the real tip", text)
+                self.assertIn("`git log <branch>` from outside shows the", text)
+                self.assertIn("review-worktrees", text)
+                self.assertIn("never a raw `git worktree add`", text)

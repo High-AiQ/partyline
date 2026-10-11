@@ -224,7 +224,7 @@ async def _resume_adapter_locked(
     provision_connection(runtime.db.path, att)
     att["digest_rider"] = lambda: ""
     bind_connection_hint(att)
-    bind_role_delivery(runtime.db, att)
+    bind_role_delivery(runtime.db, att, runtime)
     history = delivered_history(runtime.db, att)
     att["delivered_bodies"] = history.bodies
     att["delivered_transcript_records"] = history.transcript_records

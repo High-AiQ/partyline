@@ -1189,7 +1189,9 @@ class ServerTest(unittest.TestCase):
     def test_topic_and_rename_validation_and_notices(self):
         request = self.principal_request("greg")
         self.assert_http(404, server.set_topic(request, "missing", server.TopicIn(topic="x")))
-        self.assert_http(400, server.set_topic(request, "line", server.TopicIn(topic="x" * 3001)))
+        self.assert_http(400, server.set_topic(request, "line", server.TopicIn(topic="x" * 20001)))
+        changed = self.arun(server.set_topic(request, "line", server.TopicIn(topic="x" * 19000)))
+        self.assertEqual(changed["topic"], "x" * 19000)
         changed = self.arun(server.set_topic(request, "line", server.TopicIn(topic=" New ")))
         self.assertEqual(changed["topic"], "New")
         self.assertIn(

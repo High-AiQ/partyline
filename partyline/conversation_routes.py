@@ -2,28 +2,23 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 import uuid
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
 
 from .adapter_update import apply_update, requested_update_argv
 from .attachment_commands import validated_attachment_command
 from .auth_guard import request_principal
 from .auth_store import handle_taken
+from .conversation_archive import register_archive_route
 from .hierarchy import tree_live_name_conflict
-from .line_process_routes import detach_attachment, live_attachments, mid_turn_blocker
-from .line_subtree import archive_line, archive_subtree
 from .line_worktree import describe, ensure_placed, line_cwd, outside_worktree_note
-from .retirement import archive_blockers
-from .worktree_lifecycle import archive_worktree_if_safe, discard_worktree
-from .review_worktrees import prune_review_worktrees
-from .conversation_contracts import BlockedArchiveResponse, PurgeAllResponse
+from .conversation_contracts import PurgeAllResponse
 from .conversation_purge import execute_purge, execute_purge_all_archived
+from .goal import MAX_TOPIC
 from .contracts import (
-    ArchiveResponse, AttachIn, AttachmentResponse, ConvIn, ConversationEvent,
+    AttachIn, AttachmentResponse, ConvIn, ConversationEvent,
     ConversationResponse, ConversationsChangedEvent, PurgeResponse, RenameIn, TopicIn,
 )
 from .machine_scope import (
@@ -93,8 +88,8 @@ def register_conversation_routes(
         deny_unless(db, principal, conv_id, "write")
         conv = db.get_conversation(conv_id)
         topic = body.topic.strip()
-        if len(topic) > 3000:
-            raise HTTPException(400, "topic is capped at 3000 characters")
+        if len(topic) > MAX_TOPIC:
+            raise HTTPException(400, f"topic is capped at {MAX_TOPIC} characters")
         if topic == conv["topic"]:
             return conv
         conv = db.set_topic(conv_id, topic)
@@ -136,66 +131,9 @@ def register_conversation_routes(
             raise HTTPException(403, "only a human can purge all archived lines")
         return await execute_purge_all_archived(s.runtime, s.media, s.runtime.db)
 
-    @app.delete(
-        "/api/conversations/{conv_id}",
-        response_model=ArchiveResponse,
-        responses={409: {"model": BlockedArchiveResponse}},
-    )
-    async def archive_conversation(
-        request: Request, conv_id: str, include_children: bool = False, discard: bool = False,
-        stop_processes: bool = False,
-    ):
-        runtime = _server().runtime
-        db = runtime.db
-        principal = request_principal(request)
-        deny_unless(db, principal, conv_id, "archive")
-        conv = db.get_conversation(conv_id)
-        if conv["archived_at"]:
-            raise HTTPException(409, "line is already archived")
-        pre_stopped: list[str] = []
-        live: list[dict] = []
-        if stop_processes:
-            live = live_attachments(db, conv_id, include_children)
-            working_presence = getattr(runtime, "presence", None) or presence
-        # Every blocker in one answer, so a captain fixes them in one pass
-        # instead of learning the next one on each round trip.
-        blockers = await asyncio.to_thread(
-            archive_blockers, db, conv_id,
-            include_children=include_children, discard=discard,
-            strict=not is_human(principal), ignore_live_processes=stop_processes,
-        )
-        if stop_processes and (blocker := mid_turn_blocker(live, working_presence)):
-            blockers.append(blocker)
-        if blockers:
-            summary = "; ".join(blocker["message"] for blocker in blockers)
-            return JSONResponse(
-                status_code=409, content={"detail": summary, "blockers": blockers}
-            )
-        for attachment in live:
-            await detach_attachment(runtime, attachment["id"])
-            pre_stopped.append(attachment["name"])
-        if include_children:
-            stopped, archived = await archive_subtree(runtime, conv_id)
-        else:
-            stopped, archived = await archive_line(runtime, conv_id), [conv_id]
-        stopped = [*pre_stopped, *stopped]
-        removed, kept_reason = False, None
-        for line_id in archived:
-            if discard and line_id == conv_id:
-                # The explicit discard: a merged branch's dirty worktree goes.
-                line_removed = await asyncio.to_thread(discard_worktree, db, line_id)
-                reason = None
-            else:
-                line_removed, reason = await asyncio.to_thread(
-                    archive_worktree_if_safe, db, line_id)
-            await asyncio.to_thread(prune_review_worktrees, db, line_id)
-            if line_id == conv_id:
-                removed, kept_reason = line_removed, reason
-        await runtime.broadcast_all(ConversationsChangedEvent())
-        return {"ok": True, "archived": True, "stopped": stopped,
-                "archived_ids": archived, "worktree_removed": removed,
-                "worktree_kept_reason": kept_reason,
-                "conversation": db.get_conversation(conv_id)}
+    # Retired to conversation_archive.py (2.8, ?clear_goal=true) — re-exported
+    # below under the same name so server.py and its tests keep one import.
+    archive_conversation = register_archive_route(app, presence)
 
     @app.post("/api/conversations/{conv_id}/restore", response_model=ConversationResponse)
     async def restore_conversation(request: Request, conv_id: str):

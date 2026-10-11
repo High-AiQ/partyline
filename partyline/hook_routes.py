@@ -26,6 +26,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import ValidationError
 
 from .bind import BindConfig
+from .adapter_capabilities import compaction_hooks
 from .contracts import AttentionEvent, OkResponse
 from .hook_contracts import hook_validation_detail, parse_hook_payload
 
@@ -81,6 +82,9 @@ async def handle_hook(runtime, presence, att_id: str, token: str, request: Reque
         raise HTTPException(422, hook_validation_detail(exc)) from exc
     boundary = payload.turn_boundary()
     if boundary == "began":
+        from .compaction_events import bump_turn
+
+        bump_turn(runtime.db, att_id, token)
         await presence.began(att["conv_id"], att_id, owner=token)
         adapter = getattr(runtime, "live", {}).get(att_id)
         mark_began = getattr(adapter, "mark_startup_prompt_began", None)
@@ -88,6 +92,15 @@ async def handle_hook(runtime, presence, att_id: str, token: str, request: Reque
             mark_began()
     elif boundary == "ended":
         await presence.ended(att["conv_id"], att_id, owner=token)
+    if payload.event == "precompact":
+        # Compaction is an adapter capability: only a harness whose metadata
+        # declares compaction_hooks is counted, so a stray hook from another
+        # CLI posting this URL never invents an event.
+        from .compaction_events import note_hook_compaction
+
+        if compaction_hooks(att):
+            await note_hook_compaction(runtime, att, payload.trigger or "manual")
+        return {"ok": True}
     message = (payload.message or payload.title or "").strip()
     # Only surface events that mean "a human must look at me" — idle chatter
     # from an agent waiting between mentions would spam the line.
@@ -102,5 +115,20 @@ def hooks_router(runtime, presence) -> APIRouter:
     @router.post("/api/hooks/{att_id}/{token}", response_model=OkResponse)
     async def hook_event(att_id: str, token: str, request: Request):
         return await handle_hook(runtime, presence, att_id, token, request)
+
+    @router.get("/api/hooks/{att_id}/{token}/rebrief")
+    async def rebrief(att_id: str, token: str):
+        # SessionStart(compact) prints this to stdout, and Claude folds hook
+        # stdout into the model's context: the body IS the feature, so it is
+        # plain text and never JSON.
+        from fastapi.responses import PlainTextResponse
+
+        from .rebrief import render_rebrief
+
+        att = authorize(runtime, att_id, token)
+        if not compaction_hooks(att):
+            raise HTTPException(
+                403, "this adapter does not expose compaction hooks")
+        return PlainTextResponse(render_rebrief(runtime.db, att), media_type="text/plain")
 
     return router
