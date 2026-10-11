@@ -19,6 +19,7 @@ from .attachment_lifecycle import (
 from .contracts import AttachmentEvent, AttachmentRemovedEvent, OkResponse
 from .line_process_routes import detach_attachment
 from .system_notice import post_system_notice
+from .mention_relay import post_private
 
 
 def register_attachment_lifecycle_routes(app, runtime, *, start, require_loopback, validate):
@@ -108,11 +109,28 @@ def register_attachment_lifecycle_routes(app, runtime, *, start, require_loopbac
             raise HTTPException(400, str(exc)) from exc
         if not os.path.isdir(stopped["cwd"]):
             raise HTTPException(400, "attachment working directory no longer exists")
+        from .mention_relay import live_manager
         from .rebrief import render_rebrief
 
         response = await _start_replacement(
             stopped, FreshAttachmentRequest(checkpoint=render_rebrief(
                 db, stopped, reason=body.reason.strip())))
+        replacement_id = response["id"]
+        # Finding 5.7: the fresh instance says hello without an @, so ring the
+        # line's live captain once with the assignment ask. Skipped when the
+        # replaced process was itself the captain — its fresh instance already
+        # holds the role and needs no ring.
+        if not stopped.get("is_lead"):
+            captain = live_manager(runtime, stopped["conv_id"])
+            if captain is not None:
+                await post_private(
+                    runtime, stopped["conv_id"], "system", "system",
+                    f"↻ @{stopped['name']} was replaced with a fresh instance "
+                    f"(by @{principal.name}) — assign now: "
+                    f"@{response['name']} is ready and waiting for your @mention",
+                    audience=captain["id"],
+                    source=(replacement_id, stopped["conv_id"]),
+                )
         await post_system_notice(
             runtime, stopped["conv_id"],
             f"↻ @{stopped['name']} replaced with a fresh instance "
