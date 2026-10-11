@@ -313,13 +313,28 @@ every commit, gone on any other machine). It returns `{"ok", "missing":
 resolves the SHA under the same subtree rule as review worktrees — probing
 ignore rules in that subtree line's own checkout. A reference counts as
 present when it resolves from the repository root or from the naming table's
-own directory, or when it names a tracked directory, and engine schemes are
+own directory, or when it names a tracked directory — a reference ending in
+a slash is read as that directory — and engine schemes are
 checked through `res_roots` (e.g. `{"res://": "game/"}`), so a game's
 `res://` tables are checked in the tree they ship from. After an
 accept, the response and the ☏ notice carry `tree_sync`: any worktree holding
 the accepted branch must sit at the accepted SHA with a clean status — a
 stale or dirty checkout is reported (`⚠ tree not in sync: …`) in the accept
 response, never fixed automatically.
+
+## Partyline docs for captains
+
+Partyline's own documentation is readable over the API, in shelves rather
+than one dump: `GET /api/docs` lists the categories (captaining, attachments,
+review-and-accept, fence-and-write-set, memory-and-resources, restart,
+best-practices, lessons), `GET /api/docs/<category>` lists a category's
+topics, and `GET /api/docs/<category>/<topic>` returns one section — sliced
+live from the repository's `docs/*.md`, so there is no second copy to drift;
+a mapped heading that disappears is refused, not paraphrased. People and
+current captains read them; workers and ordinary participants are refused.
+A captain's wake carries the pointer `(partyline docs: GET /api/docs — …)`
+roughly every N line messages since the last one — a setting,
+`docs_reminder_every_messages`, default 40 — and never on every wake.
 
 ## The goal
 

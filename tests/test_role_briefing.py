@@ -52,6 +52,13 @@ class RoleBriefingTests(unittest.TestCase):
         mid = role_instructions(["assign", "create_child"], "mid", "root", 1)
         self.assertIn("depth 1 of 2; a child of yours is a leaf", mid)
 
+    def test_the_captain_pack_points_at_the_captain_docs(self):
+        root = role_instructions(["assign", "create_child"], "root", None, 0)
+        self.assertIn("GET /api/conversations/root/docs", root)
+        self.assertIn("request a category, then a topic", root)
+        worker = worker_instructions(True)
+        self.assertNotIn("/docs", worker)  # the docs are a captain's shelf
+
     def test_a_leaf_captain_keeps_the_pack_and_staffs_its_own_line(self):
         text = role_instructions(["assign", "report"], "leaf", "mid", 2)
         self.assertIn("### You are the captain; you do not implement", text)

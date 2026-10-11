@@ -153,6 +153,9 @@ def referenced_paths(db, conv_id: str, sha: str, data_paths: list[str],
             candidate = _candidate(value, res_roots or {})
             if candidate is None:
                 continue
+            candidate = candidate.rstrip("/")
+            if not candidate:
+                continue  # a bare "res://" or "/" names nothing
             path_shaped = "/" in candidate or bool(_EXTENSION.search(candidate))
             if not path_shaped and candidate not in directories:
                 continue  # a plain word naming nothing tracked
