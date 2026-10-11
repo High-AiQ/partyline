@@ -24,6 +24,7 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .auth_guard import request_principal
+from .approval_bubble import bubble_approval
 from .contracts import RestartPlanRequest, RestartRequestEvent, ShutdownEvent
 from . import deployment, operator_restart
 from .machine_scope import deny_unless, is_human
@@ -150,6 +151,12 @@ def register_restart_request_routes(app: FastAPI, runtime, adapter_metadata, req
         await announce(conv_id, f"☏ @{principal.name} asks a person to restart partyline: "
                                 f"{runtime.restart_request.reason} — approve or decline from the banner",
                        actor=principal)
+        await bubble_approval(
+            runtime, conv_id, kind="restart", requester=principal.name,
+            detail=runtime.restart_request.reason,
+            approve=f"POST /api/restart-request/{runtime.restart_request.id}/approve",
+            actor=principal,
+        )
         return runtime.restart_request
 
     def _take(request: Request, request_id: str) -> RestartRequest:

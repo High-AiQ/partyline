@@ -8,8 +8,9 @@ import uuid
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from .auth_guard import request_principal
 from .adapters import ADAPTER_METADATA
+from .approval_bubble import bubble_approval
+from .auth_guard import request_principal
 from .machine_scope import deny_unless, is_human
 from .memory_contracts import MemoryRequestEvent
 from .resume_continuation import resume_with_backlog
@@ -77,6 +78,12 @@ def register_memory_request_routes(app: FastAPI, runtime, resume) -> None:
         await announce(att["conv_id"],
                        f"☏ @{actor.name} requests a {body.requested_limit} memory cap for "
                        f"@{att['name']}: {record['reason']} — review the request banner")
+        await bubble_approval(
+            runtime, att["conv_id"], kind="memory", requester=actor.name,
+            detail=f"{body.requested_limit} memory cap for @{att['name']}: {reason}",
+            approve=f"POST /api/memory-requests/{ident}/approve",
+            actor=actor,
+        )
         return record
 
     def take(request: Request, request_id: str, *, approving: bool):

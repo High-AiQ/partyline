@@ -17,6 +17,7 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
 from .adapters import ADAPTER_METADATA
+from .approval_bubble import bubble_approval
 from .auth_guard import request_principal
 from .contracts import WriteSetGrantRequestEvent
 from .hierarchy import ancestors
@@ -228,6 +229,12 @@ async def file_write_set_request(
         conv_id,
         f"☏ @{principal.name} asks a person to grant write-set scope for `{path}` — "
         "approve or decline from the banner",
+        actor=principal,
+    )
+    await bubble_approval(
+        runtime, conv_id, kind="write-set", requester=principal.name,
+        detail=f"grant write scope for `{path}`",
+        approve=f"POST /api/conversations/{conv_id}/write-set/request/{request.id}/approve",
         actor=principal,
     )
     return request

@@ -57,7 +57,7 @@ def briefing_pointer(conv_id: str) -> str:
     return f"(captain pack: GET /api/conversations/{conv_id}/briefing)"
 
 
-def bind_role_delivery(db, att: dict) -> None:
+def bind_role_delivery(db, att: dict, runtime=None) -> None:
     initial = current_role(db, att["id"])
     att["role_briefing"] = _instructions(initial, db)
     original_rider = att["digest_rider"]
@@ -94,7 +94,7 @@ def bind_role_delivery(db, att: dict) -> None:
         goal = staffing = handoff = worker = pointer = ""
         if current.role == "lead":
             current_goal = goal_rider(db, current.conv_id)
-            current_staffing = staffing_line(db, current.conv_id)
+            current_staffing = staffing_line(db, current.conv_id, runtime=runtime)
             current_handoff = handoff_rider(db, current.conv_id)
             goal = _delta(current_goal, last_goal, "goal")
             staffing = _delta(current_staffing, last_staffing, "staffing")
