@@ -13,6 +13,7 @@ is the SHA on the line's branch; nothing else counts.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 
@@ -261,6 +262,7 @@ def register_accept_route(app, runtime) -> None:
             done = accept_sha(db, conv_id, body.sha, body.allow_descendant)
         except AcceptError as exc:
             raise HTTPException(exc.status_code, exc.detail) from exc
+        _refresh_children_views(db, conv_id, done["branch"])
         state = "already at" if not done["moved"] else "moved to"
         tail = " — the hand-off is the SHA on the line's branch"
         if done["reviewed_sha"]:
@@ -280,3 +282,18 @@ def register_accept_route(app, runtime) -> None:
             conv_id=conv_id, branch=done["branch"], sha=done["sha"], moved=done["moved"],
             reviewed_sha=done["reviewed_sha"], tree_sync=TreeSyncOut(**sync),
         )
+
+
+def _refresh_children_views(db, conv_id: str, branch: str) -> None:
+    """Children's fenced views of this branch are launch-time stale; refresh.
+
+    Best-effort: a stale view is a nuisance, and an accepted hand-off must
+    never fail because a mirror could not be re-copied.
+    """
+    try:
+        from .line_base import refresh_children_views
+
+        refresh_children_views(db, conv_id, branch)
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "could not refresh children's base views after accepting on %s", conv_id)

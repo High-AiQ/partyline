@@ -145,7 +145,10 @@ FENCE = (
     "**The fence, in one paragraph.** A line's branch ref moves only on accept: the worktree "
     "HEAD (the fenced mirror) is the real tip, so `git log <branch>` from outside shows the "
     "old SHA until the accept lands. Create review worktrees through the API — POST "
-    "{root}/review-worktrees — never a raw `git worktree add`, which fails inside the fence."
+    "{root}/review-worktrees — never a raw `git worktree add`, which fails inside the fence. "
+    "A line's view of its parent branch is also launch-time fresh: GET {root}/base reports "
+    "the parent SHA as the host sees it and how far behind the line is, and POST "
+    "{root}/refresh-base re-copies it before merging main."
 )
 
 SPLIT = (

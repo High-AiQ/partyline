@@ -51,9 +51,13 @@ in the response: a worktree left dirty or behind is reported there and as a
 
 ## Merge main by a verified SHA
 
-A fenced line cannot see the parent's current main. Merge main by a SHA
-pasted in chat after verifying ancestry, or ask the root captain for the
-current main SHA. Never merge from a stale belief about where main is.
+A fenced line cannot see the parent's current main: its ref view is a mirror
+refreshed only at launch. `GET /api/conversations/<id>/base` reports the
+parent branch as the host sees it and how far behind the line is, and `POST
+/api/conversations/<id>/refresh-base` re-copies that ref into the line's
+fenced view, so `git merge <branch>` inside the line resolves to today's
+main. Merge by that verified SHA — never from a stale belief about where
+main is. An accept on a line refreshes its children's views automatically.
 
 ## Reactions instead of acknowledgements
 
