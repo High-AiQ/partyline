@@ -310,7 +310,12 @@ under `data_paths` that the commit does not track, flagging the ones the
 checkout's ignore rules hide (the `out/` incident: real on disk, absent from
 every commit, gone on any other machine). It returns `{"ok", "missing":
 [{"file", "ref", "ignored"}], "checked"}`, needs only `read` on the line, and
-resolves the SHA under the same subtree rule as review worktrees. After an
+resolves the SHA under the same subtree rule as review worktrees — probing
+ignore rules in that subtree line's own checkout. A reference counts as
+present when it resolves from the repository root or from the naming table's
+own directory, or when it names a tracked directory, and engine schemes are
+checked through `res_roots` (e.g. `{"res://": "game/"}`), so a game's
+`res://` tables are checked in the tree they ship from. After an
 accept, the response and the ☏ notice carry `tree_sync`: any worktree holding
 the accepted branch must sit at the accepted SHA with a clean status — a
 stale or dirty checkout is reported (`⚠ tree not in sync: …`) in the accept

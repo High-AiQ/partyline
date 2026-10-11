@@ -175,6 +175,65 @@ class PrereviewTest(unittest.TestCase):
             headers=outsider)
         self.assertEqual(made.status_code, 403, made.text)
 
+    def test_res_scheme_references_are_checked_through_a_mapped_root(self):
+        # Godot tables spell paths res://…: without a mapping the out/ incident
+        # passes unnoticed, so res: enters only through res_roots and is
+        # resolved under its tree prefix; user:// stays out either way
+        sha = self.commit_table({
+            "cue": {"file": "res://audio/mapped.ogg", "alt": "user://cache/x.ogg"},
+        }, extra_files={"game/audio/mapped.ogg": "sound"})
+        seen = self.check(sha, res_roots={"res://": "game/"})
+        self.assertEqual(seen.status_code, 200, seen.text)
+        self.assertTrue(seen.json()["ok"])
+        self.assertEqual(seen.json()["checked"], 1)  # user:// never counted
+        sha = self.commit_table({"cue": {"file": "res://audio/missing.ogg"}},
+                                extra_files={"game/audio/mapped.ogg": "sound"})
+        seen = self.check(sha, res_roots={"res://": "game/"})
+        body = seen.json()
+        self.assertFalse(body["ok"])
+        self.assertEqual(body["missing"][0]["ref"], "res://audio/missing.ogg")
+        self.assertEqual(body["missing"][0]["file"], "data/cues.json")
+
+    def test_table_relative_and_directory_references_count_as_present(self):
+        # tables reference files relative to themselves, and sometimes name a
+        # directory: both shapes are normal, neither is a finding
+        sha = self.commit_table({
+            "beside": {"file": "voice.ogg"},          # data/voice.ogg
+            "up": {"file": "../shared/sub.ogg"},      # shared/sub.ogg
+            "folder": {"dir": "audio"},               # a tracked directory
+        }, extra_files={"data/voice.ogg": "v", "shared/sub.ogg": "s",
+                        "audio/cue.ogg": "c"})
+        seen = self.check(sha)
+        self.assertEqual(seen.status_code, 200, seen.text)
+        self.assertTrue(seen.json()["ok"], seen.json())
+        self.assertEqual(seen.json()["checked"], 3)
+
+    def test_check_ignore_probes_the_subtree_line_s_own_checkout(self):
+        # a cross-repository check must read the ignore rules of the checkout
+        # that actually holds the files, not the calling line's other project
+        other = os.path.join(self.directory.name, "other")
+        os.makedirs(other)
+        _git("init", "-q", "-b", "main", cwd=other)
+        port = os.path.join(other, ".partyline-worktrees", "port")
+        os.makedirs(port)
+        self.db.create_conversation("port", "Port")
+        self.db._exec("UPDATE conversations SET parent_id=?, cwd=? WHERE id='port'",
+                      (self.kid["id"], port))
+        with open(os.path.join(other, ".gitignore"), "w") as fh:
+            fh.write("out/\n")
+        os.makedirs(os.path.join(other, "data"), exist_ok=True)
+        with open(os.path.join(other, "data", "cues.json"), "w") as fh:
+            json.dump({"cue": {"file": "out/built.ogg"}}, fh)
+        _git("add", "-A", cwd=other)
+        _identity("commit", "-q", "-m", "table in the other repo", cwd=other)
+        sha = _git("rev-parse", "HEAD", cwd=other).stdout.strip()
+        seen = self.check(sha, repository=other)
+        self.assertEqual(seen.status_code, 200, seen.text)
+        body = seen.json()
+        self.assertFalse(body["ok"])
+        self.assertEqual(len(body["missing"]), 1)
+        self.assertTrue(body["missing"][0]["ignored"])
+
 
 if __name__ == "__main__":
     unittest.main()
