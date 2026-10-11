@@ -68,7 +68,7 @@ class PartylineAdapter(BaseAdapter):
         return cmd
 
     @staticmethod
-    def _hook_settings(hook_url: str, with_compaction: bool) -> dict:
+    def _hook_settings(hook_url: str, with_compaction: bool = False) -> dict:
         """Process-scoped harness receipts plus the existing attention hook.
 
         ``UserPromptSubmit`` / ``Stop`` are the paired turn boundaries. The
