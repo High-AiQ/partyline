@@ -300,6 +300,22 @@ partyline owns the directory but nothing else in a repository's `.review`.
 Review checkouts are disposable by contract: pruning is forced, and the SHAs
 themselves stay in the repository, so no reviewed work is ever lost.
 
+## Scratch worktrees
+
+A review checkout is for adversarial reads; verifying an integration needs a
+build, and a build writes. `POST /api/conversations/<id>/scratch-worktrees`
+with `{"sha":"...", "repository":"<abs path>"?}` checks the SHA out detached
+and **writable** at `<repo>/.scratch/<full sha>` — same subtree rule, same
+creation permission, recorded on the calling line. The fence binds a line's
+recorded scratch checkouts writable, so the line's own process builds there
+without a write-set request; review checkouts stay exactly as they are.
+`GET …/scratch-worktrees` lists them, `DELETE
+…/scratch-worktrees/<sha>` drops one early, and a scratch checkout is pruned
+when the line retires or is purged and swept at startup when its record or
+its line is gone — it is never pruned by an accept, because integration
+checks follow the accepted work. The startup sweep owns only full-SHA
+directories under `.scratch`.
+
 ## Pre-review checks and the tree sync
 
 Some findings need no judgment, so they run without a model. `POST

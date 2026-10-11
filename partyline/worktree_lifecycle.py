@@ -21,6 +21,7 @@ from .hierarchy import parent_id_of
 from .line_worktree import WORKTREES_DIR, _git, line_cwd, repo_root
 from .worktree_paths import managed_root
 from .review_worktrees import sweep_review_worktrees
+from .scratch_worktrees import sweep_scratch_worktrees
 
 logger = logging.getLogger(__name__)
 
@@ -206,6 +207,7 @@ def sweep_orphaned_worktrees(db) -> None:
     for root in sorted(roots):
         _sweep_repo(root, known_cwds)
         sweep_review_worktrees(db, root)
+        sweep_scratch_worktrees(db, root)
 
 
 def _sweep_repo(root: str, known_cwds: set[str]) -> None:

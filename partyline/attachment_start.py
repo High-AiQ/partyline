@@ -14,6 +14,7 @@ from .process_incidents import exit_callback
 from .fence_protect import database_paths, protected_repo_roots
 from .hook_routes import surface_attention
 from .review_worktrees import list_review_worktrees
+from .scratch_worktrees import list_scratch_worktrees
 from .role_delivery import bind_role_delivery
 from .write_set_routes import list_write_grants
 from .resource_budget import format_limit, settings
@@ -30,6 +31,7 @@ def prepare_attachment(att, runtime, hook_url, checkpoint):
     att["hook_url"] = hook_url(att["id"], att["runtime_owner"])
     att["write_grants"] = list_write_grants(runtime.db, att["conv_id"])
     att["review_worktrees"] = list_review_worktrees(runtime.db, att["conv_id"])
+    att["scratch_worktrees"] = list_scratch_worktrees(runtime.db, att["conv_id"])
     att["protected_roots"] = protected_repo_roots(runtime.db)
     att["db_paths"] = database_paths(runtime.db)
     provision_connection(runtime.db.path, att)
