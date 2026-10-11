@@ -7,13 +7,26 @@ message once; the room held it twice. The API copy is stamped with the
 process's attachment id, so the tailed twin is recognisable: same process,
 same words, moments apart. The tail's copy is the one dropped, because the
 API post already routed and already woke whoever it named.
+
+The other order happens too: the tail captured the words first (a mirrored
+update, say) and the process then POSTed the same text through the API —
+finding 2.7's relay incident ended with both landing and the human reading
+every message twice. A capture carries no source stamp; it is recognisable
+by the sender's own handle on the same line. That twin is dropped at the
+API instead, and the caller gets the already-stored message back.
 """
 
 from __future__ import annotations
 
 import time
 
+from .message_queries import select_message_by_id
+
 ECHO_WINDOW_SECONDS = 180.0
+# The API-echo window is generous because the twin arrives via a transcript
+# tail that may lag; a capture twin arriving *before* its API post is a
+# same-turn double, so 15 seconds keeps a deliberate repeat intact.
+CAPTURE_ECHO_WINDOW_SECONDS = 15.0
 
 
 def _same(a: str, b: str) -> bool:
@@ -29,3 +42,23 @@ def is_api_echo(db, att_id: str, conv_id: str, body: str) -> bool:
     ).fetchall()
     horizon = time.time() - ECHO_WINDOW_SECONDS
     return any(row["created_at"] >= horizon and _same(row["body"], body) for row in rows)
+
+
+def capture_echo(db, sender: str, conv_id: str, body: str) -> dict | None:
+    """The unstamped capture of these words from the same handle, or None.
+
+    ``sender`` is the machine's handle: terminal captures are stored under it
+    without a source stamp, so the handle on this line *is* the identity.
+    """
+    rows = db._exec(
+        "SELECT id, body, created_at FROM messages WHERE conv_id=? AND sender=?"
+        " AND sender_type='agent' AND source_attachment_id IS NULL"
+        " ORDER BY id DESC LIMIT 5",
+        (conv_id, sender),
+    ).fetchall()
+    horizon = time.time() - CAPTURE_ECHO_WINDOW_SECONDS
+    for row in rows:
+        if row["created_at"] >= horizon and _same(row["body"], body):
+            return select_message_by_id(db._exec, conv_id, row["id"])
+    return None
+

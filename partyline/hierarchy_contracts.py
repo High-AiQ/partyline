@@ -172,6 +172,9 @@ class CapabilityState(BaseModel):
 
 class MessageIn(BaseModel):
     body: str = Field(min_length=1, max_length=MAX_MESSAGE_BODY)
+    # A retry-safe identity the client makes up: the same sender presenting
+    # the same key within the window gets the original message back (2.7).
+    client_key: str | None = Field(default=None, max_length=64)
 
 
 class ChildCreatedResponse(BaseModel):

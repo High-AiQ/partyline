@@ -1,6 +1,7 @@
 """Standalone authenticated API helper; credentials never enter shell arguments."""
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -58,6 +59,33 @@ def _validate_connection(data) -> Connection:
     return data
 
 
+def derived_client_key(method: str, path: str, body: bytes) -> str:
+    """A retry-safe key derived from the request itself.
+
+    The helper does not retry in-process, but the caller does: it re-runs the
+    identical command after `connection/request failed`, which may have been
+    printed for a POST that actually succeeded (finding 2.7). Deriving the
+    key — never invented per run — makes that re-run land as the original
+    message. A deliberate repeat of the same text needs a caller-made key.
+    """
+    digest = hashlib.sha256(b"\0".join((method.encode(), path.encode(), body))).hexdigest()
+    return digest[:64]  # the contract caps client_key at 64 characters
+
+
+def with_client_key(method: str, path: str, body: bytes | None) -> bytes | None:
+    """Stamp a message POST with its derived idempotency key, if unstamped."""
+    if body is None or method != "POST" or not urlsplit(path).path.endswith("/messages"):
+        return body
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        return body
+    if not isinstance(payload, dict) or payload.get("client_key"):
+        return body
+    payload["client_key"] = derived_client_key(method, path, body)
+    return json.dumps(payload).encode()
+
+
 def api_request(connection: Connection, method: str, path: str, body: bytes | None = None) -> bytes:
     parsed = urlsplit(path)
     if not path.startswith("/api/") or parsed.scheme or parsed.netloc or parsed.fragment:
@@ -88,7 +116,7 @@ def main(argv=None) -> int:
         body = None
         if args.json_file:
             raw = sys.stdin.read() if args.json_file == "-" else Path(args.json_file).read_text()
-            body = json.dumps(json.loads(raw)).encode()
+            body = with_client_key(args.method, args.path, json.dumps(json.loads(raw)).encode())
         output = api_request(connection, args.method, args.path, body)
         if args.output:
             Path(args.output).write_bytes(output)
