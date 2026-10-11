@@ -384,9 +384,10 @@ What must survive a compaction lives in the line notebook:
 `{"notes":"…"}`, capped at 4,000 characters. `tree` is stored on the root of
 the tree (contracts, standing rules), `line` on the line itself (goal,
 acceptance, decisions), `attachment` per process (what I am doing, files
-touched, last gate result, next step). A captain writes `line` and `tree`;
-each process writes only its own `attachment` notes; people write all
-three; anyone with `read` on the line can read. The notes ride the
+touched, last gate result, next step). A captain writes `line` notes; each
+process writes only its own `attachment` notes; `tree` writes need `assign`
+on the tree root, so the root captain (or a person) writes them; people
+write all three; anyone with `read` on the line can read. The notes ride the
 post-compaction re-briefing in that order, ahead of the latest assignment,
 inside the same 4k cap.
 
@@ -574,6 +575,20 @@ caller wanting a deliberate repeat of identical text sends its own key.
 The other direction is collapsed too: a machine POST whose text equals that
 process's own terminal-captured message on the same line within 15 seconds
 returns the capture instead of storing a twin.
+
+## Ack ping-pong limits
+
+Two workers trading bare acknowledgements — "standing by", "suite at 13
+of 61", "ok" — ring each other forever without moving anything. When a
+worker @mentions exactly one live peer whose last message mentioned it
+back, and nothing real happened on the line in between, the third such
+consecutive exchange is refused: an API post answers 429 before anything
+is stored, and terminal-captured speech is stored but its mention is not
+delivered, with one ⚠ notice saying to react 👀 instead. Real activity
+breaks the streak: a person or third process speaking, a file, a reaction,
+an accept, a message carrying a commit SHA, or anything substantive (more
+than 280 characters). Captains and people are always exempt — assignments
+and hand-offs must ring — and so are `@all` and multi-addressee mentions.
 
 ## The return path
 
