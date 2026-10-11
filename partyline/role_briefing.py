@@ -50,7 +50,10 @@ PROCEDURE = (
     '--conversation <line-id> --sha <sha>`, which checks it out at <repo>/.review/<sha>, '
     "records it on the line, and prunes it when the line retires or the SHA is accepted — "
     "whole diff from its intended base, gates run, hunting what the report omits "
-    "(skills/adversarial-review/SKILL.md). Run it or delegate it, but hold its findings; "
+    "(skills/adversarial-review/SKILL.md). Add "
+    '{{"repository":"<abs path>"}} to review a commit in any repository of this subtree, '
+    'and a write-set request may name {{"repository","sha"}} instead of the path. '
+    "Run it or delegate it, but hold its findings; "
     "never accept on a bare 'done'. Work accepted below still gets fresh scrutiny here, at "
     "your own scope: a lower captain's acceptance is input, never a substitute. Commission "
     "the inspection if you like, but the acceptance decision is yours and cannot be "
@@ -68,7 +71,10 @@ STAFFING_TRAITS = (
     "Favor can_manage captains, implements workers, and reads_images for visual work. "
     "GET {root}/staffing lists preset traits and live processes; a match is only the "
     "unique handle+adapter+command agreement — never infer the rest. Mix models when "
-    "you can; this is advice, not a gate."
+    "you can; this is advice, not a gate. A request that needs a person's approval "
+    "anywhere below your subtree arrives on the root line as a ⚑ approval pending "
+    "notice and is counted as approvals pending in the staffing line; the root "
+    "captain explains it to the person in context."
 )
 
 ASK_FIRST = (
@@ -173,7 +179,11 @@ SPLIT = (
     "was fulfilled and whether the piece integrates. When you accept the work, record the "
     "hand-off: POST /api/conversations/<child-id>/accept with {{\"sha\":\"<full sha>\"}} — "
     "partyline verifies the SHA exists and fast-forwards the child's branch to it, and the "
-    "hand-off is the SHA on the line's branch; nothing else counts. Accepting only "
+    "hand-off is the SHA on the line's branch; nothing else counts. If the line's tip has "
+    "moved past the SHA you reviewed, send {{\"allow_descendant\": true}}: the accept "
+    "fast-forwards to that newer tip when it descends from the reviewed SHA and the notice "
+    "counts the commits that went in unreviewed. GET /api/conversations/<child-id>/tip "
+    "shows the branch and the fenced tip before you accept. Accepting only "
     "fast-forwards: a side-branch or detached tip the branch cannot reach is refused, never "
     "merged in. Once the branch carries the accepted SHA and the child's captain is done, "
     "retire the child: DELETE /api/conversations/<child-id>?stop_processes=true; its "
@@ -181,8 +191,8 @@ SPLIT = (
     "stop its live processes first, POST /api/conversations/<child-id>/attachments/close. A "
     "refused retirement answers with every blocker at once (live processes, an uncleared "
     "goal, child lines, unmerged commits, uncommitted changes) so you fix them in one pass. "
-    "Pass ?clear_goal=true to clear the goal as part of the same call — then a goal on its "
-    "own no longer blocks the retirement. "
+    "Pass ?clear_goal=true to waive the goal blocker — a goal on its own no longer blocks "
+    "the retirement, and the goal is cleared only once every other blocker is gone. "
     "A merged branch's dirty worktree is the one you may throw away: pass ?discard=true with "
     "the DELETE; partyline refuses it for an unmerged branch, whose commits live only there."
 )

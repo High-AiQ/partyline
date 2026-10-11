@@ -118,17 +118,29 @@ class RetirementTest(unittest.TestCase):
         self.assertTrue(cleared.json()["archived"])
         self.assertIn(mid["id"], cleared.json()["archived_ids"])
 
-    def test_clear_goal_clears_the_goal_even_when_another_blocker_still_refuses(self):
+    def test_clear_goal_leaves_the_goal_alone_when_another_blocker_refuses(self):
         mid = self.child()
         self.db._exec("UPDATE conversations SET goal=? WHERE id=?", ("finish it", mid["id"]))
         self.unmerged(mid["cwd"])
 
         resp = self.retire(mid["id"], clear_goal=True)
 
-        # The clear happens before the blocker check, so the goal is gone either way.
+        # A refused retirement is not a finished line: the goal survives.
         self.assertEqual(resp.status_code, 409, resp.text)
         self.assertIn("unmerged_commits", [b["code"] for b in resp.json()["blockers"]])
-        self.assertEqual(self.db.get_conversation(mid["id"])["goal"], "")
+        self.assertEqual(self.db.get_conversation(mid["id"])["goal"], "finish it")
+
+    def test_clear_goal_waives_only_the_goal_blocker_not_the_others(self):
+        mid = self.child()
+        self.db._exec("UPDATE conversations SET goal=? WHERE id=?", ("finish it", mid["id"]))
+        self.unmerged(mid["cwd"])
+
+        resp = self.retire(mid["id"], clear_goal=True)
+
+        self.assertEqual(resp.status_code, 409, resp.text)
+        codes = [b["code"] for b in resp.json()["blockers"]]
+        self.assertNotIn("goal_not_cleared", codes)
+        self.assertIn("unmerged_commits", codes)
 
     def test_clear_goal_says_in_the_line_what_happened(self):
         mid = self.child()

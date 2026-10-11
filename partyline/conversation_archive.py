@@ -1,9 +1,10 @@
 """Retirement: DELETE /api/conversations/{id} — every blocker in one answer.
 
 Split out of ``conversation_routes`` (which sits at the 300-line cap) when
-finding 2.8 of the «3d game» report added ``?clear_goal=true``: clearing the
-goal rides the retirement call itself, before the blockers are read, so a
-goal on its own no longer strands a finished line.
+finding 2.8 of the «3d game» report added ``?clear_goal=true``: the flag
+waives the ``goal_not_cleared`` blocker and clears the goal itself only once
+every other blocker has come back empty, so a refused retirement never wipes
+the goal of a line that is not finished.
 """
 
 from __future__ import annotations
@@ -50,14 +51,6 @@ def register_archive_route(app: FastAPI, presence):
         conv = db.get_conversation(conv_id)
         if conv["archived_at"]:
             raise HTTPException(409, "line is already archived")
-        if clear_goal and conv.get("goal"):
-            set_goal(db, conv_id, "")
-            await post_system_notice(
-                runtime, conv_id, f"☏ goal cleared by @{principal.name} (retirement)",
-                actor=principal,
-            )
-            await runtime.broadcast(
-                conv_id, ConversationEvent(conversation=db.get_conversation(conv_id)))
         pre_stopped: list[str] = []
         live: list[dict] = []
         if stop_processes:
@@ -70,6 +63,11 @@ def register_archive_route(app: FastAPI, presence):
             include_children=include_children, discard=discard,
             strict=not is_human(principal), ignore_live_processes=stop_processes,
         )
+        if clear_goal:
+            # The goal blocker is what this flag waives — and only that one.
+            # The goal itself survives a refusal: a line refused for another
+            # reason is not finished, and its goal nudges must keep firing.
+            blockers = [b for b in blockers if b["code"] != "goal_not_cleared"]
         if stop_processes and (blocker := mid_turn_blocker(live, working_presence)):
             blockers.append(blocker)
         if blockers:
@@ -77,6 +75,14 @@ def register_archive_route(app: FastAPI, presence):
             return JSONResponse(
                 status_code=409, content={"detail": summary, "blockers": blockers}
             )
+        if clear_goal and conv.get("goal"):
+            set_goal(db, conv_id, "")
+            await post_system_notice(
+                runtime, conv_id, f"☏ goal cleared by @{principal.name} (retirement)",
+                actor=principal,
+            )
+            await runtime.broadcast(
+                conv_id, ConversationEvent(conversation=db.get_conversation(conv_id)))
         for attachment in live:
             await detach_attachment(runtime, attachment["id"])
             pre_stopped.append(attachment["name"])
