@@ -121,6 +121,15 @@ class RoleBriefingTests(unittest.TestCase):
         self.assertNotIn("## Captain pack", text)
         self.assertNotIn("You are the captain", text)
 
+    def test_the_worker_pack_limits_leases_to_exclusive_work(self):
+        # Finding 5.4: a worker took an exclusive lease for an ordinary step
+        # run and queued another line behind it.
+        text = worker_instructions(captained=True)
+        self.assertIn("A lease is for exclusive work only", text)
+        self.assertIn("timing measurements and GPU- or device-exclusive work", text)
+        self.assertIn("not for an ordinary build or test step", text)
+        self.assertIn('"purpose":"timing run"', text)
+
     def test_a_worker_on_an_uncaptained_line_is_told_nothing_new(self):
         self.assertEqual(worker_instructions(captained=False), "")
 

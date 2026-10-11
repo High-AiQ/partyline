@@ -22,6 +22,7 @@ LEASE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 MODES = ("exclusive", "shared")
 MAX_TTL_S = 4 * 3600
 DEFAULT_TTL_S = 900
+PURPOSE_MAX = 80
 
 
 class LeaseError(ValueError):
@@ -44,16 +45,18 @@ def _upsert(db, row: dict) -> None:
     waiter it is the queue place, and renewing must never move it."""
     db._exec(
         "INSERT INTO resource_leases(name,holder_attachment,holder_handle,holder_line,"
-        "mode,waiting,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?) "
+        "mode,waiting,created_at,expires_at,purpose) VALUES(?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(name,holder_attachment) DO UPDATE SET holder_handle=excluded."
         "holder_handle, holder_line=excluded.holder_line, mode=excluded.mode, "
-        "waiting=excluded.waiting, expires_at=excluded.expires_at",
+        "waiting=excluded.waiting, expires_at=excluded.expires_at, "
+        "purpose=excluded.purpose",
         (row["name"], row["holder_attachment"], row["holder_handle"], row["holder_line"],
-         row["mode"], row["waiting"], row["created_at"], row["expires_at"]))
+         row["mode"], row["waiting"], row["created_at"], row["expires_at"],
+         row.get("purpose", "")))
 
 
 def request_lease(db, holder_attachment: str, holder_handle: str, holder_line: str,
-                  name: str, mode: str, ttl_s: int) -> dict:
+                  name: str, mode: str, ttl_s: int, purpose: str = "") -> dict:
     """Take, renew, or queue for one lease; the caller polls, never blocks.
 
     Exclusive waits behind any holder; shared waits only behind an exclusive
@@ -72,6 +75,9 @@ def request_lease(db, holder_attachment: str, holder_handle: str, holder_line: s
     ttl_s = int(ttl_s)
     if not 1 <= ttl_s <= MAX_TTL_S:
         raise LeaseError(f"ttl_s must be between 1 and {MAX_TTL_S} (4 hours)")
+    purpose = (purpose or "").strip()
+    if len(purpose) > PURPOSE_MAX:
+        raise LeaseError(f"purpose must be at most {PURPOSE_MAX} characters")
     now = time.time()
     _purge_expired(db)
     rows = [dict(row) for row in db._exec(
@@ -119,14 +125,15 @@ def request_lease(db, holder_attachment: str, holder_handle: str, holder_line: s
         _upsert(db, {"name": name, "holder_attachment": holder_attachment,
                      "holder_handle": holder_handle, "holder_line": holder_line,
                      "mode": mode, "waiting": 1, "created_at": now,
-                     "ttl_s": ttl_s, "expires_at": now + ttl_s})
+                     "ttl_s": ttl_s, "expires_at": now + ttl_s, "purpose": purpose})
         return {"granted": False, "name": name, "mode": mode,
                 "holder": holder,
                 "queue_position": ahead, "expires_at": holder_row["expires_at"]}
     _upsert(db, {"name": name, "holder_attachment": holder_attachment,
                  "holder_handle": holder_handle, "holder_line": holder_line,
                  "mode": mode, "waiting": 0, "created_at": mine["created_at"]
-                 if mine else now, "ttl_s": ttl_s, "expires_at": now + ttl_s})
+                 if mine else now, "ttl_s": ttl_s, "expires_at": now + ttl_s,
+                 "purpose": purpose})
     return {"granted": True, "name": name, "mode": mode,
             "holder": {"handle": holder_handle, "line": holder_line},
             "queue_position": 0, "expires_at": now + ttl_s}
@@ -171,7 +178,7 @@ def active_lease_report(db) -> list[dict]:
             held.setdefault(row["name"], {**row, "holders": []})["holders"].append(
                 {"handle": row["holder_handle"],
                  "line": _line_name(db, row["holder_line"]),
-                 "mode": row["mode"]})
+                 "mode": row["mode"], "purpose": row.get("purpose", "")})
     report = []
     for name, lease in held.items():
         report.append({"name": name, "mode": lease["mode"], "holders": lease["holders"],
@@ -195,7 +202,11 @@ def describe_leases(db) -> str:
     parts = []
     for entry in held:
         holders = " + ".join(f"@{h['handle']} «{h['line']}»" for h in entry["holders"])
-        part = f"{entry['name']} ({entry['mode']}) {holders}"
+        # One purpose per holder, but the staffing line is a glance: show the
+        # first one offered, which is the lease's reason in the common case.
+        purpose = next((h["purpose"] for h in entry["holders"] if h.get("purpose")), "")
+        mode = entry["mode"] + (f', "{purpose}"' if purpose else "")
+        part = f"{entry['name']} ({mode}) {holders}"
         if entry["queued"]:
             part += f", {entry['queued']} queued"
         parts.append(part)
@@ -215,7 +226,8 @@ def register_lease_routes(app, runtime) -> None:
             return request_lease(
                 runtime.db, principal.attachment_id, principal.name,
                 principal.conv_id or "", body.get("name", ""),
-                body.get("mode", "exclusive"), body.get("ttl_s", DEFAULT_TTL_S))
+                body.get("mode", "exclusive"), body.get("ttl_s", DEFAULT_TTL_S),
+                body.get("purpose", ""))
         except LeaseError as exc:
             raise HTTPException(422, str(exc)) from None
         except (TypeError, ValueError):
