@@ -92,6 +92,20 @@ class CaptainDocsTest(unittest.TestCase):
             self.assertTrue(
                 body, f"{topic['doc']}#{topic['heading']} is gone — the map drifted")
 
+    def test_a_missing_doc_file_answers_410_not_500(self):
+        # an install without docs/ must not turn the request into a 500
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        empty = tempfile.TemporaryDirectory()
+        self.addCleanup(empty.cleanup)
+        with patch("partyline.captain_docs.DOCS_ROOT", Path(empty.name)):
+            seen = self.client.get(
+                "/api/docs/captaining/hand-off", headers=self.captain)
+        self.assertEqual(seen.status_code, 410, seen.text)
+        self.assertIn("docs moved", seen.json()["detail"])
+
     def test_long_sections_are_capped_with_a_pointer_to_the_doc(self):
         text = "## Head\n" + ("word " * 4000)
         body = slice_section(text, "Head", "docs/example.md", limit=100)
