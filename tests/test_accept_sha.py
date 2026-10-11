@@ -461,6 +461,83 @@ class AcceptShaTest(unittest.TestCase):
         self.assertEqual(self.branch_head(), fenced)
         self.assertEqual(_git("status", "--porcelain", cwd=self.worktree).stdout, "")
 
+    # -- the tree sync --------------------------------------------------------
+
+    def tree_sync(self, response):
+        return response.json()["tree_sync"]
+
+    def test_a_clean_accept_reports_the_worktree_in_sync(self):
+        real = self.branch_head()
+        fenced = self.commit("the real work")
+        self.mirror(fenced)
+        _git("update-ref", "refs/heads/line/kid", real, fenced, cwd=self.repo)
+        response = self.accept(fenced)
+        self.assertEqual(response.status_code, 200, response.text)
+        sync = self.tree_sync(response)
+        self.assertTrue(sync["ok"])
+        self.assertEqual(sync["worktree"], self.worktree)
+        notices = " ".join(self.system_messages(self.kid["id"]))
+        self.assertNotIn("⚠ tree not in sync", notices)
+
+    def test_a_dirty_worktree_is_reported_in_sync_terms_not_fixed(self):
+        # the stale-exports shape: the fenced accept moves the ref by CAS, so
+        # a dirty checkout sails through the hand-off — reported, not fixed
+        real = self.branch_head()
+        fenced = self.commit("the real work")
+        self.mirror(fenced)
+        _git("update-ref", "refs/heads/line/kid", real, fenced, cwd=self.repo)
+        with open(os.path.join(self.worktree, "scratch.txt"), "w") as fh:
+            fh.write("uncommitted scratch\n")
+        response = self.accept(fenced)
+        self.assertEqual(response.status_code, 200, response.text)
+        sync = self.tree_sync(response)
+        self.assertFalse(sync["ok"])
+        self.assertEqual(sync["worktree"], self.worktree)
+        self.assertIn("uncommitted change", sync["detail"])
+        self.assertEqual(self.branch_head(), fenced)  # accept itself succeeded
+        self.assertIn("⚠ tree not in sync: 1 uncommitted change(s)",
+                      " ".join(self.system_messages(self.kid["id"])))
+
+    def test_a_stale_reported_head_names_both_shas(self):
+        # porcelain HEAD tracks the branch ref, so a behind HEAD is rare —
+        # but when it is reported, it names both the worktree's and the
+        # accepted SHA, which is what makes the ⚠ actionable
+        from partyline import prereview as prereview_module
+
+        real = self.branch_head()
+        first = self.commit("reviewed work")
+        self.commit("work past the review")
+        fenced = self.branch_head()
+        self.mirror(fenced)
+        _git("update-ref", "refs/heads/line/kid", real, fenced, cwd=self.repo)
+        porcelain = (f"worktree {self.worktree}\nHEAD {first}\n"
+                     "branch refs/heads/line/kid\n")
+        original = prereview_module._git
+
+        def stale_head(*args, cwd):
+            if args[:3] == ("worktree", "list", "--porcelain"):
+                return subprocess.CompletedProcess(args, 0, porcelain, "")
+            return original(*args, cwd=cwd)
+
+        with patch.object(prereview_module, "_git", side_effect=stale_head):
+            response = self.accept(fenced)
+        self.assertEqual(response.status_code, 200, response.text)
+        sync = self.tree_sync(response)
+        self.assertFalse(sync["ok"])
+        self.assertIn("worktree HEAD is", sync["detail"])
+        self.assertIn(first[:12], sync["detail"])
+        self.assertIn("⚠ tree not in sync", " ".join(self.system_messages(self.kid["id"])))
+
+    def test_no_worktree_holding_the_branch_is_in_sync_by_default(self):
+        self.commit("first")
+        accepted = self.commit_side("work parked on a side branch")
+        response = self.accept(accepted)
+        self.assertEqual(response.status_code, 200, response.text)
+        sync = self.tree_sync(response)
+        self.assertTrue(sync["ok"])
+        self.assertIsNone(sync["worktree"])
+        self.assertIn("no worktree holds line/kid", sync["detail"])
+
     # -- refusals ------------------------------------------------------------
 
     def test_an_unknown_or_non_hex_sha_is_refused(self):

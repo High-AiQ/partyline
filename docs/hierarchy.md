@@ -300,6 +300,22 @@ partyline owns the directory but nothing else in a repository's `.review`.
 Review checkouts are disposable by contract: pruning is forced, and the SHAs
 themselves stay in the repository, so no reviewed work is ever lost.
 
+## Pre-review checks and the tree sync
+
+Some findings need no judgment, so they run without a model. `POST
+/api/conversations/<id>/prereview` with `{"sha": "...", "data_paths":
+["data/"]}` reads exactly the commit's bytes — `git ls-tree` and `git show`,
+never a worktree — and reports every path-like string in the JSON tables
+under `data_paths` that the commit does not track, flagging the ones the
+checkout's ignore rules hide (the `out/` incident: real on disk, absent from
+every commit, gone on any other machine). It returns `{"ok", "missing":
+[{"file", "ref", "ignored"}], "checked"}`, needs only `read` on the line, and
+resolves the SHA under the same subtree rule as review worktrees. After an
+accept, the response and the ☏ notice carry `tree_sync`: any worktree holding
+the accepted branch must sit at the accepted SHA with a clean status — a
+stale or dirty checkout is reported (`⚠ tree not in sync: …`) in the accept
+response, never fixed automatically.
+
 ## The goal
 
 A line carries a `goal`: what its manager is seeing through. A person or the
