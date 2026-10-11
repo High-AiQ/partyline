@@ -16,6 +16,7 @@ from .hierarchy import tree_live_name_conflict
 from .line_worktree import describe, ensure_placed, line_cwd, outside_worktree_note
 from .conversation_contracts import PurgeAllResponse
 from .conversation_purge import execute_purge, execute_purge_all_archived
+from .goal import MAX_TOPIC
 from .contracts import (
     AttachIn, AttachmentResponse, ConvIn, ConversationEvent,
     ConversationResponse, ConversationsChangedEvent, PurgeResponse, RenameIn, TopicIn,
@@ -87,8 +88,8 @@ def register_conversation_routes(
         deny_unless(db, principal, conv_id, "write")
         conv = db.get_conversation(conv_id)
         topic = body.topic.strip()
-        if len(topic) > 3000:
-            raise HTTPException(400, "topic is capped at 3000 characters")
+        if len(topic) > MAX_TOPIC:
+            raise HTTPException(400, f"topic is capped at {MAX_TOPIC} characters")
         if topic == conv["topic"]:
             return conv
         conv = db.set_topic(conv_id, topic)

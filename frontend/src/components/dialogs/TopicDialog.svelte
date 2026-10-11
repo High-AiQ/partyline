@@ -12,7 +12,7 @@
 
   let { close }: Props = $props();
 
-  const MAX = 3000;
+  const MAX = 20000;
   const conversation: Conversation | null = room.conversation;
 
   let topic = $state(conversation?.topic ?? "");
