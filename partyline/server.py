@@ -100,6 +100,7 @@ from .write_set_routes import write_set_router
 from .media_routes import media_router
 from .preset_routes import presets_router
 from .staffing_routes import staffing_router
+from .line_notes import notes_router
 from .settings_routes import settings_router
 from .resource_routes import register_resource_routes
 from .restart_report import restart_report_router
@@ -207,6 +208,7 @@ app.include_router(heartbeat_router(runtime))
 app.include_router(hooks_router(runtime, presence))
 app.include_router(presets_router(runtime, ADAPTERS))
 app.include_router(staffing_router(runtime))
+app.include_router(notes_router(runtime))
 app.include_router(settings_router(runtime))
 app.include_router(restart_report_router(runtime, lambda r: require_loopback(r)))
 

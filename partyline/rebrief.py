@@ -44,8 +44,34 @@ def latest_assignment(db, att: dict, scan: int = 300,
     return None
 
 
+def notes_block(db, att: dict, budget: int) -> str:
+    """The notebook scopes, tree first, within ``budget`` characters.
+
+    Dropped whole-oldest-first when over budget: the process's own notes are
+    the last thing a fresh context needs and the most likely to be long, but
+    the tree's contracts and the line's charge are shorter and come first.
+    """
+    from .line_notes import read_notes, tree_root
+
+    conv_id = att["conv_id"]
+    scopes = (
+        ("Tree notes (contracts, standing rules):", "tree", tree_root(db, conv_id), ""),
+        ("Line notes (goal, acceptance, decisions):", "line", conv_id, ""),
+        ("Your own notes:", "attachment", conv_id, att["id"]),
+    )
+    parts: list[str] = []
+    for label, scope, store, att_id in scopes:
+        text = read_notes(db, store, scope, att_id)["notes"].strip()
+        if text:
+            parts.append(f"{label}\n{text}")
+    block = "\n\n".join(parts)
+    if len(block) > budget:
+        block = block[:budget - 24].rstrip() + "\n… (notes truncated)"
+    return block
+
+
 def render_rebrief(db, att: dict, limit: int = REBRIEF_LIMIT) -> str:
-    """The re-briefing text: goal, topic, latest assignment, role reminder.
+    """The re-briefing text: goal, topic, notes, latest assignment, reminder.
 
     A worker hears the worker reminder — edit only on the captain's
     @mention. A captain hearing that after a compaction would be told to
@@ -62,6 +88,11 @@ def render_rebrief(db, att: dict, limit: int = REBRIEF_LIMIT) -> str:
     topic = (conv.get("topic") or "").strip()
     if topic:
         parts.append(f"Standing context (the line's topic):\n{topic}")
+    # The notebook rides every re-briefing; the notes get half the cap so the
+    # assignment and the reminder below always survive the overall truncate.
+    notes = notes_block(db, att, limit // 2)
+    if notes:
+        parts.append(notes)
     assignment = latest_assignment(db, att, person_only=lead)
     if assignment:
         label = ("Latest message from a person, verbatim:" if lead
