@@ -47,22 +47,28 @@ def _repo_of(db, conv_id: str) -> str:
 
 
 def subtree_repository(db, conv_id: str, repository: str) -> str:
-    """The repository a review worktree may be created in, for one line.
+    """The repository a review worktree may be created in, for one line."""
+    return subtree_repository_line(db, conv_id, repository)[0]
 
-    Empty names the line's own repository, as before. A named repository is
-    allowed when the line itself — or any line of its subtree — works in it:
-    a captain verifies a candidate against the repository it actually affects
-    (finding 2.2), and never reaches outside its subtree. The matching line's
-    own resolution of the root comes back, so paths derive identically to
-    that line's worktrees.
+
+def subtree_repository_line(db, conv_id: str, repository: str) -> tuple[str, str | None]:
+    """``(repository root, the subtree line that works in it)`` for one line.
+
+    Empty ``repository`` names the line's own repository and the line itself
+    is returned as ``None`` — the caller already has its checkout. A named
+    repository is allowed when the line — or any line of its subtree — works
+    in it: a captain verifies a candidate against the repository it actually
+    affects (finding 2.2), and never reaches outside its subtree. The
+    matching line comes back so follow-up work (ignore rules, worktree
+    state) probes that line's own checkout, not the caller's.
     """
     if not repository or not str(repository).strip():
-        return _repo_of(db, conv_id)
+        return _repo_of(db, conv_id), None
     wanted = os.path.realpath(str(repository).strip())
     for line_id in subtree_conversation_ids(db, conv_id):
         root, _worktree = repo_and_worktree(line_cwd(db, line_id) or "")
         if root and os.path.realpath(root) == wanted:
-            return root
+            return root, line_id
     raise ReviewError(
         403,
         f"{repository} is not this line's repository and no line in its subtree works in "

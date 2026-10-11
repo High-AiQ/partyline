@@ -73,6 +73,11 @@ class PrereviewIn(BaseModel):
     data_paths: list[str] = Field(default_factory=list, max_length=64)
     checks: list[str] = Field(default_factory=lambda: ["referenced-paths"])
     repository: str = Field(default="", max_length=4096)
+    # Engine scheme prefixes mapped into the tree, e.g. {"res://": "game/"}:
+    # a `res://audio/x.ogg` reference is checked at `game/audio/x.ogg` (an
+    # empty tree prefix means the repository root). Unmapped schemes —
+    # https:, user:, mailto: — are never file references and stay out.
+    res_roots: dict[str, str] = Field(default_factory=dict, max_length=16)
 
 
 class PrereviewRef(BaseModel):

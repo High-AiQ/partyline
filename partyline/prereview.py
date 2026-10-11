@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
 import re
 
 from fastapi import HTTPException, Request
@@ -24,7 +25,7 @@ from .auth_guard import request_principal
 from .hierarchy_contracts import PrereviewIn, PrereviewOut
 from .line_worktree import _git, line_cwd, rev
 from .machine_scope import deny_unless
-from .review_worktrees import ReviewError, subtree_repository
+from .review_worktrees import ReviewError, subtree_repository_line
 
 _SHA = re.compile(r"[0-9a-f]{4,64}")
 _SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
@@ -45,13 +46,45 @@ def _walk_strings(node) -> list[str]:
     return []
 
 
-def _looks_like_path(value: str) -> bool:
-    """A relative file path, not a URL, a scheme URI, or a plain word."""
+def _candidate(value: str, res_roots: dict[str, str]) -> str | None:
+    """The repo-root-relative path a table value names, or None to skip it.
+
+    Empty, absolute, and scheme values with no mapped root are not file
+    references (https:, mailto:, user: stay out); a mapped engine scheme —
+    Godot's ``res://`` — is resolved under its tree prefix so a game's cue
+    table is checked in the repository it actually ships from. Plain words
+    are dropped later, by the path-shape gate.
+    """
     if not value or value.startswith("/"):
-        return False
+        return None
+    for prefix, tree in (res_roots or {}).items():
+        if prefix and value.startswith(prefix):
+            rest = value[len(prefix):].strip("/")
+            base = tree.strip("/")
+            if not base and not rest:
+                return None
+            return posixpath.normpath(posixpath.join(base, rest)) if base else posixpath.normpath(rest)
     if _SCHEME.match(value):
-        return False
-    return "/" in value or bool(_EXTENSION.search(value))
+        return None
+    return value
+
+
+def _present(candidate: str, tracked: set[str], blob_dir: str) -> bool:
+    """The reference resolves in the commit: root-relative, table-relative,
+    or a tracked directory (any tracked path under it)."""
+    if candidate in tracked:
+        return True
+    if blob_dir:
+        joined = posixpath.normpath(posixpath.join(blob_dir, candidate))
+        if not joined.startswith("..") and joined in tracked:
+            return True
+    prefix = candidate.rstrip("/") + "/"
+    return any(path.startswith(prefix) for path in tracked)
+
+
+def _tracked_directory(candidate: str, tracked: set[str]) -> bool:
+    prefix = candidate.rstrip("/") + "/"
+    return any(path.startswith(prefix) for path in tracked)
 
 
 def _under(path: str, data_paths: list[str]) -> bool:
@@ -63,17 +96,21 @@ def _under(path: str, data_paths: list[str]) -> bool:
 
 
 def referenced_paths(db, conv_id: str, sha: str, data_paths: list[str],
-                     repository: str = "") -> dict:
+                     repository: str = "", res_roots: dict[str, str] | None = None) -> dict:
     """Path-like JSON references in a commit that the commit does not track.
 
     Everything is read from the commit itself — ``ls-tree`` and ``show`` —
     so the answer is about exactly those bytes, never a worktree that may be
-    ahead, behind, or carrying uncommitted scratch. A reference the commit
-    does not track is missing; one the checkout's ignore rules hide is
+    ahead, behind, or carrying uncommitted scratch. A reference is present
+    when it resolves from the repository root or from the naming table's own
+    directory, or when it names a tracked directory; anything else is
+    missing. A missing reference the checkout's ignore rules hide is
     reported as ignored too, because that is the ``out/`` incident: real on
-    disk, absent from every commit, gone on any other machine.
+    disk, absent from every commit, gone on any other machine. Those rules
+    are read in the checkout of the subtree line whose repository matched —
+    the caller's own checkout may be a different project entirely.
     """
-    root = subtree_repository(db, conv_id, repository)
+    root, scope_line = subtree_repository_line(db, conv_id, repository)
     name = (sha or "").strip().lower()
     if not _SHA.fullmatch(name):
         raise ReviewError(400, "pass the commit SHA (hex) to check")
@@ -84,9 +121,7 @@ def referenced_paths(db, conv_id: str, sha: str, data_paths: list[str],
     if listed.returncode != 0:
         raise ReviewError(409, "cannot read the commit's file tree")
     tracked = set(listed.stdout.splitlines())
-    # The ignore rules that matter are the line's own checkout's: the out/
-    # incident was a file the line's worktree held and its .gitignore hid.
-    probe = line_cwd(db, conv_id) or root
+    probe = line_cwd(db, scope_line or conv_id) or root
     if not os.path.isdir(probe):
         probe = root
     blobs = sorted(path for path in tracked
@@ -101,13 +136,22 @@ def referenced_paths(db, conv_id: str, sha: str, data_paths: list[str],
             payload = json.loads(shown.stdout)
         except ValueError:
             continue  # a malformed table is not this check's finding
+        blob_dir = posixpath.dirname(blob)
         for value in _walk_strings(payload):
-            if not _looks_like_path(value):
+            candidate = _candidate(value, res_roots or {})
+            if candidate is None:
                 continue
+            path_shaped = "/" in candidate or bool(_EXTENSION.search(candidate))
+            if not path_shaped and not _tracked_directory(candidate, tracked):
+                continue  # a plain word naming nothing tracked
             checked += 1
-            if value in tracked:
+            if _present(candidate, tracked, blob_dir):
                 continue
-            ignored = _git("check-ignore", "-q", "--", value, cwd=probe).returncode == 0
+            joined = posixpath.normpath(posixpath.join(blob_dir, candidate))
+            ignored = any(
+                _git("check-ignore", "-q", "--", path, cwd=probe).returncode == 0
+                for path in {candidate, joined} if path and not path.startswith("..")
+            )
             missing.append({"file": blob, "ref": value, "ignored": ignored})
             if len(missing) >= MAX_MISSING:
                 return {"ok": False, "missing": missing, "checked": checked}
@@ -162,7 +206,7 @@ def register_prereview_route(app, runtime) -> None:
             raise HTTPException(422, f"unknown checks: {', '.join(unknown)}")
         try:
             done = referenced_paths(
-                db, conv_id, body.sha, body.data_paths, body.repository)
+                db, conv_id, body.sha, body.data_paths, body.repository, body.res_roots)
         except ReviewError as exc:
             raise HTTPException(exc.status_code, exc.detail) from exc
         return PrereviewOut(**done)
