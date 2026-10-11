@@ -8,13 +8,19 @@ import shlex
 import sys
 
 from partyline.adapters.base import Adapter as BaseAdapter
-from partyline.adapter_capabilities import compaction_hooks as has_compaction_hooks
 from partyline.adapters.compaction import is_compaction_record
 
 # A session that recorded our claim token recorded it near the top, in the
 # briefing or the first wake. Bounding the scan keeps a stranger's
 # multi-megabyte transcript from being read in full on every poll.
 SCAN_BYTES = 512 * 1024
+
+
+def _compaction_hooks(att: dict) -> bool:
+    """Whether the manifest declares compaction hooks. Read from the stamped
+    metadata: importing the helper would cycle through this very package."""
+    capabilities = (att.get("adapter_metadata") or {}).get("capabilities") or {}
+    return bool(capabilities.get("compaction_hooks"))
 
 
 class PartylineAdapter(BaseAdapter):
@@ -50,7 +56,7 @@ class PartylineAdapter(BaseAdapter):
         hook_url = self.att.get("hook_url")
         if hook_url and "--settings" not in cmd:
             cmd += ["--settings", json.dumps(self._hook_settings(
-                hook_url, has_compaction_hooks(self.att)))]
+                hook_url, _compaction_hooks(self.att)))]
         if not self.resume:
             # Claude snapshots this system prompt with the session and reapplies
             # it on resume. Keep the user-facing briefing for after startup dialogs.
@@ -85,13 +91,15 @@ class PartylineAdapter(BaseAdapter):
             "Stop": handler,
         }
         if with_compaction:
-            rebrief = f"curl -s -m 5 {shlex.quote(hook_url + '/rebrief')}"
-            printer = [{"type": "command", "command": rebrief}]
             hooks["PreCompact"] = [
                 {"matcher": "auto", "hooks": handler[0]["hooks"]},
                 {"matcher": "manual", "hooks": handler[0]["hooks"]},
             ]
-            hooks["SessionStart"] = [{"matcher": "compact", "hooks": printer}]
+            # SessionStart(compact) prints the re-briefing to stdout, and the
+            # harness folds that into context — a printing curl everywhere.
+            rebrief = f"curl -s -m 5 {shlex.quote(hook_url + '/rebrief')}"
+            hooks["SessionStart"] = [
+                {"matcher": "compact", "hooks": [{"type": "command", "command": rebrief}]}]
         return {"hooks": hooks}
 
     def transcript_glob(self) -> str:
