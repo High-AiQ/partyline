@@ -164,6 +164,74 @@ class PrereviewTest(unittest.TestCase):
         made = self.check(sha)
         self.assertEqual(made.status_code, 400, made.text)  # no such commit here
 
+    def test_path_roots_resolve_project_relative_references(self):
+        sha = self.commit_table(
+            {"cue": {"file": "assets/ground/tile.png"}},
+            extra_files={"game/assets/ground/tile.png": "tile"})
+        without = self.check(sha)
+        self.assertFalse(without.json()["ok"])
+        self.assertEqual(without.json()["checked"], 1)
+        with_roots = self.check(sha, path_roots=["", "game/"])
+        self.assertTrue(with_roots.json()["ok"], with_roots.json())
+        self.assertEqual(with_roots.json()["checked"], 1)
+
+    def test_skip_files_and_skip_keys_keep_prose_out_of_the_scan(self):
+        sha = self.commit_table(
+            {"cue": {"file": "audio/tracked.ogg"}},
+            extra_files={"audio/tracked.ogg": "sound",
+                         "data/hero.provenance.json":
+                             '{"render": "of ghost.glb", "note": "see docs"}'})
+        plain = self.check(sha)
+        self.assertGreaterEqual(plain.json()["checked"], 2)
+        self.assertFalse(plain.json()["ok"])
+        gated = self.check(sha, skip_files=["**/*.provenance.json"])
+        self.assertTrue(gated.json()["ok"], gated.json())
+        self.assertEqual(gated.json()["checked"], 1)
+        by_key = self.check(sha, skip_keys=["render", "note"])
+        self.assertTrue(by_key.json()["ok"], by_key.json())
+        self.assertEqual(by_key.json()["checked"], 1)
+
+    def test_references_through_committed_symlinks_resolve(self):
+        # the doc's shape: game/assets/characters/kael -> ../../../assets/characters/kael
+        sha = self.commit_table(
+            {"cue": {"file": "game/assets/characters/kael/tile.png"}},
+            extra_files={"assets/characters/kael/tile.png": "tile"})
+        os.makedirs(os.path.join(self.worktree, "game/assets/characters"), exist_ok=True)
+        os.symlink("../../../assets/characters/kael",
+                   os.path.join(self.worktree, "game/assets/characters/kael"))
+        _git("add", "-A", cwd=self.worktree)
+        _identity("commit", "-q", "-m", "characters symlink", cwd=self.worktree)
+        sha = _git("rev-parse", "HEAD", cwd=self.worktree).stdout.strip()
+        seen = self.check(sha)
+        self.assertEqual(seen.status_code, 200, seen.text)
+        self.assertTrue(seen.json()["ok"], seen.json())
+
+    def test_a_symlink_loop_does_not_hang_and_reports_missing(self):
+        os.makedirs(os.path.join(self.worktree, "game/loop"), exist_ok=True)
+        os.symlink("../loop/b", os.path.join(self.worktree, "game/loop/a"))
+        os.symlink("../loop/a", os.path.join(self.worktree, "game/loop/b"))
+        sha = self.commit_table({"cue": {"file": "game/loop/a/tile.png"}})
+        seen = self.check(sha)
+        self.assertEqual(seen.status_code, 200, seen.text)
+        self.assertFalse(seen.json()["ok"])  # an unresolvable loop is a miss
+        self.assertEqual(seen.json()["checked"], 1)
+
+    def test_the_summary_groups_by_table_sorted_by_missing(self):
+        sha = self.commit_table(
+            {"cue": {"a": "missing/a.png", "b": "missing/b.png"}},
+            extra_files={"data/props.json":
+                         '{"props": {"file": "missing/c.png", "ok": "audio/tracked.ogg"}}',
+                         "audio/tracked.ogg": "sound"})
+        seen = self.check(sha)
+        body = seen.json()
+        self.assertFalse(body["ok"])
+        self.assertEqual([entry["file"] for entry in body["summary"]],
+                         ["data/cues.json", "data/props.json"])  # 2 misses before 1
+        self.assertEqual(body["summary"][0],
+                         {"file": "data/cues.json", "missing": 2, "checked": 2})
+        self.assertEqual(body["summary"][1]["missing"], 1)
+        self.assertEqual(body["summary"][1]["checked"], 2)
+
     def test_a_machine_without_read_on_the_line_is_refused(self):
         self.db.add_attachment("root-worker", "root", "dig", "fake", ["fake"], self.repo)
         self.db._exec("UPDATE attachments SET status='running' WHERE id='root-worker'")

@@ -27,7 +27,7 @@ from .hierarchy_contracts import AcceptIn, AcceptResponse, TipResponse, TreeSync
 from .line_worktree import _git, line_cwd, repo_and_worktree, rev
 from .worktree_paths import branch_name, managed_root
 from .machine_scope import deny_unless
-from .prereview import tree_sync_check
+from .tree_sync import tree_sync_check
 from .review_worktrees import prune_accepted_review
 from .system_notice import post_system_notice
 from .worktree_lifecycle import _base_ref

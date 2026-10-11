@@ -15,6 +15,7 @@ at the accepted SHA with a clean status.
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import json
 import os
 import posixpath
@@ -36,14 +37,21 @@ MAX_FILES = 500
 KNOWN_CHECKS = ("referenced-paths",)
 
 
-def _walk_strings(node) -> list[str]:
-    """Every string value in a JSON document, however it is nested."""
+def _walk_strings(node, skip_keys: frozenset[str] = frozenset(),
+                  ancestry: frozenset[str] = frozenset()) -> list[str]:
+    """Every string value in a JSON document, however it is nested, except
+    strings sitting under a skipped key at any depth — prose fields such as
+    `notes` or `reason` name no files and bury real ones in noise."""
     if isinstance(node, str):
-        return [node]
+        return [] if ancestry & skip_keys else [node]
     if isinstance(node, dict):
-        return [s for value in node.values() for s in _walk_strings(value)]
+        out = []
+        for key, value in node.items():
+            deeper = ancestry | ({key} if isinstance(key, str) else set())
+            out.extend(_walk_strings(value, skip_keys, deeper))
+        return out
     if isinstance(node, list):
-        return [s for value in node for s in _walk_strings(value)]
+        return [s for value in node for s in _walk_strings(value, skip_keys, ancestry)]
     return []
 
 
@@ -70,26 +78,96 @@ def _candidate(value: str, res_roots: dict[str, str]) -> str | None:
     return value
 
 
+def _candidates(value: str, res_roots: dict[str, str],
+                path_roots: list[str]) -> list[str]:
+    """Every repo-root-relative path a table value could name, in order: the
+    value itself, then under each ``path_roots`` prefix. Scheme values with
+    no mapped root are dropped here."""
+    mapped = _candidate(value, res_roots or {})
+    out = [mapped] if mapped is not None else []
+    for root in path_roots or []:
+        base = root.strip().strip("/")
+        joined = posixpath.normpath(posixpath.join(base, value.strip("/"))) if base else ""
+        if joined and not joined.startswith("..") and joined not in out:
+            out.append(joined)
+    return out
+
+
 def _present(candidate: str, tracked: set[str], blob_dir: str,
-             directories: set[str]) -> bool:
+             directories: set[str], symlink_map: dict[str, str]) -> bool:
     """The reference resolves in the commit: root-relative, table-relative,
-    or a tracked directory (any tracked path under it)."""
-    if candidate in tracked:
-        return True
+    a tracked directory, or through committed symlinks. A trailing slash
+    reads as the directory."""
+    candidate = candidate.rstrip("/")
+    resolved = {_resolve_symlinks(candidate, symlink_map)}
     if blob_dir:
         joined = posixpath.normpath(posixpath.join(blob_dir, candidate))
-        if not joined.startswith("..") and joined in tracked:
+        if not joined.startswith(".."):
+            resolved.add(_resolve_symlinks(joined, symlink_map))
+    for path in resolved:
+        if path and (path in tracked or path in directories):
             return True
-    return candidate in directories
+    return False
+
+
+def _resolve_symlinks(path: str, symlink_map: dict[str, str]) -> str:
+    """Rewrite a path through committed symlinks with a hop guard; loops,
+    escapes and exhausted hops resolve to "" — unverifiable in the tree."""
+    for _ in range(8):
+        parts = path.split("/")
+        hit = None
+        for index in range(len(parts) - 1, 0, -1):
+            target = symlink_map.get("/".join(parts[:index]))
+            if target is not None:
+                hit = (target, "/".join(parts[index:]))
+                break
+        if hit is None:
+            return path
+        target, rest = hit
+        if not target:
+            return ""  # a loop or a link escaping the tree
+        candidate = posixpath.normpath(posixpath.join(target, rest))
+        if candidate.startswith("..") or candidate == path:
+            return ""
+        path = candidate
+    return ""
+
+
+def _symlink_map(root: str, full: str, entries: dict[str, tuple[str, str]]) -> dict[str, str]:
+    """Committed symlinks mapped to their resolved repo-root-relative targets.
+
+    Chains are followed with a visited guard; a loop, or a link whose target
+    escapes the tree, maps to the empty string.
+    """
+    links = {path: blob for path, (mode, blob) in entries.items()
+             if mode.startswith("12")}
+    resolved: dict[str, str] = {}
+
+    def resolve(path: str, seen: frozenset[str]) -> str:
+        if path in resolved:
+            return resolved[path]
+        if path in seen:
+            return ""
+        shown = _git("show", f"{full}:{path}", cwd=root)
+        raw = shown.stdout.strip() if shown.returncode == 0 else ""
+        base = posixpath.normpath(
+            posixpath.join(posixpath.dirname(path), raw)) if raw else ""
+        if raw.startswith("/") or base.startswith("..") or base in (".", ""):
+            resolved[path] = ""
+            return ""
+        result = resolve(base, seen | {path}) if base in links else base
+        resolved[path] = result
+        return result
+
+    for link in links:
+        resolve(link, frozenset())
+    return resolved
 
 
 def _directories(tracked: set[str]) -> set[str]:
-    """Every parent directory of every tracked path, built once per commit.
-
-    A dialogue table carries thousands of bare words; membership in this set
-    is what tells a tracked directory name from a plain word, and it must be
-    an O(1) lookup rather than a scan of every tracked path per string.
-    """
+    """Every parent directory of every tracked path, built once per commit:
+    membership here is what tells a tracked directory name from a plain
+    word, and it must be an O(1) lookup, not a scan per string."""
     directories: set[str] = set()
     for path in tracked:
         parts = path.split("/")
@@ -107,19 +185,24 @@ def _under(path: str, data_paths: list[str]) -> bool:
 
 
 def referenced_paths(db, conv_id: str, sha: str, data_paths: list[str],
-                     repository: str = "", res_roots: dict[str, str] | None = None) -> dict:
+                     repository: str = "", res_roots: dict[str, str] | None = None,
+                     path_roots: list[str] | None = None,
+                     skip_files: list[str] | None = None,
+                     skip_keys: list[str] | None = None) -> dict:
     """Path-like JSON references in a commit that the commit does not track.
 
-    Everything is read from the commit itself — ``ls-tree`` and ``show`` —
-    so the answer is about exactly those bytes, never a worktree that may be
-    ahead, behind, or carrying uncommitted scratch. A reference is present
-    when it resolves from the repository root or from the naming table's own
-    directory, or when it names a tracked directory; anything else is
-    missing. A missing reference the checkout's ignore rules hide is
-    reported as ignored too, because that is the ``out/`` incident: real on
-    disk, absent from every commit, gone on any other machine. Those rules
-    are read in the checkout of the subtree line whose repository matched —
-    the caller's own checkout may be a different project entirely.
+    Everything is read from the commit itself — ``ls-tree`` and ``show`` — so
+    the answer is about exactly those bytes, never a worktree. A reference is
+    present when it resolves from the repository root, from any ``path_roots``
+    prefix, from the naming table's own directory, or through committed
+    symlinks (loops and tree-escaping links do not resolve); when it names a
+    tracked directory, it is present too. Anything else is missing, and a
+    missing reference the checkout's ignore rules hide is reported as ignored
+    — the ``out/`` incident: real on disk, absent from every commit, gone on
+    any other machine. Ignore rules are read in the checkout of the subtree
+    line whose repository matched. Prose stays out: tables matched by
+    ``skip_files`` globs are not scanned, and strings under ``skip_keys`` at
+    any depth name nothing.
     """
     root, scope_line = subtree_repository_line(db, conv_id, repository)
     name = (sha or "").strip().lower()
@@ -128,17 +211,29 @@ def referenced_paths(db, conv_id: str, sha: str, data_paths: list[str],
     full = rev(root, "rev-parse", "--verify", "--quiet", f"{name}^{{commit}}")
     if full is None:
         raise ReviewError(400, f"no commit {name} in this repository")
-    listed = _git("ls-tree", "-r", "--name-only", full, cwd=root)
+    listed = _git("ls-tree", "-r", full, cwd=root)
     if listed.returncode != 0:
         raise ReviewError(409, "cannot read the commit's file tree")
-    tracked = set(listed.stdout.splitlines())
+    entries: dict[str, tuple[str, str]] = {}
+    for line in listed.stdout.splitlines():
+        meta, _, path = line.partition("\t")
+        if path:
+            mode, _, blob = meta.partition(" ")
+            entries[path] = (mode, blob)
+    tracked = set(entries)
     directories = _directories(tracked)
+    symlink_map = _symlink_map(root, full, entries)
     probe = line_cwd(db, scope_line or conv_id) or root
     if not os.path.isdir(probe):
         probe = root
+    skip_globs = [glob for glob in (skip_files or []) if glob.strip()]
+    skipped_keys = frozenset(key.strip() for key in (skip_keys or []) if key.strip())
     blobs = sorted(path for path in tracked
-                   if path.endswith(".json") and _under(path, data_paths))[:MAX_FILES]
+                   if path.endswith(".json") and _under(path, data_paths)
+                   and not any(fnmatch.fnmatch(path, glob) for glob in skip_globs)
+                   )[:MAX_FILES]
     missing: list[dict] = []
+    summary: dict[str, dict[str, int]] = {}
     checked = 0
     for blob in blobs:
         shown = _git("show", f"{full}:{blob}", cwd=root)
@@ -149,66 +244,36 @@ def referenced_paths(db, conv_id: str, sha: str, data_paths: list[str],
         except ValueError:
             continue  # a malformed table is not this check's finding
         blob_dir = posixpath.dirname(blob)
-        for value in _walk_strings(payload):
-            candidate = _candidate(value, res_roots or {})
-            if candidate is None:
+        stats = summary.setdefault(blob, {"missing": 0, "checked": 0})
+        for value in _walk_strings(payload, skipped_keys):
+            candidates = [c for c in _candidates(value, res_roots or {},
+                                                 path_roots or []) if c]
+            if not candidates:
                 continue
-            path_shaped = "/" in candidate or bool(_EXTENSION.search(candidate))
-            candidate = candidate.rstrip("/")
-            if not candidate:
-                continue  # a bare "res://" or "/" names nothing
-            if not path_shaped and candidate not in directories:
+            path_shaped = any("/" in c or _EXTENSION.search(c) for c in candidates)
+            if not path_shaped and not any(c.rstrip("/") in directories
+                                           for c in candidates):
                 continue  # a plain word naming nothing tracked
+            present = any(
+                _present(candidate, tracked, blob_dir, directories, symlink_map)
+                for candidate in candidates)
+            stats["checked"] += 1
             checked += 1
-            if _present(candidate, tracked, blob_dir, directories):
+            if present:
                 continue
-            joined = posixpath.normpath(posixpath.join(blob_dir, candidate))
-            ignored = any(
-                _git("check-ignore", "-q", "--", path, cwd=probe).returncode == 0
-                for path in {candidate, joined} if path and not path.startswith("..")
-            )
+            probe_paths = {candidates[0],
+                           posixpath.normpath(posixpath.join(blob_dir, candidates[0]))}
+            ignored = any(_git("check-ignore", "-q", "--", path, cwd=probe).returncode == 0
+                          for path in probe_paths if path and not path.startswith(".."))
             missing.append({"file": blob, "ref": value, "ignored": ignored})
+            stats["missing"] += 1
             if len(missing) >= MAX_MISSING:
-                return {"ok": False, "missing": missing, "checked": checked}
-    return {"ok": not missing, "missing": missing, "checked": checked}
-
-
-def tree_sync_check(root: str, branch: str, full: str) -> dict:
-    """After an accept: does any worktree holding the branch actually hold it?
-
-    Reporting only — a stale or dirty checkout is named in the accept
-    response and the ☏ notice, and a person or captain decides what to do.
-    """
-    done = _git("worktree", "list", "--porcelain", cwd=root)
-    if done.returncode != 0:
-        return {"ok": False, "worktree": None, "detail": "cannot list worktrees"}
-    wanted = f"refs/heads/{branch}"
-    holder = None
-    current: dict[str, str] = {}
-    for line in done.stdout.splitlines():
-        if line.startswith("worktree "):
-            current = {"path": line[len("worktree "):].strip()}
-        elif line.startswith("HEAD "):
-            current["head"] = line[len("HEAD "):].strip()
-        elif line.startswith("branch ") and line[len("branch "):].strip() == wanted:
-            holder = dict(current)
-    if holder is None:
-        return {"ok": True, "worktree": None,
-                "detail": f"no worktree holds {branch} checked out"}
-    path = holder["path"]
-    if holder.get("head") != full:
-        return {"ok": False, "worktree": path,
-                "detail": f"worktree HEAD is {(holder.get('head') or '?')[:12]}, "
-                          f"the accepted SHA is {full[:12]}"}
-    status = _git("status", "--short", cwd=path)
-    if status.returncode != 0:
-        return {"ok": False, "worktree": path, "detail": "git status failed"}
-    changes = len([line for line in status.stdout.splitlines() if line.strip()])
-    if changes:
-        return {"ok": False, "worktree": path,
-                "detail": f"{changes} uncommitted change(s) in the worktree"}
-    return {"ok": True, "worktree": path,
-            "detail": "worktree HEAD and status match the accepted branch"}
+                break
+        if len(missing) >= MAX_MISSING:
+            break
+    ordered = sorted(summary.items(), key=lambda item: (-item[1]["missing"], item[0]))
+    return {"ok": not missing, "missing": missing, "checked": checked,
+            "summary": [{"file": blob, **counts} for blob, counts in ordered]}
 
 
 def register_prereview_route(app, runtime) -> None:
@@ -224,7 +289,8 @@ def register_prereview_route(app, runtime) -> None:
             # deterministic work belongs in a thread, not on the event loop.
             done = await asyncio.to_thread(
                 referenced_paths, db, conv_id, body.sha, body.data_paths,
-                body.repository, body.res_roots)
+                body.repository, body.res_roots, body.path_roots,
+                body.skip_files, body.skip_keys)
         except ReviewError as exc:
             raise HTTPException(exc.status_code, exc.detail) from exc
         return PrereviewOut(**done)

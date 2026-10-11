@@ -45,9 +45,13 @@ that went in unreviewed. Read that count before you record the hand-off.
 Run the deterministic pre-review check before you review:
 `POST /api/conversations/<id>/prereview` with the SHA and the data paths —
 it finds referenced files that never reached git, including ones a gitignore
-hides, which is exactly the `out/` incident. After accept, read `tree_sync`
-in the response: a worktree left dirty or behind is reported there and as a
-⚠ in the ☏ notice.
+hides, which is exactly the `out/` incident. Tune it to the repository so
+the misses are real: `path_roots` (such as `["", "game/"]`) for tables that
+spell paths relative to a project folder, `skip_files` globs and `skip_keys`
+for provenance prose, and read the `summary` — misses grouped by table —
+before reading the flat list. After accept, read `tree_sync` in the
+response: a worktree left dirty or behind is reported there and as a ⚠ in
+the ☏ notice.
 
 ## Merge main by a verified SHA
 

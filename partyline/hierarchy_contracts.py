@@ -85,6 +85,15 @@ class PrereviewIn(BaseModel):
     # empty tree prefix means the repository root). Unmapped schemes —
     # https:, user:, mailto: — are never file references and stay out.
     res_roots: dict[str, str] = Field(default_factory=dict, max_length=16)
+    # Prefixes tried in order for scheme-less references, e.g. ["", "game/"]:
+    # a reference is present if it resolves under any of them. The empty
+    # string means the repository root.
+    path_roots: list[str] = Field(default_factory=list, max_length=16)
+    # Filename globs whose tables are not scanned at all (e.g.
+    # "**/*.provenance.json"), and JSON keys whose string values — at any
+    # depth — are prose, not paths (e.g. "notes", "reason", "command").
+    skip_files: list[str] = Field(default_factory=list, max_length=64)
+    skip_keys: list[str] = Field(default_factory=list, max_length=64)
 
 
 class PrereviewRef(BaseModel):
@@ -93,10 +102,19 @@ class PrereviewRef(BaseModel):
     ignored: bool = False  # real on disk, hidden from git by the ignore rules
 
 
+class PrereviewSummary(BaseModel):
+    file: str
+    missing: int = 0
+    checked: int = 0
+
+
 class PrereviewOut(BaseModel):
     ok: bool
     missing: list[PrereviewRef] = Field(default_factory=list)
     checked: int = 0
+    # Per-table counts, sorted by missing count so one real miss stands out
+    # among many false ones.
+    summary: list[PrereviewSummary] = Field(default_factory=list)
 
 
 class TipResponse(BaseModel):
