@@ -9,6 +9,12 @@ from . import git_fence
 from .line_worktree import REVIEW_DIR, repo_root
 from .scratch_worktrees import SCRATCH_DIR
 
+# A scratch row is keyed by the plain SHA or by a trial merge's
+# `<sha>-onto-<sha>`; review rows keep the strict 40-hex rule.
+_SHA_40 = re.compile(r"[0-9a-f]{40}")
+_MERGED_KEY = re.compile(r"[0-9a-f]{40}-onto-[0-9a-f]{40}")
+_SCRATCH_KEY = re.compile(rf"(?:{_SHA_40.pattern}|{_MERGED_KEY.pattern})")
+
 
 def _checkout_directory(cwd: str, directory: str, *, create: bool = False) -> str | None:
     """Return the repository's canonical checkout directory, creating it for a bind."""
@@ -36,7 +42,8 @@ def _scratch_directory(cwd: str, *, create: bool = False) -> str | None:
     return _checkout_directory(cwd, SCRATCH_DIR, create=create)
 
 
-def _recorded_checkouts(att: dict, key: str, repo: str, directory: str) -> list[str]:
+def _recorded_checkouts(att: dict, key: str, repo: str, directory: str,
+                        sha_pattern: re.Pattern = _SHA_40) -> list[str]:
     """Return recorded, canonical checkouts of one kind for binds only.
 
     A recorded path counts only when it is exactly ``<repo>/<directory>/<sha>``
@@ -50,7 +57,7 @@ def _recorded_checkouts(att: dict, key: str, repo: str, directory: str) -> list[
         if not isinstance(row, dict) or row.get("conv_id") != conv_id:
             continue
         sha, recorded = row.get("sha"), row.get("path")
-        if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
+        if not isinstance(sha, str) or not sha_pattern.fullmatch(sha):
             continue
         expected = os.path.join(repo, directory, sha)
         if (not isinstance(recorded, str) or not os.path.isabs(recorded) or
@@ -91,7 +98,8 @@ def _scratch_worktree_paths(att: dict, scratch_root: str | None = None) -> list[
     repo = os.path.realpath(repo)
     if (scratch_root or _scratch_directory(cwd)) != os.path.join(repo, SCRATCH_DIR):
         return []
-    return _recorded_checkouts(att, "scratch_worktrees", repo, SCRATCH_DIR)
+    return _recorded_checkouts(att, "scratch_worktrees", repo, SCRATCH_DIR,
+                               sha_pattern=_SCRATCH_KEY)
 
 
 def _checkout_git_binds(path: str, cwd: str, conv_id: str) -> list[tuple[str, str, bool]]:

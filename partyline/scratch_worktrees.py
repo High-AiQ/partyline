@@ -13,7 +13,6 @@ write-set request.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
@@ -74,16 +73,13 @@ def create_scratch_worktree(db, conv_id: str, sha: str, repository: str = "",
 
     The repository is the line's own or one of its subtree's, the same rule a
     review worktree obeys. Creating the same SHA twice hands back the same
-    checkout — an interrupted build picks its tree up instead of stacking
-    copies. With ``merge_onto`` the checkout starts at that ref as the host
+    checkout. With ``merge_onto`` the checkout starts at that ref as the host
     sees it and the candidate is merged in with ``--no-ff`` under a fixed
-    partyline identity — the integration check ("merge onto today's main,
-    build, run") in one call. The row is keyed by ``<sha>-onto-<onto sha>``,
-    so it cannot collide with a plain scratch checkout at the same SHA, and
-    pruning and sweeping recognise the directory by the same key. Conflicts
-    abort the merge and answer 409 with the conflicting paths; nothing is
-    left half-merged. Nothing here prunes on accept: a scratch checkout
-    outlives the hand-off, because integration checks follow it.
+    partyline identity — the integration check in one call — and the row is
+    keyed ``<sha>-onto-<onto sha>``, so it cannot collide with a plain
+    checkout at the same SHA; pruning and sweeping recognise it by the same
+    key. Conflicts abort the merge and answer 409 with the conflicting paths;
+    nothing is left half-merged. Nothing prunes on accept.
     """
     conv = db.get_conversation(conv_id)
     if conv is None:
@@ -98,6 +94,13 @@ def create_scratch_worktree(db, conv_id: str, sha: str, repository: str = "",
     onto_name = (merge_onto or "").strip()
     onto_sha = ""
     if onto_name:
+        # A ref-shaped value is the only thing allowed near rev-parse: a flag
+        # (leading "-") or a malformed name is refused, not guessed around.
+        if onto_name.startswith("-") or not _SHA.fullmatch(onto_name):
+            if _git("check-ref-format", "--allow-onelevel",
+                    onto_name, cwd=root).returncode != 0:
+                raise ReviewError(
+                    422, f"merge_onto is not a valid ref or SHA: {onto_name}")
         onto_sha = rev(root, "rev-parse", "--verify", "--quiet",
                        f"{onto_name}^{{commit}}")
         if onto_sha is None:
@@ -138,8 +141,8 @@ def create_scratch_worktree(db, conv_id: str, sha: str, repository: str = "",
             conflicts = sorted(_git("diff", "--name-only", "--diff-filter=U",
                                     cwd=path).stdout.splitlines())
             _git("merge", "--abort", cwd=path)
-            raise ReviewError(409, json.dumps(
-                {"merge": {"onto": onto_sha, "conflicts": conflicts}}))
+            raise ReviewError(409, {"merge": {"onto": onto_sha,
+                                              "conflicts": conflicts}})
         merge = {"onto": onto_sha, "result": rev(path, "rev-parse", "HEAD") or "",
                  "conflicts": []}
     created_at = time.time()
@@ -154,7 +157,6 @@ def create_scratch_worktree(db, conv_id: str, sha: str, repository: str = "",
 
 
 def _merge_info(path: str, onto_sha: str) -> dict:
-    """The merge block for an existing trial-merge checkout, read fresh."""
     return {"onto": onto_sha, "result": rev(path, "rev-parse", "HEAD") or "",
             "conflicts": []}
 
