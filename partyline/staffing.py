@@ -66,12 +66,12 @@ def staffing_report(db, conv_id: str) -> dict:
 def _free_presets(presets: list[dict], counts: dict[str, int]) -> list[dict]:
     """Presets with capacity left, with a display string for each.
 
-    A preset without a declared ``max_instances`` stays free only while no
-    live process matches it — the old, single-instance view. A preset that
-    declares ``max_instances`` counts instances instead: a captain preset
-    with ``max_instances: 3`` and one live captain still has two seats, and
-    the free list says so ("astra (2 more)"). Workers keep their old
-    behaviour: their handles were always numbered.
+    A worker preset (no ``can_manage``) stays free only while no live
+    process matches it — the old, single-instance view. A ``can_manage``
+    preset runs one instance per line and is always free, unless it
+    declares ``max_instances``: then it stays free while the live count is
+    below the cap. The display carries the remaining-seat count when more
+    than one seat is left ("astra (2 more)").
     """
     free = []
     for preset in presets:

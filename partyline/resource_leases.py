@@ -148,6 +148,13 @@ def release_attachment_leases(db, holder_attachment: str) -> int:
     return cursor.rowcount
 
 
+def _line_name(db, line_id: str) -> str:
+    """The line's name, resolved at read time: rows store the id, so renamed
+    lines and rows written before a rename still read correctly."""
+    conv = db.get_conversation(line_id) if line_id else None
+    return conv["name"] if conv else line_id
+
+
 def active_lease_report(db) -> list[dict]:
     """Every held lease with its waiters, for the listing and the staffing line."""
     _purge_expired(db)
@@ -161,7 +168,8 @@ def active_lease_report(db) -> list[dict]:
             queued[row["name"]] = queued.get(row["name"], 0) + 1
         else:
             held.setdefault(row["name"], {**row, "holders": []})["holders"].append(
-                {"handle": row["holder_handle"], "line": row["holder_line"],
+                {"handle": row["holder_handle"],
+                 "line": _line_name(db, row["holder_line"]),
                  "mode": row["mode"]})
     report = []
     for name, lease in held.items():
