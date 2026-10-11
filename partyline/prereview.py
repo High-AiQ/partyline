@@ -39,9 +39,8 @@ KNOWN_CHECKS = ("referenced-paths",)
 
 def _walk_strings(node, skip_keys: frozenset[str] = frozenset(),
                   ancestry: frozenset[str] = frozenset()) -> list[str]:
-    """Every string value in a JSON document, however it is nested, except
-    strings sitting under a skipped key at any depth — prose fields such as
-    `notes` or `reason` name no files and bury real ones in noise."""
+    """Every JSON string value, except strings under a skipped key at any
+    depth — prose fields such as `notes` or `reason` name no files."""
     if isinstance(node, str):
         return [] if ancestry & skip_keys else [node]
     if isinstance(node, dict):
@@ -84,13 +83,17 @@ def _candidates(value: str, res_roots: dict[str, str],
     value itself, then under each ``path_roots`` prefix. Scheme values with
     no mapped root are dropped here."""
     mapped = _candidate(value, res_roots or {})
-    out = [mapped] if mapped is not None else []
-    for root in path_roots or []:
-        base = root.strip().strip("/")
-        joined = posixpath.normpath(posixpath.join(base, value.strip("/"))) if base else ""
-        if joined and not joined.startswith("..") and joined not in out:
-            out.append(joined)
-    return out
+    if mapped is None:
+        return []  # a URL, an unmapped scheme, or an absolute path
+    out = [mapped]
+    if mapped == value:  # unchanged: a plain relative path, roots may apply
+        for root in path_roots or []:
+            base = root.strip().strip("/")
+            joined = posixpath.normpath(
+                posixpath.join(base, value.strip("/"))) if base else ""
+            if joined and not joined.startswith("..") and joined not in out:
+                out.append(joined)
+    return [candidate for candidate in out if candidate]
 
 
 def _present(candidate: str, tracked: set[str], blob_dir: str,
@@ -114,22 +117,23 @@ def _resolve_symlinks(path: str, symlink_map: dict[str, str]) -> str:
     """Rewrite a path through committed symlinks with a hop guard; loops,
     escapes and exhausted hops resolve to "" — unverifiable in the tree."""
     for _ in range(8):
-        parts = path.split("/")
-        hit = None
-        for index in range(len(parts) - 1, 0, -1):
-            target = symlink_map.get("/".join(parts[:index]))
-            if target is not None:
-                hit = (target, "/".join(parts[index:]))
-                break
-        if hit is None:
+        if path in symlink_map:
+            rewritten = symlink_map[path]  # fully resolved: chains were followed
+        else:
+            rewritten = None
+            parts = path.split("/")
+            for index in range(len(parts) - 1, 0, -1):
+                parent = symlink_map.get("/".join(parts[:index]))
+                if parent is not None:
+                    rewritten = (posixpath.normpath(
+                        posixpath.join(parent, "/".join(parts[index:])))
+                        if parent else "")
+                    break
+        if rewritten is None:
             return path
-        target, rest = hit
-        if not target:
+        if not rewritten or rewritten.startswith("..") or rewritten == path:
             return ""  # a loop or a link escaping the tree
-        candidate = posixpath.normpath(posixpath.join(target, rest))
-        if candidate.startswith("..") or candidate == path:
-            return ""
-        path = candidate
+        path = rewritten
     return ""
 
 

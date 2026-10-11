@@ -175,6 +175,24 @@ class PrereviewTest(unittest.TestCase):
         self.assertTrue(with_roots.json()["ok"], with_roots.json())
         self.assertEqual(with_roots.json()["checked"], 1)
 
+    def test_path_roots_never_invent_variants_for_urls_or_absolute_paths(self):
+        sha = self.commit_table(
+            {"cue": {"web": "https://example.com/a.png",
+                     "save": "user://save.json",
+                     "abs": "/abs/x.png"}})
+        seen = self.check(sha, path_roots=["", "game/"])
+        self.assertEqual(seen.status_code, 200, seen.text)
+        self.assertTrue(seen.json()["ok"], seen.json())
+        self.assertEqual(seen.json()["checked"], 0)
+
+    def test_a_dangling_file_symlink_is_reported_missing(self):
+        os.symlink("gone.png", os.path.join(self.worktree, "a.png"))
+        sha = self.commit_table({"cue": {"file": "a.png"}})
+        seen = self.check(sha)
+        self.assertEqual(seen.status_code, 200, seen.text)
+        self.assertFalse(seen.json()["ok"])
+        self.assertEqual(seen.json()["missing"][0]["ref"], "a.png")
+
     def test_skip_files_and_skip_keys_keep_prose_out_of_the_scan(self):
         sha = self.commit_table(
             {"cue": {"file": "audio/tracked.ogg"}},
