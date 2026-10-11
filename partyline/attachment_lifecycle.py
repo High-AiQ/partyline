@@ -31,6 +31,19 @@ class FreshAttachmentRequest(BaseModel):
         return self
 
 
+class ReplaceRequest(BaseModel):
+    """Why this process is being replaced (2.8): the line reads the reason."""
+
+    reason: str = Field(min_length=1, max_length=2000)
+
+    @model_validator(mode="after")
+    def reason_has_content(self):
+        self.reason = self.reason.strip()
+        if not self.reason:
+            raise ValueError("a replacement needs a reason")
+        return self
+
+
 def require_stopped(db, att_id):
     return _require_stopped(db.get_attachment(att_id))
 
