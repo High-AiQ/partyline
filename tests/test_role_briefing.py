@@ -253,3 +253,40 @@ class RoleBriefingTests(unittest.TestCase):
     def test_the_reclaim_duty_reaches_no_one_who_cannot_act_on_it(self):
         self.assertEqual(role_instructions(["read", "write"], "line", "parent"), "")
         self.assertNotIn("Reclaim the line", worker_instructions(captained=True))
+
+    def test_the_split_brief_states_the_goal_and_topic_caps_and_points_at_a_brief_file(self):
+        # Only the splitting pack POSTs /children; a leaf or staffed captain
+        # cannot, so the cap text belongs to that variant alone.
+        text = role_instructions(["assign", "create_child"], "root", None)
+        self.assertIn("capped at 3,000 characters", text)
+        self.assertIn("docs/contracts/<line>.md", text)
+        self.assertIn("name that file in the topic", text)
+        for label, other in {
+            "leaf": role_instructions(["assign", "report"], "leaf", "mid", 2),
+            "staffed": role_instructions(
+                ["assign", "report"], "mid", "root", 1, staffed=True),
+        }.items():
+            with self.subTest(label):
+                self.assertNotIn("/children", other)
+
+    def test_retirement_takes_clear_goal_and_still_offers_the_discard(self):
+        text = role_instructions(["assign", "create_child"], "root", None)
+        self.assertIn("?clear_goal=true", text)
+        self.assertIn("no longer blocks the retirement", text)
+        self.assertIn("?discard=true", text)  # the existing relief stays documented
+
+    def test_every_captain_variant_carries_the_fence_paragraph(self):
+        packs = {
+            "splitting": role_instructions(
+                ["assign", "create_child"], "root", None),
+            "leaf": role_instructions(["assign", "report"], "leaf", "mid", 2),
+            "staffed": role_instructions(["assign", "report"], "mid", "root", 1, staffed=True),
+        }
+        for label, text in packs.items():
+            with self.subTest(label):
+                self.assertIn("The fence, in one paragraph", text)
+                self.assertIn("branch ref moves only on accept", text)
+                self.assertIn("worktree HEAD (the fenced mirror) is the real tip", text)
+                self.assertIn("`git log <branch>` from outside shows the", text)
+                self.assertIn("review-worktrees", text)
+                self.assertIn("never a raw `git worktree add`", text)

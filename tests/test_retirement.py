@@ -105,6 +105,42 @@ class RetirementTest(unittest.TestCase):
         self.assertIn("uncommitted changes", resp.json()["detail"])
         self.assertIn("POST /api/conversations/{id}/attachments/close", resp.json()["detail"])
 
+    def test_clear_goal_retires_a_line_whose_only_blocker_is_its_goal(self):
+        mid = self.child()
+        self.db._exec("UPDATE conversations SET goal=? WHERE id=?", ("finish it", mid["id"]))
+
+        refused = self.retire(mid["id"])
+        self.assertEqual(refused.status_code, 409, refused.text)
+        self.assertEqual([b["code"] for b in refused.json()["blockers"]], ["goal_not_cleared"])
+
+        cleared = self.retire(mid["id"], clear_goal=True)
+        self.assertEqual(cleared.status_code, 200, cleared.text)
+        self.assertTrue(cleared.json()["archived"])
+        self.assertIn(mid["id"], cleared.json()["archived_ids"])
+
+    def test_clear_goal_clears_the_goal_even_when_another_blocker_still_refuses(self):
+        mid = self.child()
+        self.db._exec("UPDATE conversations SET goal=? WHERE id=?", ("finish it", mid["id"]))
+        self.unmerged(mid["cwd"])
+
+        resp = self.retire(mid["id"], clear_goal=True)
+
+        # The clear happens before the blocker check, so the goal is gone either way.
+        self.assertEqual(resp.status_code, 409, resp.text)
+        self.assertIn("unmerged_commits", [b["code"] for b in resp.json()["blockers"]])
+        self.assertEqual(self.db.get_conversation(mid["id"])["goal"], "")
+
+    def test_clear_goal_says_in_the_line_what_happened(self):
+        mid = self.child()
+        self.db._exec("UPDATE conversations SET goal=? WHERE id=?", ("finish it", mid["id"]))
+
+        self.retire(mid["id"], clear_goal=True)
+
+        notices = [m["body"] for m in self.db.list_messages(mid["id"])
+                   if m["sender"] == "system"]
+        # The attachment id is root-lead; its handle (the principal's name) is terra.
+        self.assertIn("☏ goal cleared by @terra (retirement)", notices)
+
     def test_stop_processes_detaches_the_line_and_descendants_before_retiring(self):
         mid = self.child()
         grand = self.child("grand", parent=mid["id"])
