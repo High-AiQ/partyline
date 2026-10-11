@@ -107,7 +107,9 @@ def request_lease(db, holder_attachment: str, holder_handle: str, holder_line: s
         blocked = any(row["mode"] == "exclusive" for row in waiters
                       if mine is None or row["created_at"] < mine["created_at"])
     if blocked:
-        holder = others[0] if others else held[0]
+        holder_row = others[0] if others else held[0]
+        holder = {"handle": holder_row["holder_handle"],
+                  "line": _line_name(db, holder_row["holder_line"])}
         if mine is None:
             # a brand-new caller stands behind every holder and every waiter
             ahead = len(held) + len(waiters)
@@ -119,9 +121,8 @@ def request_lease(db, holder_attachment: str, holder_handle: str, holder_line: s
                      "mode": mode, "waiting": 1, "created_at": now,
                      "ttl_s": ttl_s, "expires_at": now + ttl_s})
         return {"granted": False, "name": name, "mode": mode,
-                "holder": {"handle": holder["holder_handle"],
-                           "line": holder["holder_line"]},
-                "queue_position": ahead, "expires_at": holder["expires_at"]}
+                "holder": holder,
+                "queue_position": ahead, "expires_at": holder_row["expires_at"]}
     _upsert(db, {"name": name, "holder_attachment": holder_attachment,
                  "holder_handle": holder_handle, "holder_line": holder_line,
                  "mode": mode, "waiting": 0, "created_at": mine["created_at"]

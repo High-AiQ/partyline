@@ -1,5 +1,6 @@
 """Scratch worktrees: writable checkouts for integration builds (finding 2.15)."""
 
+import json
 import os
 import subprocess
 import tempfile
@@ -76,12 +77,23 @@ class ScratchWorktreesTest(unittest.TestCase):
         self.kid = made.json()["conversation"]
         self.worktree = self.kid["cwd"]
 
+    def rev(self, name, cwd=None):
+        return _git("rev-parse", "--verify", "--quiet", name,
+                    cwd=cwd or self.repo).stdout.strip()
+
     def commit(self, message, filename="code.txt"):
         with open(os.path.join(self.worktree, filename), "a") as fh:
             fh.write(message + "\n")
         _git("add", "-A", cwd=self.worktree)
         _identity("commit", "-q", "-m", message, cwd=self.worktree)
         return _git("rev-parse", "HEAD", cwd=self.worktree).stdout.strip()
+
+    def move_main(self, message="main moved on the host"):
+        with open(os.path.join(self.repo, "main.txt"), "a") as fh:
+            fh.write(message + "\n")
+        _git("add", "-A", cwd=self.repo)
+        _identity("commit", "-q", "-m", message, cwd=self.repo)
+        return self.rev("main")
 
     def create(self, sha, repository=None, conv_id=None):
         body = {"sha": sha}
@@ -167,6 +179,54 @@ class ScratchWorktreesTest(unittest.TestCase):
 
     def scratch_dir_root(self, repo=None):
         return os.path.join(repo or self.repo, SCRATCH_DIR)
+
+    def test_a_trial_merge_starts_at_the_ref_and_merges_the_candidate(self):
+        # main moves ahead on the host; the candidate carries its own file
+        self.move_main()
+        candidate = self.commit("the candidate slice")
+        main_sha = self.rev("main")
+        made = self.client.post(
+            f"/api/conversations/{self.kid['id']}/scratch-worktrees",
+            json={"sha": candidate, "merge_onto": "main"}, headers=self.captain)
+        self.assertEqual(made.status_code, 201, made.text)
+        body = made.json()
+        self.assertEqual(body["sha"], f"{candidate}-onto-{main_sha}")
+        self.assertEqual(body["merge"]["onto"], main_sha)
+        self.assertEqual(body["merge"]["conflicts"], [])
+        head = _git("rev-parse", "HEAD", cwd=body["path"]).stdout.strip()
+        self.assertEqual(head, body["merge"]["result"])
+        parents = _git("log", "-1", "--format=%P", cwd=body["path"]).stdout.split()
+        self.assertEqual(sorted(parents), sorted([main_sha, candidate]))  # a real merge
+        # recorded under the merged key, listed beside a plain checkout
+        plain = self.create(candidate)
+        self.assertNotEqual(plain.json()["path"], body["path"])
+        listed = self.client.get(
+            f"/api/conversations/{self.kid['id']}/scratch-worktrees",
+            headers=self.captain).json()
+        self.assertEqual(sorted(row["sha"] for row in listed),
+                         sorted([body["sha"], candidate]))
+
+    def test_a_conflicting_trial_merge_answers_409_and_leaves_it_clean(self):
+        self.move_main()
+        candidate = self.commit("candidate touches main.txt")
+        with open(os.path.join(self.worktree, "main.txt"), "w") as fh:
+            fh.write("candidate side\n")
+        _git("add", "-A", cwd=self.worktree)
+        _identity("commit", "-q", "-m", "candidate edit", cwd=self.worktree)
+        candidate = _git("rev-parse", "HEAD", cwd=self.worktree).stdout.strip()
+        made = self.client.post(
+            f"/api/conversations/{self.kid['id']}/scratch-worktrees",
+            json={"sha": candidate, "merge_onto": "main"}, headers=self.captain)
+        self.assertEqual(made.status_code, 409, made.text)
+        detail = made.json()["detail"]
+        conflicts = json.loads(detail)["merge"]["conflicts"]
+        self.assertEqual(conflicts, ["main.txt"])
+        path = self.scratch_dir(f"{candidate}-onto-{self.rev('main')}")
+        # nothing half-merged: the checkout sits clean at the ref
+        self.assertTrue(os.path.isdir(path))
+        self.assertEqual(
+            _git("rev-parse", "HEAD", cwd=path).stdout.strip(), self.rev("main"))
+        self.assertEqual(_git("status", "--porcelain", cwd=path).stdout, "")
 
     def test_retirement_prunes_and_delete_drops_one_early(self):
         first = self.commit("first build")

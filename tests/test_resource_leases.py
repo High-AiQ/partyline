@@ -49,7 +49,7 @@ class LeaseLogicTest(unittest.TestCase):
         self.assertEqual(first["queue_position"], 0)
         second = self.take("luna")
         self.assertFalse(second["granted"])
-        self.assertEqual(second["holder"], {"handle": "sonnet", "line": "assets"})
+        self.assertEqual(second["holder"], {"handle": "sonnet", "line": "world-assets"})
         self.assertEqual(second["queue_position"], 1)
 
     def test_shared_leases_coexist_but_not_with_an_exclusive_one(self):
