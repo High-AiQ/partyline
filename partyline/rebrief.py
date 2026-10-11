@@ -76,8 +76,13 @@ def notes_block(db, att: dict, budget: int) -> str:
     return block
 
 
-def render_rebrief(db, att: dict, limit: int = REBRIEF_LIMIT) -> str:
-    """The re-briefing text: goal, topic, notes, latest assignment, reminder.
+def render_rebrief(db, att: dict, limit: int = REBRIEF_LIMIT, reason: str = "") -> str:
+    """The re-briefing text: header, goal, notes, latest assignment, reminder.
+
+    The header names why the context is fresh: a compaction by default, or —
+    for a replaced process — the previous handle and the reason it was
+    replaced, so the fresh instance knows it is continuing work, not
+    recovering from a summary.
 
     A worker hears the worker reminder — edit only on the captain's
     @mention. A captain hearing that after a compaction would be told to
@@ -94,8 +99,12 @@ def render_rebrief(db, att: dict, limit: int = REBRIEF_LIMIT) -> str:
     conv = db.get_conversation(att["conv_id"]) or {}
     conv_id = att["conv_id"]
     lead = bool(att.get("is_lead"))
-    header = (f"You are @{att['name']} on «{conv.get('name') or conv_id}». Your context "
-              "was just compacted — this re-briefing is partyline's record of your charge.")
+    if reason:
+        header = (f"You are a fresh instance replacing the previous @{att['name']}: "
+                  f"{reason}. This re-briefing is partyline's record of your charge.")
+    else:
+        header = (f"You are @{att['name']} on «{conv.get('name') or conv_id}». Your context "
+                  "was just compacted — this re-briefing is partyline's record of your charge.")
     assignment = latest_assignment(db, att, person_only=lead)
     if assignment and len(assignment) > ASSIGNMENT_LIMIT:
         assignment = (assignment[:ASSIGNMENT_LIMIT - 32].rstrip()
