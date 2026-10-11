@@ -45,6 +45,28 @@ def compaction_hooks(att: dict) -> bool:
     return bool((capabilities or {}).get("compaction_hooks"))
 
 
+def compaction_detect(att: dict) -> str:
+    """Where this harness reports compaction, and so how its rebrief arrives.
+
+    ``"hook"`` — Claude Code: `PreCompact` POSTs the event and the
+    `SessionStart(compact)` hook prints the rebrief into context. Only the
+    hook endpoint's own checks gate this route. ``"transcript"`` — codex and
+    opencode-v2: the adapter recognises the compaction in its structured
+    transcript, and partyline delivers the rebrief as a private wake
+    message, because neither harness has a hook whose stdout reaches the
+    model. Anything else reports empty and gets neither.
+    """
+    capabilities = (att.get("adapter_metadata") or {}).get("capabilities")
+    if capabilities is None:
+        metadata = ADAPTER_METADATA.get(att.get("adapter") or "") or {}
+        capabilities = metadata.get("capabilities")
+    caps = capabilities or {}
+    if caps.get("compaction_hooks"):
+        return "hook"
+    mode = caps.get("compaction_detect")
+    return mode if mode in ("hook", "transcript") else ""
+
+
 def claims_transcript(att: dict) -> bool:
     """Whether this attachment's harness owns a structured transcript that it
     must claim before anything typed at it counts as delivered.

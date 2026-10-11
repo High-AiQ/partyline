@@ -222,6 +222,13 @@ class PartylineAdapter(BaseAdapter):
 
         async def handle(obj):
             if is_compaction_record("codex", obj):
+                # The rollout records no trigger; codex compactions are the
+                # context-limit kind, so they count as auto. The freshness
+                # gate is the dedup: a resumed rollout's backlog of old
+                # compacted records never re-counts.
+                if self._fresh(obj.get("timestamp")) and (
+                        noted := self.att.get("on_compaction")):
+                    await noted("auto")
                 return
             if obj.get("type") != "event_msg" or not self._fresh(obj.get("timestamp")):
                 return

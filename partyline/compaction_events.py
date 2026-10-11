@@ -77,6 +77,36 @@ def _ordinal(number: int) -> str:
     return f"{number}{suffix}"
 
 
+async def note_transcript_compaction(runtime, att: dict, trigger: str) -> dict:
+    """A compaction seen in a transcript: the hook path's events, then the rebrief.
+
+    Claude Code gets its rebrief from the `SessionStart(compact)` hook's
+    stdout; a transcript-only harness (codex, opencode-v2) has no hook whose
+    stdout reaches the model, so partyline delivers the rebrief itself — a
+    private wake message addressed to the compacted process, which arrives
+    as its next prompt. Counting, the ⚠ notice and the thrash ring are the
+    hook path's logic, unchanged; their turn window already works here
+    because those adapters report turn boundaries as receipts through the
+    same hook door.
+    """
+    from .rebrief import render_rebrief
+
+    result = await note_hook_compaction(runtime, att, trigger)
+    await post_private(
+        runtime, att["conv_id"], "system", "system",
+        render_rebrief(runtime.db, att),
+        audience=att["id"],
+    )
+    return result
+
+
+def transcript_compaction_callback(runtime, att: dict):
+    """The adapter-side door: a transcript tail calls this when it sees one."""
+    async def noted(trigger: str) -> dict:
+        return await note_transcript_compaction(runtime, att, trigger or "auto")
+    return noted
+
+
 async def note_hook_compaction(runtime, att: dict, trigger: str) -> dict:
     """One PreCompact hook event: count it, speak it, ring the captain on thrash.
 
