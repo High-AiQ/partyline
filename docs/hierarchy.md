@@ -329,7 +329,14 @@ without a write-set request; review checkouts stay exactly as they are.
 when the line retires or is purged and swept at startup when its record or
 its line is gone — it is never pruned by an accept, because integration
 checks follow the accepted work. The startup sweep owns only full-SHA
-directories under `.scratch`.
+directories under `.scratch`. A scratch checkout can also start from a
+**trial merge**: `{"sha": "<candidate>", "merge_onto": "main"}` starts at
+`main` as the host sees it and merges the candidate in with `--no-ff` under
+a fixed partyline identity — the integration check in one call. The response
+carries `merge: {"onto", "result", "conflicts"}`; on conflicts the merge is
+aborted, the checkout is left clean at the ref, and the 409 detail lists the
+conflicting paths. Trial-merge checkouts are recorded as
+`<sha>-onto-<onto sha>` and swept like any other.
 
 ## Pre-review checks and the tree sync
 
