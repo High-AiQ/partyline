@@ -273,7 +273,29 @@ class RoleBriefingTests(unittest.TestCase):
         text = role_instructions(["assign", "create_child"], "root", None)
         self.assertIn("?clear_goal=true", text)
         self.assertIn("no longer blocks the retirement", text)
+        self.assertIn("cleared only once every other blocker is gone", text)
         self.assertIn("?discard=true", text)  # the existing relief stays documented
+
+    def test_the_accept_text_covers_allow_descendant_and_the_tip_read(self):
+        text = role_instructions(["assign", "create_child"], "root", None)
+        self.assertIn('"allow_descendant": true', text)
+        self.assertIn("descends from the reviewed SHA", text)
+        self.assertIn("counts the commits that went in unreviewed", text)
+        self.assertIn("/api/conversations/<child-id>/tip", text)
+        self.assertIn("shows the branch and the fenced tip before you accept", text)
+
+    def test_the_review_text_covers_cross_repository_worktrees_and_the_pair(self):
+        text = role_instructions(["assign", "create_child"], "root", None)
+        self.assertIn('"repository":"<abs path>"', text)
+        self.assertIn("any repository of this subtree", text)
+        self.assertIn('"repository","sha"', text)
+        self.assertIn("instead of the path", text)
+
+    def test_the_staffing_text_tells_the_captain_about_bubbled_approvals(self):
+        text = role_instructions(["assign", "create_child"], "root", None)
+        self.assertIn("⚑ approval pending", text)
+        self.assertIn("approvals pending in the staffing line", text)
+        self.assertIn("the root captain explains it to the person in context", text)
 
     def test_every_captain_variant_carries_the_fence_paragraph(self):
         packs = {
