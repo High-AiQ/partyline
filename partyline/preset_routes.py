@@ -46,6 +46,5 @@ def presets_router(runtime, adapters) -> APIRouter:
         return runtime.db.save_preset(
             preset_id, body.title.strip(), body.name, body.adapter, body.command.strip(),
             reads_images=body.reads_images, can_manage=body.can_manage,
-            implements=body.implements)
-
+            implements=body.implements, max_instances=body.max_instances)
     return router
