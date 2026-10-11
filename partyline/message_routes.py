@@ -110,6 +110,8 @@ def message_router(runtime, media) -> APIRouter:
             for attachment in runtime.db.list_attachments(conv_id)
         ):
             raise HTTPException(409, "attach a process to this line before sending")
-        return await post_identified(runtime, conv_id, principal, body.body)
+        return await post_identified(
+            runtime, conv_id, principal, body.body, client_key=body.client_key
+        )
 
     return router
