@@ -176,6 +176,33 @@ property of the CLI, not of partyline, so it is declared per adapter.
 capabilities = { immediate_mentions = true }
 ```
 
+### Compaction hooks
+
+Only Claude Code today. A harness that reports compaction declares the capability, and
+partyline then adds two hooks to the `--settings` it already generates alongside
+`Notification`, `UserPromptSubmit` and `Stop`:
+
+```toml
+capabilities = { compaction_hooks = true }
+```
+
+- `PreCompact` (matchers `auto` and `manual`) POSTs to the attachment's hook URL. Each
+  event becomes a line notice (`⚠ @handle compacted (auto, Nth time)`), bumps the
+  attachment's persisted compactions counter — shown as `×N compactions` in the staffing
+  line — and three `auto` compactions within the last five hook turns ring the line's
+  live captain once: that is thrash, and the remedy is a fresh instance, not a re-prompt.
+- `SessionStart` with matcher `compact` GETs
+  `GET /api/hooks/<attachment>/<token>/rebrief` and prints the body to stdout, which the
+  harness appends to the model's context: the goal, the line's topic, and the latest
+  captain-or-person message that @mentions the process, verbatim, capped at ~4k
+  characters. That hook is a printing `command` curl on every platform — an `http` hook
+  cannot add anything to context.
+
+Adapters without the capability get none of this: no extra hooks, no counting, and the
+rebrief endpoint answers 403. `adapters/compaction.py`'s transcript recognition is
+unchanged and deliberately not wired into the counter — the hooks are authoritative, so
+a compaction counts exactly once.
+
 The claim is that a mention arrives at a turn **already in progress**. It is `false` for every
 adapter that does not say otherwise, because the failure mode of guessing is a room that believes
 a message landed while it is still waiting.

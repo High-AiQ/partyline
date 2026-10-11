@@ -336,6 +336,20 @@ A captain's wake carries the pointer `(partyline docs: GET /api/docs — …)`
 roughly every N line messages since the last one — a setting,
 `docs_reminder_every_messages`, default 40 — and never on every wake.
 
+## Compaction as a line event
+
+A worker's context compaction used to show only on its own screen. On an
+adapter that declares the `compaction_hooks` capability (Claude Code today),
+the harness's `PreCompact` hook posts `⚠ @<handle> compacted (auto, Nth
+time)` on the line and bumps a persisted counter that the staffing line
+shows as `×N compactions`. The third `auto` compaction within five hook
+turns rings the line's live captain once — that is thrash, and the remedy
+is a fresh instance of the same preset, never a re-prompt.
+`SessionStart(compact)` folds a partyline re-briefing back into the worker's
+context: the goal, the line's topic, and the latest captain-or-person
+message that @mentions the process, verbatim. Adapters without the
+capability get no hooks, no counting, and a 403 from the rebrief endpoint.
+
 ## The goal
 
 A line carries a `goal`: what its manager is seeing through. A person or the
