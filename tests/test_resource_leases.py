@@ -38,10 +38,10 @@ class LeaseLogicTest(unittest.TestCase):
         self.db.add_attachment("sonnet", "assets", "sonnet", "raw", ["raw"], "/tmp")
         self.db.add_attachment("luna", "effects", "luna", "raw", ["raw"], "/tmp")
 
-    def take(self, holder, name="godot", mode="exclusive", ttl_s=900):
+    def take(self, holder, name="godot", mode="exclusive", ttl_s=900, purpose=""):
         att = self.db.get_attachment(holder)
         return request_lease(self.db, holder, att["name"], att["conv_id"],
-                             name, mode, ttl_s)
+                             name, mode, ttl_s, purpose)
 
     def test_an_exclusive_lease_blocks_and_queues_a_second(self):
         first = self.take("sonnet")
@@ -169,6 +169,25 @@ class LeaseLogicTest(unittest.TestCase):
                        {"ttl_s": 0}, {"ttl_s": 4 * 3600 + 1}):
             with self.assertRaises(LeaseError):
                 self.take("sonnet", **kwargs)
+
+    def test_a_purpose_is_stored_and_shown_in_the_staffing_line(self):
+        self.take("sonnet", purpose="timing run")
+
+        report = active_lease_report(self.db)
+        self.assertEqual(report[0]["holders"][0]["purpose"], "timing run")
+
+        # The staffing line needs a preset on the board to render at all.
+        self.db.save_preset("sonnet", "sonnet", "sonnet", "raw", "raw --x",
+                            can_manage=False, implements=True)
+        line = staffing_line(self.db, "assets", runtime=None)
+        self.assertIn('godot (exclusive, "timing run") @sonnet', line)
+
+    def test_a_purpose_is_capped_and_stripped(self):
+        self.assertEqual(self.take("sonnet", purpose="  timing run  ")["granted"], True)
+        report = active_lease_report(self.db)
+        self.assertEqual(report[0]["holders"][0]["purpose"], "timing run")
+        with self.assertRaises(LeaseError):
+            self.take("luna", purpose="x" * 81)
 
     def test_the_schema_migration_runs_twice(self):
         import sqlite3
