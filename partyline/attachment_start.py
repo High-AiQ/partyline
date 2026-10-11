@@ -70,6 +70,9 @@ async def start_attachment(att, *, runtime, presence, make_adapter, hook_url,
         )
         # Own cleanup even if start fails after creating a PTY but before returning.
         runtime.live[ident] = adapter
+        from .first_hello import mark_pending
+
+        mark_pending(runtime, ident)
         await adapter.start()
         runtime.live[ident] = presence.watch(
             adapter, conv_id, ident, adapter_completion(att["adapter"]),
