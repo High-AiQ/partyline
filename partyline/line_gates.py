@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import subprocess
 import time
 
@@ -109,8 +108,7 @@ async def run_line_gates(runtime, conv_id: str, sha: str, spec: dict) -> list[di
     event loop, with the declared timeout; the run stops at the first
     failure. The scratch checkout is removed afterwards either way.
     """
-    if not os.environ.get("PARTYLINE_GATES_ALLOW_UNFENCED") and not (
-            fence.features.enabled("write_fence") and fence.backend_available()[0]):
+    if not (fence.features.enabled("write_fence") and fence.backend_available()[0]):
         raise HTTPException(501, "no write fence on this host; gates would run unfenced")
     created = create_scratch_worktree(runtime.db, conv_id, sha)
     scratch_path = created["path"]
@@ -123,8 +121,11 @@ async def run_line_gates(runtime, conv_id: str, sha: str, spec: dict) -> list[di
     results: list[dict] = []
     try:
         for command in spec["commands"]:
-            argv = fence.command_argv(att, ["sh", "-c", command])
-            scoped = scope_argv(argv, hard)
+            try:
+                argv = fence.command_argv(att, ["sh", "-c", command])
+                scoped = scope_argv(argv, hard)
+            except fence.FenceUnavailable as exc:
+                raise HTTPException(501, str(exc)) from exc
             try:
                 done = await asyncio.to_thread(
                     subprocess.run, scoped, cwd=scratch_path,
