@@ -33,8 +33,9 @@ def _purge_expired(db) -> None:
 
 
 def _promote(db, row: dict, now: float) -> None:
-    """Turn one waiter into the holder, honouring the TTL it queued with."""
-    ttl = max(1, int(row["expires_at"] - row["created_at"]))
+    """Turn one waiter into the holder, granting exactly the TTL it asked for,
+    capped at the module maximum — queue time must not inflate the lease."""
+    ttl = min(row.get("ttl_s") or MAX_TTL_S, MAX_TTL_S)
     _upsert(db, {**row, "waiting": 0, "expires_at": now + ttl})
 
 
@@ -59,8 +60,9 @@ def request_lease(db, holder_attachment: str, holder_handle: str, holder_line: s
     one. Queue place is held: a waiter keeps its original queue-time, so
     polling cannot slide it backwards, and when the lease frees, promotion is
     by queue order — the earliest waiter for an exclusive lease, the leading
-    run of shared waiters for a shared one. A brand-new caller queues behind
-    everyone already waiting.
+    contiguous run of shared waiters, stopping at the first exclusive one. A
+    shared request never jumps an exclusive waiter queued ahead of it, and a
+    promoted lease grants exactly the TTL its waiter asked for, capped.
     """
     name = (name or "").strip()
     if not LEASE_NAME.fullmatch(name):
@@ -78,32 +80,52 @@ def request_lease(db, holder_attachment: str, holder_handle: str, holder_line: s
     waiters = sorted((row for row in rows if row["waiting"]),
                      key=lambda row: row["created_at"])
     if not held and waiters:
-        # The slot is free: promote by queue order — the earliest waiter, or
-        # every leading shared waiter together.
+        # The slot is free: promote by queue order — the earliest waiter, then
+        # the leading contiguous run of shared waiters, stopping at the first
+        # exclusive one so it keeps its place.
         promoted = [waiters[0]]
         if promoted[0]["mode"] == "shared":
-            promoted += [row for row in waiters[1:] if row["mode"] == "shared"]
+            for row in waiters[1:]:
+                if row["mode"] != "shared":
+                    break
+                promoted.append(row)
         for row in promoted:
             _promote(db, row, now)
-        held = [dict(row, waiting=0) for row in promoted]
+        rows = [dict(row) for row in db._exec(
+            "SELECT * FROM resource_leases WHERE name=?", (name,)).fetchall()]
+        held = [row for row in rows if not row["waiting"]]
+        waiters = sorted((row for row in rows if row["waiting"]),
+                         key=lambda row: row["created_at"])
+    mine = next((row for row in rows
+                 if row["holder_attachment"] == holder_attachment), None)
     others = [row for row in held if row["holder_attachment"] != holder_attachment]
     blocked = any(row["mode"] == "exclusive" for row in others) or (
         mode == "exclusive" and bool(others))
+    if not blocked and mode == "shared":
+        # A shared grant must not jump an exclusive waiter that queued before
+        # this caller's own row (every waiter, for a brand-new caller).
+        blocked = any(row["mode"] == "exclusive" for row in waiters
+                      if mine is None or row["created_at"] < mine["created_at"])
     if blocked:
         holder = others[0] if others else held[0]
-        ahead = len([row for row in rows if row["holder_attachment"] != holder_attachment])
+        if mine is None:
+            # a brand-new caller stands behind every holder and every waiter
+            ahead = len(held) + len(waiters)
+        else:
+            ahead = len(held) + len([row for row in waiters
+                                     if row["created_at"] < mine["created_at"]])
         _upsert(db, {"name": name, "holder_attachment": holder_attachment,
                      "holder_handle": holder_handle, "holder_line": holder_line,
                      "mode": mode, "waiting": 1, "created_at": now,
-                     "expires_at": now + ttl_s})
+                     "ttl_s": ttl_s, "expires_at": now + ttl_s})
         return {"granted": False, "name": name, "mode": mode,
                 "holder": {"handle": holder["holder_handle"],
                            "line": holder["holder_line"]},
                 "queue_position": ahead, "expires_at": holder["expires_at"]}
     _upsert(db, {"name": name, "holder_attachment": holder_attachment,
                  "holder_handle": holder_handle, "holder_line": holder_line,
-                 "mode": mode, "waiting": 0, "created_at": now,
-                 "expires_at": now + ttl_s})
+                 "mode": mode, "waiting": 0, "created_at": mine["created_at"]
+                 if mine else now, "ttl_s": ttl_s, "expires_at": now + ttl_s})
     return {"granted": True, "name": name, "mode": mode,
             "holder": {"handle": holder_handle, "line": holder_line},
             "queue_position": 0, "expires_at": now + ttl_s}
