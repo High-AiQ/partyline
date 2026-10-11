@@ -66,10 +66,12 @@ def derived_client_key(method: str, path: str, body: bytes) -> str:
     identical command after `connection/request failed`, which may have been
     printed for a POST that actually succeeded (finding 2.7). Deriving the
     key — never invented per run — makes that re-run land as the original
-    message. A deliberate repeat of the same text needs a caller-made key.
+    message. The ``d:`` prefix marks it derived, which the server reads as
+    "retry window, not intent" (two minutes, not ten); a deliberate repeat
+    needs a caller-made key.
     """
     digest = hashlib.sha256(b"\0".join((method.encode(), path.encode(), body))).hexdigest()
-    return digest[:64]  # the contract caps client_key at 64 characters
+    return "d:" + digest[:62]  # the contract caps client_key at 64 characters
 
 
 def with_client_key(method: str, path: str, body: bytes | None) -> bytes | None:
@@ -84,6 +86,21 @@ def with_client_key(method: str, path: str, body: bytes | None) -> bytes | None:
         return body
     payload["client_key"] = derived_client_key(method, path, body)
     return json.dumps(payload).encode()
+
+
+def note_replay(output: bytes) -> None:
+    """On a replay, say so: a caller that believes it posted new words is worse
+    than the double post the key prevents (finding 2.7's review)."""
+    try:
+        payload = json.loads(output)
+    except ValueError:
+        return
+    if isinstance(payload, dict) and payload.get("replayed"):
+        print(
+            f"replayed original message {payload.get('id')}; nothing new was posted — "
+            "add a distinct client_key to post the same text again",
+            file=sys.stderr,
+        )
 
 
 def api_request(connection: Connection, method: str, path: str, body: bytes | None = None) -> bytes:
@@ -122,6 +139,7 @@ def main(argv=None) -> int:
             Path(args.output).write_bytes(output)
         else:
             sys.stdout.write(output.decode() + "\n")
+        note_replay(output)
         return 0
     except HTTPError as exc:
         # The server's reason is the one thing a caller can act on: a 409 with

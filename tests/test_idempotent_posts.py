@@ -85,6 +85,47 @@ class IdempotentPostsTest(unittest.TestCase):
         self.assertNotEqual(retry.json()["id"], first.json()["id"])
         self.assertEqual(self.bodies().count("deploy finished"), 2)
 
+    def test_a_caller_key_still_replays_at_nine_minutes(self):
+        first = self.post("deploy finished", key="retry-42")
+        self.db._exec("UPDATE idempotent_posts SET created_at = created_at - 540")
+
+        retry = self.post("deploy finished", key="retry-42")
+
+        self.assertEqual(retry.json()["id"], first.json()["id"])
+        self.assertEqual(self.bodies().count("deploy finished"), 1)
+
+    def test_a_derived_key_replays_briefly_then_posts_fresh(self):
+        derived = derived_client_key(
+            "POST", "/api/conversations/line/messages", b'{"body": "wake up"}')
+        self.assertTrue(derived.startswith("d:"))
+        first = self.post("wake up", key=derived)
+
+        self.db._exec("UPDATE idempotent_posts SET created_at = created_at - 30")
+        soon = self.post("wake up", key=derived)
+        self.assertEqual(soon.json()["id"], first.json()["id"])
+
+        # Past the derived window a deliberate re-send must land, or a captain
+        # re-waking an idle worker is silently swallowed.
+        self.db._exec("UPDATE idempotent_posts SET created_at = created_at - 100")
+        later = self.post("wake up", key=derived)
+        self.assertNotEqual(later.json()["id"], first.json()["id"])
+        self.assertEqual(self.bodies().count("wake up"), 2)
+
+    def test_the_replayed_flag_marks_only_a_replay(self):
+        fresh = self.post("deploy finished", key="retry-42")
+        replay = self.post("deploy finished", key="retry-42")
+
+        self.assertIs(fresh.json()["replayed"], False)
+        self.assertIs(replay.json()["replayed"], True)
+
+    def test_the_capture_echo_is_a_replay_too(self):
+        captured = self.db.add_message("line", "sol", "agent", "mirrored update")
+
+        echoed = self.post("mirrored update", headers=self.machine)
+
+        self.assertIs(echoed.json()["replayed"], True)
+        self.assertEqual(echoed.json()["id"], captured["id"])
+
     def test_the_machine_path_is_idempotent_too(self):
         first = self.post("suite green", headers=self.machine, key="m-1")
         second = self.post("suite green", headers=self.machine, key="m-1")
@@ -164,6 +205,41 @@ class AgentClientKeyTest(unittest.TestCase):
         stamped = b'{"body": "hello", "client_key": "chosen"}'
         self.assertEqual(with_client_key("POST", "/api/conversations/line/messages", stamped),
                          stamped)
+
+    def test_a_replay_is_announced_on_stderr(self):
+        import contextlib
+        import io
+        from unittest.mock import patch
+
+        from partyline.agent_client import main
+
+        replayed = json.dumps({"id": 7, "replayed": True}).encode()
+        fresh = json.dumps({"id": 8, "replayed": False}).encode()
+        error, out = io.StringIO(), io.StringIO()
+        stdin = io.StringIO('{"body": "wake"}')
+        with patch("partyline.agent_client.api_request", return_value=replayed), \
+                patch("sys.stdin", stdin), \
+                patch("partyline.agent_client.load_connection", return_value={
+                    "api": "http://x", "token": "t", "conversation_id": "c",
+                    "attachment_id": "a", "handle": "h"}):
+            with contextlib.redirect_stderr(error), contextlib.redirect_stdout(out):
+                code = main(["--connection", "ignored", "request", "POST",
+                             "/api/conversations/line/messages", "--json-file", "-"])
+        self.assertEqual(code, 0)
+        self.assertIn("replayed original message 7", error.getvalue())
+        self.assertIn("add a distinct client_key", error.getvalue())
+
+        error, out = io.StringIO(), io.StringIO()
+        stdin = io.StringIO('{"body": "wake"}')
+        with patch("partyline.agent_client.api_request", return_value=fresh), \
+                patch("sys.stdin", stdin), \
+                patch("partyline.agent_client.load_connection", return_value={
+                    "api": "http://x", "token": "t", "conversation_id": "c",
+                    "attachment_id": "a", "handle": "h"}):
+            with contextlib.redirect_stderr(error), contextlib.redirect_stdout(out):
+                main(["--connection", "ignored", "request", "POST",
+                      "/api/conversations/line/messages", "--json-file", "-"])
+        self.assertEqual(error.getvalue(), "")
 
 
 if __name__ == "__main__":
