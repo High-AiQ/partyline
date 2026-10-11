@@ -6,6 +6,7 @@ ring the line's live captain once. `SessionStart(compact)` GETs a re-briefing
 that the harness folds back into the model's context.
 """
 
+import os
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -212,6 +213,26 @@ class CompactionEventsTest(unittest.TestCase):
         self.assertNotIn("you are a worker on a captained line", body)
         self.assertIn("@sol the parser fix is ready for review", body)
         self.assertIn("review and accept the parser fix", body)
+
+    def test_importing_the_server_never_cycles_on_the_capability(self):
+        # adapter_capabilities imported the adapters package, whose bundled
+        # claude adapter imported the helper back from the still-loading
+        # module: every import whose first hop went through runtime died.
+        # Fresh subprocess, fresh interpreter, both orders.
+        import subprocess
+        import sys
+
+        for program in (
+            "import partyline.adapter_capabilities; import partyline.server",
+            "import partyline.server; import partyline.adapter_capabilities",
+        ):
+            done = subprocess.run(
+                [sys.executable, "-c", program], capture_output=True, text=True,
+                cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                env={**os.environ, "PARTYLINE_DB": os.path.join(
+                    self.directory.name, "cycle-check.db")},
+            )
+            self.assertEqual(done.returncode, 0, f"{program}:\n{done.stderr}")
 
     def test_the_schema_migration_runs_twice(self):
         from partyline.compaction_schema import MIGRATIONS as COMPACTION_MIGRATIONS
