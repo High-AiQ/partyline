@@ -261,6 +261,11 @@ class RoleBriefingTests(unittest.TestCase):
         self.assertEqual(role_instructions(["read", "write"], "line", "parent"), "")
         self.assertNotIn("Reclaim the line", worker_instructions(captained=True))
 
+    def test_the_captain_pack_names_the_real_lease_path(self):
+        root = role_instructions(["assign", "create_child"], "root", None)
+        self.assertIn("POST /api/leases", root)
+        self.assertNotIn("POST {root}/leases", root)
+
     def test_the_split_brief_states_the_goal_and_topic_caps_and_points_at_a_brief_file(self):
         # Only the splitting pack POSTs /children; a leaf or staffed captain
         # cannot, so the cap text belongs to that variant alone.

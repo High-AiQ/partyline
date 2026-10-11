@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from partyline import auth_store
+from partyline import auth_store, auth_tokens
 from partyline.auth_guard import install_auth_guard
 from partyline.db import Db
 from partyline.lease_schema import MIGRATIONS as LEASE_MIGRATIONS
@@ -58,7 +58,36 @@ class LeaseLogicTest(unittest.TestCase):
         self.assertTrue(exclusive["granted"])  # a different name is free
         blocked = self.take("luna", mode="exclusive")  # godot is held shared
         self.assertFalse(blocked["granted"])
-        self.assertEqual(blocked["queue_position"], 2)  # behind both shared holders
+        # sonnet's own shared row is replaced at grant; luna is the holder ahead
+        self.assertEqual(blocked["queue_position"], 1)
+
+    def test_waiting_holds_queue_place_when_the_holder_releases(self):
+        self.take("sonnet")
+        waited = self.take("luna")  # luna queues behind sonnet
+        self.assertFalse(waited["granted"])
+        self.assertEqual(waited["queue_position"], 1)
+        # luna polls: her queue-time is write-once, her place does not slide
+        row = self.db._exec(
+            "SELECT created_at FROM resource_leases WHERE holder_attachment='luna'"
+        ).fetchone()
+        self.take("luna")
+        self.take("luna")
+        row_again = self.db._exec(
+            "SELECT created_at FROM resource_leases WHERE holder_attachment='luna'"
+        ).fetchone()
+        self.assertEqual(row_again["created_at"], row["created_at"])
+        self.assertEqual(self.take("luna")["queue_position"], 1)  # still first in line
+        # the holder releases; a brand-new caller posts first and still waits
+        self.db._exec("DELETE FROM resource_leases WHERE holder_attachment='sonnet'")
+        self.db.add_attachment("fresh", "assets", "fresh", "raw", ["raw"], "/tmp")
+        jumped = self.take("fresh")
+        self.assertFalse(jumped["granted"])
+        self.assertEqual(jumped["holder"]["handle"], "luna")
+        # the earliest waiter is promoted, and the newcomer queues behind her
+        self.assertTrue(self.take("luna")["granted"])
+        after = self.take("fresh")
+        self.assertFalse(after["granted"])
+        self.assertEqual(after["queue_position"], 1)
 
     def test_a_ttl_expiry_frees_the_lease(self):
         self.take("sonnet", ttl_s=900)
@@ -135,6 +164,17 @@ class LeaseApiTest(unittest.TestCase):
         made = self.client.post("/api/leases", json={"name": "nope nope"},
                                 headers=self.sonnet)
         self.assertEqual(made.status_code, 422, made.text)
+
+    def test_a_person_cannot_take_a_lease(self):
+        user = auth_store.create_user(
+            self.db, "other@example.com", "other", auth_tokens.hash_password("hunter2222"))
+        person = {"Authorization": "Bearer " + auth_tokens.create_access_token(
+            auth_tokens.signing_secret(self.db), user["id"])}
+        made = self.client.post("/api/leases", json={"name": "godot", "ttl_s": 900},
+                                headers=person)
+        self.assertEqual(made.status_code, 403, made.text)
+        self.assertEqual(self.client.get("/api/leases",
+                                         headers=self.sonnet).json()["leases"], [])
 
 
 class LeaseHooksTest(unittest.TestCase):
