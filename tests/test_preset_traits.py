@@ -89,8 +89,17 @@ class PresetTraitTests(unittest.TestCase):
         self.assertEqual(
             match_preset(att, presets[:1])["id"], "a",
         )
+        # a numbered handle matches its base preset (5.3): the instances of a
+        # preset are counted, not hidden. Two presets whose names both match
+        # one handle stay ambiguous and match nothing.
+        self.assertEqual(
+            match_preset(
+                {"name": "grok-2", "adapter": "fake", "command": ["run"]},
+                presets[:1])["id"],
+            "a",
+        )
         self.assertIsNone(match_preset(
-            {"name": "grok-2", "adapter": "fake", "command": ["run"]}, presets[:1]))
+            {"name": "grok-2", "adapter": "fake", "command": ["run"]}, presets))
         self.assertIsNone(match_preset(
             {"name": "grok", "adapter": "fake", "command": ["other"]}, presets[:1]))
         self.assertIsNone(match_preset(

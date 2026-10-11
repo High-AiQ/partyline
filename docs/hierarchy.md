@@ -165,7 +165,11 @@ otherwise hands the job to a sibling on the root line, in the checkout the
 child lines are already editing. Presets double as handles, so the same preset
 used twice in one tree used to collide with a 409 that read as "cannot staff";
 the server now suffixes the handle (`grok-2`) and the agent helper prints the
-server's reason on every failed request.
+server's reason on every failed request. The same is true of captains: a
+`can_manage` preset may hold one live instance per line, and the staffing
+line keeps counting it as free until its `max_instances` is reached — a
+preset declaring `max_instances: 3` with one captain running shows as
+`astra (2 more)` — so a scarce captain preset stops pretending to be spent.
 
 The rule is symmetric. A line that already carries live workers — attached by
 its parent captain or by a person — cannot be split by its captain: `POST
