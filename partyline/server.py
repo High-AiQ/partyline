@@ -85,6 +85,7 @@ from .pin_routes import pin_router
 from .accept_sha import register_accept_route
 from .accept_history import register_accept_history_route
 from .review_worktrees import register_review_routes
+from .scratch_worktrees import register_scratch_routes
 from .prereview import register_prereview_route
 from .captain_docs import register_docs_route
 from .line_base import register_line_base_route
@@ -187,6 +188,7 @@ register_terminal_route(app, runtime)
 register_accept_route(app, runtime)
 register_accept_history_route(app, runtime)
 register_review_routes(app, runtime)
+register_scratch_routes(app, runtime)
 register_prereview_route(app, runtime)
 register_docs_route(app, runtime)
 register_line_base_route(app, runtime)
