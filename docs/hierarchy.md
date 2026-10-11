@@ -430,6 +430,20 @@ and a captain's wake carries a host summary (cores, free memory, load) at
 most once every ten minutes. Leases are taken and released by processes; a
 person is refused.
 
+## Declared gates
+
+A line can declare the commands every hand-off must pass:
+`PUT /api/conversations/<id>/gates` with
+`{"commands": ["uv run --locked ruff check .", "./scripts/capped-test"],
+"timeout_s": 1800}` (the line's captain, or a person; `GET …/gates` reads
+them back). `accept` with `{"sha": "...", "run_gates": true}` then makes a
+fenced scratch checkout at the SHA and runs each command there, in order,
+under the process memory cap and the timeout, stopping at the first
+failure: the accept is refused with 409 and
+`{"gates": [{"command", "exit", "tail"}]}`, and on success the notice says
+`(gates passed)`. On a host with no write fence the request answers 501 —
+gate commands are never run unfenced inside the server.
+
 ## The goal
 
 A line carries a `goal`: what its manager is seeing through. A person or the

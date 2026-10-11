@@ -1,10 +1,10 @@
 """The SQLite schema and its append-only migration history; append idempotent entries, never edit."""
-
 from .db_schema_base import SCHEMA  # noqa: F401
 from .idempotency_schema import MIGRATIONS as IDEMPOTENCY
 from .memory_schema import MIGRATIONS as MEMORY
 from .compaction_schema import MIGRATIONS as COMPACTION
 from .accept_history_schema import MIGRATIONS as ACCEPT_HISTORY
+from .gates_schema import MIGRATIONS as GATES
 from .notes_schema import MIGRATIONS as NOTES
 from .scratch_schema import MIGRATIONS as SCRATCH
 from .lease_schema import MIGRATIONS as LEASE
@@ -297,4 +297,4 @@ MIGRATIONS = [
         BEGIN DELETE FROM message_pins WHERE conv_id=OLD.conv_id AND message_id=OLD.id; END""",
 ]
 
-MIGRATIONS.extend(MEMORY + IDEMPOTENCY + NOTES + COMPACTION + ACCEPT_HISTORY + SCRATCH + LEASE)
+MIGRATIONS.extend(MEMORY + IDEMPOTENCY + NOTES + COMPACTION + ACCEPT_HISTORY + SCRATCH + LEASE + GATES)
