@@ -25,6 +25,8 @@ class AttachIn(BaseModel):
     command: str = ""
     cwd: str = ""
     update: bool = False
+    # 2.14: a captain may deliberately put a second implementer on one branch.
+    allow_shared_branch: bool = False
 
 
 class TopicIn(BaseModel):
@@ -102,8 +104,7 @@ class MessageResponse(BaseModel):
     source_conv_name: str | None = None
     audience_attachment_id: str | None = None
     reactions: list[ReactionResponse] = Field(default_factory=list)
-    # True when a client_key replay answered with an already-stored message.
-    replayed: bool = False
+    replayed: bool = False  # a client_key replay answered with a stored message
 
 
 class FileUploadResponse(BaseModel):
@@ -127,8 +128,7 @@ class RestartPlanRequest(BaseModel):
     conversation_id: str
     debrief: str = Field(default="", max_length=10_000)
     mode: RestartPlanMode = "offer"
-    # "line" plans the requesting line; "all" plans every live resumable process.
-    # A manual offer is shown to one tab, so only an automatic plan is fleet-wide.
+    # "line" plans the requesting line; "all" is fleet-wide; manual offers target one tab.
     scope: RestartPlanScope = "line"
 
 

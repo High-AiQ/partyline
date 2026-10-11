@@ -22,7 +22,9 @@ from .contracts import (
     ConversationResponse, ConversationsChangedEvent, PurgeResponse, RenameIn, TopicIn,
 )
 from .machine_scope import (
-    deny_sideways_attach, deny_unless, is_human, visible_conversation_ids,
+    PARALLEL_WORKERS_REFUSAL,
+    deny_sideways_attach, deny_unless, is_human, parallel_worker_reason,
+    visible_conversation_ids,
 )
 from .message_contracts import ConversationDetailResponse
 from .message_routes import conversation_detail_response
@@ -177,6 +179,16 @@ def register_conversation_routes(
         if conv["archived_at"]:
             raise HTTPException(409, "restore the line before attaching to it")
         deny_sideways_attach(db, principal, conv_id)
+        # Finding 2.14: a second implementer on a captained, staffed line puts
+        # two slices on one branch, which accepts all-or-nothing. A machine
+        # captain must name the override; a person is never refused — their
+        # line, their call — but the shared branch is flagged on the line.
+        shared_branch = body.allow_shared_branch
+        if parallel_worker_reason(db, conv_id):
+            if is_human(principal):
+                shared_branch = True
+            elif not shared_branch:
+                raise HTTPException(409, PARALLEL_WORKERS_REFUSAL)
         if not NAME_RE.match(body.name):
             raise HTTPException(
                 400, "name must be alphanumeric ([A-Za-z0-9_.-], max 32)"
@@ -225,6 +237,12 @@ def register_conversation_routes(
             raise
         if update_argv:
             await apply_update(runtime.post_message, conv_id, name, update_argv)
+        if shared_branch and parallel_worker_reason(db, conv_id):
+            await post_system_notice(
+                runtime, conv_id,
+                f"⚠ @{name} joins a shared branch (attached by @{principal.name}): parallel "
+                "slices mean parallel lines — one branch accepts all-or-nothing",
+                actor=principal)
         return await s._start_attachment(att)
 
     globals().update({
