@@ -57,11 +57,12 @@ class ApprovalBubbleTest(unittest.TestCase):
         self.db._exec("UPDATE conversations SET parent_id='root' WHERE id='kid'")
         self.db._exec("UPDATE conversations SET parent_id='kid' WHERE id='grand'")
         self.db.add_attachment("rootcap", "root", "terra", "fake", ["fake"], self.directory.name)
+        self.db.add_attachment("rootwrk", "root", "roe", "fake", ["fake"], self.directory.name)
         self.db.add_attachment("digger", "grand", "dig", "fake", ["fake"], self.directory.name)
         self.db.add_attachment("solcap", "grand", "sol", "fake", ["fake"], self.directory.name)
         self.db._exec("UPDATE attachments SET is_lead=1, status='running' "
                       "WHERE id IN ('rootcap','solcap')")
-        self.db._exec("UPDATE attachments SET status='running' WHERE id='digger'")
+        self.db._exec("UPDATE attachments SET status='running' WHERE id IN ('rootwrk','digger')")
         user = auth_store.create_user(
             self.db, "person@example.com", "person", auth_tokens.hash_password("hunter2222"))
         self.human = {"Authorization": "Bearer " + auth_tokens.create_access_token(
@@ -76,6 +77,8 @@ class ApprovalBubbleTest(unittest.TestCase):
         self.db.set_setting("default_process_memory_bytes", str(3 * 1024**3))
         self.recorder = Recorder(self.db.get_attachment("rootcap"))
         self.runtime.live["rootcap"] = self.recorder
+        self.worker_recorder = Recorder(self.db.get_attachment("rootwrk"))
+        self.runtime.live["rootwrk"] = self.worker_recorder
 
     async def _resume(self, att_id, _pending=None):  # filing tests never resume
         return object()
@@ -120,7 +123,7 @@ class ApprovalBubbleTest(unittest.TestCase):
         self.assertEqual(len(found), 1)
         body = found[0]["body"]
         self.assertIn(": memory from @dig", body)
-        self.assertIn("5G memory cap for @dig: large test bundle", body)
+        self.assertIn("5G memory cap for ＠dig: large test bundle", body)
         self.assertIn("(approve: POST /api/memory-requests/", body)
         self.assertIn("@terra", body)
         self.assertEqual(len(self.delivered_bubbles()), 1)
@@ -154,6 +157,24 @@ class ApprovalBubbleTest(unittest.TestCase):
         found = self.bubbles()
         self.assertEqual(len(found), 1)
         self.assertNotIn("@terra", found[0]["body"])
+
+    def test_a_reason_cannot_address_the_root_line_through_the_bubble(self):
+        # the detail is child-authored free text on a force-routed notice: a
+        # live @all or root handle in it would let a child ring the root line
+        made = self.client.post("/api/attachments/digger/memory-requests",
+                                json={"requested_limit": "5G",
+                                      "reason": "bundle for @all and @terra to see"},
+                                headers=self.dig)
+        self.assertEqual(made.status_code, 200, made.text)
+        found = self.bubbles()
+        self.assertEqual(len(found), 1)
+        body = found[0]["body"]
+        self.assertNotIn("@all", body)  # defused in the stored notice itself
+        self.assertIn("＠all and ＠terra to see", body)
+        self.assertIn("from @dig", body)  # the deliberate requester name survives
+        self.assertIn("@terra", body)  # and so does the deliberate captain ring
+        self.assertEqual(len(self.delivered_bubbles()), 1)  # the captain, once
+        self.assertEqual(self.worker_recorder.delivered, [])  # @all rang nobody extra
 
     def test_the_staffing_line_counts_pending_across_the_subtree_and_drops_on_decision(self):
         self.assertNotIn("approvals pending",

@@ -20,8 +20,17 @@ DETAIL_LIMIT = 160
 
 
 def _clip(text: str, limit: int = DETAIL_LIMIT) -> str:
-    """One line, at most ``limit`` characters: a pointer, not the whole file."""
-    cleaned = " ".join(str(text).split())
+    """One line, at most ``limit`` characters, with the mention sigil defused.
+
+    The detail is free text a child-line process wrote — a reason, a path —
+    and the notice carrying it is force-routed on the root, so a live
+    ``@all`` or a root handle inside it would let a child address the root
+    line through an approval request. Every ``@`` in the detail becomes the
+    fullwidth look-alike: it reads the same and addresses nobody. The
+    deliberate ``@<requester>`` and captain ring live outside the detail and
+    are untouched.
+    """
+    cleaned = " ".join(str(text).split()).replace("@", "＠")
     return cleaned if len(cleaned) <= limit else cleaned[: limit - 1].rstrip() + "…"
 
 
