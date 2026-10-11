@@ -13,14 +13,20 @@ import os
 import time
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .auth_guard import request_principal
 from .machine_scope import deny_unless, is_human
 
 
 class WriteSetIn(BaseModel):
-    path: str
+    path: str = ""
+    # Or name a review worktree instead of typing its path: the pair resolves
+    # to ``<repository>/.review/<full sha>``, the repository under the same
+    # subtree rule a review worktree obeys. The pair and a typed path are
+    # exclusive; so are half a pair and empty hands.
+    repository: str = Field(default="", max_length=4096)
+    sha: str = Field(default="", max_length=64)
 
 
 class WriteSetGrant(BaseModel):
@@ -53,7 +59,11 @@ def add_write_grant(db, conv_id: str, path: str, granted_by: str) -> dict:
 
 
 def write_set_router(runtime) -> APIRouter:
-    from .write_set_requests import file_write_set_request, make_announcer
+    from .write_set_requests import (
+        file_write_set_request,
+        make_announcer,
+        resolve_write_set_path,
+    )
 
     router = APIRouter()
 
@@ -82,6 +92,7 @@ def write_set_router(runtime) -> APIRouter:
                 actor=principal)
             return list_write_grants(db, conv_id)
         return await file_write_set_request(
-            runtime, conv_id, body.path, principal, announce_fn=make_announcer(runtime))
+            runtime, conv_id, resolve_write_set_path(db, conv_id, body), principal,
+            announce_fn=make_announcer(runtime))
 
     return router
