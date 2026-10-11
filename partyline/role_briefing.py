@@ -140,7 +140,10 @@ RECLAIM = (
     "retiring a line, persist all deliverables, assets and unfinished work in durable repo/app storage or an "
     "accessible handoff location; verify read-back and record the locations in your handoff (commits keep no "
     "non-git assets; temp dirs, worktrees, child-only uploads are no sole copy); report blockers before "
-    "cleanup. Then detach idle processes (POST {root}/attachments/close), retire finished child lines "
+    "cleanup. Keep what must survive a compaction in the notebook — PUT {root}/notes?"
+    "scope=line (goal, acceptance, decisions) and ?scope=tree at the tree root (contracts, "
+    "standing rules); both ride every post-compaction re-briefing. Then detach idle processes "
+    "(POST {root}/attachments/close), retire finished child lines "
     "(DELETE /api/conversations/<child-id>?stop_processes=true). If stuck, GET {root}/process-overview, peek "
     "at /api/attachments/<att-id>/screen?lines=40 or its transcript tail: detach only when sure it is stuck."
 )
@@ -189,7 +192,9 @@ SPLIT = (
     "was fulfilled and whether the piece integrates. When you accept the work, record the "
     "hand-off: POST /api/conversations/<child-id>/accept with {{\"sha\":\"<full sha>\"}} — "
     "partyline verifies the SHA exists and fast-forwards the child's branch to it, and the "
-    "hand-off is the SHA on the line's branch; nothing else counts. If the line's tip has "
+    "hand-off is the SHA on the line's branch; nothing else counts. Record what your "
+    'review caught: add "findings":["…"] to the accept call — they land in the '
+    "line's accept history at GET …/accepts. If the line's tip has "
     "moved past the SHA you reviewed, send {{\"allow_descendant\": true}}: the accept "
     "fast-forwards to that newer tip when it descends from the reviewed SHA and the notice "
     "counts the commits that went in unreviewed. GET /api/conversations/<child-id>/tip "

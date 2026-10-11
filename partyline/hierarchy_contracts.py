@@ -2,7 +2,9 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from typing import Annotated
+
+from pydantic import BaseModel, Field, StringConstraints
 
 from .contracts import ConversationResponse
 from .goal import MAX_GOAL, MAX_TOPIC
@@ -46,6 +48,10 @@ class AcceptIn(BaseModel):
     # this flag, accept fast-forwards to that tip instead of refusing the
     # reviewed SHA as a stray; the response names both SHAs.
     allow_descendant: bool = False
+    # What the review caught, recorded with the accept (2.5): at most 20
+    # findings of at most 300 characters each, listed by GET …/accepts.
+    findings: list[Annotated[str, StringConstraints(max_length=300)]] = Field(
+        default_factory=list, max_length=20)
 
 
 class TreeSyncOut(BaseModel):

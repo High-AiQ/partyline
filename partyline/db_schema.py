@@ -1,13 +1,12 @@
-"""The SQLite schema and its append-only migration history.
-
-Split from `db.py` so schema changes land here as idempotent ``MIGRATIONS``
-entries without growing the query module. Never edit an applied entry; append a new one.
+"""The SQLite schema and its append-only migration history: schema changes land here as
+idempotent ``MIGRATIONS`` entries — never edit an applied entry, append a new one.
 """
 
 from .db_schema_base import SCHEMA  # noqa: F401
 from .idempotency_schema import MIGRATIONS as IDEMPOTENCY_MIGRATIONS
 from .memory_schema import MIGRATIONS as MEMORY_MIGRATIONS
 from .compaction_schema import MIGRATIONS as COMPACTION_MIGRATIONS
+from .accept_history_schema import MIGRATIONS as ACCEPT_HISTORY_MIGRATIONS
 
 MIGRATIONS = [
     # cli_session: optional process session id, for adapters that support resume
@@ -295,6 +294,5 @@ MIGRATIONS = [
         BEGIN DELETE FROM message_pins WHERE conv_id=OLD.conv_id AND message_id=OLD.id; END""",
 ]
 
-MIGRATIONS.extend(MEMORY_MIGRATIONS)
-MIGRATIONS.extend(IDEMPOTENCY_MIGRATIONS)
-MIGRATIONS.extend(COMPACTION_MIGRATIONS)
+MIGRATIONS.extend(MEMORY_MIGRATIONS + IDEMPOTENCY_MIGRATIONS
+                  + COMPACTION_MIGRATIONS + ACCEPT_HISTORY_MIGRATIONS)
