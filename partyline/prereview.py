@@ -14,6 +14,7 @@ at the accepted SHA with a clean status.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import posixpath
@@ -69,7 +70,8 @@ def _candidate(value: str, res_roots: dict[str, str]) -> str | None:
     return value
 
 
-def _present(candidate: str, tracked: set[str], blob_dir: str) -> bool:
+def _present(candidate: str, tracked: set[str], blob_dir: str,
+             directories: set[str]) -> bool:
     """The reference resolves in the commit: root-relative, table-relative,
     or a tracked directory (any tracked path under it)."""
     if candidate in tracked:
@@ -78,13 +80,22 @@ def _present(candidate: str, tracked: set[str], blob_dir: str) -> bool:
         joined = posixpath.normpath(posixpath.join(blob_dir, candidate))
         if not joined.startswith("..") and joined in tracked:
             return True
-    prefix = candidate.rstrip("/") + "/"
-    return any(path.startswith(prefix) for path in tracked)
+    return candidate in directories
 
 
-def _tracked_directory(candidate: str, tracked: set[str]) -> bool:
-    prefix = candidate.rstrip("/") + "/"
-    return any(path.startswith(prefix) for path in tracked)
+def _directories(tracked: set[str]) -> set[str]:
+    """Every parent directory of every tracked path, built once per commit.
+
+    A dialogue table carries thousands of bare words; membership in this set
+    is what tells a tracked directory name from a plain word, and it must be
+    an O(1) lookup rather than a scan of every tracked path per string.
+    """
+    directories: set[str] = set()
+    for path in tracked:
+        parts = path.split("/")
+        for index in range(1, len(parts)):
+            directories.add("/".join(parts[:index]))
+    return directories
 
 
 def _under(path: str, data_paths: list[str]) -> bool:
@@ -121,6 +132,7 @@ def referenced_paths(db, conv_id: str, sha: str, data_paths: list[str],
     if listed.returncode != 0:
         raise ReviewError(409, "cannot read the commit's file tree")
     tracked = set(listed.stdout.splitlines())
+    directories = _directories(tracked)
     probe = line_cwd(db, scope_line or conv_id) or root
     if not os.path.isdir(probe):
         probe = root
@@ -142,10 +154,10 @@ def referenced_paths(db, conv_id: str, sha: str, data_paths: list[str],
             if candidate is None:
                 continue
             path_shaped = "/" in candidate or bool(_EXTENSION.search(candidate))
-            if not path_shaped and not _tracked_directory(candidate, tracked):
+            if not path_shaped and candidate not in directories:
                 continue  # a plain word naming nothing tracked
             checked += 1
-            if _present(candidate, tracked, blob_dir):
+            if _present(candidate, tracked, blob_dir, directories):
                 continue
             joined = posixpath.normpath(posixpath.join(blob_dir, candidate))
             ignored = any(
@@ -205,8 +217,11 @@ def register_prereview_route(app, runtime) -> None:
         if unknown:
             raise HTTPException(422, f"unknown checks: {', '.join(unknown)}")
         try:
-            done = referenced_paths(
-                db, conv_id, body.sha, body.data_paths, body.repository, body.res_roots)
+            # A large commit and a chatty table make this seconds of CPU:
+            # deterministic work belongs in a thread, not on the event loop.
+            done = await asyncio.to_thread(
+                referenced_paths, db, conv_id, body.sha, body.data_paths,
+                body.repository, body.res_roots)
         except ReviewError as exc:
             raise HTTPException(exc.status_code, exc.detail) from exc
         return PrereviewOut(**done)
