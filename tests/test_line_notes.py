@@ -12,6 +12,7 @@ from partyline.db import Db
 from partyline.line_notes import NOTE_LIMIT, notes_router, write_notes
 from partyline.notes_schema import MIGRATIONS as NOTES_MIGRATIONS
 from partyline.rebrief import render_rebrief
+from partyline.role_briefing import WORKER_REMINDER
 from partyline.runtime import ChatRuntime
 
 
@@ -165,6 +166,19 @@ class LineNotesTest(unittest.TestCase):
         self.assertIn("@haiku ship the notebook slice", text)   # the assignment
         self.assertIn("edit only on your captain's @mention", text)  # the reminder
         self.assertIn("(full text: GET /api/conversations/line)", text)  # the pointer
+
+    def test_an_eight_thousand_char_assignment_still_fits_and_ends_with_the_reminder(self):
+        # Messages may be 8,000 characters: an unbounded quote is the one part
+        # that alone can blow the cap and evict everything after it.
+        self.db.add_message("line", "greg", "human", "@haiku " + "W" * 7990)
+        write_notes(self.db, "line", "line", "L" * NOTE_LIMIT)
+        write_notes(self.db, "line", "attachment", "A" * NOTE_LIMIT, attachment_id="worker")
+
+        text = render_rebrief(self.db, self.db.get_attachment("worker"))
+
+        self.assertLessEqual(len(text), 4000)
+        self.assertIn("(truncated — read the line)", text)
+        self.assertTrue(text.endswith(WORKER_REMINDER))
 
     # -- schema ------------------------------------------------------------
 

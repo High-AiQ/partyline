@@ -15,6 +15,10 @@ from .mentions import addresses
 from .role_briefing import WORKER_REMINDER
 
 REBRIEF_LIMIT = 4000
+# The assignment is quoted verbatim but bounded: a message may be 8,000
+# characters, and an unbounded quote is the one part that can push every
+# other section past the cap on its own.
+ASSIGNMENT_LIMIT = 2000
 
 
 def latest_assignment(db, att: dict, scan: int = 300,
@@ -66,6 +70,8 @@ def notes_block(db, att: dict, budget: int) -> str:
             parts.append(f"{label}\n{text}")
     block = "\n\n".join(parts)
     if len(block) > budget:
+        if budget < 50:  # too small to hold anything worth reading; drop it
+            return ""
         block = block[:budget - 24].rstrip() + "\n… (notes truncated)"
     return block
 
@@ -91,6 +97,9 @@ def render_rebrief(db, att: dict, limit: int = REBRIEF_LIMIT) -> str:
     header = (f"You are @{att['name']} on «{conv.get('name') or conv_id}». Your context "
               "was just compacted — this re-briefing is partyline's record of your charge.")
     assignment = latest_assignment(db, att, person_only=lead)
+    if assignment and len(assignment) > ASSIGNMENT_LIMIT:
+        assignment = (assignment[:ASSIGNMENT_LIMIT - 32].rstrip()
+                      + "\n… (truncated — read the line)")
     if assignment:
         label = ("Latest message from a person, verbatim:" if lead
                  else "Your latest assignment, verbatim:")
