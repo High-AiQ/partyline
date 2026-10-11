@@ -15,7 +15,7 @@ from partyline.conversation_routes import register_conversation_routes
 from partyline.db import Db
 from partyline.goal import register_goal_route
 from partyline.hierarchy_routes import hierarchy_router
-from partyline.line_base import register_line_base_route
+from partyline.line_base import register_line_base_route, refresh_mirror_ref
 from partyline.media import MediaStore
 from partyline.runtime import ChatRuntime
 
@@ -109,6 +109,16 @@ class LineBaseTest(unittest.TestCase):
         gitdir = git_fence._worktree_gitdir(self.worktree)
         mirror = git_fence._mirror_dir(git_fence.common_gitdir(gitdir), conv_id)
         return git_fence._read_ref(mirror, ref)
+
+    def test_refresh_refuses_to_touch_the_line_s_own_branch(self):
+        tip = self.commit("kid's own work")
+        self.write_mirror(self.kid["id"], "refs/heads/line/kid", tip)
+        # the line's own branch can never be overwritten through this path,
+        # not even by asking for it by name: the real ref never sees the
+        # line's commits, and copying it in would erase them
+        self.assertIsNone(
+            refresh_mirror_ref(self.worktree, self.kid["id"], "line/kid"))
+        self.assertEqual(self.mirrored(self.kid["id"], "refs/heads/line/kid"), tip)
 
     def test_base_reports_the_parent_sha_and_how_far_behind(self):
         new_main = self.move_host_main()
