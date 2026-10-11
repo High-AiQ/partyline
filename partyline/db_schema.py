@@ -1,21 +1,20 @@
-"""The SQLite schema and its append-only migration history.
-
-Split from `db.py` so schema changes land here as idempotent ``MIGRATIONS``
-entries without growing the query module. Never edit an applied entry; append a new one.
-"""
+"""The SQLite schema and its append-only migration history; append idempotent entries, never edit."""
 
 from .db_schema_base import SCHEMA  # noqa: F401
 from .idempotency_schema import MIGRATIONS as IDEMPOTENCY_MIGRATIONS
 from .memory_schema import MIGRATIONS as MEMORY_MIGRATIONS
 from .compaction_schema import MIGRATIONS as COMPACTION_MIGRATIONS
+from .accept_history_schema import MIGRATIONS as ACCEPT_HISTORY_MIGRATIONS
+from .notes_schema import MIGRATIONS as NOTES_MIGRATIONS
+from .scratch_schema import MIGRATIONS as SCRATCH_MIGRATIONS
+from .lease_schema import MIGRATIONS as LEASE_MIGRATIONS
 
 MIGRATIONS = [
     # cli_session: optional process session id, for adapters that support resume
     "ALTER TABLE attachments ADD COLUMN cli_session TEXT",
     # topic: free-text line topic, relayed to agents in briefings and digests
     "ALTER TABLE conversations ADD COLUMN topic TEXT NOT NULL DEFAULT ''",
-    # archived_at: when a line was archived, NULL while it is live. Archiving
-    # hides a line and stops its processes; the history stays until a purge.
+    # archived_at: NULL while live. Archiving hides a line and stops processes.
     "ALTER TABLE conversations ADD COLUMN archived_at REAL",
     # A deliberately singleton restart intent. It is saved before shutdown and
     # only consumed after the requesting line accepts reattachment on startup.
@@ -295,6 +294,6 @@ MIGRATIONS = [
         BEGIN DELETE FROM message_pins WHERE conv_id=OLD.conv_id AND message_id=OLD.id; END""",
 ]
 
-MIGRATIONS.extend(MEMORY_MIGRATIONS)
-MIGRATIONS.extend(IDEMPOTENCY_MIGRATIONS)
-MIGRATIONS.extend(COMPACTION_MIGRATIONS)
+MIGRATIONS.extend(MEMORY_MIGRATIONS + IDEMPOTENCY_MIGRATIONS + NOTES_MIGRATIONS
+                  + COMPACTION_MIGRATIONS + ACCEPT_HISTORY_MIGRATIONS
+                  + SCRATCH_MIGRATIONS + LEASE_MIGRATIONS)

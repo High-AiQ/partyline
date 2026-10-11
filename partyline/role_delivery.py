@@ -1,5 +1,7 @@
 """Refresh manager knowledge from live permissions without waking a process."""
 
+import os
+import time
 from typing import NamedTuple
 
 from .goal import goal_rider
@@ -8,6 +10,30 @@ from .captain_docs import reminder_line
 from .line_depth import depth as line_depth, has_captain, staffed_split_reason
 from .role_briefing import WORKER_REMINDER, role_instructions, worker_instructions
 from .staffing import staffing_line
+
+RESOURCE_RIDER_INTERVAL = 600
+
+
+def host_resource_line() -> str:
+    """One line of host facts for a captain: cores, free memory, 1-minute load.
+
+    Empty when the host declines to answer (no load average on Windows, no
+    meminfo): a rider that guesses is worse than a rider that skips.
+    """
+    try:
+        bits = [f"{os.cpu_count() or 1} cores"]
+        free = None
+        with open("/proc/meminfo", encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("MemAvailable:"):
+                    free = int(line.split()[1]) * 1024
+                    break
+        if free is not None:
+            bits.append(f"{free / 2**30:.1f} GB free")
+        bits.append(f"load {os.getloadavg()[0]:.2f}")
+        return "(host: " + ", ".join(bits) + ")"
+    except OSError:
+        return ""
 
 
 class RoleState(NamedTuple):
@@ -68,10 +94,12 @@ def bind_role_delivery(db, att: dict, runtime=None) -> None:
     previous = initial
     last_goal = last_staffing = last_handoff = None
     last_docs_id = None
+    last_resource_at = 0.0
     worker_reminder_sent = False
 
     def rider() -> str:
         nonlocal previous, last_goal, last_staffing, last_handoff, worker_reminder_sent
+        nonlocal last_docs_id, last_resource_at
         nonlocal last_docs_id
         current = current_role(db, att["id"])
         update = ""
@@ -94,7 +122,7 @@ def bind_role_delivery(db, att: dict, runtime=None) -> None:
             elif not update and (demoted or (worker_was and not worker_now)):
                 update = ("Your current role is ordinary participant, not captain. "
                           "Use only your own line's tools.")
-        goal = staffing = handoff = worker = pointer = docs = ""
+        goal = staffing = handoff = worker = pointer = docs = resource = ""
         if current.role == "lead":
             current_goal = goal_rider(db, current.conv_id)
             current_staffing = staffing_line(db, current.conv_id, runtime=runtime)
@@ -105,6 +133,9 @@ def bind_role_delivery(db, att: dict, runtime=None) -> None:
             last_goal, last_staffing, last_handoff = (
                 current_goal, current_staffing, current_handoff)
             docs, last_docs_id = reminder_line(db, current.conv_id, last_docs_id)
+            if time.time() - last_resource_at >= RESOURCE_RIDER_INTERVAL:
+                last_resource_at = time.time()
+                resource = host_resource_line()
             if not captain_transition:
                 pointer = briefing_pointer(current.conv_id)
         elif current.captained:
@@ -115,7 +146,7 @@ def bind_role_delivery(db, att: dict, runtime=None) -> None:
             worker_reminder_sent = False
         return "\n".join(
             part for part in (original_rider(), goal, staffing, handoff, update, worker,
-                              pointer, docs)
+                              pointer, docs, resource)
             if part)
 
     att["digest_rider"] = rider

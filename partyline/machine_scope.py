@@ -10,7 +10,8 @@ from .auth_guard import Principal
 from .db import Db
 from .hierarchy import child_ids, descendants, lead_attachment, parent_id_of
 from .line_depth import (
-    MAX_CAPTAIN_DEPTH, depth, may_split, sideways_attach_reason, staffed_split_reason,
+    MAX_CAPTAIN_DEPTH, depth, has_captain, live_workers, may_split, sideways_attach_reason,
+    staffed_split_reason,
 )
 
 Capability = Literal[
@@ -167,6 +168,23 @@ def deny_unless(
         raise HTTPException(404)
     if not allows(db, principal, conv_id, capability):
         raise HTTPException(403, "this credential cannot act on that line")
+
+
+def parallel_worker_reason(db: Db, conv_id: str) -> bool:
+    """Whether a new attachment would be a second implementer on a captained line.
+
+    Finding 2.14: two workers on one line share one branch, commit
+    interleaved, and the hand-off is all-or-nothing — parallel slices mean
+    parallel lines.
+    """
+    return has_captain(db, conv_id) and bool(live_workers(db, conv_id))
+
+
+PARALLEL_WORKERS_REFUSAL = (
+    "parallel slices mean parallel lines: this line has a captain and a live worker, and "
+    "one branch accepts all-or-nothing — give the new slice its own line with POST "
+    "…/children, pass {\"allow_shared_branch\": true} to share the branch anyway — or, to "
+    "replace a worker, close the old one first (DELETE /api/attachments/<id>)")
 
 
 def deny_sideways_attach(db: Db, principal: Principal, conv_id: str) -> None:

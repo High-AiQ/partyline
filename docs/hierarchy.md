@@ -149,6 +149,8 @@ touched.
 Operational hierarchy rules ignore archived children, while purge ordering and restore traversal
 continue to include them.
 
+## Approvals at the root
+
 Requests that need a person bubble to the root. A write-set, memory-cap or restart request
 filed on a child line posts its ordinary notice there plus one `⚑ approval pending` line on the
 tree's root, naming the line, the requester and the approve call, and @mentions the root's
@@ -202,7 +204,12 @@ branches the child from that ref — the child starts at what the upstream
 already has, never in the past, and the birth notice names the ref it was cut
 from. The default stays `base:"checkout"`: the child branches from the parent
 checkout's HEAD, exactly as before. The stale-checkout refusal for machines
-applies only to the default; a person may cut from either base.
+applies only to the default; a person may cut from either base. Inside the
+fence a line's view of the parent branch is launch-time fresh: `GET
+/api/conversations/<id>/base` reports the parent branch as the host sees it
+and how far behind the line is, and `POST …/refresh-base` re-copies that ref
+into the line's fenced view; an accept on a line refreshes its children's
+views automatically.
 
 ## The hand-off contract
 
@@ -268,7 +275,11 @@ each descendant that has an accepted SHA — so a captain planning from a wake
 sees the hand-off without asking. A tree with no hand-offs carries no rider.
 Anyone else who wants to record a
 hand-off gets 403 — a captain higher up reviews the work again at its own
-scope, so nobody accepts across two levels.
+scope, so nobody accepts across two levels. The accept call also takes an
+optional `"findings":["…"]` — at most 20 findings of at most 300 characters
+each, what the review actually caught — recorded one row per accept with
+the reviewer and the SHA, counted in the ☏ notice (`(N findings)`) and
+listed newest first by `GET /api/conversations/<id>/accepts`.
 
 ## Review worktrees
 
@@ -299,6 +310,22 @@ whose line is gone or that no record claims — only full-SHA directories, since
 partyline owns the directory but nothing else in a repository's `.review`.
 Review checkouts are disposable by contract: pruning is forced, and the SHAs
 themselves stay in the repository, so no reviewed work is ever lost.
+
+## Scratch worktrees
+
+A review checkout is for adversarial reads; verifying an integration needs a
+build, and a build writes. `POST /api/conversations/<id>/scratch-worktrees`
+with `{"sha":"...", "repository":"<abs path>"?}` checks the SHA out detached
+and **writable** at `<repo>/.scratch/<full sha>` — same subtree rule, same
+creation permission, recorded on the calling line. The fence binds a line's
+recorded scratch checkouts writable, so the line's own process builds there
+without a write-set request; review checkouts stay exactly as they are.
+`GET …/scratch-worktrees` lists them, `DELETE
+…/scratch-worktrees/<sha>` drops one early, and a scratch checkout is pruned
+when the line retires or is purged and swept at startup when its record or
+its line is gone — it is never pruned by an accept, because integration
+checks follow the accepted work. The startup sweep owns only full-SHA
+directories under `.scratch`.
 
 ## Pre-review checks and the tree sync
 
@@ -350,6 +377,38 @@ context: the goal, the line's topic, and the latest captain-or-person
 message that @mentions the process, verbatim. Adapters without the
 capability get no hooks, no counting, and a 403 from the rebrief endpoint.
 
+## The line notebook
+
+What must survive a compaction lives in the line notebook:
+`GET` / `PUT /api/conversations/<id>/notes?scope=line|attachment|tree` with
+`{"notes":"…"}`, capped at 4,000 characters. `tree` is stored on the root of
+the tree (contracts, standing rules), `line` on the line itself (goal,
+acceptance, decisions), `attachment` per process (what I am doing, files
+touched, last gate result, next step). A captain writes `line` notes; each
+process writes only its own `attachment` notes; `tree` writes need `assign`
+on the tree root, so the root captain (or a person) writes them; people
+write all three; anyone with `read` on the line can read. The notes ride the
+post-compaction re-briefing in that order, ahead of the latest assignment,
+inside the same 4k cap.
+
+## Shared-resource leases
+
+Anything on the host that needs exclusivity — a GPU render, a timing run —
+is serialised by a lease, not by prose in a topic. `POST /api/leases` with
+`{"name":"godot","ttl_s":900,"mode":"exclusive"|"shared"}` returns
+`{"granted", "holder", "queue_position", "expires_at"}`: an exclusive lease
+waits behind any holder, shared leases coexist with each other but not with
+an exclusive one, and queue place is held — polling never slides a waiter
+backwards, and when the slot frees, promotion is by queue order (the
+earliest waiter, or the leading run of shared waiters). TTLs cap at four
+hours; posting again renews or re-queues; `DELETE /api/leases/<name>`
+releases the caller's lease, and a process's leases die with it on exit or
+detach. `GET /api/leases` lists holders and queues, the staffing line shows
+held leases (`leases: godot (exclusive) @sonnet «world-assets», 1 queued`),
+and a captain's wake carries a host summary (cores, free memory, load) at
+most once every ten minutes. Leases are taken and released by processes; a
+person is refused.
+
 ## The goal
 
 A line carries a `goal`: what its manager is seeing through. A person or the
@@ -360,7 +419,9 @@ rides every wake digest of that line's manager as
 with an empty string. Ordinary participants never receive it — the topic is the
 standing context for everyone, the goal is the manager's charge. Three fleet
 trials in, the goal was the only state a manager ever had to hold in its head,
-and the heartbeat's failure was reminding it of the clock instead.
+and the heartbeat's failure was reminding it of the clock instead. The topic
+is capped at 20,000 characters (the goal at 3,000) — a longer brief belongs
+in a repo file named by the topic, such as `docs/contracts/<line>.md`.
 
 
 ## Reporting upward
@@ -457,6 +518,22 @@ cannot ring each other forever — and it switches itself off the moment a secon
 process is live on the line. A held wake (a process mid-turn with receipt
 completion) treats such a message as addressed, the same as a mention.
 
+Parallel slices mean parallel lines. A machine attaching a second
+implementer to a line that has a captain and a live worker is refused with
+409 — one branch accepts all-or-nothing — unless the attach call names
+`{"allow_shared_branch": true}`; a person is never refused, but the attach
+posts a ⚠ notice marking the branch as shared. A line with no captain is
+unaffected.
+
+A process can also be replaced outright: `POST /api/attachments/<id>/replace`
+with `{"reason":"…"}` stops it and starts a fresh instance with the same
+handle, preset, command and working directory — a new CLI session, never a
+resume, because clean context is the point. The captain role survives, the
+line reads `↻ @<handle> replaced with a fresh instance (by @<who>): <reason>`,
+and the fresh process's first briefing carries the re-briefing (the line's
+notes and its latest assignment) as its checkpoint. The line's captain, or a
+person, may replace; a worker may not.
+
 ## Mentions across lines
 
 One tree is one mention namespace: a handle is live on exactly one row in the
@@ -485,6 +562,33 @@ The old form — `POST /api/conversations/<child-id>/messages` from the manager
 | Assign with a plain `@handle` from your own line when you manage the tree above it | Expect an implementer's `@parent-lead` to reach anyone — it is told to tell its own manager |
 | Address one process per assignment and name the rest without `@` | Write `@sub-manager have @worker do X` — that rings the worker too, and on two lines |
 | Read the `via «line»` tag as "this process is elsewhere; reply by mention, not by assuming it is here" | Treat a private copy as the whole conversation on that line — read the line before deciding |
+
+## Idempotent posts and the terminal echo
+
+A message POST may carry a `client_key` (up to 64 characters). The same
+sender presenting the same key within ten minutes gets the original message
+back — 200, same id, nothing stored twice — so a retry after a false
+`connection/request failed` cannot duplicate a post. Keys derived by
+`agent_client` (sha256 of method, path and body) are marked `d:` and replay
+for only 120 seconds, and every replayed response says `"replayed": true`; a
+caller wanting a deliberate repeat of identical text sends its own key.
+The other direction is collapsed too: a machine POST whose text equals that
+process's own terminal-captured message on the same line within 15 seconds
+returns the capture instead of storing a twin.
+
+## Ack ping-pong limits
+
+Two workers trading bare acknowledgements — "standing by", "suite at 13
+of 61", "ok" — ring each other forever without moving anything. When a
+worker @mentions exactly one live peer whose last message mentioned it
+back, and nothing real happened on the line in between, the third such
+consecutive exchange is refused: an API post answers 429 before anything
+is stored, and terminal-captured speech is stored but its mention is not
+delivered, with one ⚠ notice saying to react 👀 instead. Real activity
+breaks the streak: a person or third process speaking, a file, a reaction,
+an accept, a message carrying a commit SHA, or anything substantive (more
+than 280 characters). Captains and people are always exempt — assignments
+and hand-offs must ring — and so are `@all` and multi-addressee mentions.
 
 ## The return path
 

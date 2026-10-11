@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from partyline import accept_sha as accept_sha_module
 from partyline import auth_store, auth_tokens, server
 from partyline import line_worktree as line_worktree_module
+from partyline.accept_history import register_accept_history_route
 from partyline.accept_sha import (
     AcceptError,
     accept_sha,
@@ -58,6 +59,7 @@ class AcceptShaTest(unittest.TestCase):
         app.include_router(hierarchy_router(self.runtime))
         register_goal_route(app, self.runtime)
         register_accept_route(app, self.runtime)
+        register_accept_history_route(app, self.runtime)
         register_review_routes(app, self.runtime)
         app.include_router(staffing_router(self.runtime))
 
@@ -118,10 +120,13 @@ class AcceptShaTest(unittest.TestCase):
         sha = self.commit(message, filename)
         return sha
 
-    def accept(self, sha, headers=None, conv_id=None, allow_descendant=None):
+    def accept(self, sha, headers=None, conv_id=None, allow_descendant=None,
+               findings=None):
         body = {"sha": sha}
         if allow_descendant is not None:
             body["allow_descendant"] = allow_descendant
+        if findings is not None:
+            body["findings"] = findings
         return self.client.post(
             f"/api/conversations/{conv_id or self.kid['id']}/accept",
             json=body, headers=headers or self.root_captain(),
@@ -537,6 +542,46 @@ class AcceptShaTest(unittest.TestCase):
         self.assertTrue(sync["ok"])
         self.assertIsNone(sync["worktree"])
         self.assertIn("no worktree holds line/kid", sync["detail"])
+
+    # -- the accept history -----------------------------------------------------
+
+    def test_findings_are_stored_listed_and_counted_in_the_notice(self):
+        self.commit("first")  # the line needs a commit of its own to accept onto
+        sha = self.commit_detached("the reviewed work")
+        response = self.accept(sha, findings=[
+            "level reachability regression the tests did not cover",
+            "missing runtime check on empty cues",
+        ])
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn("(2 findings)", " ".join(self.system_messages(self.kid["id"])))
+        history = self.client.get(f"/api/conversations/{self.kid['id']}/accepts",
+                                  headers=self.root_captain())
+        self.assertEqual(history.status_code, 200, history.text)
+        rows = history.json()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["sha"], sha)
+        self.assertEqual(rows[0]["reviewer"], "terra")
+        self.assertEqual(rows[0]["findings"], [
+            "level reachability regression the tests did not cover",
+            "missing runtime check on empty cues",
+        ])
+        # newest first, and a findings-free accept still records a row
+        second = self.commit_detached("more work")
+        self.assertEqual(self.accept(second).status_code, 200)
+        rows = self.client.get(f"/api/conversations/{self.kid['id']}/accepts",
+                               headers=self.root_captain()).json()
+        self.assertEqual([row["sha"] for row in rows], [second, sha])
+        self.assertEqual(rows[0]["findings"], [])
+
+    def test_over_limit_findings_are_refused(self):
+        sha = self.commit_detached("the reviewed work")
+        too_many = self.accept(sha, findings=[f"finding {n}" for n in range(21)])
+        self.assertEqual(too_many.status_code, 422, too_many.text)
+        too_long = self.accept(sha, findings=["x" * 301])
+        self.assertEqual(too_long.status_code, 422, too_long.text)
+        self.assertEqual(self.client.get(
+            f"/api/conversations/{self.kid['id']}/accepts",
+            headers=self.root_captain()).json(), [])
 
     # -- refusals ------------------------------------------------------------
 

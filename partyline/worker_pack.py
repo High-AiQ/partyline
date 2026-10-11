@@ -27,7 +27,13 @@ WORKER = (
     "$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/write-set with "
     '{{"path":"/abs/normalized/path"}} and wait for a person to approve it in the banner; '
     "never work around the fence (pointing npm at a temp cache is the kind of shortcut that "
-    "belongs in a write-set request instead)."
+    "belongs in a write-set request instead).\n"
+    "### Keep your notes current\n"
+    "Your context can be compacted or restarted away; your notes survive. After each "
+    "meaningful step, PUT $PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/notes"
+    '?scope=attachment with {"notes":"..."} (4,000 chars): what I am doing, files touched, '
+    "last gate result, next step. The notes ride back into your context after any "
+    "compaction."
 )
 
 WORKER_REMINDER = (

@@ -1,4 +1,4 @@
-"""Per-line worktree and review-checkout carve-outs for the write fence."""
+"""Per-line worktree and review/scratch-checkout carve-outs for the write fence."""
 
 from __future__ import annotations
 
@@ -7,41 +7,44 @@ import re
 
 from . import git_fence
 from .line_worktree import REVIEW_DIR, repo_root
+from .scratch_worktrees import SCRATCH_DIR
 
 
-def _review_directory(cwd: str, *, create: bool = False) -> str | None:
-    """Return the repository's canonical .review directory, creating it for a bind."""
+def _checkout_directory(cwd: str, directory: str, *, create: bool = False) -> str | None:
+    """Return the repository's canonical checkout directory, creating it for a bind."""
     repo = repo_root(cwd)
     if repo is None:
         return None
-    review_root = os.path.join(os.path.realpath(repo), REVIEW_DIR)
-    if create and not os.path.lexists(review_root):
+    root = os.path.join(os.path.realpath(repo), directory)
+    if create and not os.path.lexists(root):
         try:
-            os.mkdir(review_root)
+            os.mkdir(root)
         except FileExistsError:
             pass
         except OSError:
             return None
-    if (not os.path.isdir(review_root) or os.path.islink(review_root) or
-            os.path.realpath(review_root) != review_root):
+    if not os.path.isdir(root) or os.path.islink(root) or os.path.realpath(root) != root:
         return None
-    return review_root
+    return root
 
 
-def _review_worktree_paths(att: dict, review_root: str | None = None) -> list[str]:
-    """Return recorded, canonical review checkouts for metadata binds only."""
+def _review_directory(cwd: str, *, create: bool = False) -> str | None:
+    return _checkout_directory(cwd, REVIEW_DIR, create=create)
+
+
+def _scratch_directory(cwd: str, *, create: bool = False) -> str | None:
+    return _checkout_directory(cwd, SCRATCH_DIR, create=create)
+
+
+def _recorded_checkouts(att: dict, key: str, repo: str, directory: str) -> list[str]:
+    """Return recorded, canonical checkouts of one kind for binds only.
+
+    A recorded path counts only when it is exactly ``<repo>/<directory>/<sha>``
+    for the attachment's own line, a real directory, and a worktree git knows
+    inside that repository — anything else is somebody else's tree or a trap.
+    """
     conv_id = att.get("conv_id")
-    cwd = att.get("cwd") or ""
-    rows = att.get("review_worktrees") or []
-    repo = repo_root(cwd) if rows and conv_id else None
-    if repo is None:
-        return []
-    repo = os.path.realpath(repo)
-    expected_root = os.path.join(repo, REVIEW_DIR)
-    review_root = review_root or _review_directory(cwd)
-    if review_root != expected_root:
-        return []
-
+    rows = att.get(key) or []
     paths = []
     for row in rows:
         if not isinstance(row, dict) or row.get("conv_id") != conv_id:
@@ -49,7 +52,7 @@ def _review_worktree_paths(att: dict, review_root: str | None = None) -> list[st
         sha, recorded = row.get("sha"), row.get("path")
         if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
             continue
-        expected = os.path.join(review_root, sha)
+        expected = os.path.join(repo, directory, sha)
         if (not isinstance(recorded, str) or not os.path.isabs(recorded) or
                 recorded != expected or os.path.islink(recorded) or
                 os.path.realpath(recorded) != recorded or not os.path.isdir(recorded)):
@@ -61,8 +64,38 @@ def _review_worktree_paths(att: dict, review_root: str | None = None) -> list[st
     return paths
 
 
-def _review_git_binds(path: str, cwd: str, conv_id: str) -> list[tuple[str, str, bool]]:
-    """Avoid shadowing refs when a review worktree shares the root checkout's own Git dir."""
+def _review_worktree_paths(att: dict, review_root: str | None = None) -> list[str]:
+    """Return recorded, canonical review checkouts for metadata binds only."""
+    conv_id = att.get("conv_id")
+    cwd = att.get("cwd") or ""
+    if not (att.get("review_worktrees") or []) or not conv_id:
+        return []
+    repo = repo_root(cwd)
+    if repo is None:
+        return []
+    repo = os.path.realpath(repo)
+    if (review_root or _review_directory(cwd)) != os.path.join(repo, REVIEW_DIR):
+        return []
+    return _recorded_checkouts(att, "review_worktrees", repo, REVIEW_DIR)
+
+
+def _scratch_worktree_paths(att: dict, scratch_root: str | None = None) -> list[str]:
+    """Return recorded, canonical scratch checkouts: the line's build homes."""
+    conv_id = att.get("conv_id")
+    cwd = att.get("cwd") or ""
+    if not (att.get("scratch_worktrees") or []) or not conv_id:
+        return []
+    repo = repo_root(cwd)
+    if repo is None:
+        return []
+    repo = os.path.realpath(repo)
+    if (scratch_root or _scratch_directory(cwd)) != os.path.join(repo, SCRATCH_DIR):
+        return []
+    return _recorded_checkouts(att, "scratch_worktrees", repo, SCRATCH_DIR)
+
+
+def _checkout_git_binds(path: str, cwd: str, conv_id: str) -> list[tuple[str, str, bool]]:
+    """Avoid shadowing refs when a checkout shares the root checkout's own Git dir."""
     gitdir = git_fence._worktree_gitdir(path)
     if gitdir is not None:
         common = os.path.realpath(git_fence.common_gitdir(gitdir))
@@ -77,8 +110,12 @@ def _review_git_binds(path: str, cwd: str, conv_id: str) -> list[tuple[str, str,
     return git_fence.git_binds(path, conv_id)
 
 
+# Kept for the fence tests that name it directly.
+_review_git_binds = _checkout_git_binds
+
+
 def write_set(att: dict) -> list[tuple[str, str, bool]]:
-    """Ordered writable Git, cwd, and review carve-outs for bubblewrap."""
+    """Ordered writable Git, cwd, review, and scratch carve-outs for bubblewrap."""
     covered: set[str] = set()
     binds: list[tuple[str, str, bool]] = []
 
@@ -100,7 +137,15 @@ def write_set(att: dict) -> list[tuple[str, str, bool]]:
     if review_root:
         add(review_root)
     for path in _review_worktree_paths(att, review_root):
-        for src, dst, read_only in _review_git_binds(path, cwd, conv_id):
+        for src, dst, read_only in _checkout_git_binds(path, cwd, conv_id):
+            if src not in covered:
+                covered.add(src)
+                binds.append((src, dst, read_only))
+    scratch_root = _scratch_directory(cwd, create=True)
+    if scratch_root:
+        add(scratch_root)
+    for path in _scratch_worktree_paths(att, scratch_root):
+        for src, dst, read_only in _checkout_git_binds(path, cwd, conv_id):
             if src not in covered:
                 covered.add(src)
                 binds.append((src, dst, read_only))
@@ -128,6 +173,12 @@ def darwin_write_set(att: dict) -> list[str]:
     if review_root:
         add(review_root)
     for path in _review_worktree_paths(att, review_root):
+        add(path)
+        add(git_fence._worktree_gitdir(path) or "")
+    scratch_root = _scratch_directory(cwd, create=True)
+    if scratch_root:
+        add(scratch_root)
+    for path in _scratch_worktree_paths(att, scratch_root):
         add(path)
         add(git_fence._worktree_gitdir(path) or "")
     return paths

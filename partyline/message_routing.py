@@ -5,6 +5,7 @@ import logging
 from fastapi import HTTPException
 
 from .contracts import MessageEvent, MessageResponse
+from .ack_limits import capture_notice, pingpong_refusal, refusal_message
 from .hierarchy import stamp_source, tree_conversation_ids
 from .idempotent_posts import original_for_key, remember_key
 from .interrupts import interrupt_for
@@ -96,6 +97,10 @@ async def post_identified(runtime, conv_id, principal, body: str, client_key: st
     if (capture := capture_echo(runtime.db, principal.name, conv_id, body)) is not None:
         # The tail posted these words first; the API copy is the twin (2.7).
         return {**capture, "replayed": True}
+    if (bare := pingpong_refusal(runtime.db, conv_id, principal.name, body)):
+        # The third bare exchange of a streak: refusing costs nothing that a
+        # 👀 reaction could not say (2.4). Captains and people never land here.
+        raise HTTPException(429, refusal_message(bare))
     stored = runtime.db.add_message(conv_id, principal.name, "agent", body)
     stored = {**stored, **stamp_source(runtime.db, stored["id"], principal)}
     if client_key:
@@ -121,6 +126,16 @@ async def route_message(
     writes *to* a process — the return path's "your worker went quiet".
     """
     if message["sender_type"] == "system" and not force:
+        return
+    if (message["sender_type"] == "agent"
+            and not message.get("source_attachment_id")
+            and (bare := pingpong_refusal(
+                runtime.db, conv_id, message["sender"], message["body"],
+                exclude_id=message.get("id")))):
+        # Terminal capture of the third bare exchange: the transcript keeps the
+        # record, but the mention is not spent — and the line hears why (2.4).
+        await runtime.post_message(
+            conv_id, "system", "system", capture_notice(message["sender"], bare))
         return
     names = mentioned_names(message["body"])
     # "worker: take the review" is an address when worker is live here.
