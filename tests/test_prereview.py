@@ -202,6 +202,16 @@ class PrereviewTest(unittest.TestCase):
         self.assertEqual(seen.json()["checked"], 100)  # the tracked directory names
         self.assertLess(elapsed, 5.0)  # generous bound: the point is no stall
 
+    def test_a_trailing_slash_reference_is_read_as_a_directory(self):
+        sha = self.commit_table({"cue": {"dir": "audio/", "ghost": "nope/"}},
+                                extra_files={"audio/cue.ogg": "c"})
+        seen = self.check(sha)
+        self.assertEqual(seen.status_code, 200, seen.text)
+        body = seen.json()
+        self.assertFalse(body["ok"])  # nope/ names no tracked directory
+        self.assertEqual([m["ref"] for m in body["missing"]], ["nope/"])
+        self.assertEqual(body["checked"], 2)
+
     def test_res_scheme_references_are_checked_through_a_mapped_root(self):
         # Godot tables spell paths res://…: without a mapping the out/ incident
         # passes unnoticed, so res: enters only through res_roots and is
