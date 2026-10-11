@@ -21,6 +21,7 @@ from fastapi import HTTPException, Request
 
 from .auth_guard import request_principal
 from .system_notice import post_system_notice
+from .hierarchy import subtree_conversation_ids
 from .hierarchy_contracts import ReviewWorktreeIn, ReviewWorktreeOut
 from .line_worktree import REVIEW_DIR, _exclude, _git, line_cwd, repo_and_worktree, rev
 from .machine_scope import deny_unless
@@ -45,6 +46,30 @@ def _repo_of(db, conv_id: str) -> str:
     return root
 
 
+def subtree_repository(db, conv_id: str, repository: str) -> str:
+    """The repository a review worktree may be created in, for one line.
+
+    Empty names the line's own repository, as before. A named repository is
+    allowed when the line itself — or any line of its subtree — works in it:
+    a captain verifies a candidate against the repository it actually affects
+    (finding 2.2), and never reaches outside its subtree. The matching line's
+    own resolution of the root comes back, so paths derive identically to
+    that line's worktrees.
+    """
+    if not repository or not str(repository).strip():
+        return _repo_of(db, conv_id)
+    wanted = os.path.realpath(str(repository).strip())
+    for line_id in subtree_conversation_ids(db, conv_id):
+        root, _worktree = repo_and_worktree(line_cwd(db, line_id) or "")
+        if root and os.path.realpath(root) == wanted:
+            return root
+    raise ReviewError(
+        403,
+        f"{repository} is not this line's repository and no line in its subtree works in "
+        "it — review worktrees may only be created in a subtree repository",
+    )
+
+
 def _registered(root: str, path: str) -> bool:
     """The path is a worktree git actually knows about in this repository."""
     done = _git("worktree", "list", "--porcelain", cwd=root)
@@ -56,16 +81,20 @@ def _pinned_at(root: str, path: str, full: str) -> bool:
     return _registered(root, path) and rev(path, "rev-parse", "HEAD") == full
 
 
-def create_review_worktree(db, conv_id: str, sha: str) -> dict:
+def create_review_worktree(db, conv_id: str, sha: str, repository: str = "") -> dict:
     """Check a SHA out at ``<repo>/.review/<sha>`` and record it on the line.
 
-    Creating the same SHA twice returns the same worktree — a review that was
-    interrupted picks its checkout back up instead of stacking copies.
+    The repository is the line's own, or — when named — one a line of its
+    subtree works in; the checkout lands in that repository and the record on
+    the calling line, so its retirement or acceptance prunes it wherever it
+    was created. Creating the same SHA twice returns the same worktree — a
+    review that was interrupted picks its checkout back up instead of
+    stacking copies.
     """
     conv = db.get_conversation(conv_id)
     if conv is None:
         raise ReviewError(404, "line not found")
-    root = _repo_of(db, conv_id)
+    root = subtree_repository(db, conv_id, repository)
     name = (sha or "").strip().lower()
     if not _SHA.fullmatch(name):
         raise ReviewError(400, "pass the commit SHA (hex) to review")
@@ -215,7 +244,7 @@ def register_review_routes(app, runtime) -> None:
         deny_unless(db, request_principal(request), conv_id, "write")
         principal = request_principal(request)
         try:
-            done = create_review_worktree(db, conv_id, body.sha)
+            done = create_review_worktree(db, conv_id, body.sha, body.repository)
         except ReviewError as exc:
             raise HTTPException(exc.status_code, exc.detail) from exc
         await post_system_notice(

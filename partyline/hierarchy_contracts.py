@@ -71,6 +71,10 @@ class TipResponse(BaseModel):
 
 class ReviewWorktreeIn(BaseModel):
     sha: str = Field(min_length=4, max_length=64)
+    # Another repository this machine hosts: the review checkout is placed in
+    # ``<repository>/.review/<sha>`` when a line of this line's subtree works
+    # there. Empty means the line's own repository, as before.
+    repository: str = Field(default="", max_length=4096)
 
 
 class ReviewWorktreeOut(BaseModel):

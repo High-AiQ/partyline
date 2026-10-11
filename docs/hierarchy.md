@@ -281,7 +281,15 @@ captain, the parent's captain) — or the documented CLI form, `python -m
 scripts.review_worktree --database <db> create --conversation <id>
 --sha <sha>`. Either checks the SHA out detached at
 `<repo>/.review/<full sha>`, records it on the line, and announces it there.
-`GET .../review-worktrees` lists a line's recorded reviews. The records drive
+`GET .../review-worktrees` lists a line's recorded reviews. The body may also
+name `"repository": "/abs/path"`: the checkout is placed in that repository's
+`.review` when the line itself — or any line of its subtree — works in it
+(finding 2.2: a captain verifies a toolkit candidate against the repository
+it actually affects), and any other repository is refused. The record stays on
+the calling line, so retirement, archiving and the startup sweep prune it in
+whichever repository it was created, and a write-set request may grant a
+review checkout by the same pair (`{"repository": ..., "sha": ...}`) — the
+server derives `<repo>/.review/<full sha>`, so nobody types the path. The records drive
 the cleanup: every review worktree of a line is pruned when the line is
 retired, archived, or purged, and the accepted SHA's review goes when that SHA
 is accepted (reviews of other SHAs stay until the line retires — they may
