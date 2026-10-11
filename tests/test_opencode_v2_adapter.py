@@ -146,6 +146,55 @@ class OpenCodeV2Tests(unittest.IsolatedAsyncioTestCase):
         confirm.assert_awaited_once_with([42])
         self.assertEqual(self.adapter._confirmed_delivery_ids, {42})
 
+    # Shape copied from a real opencode-v2 session store (2026-10-11): every
+    # observed compaction row is status=completed, reason=auto; the summary
+    # and recent fields are redacted here.
+    COMPACTION = {
+        "time": {"created": 1790484322896},
+        "status": "completed",
+        "reason": "auto",
+        "model": {"id": "space-bunny-free", "providerID": "opencode", "variant": "xhigh"},
+        "summary": "<redacted>",
+        "recent": "<redacted>",
+        "cost": 0,
+        "tokens": {"input": 561, "output": 1717, "reasoning": 0,
+                   "cache": {"read": 472469, "write": 0}},
+    }
+
+    async def test_a_compaction_row_calls_the_callback_once_even_when_reread(self):
+        from unittest.mock import AsyncMock
+
+        noted = AsyncMock()
+        self.adapter.att["on_compaction"] = noted
+        self.claim()
+        self.row("compact", "compaction", dict(self.COMPACTION), seq=2)
+
+        await self.adapter._poll()
+        await self.adapter._poll()  # the same row read again must not count twice
+
+        noted.assert_awaited_once_with("auto")
+        self.post.assert_not_awaited()  # the summary is not speech
+
+    async def test_an_unfinished_compaction_row_and_a_manual_reason(self):
+        from unittest.mock import AsyncMock
+
+        noted = AsyncMock()
+        self.adapter.att["on_compaction"] = noted
+        self.claim()
+        self.row("running", "compaction", {**self.COMPACTION, "status": "running"}, seq=2)
+        await self.adapter._poll()
+        noted.assert_not_awaited()  # only completed compactions count
+
+        self.row("manual", "compaction", {**self.COMPACTION, "reason": "manual"}, seq=3)
+        await self.adapter._poll()
+        noted.assert_awaited_once_with("manual")
+
+    async def test_a_row_without_the_capability_callback_is_harmless(self):
+        self.claim()
+        self.row("compact", "compaction", dict(self.COMPACTION), seq=2)
+        await self.adapter._poll()  # no on_compaction bound: nothing raised
+        self.post.assert_not_awaited()
+
     async def test_run_claims_and_polls_then_stop_releases(self):
         self.claim()
         self.adapter._resolve_store = Mock(return_value=self.store)

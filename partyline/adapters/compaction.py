@@ -19,6 +19,11 @@ def is_compaction_record(adapter: str, record: object) -> bool:
             "context_compaction_candidate",
             "context_compaction_installed",
         }
+    if adapter == "opencode-v2":
+        # session_message rows: the `type` column is the shape, merged in by
+        # the adapter; only completed compactions count (observed 8/8 on
+        # 2026-10-11, all status=completed, reason=auto).
+        return record.get("type") == "compaction" and record.get("status") == "completed"
     if adapter == "pi":
         return record.get("type") == "compaction"
     return False

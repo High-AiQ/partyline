@@ -16,6 +16,7 @@ import subprocess
 
 from partyline.adapters import Adapter
 from partyline.adapters.bundled.opencode.wakes import WakeSettlement
+from partyline.adapters.compaction import is_compaction_record
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
 
 logger = logging.getLogger(__name__)
@@ -119,6 +120,15 @@ class PartylineAdapter(WakeSettlement, Adapter):
                 continue
             data = self._decode(raw)
             if not data:
+                continue
+            if kind == "compaction":
+                # The row type is the shape; only completed ones count. The
+                # seen-set is the dedup: a re-read row never counts twice.
+                if is_compaction_record("opencode-v2", {**data, "type": kind}):
+                    noted = self.att.get("on_compaction")
+                    if noted:
+                        await noted(data.get("reason") or "auto")
+                self._seen.add(ident)
                 continue
             if kind == "assistant":
                 timing = data.get("time")

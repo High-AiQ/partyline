@@ -15,3 +15,4 @@ delivery_proof_test = "tests/test_opencode_v2_adapter.py::test_wake_receipt_requ
 resume = true
 turn_end = "receipt"
 transcript = true
+compaction_detect = "transcript"

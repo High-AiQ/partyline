@@ -5,9 +5,10 @@ import asyncio
 from fastapi import HTTPException
 
 from .agent_connection import provision_connection
-from .adapter_capabilities import adapter_completion
+from .adapter_capabilities import adapter_completion, compaction_detect
 from .attachment_view import attach_memory_usage, attachment_response
 from .auth_store import ensure_api_token
+from .compaction_events import transcript_compaction_callback
 from .fence import FenceUnavailable
 from .process_memory import MemoryScopeUnavailable
 from .process_incidents import exit_callback
@@ -40,6 +41,11 @@ def prepare_attachment(att, runtime, hook_url, checkpoint):
     att["fresh_checkpoint"] = checkpoint
     att["startup_attention"] = lambda prompt: surface_attention(runtime, att, prompt)
     att["on_process_exit"] = exit_callback(runtime, att)
+    if compaction_detect(att) == "transcript":
+        # Claude gets its rebrief from hook stdout; a transcript-only
+        # harness gets it as a private wake, and the adapter calls this
+        # when its own tail sees the compaction (2.13, §5-generalised).
+        att["on_compaction"] = transcript_compaction_callback(runtime, att)
 
 
 async def rollback_start(runtime, att):
