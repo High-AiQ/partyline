@@ -17,6 +17,7 @@ from partyline.lease_schema import MIGRATIONS as LEASE_MIGRATIONS
 from partyline.resource_leases import (
     LeaseError,
     active_lease_report,
+    describe_leases,
     register_lease_routes,
     release_attachment_leases,
     request_lease,
@@ -88,6 +89,16 @@ class LeaseLogicTest(unittest.TestCase):
         after = self.take("fresh")
         self.assertFalse(after["granted"])
         self.assertEqual(after["queue_position"], 1)
+
+    def test_the_line_name_is_shown_not_the_id(self):
+        # the staffing segment and the listing resolve the holder line's NAME
+        # at read time: rows store the id, so renames still read correctly
+        self.take("sonnet")
+        line = describe_leases(self.db)
+        self.assertIn("leases: godot (exclusive) @sonnet «world-assets»", line)
+        self.assertNotIn("«assets»", line)
+        report = active_lease_report(self.db)
+        self.assertEqual(report[0]["holders"][0]["line"], "world-assets")
 
     def test_a_waiter_promoted_after_a_long_wait_gets_exactly_its_ttl(self):
         import time as time_module
@@ -330,4 +341,3 @@ class ResourceRiderTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
