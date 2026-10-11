@@ -117,6 +117,31 @@ class LineGatesTest(unittest.TestCase):
             "/api/conversations/root/gates",
             json={"commands": ["x"], "timeout_s": 600}).status_code, 200)
 
+    def test_no_fence_backends_answer_501(self):
+        sha = self.commit("the candidate")
+        made = self.client.put(f"/api/conversations/{self.kid['id']}/gates",
+                               json={"commands": ["true"], "timeout_s": 600})
+        self.assertEqual(made.status_code, 200, made.text)
+        cases = [
+            ("partyline.fence.features.enabled", False),
+            ("partyline.fence.backend_available", (False, "no bwrap")),
+            ("partyline.fence.backend", "restricted-token"),
+        ]
+        for target, value in cases:
+            with self.subTest(target=target):
+                with patch(target, return_value=value):
+                    made = self.client.post(
+                        f"/api/conversations/{self.kid['id']}/accept",
+                        json={"sha": sha, "run_gates": True}, headers=self.captain)
+                self.assertEqual(made.status_code, 501, made.text)
+        # a broken probe (installed but failed) is 501 too
+        with patch("partyline.fence_probe.cached_result",
+                   return_value=(False, "bwrap broke", "reinstall")):
+            made = self.client.post(
+                f"/api/conversations/{self.kid['id']}/accept",
+                json={"sha": sha, "run_gates": True}, headers=self.captain)
+        self.assertEqual(made.status_code, 501, made.text)
+
     def test_a_failing_gate_returns_409_with_the_tail(self):
         sha = self.commit("the candidate")
         with patch("partyline.line_gates.get_gates",

@@ -158,13 +158,22 @@ def command_argv(att: dict, command: list[str]) -> list[str]:
     of this line would get — so gate commands declared by a captain never
     run unfenced inside the server.
     """
+    from . import fence_probe
+
     if not features.enabled("write_fence"):
         raise FenceUnavailable(_refusal("the write fence is disabled"))
+    result = fence_probe.cached_result()
+    if result is not None and not result[0]:
+        raise FenceUnavailable(_refusal(result[1], result[2]))
     available, reason = backend_available()
     if not available:
         raise FenceUnavailable(_refusal(reason))
     if backend() == "restricted-token":
-        return list(command) + _fence_args(att)
+        # WindowsRuntime applies the restricted token around ConPTY itself; a
+        # one-off subprocess here would get no token at all. 501, never a
+        # fake fence.
+        raise FenceUnavailable(_refusal(
+            "gate commands cannot be fenced on this backend"))
     if backend() == "sandbox-exec":
         from . import fence_darwin
 
