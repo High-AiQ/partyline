@@ -25,6 +25,7 @@ from partyline.db import Db
 from partyline.goal import register_goal_route
 from partyline.hierarchy_routes import hierarchy_router
 from partyline.media import MediaStore
+from partyline.review_worktrees import register_review_routes
 from partyline.runtime import ChatRuntime
 from partyline.staffing import staffing_report
 from partyline.staffing_routes import staffing_router
@@ -52,10 +53,12 @@ class AcceptShaTest(unittest.TestCase):
         self.addCleanup(self.db.close)
         self.runtime = ChatRuntime(self.db)
         app = FastAPI()
+        self.app = app
         install_auth_guard(app, self.db)
         app.include_router(hierarchy_router(self.runtime))
         register_goal_route(app, self.runtime)
         register_accept_route(app, self.runtime)
+        register_review_routes(app, self.runtime)
         app.include_router(staffing_router(self.runtime))
 
         async def fake_start(att, **kwargs):
@@ -338,9 +341,33 @@ class AcceptShaTest(unittest.TestCase):
         self.assertEqual(
             self.db.get_conversation(self.kid["id"])["accepted_sha"], tip)
         self.assertIn(
-            f"reviewed {reviewed[:12]}, fast-forwarded to the line's newer tip",
+            f"reviewed {reviewed[:12]}, fast-forwarded to the line's newer tip "
+            "(1 commit(s) past the review)",
             " ".join(self.system_messages(self.kid["id"])),
         )
+
+    def test_allow_descendant_prunes_the_reviewed_sha_s_review_worktrees_too(self):
+        # the tip settles the review of the SHA it descends from: the worktree
+        # that was actually reviewed is pruned with the tip's, not left to
+        # linger until the line retires
+        real = self.branch_head()
+        reviewed = self.commit("the reviewed work")
+        tip = self.commit("work past the review")
+        self.mirror(tip)
+        _git("update-ref", "refs/heads/line/kid", real, tip, cwd=self.repo)
+        for sha in (reviewed, tip):
+            made = self.client.post(
+                f"/api/conversations/{self.kid['id']}/review-worktrees",
+                json={"sha": sha}, headers=self.root_captain())
+            self.assertEqual(made.status_code, 201, made.text)
+        response = self.accept(reviewed, allow_descendant=True)
+        self.assertEqual(response.status_code, 200, response.text)
+        for sha in (reviewed, tip):
+            self.assertFalse(os.path.isdir(os.path.join(self.repo, ".review", sha)))
+        listed = self.client.get(
+            f"/api/conversations/{self.kid['id']}/review-worktrees",
+            headers=self.root_captain())
+        self.assertEqual(listed.json(), [])
 
     def test_without_the_flag_a_sha_behind_the_tip_still_refuses(self):
         # the same shape as the flag's happy case, but flagless: the refusal

@@ -120,12 +120,14 @@ def accept_sha(db, conv_id: str, sha: str, allow_descendant: bool = False) -> di
         raise AcceptError(409, f"no branch {branch} to accept onto")
     mirror_head = mirror_branch_ref(cwd, conv_id, branch)
     reviewed = full
+    past_review = None
     if (allow_descendant and mirror_head is not None and mirror_head != full
             and _descends(root, full, mirror_head)):
         # The line kept committing after the reviewed hand-off: the fenced
         # tip descends from the reviewed SHA. Accept by fast-forwarding to
         # the tip instead of refusing the reviewed SHA as a stray; the
-        # response names both.
+        # response names both, and the notice counts what went in unreviewed.
+        past_review = int(rev(root, "rev-list", "--count", f"{reviewed}..{mirror_head}") or 0)
         full = mirror_head
     base = rev(root, "merge-base", branch, full)
     moved = head != full
@@ -170,9 +172,14 @@ def accept_sha(db, conv_id: str, sha: str, allow_descendant: bool = False) -> di
                      fenced=mirror_head is not None)
     db._exec("UPDATE conversations SET accepted_sha=? WHERE id=?", (full, conv_id))
     pruned = prune_accepted_review(db, conv_id, full)
+    if reviewed != full:
+        # The tip carries work past the review, so the reviewed SHA's own
+        # review worktrees are settled too: prune them with the tip's.
+        pruned += prune_accepted_review(db, conv_id, reviewed)
     return {
         "branch": branch, "sha": full, "moved": moved, "pruned_reviews": pruned,
         "reviewed_sha": reviewed if reviewed != full else None,
+        "past_review": past_review,
     }
 
 
@@ -255,8 +262,8 @@ def register_accept_route(app, runtime) -> None:
         state = "already at" if not done["moved"] else "moved to"
         tail = " — the hand-off is the SHA on the line's branch"
         if done["reviewed_sha"]:
-            tail = (f" — reviewed {done['reviewed_sha'][:12]}, fast-forwarded "
-                    "to the line's newer tip")
+            tail = (f" — reviewed {done['reviewed_sha'][:12]}, fast-forwarded to the line's "
+                    f"newer tip ({done['past_review']} commit(s) past the review)")
         await post_system_notice(
             runtime,
             conv_id,

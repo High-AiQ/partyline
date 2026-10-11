@@ -237,7 +237,18 @@ it there. Under the write fence the line commits to its mirror branch, so
 accept also reads that mirror when one exists: a SHA equal to the mirror tip
 or descended from it is landed on the real branch with a compare-and-swap ref
 update, while a mirror tip the SHA does not carry (ahead of it or diverging
-from it) is refused as a stray. Accepting only fast-forwards: a branch that carries commits the SHA
+from it) is refused as a stray. A worker often commits again after the review,
+so the reviewed SHA is then an ancestor of the mirror tip rather than the tip
+itself: `{"sha": "...", "allow_descendant": true}` accepts such a hand-off by
+fast-forwarding to the tip instead of refusing it. The response names both
+SHAs (`reviewed_sha` and `sha`), the ☏ notice counts what went in unreviewed
+(`N commit(s) past the review`), and the reviewed SHA's review worktrees are
+pruned along with the tip's — accepting work nobody reviewed stays visible in
+the record, never silent. `GET /api/conversations/<id>/tip` returns
+`{"branch", "branch_sha", "fenced_tip"}` — where the line's branch and its
+fence mirror point (`fenced_tip` null with no mirror) — so a captain reads
+the fenced tip before accepting instead of learning it from a 409. Accepting
+only fast-forwards: a branch that carries commits the SHA
 does not include, or a SHA from an unrelated history, is refused with 409
 rather than merged or rebased, so accepting never orphans a commit. Nothing is
 pushed; the captain still pushes after its own review, as before. The recorded
