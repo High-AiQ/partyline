@@ -16,7 +16,7 @@ STAFFING_TRAITS = (
     "topic, instead of guessing. Parallel slices mean parallel lines: two workers on one "
     "line share one branch and cannot be accepted separately — give an unrelated slice "
     "its own child line. Take a lease for anything that needs exclusivity, such as "
-    "timing measurements — POST {root}/leases — instead of writing serialisation rules "
+    "timing measurements — POST /api/leases — instead of writing serialisation rules "
     "into a topic. Assign in small reads, scoped test runs and files by "
     "name: a worker whose compactions badge climbs is thrashing, and a thrashing "
     "worker is replaced with a fresh instance of the same preset, never re-prompted."

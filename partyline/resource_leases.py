@@ -32,21 +32,21 @@ def _purge_expired(db) -> None:
     db._exec("DELETE FROM resource_leases WHERE expires_at<=?", (time.time(),))
 
 
-def _active(db, name: str) -> list[dict]:
-    _purge_expired(db)
-    return [dict(row) for row in db._exec(
-        "SELECT * FROM resource_leases WHERE name=? AND waiting=0 AND expires_at>?",
-        (name, time.time())).fetchall()]
+def _promote(db, row: dict, now: float) -> None:
+    """Turn one waiter into the holder, honouring the TTL it queued with."""
+    ttl = max(1, int(row["expires_at"] - row["created_at"]))
+    _upsert(db, {**row, "waiting": 0, "expires_at": now + ttl})
 
 
 def _upsert(db, row: dict) -> None:
+    """Insert or refresh one lease row. ``created_at`` is write-once: for a
+    waiter it is the queue place, and renewing must never move it."""
     db._exec(
         "INSERT INTO resource_leases(name,holder_attachment,holder_handle,holder_line,"
         "mode,waiting,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?) "
         "ON CONFLICT(name,holder_attachment) DO UPDATE SET holder_handle=excluded."
         "holder_handle, holder_line=excluded.holder_line, mode=excluded.mode, "
-        "waiting=excluded.waiting, created_at=excluded.created_at, "
-        "expires_at=excluded.expires_at",
+        "waiting=excluded.waiting, expires_at=excluded.expires_at",
         (row["name"], row["holder_attachment"], row["holder_handle"], row["holder_line"],
          row["mode"], row["waiting"], row["created_at"], row["expires_at"]))
 
@@ -56,8 +56,11 @@ def request_lease(db, holder_attachment: str, holder_handle: str, holder_line: s
     """Take, renew, or queue for one lease; the caller polls, never blocks.
 
     Exclusive waits behind any holder; shared waits only behind an exclusive
-    one. Posting again renews a held lease or re-queues a waiter, and the
-    queue position is simply how many rows stand ahead on the same name.
+    one. Queue place is held: a waiter keeps its original queue-time, so
+    polling cannot slide it backwards, and when the lease frees, promotion is
+    by queue order — the earliest waiter for an exclusive lease, the leading
+    run of shared waiters for a shared one. A brand-new caller queues behind
+    everyone already waiting.
     """
     name = (name or "").strip()
     if not LEASE_NAME.fullmatch(name):
@@ -69,16 +72,26 @@ def request_lease(db, holder_attachment: str, holder_handle: str, holder_line: s
         raise LeaseError(f"ttl_s must be between 1 and {MAX_TTL_S} (4 hours)")
     now = time.time()
     _purge_expired(db)
-    # The caller's own granted row is not an obstacle — posting again is how a
-    # holder renews, or changes its mode — but until the switch it still
-    # occupies the slot, so the queue counts it among the rows ahead.
-    everyone = _active(db, name)
-    others = [row for row in everyone if row["holder_attachment"] != holder_attachment]
+    rows = [dict(row) for row in db._exec(
+        "SELECT * FROM resource_leases WHERE name=?", (name,)).fetchall()]
+    held = [row for row in rows if not row["waiting"]]
+    waiters = sorted((row for row in rows if row["waiting"]),
+                     key=lambda row: row["created_at"])
+    if not held and waiters:
+        # The slot is free: promote by queue order — the earliest waiter, or
+        # every leading shared waiter together.
+        promoted = [waiters[0]]
+        if promoted[0]["mode"] == "shared":
+            promoted += [row for row in waiters[1:] if row["mode"] == "shared"]
+        for row in promoted:
+            _promote(db, row, now)
+        held = [dict(row, waiting=0) for row in promoted]
+    others = [row for row in held if row["holder_attachment"] != holder_attachment]
     blocked = any(row["mode"] == "exclusive" for row in others) or (
         mode == "exclusive" and bool(others))
     if blocked:
-        holder = others[0]
-        ahead = len(everyone)
+        holder = others[0] if others else held[0]
+        ahead = len([row for row in rows if row["holder_attachment"] != holder_attachment])
         _upsert(db, {"name": name, "holder_attachment": holder_attachment,
                      "holder_handle": holder_handle, "holder_line": holder_line,
                      "mode": mode, "waiting": 1, "created_at": now,
@@ -87,14 +100,13 @@ def request_lease(db, holder_attachment: str, holder_handle: str, holder_line: s
                 "holder": {"handle": holder["holder_handle"],
                            "line": holder["holder_line"]},
                 "queue_position": ahead, "expires_at": holder["expires_at"]}
-    expires_at = now + ttl_s
     _upsert(db, {"name": name, "holder_attachment": holder_attachment,
                  "holder_handle": holder_handle, "holder_line": holder_line,
                  "mode": mode, "waiting": 0, "created_at": now,
-                 "expires_at": expires_at})
+                 "expires_at": now + ttl_s})
     return {"granted": True, "name": name, "mode": mode,
             "holder": {"handle": holder_handle, "line": holder_line},
-            "queue_position": 0, "expires_at": expires_at}
+            "queue_position": 0, "expires_at": now + ttl_s}
 
 
 def release_lease(db, holder_attachment: str, name: str) -> bool:
@@ -163,9 +175,14 @@ def register_lease_routes(app, runtime) -> None:
     @app.post("/api/leases")
     async def post_lease(request: Request, body: dict):
         principal = request_principal(request)
+        # A lease is held by a process so that its exit or detach frees it; a
+        # person has neither, and an empty id would share one lease identity
+        # among every person on the host.
+        if not principal.attachment_id:
+            raise HTTPException(403, "leases are taken and released by processes")
         try:
             return request_lease(
-                runtime.db, principal.attachment_id or "", principal.name,
+                runtime.db, principal.attachment_id, principal.name,
                 principal.conv_id or "", body.get("name", ""),
                 body.get("mode", "exclusive"), body.get("ttl_s", DEFAULT_TTL_S))
         except LeaseError as exc:
