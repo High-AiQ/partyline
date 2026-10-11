@@ -20,6 +20,7 @@ import re
 from fastapi import HTTPException, Request
 
 from .auth_guard import request_principal
+from .accept_history import record_accept
 from .git_fence import mirror_branch_ref
 from .hierarchy import ancestors, descendants, parent_id_of
 from .hierarchy_contracts import AcceptIn, AcceptResponse, TipResponse, TreeSyncOut
@@ -263,11 +264,14 @@ def register_accept_route(app, runtime) -> None:
         except AcceptError as exc:
             raise HTTPException(exc.status_code, exc.detail) from exc
         _refresh_children_views(db, conv_id, done["branch"])
+        record_accept(db, conv_id, done["sha"], principal.name, body.findings)
         state = "already at" if not done["moved"] else "moved to"
         tail = " — the hand-off is the SHA on the line's branch"
         if done["reviewed_sha"]:
             tail = (f" — reviewed {done['reviewed_sha'][:12]}, fast-forwarded to the line's "
                     f"newer tip ({done['past_review']} commit(s) past the review)")
+        if body.findings:
+            tail += f" ({len(body.findings)} findings)"
         sync = done["tree_sync"]
         if not sync["ok"]:
             tail += f" ⚠ tree not in sync: {sync['detail']}"
@@ -285,11 +289,7 @@ def register_accept_route(app, runtime) -> None:
 
 
 def _refresh_children_views(db, conv_id: str, branch: str) -> None:
-    """Children's fenced views of this branch are launch-time stale; refresh.
-
-    Best-effort: a stale view is a nuisance, and an accepted hand-off must
-    never fail because a mirror could not be re-copied.
-    """
+    """Refresh children's launch-time-stale views; best-effort, never fail an accept."""
     try:
         from .line_base import refresh_children_views
 

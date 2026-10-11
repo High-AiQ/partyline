@@ -83,6 +83,7 @@ from .message_routes import message_router
 from .reaction_routes import reaction_router
 from .pin_routes import pin_router
 from .accept_sha import register_accept_route
+from .accept_history import register_accept_history_route
 from .review_worktrees import register_review_routes
 from .prereview import register_prereview_route
 from .captain_docs import register_docs_route
@@ -183,6 +184,7 @@ install_auth_guard(app, runtime.db)
 install_static_cache(app)
 register_terminal_route(app, runtime)
 register_accept_route(app, runtime)
+register_accept_history_route(app, runtime)
 register_review_routes(app, runtime)
 register_prereview_route(app, runtime)
 register_docs_route(app, runtime)
