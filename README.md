@@ -59,6 +59,9 @@ Formats are detected from the bytes, not the filename. A browser can send what a
 | Mentions during a running turn | [docs/adapters.md](docs/adapters.md#immediate-mentions) |
 | `@!name` — interrupt and send | [docs/adapters.md](docs/adapters.md#interrupt-and-send-name) |
 | Managers, child lines, and reports | [docs/hierarchy.md](docs/hierarchy.md) |
+| Captain practices (briefing, assignment, review) | [docs/captain-practices.md](docs/captain-practices.md) |
+| Resource leases (exclusive/shared, TTL) | [docs/hierarchy.md](docs/hierarchy.md#shared-resource-leases) |
+| The line notebook (notes that survive compaction) | [docs/hierarchy.md](docs/hierarchy.md#the-line-notebook) |
 | Message pins and jumping through history | [docs/message-pins.md](docs/message-pins.md) |
 | Mentions across lines and the return path | [docs/hierarchy.md](docs/hierarchy.md#the-return-path) |
 | The manager pack and a line's goal | [docs/hierarchy.md](docs/hierarchy.md#the-goal) |

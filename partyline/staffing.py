@@ -6,6 +6,7 @@ from .approval_bubble import pending_approvals
 from .compaction_events import compaction_counts
 from .hierarchy import descendants, subtree_conversation_ids
 from .preset_traits import coerce_preset, coerce_traits, match_preset
+from .resource_leases import describe_leases
 
 LIVE = ("starting", "running")
 
@@ -100,6 +101,9 @@ def staffing_line(db, conv_id: str, *, runtime=None) -> str:
     workers = ", ".join(p["name"] for p in free if traits[p["id"]]["implements"]) or "none"
     busy = "; ".join(in_use) or "nobody"
     parts = [f"in use: {busy}", f"free captains: {captains}", f"free workers: {workers}"]
+    leases = describe_leases(db)
+    if leases:
+        parts.append(leases)
     if pending:
         counted = ", ".join(f"«{name}» {kind}" for name, kind in pending)
         parts.append(f"approvals pending: {len(pending)} ({counted})")

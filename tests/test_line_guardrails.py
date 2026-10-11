@@ -100,6 +100,59 @@ class GuardrailTest(unittest.TestCase):
 
     # -- sideways staffing -------------------------------------------------------
 
+    def test_a_second_worker_on_a_captained_staffed_line_means_parallel_lines(self):
+        payload = {"name": "luna", "adapter": "raw", "command": "sh"}
+        mid = self.child("root", "mid", self.machine("root-lead"))
+        captain = self.captain(mid["id"], "sol")
+        first = self.client.post(f"/api/conversations/{mid['id']}/attachments",
+                                 json=payload, headers=captain)
+        self.assertEqual(first.status_code, 200, first.text)
+        # the captain's second implementer is refused, with the remedy named
+        second = self.client.post(f"/api/conversations/{mid['id']}/attachments",
+                                  json={**payload, "name": "mimo"},
+                                  headers=captain)
+        self.assertEqual(second.status_code, 409, second.text)
+        self.assertIn("parallel slices mean parallel lines", second.json()["detail"])
+        self.assertIn("allow_shared_branch", second.json()["detail"])
+        self.assertIn("close the old one first (DELETE /api/attachments/<id>)",
+                      second.json()["detail"])
+        # the override is the captain's explicit call, and the line hears it
+        overridden = self.client.post(
+            f"/api/conversations/{mid['id']}/attachments",
+            json={**payload, "name": "mimo", "allow_shared_branch": True},
+            headers=captain)
+        self.assertEqual(overridden.status_code, 200, overridden.text)
+        notices = [m["body"] for m in self.db.list_messages(mid["id"])
+                   if "shared branch" in m["body"]]
+        self.assertEqual(len(notices), 1)
+        self.assertIn("@mimo joins a shared branch", notices[0])
+
+    def test_a_person_is_never_refused_but_the_shared_branch_is_flagged(self):
+        payload = {"name": "luna", "adapter": "raw", "command": "sh"}
+        mid = self.child("root", "mid", self.machine("root-lead"))
+        captain = self.captain(mid["id"], "sol")
+        self.client.post(f"/api/conversations/{mid['id']}/attachments",
+                         json=payload, headers=captain)
+        person = self.client.post(f"/api/conversations/{mid['id']}/attachments",
+                                  json={**payload, "name": "mimo"})
+        self.assertEqual(person.status_code, 200, person.text)
+        notices = [m["body"] for m in self.db.list_messages(mid["id"])
+                   if "shared branch" in m["body"]]
+        self.assertEqual(len(notices), 1)
+        self.assertIn("attached by @person", notices[0])
+
+    def test_a_line_without_a_captain_takes_a_second_worker_untouched(self):
+        payload = {"name": "luna", "adapter": "raw", "command": "sh"}
+        bare = self.child("root", "bare")
+        first = self.client.post(f"/api/conversations/{bare['id']}/attachments",
+                                 json=payload)
+        second = self.client.post(f"/api/conversations/{bare['id']}/attachments",
+                                  json={**payload, "name": "mimo"})
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(second.status_code, 200, second.text)
+        self.assertEqual([m for m in self.db.list_messages(bare["id"])
+                          if "shared branch" in m["body"]], [])
+
     def test_a_captain_cannot_attach_to_its_own_line_once_it_has_a_child(self):
         payload = {"name": "grok", "adapter": "raw", "command": "sh"}
         mid = self.child("root", "mid", self.machine("root-lead"))

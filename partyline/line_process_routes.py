@@ -132,6 +132,9 @@ async def detach_attachment(runtime, att_id: str) -> dict:
         await _bounded_broadcast(runtime.broadcast(
             att["conv_id"], MessageEvent(message=MessageResponse.model_validate(message))
         ))
+        from .resource_leases import release_attachment_leases
+
+        release_attachment_leases(runtime.db, att_id)
         if adapter is not None and runtime.live.get(att_id) is adapter:
             runtime.live.pop(att_id, None)
         runtime.memory_usage.pop(att_id, None)

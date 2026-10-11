@@ -83,7 +83,10 @@ from .message_routes import message_router
 from .reaction_routes import reaction_router
 from .pin_routes import pin_router
 from .accept_sha import register_accept_route
+from .accept_history import register_accept_history_route
+from .resource_leases import register_lease_routes
 from .review_worktrees import register_review_routes
+from .scratch_worktrees import register_scratch_routes
 from .prereview import register_prereview_route
 from .captain_docs import register_docs_route
 from .line_base import register_line_base_route
@@ -99,6 +102,7 @@ from .write_set_routes import write_set_router
 from .media_routes import media_router
 from .preset_routes import presets_router
 from .staffing_routes import staffing_router
+from .line_notes import notes_router
 from .settings_routes import settings_router
 from .resource_routes import register_resource_routes
 from .restart_report import restart_report_router
@@ -183,7 +187,10 @@ install_auth_guard(app, runtime.db)
 install_static_cache(app)
 register_terminal_route(app, runtime)
 register_accept_route(app, runtime)
+register_accept_history_route(app, runtime)
 register_review_routes(app, runtime)
+register_scratch_routes(app, runtime)
+register_lease_routes(app, runtime)
 register_prereview_route(app, runtime)
 register_docs_route(app, runtime)
 register_line_base_route(app, runtime)
@@ -205,6 +212,7 @@ app.include_router(heartbeat_router(runtime))
 app.include_router(hooks_router(runtime, presence))
 app.include_router(presets_router(runtime, ADAPTERS))
 app.include_router(staffing_router(runtime))
+app.include_router(notes_router(runtime))
 app.include_router(settings_router(runtime))
 app.include_router(restart_report_router(runtime, lambda r: require_loopback(r)))
 

@@ -23,6 +23,7 @@ from .line_subtree import archive_line, archive_subtree
 from .machine_scope import deny_unless, is_human
 from .retirement import archive_blockers
 from .review_worktrees import prune_review_worktrees
+from .scratch_worktrees import prune_scratch_worktrees
 from .system_notice import post_system_notice
 from .worktree_lifecycle import archive_worktree_if_safe, discard_worktree
 
@@ -101,6 +102,7 @@ def register_archive_route(app: FastAPI, presence):
                 line_removed, reason = await asyncio.to_thread(
                     archive_worktree_if_safe, db, line_id)
             await asyncio.to_thread(prune_review_worktrees, db, line_id)
+            await asyncio.to_thread(prune_scratch_worktrees, db, line_id)
             if line_id == conv_id:
                 removed, kept_reason = line_removed, reason
         await runtime.broadcast_all(ConversationsChangedEvent())
