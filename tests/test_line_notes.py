@@ -2,6 +2,7 @@
 
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -178,16 +179,103 @@ class LineNotesTest(unittest.TestCase):
 
         self.assertLessEqual(len(text), 4000)
         self.assertIn("(truncated — read the line)", text)
-        self.assertTrue(text.endswith(WORKER_REMINDER))
+        self.assertIn(WORKER_REMINDER, text)  # the reminder survives the cap
+        self.assertTrue(text.endswith("notes?scope=attachment"))  # and the nudge rides last
 
     # -- schema ------------------------------------------------------------
 
     def test_the_notes_migration_runs_twice(self):
-        for mig in NOTES_MIGRATIONS:
-            self.db.conn.execute(mig)  # already applied at Db() open; must not raise
+        import sqlite3
+
+        for _ in range(2):
+            for mig in NOTES_MIGRATIONS:
+                try:
+                    self.db.conn.execute(mig)
+                except sqlite3.OperationalError:
+                    pass  # already applied, exactly as db.py tolerates it
         self.db.conn.commit()
         row = self.db._exec("SELECT COUNT(*) AS n FROM line_notes").fetchone()
         self.assertEqual(row["n"], 0)
+
+    def test_the_rebrief_always_ends_with_the_notes_nudge(self):
+        # PreCompact stdout never reaches the model (Claude Code discards it),
+        # so the rebriefing is where the worker is told to refresh its notes.
+        write_notes(self.db, "line", "attachment", "doing: x", attachment_id="worker")
+
+        text = render_rebrief(self.db, self.db.get_attachment("worker"))
+
+        self.assertIn("Update your attachment notes now", text)
+        self.assertIn("PUT $PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID"
+                      "/notes?scope=attachment", text)
+        self.assertTrue(text.endswith("notes?scope=attachment"))
+
+    def test_the_nudge_rides_the_wake_every_eight_turns_when_notes_are_stale(self):
+        from partyline.line_notes import notes_nudge
+
+        self.assertEqual(notes_nudge(self.db, "line", "worker", 0), "")   # no turns yet
+        self.assertEqual(notes_nudge(self.db, "line", "worker", 3), "")   # not a multiple
+        write_notes(self.db, "line", "attachment", "doing: x", attachment_id="worker")
+        # 8 is a multiple but the notes were just written (turn 0)
+        self.assertEqual(notes_nudge(self.db, "line", "worker", 8), "")
+        self.db._exec("UPDATE line_notes SET turn=8 WHERE scope='attachment'"
+                      " AND attachment_id='worker'")
+        self.assertEqual(notes_nudge(self.db, "line", "worker", 8), "")   # fresh
+        self.assertEqual(notes_nudge(self.db, "line", "worker", 16), "")  # 16-8 < 16
+        nudge = notes_nudge(self.db, "line", "worker", 24)                # 24-8 >= 16
+        self.assertIn("Update your attachment notes now", nudge)
+
+    def test_a_worker_that_never_wrote_notes_is_still_nudged(self):
+        # Finding 5.1's complaint: the rebriefing carries "whatever the worker
+        # last wrote, often nothing". No row at all is the stalest case.
+        from partyline.line_notes import notes_nudge
+
+        nudge = notes_nudge(self.db, "line", "worker", 16)  # a multiple, nothing written
+
+        self.assertIn("Update your attachment notes now", nudge)
+
+    def test_the_stale_turns_threshold_is_a_setting(self):
+        from partyline.line_notes import notes_nudge
+
+        write_notes(self.db, "line", "attachment", "doing: x", attachment_id="worker")
+        self.db.set_setting("notes_stale_turns", "4")
+        self.db._exec("UPDATE line_notes SET turn=8 WHERE scope='attachment'"
+                      " AND attachment_id='worker'")
+
+        self.assertEqual(notes_nudge(self.db, "line", "worker", 8), "")  # 8-8 < 4
+        nudge = notes_nudge(self.db, "line", "worker", 16)  # 16-8 >= 4, and 16%8==0
+
+        self.assertIn("Update your attachment notes now", nudge)
+
+    def test_a_self_write_records_the_harness_turn(self):
+        # The route stamps the writer's own turn so staleness is measurable.
+        from partyline.compaction_events import bump_turn
+        from partyline.line_notes import read_notes
+
+        for _ in range(5):
+            bump_turn(self.db, "worker", "owner")
+        made = self.put("attachment", "files touched: calc.py", self.worker)
+
+        self.assertEqual(made.status_code, 200, made.text)
+        row = self.db._exec("SELECT turn FROM line_notes WHERE scope='attachment'"
+                            " AND attachment_id='worker'").fetchone()
+        self.assertEqual(row["turn"], 5)
+        self.assertEqual(read_notes(self.db, "line", "attachment", "worker")["notes"],
+                         "files touched: calc.py")
+
+    def test_the_worker_rider_carries_the_nudge_when_notes_go_stale(self):
+        from partyline.compaction_events import bump_turn
+        from partyline.role_delivery import RoleState, bind_role_delivery
+
+        worker = RoleState("participant", "line", "root", ("read", "write"),
+                           captained=True)
+        att = {"id": "worker", "digest_rider": lambda: "board"}
+        for _ in range(16):
+            bump_turn(self.db, "worker", "o2")
+        with patch("partyline.role_delivery.current_role", return_value=worker):
+            bind_role_delivery(self.db, att)
+            ride = att["digest_rider"]()
+        self.assertIn("Update your attachment notes now", ride)
+        self.assertIn(WORKER_REMINDER, ride)  # the reminder rides with it
 
 
 if __name__ == "__main__":

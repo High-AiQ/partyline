@@ -17,4 +17,8 @@ MIGRATIONS = [
         PRIMARY KEY(conv_id, scope, attachment_id)
     )""",
     "CREATE INDEX IF NOT EXISTS idx_line_notes_line ON line_notes(conv_id, scope)",
+    # 5.1: a worker is nudged to refresh its notes when they are M turns old,
+    # so the row records the attachment's hook turn at write time. NULL for
+    # line/tree rows and for writes made before this entry shipped.
+    "ALTER TABLE line_notes ADD COLUMN turn INTEGER",
 ]
