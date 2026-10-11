@@ -171,6 +171,48 @@ class CompactionEventsTest(unittest.TestCase):
         self.assertEqual(
             self.client.get("/api/hooks/for-raw/raw-owner/rebrief").status_code, 403)
 
+    def test_a_restart_resets_the_thrash_window_but_not_the_badge(self):
+        self.turn()
+        self.compact("auto")
+        self.turn()
+        self.compact("auto")
+        self.turn()
+        self.compact("auto")  # third in window under owner1: the one ring
+        self.assertEqual(len([m for m in self.captain_recorder.delivered
+                              if "thrashing" in m["body"]]), 1)
+        # restart as owner B: the turn count and the ordinal start over, and
+        # owner A's old high-turn events must not read as thrash
+        self.db._exec("UPDATE attachments SET runtime_owner='owner2' WHERE id='haiku'")
+        self.turn_post = self.client.post("/api/hooks/haiku/owner2",
+                                          json={"hookEventName": "UserPromptSubmit"})
+        self.assertEqual(self.turn_post.status_code, 200, self.turn_post.text)
+        made = self.client.post("/api/hooks/haiku/owner2",
+                                json={"hook_event_name": "PreCompact", "trigger": "auto"})
+        self.assertEqual(made.status_code, 200)
+        notices = [m["body"] for m in self.db.list_messages("line") if "compacted" in m["body"]]
+        self.assertIn("⚠ @haiku compacted (auto, 1st time)", notices)  # this activation's 1st
+        self.assertEqual(len([m for m in self.captain_recorder.delivered
+                              if "thrashing" in m["body"]]), 1)  # still just the one ring
+        # the staffing badge keeps the lifetime count across owners
+        from partyline.compaction_events import compaction_counts
+
+        self.assertEqual(compaction_counts(self.db).get("haiku"), 4)
+
+    def test_a_captains_rebrief_points_at_the_captain_pack(self):
+        from partyline.goal import set_goal
+
+        self.db._exec(
+            "UPDATE attachments SET runtime_owner='cap-owner' WHERE id='cap'")
+        set_goal(self.db, "line", "review and accept the parser fix")
+        self.db.add_message("line", "person", "human", "@sol the parser fix is ready for review")
+        seen = self.client.get("/api/hooks/cap/cap-owner/rebrief")
+        self.assertEqual(seen.status_code, 200, seen.text)
+        body = seen.text
+        self.assertIn("(captain pack: GET /api/conversations/line/briefing)", body)
+        self.assertNotIn("you are a worker on a captained line", body)
+        self.assertIn("@sol the parser fix is ready for review", body)
+        self.assertIn("review and accept the parser fix", body)
+
     def test_the_schema_migration_runs_twice(self):
         from partyline.compaction_schema import MIGRATIONS as COMPACTION_MIGRATIONS
 

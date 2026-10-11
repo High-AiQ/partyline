@@ -82,7 +82,13 @@ async def note_hook_compaction(runtime, att: dict, trigger: str) -> dict:
             "INSERT INTO compaction_events"
             "(attachment_id,runtime_owner,trigger,turn,created_at) VALUES(?,?,?,?,?)",
             (ident, owner, trigger, turn, time.time()))
-    count = compaction_count(db, ident)
+    # The ordinal and the thrash window are this activation's story: a fresh
+    # owner starts at 1st again, and an old activation's high turn numbers
+    # must not make the first compaction after a restart read as thrash. The
+    # lifetime count across owners is the staffing badge's business.
+    count = db._exec(
+        "SELECT COUNT(*) AS n FROM compaction_events WHERE attachment_id=? "
+        "AND runtime_owner=?", (ident, owner)).fetchone()["n"]
     notice = f"⚠ @{att['name']} compacted ({trigger}, {_ordinal(count)} time)"
     message = db.add_owned_message(ident, owner, conv_id, "system", "system", notice)
     if message is not None:
@@ -92,7 +98,8 @@ async def note_hook_compaction(runtime, att: dict, trigger: str) -> dict:
     if trigger == "auto":
         window = db._exec(
             "SELECT COUNT(*) AS n FROM compaction_events WHERE attachment_id=? "
-            "AND trigger='auto' AND turn>?", (ident, turn - THRASH_WINDOW_TURNS)).fetchone()
+            "AND runtime_owner=? AND trigger='auto' AND turn>?",
+            (ident, owner, turn - THRASH_WINDOW_TURNS)).fetchone()
         if window["n"] == THRASH_AUTOS:
             captain = live_manager(runtime, conv_id)
             if captain is not None:
