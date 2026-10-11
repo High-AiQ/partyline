@@ -40,6 +40,11 @@ class ChildIn(BaseModel):
 
 class AcceptIn(BaseModel):
     sha: str = Field(min_length=4, max_length=64)
+    # A worker often commits after the review: the reviewed SHA is then an
+    # ancestor of the line's newer fenced tip instead of the tip itself. With
+    # this flag, accept fast-forwards to that tip instead of refusing the
+    # reviewed SHA as a stray; the response names both SHAs.
+    allow_descendant: bool = False
 
 
 class AcceptResponse(BaseModel):
@@ -47,6 +52,21 @@ class AcceptResponse(BaseModel):
     branch: str
     sha: str  # the full SHA recorded on the line
     moved: bool  # False when the branch already pointed at it
+    # Set when allow_descendant landed the branch on the line's newer fenced
+    # tip; null when the branch holds the reviewed SHA itself.
+    reviewed_sha: str | None = None
+
+
+class TipResponse(BaseModel):
+    """Where the line's hand-off branch and its fence mirror point.
+
+    ``fenced_tip`` is null when no mirror exists (an unfenced line), and all
+    three are null when the line has no placed worktree to read.
+    """
+
+    branch: str | None = None
+    branch_sha: str | None = None
+    fenced_tip: str | None = None
 
 
 class ReviewWorktreeIn(BaseModel):
