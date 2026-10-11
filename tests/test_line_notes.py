@@ -59,18 +59,28 @@ class LineNotesTest(unittest.TestCase):
 
     # -- write permissions -------------------------------------------------
 
-    def test_the_captain_writes_line_and_tree_notes(self):
+    def test_the_captain_writes_line_notes_and_the_root_captain_writes_tree(self):
         line = self.put("line", "acceptance: 11 tests green", self.captain)
-        tree = self.put("tree", "main at 9140d4c", self.captain)
-
         self.assertEqual(line.status_code, 200, line.text)
-        self.assertEqual(tree.status_code, 200, tree.text)
-        # tree notes are stored on the root, readable from the child line
         self.assertEqual(self.get("line", self.captain).json()["notes"],
                          "acceptance: 11 tests green")
+
+        self.db.add_attachment("rootcap", "root", "sol", "fake", ["fake"], "/tmp", "o0")
+        self.db._exec("UPDATE attachments SET is_lead=1, status='running' WHERE id='rootcap'")
+        root_captain = {"Authorization": "Bearer " + auth_store.ensure_api_token(
+            self.db, "rootcap")}
+        tree = self.put("tree", "main at 9140d4c", root_captain)
+        self.assertEqual(tree.status_code, 200, tree.text)
+        # tree notes are stored on the root, readable from the child line
         self.assertEqual(self.get("tree", self.captain).json()["notes"], "main at 9140d4c")
         row = self.db._exec("SELECT conv_id FROM line_notes WHERE scope='tree'").fetchone()
         self.assertEqual(row["conv_id"], "root")
+
+    def test_a_sub_captain_cannot_overwrite_the_roots_tree_notes(self):
+        # The storage is the root's, so the write permission must be too:
+        # otherwise a grandchild's captain could rewrite the root's contracts.
+        made = self.put("tree", "hijacked", self.captain)
+        self.assertEqual(made.status_code, 403, made.text)
 
     def test_a_worker_may_write_only_its_own_notes(self):
         own = self.put("attachment", "files touched: calc.py", self.worker)
@@ -141,6 +151,20 @@ class LineNotesTest(unittest.TestCase):
         self.assertIn("(notes truncated)", text)
         # the worker reminder survives the truncate: it is the rule that matters
         self.assertIn("edit only on your captain's @mention", text)
+
+    def test_a_huge_topic_cannot_push_out_the_assignment_or_the_reminder(self):
+        self.db._exec("UPDATE conversations SET topic=? WHERE id='line'", ("X" * 18000,))
+        self.db._exec("UPDATE conversations SET goal=? WHERE id='line'", ("G" * 3000,))
+        write_notes(self.db, "line", "line", "L" * NOTE_LIMIT)
+        write_notes(self.db, "line", "attachment", "A" * NOTE_LIMIT, attachment_id="worker")
+        self.db.add_message("line", "greg", "human", "@haiku ship the notebook slice")
+
+        text = render_rebrief(self.db, self.db.get_attachment("worker"))
+
+        self.assertLessEqual(len(text), 4000)
+        self.assertIn("@haiku ship the notebook slice", text)   # the assignment
+        self.assertIn("edit only on your captain's @mention", text)  # the reminder
+        self.assertIn("(full text: GET /api/conversations/line)", text)  # the pointer
 
     # -- schema ------------------------------------------------------------
 

@@ -101,8 +101,11 @@ def notes_router(runtime) -> APIRouter:
             if not target:
                 raise HTTPException(400, "name the attachment whose notes these are")
         elif not is_human(principal):
-            # line and tree are the captain's charge to persist.
-            deny_unless(db, principal, conv_id, "assign")
+            # line notes are this line's captain's charge; tree notes live on
+            # the root, so writing them needs the root's assign — otherwise a
+            # grandchild's captain could overwrite the root's contracts.
+            deny_unless(db, principal,
+                        tree_root(db, conv_id) if scope == "tree" else conv_id, "assign")
         return write_notes(db, conv_id, scope, body.notes.strip(), target
                            if scope == "attachment" else "")
 
