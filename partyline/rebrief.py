@@ -77,34 +77,46 @@ def render_rebrief(db, att: dict, limit: int = REBRIEF_LIMIT) -> str:
     @mention. A captain hearing that after a compaction would be told to
     disobey its own hierarchy, so a captain gets the captain-pack pointer
     instead, and its newest person message as the assignment.
+
+    Assembled by priority, not by importance-of-place: the header, the
+    assignment and the role reminder are built first and always survive; the
+    notes get half of what is left; the goal and the topic share the rest and
+    are truncated with a pointer to the full text. The topic alone may now be
+    20,000 characters, so an end-truncate would otherwise eat exactly the
+    sections the notes budget exists to protect.
     """
     conv = db.get_conversation(att["conv_id"]) or {}
+    conv_id = att["conv_id"]
     lead = bool(att.get("is_lead"))
-    parts = [f"You are @{att['name']} on «{conv.get('name') or att['conv_id']}». Your context "
-             "was just compacted — this re-briefing is partyline's record of your charge."]
-    goal = (conv.get("goal") or "").strip()
-    if goal:
-        parts.append(f"Goal: {goal}")
-    topic = (conv.get("topic") or "").strip()
-    if topic:
-        parts.append(f"Standing context (the line's topic):\n{topic}")
-    # The notebook rides every re-briefing; the notes get half the cap so the
-    # assignment and the reminder below always survive the overall truncate.
-    notes = notes_block(db, att, limit // 2)
-    if notes:
-        parts.append(notes)
+    header = (f"You are @{att['name']} on «{conv.get('name') or conv_id}». Your context "
+              "was just compacted — this re-briefing is partyline's record of your charge.")
     assignment = latest_assignment(db, att, person_only=lead)
     if assignment:
         label = ("Latest message from a person, verbatim:" if lead
                  else "Your latest assignment, verbatim:")
-        parts.append(f"{label}\n{assignment}")
+        assignment = f"{label}\n{assignment}"
     if lead:
         from .role_delivery import briefing_pointer
 
-        parts.append(briefing_pointer(att["conv_id"]))
+        reminder = briefing_pointer(conv_id)
     else:
-        parts.append(WORKER_REMINDER)
-    text = "\n\n".join(parts)
-    if len(text) > limit:
-        text = text[:limit - 24].rstrip() + "\n… (re-briefing truncated)"
-    return text
+        reminder = WORKER_REMINDER
+    fixed = [part for part in (header, assignment, reminder) if part]
+    # Two more parts (context, notes) may join the join, so reserve their
+    # separators up front: the budget must cover the "\n\n" between parts.
+    remaining = max(0, limit - sum(len(part) for part in fixed)
+                    - 2 * (len(fixed) + 1))
+    notes = notes_block(db, att, remaining // 2)
+    context_budget = remaining - len(notes) - (2 if notes else 0)
+    pointer = f"… (full text: GET /api/conversations/{conv_id})"
+    context = ""
+    goal = (conv.get("goal") or "").strip()
+    topic = (conv.get("topic") or "").strip()
+    if goal:
+        context = f"Goal: {goal}"
+    if topic:
+        context += ("\n\n" if context else "") + f"Standing context (the line's topic):\n{topic}"
+    if context and len(context) + len(pointer) + 2 > context_budget:
+        context = context[:max(0, context_budget - len(pointer) - 2)].rstrip() + "\n" + pointer
+    parts = [part for part in (header, context, notes, assignment, reminder) if part]
+    return "\n\n".join(parts)
