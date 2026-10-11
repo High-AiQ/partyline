@@ -343,7 +343,17 @@ present when it resolves from the repository root or from the naming table's
 own directory, or when it names a tracked directory — a reference ending in
 a slash is read as that directory — and engine schemes are
 checked through `res_roots` (e.g. `{"res://": "game/"}`), so a game's
-`res://` tables are checked in the tree they ship from. After an
+`res://` tables are checked in the tree they ship from. Plain path roots work
+the same way: `path_roots: ["", "game/"]` is tried in order for scheme-less
+references, so `assets/ground/tile.png` is found under `game/assets/`. Prose
+stays out of the scan: `skip_files` globs (such as `**/*.provenance.json`)
+exclude whole tables, and `skip_keys` (such as `notes`, `reason`, `command`)
+exclude string values under those keys at any depth. References resolving
+through committed symlinks (mode `120000`) count as present; symlink loops
+and links escaping the tree do not resolve and are reported missing. The
+response carries `summary: [{"file", "missing", "checked"}]`, grouped by
+table and sorted by missing count, so one real miss stands out among many
+false ones. After an
 accept, the response and the ☏ notice carry `tree_sync`: any worktree holding
 the accepted branch must sit at the accepted SHA with a clean status — a
 stale or dirty checkout is reported (`⚠ tree not in sync: …`) in the accept
