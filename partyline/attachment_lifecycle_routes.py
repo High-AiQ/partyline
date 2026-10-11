@@ -7,14 +7,56 @@ from fastapi import HTTPException, Request
 
 from .agent_connection import remove_connection
 from .auth_guard import request_principal
-from .machine_scope import deny_unless_attachment
+from .machine_scope import deny_unless, deny_unless_attachment, is_human
 from .attachment_contracts import AttachmentResponse
-from .attachment_lifecycle import (FreshAttachmentRequest, create_fresh_record,
-                                   remove_stopped_record, require_stopped)
+from .attachment_lifecycle import (
+    FreshAttachmentRequest,
+    ReplaceRequest,
+    create_fresh_record,
+    remove_stopped_record,
+    require_stopped,
+)
 from .contracts import AttachmentEvent, AttachmentRemovedEvent, OkResponse
+from .line_process_routes import detach_attachment
+from .system_notice import post_system_notice
 
 
 def register_attachment_lifecycle_routes(app, runtime, *, start, require_loopback, validate):
+    async def _start_replacement(att, body):
+        """Reserve the handle, restore the captain role, and start the fresh session.
+
+        Shared by /fresh and /replace: on a failed start the replacement is
+        cleaned up and the failure re-raised, so neither route leaves a
+        half-created card behind.
+        """
+        replacement = await create_fresh_record(runtime.db, att, body)
+        if att.get("is_lead"):
+            # The fresh record carries the old identity but not its role: a
+            # replaced captain is still this line's captain. The old row gives
+            # up the one-lead flag first — the index allows exactly one.
+            runtime.db._exec("UPDATE attachments SET is_lead=0 WHERE id=?", (att["id"],))
+            runtime.db._exec(
+                "UPDATE attachments SET is_lead=1 WHERE id=?", (replacement["id"],))
+            replacement["is_lead"] = 1
+        try:
+            response = await start(replacement, checkpoint=body.checkpoint, fresh=True)
+        except (Exception, asyncio.CancelledError) as exc:
+            if replacement["id"] in runtime.live:
+                raise HTTPException(500, "fresh start failed; the replacement is still tracked. "
+                                    "Detach it before retrying.") from exc
+            await runtime.db.set_attachment_status_async(
+                replacement["id"], "exited", replacement["runtime_owner"]
+            )
+            await remove_stopped_record(runtime.db, replacement["id"], missing_ok=True)
+            await _removed_event(replacement)
+            if isinstance(exc, (HTTPException, asyncio.CancelledError)):
+                raise
+            raise HTTPException(500, f"failed to start fresh: {exc}") from exc
+        await remove_stopped_record(runtime.db, att["id"], missing_ok=True)
+        await _removed_event(att)
+        await runtime.broadcast(att["conv_id"], AttachmentEvent(attachment=response))
+        return response
+
     @app.post("/api/attachments/{att_id}/fresh", response_model=AttachmentResponse)
     async def fresh_attachment(
         request: Request, att_id: str, body: FreshAttachmentRequest | None = None
@@ -31,24 +73,45 @@ def register_attachment_lifecycle_routes(app, runtime, *, start, require_loopbac
             raise HTTPException(400, str(exc)) from exc
         if not os.path.isdir(att["cwd"]):
             raise HTTPException(400, "attachment working directory no longer exists")
-        replacement = await create_fresh_record(runtime.db, att, body)
+        return await _start_replacement(att, body)
+
+    @app.post("/api/attachments/{att_id}/replace", response_model=AttachmentResponse)
+    async def replace_attachment(att_id: str, body: ReplaceRequest, request: Request):
+        """Finding 2.8: a thrashing or stuck process becomes a fresh instance of itself.
+
+        The line's captain — or a person — stops the old process and starts a
+        new one with the same handle, preset, command and working directory
+        and a **new CLI session**: clean context is the point. The captain
+        role survives, and the re-briefing (the line's notes and the latest
+        assignment) rides the first briefing as the checkpoint, so the fresh
+        process picks the work back up instead of guessing.
+        """
+        db = runtime.db
+        principal = request_principal(request)
+        att = db.get_attachment(att_id)
+        if att is None:
+            raise HTTPException(404, "attachment not found")
+        if not is_human(principal):
+            deny_unless(db, principal, att["conv_id"], "assign")
+        if att_id in runtime.live:
+            await detach_attachment(runtime, att_id)
+        stopped = require_stopped(db, att_id)
         try:
-            response = await start(replacement, checkpoint=body.checkpoint, fresh=True)
-        except (Exception, asyncio.CancelledError) as exc:
-            if replacement["id"] in runtime.live:
-                raise HTTPException(500, "fresh start failed; the replacement is still tracked. "
-                                    "Detach it before retrying.") from exc
-            await runtime.db.set_attachment_status_async(
-                replacement["id"], "exited", replacement["runtime_owner"]
-            )
-            await remove_stopped_record(runtime.db, replacement["id"], missing_ok=True)
-            await _removed_event(replacement)
-            if isinstance(exc, (HTTPException, asyncio.CancelledError)):
-                raise
-            raise HTTPException(500, f"failed to start fresh: {exc}") from exc
-        await remove_stopped_record(runtime.db, att_id, missing_ok=True)
-        await _removed_event(att)
-        await runtime.broadcast(att["conv_id"], AttachmentEvent(attachment=response))
+            validate(stopped)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if not os.path.isdir(stopped["cwd"]):
+            raise HTTPException(400, "attachment working directory no longer exists")
+        from .rebrief import render_rebrief
+
+        response = await _start_replacement(
+            stopped, FreshAttachmentRequest(checkpoint=render_rebrief(db, stopped)))
+        await post_system_notice(
+            runtime, stopped["conv_id"],
+            f"↻ @{stopped['name']} replaced with a fresh instance "
+            f"(by @{principal.name}): {body.reason.strip()}",
+            actor=principal,
+        )
         return response
 
 

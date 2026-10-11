@@ -108,7 +108,8 @@ async def note_hook_compaction(runtime, att: dict, trigger: str) -> dict:
                     runtime, conv_id, "system", "system",
                     f"⚠ @{att['name']} is thrashing: {THRASH_AUTOS} auto compactions within "
                     f"the last {THRASH_WINDOW_TURNS} turns — replace it with a fresh instance "
-                    "of the same preset and worktree; re-prompting will not hold",
+                    "of the same preset and worktree; re-prompting will not hold. "
+                    f"Replace it: POST /api/attachments/{ident}/replace",
                     audience=captain["id"], source=(ident, conv_id),
                 )
     return {"notice": notice, "count": count, "thrash_ringed": rung}
