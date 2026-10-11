@@ -133,7 +133,7 @@ TOPICS = [
        "Prereview referenced-paths before review; read tree_sync after accept.",
        "docs/captain-practices.md", "Let the machines check first"),
     _t("best-practices", "merge-main-by-verified-sha", "Merge main by a verified SHA",
-       "A fenced line cannot see the parent's main; merge by a verified SHA only.",
+       "GET …/base and POST …/refresh-base first; a fenced line cannot see the parent's main.",
        "docs/captain-practices.md", "Merge main by a verified SHA"),
     _t("best-practices", "reactions-not-acks", "Reactions instead of acknowledgements",
        "👀 instead of standing-by messages; never trade thanks between processes.",
