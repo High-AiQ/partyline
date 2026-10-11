@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 import unittest
 
 from fastapi import FastAPI
@@ -174,6 +175,32 @@ class PrereviewTest(unittest.TestCase):
             "sha": sha, "data_paths": ["data/"], "checks": ["referenced-paths"]},
             headers=outsider)
         self.assertEqual(made.status_code, 403, made.text)
+
+    def test_a_large_commit_and_a_chatty_table_stay_fast(self):
+        # a real game repository is ~10k files and a dialogue table has
+        # thousands of strings: the check is set lookups in a worker thread,
+        # not a scan per string on the event loop
+        table = {"lines": [f"word{i:04d}" for i in range(5000)],
+                 "dirs": [f"d{i:04d}" for i in range(0, 100)]}
+        marks = [f"M 100644 :1 d{i:04d}/f.txt" for i in range(20000)]
+        marks.append("M 100644 :1 data/cues.json")
+        blob = json.dumps(table).encode()
+        stream = (b"blob\nmark :1\ndata " + str(len(blob)).encode() + b"\n" + blob + b"\n"
+                  b"commit refs/heads/perf\n"
+                  b"author t <t@example.com> 1700000000 +0000\n"
+                  b"committer t <t@example.com> 1700000000 +0000\n"
+                  b"data 4\nperf\n")
+        stream += b"".join(mark.encode() + b"\n" for mark in marks)
+        subprocess.run(["git", "fast-import", "--quiet"], cwd=self.repo,
+                       input=stream, capture_output=True, check=True)
+        sha = _git("rev-parse", "refs/heads/perf", cwd=self.repo).stdout.strip()
+        started = time.perf_counter()
+        seen = self.check(sha)
+        elapsed = time.perf_counter() - started
+        self.assertEqual(seen.status_code, 200, seen.text)
+        self.assertTrue(seen.json()["ok"], seen.json())
+        self.assertEqual(seen.json()["checked"], 100)  # the tracked directory names
+        self.assertLess(elapsed, 5.0)  # generous bound: the point is no stall
 
     def test_res_scheme_references_are_checked_through_a_mapped_root(self):
         # Godot tables spell paths res://…: without a mapping the out/ incident
