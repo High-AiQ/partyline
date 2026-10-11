@@ -25,6 +25,9 @@ async def record_exit(runtime, att, evidence):
         current = db.get_attachment(ident)
         if current is not None and current.get("runtime_owner") == owner:
             runtime.memory_usage.pop(ident, None)
+            from .resource_leases import release_attachment_leases
+
+            release_attachment_leases(db, ident)
         await runtime.post_callback(ident, att["conv_id"], owner)(
             "system", "system", exit_notice(att["name"], evidence))
         return
@@ -33,6 +36,9 @@ async def record_exit(runtime, att, evidence):
         if current is None or current.get("runtime_owner") != owner:
             return
         runtime.memory_usage.pop(ident, None)
+        from .resource_leases import release_attachment_leases
+
+        release_attachment_leases(db, ident)
         saved = db._exec(
             "INSERT OR IGNORE INTO process_incidents "
             "(attachment_id,runtime_owner,evidence,created_at) VALUES(?,?,?,?)",

@@ -1,6 +1,4 @@
-"""The SQLite schema and its append-only migration history: schema changes land here as
-idempotent ``MIGRATIONS`` entries — never edit an applied entry, append a new one.
-"""
+"""The SQLite schema and its append-only migration history; append idempotent entries, never edit."""
 
 from .db_schema_base import SCHEMA  # noqa: F401
 from .idempotency_schema import MIGRATIONS as IDEMPOTENCY_MIGRATIONS
@@ -9,6 +7,7 @@ from .compaction_schema import MIGRATIONS as COMPACTION_MIGRATIONS
 from .accept_history_schema import MIGRATIONS as ACCEPT_HISTORY_MIGRATIONS
 from .notes_schema import MIGRATIONS as NOTES_MIGRATIONS
 from .scratch_schema import MIGRATIONS as SCRATCH_MIGRATIONS
+from .lease_schema import MIGRATIONS as LEASE_MIGRATIONS
 
 MIGRATIONS = [
     # cli_session: optional process session id, for adapters that support resume
@@ -297,4 +296,4 @@ MIGRATIONS = [
 
 MIGRATIONS.extend(MEMORY_MIGRATIONS + IDEMPOTENCY_MIGRATIONS + NOTES_MIGRATIONS
                   + COMPACTION_MIGRATIONS + ACCEPT_HISTORY_MIGRATIONS
-                  + SCRATCH_MIGRATIONS)
+                  + SCRATCH_MIGRATIONS + LEASE_MIGRATIONS)
