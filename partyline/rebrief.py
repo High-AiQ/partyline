@@ -17,12 +17,14 @@ from .role_briefing import WORKER_REMINDER
 REBRIEF_LIMIT = 4000
 
 
-def latest_assignment(db, att: dict, scan: int = 300) -> str | None:
-    """The newest line message that @mentions this process, and who may assign.
+def latest_assignment(db, att: dict, scan: int = 300,
+                      person_only: bool = False) -> str | None:
+    """The newest line message that @mentions this process and may assign it.
 
-    A person's message or a captain's (the source attachment is a lead):
-    those two assign work. A sibling worker's @mention is conversation, not
-    an assignment, and never survives a compaction on its own say-so.
+    A person always may; an agent may when its source attachment is a lead —
+    unless ``person_only``, which is the captain's rule: a captain takes
+    work from the person alone. A sibling worker's @mention is conversation,
+    not an assignment, and never survives a compaction on its own say-so.
     """
     name = (att.get("name") or "").lower()
     rows = db._exec(
@@ -31,6 +33,8 @@ def latest_assignment(db, att: dict, scan: int = 300) -> str | None:
         "IS NULL ORDER BY id DESC LIMIT ?", (att["conv_id"], scan)).fetchall()
     for row in rows:
         if row["sender_type"] == "agent":
+            if person_only:
+                continue
             source = db.get_attachment(row["source_attachment_id"]) \
                 if row["source_attachment_id"] else None
             if not source or not source.get("is_lead"):
@@ -41,8 +45,15 @@ def latest_assignment(db, att: dict, scan: int = 300) -> str | None:
 
 
 def render_rebrief(db, att: dict, limit: int = REBRIEF_LIMIT) -> str:
-    """The re-briefing text: goal, topic, latest assignment, worker reminder."""
+    """The re-briefing text: goal, topic, latest assignment, role reminder.
+
+    A worker hears the worker reminder — edit only on the captain's
+    @mention. A captain hearing that after a compaction would be told to
+    disobey its own hierarchy, so a captain gets the captain-pack pointer
+    instead, and its newest person message as the assignment.
+    """
     conv = db.get_conversation(att["conv_id"]) or {}
+    lead = bool(att.get("is_lead"))
     parts = [f"You are @{att['name']} on «{conv.get('name') or att['conv_id']}». Your context "
              "was just compacted — this re-briefing is partyline's record of your charge."]
     goal = (conv.get("goal") or "").strip()
@@ -51,10 +62,17 @@ def render_rebrief(db, att: dict, limit: int = REBRIEF_LIMIT) -> str:
     topic = (conv.get("topic") or "").strip()
     if topic:
         parts.append(f"Standing context (the line's topic):\n{topic}")
-    assignment = latest_assignment(db, att)
+    assignment = latest_assignment(db, att, person_only=lead)
     if assignment:
-        parts.append(f"Your latest assignment, verbatim:\n{assignment}")
-    parts.append(WORKER_REMINDER)
+        label = ("Latest message from a person, verbatim:" if lead
+                 else "Your latest assignment, verbatim:")
+        parts.append(f"{label}\n{assignment}")
+    if lead:
+        from .role_delivery import briefing_pointer
+
+        parts.append(briefing_pointer(att["conv_id"]))
+    else:
+        parts.append(WORKER_REMINDER)
     text = "\n\n".join(parts)
     if len(text) > limit:
         text = text[:limit - 24].rstrip() + "\n… (re-briefing truncated)"
