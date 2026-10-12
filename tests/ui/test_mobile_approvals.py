@@ -17,7 +17,6 @@ import time
 import urllib.request
 import unittest
 
-from scripts.ui_auth import post_json
 from scripts.uishot import NARROW_VIEWPORT, VIEWPORT, ui_session
 
 
