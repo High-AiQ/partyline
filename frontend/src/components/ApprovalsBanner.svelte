@@ -12,7 +12,7 @@
 {#if approvals.items.length > 0}
   <div
     id="approvalsPending"
-    class="flex flex-col gap-1 border-b px-3 py-2 font-mono text-[11px] leading-[1.35] text-copper border-[rgb(190_123_74/0.36)] bg-[rgb(190_123_74/0.08)]"
+    class="flex max-h-[38dvh] flex-col gap-1 overflow-y-auto border-b px-3 py-2 font-mono text-[11px] leading-[1.35] text-copper border-[rgb(190_123_74/0.36)] bg-[rgb(190_123_74/0.08)]"
     role="region"
     aria-label="Approvals pending"
   >
