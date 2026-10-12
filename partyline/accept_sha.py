@@ -13,7 +13,6 @@ is the SHA on the line's branch; nothing else counts.
 
 from __future__ import annotations
 
-import logging
 import os
 import re
 
@@ -22,14 +21,20 @@ from fastapi import HTTPException, Request
 from .auth_guard import request_principal
 from .accept_history import record_accept
 from .git_fence import mirror_branch_ref
+from .review_worktrees import prune_accepted_review
+from .system_notice import post_system_notice
 from .hierarchy import ancestors, descendants, parent_id_of
-from .hierarchy_contracts import AcceptIn, AcceptResponse, TipResponse, TreeSyncOut
+from .hierarchy_contracts import (
+    AcceptIn,
+    AcceptResponse,
+    GateResult,
+    TreeSyncOut,
+)
+from .line_base import _refresh_children_views_quietly
+from .tree_sync import tree_sync_check
 from .line_worktree import _git, line_cwd, repo_and_worktree, rev
 from .worktree_paths import branch_name, managed_root
 from .machine_scope import deny_unless
-from .prereview import tree_sync_check
-from .review_worktrees import prune_accepted_review
-from .system_notice import post_system_notice
 from .worktree_lifecycle import _base_ref
 
 _SHA = re.compile(r"[0-9a-f]{4,64}")
@@ -230,40 +235,29 @@ def handoff_rider(db, conv_id: str) -> str:
     return "(hand-off: " + "; ".join(parts) + ")"
 
 
-def _tip_response(db, conv_id: str) -> TipResponse:
-    """Where the line's branch and its fence mirror point, read-only.
-
-    A captain needs the fenced tip to plan a hand-off without learning it
-    from an accept refusal; the mirror lookup is the one accept uses.
-    """
-    cwd = line_cwd(db, conv_id) or ""
-    root, _worktree = repo_and_worktree(cwd) if cwd else (None, None)
-    branch = _branch_name(cwd) if root and managed_root(cwd) else None
-    return TipResponse(
-        branch=branch,
-        branch_sha=rev(root, "rev-parse", "--verify", "--quiet", branch)
-        if branch else None,
-        fenced_tip=mirror_branch_ref(cwd, conv_id, branch) if branch else None,
-    )
-
-
 def register_accept_route(app, runtime) -> None:
-    @app.get("/api/conversations/{conv_id}/tip", response_model=TipResponse)
-    async def line_tip(request: Request, conv_id: str):
-        db = runtime.db
-        deny_unless(db, request_principal(request), conv_id, "read")
-        return _tip_response(db, conv_id)
-
     @app.post("/api/conversations/{conv_id}/accept", response_model=AcceptResponse)
     async def accept(request: Request, conv_id: str, body: AcceptIn):
         db = runtime.db
         principal = request_principal(request)
         deny_unless(db, principal, conv_id, "accept")
+        gate_results = None
+        if body.run_gates:
+            from .line_gates import get_gates, run_line_gates
+
+            spec = get_gates(db, conv_id)
+            if spec is None:
+                raise HTTPException(
+                    409, "run_gates asked, but no gates are declared on this line "
+                         "(PUT /api/conversations/<id>/gates)")
+            gate_results = await run_line_gates(runtime, conv_id, body.sha, spec)
+            if any(result["exit"] != 0 for result in gate_results):
+                raise HTTPException(409, {"gates": gate_results})
         try:
             done = accept_sha(db, conv_id, body.sha, body.allow_descendant)
         except AcceptError as exc:
             raise HTTPException(exc.status_code, exc.detail) from exc
-        _refresh_children_views(db, conv_id, done["branch"])
+        _refresh_children_views_quietly(db, conv_id, done["branch"])
         record_accept(db, conv_id, done["sha"], principal.name, body.findings)
         state = "already at" if not done["moved"] else "moved to"
         tail = " — the hand-off is the SHA on the line's branch"
@@ -272,6 +266,8 @@ def register_accept_route(app, runtime) -> None:
                     f"newer tip ({done['past_review']} commit(s) past the review)")
         if body.findings:
             tail += f" ({len(body.findings)} findings)"
+        if gate_results is not None:
+            tail += " (gates passed)"
         sync = done["tree_sync"]
         if not sync["ok"]:
             tail += f" ⚠ tree not in sync: {sync['detail']}"
@@ -285,15 +281,7 @@ def register_accept_route(app, runtime) -> None:
         return AcceptResponse(
             conv_id=conv_id, branch=done["branch"], sha=done["sha"], moved=done["moved"],
             reviewed_sha=done["reviewed_sha"], tree_sync=TreeSyncOut(**sync),
+            gates=[GateResult(**result) for result in (gate_results or [])],
         )
 
 
-def _refresh_children_views(db, conv_id: str, branch: str) -> None:
-    """Refresh children's launch-time-stale views; best-effort, never fail an accept."""
-    try:
-        from .line_base import refresh_children_views
-
-        refresh_children_views(db, conv_id, branch)
-    except Exception:
-        logging.getLogger(__name__).exception(
-            "could not refresh children's base views after accepting on %s", conv_id)

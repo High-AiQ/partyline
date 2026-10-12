@@ -93,6 +93,10 @@ class PartylineAdapter(BaseAdapter):
             cmd = [cmd[0], "resume", self.att["cli_session"], *cmd[1:]]
             if prompt := getattr(self, "_startup_prompt", ""):
                 cmd.append(prompt)
+        if limit := int(self.att.get("auto_compact_tokens") or 0):
+            # -c is a codex global flag: it must sit before the subcommand,
+            # which is why the insertion runs after the resume rewrite.
+            cmd[1:1] = ["-c", f"model_auto_compact_token_limit={limit}"]
         return cmd
 
     def stage_startup_delivery(self, messages: list[dict]) -> bool:
@@ -222,6 +226,13 @@ class PartylineAdapter(BaseAdapter):
 
         async def handle(obj):
             if is_compaction_record("codex", obj):
+                # The rollout records no trigger; codex compactions are the
+                # context-limit kind, so they count as auto. The freshness
+                # gate is the dedup: a resumed rollout's backlog of old
+                # compacted records never re-counts.
+                if self._fresh(obj.get("timestamp")) and (
+                        noted := self.att.get("on_compaction")):
+                    await noted("auto")
                 return
             if obj.get("type") != "event_msg" or not self._fresh(obj.get("timestamp")):
                 return

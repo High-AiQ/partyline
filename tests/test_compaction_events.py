@@ -6,6 +6,7 @@ ring the line's live captain once. `SessionStart(compact)` GETs a re-briefing
 that the harness folds back into the model's context.
 """
 
+import asyncio
 import os
 import tempfile
 import unittest
@@ -171,6 +172,29 @@ class CompactionEventsTest(unittest.TestCase):
             "WHERE id='for-raw'")
         self.assertEqual(
             self.client.get("/api/hooks/for-raw/raw-owner/rebrief").status_code, 403)
+
+    def test_a_transcript_compaction_counts_notices_and_delivers_the_rebrief(self):
+        from partyline.compaction_events import note_transcript_compaction
+
+        att = self.db.get_attachment("haiku")
+        worker_recorder = Recorder(self.db.get_attachment("haiku"))
+        self.runtime.live["haiku"] = worker_recorder
+
+        result = asyncio.run(note_transcript_compaction(self.runtime, att, "auto"))
+
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["notice"], "⚠ @haiku compacted (auto, 1st time)")
+        # The rebrief is delivered to the compacted worker as a private copy.
+        wakes = [item for item in worker_recorder.delivered]
+        rebriefs = [item for item in wakes
+                    if isinstance(item, dict) and item.get("audience_attachment_id") == "haiku"]
+        self.assertEqual(len(rebriefs), 1)
+        self.assertIn("was just compacted", rebriefs[0]["body"])
+        self.assertIn("Update your attachment notes now", rebriefs[0]["body"])
+        # and the line saw the one notice
+        notices = [m["body"] for m in self.db.list_messages("line")
+                   if m["body"].startswith("⚠")]
+        self.assertEqual(notices, ["⚠ @haiku compacted (auto, 1st time)"])
 
     def test_a_restart_resets_the_thrash_window_but_not_the_badge(self):
         self.turn()

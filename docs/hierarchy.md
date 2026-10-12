@@ -157,7 +157,13 @@ tree's root, naming the line, the requester and the approve call, and @mentions 
 captain so that process wakes and can explain the request in context — the person talks to the
 root captain and never reads sublines. A request filed on the root itself does not bubble, and
 the staffing wake line counts what is still waiting anywhere below:
-`approvals pending: N («line» write-set, «line2» memory)`, falling as each request is decided.
+`approvals pending: N («line» write-set, «line2» memory)`, falling as each
+request is decided. On the root line the person doesn't even need the
+notices: `GET /api/conversations/<root id>/approvals` (people only) lists
+every pending request in the subtree — kind, line, requester, detail, and
+the approve/decline endpoints — and the root line's one-click approvals
+banner renders exactly that list with **Approve** and **Decline** buttons
+per row.
 
 Work goes down, not sideways. Once a line has a child, a machine may no longer
 attach processes to that line: the root captain that could not staff a child
@@ -165,7 +171,16 @@ otherwise hands the job to a sibling on the root line, in the checkout the
 child lines are already editing. Presets double as handles, so the same preset
 used twice in one tree used to collide with a 409 that read as "cannot staff";
 the server now suffixes the handle (`grok-2`) and the agent helper prints the
-server's reason on every failed request.
+server's reason on every failed request. The same is true of captains: a
+`can_manage` preset may hold one live instance per line, and the staffing
+line keeps counting it as free until its `max_instances` is reached — a
+preset declaring `max_instances: 3` with one captain running shows as
+`astra (2 more)` — so a scarce captain preset stops pretending to be spent.
+An explicit auto-compact threshold rides the same seam: a preset declaring
+`auto_compact_tokens: 80000` spawns its process with that window — Claude
+Code reads it from `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, codex from a
+`-c model_auto_compact_token_limit` override — and 0 leaves the CLI's own
+tuned default alone.
 
 The rule is symmetric. A line that already carries live workers — attached by
 its parent captain or by a person — cannot be split by its captain: `POST
@@ -325,7 +340,14 @@ without a write-set request; review checkouts stay exactly as they are.
 when the line retires or is purged and swept at startup when its record or
 its line is gone — it is never pruned by an accept, because integration
 checks follow the accepted work. The startup sweep owns only full-SHA
-directories under `.scratch`.
+directories under `.scratch`. A scratch checkout can also start from a
+**trial merge**: `{"sha": "<candidate>", "merge_onto": "main"}` starts at
+`main` as the host sees it and merges the candidate in with `--no-ff` under
+a fixed partyline identity — the integration check in one call. The response
+carries `merge: {"onto", "result", "conflicts"}`; on conflicts the merge is
+aborted, the checkout is left clean at the ref, and the 409 detail lists the
+conflicting paths. Trial-merge checkouts are recorded as
+`<sha>-onto-<onto sha>` and swept like any other.
 
 ## Pre-review checks and the tree sync
 
@@ -343,7 +365,17 @@ present when it resolves from the repository root or from the naming table's
 own directory, or when it names a tracked directory — a reference ending in
 a slash is read as that directory — and engine schemes are
 checked through `res_roots` (e.g. `{"res://": "game/"}`), so a game's
-`res://` tables are checked in the tree they ship from. After an
+`res://` tables are checked in the tree they ship from. Plain path roots work
+the same way: `path_roots: ["", "game/"]` is tried in order for scheme-less
+references, so `assets/ground/tile.png` is found under `game/assets/`. Prose
+stays out of the scan: `skip_files` globs (such as `**/*.provenance.json`)
+exclude whole tables, and `skip_keys` (such as `notes`, `reason`, `command`)
+exclude string values under those keys at any depth. References resolving
+through committed symlinks (mode `120000`) count as present; symlink loops
+and links escaping the tree do not resolve and are reported missing. The
+response carries `summary: [{"file", "missing", "checked"}]`, grouped by
+table and sorted by missing count, so one real miss stands out among many
+false ones. After an
 accept, the response and the ☏ notice carry `tree_sync`: any worktree holding
 the accepted branch must sit at the accepted SHA with a clean status — a
 stale or dirty checkout is reported (`⚠ tree not in sync: …`) in the accept
@@ -365,17 +397,25 @@ roughly every N line messages since the last one — a setting,
 
 ## Compaction as a line event
 
-A worker's context compaction used to show only on its own screen. On an
-adapter that declares the `compaction_hooks` capability (Claude Code today),
-the harness's `PreCompact` hook posts `⚠ @<handle> compacted (auto, Nth
-time)` on the line and bumps a persisted counter that the staffing line
-shows as `×N compactions`. The third `auto` compaction within five hook
-turns rings the line's live captain once — that is thrash, and the remedy
-is a fresh instance of the same preset, never a re-prompt.
-`SessionStart(compact)` folds a partyline re-briefing back into the worker's
-context: the goal, the line's topic, and the latest captain-or-person
-message that @mentions the process, verbatim. Adapters without the
-capability get no hooks, no counting, and a 403 from the rebrief endpoint.
+A worker's context compaction used to show only on its own screen. It is now
+a line event on every adapter that declares a compaction capability (finding
+2.13, extended in §5 of the findings doc):
+
+- **`compaction_hooks`** (Claude Code): the harness's `PreCompact` hook
+  posts `⚠ @<handle> compacted (auto, Nth time)` on the line and bumps the
+  persisted counter; `SessionStart(compact)` folds a partyline re-briefing
+  back into the worker's context.
+- **`compaction_detect = "transcript"`** (Codex, opencode-v2): the adapter
+  tails its own transcript or storage for the compaction record — Codex's
+  `{"type": "compacted"}` rollout record, opencode-v2's `type='compaction'`
+  row with `status='completed'` — and counts it once per activation, so a
+  re-read transcript never double-counts. The re-briefing is delivered as a
+  private wake message instead of hook stdout.
+
+Both routes share the counter (shown as `×N compactions` in the staffing
+line) and the thrash rule: the third `auto` compaction within five hook
+turns rings the line's live captain once. Adapters without a capability
+report nothing.
 
 ## The line notebook
 
@@ -389,7 +429,9 @@ process writes only its own `attachment` notes; `tree` writes need `assign`
 on the tree root, so the root captain (or a person) writes them; people
 write all three; anyone with `read` on the line can read. The notes ride the
 post-compaction re-briefing in that order, ahead of the latest assignment,
-inside the same 4k cap.
+inside the same 4k cap — and the re-briefing ends with the nudge to update
+them. A worker whose notes go stale (16 turns without a write, on adapters
+that report turns) hears a one-line reminder on its wake every 8 turns.
 
 ## Shared-resource leases
 
@@ -403,11 +445,27 @@ backwards, and when the slot frees, promotion is by queue order (the
 earliest waiter, or the leading run of shared waiters). TTLs cap at four
 hours; posting again renews or re-queues; `DELETE /api/leases/<name>`
 releases the caller's lease, and a process's leases die with it on exit or
-detach. `GET /api/leases` lists holders and queues, the staffing line shows
+detach. A lease may carry a `purpose` (up to 80 characters) so the staffing
+line can tell a timing run from a habit:
+`godot (exclusive, "timing walk") @sonnet «world-assets»`. `GET /api/leases` lists holders and queues, the staffing line shows
 held leases (`leases: godot (exclusive) @sonnet «world-assets», 1 queued`),
 and a captain's wake carries a host summary (cores, free memory, load) at
 most once every ten minutes. Leases are taken and released by processes; a
 person is refused.
+
+## Declared gates
+
+A line can declare the commands every hand-off must pass:
+`PUT /api/conversations/<id>/gates` with
+`{"commands": ["uv run --locked ruff check .", "./scripts/capped-test"],
+"timeout_s": 1800}` (the line's captain, or a person; `GET …/gates` reads
+them back). `accept` with `{"sha": "...", "run_gates": true}` then makes a
+fenced scratch checkout at the SHA and runs each command there, in order,
+under the process memory cap and the timeout, stopping at the first
+failure: the accept is refused with 409 and
+`{"gates": [{"command", "exit", "tail"}]}`, and on success the notice says
+`(gates passed)`. On a host with no write fence the request answers 501 —
+gate commands are never run unfenced inside the server.
 
 ## The goal
 
@@ -517,6 +575,15 @@ people only — an agent's plain speech stays a reply for the room, so two proce
 cannot ring each other forever — and it switches itself off the moment a second
 process is live on the line. A held wake (a process mid-turn with receipt
 completion) treats such a message as addressed, the same as a mention.
+
+Two rules keep a *fresh* worker's hello from vanishing (finding 5.7). When
+a process is replaced, the line's live captain is rung privately —
+`↻ @<old> was replaced with a fresh instance (by @<who>) — assign now:
+@<new> is ready and waiting for your @mention` — unless the replaced
+process was itself the captain. And a worker's first message after attach
+or replace, on a line with a live captain, is delivered to that captain as
+a private copy when it doesn't already @mention them — once per
+activation, so it can never become a chatter loop.
 
 Parallel slices mean parallel lines. A machine attaching a second
 implementer to a line that has a captain and a live worker is refused with

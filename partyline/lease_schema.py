@@ -24,4 +24,7 @@ MIGRATIONS = [
     # so the requested TTL rides the row; promotion grants exactly it, capped
     # at the module's maximum.
     "ALTER TABLE resource_leases ADD COLUMN ttl_s INTEGER NOT NULL DEFAULT 900",
+    # 5.4: why the lease is held, so a captain can tell a timing run from a
+    # habit in the staffing line. Free text the holder chooses, ≤80 chars.
+    "ALTER TABLE resource_leases ADD COLUMN purpose TEXT NOT NULL DEFAULT ''",
 ]

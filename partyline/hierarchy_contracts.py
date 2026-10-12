@@ -52,12 +52,23 @@ class AcceptIn(BaseModel):
     # findings of at most 300 characters each, listed by GET …/accepts.
     findings: list[Annotated[str, StringConstraints(max_length=300)]] = Field(
         default_factory=list, max_length=20)
+    # 5.6: run the line's declared gates in a fenced scratch checkout at the
+    # SHA before the branch moves; a failure refuses the accept with 409.
+    run_gates: bool = False
 
 
 class TreeSyncOut(BaseModel):
     ok: bool
     worktree: str | None = None
     detail: str = ""
+
+
+class GateResult(BaseModel):
+    command: str
+    exit: int | str
+    tail: str = ""
+
+
 
 
 class AcceptResponse(BaseModel):
@@ -71,6 +82,8 @@ class AcceptResponse(BaseModel):
     # The deterministic post-accept check: any worktree holding the branch is
     # at the accepted SHA with a clean status. Reporting only.
     tree_sync: TreeSyncOut | None = None
+    # Gate results when the accept was asked to run them (5.6).
+    gates: list[GateResult] = Field(default_factory=list)
 
 
 class PrereviewIn(BaseModel):
@@ -85,6 +98,15 @@ class PrereviewIn(BaseModel):
     # empty tree prefix means the repository root). Unmapped schemes —
     # https:, user:, mailto: — are never file references and stay out.
     res_roots: dict[str, str] = Field(default_factory=dict, max_length=16)
+    # Prefixes tried in order for scheme-less references, e.g. ["", "game/"]:
+    # a reference is present if it resolves under any of them. The empty
+    # string means the repository root.
+    path_roots: list[str] = Field(default_factory=list, max_length=16)
+    # Filename globs whose tables are not scanned at all (e.g.
+    # "**/*.provenance.json"), and JSON keys whose string values — at any
+    # depth — are prose, not paths (e.g. "notes", "reason", "command").
+    skip_files: list[str] = Field(default_factory=list, max_length=64)
+    skip_keys: list[str] = Field(default_factory=list, max_length=64)
 
 
 class PrereviewRef(BaseModel):
@@ -93,10 +115,19 @@ class PrereviewRef(BaseModel):
     ignored: bool = False  # real on disk, hidden from git by the ignore rules
 
 
+class PrereviewSummary(BaseModel):
+    file: str
+    missing: int = 0
+    checked: int = 0
+
+
 class PrereviewOut(BaseModel):
     ok: bool
     missing: list[PrereviewRef] = Field(default_factory=list)
     checked: int = 0
+    # Per-table counts, sorted by missing count so one real miss stands out
+    # among many false ones.
+    summary: list[PrereviewSummary] = Field(default_factory=list)
 
 
 class TipResponse(BaseModel):

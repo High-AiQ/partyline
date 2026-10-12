@@ -11,6 +11,13 @@ class PresetIn(BaseModel):
     reads_images: bool = False
     can_manage: bool = False
     implements: bool = True
+    # 5.3: how many instances of this preset may run at once. 0 means
+    # unlimited — a captain preset can hold a live instance per line, the
+    # same as a worker preset always could.
+    max_instances: int = Field(default=0, ge=0)
+    # §2.13: an explicit auto-compact threshold in tokens, the CLIs' own
+    # native unit. 0 means unset, so the CLI's tuned default applies.
+    auto_compact_tokens: int = Field(default=0, ge=0)
 
 
 class PresetResponse(BaseModel):
@@ -23,6 +30,8 @@ class PresetResponse(BaseModel):
     reads_images: bool = False
     can_manage: bool = False
     implements: bool = True
+    max_instances: int = 0
+    auto_compact_tokens: int = 0
 
 
 class StaffingTraits(BaseModel):

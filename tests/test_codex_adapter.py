@@ -61,6 +61,25 @@ class CodexCommandTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(adapter.build_command(), command)
 
+    def test_the_preset_threshold_is_a_global_flag_before_the_subcommand(self):
+        # `-c` is codex's documented global override; it must precede
+        # `resume`, which is why the adapter inserts it after that rewrite.
+        adapter = self.make_adapter(
+            command=["codex", "--model", "gpt-5.6-terra"], resume=False)
+        adapter.att["auto_compact_tokens"] = 100000
+        self.assertEqual(
+            adapter.build_command(),
+            ["codex", "-c", "model_auto_compact_token_limit=100000",
+             "--model", "gpt-5.6-terra"])
+
+        resumed = self.make_adapter(
+            command=["codex"], resume=True, session_id="session-1")
+        resumed.att["auto_compact_tokens"] = 100000
+        self.assertEqual(
+            resumed.build_command(),
+            ["codex", "-c", "model_auto_compact_token_limit=100000",
+             "resume", "session-1"])
+
     def test_resume_without_a_staged_digest_is_unchanged(self):
         command = ["codex", "--model", "gpt-5.6-terra"]
         adapter = self.make_adapter(command=command, resume=True, session_id="session-1")
@@ -158,7 +177,8 @@ class CodexCommandTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(posted[0][2].startswith("codex: no rollout file after 90s"))
 
-    async def run_tail_with(self, record: dict) -> tuple[PartylineAdapter, list[tuple]]:
+    async def run_tail_with(self, record: dict, extra_att: dict | None = None,
+                            fresh: bool = True) -> tuple[PartylineAdapter, list[tuple]]:
         """Feed one rollout record through a resumed adapter's tail handler."""
         posted: list[tuple] = []
 
@@ -168,18 +188,17 @@ class CodexCommandTest(unittest.IsolatedAsyncioTestCase):
         async def on_status(status: str) -> None:
             return None
 
-        adapter = PartylineAdapter(
-            {"command": ["codex"], "cli_session": "session-1", "name": "terra", "resume": True},
-            post,
-            on_status,
-        )
+        att = {"command": ["codex"], "cli_session": "session-1", "name": "terra",
+               "resume": True}
+        att.update(extra_att or {})
+        adapter = PartylineAdapter(att, post, on_status)
         self.assertTrue(
             adapter.stage_startup_delivery(
                 [{"sender": "system", "body": "Continuation debrief: nonce-123"}]
             )
         )
         adapter.alive = lambda: True
-        adapter._fresh = lambda timestamp: True
+        adapter._fresh = lambda timestamp: fresh
         adapter._find_rollout = lambda: "rollout.jsonl"
 
         async def tail(path, handle):
@@ -1341,6 +1360,42 @@ class CodexThreadHistoryTest(unittest.IsolatedAsyncioTestCase):
             await adapter._run()
 
         self.assertEqual(self.messages, [("terra", "agent", "from sqlite")])
+
+
+class CodexCompactionTest(CodexCommandTest):
+    """A transcript-detected compaction counts once and carries the rebrief."""
+
+    def compacted_record(self) -> dict:
+        # Shape copied from a real rollout (2026-09-21), content redacted.
+        return {
+            "timestamp": "2026-09-21T11:28:31.241Z",
+            "ordinal": 908,
+            "type": "compacted",
+            "payload": {"message": "", "replacement_history": []},
+        }
+
+    async def test_a_compacted_record_calls_the_compaction_callback_once(self):
+        from unittest.mock import AsyncMock
+
+        noted = AsyncMock()
+        adapter, posted = await self.run_tail_with(
+            self.compacted_record(), extra_att={"on_compaction": noted})
+        noted.assert_awaited_once_with("auto")
+        self.assertEqual(posted, [])  # the record itself is not speech
+
+    async def test_an_old_compacted_record_on_resume_does_not_recount(self):
+        from unittest.mock import AsyncMock
+
+        noted = AsyncMock()
+        adapter, _ = await self.run_tail_with(
+            self.compacted_record(), extra_att={"on_compaction": noted},
+            fresh=False)  # the freshness gate: a resumed backlog never re-counts
+        noted.assert_not_awaited()
+
+    async def test_a_fresh_record_without_the_callback_is_harmless(self):
+        # An adapter whose attachment lacks the capability simply drops it.
+        adapter, posted = await self.run_tail_with(self.compacted_record())
+        self.assertEqual(posted, [])
 
 
 if __name__ == "__main__":

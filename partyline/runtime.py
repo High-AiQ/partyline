@@ -51,6 +51,7 @@ class ChatRuntime(DeliveryCreditMixin):
         self.uncredited: dict[str, dict] = {}
         self.unclaimed_noticed: set[str] = set()
         self.memory_usage: dict[str, dict] = {}
+        self.first_hello_pending: set[str] = set()
 
     @staticmethod
     def activation_matches(adapter: Adapter, attachment: dict) -> bool:
@@ -198,6 +199,10 @@ class ChatRuntime(DeliveryCreditMixin):
             )
             if route:
                 await self.route_mentions(conv_id, msg)
+            if sender_type == "agent":
+                from .first_hello import deliver_pending_first_hello
+
+                await deliver_pending_first_hello(self, att_id, sender, body)
 
         return post
 

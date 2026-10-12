@@ -17,6 +17,7 @@ from partyline.lease_schema import MIGRATIONS as LEASE_MIGRATIONS
 from partyline.resource_leases import (
     LeaseError,
     active_lease_report,
+    describe_leases,
     register_lease_routes,
     release_attachment_leases,
     request_lease,
@@ -37,10 +38,10 @@ class LeaseLogicTest(unittest.TestCase):
         self.db.add_attachment("sonnet", "assets", "sonnet", "raw", ["raw"], "/tmp")
         self.db.add_attachment("luna", "effects", "luna", "raw", ["raw"], "/tmp")
 
-    def take(self, holder, name="godot", mode="exclusive", ttl_s=900):
+    def take(self, holder, name="godot", mode="exclusive", ttl_s=900, purpose=""):
         att = self.db.get_attachment(holder)
         return request_lease(self.db, holder, att["name"], att["conv_id"],
-                             name, mode, ttl_s)
+                             name, mode, ttl_s, purpose)
 
     def test_an_exclusive_lease_blocks_and_queues_a_second(self):
         first = self.take("sonnet")
@@ -48,7 +49,7 @@ class LeaseLogicTest(unittest.TestCase):
         self.assertEqual(first["queue_position"], 0)
         second = self.take("luna")
         self.assertFalse(second["granted"])
-        self.assertEqual(second["holder"], {"handle": "sonnet", "line": "assets"})
+        self.assertEqual(second["holder"], {"handle": "sonnet", "line": "world-assets"})
         self.assertEqual(second["queue_position"], 1)
 
     def test_shared_leases_coexist_but_not_with_an_exclusive_one(self):
@@ -88,6 +89,16 @@ class LeaseLogicTest(unittest.TestCase):
         after = self.take("fresh")
         self.assertFalse(after["granted"])
         self.assertEqual(after["queue_position"], 1)
+
+    def test_the_line_name_is_shown_not_the_id(self):
+        # the staffing segment and the listing resolve the holder line's NAME
+        # at read time: rows store the id, so renames still read correctly
+        self.take("sonnet")
+        line = describe_leases(self.db)
+        self.assertIn("leases: godot (exclusive) @sonnet «world-assets»", line)
+        self.assertNotIn("«assets»", line)
+        report = active_lease_report(self.db)
+        self.assertEqual(report[0]["holders"][0]["line"], "world-assets")
 
     def test_a_waiter_promoted_after_a_long_wait_gets_exactly_its_ttl(self):
         import time as time_module
@@ -158,6 +169,25 @@ class LeaseLogicTest(unittest.TestCase):
                        {"ttl_s": 0}, {"ttl_s": 4 * 3600 + 1}):
             with self.assertRaises(LeaseError):
                 self.take("sonnet", **kwargs)
+
+    def test_a_purpose_is_stored_and_shown_in_the_staffing_line(self):
+        self.take("sonnet", purpose="timing run")
+
+        report = active_lease_report(self.db)
+        self.assertEqual(report[0]["holders"][0]["purpose"], "timing run")
+
+        # The staffing line needs a preset on the board to render at all.
+        self.db.save_preset("sonnet", "sonnet", "sonnet", "raw", "raw --x",
+                            can_manage=False, implements=True)
+        line = staffing_line(self.db, "assets", runtime=None)
+        self.assertIn('godot (exclusive, "timing run") @sonnet', line)
+
+    def test_a_purpose_is_capped_and_stripped(self):
+        self.assertEqual(self.take("sonnet", purpose="  timing run  ")["granted"], True)
+        report = active_lease_report(self.db)
+        self.assertEqual(report[0]["holders"][0]["purpose"], "timing run")
+        with self.assertRaises(LeaseError):
+            self.take("luna", purpose="x" * 81)
 
     def test_the_schema_migration_runs_twice(self):
         import sqlite3
@@ -330,4 +360,3 @@ class ResourceRiderTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

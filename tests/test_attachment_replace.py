@@ -133,10 +133,15 @@ class ReplaceAttachmentTest(unittest.TestCase):
     def test_a_person_can_replace_and_the_notice_is_posted(self):
         response = self.replace(headers=self.human)
         self.assertEqual(response.status_code, 200, response.text)
-        notices = [m["body"] for m in self.db.list_messages("line") if "↻" in m["body"]]
+        notices = [m["body"] for m in self.db.list_messages("line")
+                   if m["body"].startswith("↻ @worker replaced with a fresh instance")]
         self.assertEqual(len(notices), 1)
-        self.assertIn("@worker replaced with a fresh instance (by @greg)", notices[0])
-        self.assertIn("thrashing on compaction", notices[0])
+        self.assertIn("(by @greg): thrashing on compaction", notices[0])
+        # the line's live captain is privately rung with the assignment ask
+        ringed = [m["body"] for m in self.captain_recorder.delivered
+                  if "assign now" in m["body"]]
+        self.assertEqual(len(ringed), 1)
+        self.assertIn("@worker is ready and waiting", ringed[0])
 
     def test_the_reason_is_required(self):
         self.assertEqual(self.replace({}).status_code, 422)

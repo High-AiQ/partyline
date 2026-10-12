@@ -5,6 +5,7 @@
    */
   import Gate from "./components/Gate.svelte";
   import WireBanner from "./components/WireBanner.svelte";
+  import ApprovalsBanner from "./components/ApprovalsBanner.svelte";
   import InstanceBanner from "./components/InstanceBanner.svelte";
   import Rail from "./components/rail/Rail.svelte";
   import TopBar from "./components/chat/TopBar.svelte";
@@ -164,6 +165,7 @@
 {/if}
 
 <WireBanner />
+<ApprovalsBanner />
 
 <!-- Rendered from the store rather than pushed onto the dialog stack: the
      server owns this offer's lifetime. It arrives unprompted after a restart

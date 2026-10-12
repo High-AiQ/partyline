@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import time
 
@@ -37,11 +38,22 @@ from .system_notice import post_system_notice
 logger = logging.getLogger(__name__)
 
 SCRATCH_DIR = ".scratch"
+_MERGED_NAME = re.compile(r"[0-9a-f]{40}-onto-[0-9a-f]{40}")
 
 
 class ScratchWorktreeIn(BaseModel):
     sha: str = Field(min_length=4, max_length=64)
     repository: str = Field(default="", max_length=4096)
+    # 5.5: a trial merge — the checkout starts at this ref as the host sees
+    # it, then the candidate SHA is merged in. Conflicts abort the merge and
+    # answer 409 with the conflicting paths; nothing is left half-merged.
+    merge_onto: str = Field(default="", max_length=256)
+
+
+class ScratchMerge(BaseModel):
+    onto: str
+    result: str = ""
+    conflicts: list[str] = Field(default_factory=list)
 
 
 class ScratchWorktreeOut(BaseModel):
@@ -49,16 +61,25 @@ class ScratchWorktreeOut(BaseModel):
     sha: str
     path: str
     created_at: float
+    merge: ScratchMerge | None = None
 
 
-def create_scratch_worktree(db, conv_id: str, sha: str, repository: str = "") -> dict:
+MERGE_IDENTITY = ("-c", "user.name=partyline", "-c", "user.email=partyline@lan")
+
+
+def create_scratch_worktree(db, conv_id: str, sha: str, repository: str = "",
+                            merge_onto: str = "") -> dict:
     """Check a SHA out at ``<repo>/.scratch/<sha>`` and record it on the line.
 
     The repository is the line's own or one of its subtree's, the same rule a
     review worktree obeys. Creating the same SHA twice hands back the same
-    checkout — an interrupted build picks its tree up instead of stacking
-    copies. Nothing here prunes on accept: a scratch checkout outlives the
-    hand-off, because integration checks follow it.
+    checkout. With ``merge_onto`` the checkout starts at that ref as the host
+    sees it and the candidate is merged in with ``--no-ff`` under a fixed
+    partyline identity — the integration check in one call — and the row is
+    keyed ``<sha>-onto-<onto sha>``, so it cannot collide with a plain
+    checkout at the same SHA; pruning and sweeping recognise it by the same
+    key. Conflicts abort the merge and answer 409 with the conflicting paths;
+    nothing is left half-merged. Nothing prunes on accept.
     """
     conv = db.get_conversation(conv_id)
     if conv is None:
@@ -70,13 +91,29 @@ def create_scratch_worktree(db, conv_id: str, sha: str, repository: str = "") ->
     full = rev(root, "rev-parse", "--verify", "--quiet", f"{name}^{{commit}}")
     if full is None:
         raise ReviewError(400, f"no commit {name} in this repository")
-    path = os.path.realpath(os.path.join(root, SCRATCH_DIR, full))
+    onto_name = (merge_onto or "").strip()
+    onto_sha = ""
+    if onto_name:
+        # A ref-shaped value is the only thing allowed near rev-parse: a flag
+        # (leading "-") or a malformed name is refused, not guessed around.
+        if onto_name.startswith("-") or not _SHA.fullmatch(onto_name):
+            if _git("check-ref-format", "--allow-onelevel",
+                    onto_name, cwd=root).returncode != 0:
+                raise ReviewError(
+                    422, f"merge_onto is not a valid ref or SHA: {onto_name}")
+        onto_sha = rev(root, "rev-parse", "--verify", "--quiet",
+                       f"{onto_name}^{{commit}}")
+        if onto_sha is None:
+            raise ReviewError(400, f"no ref {onto_name} in this repository")
+    key = f"{full}-onto-{onto_sha}" if onto_sha else full
+    path = os.path.realpath(os.path.join(root, SCRATCH_DIR, key))
     existing = db._exec(
         "SELECT created_at FROM scratch_worktrees WHERE conv_id=? AND sha=?",
-        (conv_id, full)).fetchone()
-    if existing and os.path.isdir(path) and _pinned_at(root, path, full):
-        return {"conv_id": conv_id, "sha": full,
-                "path": path, "created_at": existing["created_at"]}
+        (conv_id, key)).fetchone()
+    if existing and os.path.isdir(path) and _registered(root, path):
+        merge = _merge_info(path, onto_sha) if onto_sha else None
+        return {"conv_id": conv_id, "sha": key, "path": path,
+                "created_at": existing["created_at"], "merge": merge}
     os.makedirs(os.path.join(root, SCRATCH_DIR), exist_ok=True)
     _exclude(root, SCRATCH_DIR)
     if os.path.isdir(path) and not _registered(root, path):
@@ -89,20 +126,39 @@ def create_scratch_worktree(db, conv_id: str, sha: str, repository: str = "") ->
                 409, f"a stale scratch checkout occupies {path} and git will not release it")
     if not os.path.isdir(path):
         _git("worktree", "prune", cwd=root)
-        done = _git("worktree", "add", "--detach", path, full, cwd=root)
+        base = onto_sha or full
+        done = _git("worktree", "add", "--detach", path, base, cwd=root)
         if done.returncode != 0:
             detail = (done.stderr or "").strip().splitlines()
             raise ReviewError(
                 409, f"cannot create the scratch worktree: {detail[-1] if detail else 'git failed'}"
             )
+    merge = None
+    if onto_sha:
+        merged = _git(*MERGE_IDENTITY, "merge", "--no-ff", "--no-edit",
+                      full, cwd=path)
+        if merged.returncode != 0:
+            conflicts = sorted(_git("diff", "--name-only", "--diff-filter=U",
+                                    cwd=path).stdout.splitlines())
+            _git("merge", "--abort", cwd=path)
+            raise ReviewError(409, {"merge": {"onto": onto_sha,
+                                              "conflicts": conflicts}})
+        merge = {"onto": onto_sha, "result": rev(path, "rev-parse", "HEAD") or "",
+                 "conflicts": []}
     created_at = time.time()
     db._exec(
         "INSERT INTO scratch_worktrees(conv_id,sha,path,created_at) VALUES(?,?,?,?) "
         "ON CONFLICT(conv_id,sha) DO UPDATE SET path=excluded.path, "
         "created_at=excluded.created_at",
-        (conv_id, full, path, created_at),
+        (conv_id, key, path, created_at),
     )
-    return {"conv_id": conv_id, "sha": full, "path": path, "created_at": created_at}
+    return {"conv_id": conv_id, "sha": key, "path": path, "created_at": created_at,
+            "merge": merge}
+
+
+def _merge_info(path: str, onto_sha: str) -> dict:
+    return {"onto": onto_sha, "result": rev(path, "rev-parse", "HEAD") or "",
+            "conflicts": []}
 
 
 def list_scratch_worktrees(db, conv_id: str) -> list[dict]:
@@ -176,7 +232,9 @@ def sweep_scratch_worktrees(db, root: str) -> None:
             db._exec("SELECT path, conv_id FROM scratch_worktrees").fetchall()}
     for name in sorted(os.listdir(directory)):
         path = os.path.join(directory, name)
-        if not os.path.isdir(path) or not _SHA_DIR.fullmatch(name):
+        if not os.path.isdir(path):
+            continue
+        if not (_SHA_DIR.fullmatch(name) or _MERGED_NAME.fullmatch(name)):
             continue
         conv = db.get_conversation(rows[path]) if path in rows else None
         if conv is not None and not conv.get("archived_at"):
@@ -200,7 +258,8 @@ def register_scratch_routes(app, runtime) -> None:
         deny_unless(db, request_principal(request), conv_id, "write")
         principal = request_principal(request)
         try:
-            done = create_scratch_worktree(db, conv_id, body.sha, body.repository)
+            done = create_scratch_worktree(db, conv_id, body.sha, body.repository,
+                                           body.merge_onto)
         except ReviewError as exc:
             raise HTTPException(exc.status_code, exc.detail) from exc
         await post_system_notice(

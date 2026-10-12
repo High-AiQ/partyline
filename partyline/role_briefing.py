@@ -109,7 +109,10 @@ SPLIT = (
     "partyline verifies the SHA exists and fast-forwards the child's branch to it, and the "
     "hand-off is the SHA on the line's branch; nothing else counts. Record what your "
     'review caught: add "findings":["…"] to the accept call — they land in the '
-    "line's accept history at GET …/accepts. If the line's tip has "
+    "line's accept history at GET …/accepts. Declare the line's gates with "
+    "PUT {root}/gates and accept with {{\"run_gates\": true}} — they run fenced "
+    "in a scratch checkout at the SHA before the branch moves, and a failure "
+    "refuses the accept. If the line's tip has "
     "moved past the SHA you reviewed, send {{\"allow_descendant\": true}}: the accept "
     "fast-forwards to that newer tip when it descends from the reviewed SHA and the notice "
     "counts the commits that went in unreviewed. GET /api/conversations/<child-id>/tip "
