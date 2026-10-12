@@ -11,7 +11,7 @@ from .line_process_contracts import LineLiveEvent
 from .presence_contracts import WorkingEvent
 from .reaction_contracts import ReactionEvent, ReactionResponse
 from .pin_contracts import PinsChangedEvent
-from .resource_contracts import ResourceSnapshot
+from .resource_contracts import ResourceSnapshotEvent
 
 RestartPlanMode = Literal["offer", "automatic"]
 RestartPlanScope = Literal["line", "all"]
@@ -266,18 +266,6 @@ class RestartRequestEvent(BaseModel):
     request: Any = None
 
 
-class ResourceSnapshotEvent(BaseModel):
-    """The host memory picture, pushed once per sampler tick when it moved.
-
-    Replaces the per-tab 5 s poll: the sampler already runs on that cadence,
-    so the snapshot is computed once per tick and pushed to every open tab,
-    instead of every tab recomputing it over HTTP. A heartbeat rides at least
-    every 60 s so a quiet tab still sees fresh numbers arrive.
-    """
-    type: Literal["resources"] = "resources"
-    snapshot: ResourceSnapshot
-
-
 class WriteSetGrantRequestEvent(BaseModel):
     """The pending write-set grant request on a line changed."""
     type: Literal["write_set_grant_request"] = "write_set_grant_request"
@@ -301,10 +289,8 @@ Event = (
     | ConversationArchivedEvent
     | ConversationDeletedEvent
     | ConversationsChangedEvent
-    | ErrorEvent
-    | HelloEvent
-    | ReattachOfferEvent
-    | ReattachDecisionEvent
+    | ErrorEvent | HelloEvent
+    | ReattachOfferEvent | ReattachDecisionEvent
     | RestartRequestEvent | WriteSetGrantRequestEvent | MemoryEvent | ReactionEvent | PinsChangedEvent
     | ResourceSnapshotEvent
 )
