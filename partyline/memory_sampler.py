@@ -13,6 +13,7 @@ from .memory_contracts import MemoryUsageEvent
 from .mention_relay import live_manager, post_private
 from .resource_budget import cap_bytes, live_rows, settings
 from .process_memory import backstop_bytes
+from .resource_push import ResourcePusher
 from .memory_warning import warning_text  # noqa: F401  re-exported for the sampler's tests
 from .top_processes import top_descendants
 
@@ -177,6 +178,7 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
     activation: dict[str, object] = {}
     notified: dict[str, float] = {}
     cursor = 0
+    pusher = ResourcePusher(clock)
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="memory-sampler")
     loop = asyncio.get_running_loop()
     try:
@@ -250,6 +252,7 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
                             attachment_id=row["id"], usage_bytes=usage, cap_bytes=cap,
                             percent=min(100, usage * 100 // max(cap, 1)),
                         ))
+                await pusher.tick(runtime)
             except asyncio.CancelledError:
                 raise
             except Exception:

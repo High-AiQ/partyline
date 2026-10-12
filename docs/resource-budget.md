@@ -107,7 +107,15 @@ deliberately not shown: caps are ceilings, not usage, and their sum routinely
 exceeds the RAM the host has. Over-limit usage stays visible as real numbers
 and turns the indicator red. The root captain briefing includes a capacity
 line. The authenticated `/api/resources` endpoint is readable by machines as
-well as people.
+well as people, and serves the first load.
+
+Open tabs do not poll. On each memory-sampler tick the server computes the
+snapshot once and pushes it as a `resources` socket event — but only when
+something moved (host, partyline or temp use by 64 MB or 0.5% of RAM, or the
+live-process count, the process limit or the reserve changed), plus one
+heartbeat every 60 s while quiet. With no tab open nothing is computed. A tab
+loads once on mount and refreshes (debounced) on attachment and line-live
+events; the pushed frame carries the same body as `GET /api/resources`.
 
 The UI refreshes its resource snapshot on attachment, removal, and line-live
 wire events. `LineLiveEvent` is broadcast to every open socket, so a browser on
