@@ -14,6 +14,7 @@ import { MemoryRequestSchema } from "./memory-request-contracts";
 import { WriteSetGrantRequestSchema } from "./write-set-contracts";
 import { ReactionResponseSchema } from "./reaction-contracts";
 import { PinsChangedEventSchema } from "./pin-contracts";
+import { ResourceSnapshotSchema } from "./resource-api";
 
 export const HelloEventSchema = z.object({
   type: z.literal("hello"),
@@ -172,6 +173,11 @@ export const MemoryUsageEventSchema = z.object({
   cap_bytes: z.number().int().positive(),
   percent: z.number().int().min(0).max(100),
 });
+export const ResourcesEventSchema = z.object({
+  type: z.literal("resources"),
+  snapshot: ResourceSnapshotSchema,
+});
+export type ResourcesEvent = z.infer<typeof ResourcesEventSchema>;
 export type MemoryRequestEvent = z.infer<typeof MemoryRequestEventSchema>;
 export type ConversationsChangedEvent = z.infer<typeof ConversationsChangedEventSchema>;
 
@@ -196,6 +202,7 @@ const CurrentWireEventSchema = z.discriminatedUnion("type", [
   WriteSetGrantRequestEventSchema,
   MemoryRequestEventSchema,
   MemoryUsageEventSchema,
+  ResourcesEventSchema,
   PinsChangedEventSchema,
 ]);
 
