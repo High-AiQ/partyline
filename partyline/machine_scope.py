@@ -131,6 +131,28 @@ def allows(db: Db, principal: Principal, conv_id: str, capability: Capability) -
     return False
 
 
+def sibling_messaging(db: Db, principal: Principal, conv_id: str) -> bool:
+    """A captain may post a message to a sibling line — messages only (5.11).
+
+    Two captains cut from one parent coordinate constantly, and every such
+    post used to bounce off the assign check: a sibling is neither the
+    captain's own line nor a descendant of it. Both lines must share the
+    same **non-null** parent, so a root line or a cousin never qualifies,
+    and no other capability rides along — attach, accept, archive and the
+    rest stay exactly as refused as they were.
+    """
+    if principal.kind != "machine" or not principal.is_lead or not principal.conv_id:
+        return False
+    home = principal.conv_id
+    if home == conv_id:
+        return False  # own line: already allowed by "write"
+    target = db.get_conversation(conv_id)
+    parent = parent_id_of(target) if target else None
+    if parent is None:
+        return False
+    return parent == parent_id_of(db.get_conversation(home))
+
+
 def allows_restart_plan(
     principal: Principal, conversation_id: str, *, db: Db | None = None, scope: str = "line"
 ) -> bool:

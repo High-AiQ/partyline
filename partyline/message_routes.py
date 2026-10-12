@@ -8,7 +8,7 @@ from .attachment_view import attach_memory_usage, attachment_response
 from .auth_guard import request_principal
 from .contracts import MessageResponse
 from .hierarchy_contracts import MessageIn
-from .machine_scope import deny_unless, is_human
+from .machine_scope import deny_unless, is_human, sibling_messaging
 from .message_contracts import AroundMessageResponse, MessagePageResponse
 from .message_queries import select_message_by_id
 from .message_routing import post_identified
@@ -104,7 +104,11 @@ def message_router(runtime, media) -> APIRouter:
         capability = (
             "write" if principal.conv_id == conv_id or is_human(principal) else "assign"
         )
-        deny_unless(runtime.db, principal, conv_id, capability)
+        # A sibling captain's post is allowed here and nowhere else: the
+        # stamp below marks it with its own line, so the transcript reads
+        # "via «its line»" — attribution for free (5.11).
+        if not sibling_messaging(runtime.db, principal, conv_id):
+            deny_unless(runtime.db, principal, conv_id, capability)
         if is_human(principal) and not any(
             attachment["status"] in ("starting", "running")
             for attachment in runtime.db.list_attachments(conv_id)
