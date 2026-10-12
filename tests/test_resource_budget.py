@@ -286,14 +286,14 @@ class ResourceBudgetTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(refusal(self.db, GIB, host=host))
 
     def test_snapshot_reports_temp_mount_totals_and_the_partyline_share(self):
-        from partyline.attachment_tmp import attachment_tmp_dir, ensure_tmp_dir, tmp_summary
-        from partyline.attachment_tmp import _summary_cache
+        from partyline.attachment_tmp import attachment_tmp_dir, ensure_tmp_dir
+        from partyline.attachment_tmp import cached_usage
 
-        _summary_cache["value"] = None  # never serve another test's cached base
         ensure_tmp_dir({"id": "tmp-snap"})
         attachment_tmp_dir("tmp-snap").joinpath("f").write_bytes(b"x" * 512)
+        cached_usage(cached=False)  # refresh for this test's base before snapshot
         view = snapshot(self.db, self.host, runtime=SimpleNamespace(memory_usage={}))
-        fresh = tmp_summary(cached=False)
+        fresh = cached_usage()
         self.assertEqual(view["tmp_partyline_bytes"], fresh["tmp_partyline_bytes"])
         self.assertGreaterEqual(view["tmp_partyline_bytes"], 512)
         self.assertGreater(view["tmp_total_bytes"] or 0, 0)
