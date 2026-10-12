@@ -80,6 +80,7 @@ from .hook_routes import hook_url, hooks_router
 from .line_process_routes import detach_attachment, register_line_process_routes
 from .worktree_lifecycle import sweep_orphaned_worktrees
 from .message_routes import message_router
+from .message_forward import forward_router
 from .reaction_routes import reaction_router
 from .pin_routes import pin_router
 from .accept_sha import register_accept_route
@@ -103,6 +104,7 @@ from .hierarchy_routes import hierarchy_router
 from .write_set_routes import write_set_router
 from .media_routes import media_router
 from .preset_routes import presets_router
+from .process_signal import signal_router
 from .staffing_routes import staffing_router
 from .line_notes import notes_router
 from .settings_routes import settings_router
@@ -111,7 +113,7 @@ from .restart_report import restart_report_router
 from .static_cache import install_static_cache
 from .resume_continuation import resume_with_backlog
 from .restart_requests import register_restart_request_routes
-from .write_set_requests import register_write_set_request_routes
+from .write_set_decisions import register_write_set_request_routes
 from .reattach import (
     ReattachCoordinator,
     RestartPlanError,
@@ -219,6 +221,8 @@ app.include_router(staffing_router(runtime))
 app.include_router(notes_router(runtime))
 app.include_router(settings_router(runtime))
 app.include_router(restart_report_router(runtime, lambda r: require_loopback(r)))
+app.include_router(signal_router(runtime))
+app.include_router(forward_router(runtime))
 
 # -- REST ------------------------------------------------------------------
 @app.get("/")

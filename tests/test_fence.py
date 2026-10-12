@@ -26,7 +26,7 @@ from partyline import (auth_store, auth_tokens, fence, fence_darwin, fence_paths
                        git_fence, server)
 from partyline.auth_guard import install_auth_guard
 from partyline.write_set_routes import list_write_grants, write_set_router
-from partyline.write_set_requests import register_write_set_request_routes
+from partyline.write_set_decisions import register_write_set_request_routes
 from partyline.db import Db
 from partyline.features import overridden
 from partyline.hierarchy_routes import hierarchy_router

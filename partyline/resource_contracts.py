@@ -34,6 +34,12 @@ class ResourceSettings(BaseModel):
     computed_defaults: ResourceDefaults
 
 
+class ResourceLineUsage(BaseModel):
+    line_id: str
+    line: str
+    usage_bytes: int
+
+
 class ResourceSnapshot(BaseModel):
     max_live_processes: int
     memory_reserve_bytes: int
@@ -50,3 +56,11 @@ class ResourceSnapshot(BaseModel):
     remaining_processes: int
     remaining_memory_bytes: int
     busiest_line: str | None = None
+    host_used_bytes: int | None = None
+    host_available_bytes: int | None = None
+    partyline_server_bytes: int | None = None
+    partyline_processes_bytes: int | None = None
+    partyline_used_bytes: int | None = None
+    other_used_bytes: int | None = None
+    sampled_at: float | None = None
+    top_lines: list[ResourceLineUsage] = []

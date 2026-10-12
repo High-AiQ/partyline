@@ -11,8 +11,10 @@ import time
 from .hierarchy import ancestors
 from .memory_contracts import MemoryUsageEvent
 from .mention_relay import live_manager, post_private
-from .resource_budget import cap_bytes, live_rows, memory_ceiling, settings
-from .process_memory import backstop_bytes, format_memory_bytes, suggested_memory_limit
+from .resource_budget import cap_bytes, live_rows, settings
+from .process_memory import backstop_bytes
+from .memory_warning import warning_text  # noqa: F401  re-exported for the sampler's tests
+from .top_processes import top_descendants
 
 INTERVAL = 5.0
 CHUNK = 8
@@ -21,10 +23,6 @@ NOTICE_WINDOW = 600.0
 logger = logging.getLogger(__name__)
 _NO_PROCESS_TABLE = object()
 _NO_CGROUP_SAMPLE = object()
-
-
-def suggested_limit(cap: int) -> str | None:
-    return suggested_memory_limit(cap, memory_ceiling())
 
 
 def cgroup_usage(pid: int) -> tuple[int, int | None] | None:
@@ -47,26 +45,36 @@ def cgroup_usage(pid: int) -> tuple[int, int | None] | None:
 
 
 def process_snapshot(platform: str | None = None) -> tuple[dict[int, int], dict[int, int]] | None:
-    """Read a bounded process table once for a fallback batch."""
+    """Read a bounded process table once for a fallback batch.
+
+    A process exiting between the listing and the read must not lose the
+    whole table: entries that vanish mid-scan are skipped, not fatal. The
+    sampler treats an empty table as no data; the signal endpoint's
+    descendant check treats a partial table as partial truth, so a churning
+    host degrades to an incomplete answer rather than a false refusal.
+    """
     platform = sys.platform if platform is None else platform
     if platform.startswith("linux"):
         try:
-            parents, rss = {}, {}
             import os
+            parents, rss = {}, {}
             for name in os.listdir("/proc"):
                 if not name.isdigit():
                     continue
-                with open(f"/proc/{name}/stat", encoding="ascii") as stream:
-                    fields = stream.read().rsplit(")", 1)[1].split()
-                child = int(name)
-                parents[child] = int(fields[1])
-                with open(f"/proc/{child}/status", encoding="ascii") as stream:
-                    for line in stream:
-                        if line.startswith("VmRSS:"):
-                            rss[child] = int(line.split()[1]) * 1024
-                            break
+                try:
+                    with open(f"/proc/{name}/stat", encoding="ascii") as stream:
+                        fields = stream.read().rsplit(")", 1)[1].split()
+                    child = int(name)
+                    parents[child] = int(fields[1])
+                    with open(f"/proc/{child}/status", encoding="ascii") as stream:
+                        for line in stream:
+                            if line.startswith("VmRSS:"):
+                                rss[child] = int(line.split()[1]) * 1024
+                                break
+                except (OSError, ValueError, IndexError):
+                    continue  # exited mid-scan; the table is partial, not void
             return parents, rss
-        except (OSError, ValueError, IndexError):
+        except (OSError, ValueError):
             return None
     try:
         import subprocess
@@ -141,13 +149,16 @@ async def _warn(runtime, row: dict, usage: int, cap: int) -> None:
     Private copies still reach people on each line. A process near its cap is
     always told: a notice no process is rung for is one nobody acts on.
     """
+    adapter = runtime.live.get(row["id"])
+    pid = getattr(getattr(adapter, "proc", None), "pid", None)
+    top = top_descendants(pid) if isinstance(pid, int) else []
     # The copy to the process itself must not name it as the speaker: routing
     # never rings a process with its own words.
     await post_private(runtime, row["conv_id"], "system", "system",
-                       warning_text(row, usage, cap, own=True),
+                       warning_text(row, usage, cap, own=True, top=top),
                        audience=row["id"], source=(None, row["conv_id"]))
     source = (row["id"], row["conv_id"])
-    detail = warning_text(row, usage, cap)
+    detail = warning_text(row, usage, cap, top=top)
     for line in [row["conv_id"], *ancestors(runtime.db, row["conv_id"])]:
         captain = live_manager(runtime, line)
         if captain is not None and captain["id"] != row["id"]:
@@ -155,48 +166,6 @@ async def _warn(runtime, row: dict, usage: int, cap: int) -> None:
                                audience=captain["id"], source=source)
             return
 
-
-def cap_enforcement(platform: str, cap: int) -> str:
-    """Say honestly what reaching the cap does on this host."""
-    if platform.startswith("linux"):
-        hard = backstop_bytes(cap)
-        backstop = format_memory_bytes(hard)
-        if hard <= cap:
-            return (f"On this host the {backstop} emergency backstop is at or below the "
-                    f"{format_memory_bytes(cap)} budget. Warnings use the backstop; the kernel "
-                    "may kill this process there if it cannot reclaim enough memory.")
-        return ("The budget is advisory, so nothing stops you there, but at the "
-                f"{backstop} emergency backstop the kernel kills this process.")
-    if platform.startswith("win"):
-        return "On this host the budget is a hard limit: allocations past it fail and the process may exit."
-    # macOS gets only a best-effort address-space limit, not a resident one.
-    return ("This host cannot enforce the budget on resident memory, so growth past it "
-            "eats into memory every other process needs.")
-
-
-def warning_text(row: dict, usage: int, cap: int, *, own: bool = False) -> str:
-    """Build the warning; ``own`` words it for the process that is near its cap."""
-    percent = usage * 100 // max(cap, 1)
-    request_limit = suggested_limit(cap)
-    request_hint = (
-        f'POST /api/attachments/{row["id"]}/memory-requests with '
-        f'{{"requested_limit":"{request_limit}","reason":"…"}}; '
-        "approval restarts the process with the new budget."
-        if request_limit else "The host ceiling prevents a larger budget."
-    )
-    used = (f"{format_memory_bytes(usage)} of {'your' if own else 'its'} {format_memory_bytes(cap)} "
-            f"per-process memory budget ({percent}%)")
-    if own:
-        fate = cap_enforcement(sys.platform, cap)
-        return (f"⚠ {row['name']}, you are using {used}. {fate} Commit or save your work "
-                "now, then find and stop what is growing (a build, test run, or cache). If "
-                "the work genuinely needs more, file a request with a reason for a person to "
-                f"approve: {request_hint}")
-    clamp = (cap_enforcement(sys.platform, cap) + " "
-             if sys.platform.startswith("linux") and backstop_bytes(cap) <= cap else "")
-    return (f"⚠ {row['name']} is using {used}. {clamp}It has been told to save its work. As its "
-            "captain, decide now: have it cut what is growing, or file a justified higher budget "
-            f"for a person to approve, and tell the person which you chose. {request_hint}")
 
 
 async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:

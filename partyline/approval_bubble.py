@@ -39,14 +39,16 @@ def _clip(text: str, limit: int = DETAIL_LIMIT) -> str:
 
 
 async def bubble_approval(runtime, conv_id: str, *, kind: str, requester: str,
-                          detail: str, approve: str, actor=None) -> None:
+                          detail: str, approve: str, decline: str = "",
+                          actor=None) -> None:
     """Post the pending-approval notice on the tree's root and ring its captain.
 
     The forced mention route is what wakes: system notices are otherwise
     never delivered. The routed body names the requester too, but relays skip
     system notices, so only a process on the root — the captain — is rung,
     and the captain that filed the request itself is never rung about its own
-    filing (the same-speaker rule).
+    filing (the same-speaker rule). ``decline`` names the deny endpoint when
+    one exists, so the root captain can decline from the notice as well.
     """
     db = runtime.db
     chain = ancestors(db, conv_id)
@@ -59,8 +61,10 @@ async def bubble_approval(runtime, conv_id: str, *, kind: str, requester: str,
     line = db.get_conversation(conv_id)
     captain = lead_attachment(db, root_id)
     ring = f" @{captain['name']}" if captain else ""
+    decline_part = f"; decline: {decline}" if decline else ""
     body = (f"⚑ approval pending on «{line['name'] if line else conv_id}»: {kind} "
-            f"from @{requester} — {_clip(detail)} (approve: {approve}){ring}")
+            f"from @{requester} — {_clip(detail)} "
+            f"(approve: {approve}{decline_part}){ring}")
     msg = await post_system_notice(runtime, root_id, body, actor=actor)
     if captain:
         await runtime.route_mentions(root_id, msg, force=True)
@@ -87,6 +91,8 @@ def pending_approval_rows(db, conv_id: str, runtime=None) -> list[dict]:
                        f"/write-set/request/{row['id']}/approve",
             "decline": f"/api/conversations/{row['conv_id']}"
                        f"/write-set/request/{row['id']}",
+            "deny": f"/api/conversations/{row['conv_id']}"
+                    f"/write-set/request/{row['id']}/deny",
         })
     for row in db._exec(
             "SELECT conv_id, id, attachment_id, requester, requested_limit, reason, "

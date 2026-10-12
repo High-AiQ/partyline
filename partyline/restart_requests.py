@@ -155,6 +155,7 @@ def register_restart_request_routes(app: FastAPI, runtime, adapter_metadata, req
             runtime, conv_id, kind="restart", requester=principal.name,
             detail=runtime.restart_request.reason,
             approve=f"POST /api/restart-request/{runtime.restart_request.id}/approve",
+            decline=f"DELETE /api/restart-request/{runtime.restart_request.id}",
             actor=principal,
         )
         return runtime.restart_request

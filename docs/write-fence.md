@@ -158,6 +158,20 @@ combined workload fits; the captain still needs to consider other live processes
 First inspect the failed command and its error output. A failing assertion that
 prints a huge object graph needs a bounded diagnostic, not more RAM. Run uncertain
 tests under a smaller independent cap so the test can fail while the agent lives.
+The early memory warning names the process's three largest descendants — pid,
+RSS and a short command line — with each pid as the process itself sees it (the
+last `NSpid` field), so the fix is targeted. Stop one with `kill <pid>`, or with
+`POST /api/attachments/<id>/signal {"pid": N, "signal": "TERM"|"KILL"}`, which
+the process itself or its line's captain may call and which refuses anything
+that is not a strict descendant of that process. Never `pkill -f` or `killall`:
+every attachment runs under one uid, so a pattern kill reaches other lines'
+processes (two attachments exited -15 from one captain's cleanup on 2026-10-12).
+A per-attachment PID namespace (`bwrap --unshare-pid`) would make that physically
+impossible, and is deliberately not used: probed on 2026-10-12, `scripts/capped-test`
+inside such a fence falls back from the cgroup `MemoryMax` scope (whole process tree)
+to `RLIMIT_AS` (one process), so the flag would trade a cross-line kill risk for a
+silently weaker test cap.
+
 The repository's `scripts/capped-test` now uses the scope result to return 137 for
 a confirmed OOM even when systemd's launcher was terminated with SIGTERM.
 
@@ -287,6 +301,8 @@ POST /api/conversations/<id>/write-set   {"path": "/abs/normalized/path"}
 GET  /api/conversations/<id>/write-set
 GET  /api/conversations/<id>/write-set/request
 POST /api/conversations/<id>/write-set/request/<id>/approve   (person only)
+POST /api/conversations/<id>/write-set/request/<id>/deny      {"reason": "…"}
+POST /api/conversations/<id>/write-set/request/<id>/withdraw  (the requester only)
 DELETE /api/conversations/<id>/write-set/request/<id>         (person only)
 ```
 
@@ -297,7 +313,13 @@ Every open tab on that line shows the banner; a person approves or declines.
 Approval inserts the grant row, posts a system notice, privately rings the
 requester on its home line (by attachment id, never by name), and detaches
 and resumes every live process on the line so the widened bind applies.
-Decline clears the request and rings the requester the same way. Grants are
+Decline clears the request and rings the requester the same way; `deny` does the
+same with a reason (1–500 characters) posted on the requesting line, and the
+process that filed a request may `withdraw` it. A **captain** may approve or deny
+too, but only inside a grant it already holds: it must be the live lead of a
+strict ancestor of the requesting line, must not be the requester, and the
+requested path — resolved through symlinks — must lie inside a write grant on its
+own line. Anything wider is refused with `outside your grants; a person decides`. Grants are
 rows in `conversation_write_grants` with the grantor recorded. Paths must be
 absolute and normalized; a path that does not exist at spawn time binds nothing.
 

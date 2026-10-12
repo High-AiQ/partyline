@@ -16,7 +16,7 @@ def register_resource_routes(app, runtime) -> None:
     @app.get("/api/resources", response_model=ResourceSnapshot)
     def resources(request: Request):
         request_principal(request)  # all authenticated people and machines may read
-        view = snapshot(runtime.db)
+        view = snapshot(runtime.db, runtime=runtime)
         return {**view, "memory_ceiling_bytes": memory_ceiling()}
 
     @app.get("/api/settings/resources", response_model=ResourceSettings)

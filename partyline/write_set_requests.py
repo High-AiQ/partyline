@@ -14,23 +14,17 @@ import os
 import time
 import uuid
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import HTTPException
 from pydantic import BaseModel
 
 from .adapters import ADAPTER_METADATA
 from .approval_bubble import bubble_approval
-from .auth_guard import request_principal
-from .contracts import WriteSetGrantRequestEvent
 from .hierarchy import ancestors
 from .line_process_routes import detach_attachment, live_attachments
 from .line_worktree import REVIEW_DIR, rev
-from .machine_scope import deny_unless, is_human
-from .mention_relay import post_private
 from .resume_continuation import resume_with_backlog
 from .reattach import adapter_can_resume
 from .review_worktrees import ReviewError, subtree_repository
-from .system_notice import post_system_notice
-from .write_set_routes import add_write_grant
 
 logger = logging.getLogger(__name__)
 
@@ -151,89 +145,6 @@ def non_resumable_live_attachments(runtime, conv_id: str) -> list[dict]:
     ]
 
 
-def make_announcer(runtime):
-    async def announce(conv_id: str, text: str, *, actor=None) -> None:
-        await post_system_notice(runtime, conv_id, text, actor=actor)
-        await runtime.broadcast(
-            conv_id, WriteSetGrantRequestEvent(request=pending_model(runtime.db, conv_id).request))
-    return announce
-
-
-def register_write_set_request_routes(app: FastAPI, runtime, resume) -> None:
-    announce = make_announcer(runtime)
-
-    async def ring_requester(request: WriteSetGrantRequest, text: str, *, actor) -> None:
-        if not request.requester_attachment_id:
-            return
-        target = runtime.db.get_attachment(request.requester_attachment_id)
-        if target is None:
-            return
-        await post_private(
-            runtime, target["conv_id"], "system", "system", text,
-            audience=target["id"], actor=actor,
-        )
-
-    @app.get("/api/conversations/{conv_id}/write-set/request",
-             response_model=PendingWriteSetGrant)
-    async def pending(request: Request, conv_id: str):
-        principal = request_principal(request)
-        deny_unless(runtime.db, principal, conv_id, "read")
-        return pending_model(runtime.db, conv_id)
-
-    def _take(request: Request, conv_id: str, request_id: str) -> WriteSetGrantRequest:
-        if not is_human(request_principal(request)):
-            raise HTTPException(403, "only a person may decide a write-set request")
-        current = pending_model(runtime.db, conv_id).request
-        if current is None or current.id != request_id:
-            raise HTTPException(404, "that write-set request is no longer pending")
-        return current
-
-    @app.post("/api/conversations/{conv_id}/write-set/request/{request_id}/approve",
-              response_model=PendingWriteSetGrant)
-    async def approve(request: Request, conv_id: str, request_id: str):
-        current = _take(request, conv_id, request_id)
-        principal = request_principal(request)
-        blocked = non_resumable_live_attachments(runtime, conv_id)
-        if blocked:
-            names = ", ".join(f"@{att['name']} ({att['adapter']})" for att in blocked)
-            raise HTTPException(
-                409,
-                f"cannot approve while live processes cannot resume: {names}; "
-                "detach them first",
-            )
-        who = principal.name
-        add_write_grant(runtime.db, conv_id, current.path, who)
-        with runtime.db.lock:
-            runtime.db.conn.execute(
-                "DELETE FROM conversation_write_grant_requests WHERE conv_id=? AND id=?",
-                (conv_id, request_id))
-            runtime.db.conn.commit()
-        _resumed, failed = await resume_line_attachments(runtime, conv_id, resume)
-        text = (f"☏ write-set grant for `{current.path}` approved by @{who} — "
-                "live processes on this line are resumed with the widened bind")
-        if failed:
-            text += (f" — could not resume @{', @'.join(failed)}; "
-                     "re-attach them by hand")
-        await announce(conv_id, text)
-        await ring_requester(current, text, actor=principal)
-        return PendingWriteSetGrant(request=None)
-
-    @app.delete("/api/conversations/{conv_id}/write-set/request/{request_id}",
-                 response_model=PendingWriteSetGrant)
-    async def decline(request: Request, conv_id: str, request_id: str):
-        current = _take(request, conv_id, request_id)
-        principal = request_principal(request)
-        with runtime.db.lock:
-            runtime.db.conn.execute(
-                "DELETE FROM conversation_write_grant_requests WHERE conv_id=? AND id=?",
-                (conv_id, request_id))
-            runtime.db.conn.commit()
-        text = f"☏ write-set request for `{current.path}` declined by @{principal.name}"
-        await announce(conv_id, text)
-        await ring_requester(current, text, actor=principal)
-        return PendingWriteSetGrant(request=None)
-
-
 async def file_write_set_request(
     runtime, conv_id: str, path: str, principal, *, announce_fn,
 ) -> WriteSetGrantRequest:
@@ -270,6 +181,7 @@ async def file_write_set_request(
         runtime, conv_id, kind="write-set", requester=principal.name,
         detail=f"grant write scope for `{path}`",
         approve=f"POST /api/conversations/{conv_id}/write-set/request/{request.id}/approve",
+        decline=f"POST /api/conversations/{conv_id}/write-set/request/{request.id}/deny",
         actor=principal,
     )
     return request
