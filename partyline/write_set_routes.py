@@ -59,11 +59,8 @@ def add_write_grant(db, conv_id: str, path: str, granted_by: str) -> dict:
 
 
 def write_set_router(runtime) -> APIRouter:
-    from .write_set_requests import (
-        file_write_set_request,
-        make_announcer,
-        resolve_write_set_path,
-    )
+    from .write_set_decisions import make_announcer
+    from .write_set_requests import file_write_set_request, resolve_write_set_path
 
     router = APIRouter()
 

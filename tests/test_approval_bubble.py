@@ -22,7 +22,7 @@ from partyline.memory_requests import register_memory_request_routes
 from partyline.restart_requests import register_restart_request_routes
 from partyline.runtime import ChatRuntime
 from partyline.staffing import staffing_line
-from partyline.write_set_requests import register_write_set_request_routes
+from partyline.write_set_decisions import register_write_set_request_routes
 from partyline.write_set_routes import write_set_router
 
 
@@ -119,6 +119,7 @@ class ApprovalBubbleTest(unittest.TestCase):
         self.assertIn(": write-set from @dig", body)
         self.assertIn("grant write scope for `/tmp/opencode/extra`", body)
         self.assertIn("(approve: POST /api/conversations/grand/write-set/request/", body)
+        self.assertIn("decline: POST /api/conversations/grand/write-set/request/", body)
         self.assertIn("@terra", body)  # the root captain is named
         self.assertEqual(len(self.delivered_bubbles()), 1)  # and its process was rung
 
@@ -131,6 +132,7 @@ class ApprovalBubbleTest(unittest.TestCase):
         self.assertIn(": memory from @dig", body)
         self.assertIn("5G memory cap for ＠dig: large test bundle", body)
         self.assertIn("(approve: POST /api/memory-requests/", body)
+        self.assertIn("decline: DELETE /api/memory-requests/", body)
         self.assertIn("@terra", body)
         self.assertEqual(len(self.delivered_bubbles()), 1)
 
@@ -143,6 +145,7 @@ class ApprovalBubbleTest(unittest.TestCase):
         self.assertIn(": restart from @sol", body)
         self.assertIn("1.19.1 is merged and pulled", body)
         self.assertIn("(approve: POST /api/restart-request/", body)
+        self.assertIn("decline: DELETE /api/restart-request/", body)
         self.assertIn("@terra", body)
         self.assertEqual(len(self.delivered_bubbles()), 1)
 

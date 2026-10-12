@@ -82,6 +82,7 @@ def register_memory_request_routes(app: FastAPI, runtime, resume) -> None:
             runtime, att["conv_id"], kind="memory", requester=actor.name,
             detail=f"{body.requested_limit} memory cap for @{att['name']}: {reason}",
             approve=f"POST /api/memory-requests/{ident}/approve",
+            decline=f"DELETE /api/memory-requests/{ident}",
             actor=actor,
         )
         return record
