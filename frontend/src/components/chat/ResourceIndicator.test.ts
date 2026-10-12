@@ -6,6 +6,9 @@ import * as resourceApi from "../../lib/resource-api";
 import type { ResourceSnapshot } from "../../lib/resource-api";
 import { resources } from "../../state/resources.svelte.js";
 import ResourceIndicator from "./ResourceIndicator.svelte";
+import { onRoomWireEvent } from "../../state/room-wire-events.js";
+import type { RoomWireSink } from "../../state/room-wire-events.js";
+import type { WireContext } from "../../state/wire.svelte.js";
 import SettingsDialog from "../dialogs/SettingsDialog.svelte";
 
 const topbarActionsCss = readFileSync("src/styles/topbar-actions.css", "utf8");
@@ -42,6 +45,34 @@ describe("ResourceIndicator", () => {
     resources.popoverOpen = false;
     vi.restoreAllMocks();
     document.body.replaceChildren();
+  });
+
+  it("updates from a pushed resources event and never polls", async () => {
+    vi.useFakeTimers();
+    try {
+      const load = vi.spyOn(resourceApi, "getResources").mockResolvedValue(snapshot);
+      const component = mount(ResourceIndicator, { target: document.body });
+      try {
+        await vi.waitFor(() => {
+          expect(document.querySelector(".resource-trigger")?.textContent).toContain("18");
+        });
+        onRoomWireEvent(
+          {} as RoomWireSink,
+          { type: "resources", snapshot: { ...snapshot, live_processes: 7 } },
+          {} as WireContext,
+        );
+        await vi.waitFor(() => {
+          expect(document.querySelector(".resource-trigger")?.textContent).toContain("7");
+        });
+        expect(resources.snapshot?.live_processes).toBe(7);
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(load).toHaveBeenCalledTimes(1);
+      } finally {
+        void unmount(component);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("uses shared topbar interaction styling without state colours on hover", async () => {

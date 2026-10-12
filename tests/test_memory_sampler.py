@@ -177,6 +177,19 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("stale", self.runtime.memory_usage)
         self.assertNotIn("worker", self.runtime.memory_usage)
 
+    async def test_every_tick_offers_the_resource_snapshot_to_the_pusher(self):
+        class StopSampling(Exception):
+            pass
+
+        async def stop_after_tick(_seconds):
+            raise StopSampling
+
+        with patch("partyline.memory_sampler.ResourcePusher.tick", new_callable=AsyncMock) as push, \
+                patch("partyline.memory_sampler.asyncio.sleep", stop_after_tick):
+            with self.assertRaises(StopSampling):
+                await run(self.runtime, sampler=lambda _adapter: (1, None, "fake"))
+        push.assert_awaited_once_with(self.runtime)
+
     async def test_real_rss_sampler_takes_one_snapshot_for_the_whole_tick(self):
         from partyline.memory_sampler import read_usage
 
