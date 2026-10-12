@@ -15,13 +15,16 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
 import shutil
 import socket
+from dataclasses import dataclass, field
+from functools import partial
 
+logger = logging.getLogger(__name__)
 RELAY_ROOT = os.path.expanduser("~/.partyline/docker")
 DEFAULT_SOCKET = "/run/docker.sock"
-_servers: dict[str, asyncio.Task] = {}
 
 
 def host_socket() -> str:
@@ -68,25 +71,101 @@ async def _pump(source: asyncio.StreamReader, sink: asyncio.StreamWriter) -> Non
         pass
 
 
-async def _serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+def failure_text(host: str, error: OSError) -> str:
+    return (f"partyline docker relay: cannot connect to {host}: {error.strerror or error} — the "
+            "partyline server process needs the docker group (log out and in, or restart "
+            "the user manager, then restart partyline)")
+
+
+async def probe() -> str | None:
+    """Try the host socket once: None when it answers, else the reason it does not."""
+    host = host_socket()
     try:
-        host_reader, host_writer = await asyncio.open_unix_connection(host_socket())
-    except OSError:
+        _reader, writer = await asyncio.open_unix_connection(host)
+    except OSError as exc:
+        return failure_text(host, exc)
+    writer.close()
+    return None
+
+
+@dataclass
+class Relay:
+    path: str
+    task: asyncio.Task  # resolves to the asyncio.Server
+    clients: set = field(default_factory=set)
+    last_error: str | None = None
+
+    def listening(self) -> bool:
+        if not self.task.done():
+            return True
+        return not self.task.cancelled() and self.task.exception() is None \
+            and self.task.result().is_serving() and os.path.exists(self.path)
+
+
+_relays: dict[str, Relay] = {}
+_runtime = None
+
+
+def bind_runtime(runtime) -> None:
+    """Let a relay tell its line why it cannot reach Docker."""
+    global _runtime
+    _runtime = runtime
+
+
+async def _serve(conv_id: str, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    relay = _relays.get(conv_id)
+    host = host_socket()
+    try:
+        host_reader, host_writer = await asyncio.open_unix_connection(host)
+    except OSError as exc:
+        text = failure_text(host, exc)
+        logger.warning("docker relay for %s: upstream %s failed: errno %s: %s",
+                       conv_id, host, exc.errno, exc.strerror)
+        if relay is not None:
+            relay.last_error = text
+        # Take the request off the wire first: closing with it unread would
+        # reset the connection and swallow the reply.
+        with contextlib.suppress(TimeoutError, OSError):
+            await asyncio.wait_for(reader.read(65536), 1)
+        body = text.encode()
+        writer.write(b"HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\n"
+                     b"Connection: close\r\nContent-Length: %d\r\n\r\n" % len(body) + body)
+        with contextlib.suppress(OSError):
+            await writer.drain()
         writer.close()
         return
+    if relay is not None:
+        relay.last_error = None
+        relay.clients.add(writer)
     try:
         await asyncio.gather(_pump(reader, host_writer), _pump(host_reader, writer))
     finally:
+        if relay is not None:
+            relay.clients.discard(writer)
         for stream in (writer, host_writer):
             stream.close()
 
 
+async def _announce_probe(conv_id: str) -> None:
+    reason = await probe()
+    if reason is None:
+        return
+    logger.warning("docker relay for %s cannot reach Docker: %s", conv_id, reason)
+    if conv_id in _relays:
+        _relays[conv_id].last_error = reason
+    if _runtime is not None:
+        from .system_notice import post_system_notice
+        await post_system_notice(_runtime, conv_id, f"⚠ docker access cannot work: {reason}")
+
+
 def start(conv_id: str) -> str:
-    """Listen for this line (idempotent) and return the socket path; call inside the loop."""
+    """Listen for this line (one listener, reused) and return the socket path; call inside the loop."""
     path = relay_socket(conv_id)
-    running = _servers.get(conv_id)
-    if running is not None and not running.done():
+    existing = _relays.get(conv_id)
+    if existing is not None and existing.listening():
         return path
+    if existing is not None:
+        _close_now(existing)
     ensure_root()
     os.makedirs(relay_dir(conv_id), mode=0o700, exist_ok=True)
     os.chmod(relay_dir(conv_id), 0o700)
@@ -100,19 +179,42 @@ def start(conv_id: str) -> str:
         os.umask(previous)
     listener.listen()
     listener.setblocking(False)
+    loop = asyncio.get_running_loop()
     # Listening before the server task first runs: early connects queue.
-    _servers[conv_id] = asyncio.get_running_loop().create_task(
-        asyncio.start_unix_server(_serve, sock=listener))
+    _relays[conv_id] = Relay(path, loop.create_task(
+        asyncio.start_unix_server(partial(_serve, conv_id), sock=listener)))
+    loop.create_task(_announce_probe(conv_id))
     return path
 
 
+def _close_now(relay: Relay) -> None:
+    for client in list(relay.clients):
+        client.close()
+    if relay.task.done() and not relay.task.cancelled() and relay.task.exception() is None:
+        relay.task.result().close()
+    else:
+        relay.task.cancel()
+
+
 async def stop(conv_id: str) -> None:
-    task = _servers.pop(conv_id, None)
-    if task is not None:
-        server = await task
+    relay = _relays.pop(conv_id, None)
+    if relay is not None:
+        for client in list(relay.clients):
+            client.close()  # wait_closed waits for open connections
+        server = await relay.task
         server.close()
-        await server.wait_closed()
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(server.wait_closed(), 5)
     shutil.rmtree(relay_dir(conv_id), ignore_errors=True)
+
+
+async def status() -> list[dict]:
+    """Per relay: where it listens, whether it does, who is connected, why it last failed."""
+    reason = await probe()
+    return [{"conv_id": conv_id, "socket": relay.path, "listening": relay.listening(),
+             "connections": len(relay.clients), "last_error": relay.last_error,
+             "probe": "ok" if reason is None else reason}
+            for conv_id, relay in sorted(_relays.items())]
 
 
 def prepare(att: dict) -> None:
