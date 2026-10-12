@@ -177,6 +177,69 @@ class LaunchArgvTest(unittest.TestCase):
             last = max(i for i, item in enumerate(argv) if item == "--bind")
             self.assertEqual(argv[last + 1:last + 3], [grant, grant])
 
+    def test_a_grant_through_a_symlinked_parent_is_dropped(self):
+        # The 2.18 incident: /var/run -> /run resolves outside the sandbox
+        # root, and binding it killed every process before its CLI started.
+        with tempfile.TemporaryDirectory() as base:
+            repo = os.path.join(base, "repo")
+            line = os.path.join(repo, "worktree")
+            real = os.path.join(base, "run")
+            os.makedirs(os.path.join(line))
+            os.makedirs(real)
+            link = os.path.join(base, "var-run")
+            os.symlink(real, link)
+            sock = os.path.join(real, "docker.sock")
+            with open(sock, "w") as fh:
+                fh.write("")
+            att = _att(line, grants=[{"path": os.path.join(link, "docker.sock")}])
+            att["protected_roots"] = [repo]
+            with patch.object(fence, "bwrap_available", return_value=True):
+                argv = fence.launch_argv(FakeAdapter(att, ["cli"]))
+            binds = [argv[i + 1] for i, item in enumerate(argv) if item == "--bind"]
+            self.assertNotIn(os.path.realpath(sock), binds)
+
+    def test_a_grant_inside_a_protected_root_binds_its_realpath(self):
+        with tempfile.TemporaryDirectory() as base:
+            repo = os.path.join(base, "repo")
+            line = os.path.join(repo, "worktree")
+            target = os.path.join(repo, "asset.txt")
+            os.makedirs(line)
+            with open(target, "w") as fh:
+                fh.write("")
+            att = _att(line, grants=[{"path": target}])
+            att["protected_roots"] = [repo]
+            with patch.object(fence, "bwrap_available", return_value=True):
+                argv = fence.launch_argv(FakeAdapter(att, ["cli"]))
+            pairs = [(argv[i + 1], argv[i + 2])
+                     for i, item in enumerate(argv) if item == "--bind"]
+            self.assertIn((os.path.realpath(target), os.path.realpath(target)), pairs)
+
+    def test_a_socket_inside_a_protected_root_is_dropped(self):
+        # A bind source must be a regular file or directory: a socket cannot
+        # be a --bind source, so it is dropped rather than killing the spawn.
+        with tempfile.TemporaryDirectory() as base:
+            repo = os.path.join(base, "repo")
+            line = os.path.join(repo, "worktree")
+            os.makedirs(line)
+            listener = os.path.join(base, "agent.sock")
+            import socket as socket_mod
+            srv = socket_mod.socket(socket_mod.AF_UNIX, socket_mod.SOCK_STREAM)
+            srv.bind(listener)
+            self.addCleanup(srv.close)
+            # place the socket inside the protected root to prove the type
+            # rule, not the containment rule, is what drops it
+            inside = os.path.join(repo, "agent.sock")
+            srv2 = socket_mod.socket(socket_mod.AF_UNIX, socket_mod.SOCK_STREAM)
+            srv2.bind(inside)
+            self.addCleanup(srv2.close)
+            att = _att(line, grants=[{"path": inside}])
+            att["protected_roots"] = [repo]
+            with patch.object(fence, "bwrap_available", return_value=True):
+                argv = fence.launch_argv(FakeAdapter(att, ["cli"]))
+            binds = [argv[i + 1] for i, item in enumerate(argv) if item == "--bind"]
+            self.assertNotIn(inside, binds)
+            self.assertNotIn(os.path.realpath(inside), binds)
+
     def test_manifest_fence_args_apply_only_when_fenced(self):
         att = _att("/tmp", metadata={"fence_args": ["--yolo"]})
         with patch.object(fence, "bwrap_available", return_value=True):
@@ -902,7 +965,7 @@ class WriteSetGrantApiTest(unittest.TestCase):
         return {"Authorization": "Bearer " + auth_store.ensure_api_token(self.db, att_id)}
 
     def test_person_grants_scope_and_it_is_recorded(self):
-        target = os.path.join(self.directory.name, "shared-assets")
+        target = os.path.join(self.repo, "shared-assets")
         response = self.client.post(f"/api/conversations/{self.kid['id']}/write-set",
                                     json={"path": target})
         self.assertEqual(response.status_code, 200, response.text)
@@ -911,7 +974,7 @@ class WriteSetGrantApiTest(unittest.TestCase):
         self.assertEqual(rows[0]["granted_by"], "person")
 
     def test_grant_is_idempotent(self):
-        target = os.path.join(self.directory.name, "assets")
+        target = os.path.join(self.repo, "assets")
         for _ in range(2):
             response = self.client.post(f"/api/conversations/{self.kid['id']}/write-set",
                                         json={"path": target})
@@ -921,7 +984,7 @@ class WriteSetGrantApiTest(unittest.TestCase):
     def test_the_line_itself_files_a_write_set_request(self):
         self.db.add_attachment("kid-worker", self.kid["id"], "worker", "fake",
                                ["fake"], self.directory.name)
-        target = os.path.join(self.directory.name, "x")
+        target = os.path.join(self.repo, "x")
         response = self.client.post(
             f"/api/conversations/{self.kid['id']}/write-set",
             json={"path": target},
@@ -935,7 +998,7 @@ class WriteSetGrantApiTest(unittest.TestCase):
         self.assertEqual(pending.json()["request"]["id"], body["id"])
 
     def test_a_captain_above_can_file_a_write_set_request(self):
-        target = os.path.join(self.directory.name, "captain-requested")
+        target = os.path.join(self.repo, "captain-requested")
         response = self.client.post(
             f"/api/conversations/{self.kid['id']}/write-set",
             json={"path": target},
@@ -947,8 +1010,8 @@ class WriteSetGrantApiTest(unittest.TestCase):
         self.db.add_attachment("kid-worker", self.kid["id"], "worker", "fake",
                                ["fake"], self.directory.name)
         headers = self.machine("kid-worker")
-        first = os.path.join(self.directory.name, "first")
-        second = os.path.join(self.directory.name, "second")
+        first = os.path.join(self.repo, "first")
+        second = os.path.join(self.repo, "second")
         self.assertEqual(self.client.post(
             f"/api/conversations/{self.kid['id']}/write-set",
             json={"path": first}, headers=headers).status_code, 200)
@@ -963,7 +1026,7 @@ class WriteSetGrantApiTest(unittest.TestCase):
         self.db._exec("UPDATE attachments SET is_lead=1, status='running' WHERE id='stranger-lead'")
         response = self.client.post(
             f"/api/conversations/{self.kid['id']}/write-set",
-            json={"path": os.path.join(self.directory.name, "y")},
+            json={"path": os.path.join(self.repo, "y")},
             headers=self.machine("stranger-lead"))
         self.assertEqual(response.status_code, 403, response.text)
 
@@ -984,7 +1047,7 @@ class WriteSetGrantApiTest(unittest.TestCase):
         self.assertEqual(listing.json(), [])
 
     def test_a_granted_path_is_reopened_after_the_repository_deny(self):
-        target = os.path.join(self.directory.name, "granted-dir")
+        target = os.path.join(self.repo, "granted-dir")
         os.makedirs(target)
         line = os.path.join(self.repo, "child-worktree")
         os.makedirs(line)

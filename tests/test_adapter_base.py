@@ -78,6 +78,15 @@ class Recorder(Adapter):
 
 
 class AdapterLifecycleTest(unittest.IsolatedAsyncioTestCase):
+    async def test_none_in_spawn_argv_is_named_before_popen(self):
+        adapter = Recorder(["codex", "resume", None, "--flag"])
+        with patch("subprocess.Popen") as popen:
+            with self.assertRaises(ValueError) as caught:
+                await adapter.start()
+        self.assertIn("is None (after 'resume')", str(caught.exception))
+        self.assertIn("'resume'", str(caught.exception))
+        popen.assert_not_called()
+
     async def test_many_child_waits_do_not_starve_shared_executor_and_reap_once(self):
         class SleepingChild:
             def __init__(self, pid, release, lock, entered):
