@@ -190,8 +190,10 @@ def register_line_base_route(app, runtime) -> None:
         tip_sha = fenced_tip or branch_sha
         ahead = None
         if branch_sha and tip_sha:
-            ahead = int(rev(root, "rev-list", "--count",
-                            f"{branch_sha}..{tip_sha}") or 0)
+            # rev() answers None when git cannot range — a tip root cannot
+            # see, say. Unknown is not zero: 0 says "nothing to accept".
+            count = rev(root, "rev-list", "--count", f"{branch_sha}..{tip_sha}")
+            ahead = int(count) if count is not None else None
         return TipResponse(
             accepted_sha=branch_sha, tip_sha=tip_sha, ahead=ahead,
             branch=branch, branch_sha=branch_sha, fenced_tip=fenced_tip,

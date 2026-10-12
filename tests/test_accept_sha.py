@@ -456,6 +456,20 @@ class AcceptShaTest(unittest.TestCase):
         self.assertEqual(body["tip_sha"], body["branch_sha"])
         self.assertEqual(body["ahead"], 0)
 
+    def test_an_unranged_tip_reports_unknown_ahead_not_zero(self):
+        # The mirror names an object the host repository cannot range over:
+        # tip_sha is still reported, but "how far ahead" is unknown — a 0
+        # there would tell the captain there is nothing to accept.
+        self.commit("first")
+        bogus = "f" * 40
+        self.mirror(bogus)
+
+        body = self.tip().json()
+
+        self.assertEqual(body["tip_sha"], bogus)  # still reported
+        self.assertEqual(body["accepted_sha"], self.branch_head())
+        self.assertIsNone(body["ahead"])
+
     def test_tip_of_an_unplaced_or_unknown_line(self):
         # no placed worktree: nothing to read, all nulls, never a crash
         self.db.create_conversation("det", "det")
