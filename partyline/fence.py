@@ -108,8 +108,39 @@ def existing(paths: list[str]) -> list[str]:
     return [p for p in paths if os.path.lexists(p)]
 
 
+def _inside(path: str, root: str) -> bool:
+    """Separator-safe containment: ``/a/bc`` is not inside ``/a/b``."""
+    root = root.rstrip(os.sep)
+    if not root:
+        return True  # "/" contains every absolute path
+    return path == root or path.startswith(root + os.sep)
+
+
 def _grant_paths(att: dict) -> list[str]:
-    return existing([str(grant.get("path", "")) for grant in att.get("write_grants") or []])
+    """Grants that still need a bind: resolved, regular, and not already
+    writable.
+
+    A grant outside every protected root is dropped: the fence leaves the
+    rest of the filesystem writable, so the bind is pointless — and a grant
+    reached through a symlinked parent (``/var/run`` → ``/run``) resolves
+    outside the sandbox root, where bubblewrap refuses the bind and the
+    process dies before its CLI starts (2.18). Sockets, devices and fifos
+    are dropped too: only regular files and directories bind, each onto its
+    own resolved path.
+    """
+    protected = _protected_roots(att)
+    kept: list[str] = []
+    for grant in att.get("write_grants") or []:
+        raw = str(grant.get("path", ""))
+        if not raw or not os.path.lexists(raw):
+            continue
+        resolved = os.path.realpath(raw)
+        if not any(_inside(resolved, root) for root in protected):
+            continue  # already writable outside the protected set
+        if not (os.path.isfile(resolved) or os.path.isdir(resolved)):
+            continue  # a socket, device or fifo: nothing to bind
+        kept.append(resolved)
+    return kept
 
 
 def _protected_roots(att: dict) -> list[str]:

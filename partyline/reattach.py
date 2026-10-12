@@ -79,6 +79,11 @@ def adapter_can_resume(metadata: Mapping[str, object]) -> bool:
     )
 
 
+def resume_needs_session(metadata: Mapping[str, object]) -> bool:
+    capabilities = metadata.get("capabilities")
+    return isinstance(capabilities, dict) and bool(capabilities.get("resume_needs_session"))
+
+
 def restart_plan_response(db: Db, plan: RestartPlan) -> RestartPlanResponse:
     attachments = []
     for attachment_id in plan["attachment_ids"]:

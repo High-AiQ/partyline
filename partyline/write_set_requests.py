@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from .adapters import ADAPTER_METADATA
 from .approval_bubble import bubble_approval
+from .fence_protect import protected_repo_roots
 from .hierarchy import ancestors
 from .line_process_routes import detach_attachment, live_attachments
 from .line_worktree import REVIEW_DIR, rev
@@ -79,6 +80,38 @@ def validate_path(path: str) -> str:
     if not path.startswith("/") or path == "/" or os.path.normpath(path) != path:
         raise HTTPException(
             400, "path must be an absolute, normalized file or directory path")
+    return path
+
+
+def validate_grantable(db, path: str) -> str:
+    """The path a filing may grant: inside a protected repository, and bindable.
+
+    Two refusals at filing time (2.18), because a grant the fence cannot use
+    is worse than no grant: it either does nothing or kills the spawn. A path
+    outside every protected root is already writable — the fence leaves the
+    rest of the filesystem open — so say that rather than silently storing a
+    grant that will be dropped at spawn. A path that exists but is not a
+    regular file or directory (a socket, device or fifo) cannot be bound by
+    bubblewrap at all: ``/var/run/docker.sock`` through its symlinked parent
+    is exactly how an entire line's processes died before their CLIs started.
+    """
+    import os
+
+    path = validate_path(path)
+    resolved = os.path.realpath(path)
+    roots = protected_repo_roots(db)
+    if not any(
+        resolved == root or resolved.startswith(root.rstrip(os.sep) + os.sep)
+        for root in roots
+    ):
+        raise HTTPException(
+            400, f"{path} is already writable outside the protected repositories "
+                 "— no grant needed")
+    if os.path.exists(resolved) and not (
+            os.path.isfile(resolved) or os.path.isdir(resolved)):
+        raise HTTPException(
+            400, f"{path} is not a regular file or directory; only files and "
+                 "directories can be granted")
     return path
 
 
@@ -154,7 +187,7 @@ async def file_write_set_request(
     if not machine_may_file(db, principal, conv_id):
         raise HTTPException(
             403, "only a person or a captain above this line may grant write scope")
-    path = validate_path(path)
+    path = validate_grantable(db, path)
     request = WriteSetGrantRequest(
         id=uuid.uuid4().hex[:12],
         conversation_id=conv_id,

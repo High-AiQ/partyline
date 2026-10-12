@@ -113,6 +113,9 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
         # Soft cap: the scope's only kernel limit is the backstop above it.
         hard = process_memory.backstop_limit(self.memory_limit) if self.memory_scope else self.memory_limit
         self.spawn_argv = process_memory.scope_argv(fence.launch_argv(self), hard, unit=self.memory_scope)
+        if None in self.spawn_argv:
+            i = self.spawn_argv.index(None)
+            raise ValueError(f"spawn argv element {i} is None (after {self.spawn_argv[i - 1]!r})")
         env = dict(child_env(os.environ, self.att), TERM="xterm-256color")
         env.update(self.spawn_env())
         # Adapters declare what to strip so a spawned CLI doesn't mistake itself

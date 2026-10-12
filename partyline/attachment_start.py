@@ -1,6 +1,7 @@
 """Start an already-reserved attachment through the regular PTY seam."""
 
 import asyncio
+import logging
 
 from fastapi import HTTPException
 
@@ -20,6 +21,8 @@ from .scratch_worktrees import list_scratch_worktrees
 from .role_delivery import bind_role_delivery
 from .write_set_routes import list_write_grants
 from .resource_budget import format_limit, settings
+
+logger = logging.getLogger(__name__)
 
 
 def prepare_attachment(att, runtime, hook_url, checkpoint):
@@ -107,6 +110,8 @@ async def start_attachment(att, *, runtime, presence, make_adapter, hook_url,
         await rollback_start(runtime, att)
         if isinstance(exc, asyncio.CancelledError):
             raise
+        # The 500 the caller sees is one line; the journal gets the trace.
+        logger.exception("start of %s failed", ident)
         raise HTTPException(500, f"failed to spawn: {exc}") from exc
 
 
