@@ -109,6 +109,8 @@ from .process_signal import signal_router
 from .staffing_routes import staffing_router
 from .line_notes import notes_router
 from .settings_routes import settings_router
+from . import docker_relay
+from .docker_relay_routes import register_docker_relay_routes
 from .resource_routes import register_resource_routes
 from .restart_report import restart_report_router
 from .static_cache import install_static_cache
@@ -207,6 +209,8 @@ register_line_process_routes(app, runtime)
 register_goal_route(app, runtime)
 register_process_overview_route(app, runtime)
 register_resource_routes(app, runtime)
+register_docker_relay_routes(app)
+docker_relay.bind_runtime(runtime)
 register_tmp_reap_routes(app, runtime)
 register_restart_request_routes(app, runtime, ADAPTER_METADATA, lambda: request_exit())
 app.include_router(auth_router(runtime.db, on_handle_change=user_sockets.close_all))
