@@ -9,6 +9,7 @@ import sys
 
 from partyline.adapters.base import Adapter as BaseAdapter
 from partyline.adapters.compaction import is_compaction_record
+from partyline.adapters.session_seed import seed_claude_home
 
 # A session that recorded our claim token recorded it near the top, in the
 # briefing or the first wake. Bounding the scan keeps a stranger's
@@ -17,8 +18,8 @@ SCAN_BYTES = 512 * 1024
 
 
 def _compaction_hooks(att: dict) -> bool:
-    """Whether the manifest declares compaction hooks. Read from the stamped
-    metadata: importing the helper would cycle through this very package."""
+    """Whether the manifest declares compaction hooks; stamped metadata (an
+    import of the helper would cycle through this package)."""
     capabilities = (att.get("adapter_metadata") or {}).get("capabilities") or {}
     return bool(capabilities.get("compaction_hooks"))
 
@@ -35,13 +36,12 @@ class PartylineAdapter(BaseAdapter):
     _transcript: str = ""
 
     def spawn_env(self):
-        if sys.platform != 'win32':
-            return {}
-        from partyline.adapters.session_seed import seed
-        home = os.path.expanduser(os.environ.get('CLAUDE_CONFIG_DIR', '~/.claude'))
-        os.makedirs(home, exist_ok=True)
-        seed(os.path.expanduser('~/.claude.json'), os.path.join(home, '.claude.json'))
-        return {'CLAUDE_CONFIG_DIR': home}
+        env = {}
+        if home := seed_claude_home():
+            env['CLAUDE_CONFIG_DIR'] = home
+        if limit := int(self.att.get("auto_compact_tokens") or 0):
+            env['CLAUDE_CODE_AUTO_COMPACT_WINDOW'] = str(limit)  # plain token count
+        return env
 
     async def stop(self):
         self._CLAIMED.discard(self._transcript)
