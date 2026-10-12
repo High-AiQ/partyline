@@ -23,6 +23,7 @@ from .write_set_requests import (
     WriteSetGrantRequest,
     non_resumable_live_attachments,
     pending_model,
+    resume_granted_scope,
     resume_line_attachments,
 )
 from .contracts import WriteSetGrantRequestEvent
@@ -121,7 +122,7 @@ def register_write_set_request_routes(app: FastAPI, runtime, resume) -> None:
               response_model=PendingWriteSetGrant)
     async def approve(request: Request, conv_id: str, request_id: str):
         current, principal = _take_for_decision(request, conv_id, request_id)
-        blocked = non_resumable_live_attachments(runtime, conv_id)
+        blocked = non_resumable_live_attachments(runtime, conv_id, current.path)
         if blocked:
             names = ", ".join(f"@{att['name']} ({att['adapter']})" for att in blocked)
             raise HTTPException(
@@ -136,9 +137,13 @@ def register_write_set_request_routes(app: FastAPI, runtime, resume) -> None:
                 "DELETE FROM conversation_write_grant_requests WHERE conv_id=? AND id=?",
                 (conv_id, request_id))
             runtime.db.conn.commit()
-        _resumed, failed = await resume_line_attachments(runtime, conv_id, resume)
+        _resumed, failed = await resume_granted_scope(
+            runtime, conv_id, current.path, resume, resume_line_attachments)
         text = (f"☏ write-set grant for `{current.path}` approved by @{who} — "
                 "live processes on this line are resumed with the widened bind")
+        if docker_relay.is_docker_socket(current.path):
+            text = (f"☏ docker access granted by @{who} — every live process is resumed "
+                    "so other lines cannot reach the relay")
         if failed:
             text += (f" — could not resume @{', @'.join(failed)}; "
                      "re-attach them by hand")
