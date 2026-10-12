@@ -32,7 +32,7 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(process_tree_rss(10, "darwin"), 300 * 1024)
 
     def test_warning_text_uses_a_ceiling_bounded_request_and_human_units(self):
-        with patch("partyline.memory_sampler.memory_ceiling", return_value=6 * 1024**3):
+        with patch("partyline.memory_warning.memory_ceiling", return_value=6 * 1024**3):
             text = warning_text({"id": "worker", "name": "worker"},
                                 3_600_000_000, 4 * 1024**3)
         self.assertIn("3.4 GiB of its 4.0 GiB per-process memory budget (83%)", text)
@@ -46,7 +46,8 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
                  "win32": "allocations past it fail",
                  "darwin": "cannot enforce the budget on resident memory"}
         for platform, phrase in cases.items():
-            with self.subTest(platform), patch("partyline.memory_sampler.sys.platform", platform):
+            with self.subTest(platform), \
+                    patch("partyline.memory_warning.sys.platform", platform):
                 text = warning_text(row, 9, 10, own=True)
             self.assertIn(phrase, text)
             self.assertIn("Commit or save your work now", text)
@@ -67,7 +68,8 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
         with patch('partyline.server_memory.host_memory_bytes', return_value=8 * gib):
             for platform in ('linux', 'win32', 'darwin'):
                 with self.subTest(platform=platform), \
-                        patch('partyline.memory_sampler.sys.platform', platform):
+                        patch('partyline.memory_sampler.sys.platform', platform), \
+                        patch('partyline.memory_warning.sys.platform', platform):
                     self.assertEqual(warning_limit(8 * gib), (6 if platform == 'linux' else 8) * gib)
                     self.assertEqual(warning_limit(4 * gib), 4 * gib)
             with patch('partyline.memory_sampler.sys.platform', 'linux'):
