@@ -13,6 +13,10 @@ is still waiting anywhere in a line's subtree, for the staffing line.
 
 from __future__ import annotations
 
+from fastapi import HTTPException, Request
+
+from .auth_guard import request_principal
+from .machine_scope import is_human
 from .hierarchy import ancestors, lead_attachment, subtree_conversation_ids
 from .system_notice import post_system_notice
 
@@ -60,6 +64,72 @@ async def bubble_approval(runtime, conv_id: str, *, kind: str, requester: str,
     msg = await post_system_notice(runtime, root_id, body, actor=actor)
     if captain:
         await runtime.route_mentions(root_id, msg, force=True)
+
+
+def pending_approval_rows(db, conv_id: str, runtime=None) -> list[dict]:
+    """Rich rows for every approval still pending in conv_id's subtree.
+
+    Oldest first. Same sources as ``pending_approvals``, plus the fields a
+    person needs to decide without opening the subline: kind, line id and
+    name, requester, a human detail line, created-at, and the approve and
+    decline endpoints. Restart requests are host-wide and live in memory.
+    """
+    items: list[dict] = []
+    for row in db._exec(
+            "SELECT conv_id, id, requester, path, created_at "
+            "FROM conversation_write_grant_requests").fetchall():
+        items.append({
+            "kind": "write-set", "conv_id": row["conv_id"], "request_id": row["id"],
+            "requester": row["requester"],
+            "detail": f"write-set scope for `{row['path']}`",
+            "created_at": row["created_at"],
+            "approve": f"/api/conversations/{row['conv_id']}"
+                       f"/write-set/request/{row['id']}/approve",
+            "decline": f"/api/conversations/{row['conv_id']}"
+                       f"/write-set/request/{row['id']}",
+        })
+    for row in db._exec(
+            "SELECT conv_id, id, attachment_id, requester, requested_limit, reason, "
+            "created_at FROM memory_limit_requests").fetchall():
+        att = db.get_attachment(row["attachment_id"]) if row["attachment_id"] else None
+        target = f"@{att['name']}" if att else row["attachment_id"]
+        items.append({
+            "kind": "memory", "conv_id": row["conv_id"], "request_id": row["id"],
+            "requester": row["requester"],
+            "detail": f"{row['requested_limit']} memory cap for {target}: {row['reason']}",
+            "created_at": row["created_at"],
+            "approve": f"/api/memory-requests/{row['id']}/approve",
+            "decline": f"/api/memory-requests/{row['id']}",
+        })
+    request = getattr(runtime, "restart_request", None) if runtime is not None else None
+    if request is not None:
+        items.append({
+            "kind": "restart", "conv_id": request.conversation_id,
+            "request_id": request.id, "requester": request.requester,
+            "detail": f"restart partyline: {request.reason}",
+            "created_at": request.created_at,
+            "approve": f"/api/restart-request/{request.id}/approve",
+            "decline": f"/api/restart-request/{request.id}",
+        })
+    subtree = set(subtree_conversation_ids(db, conv_id))
+    found = []
+    for item in sorted(items, key=lambda entry: entry["created_at"]):
+        if item["conv_id"] not in subtree:
+            continue
+        conv = db.get_conversation(item["conv_id"])
+        item["line"] = conv["name"] if conv else item["conv_id"]
+        found.append(item)
+    return found
+
+
+def register_approval_routes(app, runtime) -> None:
+    @app.get("/api/conversations/{conv_id}/approvals")
+    async def approvals(request: Request, conv_id: str):
+        # Deciding is a person's act; a process reads its own line's banner
+        # through the existing per-kind routes instead.
+        if not is_human(request_principal(request)):
+            raise HTTPException(403, "approvals are decided by people")
+        return pending_approval_rows(runtime.db, conv_id, runtime=runtime)
 
 
 def pending_approvals(db, conv_id: str, *, runtime=None) -> list[tuple[str, str]]:

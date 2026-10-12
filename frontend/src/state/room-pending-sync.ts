@@ -2,6 +2,7 @@
 import type { MemoryRequestEvent, RestartRequestEvent, WriteSetGrantRequestEvent } from "../lib/events";
 import { restart } from "./restart.svelte.js";
 import { writeSet } from "./write-set.svelte.js";
+import { approvals } from "./approvals.svelte";
 import { memoryRequest } from "./memory-request.svelte.js";
 
 export function ignoreBackgroundFailure(): void {
@@ -20,14 +21,17 @@ export function resyncPendingBanners(convId: string): void {
   void restart.load(true).catch(ignoreBackgroundFailure);
   void writeSet.load(convId, true).catch(ignoreBackgroundFailure);
   void memoryRequest.load(convId, true).catch(ignoreBackgroundFailure);
+  void approvals.refresh().catch(ignoreBackgroundFailure);
 }
 
 export function openPendingBanners(convId: string): void {
   void writeSet.load(convId).catch(ignoreBackgroundFailure);
   void memoryRequest.load(convId).catch(ignoreBackgroundFailure);
+  void approvals.load(convId).catch(ignoreBackgroundFailure);
 }
 
 export function leavePendingBanners(): void {
   writeSet.clear();
   memoryRequest.clear();
+  approvals.clear();
 }
