@@ -11,6 +11,13 @@ export const ResourceDefaultsSchema = z.object({
   memory_captain_ceiling_bytes: z.number().int(),
 });
 
+export const ResourceLineUsageSchema = z.object({
+  line_id: z.string(),
+  line: z.string(),
+  usage_bytes: z.number().int(),
+});
+export type ResourceLineUsage = z.infer<typeof ResourceLineUsageSchema>;
+
 export const ResourceSnapshotSchema = z.object({
   max_live_processes: z.number().int(),
   memory_reserve_bytes: z.number().int(),
@@ -27,6 +34,14 @@ export const ResourceSnapshotSchema = z.object({
   remaining_processes: z.number().int(),
   remaining_memory_bytes: z.number().int(),
   busiest_line: z.string().nullable(),
+  host_used_bytes: z.number().int().nullable(),
+  host_available_bytes: z.number().int().nullable(),
+  partyline_server_bytes: z.number().int().nullable(),
+  partyline_processes_bytes: z.number().int().nullable(),
+  partyline_used_bytes: z.number().int().nullable(),
+  other_used_bytes: z.number().int().nullable(),
+  sampled_at: z.number().nullable(),
+  top_lines: z.array(ResourceLineUsageSchema),
 });
 export type ResourceSnapshot = z.infer<typeof ResourceSnapshotSchema>;
 

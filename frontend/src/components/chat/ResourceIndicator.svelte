@@ -23,14 +23,32 @@
         view.memory_reserved_bytes > view.memory_budget_bytes),
     ),
   );
+  const hostLabel = $derived(
+    view?.host_used_bytes != null ? `${gb(view.host_used_bytes)}/${gb(view.host_ram_bytes)}` : null,
+  );
+  const partylineShare = $derived(usageShare(view?.host_used_bytes, view?.partyline_used_bytes));
+  const otherShare = $derived(usageShare(view?.host_used_bytes, view?.other_used_bytes));
 
-  onMount(() => {
-    void resources.load();
-  });
+  function usageShare(used: number | null | undefined, part: number | null | undefined): number {
+    if (used == null || part == null || used <= 0) return 0;
+    return Math.min(100, Math.round((part / used) * 100));
+  }
 
   function gb(bytes: number): string {
     return `${(bytes / 1024 ** 3).toFixed(bytes >= 10 * 1024 ** 3 ? 0 : 1)} GB`;
   }
+
+  function gbText(bytes: number | null | undefined): string {
+    return bytes == null ? "—" : gb(bytes);
+  }
+
+  onMount(() => {
+    void resources.load();
+    resources.startPolling();
+    return () => {
+      resources.stopPolling();
+    };
+  });
 
   function openSettings(): void {
     resources.popoverOpen = false;
@@ -44,7 +62,7 @@
 
   const tooltipLabel = $derived(
     view
-      ? `processes ${String(view.live_processes)}/${String(view.max_live_processes)}\nadmission reservation ${gb(view.memory_reserved_bytes)} of ${gb(view.memory_budget_bytes)} · per-process caps ${gb(view.memory_cap_bytes)}\nmost processes (line + child lines): ${view.busiest_line ?? "none"}${blocked ? "\nnew attaches are blocked until usage drops or the limit is raised" : ""}`
+      ? `processes ${String(view.live_processes)}/${String(view.max_live_processes)}\nhost ${gbText(view.host_used_bytes)}/${gb(view.host_ram_bytes)} · partyline ${gbText(view.partyline_used_bytes)}\nadmission reservation ${gb(view.memory_reserved_bytes)} of ${gb(view.memory_budget_bytes)}\nmost processes (line + child lines): ${view.busiest_line ?? "none"}${blocked ? "\nnew attaches are blocked until usage drops or the limit is raised" : ""}`
       : "resource capacity loading",
   );
 </script>
@@ -78,16 +96,36 @@
         >/{view ? String(view.max_live_processes) : "—"}</span
       >
     </span>
+    {#if hostLabel}
+      <span class="resource-host">{hostLabel}</span>
+    {/if}
   </button>
   {#if resources.popoverOpen && view}
     <div class="resource-popover" role="dialog" aria-label="resource capacity">
       <div>processes <strong>{view.live_processes}/{view.max_live_processes}</strong></div>
       <div>
+        host memory <strong>{gbText(view.host_used_bytes)} / {gb(view.host_ram_bytes)}</strong>
+      </div>
+      {#if view.host_used_bytes != null}
+        <div class="host-bar" role="img" aria-label="host memory used of total">
+          <span class="partyline" style="width: {String(partylineShare)}%"></span>
+          <span class="other" style="width: {String(otherShare)}%"></span>
+        </div>
+      {/if}
+      <div>available <strong>{gbText(view.host_available_bytes)}</strong></div>
+      <div>
+        partyline <strong>{gbText(view.partyline_used_bytes)}</strong>
+        ({gbText(view.partyline_server_bytes)} server + {gbText(view.partyline_processes_bytes)}
+        processes)
+      </div>
+      {#each view.top_lines as line (line.line_id)}
+        <div class="top-line">↳ {line.line} <strong>{gb(line.usage_bytes)}</strong></div>
+      {/each}
+      <div>
         admission reservation <strong
           >{gb(view.memory_reserved_bytes)} / {gb(view.memory_budget_bytes)}</strong
         >
       </div>
-      <div>per-process caps <strong>{gb(view.memory_cap_bytes)}</strong></div>
       <div>most processes (line + child lines) <strong>{view.busiest_line ?? "none"}</strong></div>
       {#if blocked}
         <p class="capacity-blocked">New attaches are blocked until usage drops or the limit is raised.</p>
@@ -145,6 +183,32 @@
     stroke: currentColor;
     stroke-linecap: round;
     transition: stroke-dashoffset 220ms ease;
+  }
+  .resource-host {
+    color: var(--color-cream);
+    opacity: 0.72;
+  }
+  .host-bar {
+    display: flex;
+    height: 5px;
+    margin: 3px 0 1px;
+    overflow: hidden;
+    border-radius: 4px;
+    background: var(--color-panel-line);
+  }
+  .host-bar span {
+    height: 100%;
+  }
+  .host-bar .partyline {
+    background: var(--color-green);
+  }
+  .host-bar .other {
+    background: var(--color-cream);
+    opacity: 0.28;
+  }
+  .top-line {
+    color: var(--color-cream);
+    opacity: 0.85;
   }
   .resource-popover {
     position: absolute;
