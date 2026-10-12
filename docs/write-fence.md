@@ -153,7 +153,13 @@ own `<conv_id>` directory, so no other line can reach a relay. With no docker gr
 anywhere the fence argv is unchanged. Because a process started before the grant
 lacks that mount, approving a docker grant resumes **every** live process on the
 host, not just the granted line's. A relay never outlives a restart of the server:
-the next spawn recreates it. Revoking a grant has no route yet; archive
+the next spawn recreates it. If the server process itself cannot open the host socket (it needs the docker
+group, and a systemd user manager keeps the groups it had at login), the relay
+answers a client with `502 Bad Gateway` and the reason, logs the errno, and posts
+a notice on the line when it starts. `GET /api/docker-relay` (a person, or a
+line's captain for its own line) lists each relay's socket, whether it is
+listening, open connections, the last upstream error, and a live probe. Starting
+a relay twice reuses the one listener. Revoking a grant has no route yet; archive
 the line to stop its relay.
 
 ## Memory failures and recovery

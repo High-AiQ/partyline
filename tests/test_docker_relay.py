@@ -3,7 +3,7 @@ import os
 import stat
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from partyline import docker_relay, fence
 from partyline.adapters.briefing import child_env
@@ -49,7 +49,8 @@ class DockerRelayTest(unittest.IsolatedAsyncioTestCase):
         writer.write_eof()
         self.assertEqual(await asyncio.wait_for(reader.read(), 5), b"daemon:GET /_ping")
         writer.close()
-        self.assertEqual(self.seen, [b"GET /_ping"])
+        # The start probe connects and sends nothing.
+        self.assertEqual([seen for seen in self.seen if seen], [b"GET /_ping"])
 
     async def test_stop_removes_the_relay(self):
         path = docker_relay.start("line")
@@ -119,3 +120,54 @@ class DockerRelayTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("docker_socket", att)  # B holds no grant: no relay of its own
         db._exec("UPDATE conversations SET archived_at=1 WHERE id='a'")
         self.assertFalse(docker_relay.any_grant(db))
+
+    async def test_an_unreachable_host_socket_answers_502_with_the_reason_and_a_notice(self):
+        await self._close_daemon()
+        # Closing the daemon removed its socket: connect fails with ENOENT.
+        path = docker_relay.start("line")
+        reader, writer = await asyncio.open_unix_connection(path)
+        writer.write(b"GET /_ping HTTP/1.1\r\n\r\n")
+        reply = await asyncio.wait_for(reader.read(), 5)
+        writer.close()
+        self.assertTrue(reply.startswith(b"HTTP/1.1 502 Bad Gateway"))
+        self.assertIn(b"Content-Type: text/plain", reply)
+        self.assertIn(f"cannot connect to {self.host}".encode(), reply)
+        self.assertIn(b"needs the docker group", reply)
+        (row,) = await docker_relay.status()
+        self.assertIn("cannot connect", row["last_error"])
+        self.assertIn("cannot connect", row["probe"])
+
+    async def test_a_failed_probe_at_start_posts_a_notice_on_the_line(self):
+        await self._close_daemon()
+        with patch("partyline.system_notice.post_system_notice", new_callable=AsyncMock) as post, \
+                patch.object(docker_relay, "_runtime", object()):
+            docker_relay.start("line")
+            for _ in range(100):
+                if post.await_count:
+                    break
+                await asyncio.sleep(0.02)
+        post.assert_awaited_once()
+        self.assertEqual(post.await_args.args[1], "line")
+        self.assertIn("cannot connect to", post.await_args.args[2])
+
+    async def test_a_second_start_reuses_the_one_listener(self):
+        path = docker_relay.start("line")
+        first, inode = docker_relay._relays["line"], os.stat(path).st_ino
+        await asyncio.sleep(0.05)  # the server task has finished creating the server
+        self.assertEqual(docker_relay.start("line"), path)
+        self.assertIs(docker_relay._relays["line"], first)
+        self.assertEqual(os.stat(path).st_ino, inode)
+        self.assertEqual(len(docker_relay._relays), 1)
+
+    async def test_a_dead_listener_is_replaced_and_stop_closes_open_connections(self):
+        path = docker_relay.start("line")
+        reader, writer = await asyncio.open_unix_connection(path)
+        for _ in range(100):
+            if docker_relay._relays["line"].clients:
+                break
+            await asyncio.sleep(0.02)
+        self.assertEqual((await docker_relay.status())[0]["connections"], 1)
+        await asyncio.wait_for(docker_relay.stop("line"), 10)  # must not hang on the client
+        self.assertEqual(await asyncio.wait_for(reader.read(), 5), b"")
+        writer.close()
+        self.assertEqual(docker_relay._relays, {})
