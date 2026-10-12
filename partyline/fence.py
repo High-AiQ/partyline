@@ -160,10 +160,12 @@ def _bwrap_argv(att: dict, command: list[str]) -> list[str]:
     argv = [BWRAP, "--bind", "/", "/", "--dev-bind", DEV_ROOT, DEV_ROOT,
             "--proc", "/proc", "--unshare-user"]
     # Docker relays (docker_relay): hide every line's directory, then bind
-    # back only this line's own, so no other line can reach a relay. With no
-    # relay anywhere the argv is exactly what it was before relays existed.
-    if docker_relay.in_use():
-        argv += ["--tmpfs", docker_relay.RELAY_ROOT]
+    # back only this line's own, so no other line can reach a relay. The
+    # trigger is a grant row anywhere on the host, not a directory on disk, so
+    # a line that starts before the first grant is hidden too; with no grant
+    # anywhere the argv is exactly what it was before relays existed.
+    if att.get("docker_relays_exist"):
+        argv += ["--tmpfs", docker_relay.ensure_root()]
         own = os.path.dirname(att.get("docker_socket") or "")
         if own and not existing([own]):
             logger.warning("docker relay directory %s is missing; not binding it", own)

@@ -146,10 +146,14 @@ row in the line's write set.
 
 At spawn a granted line gets `DOCKER_HOST=unix://~/.partyline/docker/<conv_id>/docker.sock`.
 The relay is started lazily then (directory `0700`, socket `0600`, our uid, which is
-mapped inside the fence) and stopped when the line is archived. While any relay exists every process gets
-`--tmpfs ~/.partyline/docker` (with no relay anywhere the fence argv is unchanged); a granted line binds back only its own `<conv_id>`
-directory, so no other line can reach a relay. A relay never outlives a restart of
-the server: the next spawn recreates it. Revoking a grant has no route yet; archive
+mapped inside the fence) and stopped when the line is archived. While any live line
+on the host holds a docker grant (decided from the grant rows, not the directory),
+every process gets `--tmpfs ~/.partyline/docker`; a granted line binds back only its
+own `<conv_id>` directory, so no other line can reach a relay. With no docker grant
+anywhere the fence argv is unchanged. Because a process started before the grant
+lacks that mount, approving a docker grant resumes **every** live process on the
+host, not just the granted line's. A relay never outlives a restart of the server:
+the next spawn recreates it. Revoking a grant has no route yet; archive
 the line to stop its relay.
 
 ## Memory failures and recovery
