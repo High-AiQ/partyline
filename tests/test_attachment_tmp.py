@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -32,8 +32,9 @@ class AttachmentTmpTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.base = Path(self.tmp.name, "tmp")  # base_dir() becomes <tmp>/partyline
-        os.environ["PARTYLINE_TMP_BASE"] = str(self.base)
-        self.addCleanup(os.environ.pop, "PARTYLINE_TMP_BASE")
+        base_pin = patch.dict(os.environ, {"PARTYLINE_TMP_BASE": str(self.base)})
+        base_pin.start()
+        self.addCleanup(base_pin.stop)
 
     def test_ensure_creates_a_private_dir_reused_by_the_same_id(self):
         first = Path(os.environ["PARTYLINE_TMP_BASE"], "partyline", "att-1")
@@ -126,8 +127,9 @@ class CloseReapTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        os.environ["PARTYLINE_TMP_BASE"] = str(Path(self.tmp.name, "tmp"))
-        self.addCleanup(os.environ.pop, "PARTYLINE_TMP_BASE")
+        base_pin = patch.dict(os.environ, {"PARTYLINE_TMP_BASE": str(Path(self.tmp.name, "tmp"))})
+        base_pin.start()
+        self.addCleanup(base_pin.stop)
         self.db = Db(f"{self.tmp.name}/partyline.db")
         self.addCleanup(self.db.close)
         self.db.create_conversation("line", "Line")
@@ -157,8 +159,9 @@ class TmpReapRouteTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        os.environ["PARTYLINE_TMP_BASE"] = str(Path(self.tmp.name, "tmp"))
-        self.addCleanup(os.environ.pop, "PARTYLINE_TMP_BASE")
+        base_pin = patch.dict(os.environ, {"PARTYLINE_TMP_BASE": str(Path(self.tmp.name, "tmp"))})
+        base_pin.start()
+        self.addCleanup(base_pin.stop)
         self.db = Db(f"{self.tmp.name}/partyline.db")
         self.addCleanup(self.db.close)
         self.db.create_conversation("root", "Root")
