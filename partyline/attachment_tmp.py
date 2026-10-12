@@ -5,7 +5,10 @@ so one line's engine runs, frames and wheels can neither collide with
 another line's artifacts nor hide from reaping. The base is
 ``$PARTYLINE_TMP_BASE`` when set (tests pin it to their sandbox so nothing
 touches the real ``/tmp``; production uses the platform temp), then
-``partyline``, then one directory per attachment id, private (0700).
+``partyline``, then one directory per running partyline instance — twelve
+hex of the database path, because several instances share a host and must
+never reap each other's directories — then one per attachment id, private
+(0700).
 
 Reaping happens only at the moments an attachment ends: a person- or
 captain-called close (``DELETE /api/attachments/<id>``), record removal, a
@@ -13,7 +16,7 @@ line archive, or a purge — the same moments Greg's finding names. A
 restart-driven detach keeps the directory: the same id always resumes into
 the same path, and no CLI keeps durable state in ``TMPDIR`` anyway. Every
 delete is guarded — the directory on disk must be exactly
-``<base>/partyline/<id>``, so a symlink planted at either level is
+``<base>/partyline/<instance>/<id>``, so a symlink planted at any level is
 refused, never followed out.
 
 Sizing never trusts a whole-tree walk to finish: every walk runs under a
@@ -23,7 +26,9 @@ partial answer per tick, never a stalled event loop.
 
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -31,14 +36,24 @@ from pathlib import Path
 
 SIZE_BUDGET_SECONDS = 0.25
 SUMMARY_TTL_SECONDS = 5.0
-_summary_cache: dict[str, object] = {"at": 0.0, "value": None}
+ID_PATTERN = re.compile(r"[A-Za-z0-9_-]+\Z")
+_cache: dict[str, object] = {"at": 0.0, "value": None}
+
+
+def instance_key() -> str:
+    """Twelve hex of the database path: this partyline's temp scope."""
+    raw = os.environ.get("PARTYLINE_DB") or "~/.partyline.db"
+    return hashlib.sha256(os.path.realpath(os.path.expanduser(raw)).encode()).hexdigest()[:12]
+
+
+def temp_root() -> Path:
+    """The pinned or platform temp directory that hosts everything here."""
+    pinned = os.environ.get("PARTYLINE_TMP_BASE", "").strip()
+    return Path(pinned) if pinned else Path(tempfile.gettempdir())
 
 
 def base_dir() -> Path:
-    """The partyline temp base: the pinned or platform temp, plus ``partyline``."""
-    pinned = os.environ.get("PARTYLINE_TMP_BASE", "").strip()
-    root = Path(pinned) if pinned else Path(tempfile.gettempdir())
-    return root / "partyline"
+    return temp_root() / "partyline" / instance_key()
 
 
 def attachment_tmp_dir(att_id: str) -> Path:
@@ -98,13 +113,16 @@ def reap_line_tmp(db, conv_id: str) -> int:
 
 
 def reap_missing_tmp(db) -> tuple[int, list[str]]:
-    """Reap dirs whose attachment row is gone; the bytes and the ids reaped."""
+    """Reap leftover dirs in this instance's scope: attachment-shaped names
+    whose row is gone. Other instances' scopes are not ours to touch."""
     freed, reaped = 0, []
     try:
-        on_disk = sorted(os.listdir(base_dir()))
+        entries = sorted(os.listdir(base_dir()))
     except OSError:
         return 0, []
-    for entry in on_disk:
+    for entry in entries:
+        if not ID_PATTERN.match(entry):
+            continue
         if db.get_attachment(entry) is None:
             if (bytes_ := reap_tmp_dir(entry)) is not None:
                 freed += bytes_

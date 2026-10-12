@@ -13,8 +13,8 @@ from fastapi.testclient import TestClient
 
 from partyline.attachment_tmp import (
     attachment_tmp_dir, base_dir, dir_size, ensure_tmp_dir, env_for, guarded_path,
-    line_tmp_bytes, reap_line_tmp, reap_missing_tmp, reap_tmp_dir, tmp_resource_line,
-    tmp_summary,
+    instance_key, line_tmp_bytes, reap_line_tmp, reap_missing_tmp, reap_tmp_dir,
+    temp_root, tmp_resource_line, tmp_summary,
 )
 from partyline.auth_guard import Principal
 from partyline.db import Db
@@ -27,18 +27,25 @@ def write_file(path: Path, size: int) -> None:
     path.write_bytes(b"x" * size)
 
 
+def pin_tmp_base(testcase, path: Path) -> None:
+    """Pin the temp base for one test, restoring whatever was there before."""
+    saver = patch.dict(os.environ, {"PARTYLINE_TMP_BASE": str(path)})
+    saver.start()
+    testcase.addCleanup(saver.stop)
+
+
 class AttachmentTmpTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.base = Path(self.tmp.name, "tmp")  # base_dir() becomes <tmp>/partyline
-        base_pin = patch.dict(os.environ, {"PARTYLINE_TMP_BASE": str(self.base)})
-        base_pin.start()
-        self.addCleanup(base_pin.stop)
+        self.base = Path(self.tmp.name, "tmp")  # base_dir() is <tmp>/partyline/<key>
+        pin_tmp_base(self, self.base)
 
-    def test_ensure_creates_a_private_dir_reused_by_the_same_id(self):
-        first = Path(os.environ["PARTYLINE_TMP_BASE"], "partyline", "att-1")
+    def test_ensure_creates_a_scoped_private_dir_reused_by_the_same_id(self):
+        first = attachment_tmp_dir("att-1")
         self.assertEqual(base_dir(), first.parent)
+        self.assertEqual(first.parent.name, instance_key())
+        self.assertRegex(instance_key(), r"[0-9a-f]{12}")
         self.assertEqual(ensure_tmp_dir({"id": "att-1"}), str(first))
         self.assertTrue(first.is_dir())
         self.assertEqual(stat.S_IMODE(first.stat().st_mode), 0o700)
@@ -81,7 +88,7 @@ class AttachmentTmpTest(unittest.TestCase):
         os.symlink("/etc/hostname", directory / "huge-link")
         self.assertEqual(dir_size(directory, budget=None), 177)
 
-    def test_reap_line_and_missing_reaps(self):
+    def test_reap_line_and_missing_reaps_skip_foreign_scopes_and_names(self):
         db = Db(f"{self.tmp.name}/partyline.db")
         self.addCleanup(db.close)
         db.create_conversation("line", "Line")
@@ -90,11 +97,18 @@ class AttachmentTmpTest(unittest.TestCase):
         for att_id in ("live-1", "gone-1", "no-row-1"):
             attachment_tmp_dir(att_id).mkdir(parents=True)
             write_file(attachment_tmp_dir(att_id) / "f", 64)
+        # another partyline instance on this host, and a non-id entry: both
+        # live outside this instance's authority
+        other = temp_root() / "partyline" / "deadbeefcafe1234"
+        write_file(other / "somewhere-else" / "f", 99)
+        write_file(base_dir() / "cache.bin", 7)
         self.assertEqual(reap_line_tmp(db, "line"), 128)  # the line's own rows only
-        self.assertFalse(attachment_tmp_dir("live-1").exists())
-        self.assertTrue(attachment_tmp_dir("no-row-1").exists())
+        self.assertTrue((other / "somewhere-else" / "f").exists())
+        self.assertTrue((base_dir() / "cache.bin").exists())
         freed, reaped = reap_missing_tmp(db)
         self.assertEqual((freed, reaped), (64, ["no-row-1"]))
+        self.assertTrue((other / "somewhere-else" / "f").exists())
+        self.assertTrue((base_dir() / "cache.bin").exists())
 
     def test_summary_reports_mount_totals_and_the_partyline_share(self):
         directory = attachment_tmp_dir("att-5")
@@ -114,8 +128,9 @@ class AttachmentTmpTest(unittest.TestCase):
         db._exec("UPDATE attachments SET status='running' WHERE id='live-1'")
         ensure_tmp_dir({"id": "live-1"})
         write_file(attachment_tmp_dir("live-1") / "f", 2048)
+        tmp_summary(cached=False)  # fill the cache once
         rider = tmp_resource_line(db, "line")
-        self.assertTrue(rider.startswith("(tmp: /tmp "))
+        self.assertTrue(rider.startswith(f"(tmp: /{temp_root().name} "))
         self.assertIn("GB · this line's processes", rider)
         self.assertTrue(rider.endswith(")"))
         self.assertGreater(line_tmp_bytes(db, "line"), 0)
@@ -127,9 +142,7 @@ class CloseReapTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        base_pin = patch.dict(os.environ, {"PARTYLINE_TMP_BASE": str(Path(self.tmp.name, "tmp"))})
-        base_pin.start()
-        self.addCleanup(base_pin.stop)
+        pin_tmp_base(self, Path(self.tmp.name, "tmp"))
         self.db = Db(f"{self.tmp.name}/partyline.db")
         self.addCleanup(self.db.close)
         self.db.create_conversation("line", "Line")
@@ -159,9 +172,7 @@ class TmpReapRouteTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        base_pin = patch.dict(os.environ, {"PARTYLINE_TMP_BASE": str(Path(self.tmp.name, "tmp"))})
-        base_pin.start()
-        self.addCleanup(base_pin.stop)
+        pin_tmp_base(self, Path(self.tmp.name, "tmp"))
         self.db = Db(f"{self.tmp.name}/partyline.db")
         self.addCleanup(self.db.close)
         self.db.create_conversation("root", "Root")

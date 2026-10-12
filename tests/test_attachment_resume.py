@@ -210,9 +210,10 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
     @patch("partyline.attachment_resume.provision_connection")
     async def test_resume_resumes_into_the_same_temp_directory(self, *_mocks):
         from pathlib import Path
+        from partyline.attachment_tmp import attachment_tmp_dir
 
         await resume_adapter("one", None, **self.resume_arguments())
-        expected = str(Path(os.environ["PARTYLINE_TMP_BASE"], "partyline", "one"))
+        expected = str(attachment_tmp_dir("one"))
         self.assertEqual(self.captured["att"]["tmp_dir"], expected)
         self.assertTrue(Path(expected).is_dir())
         arguments = self.resume_arguments()
@@ -236,15 +237,6 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.db.get_attachment("one")["cli_session"])
         await resume_adapter("one", None, **self.resume_arguments())
         self.assertIn("att", self.captured)
-=======
-    async def test_resume_resumes_into_the_same_temp_directory(self, *_mocks):
-        from pathlib import Path
-
-        await resume_adapter("one", None, **self.resume_arguments())
-        expected = str(Path(os.environ["PARTYLINE_TMP_BASE"], "partyline", "one"))
-        self.assertEqual(self.captured["att"]["tmp_dir"], expected)
-        self.assertTrue(Path(expected).is_dir())
->>>>>>> 4ac5507 (fix: a resumed attachment re-enters the same private temp directory instead of losing its TMPDIR at the resume seam)
 
     @patch("partyline.attachment_resume.bind_role_delivery")
     @patch("partyline.attachment_resume.bind_connection_hint")
