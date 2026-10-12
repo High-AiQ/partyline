@@ -3,6 +3,7 @@
 import asyncio
 import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -19,7 +20,7 @@ from partyline.resource_budget import (
 )
 from partyline.resource_routes import register_resource_routes
 from partyline.role_delivery import RoleState, _instructions
-from tests import PINNED_TEST_HOST, REAL_HOST_RESOURCES
+from tests import PINNED_TEST_HOST, REAL_HOST_RESOURCES, REAL_SERVER_USAGE
 
 
 class ResourceBudgetTest(unittest.IsolatedAsyncioTestCase):
@@ -57,7 +58,9 @@ class ResourceBudgetTest(unittest.IsolatedAsyncioTestCase):
         with patch("partyline.resource_budget.os.cpu_count", return_value=None), patch(
             "partyline.resource_budget.host_memory_bytes", return_value=12 * GIB
         ):
-            self.assertEqual(REAL_HOST_RESOURCES(), Host(cpus=1, ram_bytes=12 * GIB))
+            # availability is whatever the running kernel reports; totals are pinned
+            real = REAL_HOST_RESOURCES()
+            self.assertEqual((real.cpus, real.ram_bytes), (1, 12 * GIB))
 
     def test_format_and_invalid_attachment_leases(self):
         self.assertEqual(format_limit(4 * GIB), "4G")
@@ -209,6 +212,79 @@ class ResourceBudgetTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("7 of 6 GB would be reserved", message or "")
         self.assertIn("1G reservation per process", message or "")
 
+    def test_snapshot_reports_real_host_and_partyline_usage(self):
+        self.attach("one", "root")
+        self.attach("two", "child")
+        host = Host(cpus=10, ram_bytes=8 * GIB, available_bytes=3 * GIB)
+        runtime = SimpleNamespace(memory_usage={
+            "one": {"usage_bytes": GIB // 2}, "two": {"usage_bytes": GIB // 4}})
+        with patch("partyline.resource_usage.server_usage_bytes", return_value=GIB):
+            view = snapshot(self.db, host, runtime=runtime)
+        self.assertEqual(view["host_used_bytes"], 5 * GIB)
+        self.assertEqual(view["host_available_bytes"], 3 * GIB)
+        self.assertEqual(view["partyline_server_bytes"], GIB)
+        self.assertEqual(view["partyline_processes_bytes"], 3 * GIB // 4)
+        self.assertEqual(view["partyline_used_bytes"], GIB + 3 * GIB // 4)
+        self.assertEqual(view["other_used_bytes"], 5 * GIB - (GIB + 3 * GIB // 4))
+        self.assertIsNotNone(view["sampled_at"])
+
+    def test_other_usage_is_floored_at_zero_and_null_without_host_numbers(self):
+        self.attach("one", "root")
+        runtime = SimpleNamespace(memory_usage={"one": {"usage_bytes": 8 * GIB}})
+        host = Host(cpus=10, ram_bytes=8 * GIB, available_bytes=GIB)
+        with patch("partyline.resource_usage.server_usage_bytes", return_value=2 * GIB):
+            view = snapshot(self.db, host, runtime=runtime)
+        self.assertEqual(view["other_used_bytes"], 0)  # used 7G, partyline 10G
+        plain = snapshot(self.db, self.host)  # pinned host reports no availability
+        self.assertIsNone(plain["host_used_bytes"])
+        self.assertIsNone(plain["host_available_bytes"])
+        self.assertIsNone(plain["partyline_used_bytes"])
+
+    def test_top_lines_rank_families_by_real_usage(self):
+        for line in ("small", "large"):
+            self.db.create_conversation(line, f"{line} line")
+            self.attach(f"{line}-a", line)
+            self.attach(f"{line}-b", line)
+        runtime = SimpleNamespace(memory_usage={
+            "small-a": {"usage_bytes": 100}, "small-b": {"usage_bytes": 100},
+            "large-a": {"usage_bytes": 500}, "large-b": {"usage_bytes": 400}})
+        view = snapshot(self.db, self.host, runtime=runtime)
+        top = view["top_lines"]
+        self.assertEqual(top[0], {"line_id": "large", "line": "large line",
+                                  "usage_bytes": 900})
+        self.assertTrue(all("line_id" in entry and "usage_bytes" in entry for entry in top))
+
+    def test_server_usage_reads_cgroup_then_falls_back_to_rss(self):
+        with tempfile.TemporaryDirectory() as room:
+            group = Path(room, "user.slice/partyline")
+            group.mkdir(parents=True)
+            self_cgroup = Path(room, "self.cgroup")
+            self_status = Path(room, "self.status")
+            self_cgroup.write_text("0::/user.slice/partyline\n")
+
+            def read():
+                return REAL_SERVER_USAGE(
+                    cgroup_root=room, self_cgroup=str(self_cgroup),
+                    self_status=str(self_status))
+
+            (group / "memory.current").write_text("1234\n")
+            self.assertEqual(read(), 1234)
+            (group / "memory.current").unlink()
+            self.assertIsNone(read())  # no cgroup number, status has no VmRSS
+            self_status.write_text("VmRSS:\t 5678 kB\n")
+            self.assertEqual(read(), 5678 * 1024)  # RSS fallback
+
+    def test_admission_refuses_when_real_host_memory_is_short(self):
+        host = Host(cpus=10, ram_bytes=8 * GIB, available_bytes=2500 * 1024**2)
+        message = refusal(self.db, GIB, host=host)  # 2G reserve leaves 0.4G < 1G
+        self.assertIsNotNone(message)
+        self.assertIn("0.4 GB available", message or "")
+        self.assertIn("reserve 1 GB", message or "")
+
+    def test_admission_allows_when_real_host_memory_covers_the_reserve(self):
+        host = Host(cpus=10, ram_bytes=8 * GIB, available_bytes=4 * GIB)
+        self.assertIsNone(refusal(self.db, GIB, host=host))
+
     def test_scaled_cap_defaults_and_generic_host_table(self):
         # Generic 8/16/32/64/128 GB host classes, with representative detected RAM.
         expected = ((7, 5, 2), (15, 13, 2), (30, 27, 3.75),
@@ -230,7 +306,7 @@ class ResourceBudgetTest(unittest.IsolatedAsyncioTestCase):
             request.state.principal = Principal(kind=kind, name="caller")
             return await call_next(request)
 
-        register_resource_routes(app, SimpleNamespace(db=self.db))
+        register_resource_routes(app, SimpleNamespace(db=self.db, memory_usage={}))
         with patch("partyline.resource_budget.host_resources", return_value=self.host):
             client = TestClient(app)
             readable = client.get("/api/resources")
