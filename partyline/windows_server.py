@@ -20,7 +20,8 @@ class MemoryStatus(c.Structure):
     ]
 
 
-def host_memory_bytes():
+def memory_status():
+    """Total and available physical memory in bytes via GlobalMemoryStatusEx."""
     kernel = c.WinDLL('kernel32', use_last_error=True)
     kernel.GlobalMemoryStatusEx.argtypes = [c.POINTER(MemoryStatus)]
     kernel.GlobalMemoryStatusEx.restype = w.BOOL
@@ -28,7 +29,11 @@ def host_memory_bytes():
     info.length = c.sizeof(info)
     if not kernel.GlobalMemoryStatusEx(c.byref(info)):
         raise c.WinError(c.get_last_error())
-    return info.total
+    return info.total, info.available
+
+
+def host_memory_bytes():
+    return memory_status()[0]
 
 
 def serve(arguments, main):
