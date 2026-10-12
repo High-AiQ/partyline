@@ -133,10 +133,22 @@ class PrereviewOut(BaseModel):
 class TipResponse(BaseModel):
     """Where the line's hand-off branch and its fence mirror point.
 
-    ``fenced_tip`` is null when no mirror exists (an unfenced line), and all
-    three are null when the line has no placed worktree to read.
+    ``accepted_sha`` and ``tip_sha`` are the fields to read: the branch ref
+    as the host sees it (which only advances on accept — it is what
+    ``git rev-parse line/<name>`` from the main checkout reports) and the
+    line's real working tip. ``branch_sha`` and ``fenced_tip`` are older
+    names for the same two values, kept for compatibility.
+
+    ``tip_sha`` falls back to ``accepted_sha`` when no mirror exists (an
+    unfenced line's branch head is its tip), and all are null when the line
+    has no placed worktree to read. ``ahead`` counts commits from the
+    accepted SHA to the tip, so "two commits ahead" is stated outright;
+    null when either end does not resolve.
     """
 
+    accepted_sha: str | None = None
+    tip_sha: str | None = None
+    ahead: int | None = None
     branch: str | None = None
     branch_sha: str | None = None
     fenced_tip: str | None = None

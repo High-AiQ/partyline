@@ -425,6 +425,24 @@ class AcceptShaTest(unittest.TestCase):
         self.assertEqual(body["branch_sha"], real)
         self.assertEqual(body["fenced_tip"], fenced)
 
+    def test_tip_names_the_accepted_and_real_tips_and_counts_ahead(self):
+        # 2.17: the host-visible branch ref lags at the accepted SHA while the
+        # fence mirror holds two newer commits — the captain must read tip_sha.
+        accepted = self.branch_head()
+        self.commit("one more thing")
+        tip = self.commit("and another")
+        _git("update-ref", "refs/heads/line/kid", accepted, tip, cwd=self.repo)
+        self.mirror(tip)
+
+        body = self.tip().json()
+
+        self.assertEqual(body["accepted_sha"], accepted)
+        self.assertEqual(body["tip_sha"], tip)
+        self.assertEqual(body["ahead"], 2)
+        # the older names still answer, for compatibility
+        self.assertEqual(body["branch_sha"], accepted)
+        self.assertEqual(body["fenced_tip"], tip)
+
     def test_tip_without_a_mirror_reports_a_null_fenced_tip(self):
         self.commit("first")
         seen = self.tip()
@@ -433,6 +451,10 @@ class AcceptShaTest(unittest.TestCase):
         self.assertEqual(body["branch"], "line/kid")
         self.assertEqual(body["branch_sha"], self.branch_head())
         self.assertIsNone(body["fenced_tip"])
+        # With no mirror the branch head is the tip, and nothing is ahead.
+        self.assertEqual(body["accepted_sha"], body["branch_sha"])
+        self.assertEqual(body["tip_sha"], body["branch_sha"])
+        self.assertEqual(body["ahead"], 0)
 
     def test_tip_of_an_unplaced_or_unknown_line(self):
         # no placed worktree: nothing to read, all nulls, never a crash
@@ -441,7 +463,9 @@ class AcceptShaTest(unittest.TestCase):
                       (self.repo,))
         seen = self.tip("det")
         self.assertEqual(seen.status_code, 200, seen.text)
-        self.assertEqual(seen.json(), {"branch": None, "branch_sha": None, "fenced_tip": None})
+        self.assertEqual(seen.json(), {
+            "accepted_sha": None, "tip_sha": None, "ahead": None,
+            "branch": None, "branch_sha": None, "fenced_tip": None})
         self.assertEqual(self.tip("missing").status_code, 404)
 
     def test_a_fenced_accept_moves_the_real_ref_by_cas(self):
