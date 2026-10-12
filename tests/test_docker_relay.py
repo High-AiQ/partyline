@@ -70,32 +70,52 @@ class DockerRelayTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("DOCKER_HOST", child_env({}, plain))
         self.assertFalse(os.path.exists(docker_relay.relay_dir("other")))
 
-    async def test_without_a_relay_the_argv_has_no_docker_ops(self):
-        base = {"cwd": self.tmp.name}
-        self.assertNotIn("--tmpfs", fence._bwrap_argv(base, ["cli"]))
+    async def test_without_a_docker_grant_the_argv_has_no_docker_ops(self):
+        argv = fence._bwrap_argv({"cwd": self.tmp.name}, ["cli"])
+        self.assertNotIn("--tmpfs", argv)
         self.assertFalse(os.path.exists(docker_relay.RELAY_ROOT))
-        os.makedirs(docker_relay.RELAY_ROOT)  # an empty root is still no relay
-        self.assertNotIn("--tmpfs", fence._bwrap_argv(base, ["cli"]))
 
-    async def test_fence_hides_every_relay_and_binds_back_only_its_own(self):
+    async def test_another_line_is_hidden_from_the_relay_and_only_the_granted_one_binds_it(self):
         own = docker_relay.relay_dir("line")
-        base = {"cwd": self.tmp.name}
-        socket_path = docker_relay.start("line")
-        plain = fence._bwrap_argv(base, ["cli"])
-        hidden = plain.index("--tmpfs")
-        self.assertEqual(plain[hidden + 1], docker_relay.RELAY_ROOT)
-        self.assertNotIn(own, plain)
-        granted = fence._bwrap_argv({**base, "docker_socket": socket_path}, ["cli"])
+        socket_path = docker_relay.start("line")  # line A holds the grant
+        other = fence._bwrap_argv({"cwd": self.tmp.name, "docker_relays_exist": True}, ["cli"])
+        self.assertEqual(other[other.index("--tmpfs") + 1], docker_relay.RELAY_ROOT)
+        self.assertNotIn(own, other)
+        granted = fence._bwrap_argv({"cwd": self.tmp.name, "docker_relays_exist": True,
+                                     "docker_socket": socket_path}, ["cli"])
         bind = [i for i, a in enumerate(granted) if a == "--bind" and granted[i + 1] == own]
         self.assertEqual(len(bind), 1)
         self.assertGreater(bind[0], granted.index("--tmpfs"))
         self.assertEqual(granted[bind[0] + 2], own)
 
+    async def test_a_line_that_starts_before_any_relay_exists_is_still_hidden(self):
+        # The trigger is a grant row; the root is created for the argv.
+        argv = fence._bwrap_argv({"cwd": self.tmp.name, "docker_relays_exist": True}, ["cli"])
+        self.assertIn("--tmpfs", argv)
+        self.assertTrue(os.path.isdir(docker_relay.RELAY_ROOT))
+
     async def test_a_missing_relay_directory_is_skipped_not_fatal(self):
-        docker_relay.start("other")
         missing = docker_relay.relay_socket("gone")
         with self.assertLogs("partyline.fence", "WARNING"):
-            argv = fence._bwrap_argv({"cwd": self.tmp.name, "docker_socket": missing}, ["cli"])
+            argv = fence._bwrap_argv({"cwd": self.tmp.name, "docker_relays_exist": True,
+                                      "docker_socket": missing}, ["cli"])
         self.assertNotIn(os.path.dirname(missing), argv)
         self.assertIn("--tmpfs", argv)
-        await docker_relay.stop("other")
+
+    async def test_grant_rows_decide_whether_relays_exist(self):
+        from partyline.db import Db
+        from partyline.write_set_routes import add_write_grant, load_write_grants
+        db = Db(os.path.join(self.tmp.name, "t.db"))
+        self.addCleanup(db.close)
+        db.create_conversation("a", "A")
+        db.create_conversation("b", "B")
+        att = {"conv_id": "b"}
+        load_write_grants(db, att)
+        self.assertFalse(att["docker_relays_exist"])
+        add_write_grant(db, "a", "/var/run/docker.sock", "person")
+        att = {"conv_id": "b"}
+        load_write_grants(db, att)
+        self.assertTrue(att["docker_relays_exist"])
+        self.assertNotIn("docker_socket", att)  # B holds no grant: no relay of its own
+        db._exec("UPDATE conversations SET archived_at=1 WHERE id='a'")
+        self.assertFalse(docker_relay.any_grant(db))
