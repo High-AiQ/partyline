@@ -6,7 +6,7 @@ import asyncio
 from datetime import UTC, datetime
 import hashlib
 import os
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 
@@ -178,6 +178,32 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
     async def test_resume_adapter_loads_write_grants(self, *_mocks):
         await resume_adapter("one", None, **self.resume_arguments())
         self.assertEqual([row["path"] for row in self.captured["write_grants"]], [self.grant])
+
+    @patch("partyline.attachment_resume.bind_role_delivery")
+    @patch("partyline.attachment_resume.bind_connection_hint")
+    @patch("partyline.attachment_resume.provision_connection")
+    async def test_session_resuming_adapter_without_a_session_is_refused(self, *_mocks):
+        arguments = self.resume_arguments()
+        arguments["adapter_metadata"] = {
+            "fake": {"capabilities": {"resume": True, "resume_needs_session": True}}}
+        with patch.object(FakeAdapter, "start", new_callable=AsyncMock) as start:
+            with self.assertRaises(HTTPException) as caught:
+                await resume_adapter("one", None, **arguments)
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertIn("@luna never claimed a CLI session", caught.exception.detail)
+        self.assertIn("replace it with a fresh process", caught.exception.detail)
+        # Refused before the spawn, so nothing could reach Popen.
+        start.assert_not_called()
+        self.assertNotIn("luna", self.runtime.live)
+
+    @patch("partyline.attachment_resume.bind_role_delivery")
+    @patch("partyline.attachment_resume.bind_connection_hint")
+    @patch("partyline.attachment_resume.provision_connection")
+    async def test_id_resuming_adapter_without_a_session_still_resumes(self, *_mocks):
+        # Claude resumes by attachment id and never declares the capability.
+        self.assertIsNone(self.db.get_attachment("one")["cli_session"])
+        await resume_adapter("one", None, **self.resume_arguments())
+        self.assertIn("att", self.captured)
 
     @patch("partyline.attachment_resume.bind_role_delivery")
     @patch("partyline.attachment_resume.bind_connection_hint")

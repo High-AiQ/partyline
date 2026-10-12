@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import logging
 import re
 import uuid
 
@@ -27,10 +28,12 @@ from .process_incidents import exit_callback
 from .hierarchy import tree_live_name_conflict
 from .role_delivery import bind_role_delivery
 from .review_worktrees import list_review_worktrees
-from .reattach import ResumedAttachment, adapter_can_resume
+from .reattach import ResumedAttachment, adapter_can_resume, resume_needs_session
 from .transcript_delivery import TranscriptDeliveryRecord
 from .write_set_routes import list_write_grants
 from .resource_budget import cap_bytes, claim_resume, format_limit, settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -265,6 +268,9 @@ async def _resume_adapter_locked(
     # ReattachCoordinator fills this set from the stored plan before calling
     # the resume path; API callers cannot supply a grandfathering flag.
     grandfathered = att_id in runtime.reattaching
+    if resume_needs_session(capabilities) and not str(att.get("cli_session") or "").strip():
+        raise HTTPException(409, f"@{att['name']} never claimed a CLI session (it exited during "
+                            "startup) — replace it with a fresh process instead of resuming")
     if not await claim_resume(
         runtime.db, att_id, runtime_owner, lease, grandfathered=grandfathered
     ):
@@ -275,6 +281,7 @@ async def _resume_adapter_locked(
         await runtime.db.set_attachment_status_async(att_id, "exited", runtime_owner)
         raise HTTPException(409, f"write fence unavailable: {exc}") from exc
     except Exception as exc:
+        logger.exception("resume of %s failed", att_id)
         await runtime.db.set_attachment_status_async(att_id, "exited", runtime_owner)
         raise HTTPException(500, f"failed to resume: {exc}") from exc
     runtime.live[att_id] = presence.watch(
