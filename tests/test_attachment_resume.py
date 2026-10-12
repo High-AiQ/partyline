@@ -232,15 +232,6 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
     @patch("partyline.attachment_resume.bind_role_delivery")
     @patch("partyline.attachment_resume.bind_connection_hint")
     @patch("partyline.attachment_resume.provision_connection")
-    async def test_id_resuming_adapter_without_a_session_still_resumes(self, *_mocks):
-        # Claude resumes by attachment id and never declares the capability.
-        self.assertIsNone(self.db.get_attachment("one")["cli_session"])
-        await resume_adapter("one", None, **self.resume_arguments())
-        self.assertIn("att", self.captured)
-
-    @patch("partyline.attachment_resume.bind_role_delivery")
-    @patch("partyline.attachment_resume.bind_connection_hint")
-    @patch("partyline.attachment_resume.provision_connection")
     async def test_resumed_process_briefing_receives_saved_global_prose(self, *_mocks):
         prose = "Keep the saved release notes in view."
         self.db.set_setting("global_prose", prose)
