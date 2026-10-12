@@ -16,7 +16,8 @@ from partyline.auth_guard import install_auth_guard
 from partyline.db import Db
 from partyline.reattach import ResumedAttachment
 from partyline.runtime import ChatRuntime
-from partyline.write_set_requests import register_write_set_request_routes, resume_line_attachments
+from partyline.write_set_decisions import register_write_set_request_routes
+from partyline.write_set_requests import resume_line_attachments
 from partyline.write_set_routes import list_write_grants, write_set_router
 from tests.test_server import FakeAdapter
 
@@ -225,7 +226,7 @@ class WriteSetRequestTest(unittest.TestCase):
         request_id = self.file(self.worker).json()["id"]
         wrk = self.go_live("wrk")
         self.go_live("cap")
-        with patch("partyline.write_set_requests.resume_line_attachments", self._resume_line):
+        with patch("partyline.write_set_decisions.resume_line_attachments", self._resume_line):
             approved = self.client.post(
                 f"/api/conversations/line/write-set/request/{request_id}/approve",
                 headers=self.human)
@@ -278,7 +279,7 @@ class WriteSetRequestTest(unittest.TestCase):
     def test_cross_line_approval_rings_the_requester_on_its_home_line(self):
         request_id = self.file_on_child()
         cap = self.go_live("cap")
-        with patch("partyline.write_set_requests.resume_line_attachments", self._resume_line):
+        with patch("partyline.write_set_decisions.resume_line_attachments", self._resume_line):
             approved = self.client.post(
                 f"/api/conversations/child/write-set/request/{request_id}/approve",
                 headers=self.human)
@@ -347,6 +348,172 @@ class WriteSetRequestTest(unittest.TestCase):
             self.assertIn(phrase, made.json()["detail"])
         self.assertEqual(self.client.get("/api/conversations/line/write-set/request",
                                          headers=self.captain).json()["request"], None)
+
+    # -- 5.9: an ancestor captain decides inside its own grants -----------------
+
+    def _seed_subtree(self):
+        """line (captain) -> kid (worker files there); a shared dir on disk."""
+        self.db.create_conversation("kid", "Kid")
+        self.db._exec("UPDATE conversations SET parent_id='line' WHERE id='kid'")
+        self.db.add_attachment("kid-worker", "kid", "digger", "raw", ["raw"], "/tmp")
+        self.db._exec("UPDATE attachments SET status='detached' WHERE id='kid-worker'")
+        self.kid_worker = {"Authorization": "Bearer " + auth_store.ensure_api_token(
+            self.db, "kid-worker")}
+        shared = os.path.join(self.directory.name, "shared")
+        os.makedirs(shared, exist_ok=True)
+        return shared
+
+    def grant_on(self, conv_id, path):
+        self.db._exec(
+            "INSERT OR REPLACE INTO conversation_write_grants"
+            "(conv_id,path,granted_by,granted_at) VALUES(?,?, 'greg', 0)",
+            (conv_id, path))
+
+    def file_on_kid(self, path=None):
+        return self.client.post("/api/conversations/kid/write-set",
+                                json={"path": path or self.target},
+                                headers=self.kid_worker)
+
+    def test_an_ancestor_captain_approves_inside_its_own_grant(self):
+        shared = self._seed_subtree()
+        self.grant_on("line", shared)
+        inner = os.path.join(shared, "inner", "file.txt")
+        self.file_on_kid(inner)
+        request_id = self.db._exec(
+            "SELECT id FROM conversation_write_grant_requests").fetchone()["id"]
+        approved = self.client.post(
+            f"/api/conversations/kid/write-set/request/{request_id}/approve",
+            headers=self.captain)
+        self.assertEqual(approved.status_code, 200, approved.text)
+        grants = [g["path"] for g in list_write_grants(self.db, "kid")]
+        self.assertIn(os.path.realpath(inner), grants)
+
+    def test_a_non_ancestor_captain_gets_403_even_with_a_covering_grant(self):
+        # the earlier version passed only because the other line held no
+        # grant: give the non-ancestor line one covering the path and assert
+        # 403 anyway
+        self._seed_subtree()
+        other = os.path.join(self.directory.name, "other")
+        os.makedirs(other, exist_ok=True)
+        self.grant_on("other", other)
+        self.file_on_kid()
+        request_id = self.db._exec(
+            "SELECT id FROM conversation_write_grant_requests").fetchone()["id"]
+        self.db.add_attachment("other-lead", "other", "mo", "raw", ["raw"], "/tmp")
+        self.db._exec(
+            "UPDATE attachments SET is_lead=1, status='running' WHERE id='other-lead'")
+        other_captain = {"Authorization": "Bearer " + auth_store.ensure_api_token(
+            self.db, "other-lead")}
+        refused = self.client.post(
+            f"/api/conversations/kid/write-set/request/{request_id}/approve",
+            headers=other_captain)
+        self.assertEqual(refused.status_code, 403, refused.text)
+        self.assertIn("outside your grants", refused.json()["detail"])
+
+    def test_a_worker_on_the_ancestor_line_gets_403(self):
+        # a grant and a non-lead attachment on the ancestor line: still
+        # refused, because the deciding role is the captain's, not any
+        # process's
+        self._seed_subtree()
+        self.grant_on("line", self.target)
+        self.db.add_attachment("line-worker", "line", "moo", "raw", ["raw"], "/tmp")
+        self.db._exec(
+            "UPDATE attachments SET status='running' WHERE id='line-worker'")
+        worker = {"Authorization": "Bearer " + auth_store.ensure_api_token(
+            self.db, "line-worker")}
+        self.file_on_kid()
+        request_id = self.db._exec(
+            "SELECT id FROM conversation_write_grant_requests").fetchone()["id"]
+        refused = self.client.post(
+            f"/api/conversations/kid/write-set/request/{request_id}/approve",
+            headers=worker)
+        self.assertEqual(refused.status_code, 403, refused.text)
+
+    def test_the_requester_cannot_approve_its_own_request(self):
+        shared = self._seed_subtree()
+        self.grant_on("line", shared)
+        self.db.add_attachment("kid-lead", "kid", "nix", "raw", ["raw"], "/tmp")
+        self.db._exec(
+            "UPDATE attachments SET is_lead=1, status='running' WHERE id='kid-lead'")
+        kid_lead = {"Authorization": "Bearer " + auth_store.ensure_api_token(
+            self.db, "kid-lead")}
+        made = self.client.post("/api/conversations/kid/write-set",
+                                json={"path": os.path.join(shared, "inner")},
+                                headers=kid_lead)
+        self.assertEqual(made.status_code, 200, made.text)
+        request_id = self.db._exec(
+            "SELECT id FROM conversation_write_grant_requests").fetchone()["id"]
+        refused = self.client.post(
+            f"/api/conversations/kid/write-set/request/{request_id}/approve",
+            headers=kid_lead)
+        self.assertEqual(refused.status_code, 403, refused.text)
+        self.assertIn("outside your grants", refused.json()["detail"])
+
+    def test_a_captain_two_levels_up_can_approve_inside_its_grant(self):
+        # mid sits between line and the filer: the line's captain is two
+        # strict-ancestor levels above the request, and still decides it
+        self.db.create_conversation("mid", "Mid")
+        self.db._exec("UPDATE conversations SET parent_id='line' WHERE id='mid'")
+        self.db.add_attachment("mid-worker", "mid", "leafy", "raw", ["raw"], "/tmp")
+        self.db._exec(
+            "UPDATE attachments SET status='detached' WHERE id='mid-worker'")
+        mid_worker = {"Authorization": "Bearer " + auth_store.ensure_api_token(
+            self.db, "mid-worker")}
+        other = os.path.join(self.directory.name, "other")
+        os.makedirs(other, exist_ok=True)
+        # the captain's home line holds the grant; the request is on mid
+        self.grant_on("line", other)
+        self.client.post("/api/conversations/mid/write-set",
+                         json={"path": os.path.join(other, "inner")},
+                         headers=mid_worker)
+        request_id = self.db._exec(
+            "SELECT id FROM conversation_write_grant_requests").fetchone()["id"]
+        approved = self.client.post(
+            f"/api/conversations/mid/write-set/request/{request_id}/approve",
+            headers=self.captain)
+        self.assertEqual(approved.status_code, 200, approved.text)
+        grants = [g["path"] for g in list_write_grants(self.db, "mid")]
+        self.assertIn(os.path.realpath(os.path.join(other, "inner")), grants)
+
+    # -- 5.8: decline with a reason, and withdraw -------------------------------
+
+    def test_deny_posts_the_reason_and_rings_the_requester(self):
+        self._seed_subtree()
+        self.file_on_kid()
+        request_id = self.db._exec(
+            "SELECT id FROM conversation_write_grant_requests").fetchone()["id"]
+        denied = self.client.post(
+            f"/api/conversations/kid/write-set/request/{request_id}/deny",
+            json={"reason": "the budget is spent"}, headers=self.human)
+        self.assertEqual(denied.status_code, 200, denied.text)
+        notices = [m["body"] for m in self.db.list_messages("kid")
+                   if "declined by @person" in m["body"]
+                   and m["audience_attachment_id"] is None]
+        self.assertEqual(len(notices), 1)
+        self.assertIn("the budget is spent", notices[0])
+        self.assertEqual(
+            self.db._exec("SELECT COUNT(*) AS n FROM conversation_write_grant_requests"
+                          ).fetchone()["n"], 0)
+
+    def test_the_requester_can_withdraw_but_a_stranger_cannot(self):
+        self._seed_subtree()
+        self.file_on_kid()
+        request_id = self.db._exec(
+            "SELECT id FROM conversation_write_grant_requests").fetchone()["id"]
+        self.db.add_attachment("stranger", "kid", "moo", "raw", ["raw"], "/tmp")
+        stranger = {"Authorization": "Bearer " + auth_store.ensure_api_token(
+            self.db, "stranger")}
+        refused = self.client.post(
+            f"/api/conversations/kid/write-set/request/{request_id}/withdraw",
+            headers=stranger)
+        self.assertEqual(refused.status_code, 403, refused.text)
+        withdrawn = self.client.post(
+            f"/api/conversations/kid/write-set/request/{request_id}/withdraw",
+            headers=self.kid_worker)
+        self.assertEqual(withdrawn.status_code, 200, withdrawn.text)
+        self.assertEqual(
+            self.db._exec("SELECT COUNT(*) AS n FROM conversation_write_grant_requests"
+                          ).fetchone()["n"], 0)
 
 
 if __name__ == "__main__":
