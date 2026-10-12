@@ -55,6 +55,10 @@ def release_scope(scope: str | None) -> None:
 
 
 def exit_notice(name: str, evidence: ProcessExit) -> str:
+    if evidence.startup and evidence.reason == "exit":
+        tail = " | ".join((evidence.last_output or "").splitlines()[-3:])
+        return (f"⚠ @{name} exited during startup (code {evidence.code})"
+                + (f": {tail}" if tail else " with no output"))
     if evidence.reason == "oom":
         peak = (f", recorded peak {evidence.peak_bytes / 1024**2:.0f} MiB"
                 if evidence.peak_bytes is not None else "")
@@ -73,6 +77,13 @@ async def report_exit(adapter, code: int) -> None:
         evidence = await asyncio.to_thread(inspect_exit, scope, code, adapter.memory_limit)
         if adapter._stopping:
             return
+        # Only adapters that declare readiness (transcript ones) can tell a
+        # startup death from an ordinary exit.
+        if getattr(adapter, "_ready_result", True) is not True and adapter.pastes_claim():
+            evidence.startup = True
+            tail = getattr(adapter, "output_tail", None)
+            # Output is relayed into a notice: a quoted @handle must not ring anyone.
+            evidence.last_output = "\n".join(tail.lines(15)).replace("@", "＠") if tail else None
         await adapter.on_status("exited")
         callback = adapter.att.get("on_process_exit")
         if callback:

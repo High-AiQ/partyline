@@ -136,7 +136,12 @@ def bind_role_delivery(db, att: dict, runtime=None) -> None:
             docs, last_docs_id = reminder_line(db, current.conv_id, last_docs_id)
             if time.time() - last_resource_at >= RESOURCE_RIDER_INTERVAL:
                 last_resource_at = time.time()
-                resource = host_resource_line()
+                from .attachment_tmp import tmp_resource_line
+
+                resource = "\n".join(
+                    part for part in (host_resource_line(),
+                                      tmp_resource_line(db, current.conv_id))
+                    if part)
             if not captain_transition:
                 pointer = briefing_pointer(current.conv_id)
         elif current.captained:

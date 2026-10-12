@@ -12,6 +12,7 @@ from .attachment_lifecycle import expire_unowned_attachment
 from .hierarchy import descendants
 from .line_process_contracts import CloseProcessesResponse
 from .machine_scope import deny_unless
+from .attachment_tmp import reap_tmp_dir
 
 LIVE = ("starting", "running")
 DETACH_STOP_TIMEOUT = 2.5
@@ -141,6 +142,19 @@ async def detach_attachment(runtime, att_id: str) -> dict:
         return {"ok": True}
     finally:
         lock.release()
+
+
+async def close_attachment(runtime, att_id: str) -> dict:
+    """The person-called close (``DELETE /api/attachments/<id>``): detach,
+    then reap the attachment's temp directory (5.12).
+
+    Every other detach — replace, restart, an approval dropping a process —
+    goes through ``detach_attachment`` and keeps the directory: the same id
+    resumes into the same path, and no CLI keeps durable state in ``TMPDIR``.
+    """
+    response = await detach_attachment(runtime, att_id)
+    reap_tmp_dir(att_id)
+    return response
 
 
 async def _report_stop_failure(

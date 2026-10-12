@@ -207,6 +207,20 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
 
     @patch("partyline.attachment_resume.bind_role_delivery")
     @patch("partyline.attachment_resume.bind_connection_hint")
+    async def test_resume_resumes_into_the_same_temp_directory(self, *_mocks):
+        # provision_connection runs for real: it is the seam that re-ensures
+        # the attachment's private temp directory (5.12), and its connection
+        # file lands beside the sandbox database.
+        from pathlib import Path
+        from partyline.attachment_tmp import attachment_tmp_dir
+
+        await resume_adapter("one", None, **self.resume_arguments())
+        expected = str(attachment_tmp_dir("one"))
+        self.assertEqual(self.captured["att"]["tmp_dir"], expected)
+        self.assertTrue(Path(expected).is_dir())
+
+    @patch("partyline.attachment_resume.bind_role_delivery")
+    @patch("partyline.attachment_resume.bind_connection_hint")
     @patch("partyline.attachment_resume.provision_connection")
     async def test_resumed_process_briefing_receives_saved_global_prose(self, *_mocks):
         prose = "Keep the saved release notes in view."

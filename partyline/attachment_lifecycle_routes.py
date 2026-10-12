@@ -18,6 +18,7 @@ from .attachment_lifecycle import (
 )
 from .contracts import AttachmentEvent, AttachmentRemovedEvent, OkResponse
 from .line_process_routes import detach_attachment
+from .attachment_tmp import reap_tmp_dir
 from .system_notice import post_system_notice
 from .mention_relay import post_private
 
@@ -169,6 +170,7 @@ def register_attachment_lifecycle_routes(app, runtime, *, start, require_loopbac
         if att_id in runtime.live:
             raise HTTPException(409, "detach the process before removing it")
         att = await remove_stopped_record(runtime.db, att_id)
+        reap_tmp_dir(att_id)
         await _removed_event(att)
         return {"ok": True}
 

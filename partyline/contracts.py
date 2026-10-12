@@ -11,6 +11,7 @@ from .line_process_contracts import LineLiveEvent
 from .presence_contracts import WorkingEvent
 from .reaction_contracts import ReactionEvent, ReactionResponse
 from .pin_contracts import PinsChangedEvent
+from .resource_contracts import ResourceSnapshotEvent
 
 RestartPlanMode = Literal["offer", "automatic"]
 RestartPlanScope = Literal["line", "all"]
@@ -288,11 +289,10 @@ Event = (
     | ConversationArchivedEvent
     | ConversationDeletedEvent
     | ConversationsChangedEvent
-    | ErrorEvent
-    | HelloEvent
-    | ReattachOfferEvent
-    | ReattachDecisionEvent
+    | ErrorEvent | HelloEvent
+    | ReattachOfferEvent | ReattachDecisionEvent
     | RestartRequestEvent | WriteSetGrantRequestEvent | MemoryEvent | ReactionEvent | PinsChangedEvent
+    | ResourceSnapshotEvent
 )
 class HookEventRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")

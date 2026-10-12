@@ -278,9 +278,15 @@ SHAs (`reviewed_sha` and `sha`), the ☏ notice counts what went in unreviewed
 (`N commit(s) past the review`), and the reviewed SHA's review worktrees are
 pruned along with the tip's — accepting work nobody reviewed stays visible in
 the record, never silent. `GET /api/conversations/<id>/tip` returns
-`{"branch", "branch_sha", "fenced_tip"}` — where the line's branch and its
-fence mirror point (`fenced_tip` null with no mirror) — so a captain reads
-the fenced tip before accepting instead of learning it from a 409. Accepting
+`{"accepted_sha", "tip_sha", "ahead", ...}` — where the line's branch ref and
+its real working tip point. The branch ref visible outside the fence,
+including `git rev-parse line/<name>` from the main checkout, advances only
+on accept, so it lags the line's actual work; read `tip_sha` for that (it
+falls back to `accepted_sha` when no mirror exists, and `ahead` states the
+commit count outright, so "two commits ahead" needs no git). `branch_sha` and
+`fenced_tip` are older names for the first two values, kept for
+compatibility. Reading the fenced tip before accepting instead of learning it
+from a 409 remains the point. Accepting
 only fast-forwards: a branch that carries commits the SHA
 does not include, or a SHA from an unrelated history, is refused with 409
 rather than merged or rebased, so accepting never orphans a commit. Nothing is

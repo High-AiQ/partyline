@@ -398,6 +398,39 @@ class WriteSetRequestTest(unittest.TestCase):
         grants = [g["path"] for g in list_write_grants(self.db, "kid")]
         self.assertIn(os.path.realpath(inner), grants)
 
+    def test_docker_access_is_a_grant_only_a_person_approves(self):
+        self._seed_subtree()
+        self.grant_on("line", "/run/docker.sock")  # the captain even holds it
+        filed = self.file_on_kid("/var/run/docker.sock")  # through the symlinked parent
+        self.assertEqual(filed.status_code, 200, filed.text)
+        request_id = filed.json()["id"]
+        refused = self.client.post(
+            f"/api/conversations/kid/write-set/request/{request_id}/approve",
+            headers=self.captain)
+        self.assertEqual(refused.status_code, 403)
+        self.assertIn("root-equivalent", refused.json()["detail"])
+        approved = self.client.post(
+            f"/api/conversations/kid/write-set/request/{request_id}/approve",
+            headers=self.human)
+        self.assertEqual(approved.status_code, 200, approved.text)
+        self.assertEqual([g["path"] for g in list_write_grants(self.db, "kid")],
+                         ["/var/run/docker.sock"])
+
+    def test_approving_docker_access_resumes_every_live_process_on_every_line(self):
+        self._seed_subtree()
+        self.db.add_attachment("kid-live", "kid", "kidlive", "fake", ["fake"], self.repo)
+        self.db._exec("UPDATE attachments SET status='running' WHERE id='kid-live'")
+        request_id = self.file(self.worker, "/run/docker.sock").json()["id"]
+        for att_id in ("cap", "wrk", "kid-live"):
+            self.go_live(att_id)
+        approved = self.client.post(
+            f"/api/conversations/line/write-set/request/{request_id}/approve",
+            headers=self.human)
+        self.assertEqual(approved.status_code, 200, approved.text)
+        self.assertEqual(sorted(self.resumed), ["cap", "kid-live", "wrk"])
+        self.assertTrue(self.public_notices(
+            "every live process is resumed so other lines cannot reach the relay"))
+
     def test_a_non_ancestor_captain_gets_403_even_with_a_covering_grant(self):
         # the earlier version passed only because the other line held no
         # grant: give the non-ancestor line one covering the path and assert

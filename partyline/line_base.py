@@ -183,11 +183,20 @@ def register_line_base_route(app, runtime) -> None:
         cwd = line_cwd(db, conv_id) or ""
         root, _worktree = repo_and_worktree(cwd) if cwd else (None, None)
         branch = branch_name(cwd) if root and managed_root(cwd) else None
+        branch_sha = rev(root, "rev-parse", "--verify", "--quiet", branch) if branch else None
+        fenced_tip = mirror_branch_ref(cwd, conv_id, branch) if branch else None
+        # The host-visible branch ref only advances on accept; the mirror is
+        # the line's real tip. With no mirror the two coincide (2.17).
+        tip_sha = fenced_tip or branch_sha
+        ahead = None
+        if branch_sha and tip_sha:
+            # rev() answers None when git cannot range — a tip root cannot
+            # see, say. Unknown is not zero: 0 says "nothing to accept".
+            count = rev(root, "rev-list", "--count", f"{branch_sha}..{tip_sha}")
+            ahead = int(count) if count is not None else None
         return TipResponse(
-            branch=branch,
-            branch_sha=rev(root, "rev-parse", "--verify", "--quiet", branch)
-            if branch else None,
-            fenced_tip=mirror_branch_ref(cwd, conv_id, branch) if branch else None,
+            accepted_sha=branch_sha, tip_sha=tip_sha, ahead=ahead,
+            branch=branch, branch_sha=branch_sha, fenced_tip=fenced_tip,
         )
 
     @app.post("/api/conversations/{conv_id}/refresh-base")
