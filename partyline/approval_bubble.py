@@ -129,7 +129,8 @@ def register_approval_routes(app, runtime) -> None:
         # through the existing per-kind routes instead.
         if not is_human(request_principal(request)):
             raise HTTPException(403, "approvals are decided by people")
-        return pending_approval_rows(runtime.db, conv_id, runtime=runtime)
+        rows = pending_approval_rows(runtime.db, conv_id, runtime=runtime)
+        return {"approvals": rows}
 
 
 def pending_approvals(db, conv_id: str, *, runtime=None) -> list[tuple[str, str]]:

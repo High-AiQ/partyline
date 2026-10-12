@@ -187,7 +187,7 @@ class ApprovalBubbleTest(unittest.TestCase):
         self.file_memory()
         seen = self.client.get("/api/conversations/root/approvals", headers=self.human)
         self.assertEqual(seen.status_code, 200, seen.text)
-        rows = seen.json()
+        rows = seen.json()["approvals"]
         self.assertEqual([row["kind"] for row in rows], ["write-set", "memory"])
         self.assertEqual([row["line"] for row in rows], ["Grand", "Grand"])
         self.assertEqual([row["requester"] for row in rows], ["dig", "dig"])
@@ -212,7 +212,7 @@ class ApprovalBubbleTest(unittest.TestCase):
         self.assertEqual(declined.status_code, 200, declined.text)
         self.assertEqual(
             self.client.get("/api/conversations/root/approvals",
-                            headers=self.human).json(), [])
+                            headers=self.human).json()["approvals"], [])
 
     def test_the_staffing_line_counts_pending_across_the_subtree_and_drops_on_decision(self):
         self.assertNotIn("approvals pending",
