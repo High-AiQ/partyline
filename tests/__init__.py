@@ -14,12 +14,18 @@ import os
 import shutil
 import tempfile
 
+from partyline import docker_relay as _docker_relay
 from partyline import resource_budget as _resource_budget
 from partyline import resource_usage as _resource_usage
 from partyline.resource_budget import GIB, Host
 
 _SANDBOX = tempfile.mkdtemp(prefix="partyline-tests-")
 os.environ["PARTYLINE_DB"] = os.path.join(_SANDBOX, "partyline.db")
+# Temp directories never touch the real /tmp either: every attachment's
+# TMPDIR is created under the sandbox (finding 5.12).
+os.environ["PARTYLINE_TMP_BASE"] = os.path.join(_SANDBOX, "tmp")
+# The docker relay directories live under the home directory; tests get their own.
+_docker_relay.RELAY_ROOT = os.path.join(_SANDBOX, "docker")
 # Pin runtime-derived capacity for every ordinary test. Tests of host discovery
 # and admission policy explicitly use their own fake Host values.
 PINNED_TEST_HOST = Host(cpus=32, ram_bytes=1024 * GIB)

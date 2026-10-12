@@ -83,6 +83,7 @@ def _gate_attachment(db, conv_id: str, scratch_path: str, scratch_sha: str) -> d
     as the working directory, its git metadata, the line's write grants and
     the protected database — nothing more.
     """
+    from . import docker_relay
     from .fence_protect import database_paths
     from .scratch_worktrees import list_scratch_worktrees
 
@@ -91,6 +92,7 @@ def _gate_attachment(db, conv_id: str, scratch_path: str, scratch_sha: str) -> d
         "conv_id": conv_id,
         "cwd": scratch_path,
         "adapter_metadata": {},
+        "docker_relays_exist": docker_relay.any_grant(db),
         "write_grants": [dict(r) for r in db._exec(
             "SELECT * FROM conversation_write_grants WHERE conv_id=?",
             (conv_id,)).fetchall()],

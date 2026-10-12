@@ -1,5 +1,7 @@
 """Wire contracts for fleet-wide process capacity."""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -64,3 +66,20 @@ class ResourceSnapshot(BaseModel):
     other_used_bytes: int | None = None
     sampled_at: float | None = None
     top_lines: list[ResourceLineUsage] = []
+    tmp_total_bytes: int | None = None
+    tmp_used_bytes: int | None = None
+    tmp_partyline_bytes: int | None = None
+
+
+class ResourceSnapshotEvent(BaseModel):
+    """The host memory picture, pushed once per sampler tick when it moved.
+
+    Replaces the per-tab 5 s poll: the sampler already runs on that cadence,
+    so the snapshot is computed once per tick and pushed to every open tab,
+    instead of every tab recomputing it over HTTP. A heartbeat rides at least
+    every 60 s so a quiet tab still sees fresh numbers arrive.
+    """
+    type: Literal["resources"] = "resources"
+    snapshot: ResourceSnapshot
+
+

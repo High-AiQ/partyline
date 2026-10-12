@@ -129,6 +129,33 @@ macOS uses its existing per-process address-space limits and does not require
 systemd. Windows uses ConPTY, restricted tokens, and Job Objects; see
 [native platform support](native-platforms.md).
 
+## Docker access
+
+Inside the fence's user namespace the Docker socket's group is unmapped
+(unprivileged bubblewrap maps only our own uid and gid), so every connect from a
+fenced process fails with `EACCES`, and no bind can fix that. Docker access is
+therefore **relayed**: a write-set grant whose path resolves to the host socket
+(`/run/docker.sock`, `/var/run/docker.sock`, or the `unix://` path of `DOCKER_HOST`)
+is accepted as a *docker access* grant instead of refused, and the server, which runs
+outside the fence and holds the group, copies bytes between a per-line socket and
+the host socket.
+
+**This is root-equivalent access to the host.** Only a person may approve it; an
+ancestor captain cannot, even if it holds the grant itself. The grant is an ordinary
+row in the line's write set.
+
+At spawn a granted line gets `DOCKER_HOST=unix://~/.partyline/docker/<conv_id>/docker.sock`.
+The relay is started lazily then (directory `0700`, socket `0600`, our uid, which is
+mapped inside the fence) and stopped when the line is archived. While any live line
+on the host holds a docker grant (decided from the grant rows, not the directory),
+every process gets `--tmpfs ~/.partyline/docker`; a granted line binds back only its
+own `<conv_id>` directory, so no other line can reach a relay. With no docker grant
+anywhere the fence argv is unchanged. Because a process started before the grant
+lacks that mount, approving a docker grant resumes **every** live process on the
+host, not just the granted line's. A relay never outlives a restart of the server:
+the next spawn recreates it. Revoking a grant has no route yet; archive
+the line to stop its relay.
+
 ## Memory failures and recovery
 
 A process killed by the kernel cannot catch its own OOM. The Partyline host stays
@@ -144,6 +171,14 @@ the line's captain first, then the first available ancestor captain. A captain's
 own failure goes upward. There is one incident per activation, no automatic
 restart, and no escalation for a deliberate detach or a normal exit. With no live
 captain, the line's notice and incident remain available to a person.
+
+A transcript adapter that exits before it is ready (it never claimed a CLI session)
+is a startup failure, not a memory event. Its incident carries `startup: true` and
+`last_output`, the last 15 non-blank lines of the pty with ANSI stripped (the adapter
+keeps a bounded ~4 KB tail; what is relayed is unchanged). The line notice reads
+`⚠ @name exited during startup (code N): <last 3 lines>`, and the captain is woken
+with advice to fix the cause and replace the process with a fresh one: resuming
+cannot work, and the resume endpoint answers 409.
 
 `GET /api/attachments/<id>/memory` returns the last incident, the saved override,
 the effective limit for the next launch, and the host's maximum allowed override.

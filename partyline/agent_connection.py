@@ -16,7 +16,15 @@ def connection_directory(db_path: str) -> Path:
 
 
 def provision_connection(db_path: str, att: dict) -> None:
-    """Publish atomically; never include a credential in a prompt or command."""
+    """Publish atomically; never include a credential in a prompt or command.
+
+    Both spawn paths come through here, so this is also where the
+    attachment's private temp directory is (re-)ensured (5.12): idempotent
+    per id, the same id always resumes into the same directory.
+    """
+    from .attachment_tmp import ensure_tmp_dir
+
+    att["tmp_dir"] = ensure_tmp_dir(att)
     if not att.get("api_token"):
         raise ValueError("attachment has no machine credential")
     directory = connection_directory(db_path)

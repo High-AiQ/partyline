@@ -14,6 +14,7 @@ import time
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from . import docker_relay
 from .auth_guard import request_principal
 from .machine_scope import deny_unless, is_human
 
@@ -40,6 +41,13 @@ def list_write_grants(db, conv_id: str) -> list[dict]:
     return [dict(r) for r in cur.fetchall()]
 
 
+def load_write_grants(db, att: dict) -> None:
+    """Load a spawning attachment's grants; the docker grant starts its relay."""
+    att["write_grants"] = list_write_grants(db, att["conv_id"])
+    att["docker_relays_exist"] = docker_relay.any_grant(db)
+    docker_relay.prepare(att)
+
+
 def add_write_grant(db, conv_id: str, path: str, granted_by: str) -> dict:
     """Record one granted path; re-granting an existing path is a no-op."""
     with db.lock:
@@ -57,9 +65,10 @@ def add_write_grant(db, conv_id: str, path: str, granted_by: str) -> dict:
     return dict(row)
 
 
-def write_set_router(runtime) -> APIRouter:
+def write_set_router(runtime, resume=None) -> APIRouter:
     from .write_set_decisions import make_announcer
-    from .write_set_requests import file_write_set_request, resolve_write_set_path
+    from .write_set_requests import (
+        file_write_set_request, resolve_write_set_path, resume_granted_scope)
 
     router = APIRouter()
 
@@ -83,9 +92,15 @@ def write_set_router(runtime) -> APIRouter:
             from .write_set_requests import validate_grantable
             path = validate_grantable(db, resolve_write_set_path(db, conv_id, body))
             add_write_grant(db, conv_id, path, principal.name)
-            await post_system_notice(
-                runtime, conv_id, f"☏ write-set grant for `{path}` by @{principal.name}",
-                actor=principal)
+            text = f"☏ write-set grant for `{path}` by @{principal.name}"
+            if resume is not None and docker_relay.is_docker_socket(path):
+                # Every live process must pick up the mount that hides the relays.
+                _done, failed = await resume_granted_scope(runtime, conv_id, path, resume)
+                text = (f"☏ docker access granted by @{principal.name} — every live process "
+                        "is resumed so other lines cannot reach the relay")
+                if failed:
+                    text += f" — could not resume @{', @'.join(failed)}; re-attach them by hand"
+            await post_system_notice(runtime, conv_id, text, actor=principal)
             return list_write_grants(db, conv_id)
         return await file_write_set_request(
             runtime, conv_id, resolve_write_set_path(db, conv_id, body), principal,
