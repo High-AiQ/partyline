@@ -20,7 +20,6 @@ from .review_worktrees import list_review_worktrees
 from .scratch_worktrees import list_scratch_worktrees
 from .role_delivery import bind_role_delivery
 from .write_set_routes import list_write_grants
-from .attachment_tmp import ensure_tmp_dir
 from .resource_budget import format_limit, settings
 
 logger = logging.getLogger(__name__)
@@ -29,9 +28,6 @@ logger = logging.getLogger(__name__)
 def prepare_attachment(att, runtime, hook_url, checkpoint):
     conv = runtime.db.get_conversation(att["conv_id"])
     att["api_token"] = ensure_api_token(runtime.db, att["id"])
-    # The attachment's own temp directory (5.12): created once per id, so a
-    # resume lands in the same directory; reaped only when the attachment ends.
-    att["tmp_dir"] = ensure_tmp_dir(att)
     att["memory_limit"] = att.get("memory_limit") or format_limit(
         settings(runtime.db)["default_process_memory_bytes"]
     )
