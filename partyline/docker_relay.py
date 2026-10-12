@@ -22,6 +22,8 @@ import socket
 from dataclasses import dataclass, field
 from functools import partial
 
+from .docker_bridge_client import bridge, open_upstream
+
 logger = logging.getLogger(__name__)
 RELAY_ROOT = os.path.expanduser("~/.partyline/docker")
 DEFAULT_SOCKET = "/run/docker.sock"
@@ -81,7 +83,7 @@ async def probe() -> str | None:
     """Try the host socket once: None when it answers, else the reason it does not."""
     host = host_socket()
     try:
-        _reader, writer = await asyncio.open_unix_connection(host)
+        _reader, writer = await open_upstream(host)
     except OSError as exc:
         return failure_text(host, exc)
     writer.close()
@@ -116,7 +118,7 @@ async def _serve(conv_id: str, reader: asyncio.StreamReader, writer: asyncio.Str
     relay = _relays.get(conv_id)
     host = host_socket()
     try:
-        host_reader, host_writer = await asyncio.open_unix_connection(host)
+        host_reader, host_writer = await open_upstream(host)
     except OSError as exc:
         text = failure_text(host, exc)
         logger.warning("docker relay for %s: upstream %s failed: errno %s: %s",
@@ -213,7 +215,7 @@ async def status() -> list[dict]:
     reason = await probe()
     return [{"conv_id": conv_id, "socket": relay.path, "listening": relay.listening(),
              "connections": len(relay.clients), "last_error": relay.last_error,
-             "probe": "ok" if reason is None else reason}
+             "probe": "ok" if reason is None else reason, "bridge": bridge.info()}
             for conv_id, relay in sorted(_relays.items())]
 
 

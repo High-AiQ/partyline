@@ -49,7 +49,7 @@ import logging
 import os
 import sys
 
-from . import docker_relay, features, fence_darwin, fence_protect, git_fence
+from . import docker_bridge_client, docker_relay, features, fence_darwin, fence_protect, git_fence
 from .fence_paths import darwin_write_set, write_set
 
 logger = logging.getLogger(__name__)
@@ -165,7 +165,8 @@ def _bwrap_argv(att: dict, command: list[str]) -> list[str]:
     # a line that starts before the first grant is hidden too; with no grant
     # anywhere the argv is exactly what it was before relays existed.
     if att.get("docker_relays_exist"):
-        argv += ["--tmpfs", docker_relay.ensure_root()]
+        # The bridge socket is the server's alone: hidden from everyone, bound back to no one.
+        argv += ["--tmpfs", docker_relay.ensure_root(), "--tmpfs", docker_bridge_client.ensure_root()]
         own = os.path.dirname(att.get("docker_socket") or "")
         if own and not existing([own]):
             logger.warning("docker relay directory %s is missing; not binding it", own)
