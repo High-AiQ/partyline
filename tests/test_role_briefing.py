@@ -279,7 +279,6 @@ class RoleBriefingTests(unittest.TestCase):
         root = role_instructions(["assign", "create_child"], "root", None)
         self.assertIn("PUT /api/conversations/root/gates", root)
         self.assertIn('"run_gates": true', root)
-
     def test_the_split_brief_states_the_goal_and_topic_caps_and_points_at_a_brief_file(self):
         # Only the splitting pack POSTs /children; a leaf or staffed captain
         # cannot, so the cap text belongs to that variant alone.

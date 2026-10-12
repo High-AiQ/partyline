@@ -157,7 +157,13 @@ tree's root, naming the line, the requester and the approve call, and @mentions 
 captain so that process wakes and can explain the request in context — the person talks to the
 root captain and never reads sublines. A request filed on the root itself does not bubble, and
 the staffing wake line counts what is still waiting anywhere below:
-`approvals pending: N («line» write-set, «line2» memory)`, falling as each request is decided.
+`approvals pending: N («line» write-set, «line2» memory)`, falling as each
+request is decided. On the root line the person doesn't even need the
+notices: `GET /api/conversations/<root id>/approvals` (people only) lists
+every pending request in the subtree — kind, line, requester, detail, and
+the approve/decline endpoints — and the root line's one-click approvals
+banner renders exactly that list with **Approve** and **Decline** buttons
+per row.
 
 Work goes down, not sideways. Once a line has a child, a machine may no longer
 attach processes to that line: the root captain that could not staff a child
@@ -386,17 +392,25 @@ roughly every N line messages since the last one — a setting,
 
 ## Compaction as a line event
 
-A worker's context compaction used to show only on its own screen. On an
-adapter that declares the `compaction_hooks` capability (Claude Code today),
-the harness's `PreCompact` hook posts `⚠ @<handle> compacted (auto, Nth
-time)` on the line and bumps a persisted counter that the staffing line
-shows as `×N compactions`. The third `auto` compaction within five hook
-turns rings the line's live captain once — that is thrash, and the remedy
-is a fresh instance of the same preset, never a re-prompt.
-`SessionStart(compact)` folds a partyline re-briefing back into the worker's
-context: the goal, the line's topic, and the latest captain-or-person
-message that @mentions the process, verbatim. Adapters without the
-capability get no hooks, no counting, and a 403 from the rebrief endpoint.
+A worker's context compaction used to show only on its own screen. It is now
+a line event on every adapter that declares a compaction capability (finding
+2.13, extended in §5 of the findings doc):
+
+- **`compaction_hooks`** (Claude Code): the harness's `PreCompact` hook
+  posts `⚠ @<handle> compacted (auto, Nth time)` on the line and bumps the
+  persisted counter; `SessionStart(compact)` folds a partyline re-briefing
+  back into the worker's context.
+- **`compaction_detect = "transcript"`** (Codex, opencode-v2): the adapter
+  tails its own transcript or storage for the compaction record — Codex's
+  `{"type": "compacted"}` rollout record, opencode-v2's `type='compaction'`
+  row with `status='completed'` — and counts it once per activation, so a
+  re-read transcript never double-counts. The re-briefing is delivered as a
+  private wake message instead of hook stdout.
+
+Both routes share the counter (shown as `×N compactions` in the staffing
+line) and the thrash rule: the third `auto` compaction within five hook
+turns rings the line's live captain once. Adapters without a capability
+report nothing.
 
 ## The line notebook
 
@@ -410,7 +424,9 @@ process writes only its own `attachment` notes; `tree` writes need `assign`
 on the tree root, so the root captain (or a person) writes them; people
 write all three; anyone with `read` on the line can read. The notes ride the
 post-compaction re-briefing in that order, ahead of the latest assignment,
-inside the same 4k cap.
+inside the same 4k cap — and the re-briefing ends with the nudge to update
+them. A worker whose notes go stale (16 turns without a write, on adapters
+that report turns) hears a one-line reminder on its wake every 8 turns.
 
 ## Shared-resource leases
 
@@ -424,7 +440,9 @@ backwards, and when the slot frees, promotion is by queue order (the
 earliest waiter, or the leading run of shared waiters). TTLs cap at four
 hours; posting again renews or re-queues; `DELETE /api/leases/<name>`
 releases the caller's lease, and a process's leases die with it on exit or
-detach. `GET /api/leases` lists holders and queues, the staffing line shows
+detach. A lease may carry a `purpose` (up to 80 characters) so the staffing
+line can tell a timing run from a habit:
+`godot (exclusive, "timing walk") @sonnet «world-assets»`. `GET /api/leases` lists holders and queues, the staffing line shows
 held leases (`leases: godot (exclusive) @sonnet «world-assets», 1 queued`),
 and a captain's wake carries a host summary (cores, free memory, load) at
 most once every ten minutes. Leases are taken and released by processes; a
@@ -552,6 +570,15 @@ people only — an agent's plain speech stays a reply for the room, so two proce
 cannot ring each other forever — and it switches itself off the moment a second
 process is live on the line. A held wake (a process mid-turn with receipt
 completion) treats such a message as addressed, the same as a mention.
+
+Two rules keep a *fresh* worker's hello from vanishing (finding 5.7). When
+a process is replaced, the line's live captain is rung privately —
+`↻ @<old> was replaced with a fresh instance (by @<who>) — assign now:
+@<new> is ready and waiting for your @mention` — unless the replaced
+process was itself the captain. And a worker's first message after attach
+or replace, on a line with a live captain, is delivered to that captain as
+a private copy when it doesn't already @mention them — once per
+activation, so it can never become a chatter loop.
 
 Parallel slices mean parallel lines. A machine attaching a second
 implementer to a line that has a captain and a live worker is refused with

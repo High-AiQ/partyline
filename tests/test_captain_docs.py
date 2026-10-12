@@ -114,6 +114,15 @@ class CaptainDocsTest(unittest.TestCase):
         self.assertIn("truncated", body)
         self.assertIn("docs/example.md", body)
 
+    def test_no_duplicate_topic_slugs(self):
+        from partyline.docs_catalog import TOPICS
+
+        seen = set()
+        for topic in TOPICS:
+            key = (topic["category"], topic["slug"])
+            self.assertNotIn(key, seen, f"duplicate catalogue topic {key}")
+            seen.add(key)
+
 
 if __name__ == "__main__":
     unittest.main()
