@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from partyline import attachment_tmp
 from partyline.attachment_tmp import (
     attachment_tmp_dir, base_dir, dir_size, ensure_tmp_dir, env_for, guarded_path,
     instance_key, line_tmp_bytes, reap_line_tmp, reap_missing_tmp, reap_tmp_dir,
@@ -142,12 +143,25 @@ class AttachmentTmpTest(unittest.TestCase):
         db._exec("UPDATE attachments SET status='running' WHERE id='live-1'")
         ensure_tmp_dir({"id": "live-1"})
         write_file(attachment_tmp_dir("live-1") / "f", 2048)
-        tmp_summary(cached=False)  # fill the cache once
+        attachment_tmp.cached_usage(cached=False)  # fill the cache once
         rider = tmp_resource_line(db, "line")
         self.assertTrue(rider.startswith(f"(tmp: /{temp_root().name} "))
         self.assertIn("GB · this line's processes", rider)
         self.assertTrue(rider.endswith(")"))
         self.assertGreater(line_tmp_bytes(db, "line"), 0)
+
+    def test_riders_within_the_ttl_read_the_cache_instead_of_walking(self):
+        db = Db(f"{self.tmp.name}/partyline.db")
+        self.addCleanup(db.close)
+        db.create_conversation("line", "Line")
+        db.add_attachment("live-1", "line", "a", "raw", ["cat"], self.tmp.name)
+        db._exec("UPDATE attachments SET status='running' WHERE id='live-1'")
+        ensure_tmp_dir({"id": "live-1"})
+        attachment_tmp.cached_usage(cached=False)  # one fresh walk, then TTL
+        with patch.object(attachment_tmp, "dir_size", return_value=0) as walk:
+            tmp_resource_line(db, "line")
+            tmp_resource_line(db, "line")
+            self.assertEqual(walk.call_count, 0)  # riders never touch the disk
 
 
 class CloseReapTest(unittest.IsolatedAsyncioTestCase):

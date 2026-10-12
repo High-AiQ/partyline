@@ -20,9 +20,10 @@ delete is guarded — the directory on disk must be exactly
 refused, never followed out; the path comparison runs on resolved parents
 so macOS's symlinked ``/var/folders`` temp still reaps.
 
-Sizing never trusts a whole-tree walk to finish: every walk runs under a
-time budget and the mount-level summary is cached, so a huge tree costs a
-partial answer per tick, never a stalled event loop.
+Sizing never trusts a whole-tree walk to finish: one budgeted walk per few
+seconds fills the mount totals, the instance total and the per-id sizes
+together, and everything else reads the cache — a huge tree costs a partial
+answer per tick, never a stalled event loop.
 """
 
 from __future__ import annotations
@@ -163,17 +164,11 @@ def dir_size(path: Path, budget: float | None = SIZE_BUDGET_SECONDS) -> int:
     return total
 
 
-def tmp_summary(*, cached: bool = True) -> dict[str, int | None]:
-    """Mount totals for the temp filesystem plus partyline's share of it.
-
-    Cached for a few seconds so admission checks and riders can ask every
-    tick without re-walking; ``cached=False`` forces a fresh answer.
-    """
-    now = time.monotonic()
-    if cached and _summary_cache["value"] is not None and now - _summary_cache["at"] < SUMMARY_TTL_SECONDS:
-        return _summary_cache["value"]
+def _usage_snapshot() -> dict:
+    """One budgeted walk: mount totals, per-id sizes, the instance total."""
+    value: dict[str, object] = {"tmp_total_bytes": None, "tmp_used_bytes": None,
+                                "sizes": {}, "tmp_partyline_bytes": 0}
     root = base_dir()
-    value: dict[str, int | None] = {"tmp_total_bytes": None, "tmp_used_bytes": None}
     try:
         if hasattr(os, "statvfs"):
             stats = os.statvfs(root)
@@ -182,22 +177,52 @@ def tmp_summary(*, cached: bool = True) -> dict[str, int | None]:
             value["tmp_used_bytes"] = total - stats.f_bavail * stats.f_frsize
     except OSError:
         pass
-    value["tmp_partyline_bytes"] = dir_size(root) if root.is_dir() else 0
-    _summary_cache["at"], _summary_cache["value"] = now, value
+    walked = 0
+    if root.is_dir():
+        try:
+            entries = sorted(os.listdir(root))
+        except OSError:
+            entries = []
+        for entry in entries:
+            path = root / entry
+            if not path.is_dir() or os.path.islink(path):
+                continue
+            size = dir_size(path)
+            walked += size
+            if ID_PATTERN.match(entry):
+                value["sizes"][entry] = size
+    value["tmp_partyline_bytes"] = walked
     return value
 
 
+def cached_usage(*, cached: bool = True) -> dict:
+    """The walk result, refreshed at most once per TTL."""
+    now = time.monotonic()
+    if cached and _summary_cache["value"] is not None and now - _summary_cache["at"] < SUMMARY_TTL_SECONDS:
+        return _summary_cache["value"]
+    _summary_cache["at"], _summary_cache["value"] = now, _usage_snapshot()
+    return _summary_cache["value"]
+
+
+def tmp_summary(*, cached: bool = True) -> dict[str, int | None]:
+    """Mount totals plus partyline's share, from the cached walk."""
+    usage = cached_usage(cached=cached)
+    return {"tmp_total_bytes": usage["tmp_total_bytes"],
+            "tmp_used_bytes": usage["tmp_used_bytes"],
+            "tmp_partyline_bytes": usage["tmp_partyline_bytes"]}
+
+
 def line_tmp_bytes(db, conv_id: str) -> int:
-    """The temp bytes of the given line's live attachments' directories."""
+    """The temp bytes of the given line's live attachments, from the cache."""
     from .hierarchy import descendants
 
+    sizes = cached_usage().get("sizes", {})
     total = 0
     for line_id in [conv_id, *descendants(db, conv_id)]:
         for att in db.list_attachments(line_id):
             if att["status"] not in ("starting", "running"):
                 continue
-            if path := guarded_path(att["id"]):
-                total += dir_size(path, budget=SIZE_BUDGET_SECONDS / 4)
+            total += sizes.get(att["id"], 0)
     return total
 
 
