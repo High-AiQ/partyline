@@ -17,7 +17,8 @@ restart-driven detach keeps the directory: the same id always resumes into
 the same path, and no CLI keeps durable state in ``TMPDIR`` anyway. Every
 delete is guarded — the directory on disk must be exactly
 ``<base>/partyline/<instance>/<id>``, so a symlink planted at any level is
-refused, never followed out.
+refused, never followed out; the path comparison runs on resolved parents
+so macOS's symlinked ``/var/folders`` temp still reaps.
 
 Sizing never trusts a whole-tree walk to finish: every walk runs under a
 time budget and the mount-level summary is cached, so a huge tree costs a
@@ -75,11 +76,19 @@ def env_for(att: dict) -> dict[str, str]:
 
 
 def guarded_path(att_id: str) -> Path | None:
-    """The attachment's temp dir only if the on-disk path is exactly ours."""
-    expected = attachment_tmp_dir(att_id)
-    if os.path.islink(base_dir()) or os.path.islink(expected):
+    """The attachment's temp dir only if the on-disk path is exactly ours.
+
+    Parents are compared resolved, so a temp reached through macOS's
+    symlinked ``/var/folders`` still matches; a symlink planted on the
+    partyline root, the instance dir or the leaf itself is refused.
+    """
+    instance = base_dir()
+    partyline = instance.parent
+    expected = instance / att_id
+    if any(os.path.islink(p) for p in (partyline, instance, expected)):
         return None
-    if os.path.realpath(expected) != str(expected):
+    resolved = os.path.realpath(instance)
+    if os.path.realpath(expected) != os.path.join(resolved, att_id):
         return None
     return expected if expected.is_dir() else None
 

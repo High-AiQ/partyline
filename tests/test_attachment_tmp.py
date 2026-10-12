@@ -79,6 +79,20 @@ class AttachmentTmpTest(unittest.TestCase):
         self.assertIsNone(reap_tmp_dir("att-3"))
         self.assertTrue((outside / "keep.txt").exists())  # never followed out
 
+    def test_a_base_reached_through_a_symlinked_parent_still_reaps(self):
+        # macOS's temp is /var/folders, a symlink away from /private/var: the
+        # parents compare resolved, so such a base must reap, not refuse.
+        real = Path(self.tmp.name, "real-temp")
+        link = Path(self.tmp.name, "linked-temp")
+        real.mkdir()
+        os.symlink(real, link)
+        pin_tmp_base(self, link)
+        directory = attachment_tmp_dir("att-mac")
+        directory.mkdir(parents=True)
+        write_file(directory / "f", 16)
+        self.assertIsNotNone(guarded_path("att-mac"))
+        self.assertEqual(reap_tmp_dir("att-mac"), 16)
+
     def test_size_math_walks_the_tree_and_skips_symlinks(self):
         directory = attachment_tmp_dir("att-4")
         directory.mkdir(parents=True)
