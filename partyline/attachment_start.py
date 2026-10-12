@@ -12,6 +12,7 @@ from .compaction_events import transcript_compaction_callback
 from .fence import FenceUnavailable
 from .process_memory import MemoryScopeUnavailable
 from .process_incidents import exit_callback
+from .preset_traits import auto_compact_tokens_for
 from .fence_protect import database_paths, protected_repo_roots
 from .hook_routes import surface_attention
 from .review_worktrees import list_review_worktrees
@@ -41,6 +42,9 @@ def prepare_attachment(att, runtime, hook_url, checkpoint):
     att["fresh_checkpoint"] = checkpoint
     att["startup_attention"] = lambda prompt: surface_attention(runtime, att, prompt)
     att["on_process_exit"] = exit_callback(runtime, att)
+    # The preset's explicit auto-compact threshold (§2.13), re-read on every
+    # start so a resume picks up a changed preset; 0 lets the CLI default.
+    att["auto_compact_tokens"] = auto_compact_tokens_for(runtime.db, att)
     if compaction_detect(att) == "transcript":
         # Claude gets its rebrief from hook stdout; a transcript-only
         # harness gets it as a private wake, and the adapter calls this

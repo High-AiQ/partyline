@@ -65,6 +65,15 @@ class ClaudeCommandTest(unittest.TestCase):
             ["claude", "--model", "opus", "--resume", "attachment-1"],
         )
 
+    def test_the_preset_threshold_rides_the_spawn_env(self):
+        # §2.13: the documented variable takes a plain token count.
+        adapter = self.make_adapter(command=["claude"], resume=False)
+        self.assertEqual(adapter.spawn_env(), {})  # unset: the CLI default
+
+        adapter.att["auto_compact_tokens"] = 200000
+        self.assertEqual(
+            adapter.spawn_env(), {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "200000"})
+
     def test_notification_hook_is_structured_settings_not_a_vendor_invocation(self):
         adapter = self.make_adapter(
             command=["claude"], resume=False,

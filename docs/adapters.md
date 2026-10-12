@@ -220,6 +220,13 @@ capabilities = { compaction_detect = "transcript" }
 Adapters with neither capability get none of this: no counting, no notices, and the
 rebrief endpoint answers 403.
 
+**Per-preset thresholds.** A preset may declare `auto_compact_tokens` (0 = unset, so the
+CLI's own tuned default applies). It is applied at spawn only where the CLI documents a
+per-attachment knob: Claude Code takes `CLAUDE_CODE_AUTO_COMPACT_WINDOW` (a plain token
+count) and codex takes a `-c model_auto_compact_token_limit=<n>` global flag. Adapters
+without such a knob — opencode v2's `compaction.buffer` is config-file-only, with no env
+var or flag — ignore the field.
+
 The claim is that a mention arrives at a turn **already in progress**. It is `false` for every
 adapter that does not say otherwise, because the failure mode of guessing is a room that believes
 a message landed while it is still waiting.

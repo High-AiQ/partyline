@@ -176,6 +176,11 @@ server's reason on every failed request. The same is true of captains: a
 line keeps counting it as free until its `max_instances` is reached — a
 preset declaring `max_instances: 3` with one captain running shows as
 `astra (2 more)` — so a scarce captain preset stops pretending to be spent.
+An explicit auto-compact threshold rides the same seam: a preset declaring
+`auto_compact_tokens: 80000` spawns its process with that window — Claude
+Code reads it from `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, codex from a
+`-c model_auto_compact_token_limit` override — and 0 leaves the CLI's own
+tuned default alone.
 
 The rule is symmetric. A line that already carries live workers — attached by
 its parent captain or by a person — cannot be split by its captain: `POST

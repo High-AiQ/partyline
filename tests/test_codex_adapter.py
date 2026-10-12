@@ -61,6 +61,25 @@ class CodexCommandTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(adapter.build_command(), command)
 
+    def test_the_preset_threshold_is_a_global_flag_before_the_subcommand(self):
+        # `-c` is codex's documented global override; it must precede
+        # `resume`, which is why the adapter inserts it after that rewrite.
+        adapter = self.make_adapter(
+            command=["codex", "--model", "gpt-5.6-terra"], resume=False)
+        adapter.att["auto_compact_tokens"] = 100000
+        self.assertEqual(
+            adapter.build_command(),
+            ["codex", "-c", "model_auto_compact_token_limit=100000",
+             "--model", "gpt-5.6-terra"])
+
+        resumed = self.make_adapter(
+            command=["codex"], resume=True, session_id="session-1")
+        resumed.att["auto_compact_tokens"] = 100000
+        self.assertEqual(
+            resumed.build_command(),
+            ["codex", "-c", "model_auto_compact_token_limit=100000",
+             "resume", "session-1"])
+
     def test_resume_without_a_staged_digest_is_unchanged(self):
         command = ["codex", "--model", "gpt-5.6-terra"]
         adapter = self.make_adapter(command=command, resume=True, session_id="session-1")

@@ -20,3 +20,13 @@ def seed(source, target):
             os.symlink(source, target)
         except OSError:
             pass
+
+
+def seed_claude_home():
+    """Seed and return Claude Code's private config dir on Windows; '' elsewhere."""
+    if sys.platform != 'win32':
+        return ""
+    home = os.path.expanduser(os.environ.get('CLAUDE_CONFIG_DIR', '~/.claude'))
+    os.makedirs(home, exist_ok=True)
+    seed(os.path.expanduser('~/.claude.json'), os.path.join(home, '.claude.json'))
+    return home

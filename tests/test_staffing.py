@@ -233,3 +233,37 @@ class CaptainInstancesTest(unittest.TestCase):
         row = self.db._exec(
             "SELECT max_instances FROM presets WHERE id=?", ("astra",)).fetchone()
         self.assertEqual(row["max_instances"], 3)
+
+    def test_auto_compact_tokens_round_trips_and_resolves_at_spawn(self):
+        from partyline.preset_routes import presets_router
+        from partyline.preset_traits import auto_compact_tokens_for
+
+        runtime = ChatRuntime(self.db)
+        app = FastAPI()
+        app.include_router(presets_router(runtime, {"claude"}))
+        client = TestClient(app)
+        made = client.post("/api/presets", json={
+            "title": "Haiku", "name": "haiku", "adapter": "claude",
+            "command": "claude", "auto_compact_tokens": 80000})
+        self.assertEqual(made.status_code, 200, made.text)
+        self.assertEqual(made.json()["auto_compact_tokens"], 80000)
+
+        # The spawn seam resolves it from the matched preset; a preset the
+        # attachment does not match leaves the CLI default in place.
+        att = {"name": "haiku", "adapter": "claude", "command": ["claude"]}
+        self.assertEqual(auto_compact_tokens_for(self.db, att), 80000)
+        other = {"name": "dig", "adapter": "claude", "command": ["claude"]}
+        self.assertEqual(auto_compact_tokens_for(self.db, other), 0)
+
+        # Unset means unset: a fresh preset without the field stays 0.
+        made = client.post("/api/presets", json={
+            "title": "Opus", "name": "opus", "adapter": "claude", "command": "claude"})
+        self.assertEqual(made.json()["auto_compact_tokens"], 0)
+        att = {"name": "opus", "adapter": "claude", "command": ["claude"]}
+        self.assertEqual(auto_compact_tokens_for(self.db, att), 0)
+
+        # Over-limit values are refused at the contract, like max_instances.
+        refused = client.post("/api/presets", json={
+            "title": "Bad", "name": "bad", "adapter": "claude", "command": "claude",
+            "auto_compact_tokens": -1})
+        self.assertEqual(refused.status_code, 422)

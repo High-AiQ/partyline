@@ -8,6 +8,7 @@ from .gates_schema import MIGRATIONS as GATES
 from .notes_schema import MIGRATIONS as NOTES
 from .scratch_schema import MIGRATIONS as SCRATCH
 from .lease_schema import MIGRATIONS as LEASE
+from .auto_compact_schema import MIGRATIONS as AUTO_COMPACT
 
 MIGRATIONS = [
     # cli_session: optional process session id, for adapters that support resume
@@ -16,8 +17,7 @@ MIGRATIONS = [
     "ALTER TABLE conversations ADD COLUMN topic TEXT NOT NULL DEFAULT ''",
     # archived_at: NULL while live. Archiving hides a line and stops processes.
     "ALTER TABLE conversations ADD COLUMN archived_at REAL",
-    # A deliberately singleton restart intent. It is saved before shutdown and
-    # only consumed after the requesting line accepts reattachment on startup.
+    # A singleton restart intent: saved before shutdown, consumed on reattachment.
     """CREATE TABLE IF NOT EXISTS restart_plan(
         singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
         conversation_id TEXT NOT NULL,
@@ -34,8 +34,7 @@ MIGRATIONS = [
     # Pre-token plans were never offered by a server route, so discard them.
     "ALTER TABLE restart_plan ADD COLUMN token TEXT",
     "DELETE FROM restart_plan WHERE token IS NULL",
-    # Automatic plans are trusted, hands-off recovery; ordinary UI plans remain
-    # manual offers. Existing plans must keep the safe manual behaviour.
+    # Automatic plans are hands-off recovery; UI plans stay manual offers.
     "ALTER TABLE restart_plan ADD COLUMN mode TEXT NOT NULL DEFAULT 'offer'",
     # A lease prevents two server lifespans from resuming the same automatic
     # plan. Nullable values mean no owner currently holds the plan.
@@ -297,4 +296,5 @@ MIGRATIONS = [
         BEGIN DELETE FROM message_pins WHERE conv_id=OLD.conv_id AND message_id=OLD.id; END""",
 ]
 
-MIGRATIONS.extend(MEMORY + IDEMPOTENCY + NOTES + COMPACTION + ACCEPT_HISTORY + SCRATCH + LEASE + GATES)
+MIGRATIONS.extend(MEMORY + IDEMPOTENCY + NOTES + COMPACTION + ACCEPT_HISTORY
+                  + SCRATCH + LEASE + GATES + AUTO_COMPACT)
