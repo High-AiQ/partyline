@@ -65,9 +65,18 @@ class WriteSetRequestTest(unittest.TestCase):
         self.client = TestClient(app)
         self.addCleanup(self.client.close)
         self.db.create_conversation("line", "Line")
-        self.db.add_attachment("cap", "line", "astra", "fake", ["fake"], "/tmp")
+        # The line works in a real repository, so filings are grantable under
+        # the 2.18 rule (a path must sit inside a protected repository root).
+        self.repo = os.path.join(self.directory.name, "repo")
+        os.makedirs(self.repo)
+        subprocess.run(["git", "init", "-q", "-b", "main"], cwd=self.repo,
+                       check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q",
+             "--allow-empty", "-m", "root"], cwd=self.repo, check=True, capture_output=True)
+        self.db.add_attachment("cap", "line", "astra", "fake", ["fake"], self.repo)
         self.db._exec("UPDATE attachments SET is_lead=1, status='running' WHERE id='cap'")
-        self.db.add_attachment("wrk", "line", "worker", "fake", ["fake"], "/tmp")
+        self.db.add_attachment("wrk", "line", "worker", "fake", ["fake"], self.repo)
         self.db._exec("UPDATE attachments SET status='running' WHERE id='wrk'")
         user = auth_store.create_user(
             self.db, "person@example.com", "person", auth_tokens.hash_password("hunter2222"))
@@ -75,7 +84,8 @@ class WriteSetRequestTest(unittest.TestCase):
             auth_tokens.signing_secret(self.db), user["id"])}
         self.captain = {"Authorization": "Bearer " + auth_store.ensure_api_token(self.db, "cap")}
         self.worker = {"Authorization": "Bearer " + auth_store.ensure_api_token(self.db, "wrk")}
-        self.target = os.path.join(self.directory.name, "shared")
+        self.target = os.path.join(self.repo, "shared")
+        os.makedirs(self.target, exist_ok=True)
 
     async def _resume(self, att_id, pending=None):
         self.resumed.append(att_id)
@@ -359,7 +369,7 @@ class WriteSetRequestTest(unittest.TestCase):
         self.db._exec("UPDATE attachments SET status='detached' WHERE id='kid-worker'")
         self.kid_worker = {"Authorization": "Bearer " + auth_store.ensure_api_token(
             self.db, "kid-worker")}
-        shared = os.path.join(self.directory.name, "shared")
+        shared = os.path.join(self.repo, "shared")
         os.makedirs(shared, exist_ok=True)
         return shared
 
@@ -393,7 +403,7 @@ class WriteSetRequestTest(unittest.TestCase):
         # grant: give the non-ancestor line one covering the path and assert
         # 403 anyway
         self._seed_subtree()
-        other = os.path.join(self.directory.name, "other")
+        other = os.path.join(self.repo, "other")
         os.makedirs(other, exist_ok=True)
         self.grant_on("other", other)
         self.file_on_kid()
@@ -459,7 +469,7 @@ class WriteSetRequestTest(unittest.TestCase):
             "UPDATE attachments SET status='detached' WHERE id='mid-worker'")
         mid_worker = {"Authorization": "Bearer " + auth_store.ensure_api_token(
             self.db, "mid-worker")}
-        other = os.path.join(self.directory.name, "other")
+        other = os.path.join(self.repo, "other")
         os.makedirs(other, exist_ok=True)
         # the captain's home line holds the grant; the request is on mid
         self.grant_on("line", other)

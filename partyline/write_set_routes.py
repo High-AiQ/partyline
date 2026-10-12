@@ -9,7 +9,6 @@ widened what.
 
 from __future__ import annotations
 
-import os
 import time
 
 from fastapi import APIRouter, HTTPException, Request
@@ -79,10 +78,10 @@ def write_set_router(runtime) -> APIRouter:
         if db.get_conversation(conv_id) is None:
             raise HTTPException(404)
         if is_human(principal):
-            path = resolve_write_set_path(db, conv_id, body)
-            if not path.startswith("/") or path == "/" or os.path.normpath(path) != path:
-                raise HTTPException(
-                    400, "path must be an absolute, normalized file or directory path")
+            # Same rule as a process filing: the path must be grantable, so a
+            # person cannot record a grant the fence would drop at spawn (2.18).
+            from .write_set_requests import validate_grantable
+            path = validate_grantable(db, resolve_write_set_path(db, conv_id, body))
             add_write_grant(db, conv_id, path, principal.name)
             await post_system_notice(
                 runtime, conv_id, f"☏ write-set grant for `{path}` by @{principal.name}",
