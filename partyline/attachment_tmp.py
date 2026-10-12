@@ -232,6 +232,12 @@ def tmp_resource_line(db, conv_id: str) -> str:
     mount, used = summary["tmp_total_bytes"], summary["tmp_used_bytes"]
     if mount is None or used is None:
         return ""
+    try:
+        share = line_tmp_bytes(db, conv_id)
+    except AttributeError:
+        # Some callers hand the rider a partial db (role-delivery deltas);
+        # a rider must never fail, so the share reads zero instead.
+        share = 0
     name = temp_root().name
     return (f"(tmp: /{name} {used / 2**30:.0f}/{mount / 2**30:.0f} GB · "
-            f"this line's processes {line_tmp_bytes(db, conv_id) / 2**30:.1f} GB)")
+            f"this line's processes {share / 2**30:.1f} GB)")
