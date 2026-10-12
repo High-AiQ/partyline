@@ -7,6 +7,8 @@ and ring the root's captain; the staffing wake line counts what is still
 pending across the subtree.
 """
 
+import os
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -58,10 +60,17 @@ class ApprovalBubbleTest(unittest.TestCase):
         self.db.create_conversation("grand", "Grand")
         self.db._exec("UPDATE conversations SET parent_id='root' WHERE id='kid'")
         self.db._exec("UPDATE conversations SET parent_id='kid' WHERE id='grand'")
-        self.db.add_attachment("rootcap", "root", "terra", "fake", ["fake"], self.directory.name)
-        self.db.add_attachment("rootwrk", "root", "roe", "fake", ["fake"], self.directory.name)
-        self.db.add_attachment("digger", "grand", "dig", "fake", ["fake"], self.directory.name)
-        self.db.add_attachment("solcap", "grand", "sol", "fake", ["fake"], self.directory.name)
+        self.repo = os.path.join(self.directory.name, "repo")
+        os.makedirs(self.repo)
+        subprocess.run(["git", "init", "-q", "-b", "main"], cwd=self.repo,
+                       check=True, capture_output=True)
+        subprocess.run(["git", "-c", "user.email=t@example.com", "-c", "user.name=t",
+                        "commit", "-q", "--allow-empty", "-m", "root"],
+                       cwd=self.repo, check=True, capture_output=True)
+        self.db.add_attachment("rootcap", "root", "terra", "fake", ["fake"], self.repo)
+        self.db.add_attachment("rootwrk", "root", "roe", "fake", ["fake"], self.repo)
+        self.db.add_attachment("digger", "grand", "dig", "fake", ["fake"], self.repo)
+        self.db.add_attachment("solcap", "grand", "sol", "fake", ["fake"], self.repo)
         self.db._exec("UPDATE attachments SET is_lead=1, status='running' "
                       "WHERE id IN ('rootcap','solcap')")
         self.db._exec("UPDATE attachments SET status='running' WHERE id IN ('rootwrk','digger')")
@@ -94,7 +103,7 @@ class ApprovalBubbleTest(unittest.TestCase):
 
     def file_write_set(self):
         response = self.client.post("/api/conversations/grand/write-set",
-                                    json={"path": "/tmp/opencode/extra"}, headers=self.dig)
+                                    json={"path": os.path.join(self.repo, "extra")}, headers=self.dig)
         self.file_write_set_request_id = response.json()["id"]
         return response
 
@@ -117,7 +126,8 @@ class ApprovalBubbleTest(unittest.TestCase):
         body = found[0]["body"]
         self.assertIn("⚑ approval pending on «Grand»", body)
         self.assertIn(": write-set from @dig", body)
-        self.assertIn("grant write scope for `/tmp/opencode/extra`", body)
+        self.assertIn("grant write scope for `", body)
+        self.assertIn("extra`", body)  # the filed path, inside the repo
         self.assertIn("(approve: POST /api/conversations/grand/write-set/request/", body)
         self.assertIn("decline: POST /api/conversations/grand/write-set/request/", body)
         self.assertIn("@terra", body)  # the root captain is named
@@ -152,7 +162,7 @@ class ApprovalBubbleTest(unittest.TestCase):
     def test_a_request_on_the_root_itself_does_not_bubble(self):
         terra = {"Authorization": "Bearer " + auth_store.ensure_api_token(self.db, "rootcap")}
         made = self.client.post("/api/conversations/root/write-set",
-                                json={"path": "/tmp/opencode/extra"}, headers=terra)
+                                json={"path": os.path.join(self.repo, "extra")}, headers=terra)
         self.assertEqual(made.status_code, 200, made.text)
         self.assertEqual(self.bubbles(), [])
         self.assertIn("asks a person to grant write-set scope",
