@@ -79,6 +79,14 @@ describe("SettingsDialog", () => {
       remaining_processes: 24,
       remaining_memory_bytes: budget.memory_budget_bytes,
       busiest_line: null,
+      host_used_bytes: null,
+      host_available_bytes: null,
+      partyline_server_bytes: null,
+      partyline_processes_bytes: null,
+      partyline_used_bytes: null,
+      other_used_bytes: null,
+      sampled_at: null,
+      top_lines: [],
     });
     const save = vi.spyOn(resourceApi, "setResourceSettings").mockResolvedValue(budget);
     const reset = vi.spyOn(resourceApi, "resetResourceSettings").mockResolvedValue(budget);
@@ -159,6 +167,14 @@ describe("SettingsDialog", () => {
       remaining_processes: 24,
       remaining_memory_bytes: budget.memory_budget_bytes,
       busiest_line: null,
+      host_used_bytes: null,
+      host_available_bytes: null,
+      partyline_server_bytes: null,
+      partyline_processes_bytes: null,
+      partyline_used_bytes: null,
+      other_used_bytes: null,
+      sampled_at: null,
+      top_lines: [],
     });
     const save = vi.spyOn(resourceApi, "setResourceSettings").mockResolvedValue(budget);
     const { dialog } = openDialog();

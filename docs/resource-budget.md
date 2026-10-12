@@ -96,17 +96,29 @@ it; no planned live process is stopped by resource-budget admission.
 
 ## Visibility
 
-The top bar shows fleet-wide process usage. Its popover includes reserved memory
-and the sum of per-process caps,
-the line with the most live processes, and a blocked-admission notice when the
-fleet is at or above a limit. Over-limit usage stays visible as real numbers
+The top bar shows fleet-wide process usage and real host memory — used over
+total, such as `41/64 GB`. Its popover shows the host bar (partyline's share
+and everything else's, against total RAM), what is still available, partyline's
+own use split into the server and the processes it runs (each process's whole
+CLI tree), the lines whose families use the most memory, the admission
+reservation, the line with the most live processes, and a blocked-admission
+notice when the fleet is at or above a limit. The sum of per-process caps is
+deliberately not shown: caps are ceilings, not usage, and their sum routinely
+exceeds the RAM the host has. Over-limit usage stays visible as real numbers
 and turns the indicator red. The root captain briefing includes a capacity
 line. The authenticated `/api/resources` endpoint is readable by machines as
 well as people.
 
 The UI refreshes its resource snapshot on attachment, removal, and line-live
 wire events. `LineLiveEvent` is broadcast to every open socket, so a browser on
-one line also sees changes on another; refreshes are debounced by 300 ms.
+one line also sees changes on another; refreshes are debounced by 300 ms, and
+the snapshot is polled every five seconds while the tab is visible, because
+real usage moves without any event. `/api/resources` carries the same numbers:
+`host_used_bytes`, `host_available_bytes` (Linux `MemAvailable`, Windows
+`GlobalMemoryStatusEx`, null elsewhere), `partyline_server_bytes` (the server's
+cgroup `memory.current`, else its RSS), `partyline_processes_bytes` (the
+sampler's latest reading per live process), `partyline_used_bytes`,
+`other_used_bytes`, `top_lines` and `sampled_at`.
 
 ## Enforcement and limits
 
@@ -114,6 +126,7 @@ one line also sees changes on another; refreshes are debounced by 300 ms.
 | --- | --- |
 | Process-count admission across all lines | Enforced by Partyline on Linux, macOS, and Windows |
 | Sum of declared memory reservations against host RAM minus reserve | Enforced by Partyline admission on Linux, macOS, and Windows |
+| Real available memory minus reserve against the new process's reservation | Enforced by Partyline admission where the host reports available memory (Linux, Windows); the refusal names the real numbers |
 | Per-process memory cap | Linux cgroup scope and Windows Job Object are kernel enforced; macOS `RLIMIT_AS` is best-effort address-space limiting and does not guarantee resident-memory use |
 | Process overview RSS | Advisory visibility only; best effort across supported platforms |
 | Early memory warning | Advisory; one server sampler checks live process trees every five seconds and warns at the people-configured threshold (default 80%), re-arming below 65% and rate-limiting each process to one notice per ten minutes |

@@ -81,6 +81,11 @@ Killing by pattern-matching the word partyline across every command line (the fu
 form of pkill) matches the instance hosting your own conversation and your own shell. The
 literal command is deliberately not written here: Grok's shell guard refuses any script that
 quotes it, including a captain's brief that copied this rule.
+The same holds for any pattern kill (`pkill -f`, `killall`): every attachment runs
+under one uid, so the pattern reaches other lines' processes. Kill by pid from your
+own tree — the memory warning names your largest children by pid — or use
+`POST /api/attachments/<id>/signal {"pid": N}`, which refuses anything that is not
+your descendant.
 Find the pid that owns the port instead:
 
 ```bash

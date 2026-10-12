@@ -153,7 +153,7 @@ continue to include them.
 
 Requests that need a person bubble to the root. A write-set, memory-cap or restart request
 filed on a child line posts its ordinary notice there plus one `⚑ approval pending` line on the
-tree's root, naming the line, the requester and the approve call, and @mentions the root's
+tree's root, naming the line, the requester and the approve and decline calls, and @mentions the root's
 captain so that process wakes and can explain the request in context — the person talks to the
 root captain and never reads sublines. A request filed on the root itself does not bubble, and
 the staffing wake line counts what is still waiting anywhere below:
@@ -163,7 +163,10 @@ notices: `GET /api/conversations/<root id>/approvals` (people only) lists
 every pending request in the subtree — kind, line, requester, detail, and
 the approve/decline endpoints — and the root line's one-click approvals
 banner renders exactly that list with **Approve** and **Decline** buttons
-per row.
+per row. A write-set row also carries `deny`, the machine-callable
+`POST …/deny {"reason"}`: a captain decides a child's write-set request itself
+when the path lies inside a grant its own line already holds, and declines with
+a reason as easily as it approves (see `docs/write-fence.md`, Scope expansion).
 
 Work goes down, not sideways. Once a line has a child, a machine may no longer
 attach processes to that line: the root captain that could not staff a child
@@ -623,6 +626,15 @@ once, and two lines cannot start a ping-pong. `@all` rings one line only.
 
 The old form — `POST /api/conversations/<child-id>/messages` from the manager
 — still works and is the same thing said on the child's line directly.
+
+Sibling captains may talk without a relay: a captain may `POST
+/api/conversations/<sibling-id>/messages` when both lines share the same
+parent. The post is stamped with its line, so it reads `name via «line»`;
+nothing else crosses — no attach, accept or assign on the sibling. A worker,
+a cousin line and a root line get 403. To move one message verbatim instead of
+retelling it, `POST /api/conversations/<src>/messages/<id>/forward {"to":
+"<line id>", "note": "…"}` posts it to the target quoted as `↪ forwarded from
+«line» — author said:`; it needs read on the source and write on the target.
 
 | DO | DO NOT |
 | --- | --- |

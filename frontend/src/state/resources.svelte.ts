@@ -1,10 +1,16 @@
 /** Fleet resource snapshot shared by the top bar and incoming wire events. */
 import { getResources, type ResourceSnapshot } from "../lib/resource-api";
 
+const POLL_MS = 5000;
+
 class Resources {
   snapshot = $state<ResourceSnapshot | null>(null);
   popoverOpen = $state(false);
   #refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  #pollTimer: ReturnType<typeof setInterval> | null = null;
+  #onVisible = (): void => {
+    if (document.visibilityState === "visible") void this.load();
+  };
 
   async load(): Promise<void> {
     try {
@@ -20,6 +26,22 @@ class Resources {
       this.#refreshTimer = null;
       void this.load();
     }, 300);
+  }
+
+  /** Real usage moves on its own; poll while the tab can show it. */
+  startPolling(): void {
+    if (this.#pollTimer !== null) return;
+    this.#pollTimer = setInterval(() => {
+      if (document.visibilityState === "visible") void this.load();
+    }, POLL_MS);
+    document.addEventListener("visibilitychange", this.#onVisible);
+  }
+
+  stopPolling(): void {
+    if (this.#pollTimer === null) return;
+    clearInterval(this.#pollTimer);
+    this.#pollTimer = null;
+    document.removeEventListener("visibilitychange", this.#onVisible);
   }
 }
 

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from fastapi import HTTPException
 
 from .process_memory import DEFAULT_PROCESS_MEMORY_LIMIT, parse_size, process_memory_limit
+from .resource_usage import gib_text, host_available_bytes, usage_section
 from .server_memory import host_memory_bytes
 
 GIB = 1024**3
@@ -22,11 +23,13 @@ LIVE = ("starting", "running")
 class Host:
     cpus: int
     ram_bytes: int
+    available_bytes: int | None = None
 
 
 def host_resources() -> Host:
     """Return portable host totals; injectable host values keep policy testable."""
-    return Host(max(1, os.cpu_count() or 1), host_memory_bytes())
+    return Host(max(1, os.cpu_count() or 1), host_memory_bytes(),
+                host_available_bytes())
 
 
 def defaults(host: Host | None = None) -> dict[str, int]:
@@ -146,7 +149,7 @@ def lease_bytes(row: dict, config: dict[str, int]) -> int:
     return min(cap_bytes(row, config), config["memory_reservation_bytes"])
 
 
-def snapshot(db, host: Host | None = None) -> dict:
+def snapshot(db, host: Host | None = None, runtime=None) -> dict:
     host = host or host_resources()
     config = settings(db, host)
     rows = live_rows(db)
@@ -164,11 +167,13 @@ def snapshot(db, host: Host | None = None) -> dict:
         "remaining_processes": max(0, config["max_live_processes"] - len(rows)),
         "remaining_memory_bytes": max(0, budget - reserved),
         "busiest_line": busiest,
+        **usage_section(runtime, rows, host, family_roots(db)),
     }
 
 
 def refusal(db, requested_lease: int, *, exclude_id: str | None = None,
             host: Host | None = None) -> str | None:
+    host = host or host_resources()
     view = snapshot(db, host)
     rows = live_rows(db)
     if exclude_id:
@@ -180,9 +185,15 @@ def refusal(db, requested_lease: int, *, exclude_id: str | None = None,
     maximum = view["max_live_processes"]
     if count >= maximum:
         return f"{count} of {maximum} live processes in use; stop one or raise the limit in settings"
+    reservation = min(requested_lease, view["memory_reservation_bytes"])
+    if host is not None and host.available_bytes is not None:
+        headroom = max(0, host.available_bytes - view["memory_reserve_bytes"])
+        if headroom < reservation:
+            return (f"host has {gib_text(headroom)} available, new process "
+                    f"reserve {gib_text(reservation)}; stop a process or lower "
+                    "the reserve in settings")
     leased = view["memory_reserved_bytes"]
     budget = view["memory_budget_bytes"]
-    reservation = min(requested_lease, view["memory_reservation_bytes"])
     if leased + reservation > budget:
         gib = GIB
         used_gb = (leased + reservation + gib - 1) // gib
