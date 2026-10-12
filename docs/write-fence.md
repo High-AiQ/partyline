@@ -166,6 +166,11 @@ the process itself or its line's captain may call and which refuses anything
 that is not a strict descendant of that process. Never `pkill -f` or `killall`:
 every attachment runs under one uid, so a pattern kill reaches other lines'
 processes (two attachments exited -15 from one captain's cleanup on 2026-10-12).
+A per-attachment PID namespace (`bwrap --unshare-pid`) would make that physically
+impossible, and is deliberately not used: probed on 2026-10-12, `scripts/capped-test`
+inside such a fence falls back from the cgroup `MemoryMax` scope (whole process tree)
+to `RLIMIT_AS` (one process), so the flag would trade a cross-line kill risk for a
+silently weaker test cap.
 
 The repository's `scripts/capped-test` now uses the scope result to return 137 for
 a confirmed OOM even when systemd's launcher was terminated with SIGTERM.
