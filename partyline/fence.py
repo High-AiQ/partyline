@@ -48,7 +48,7 @@ from __future__ import annotations
 import os
 import sys
 
-from . import features, fence_darwin, fence_protect, git_fence
+from . import docker_relay, features, fence_darwin, fence_protect, git_fence
 from .fence_paths import darwin_write_set, write_set
 
 BWRAP = "/usr/bin/bwrap"
@@ -157,6 +157,12 @@ def _fence_args(att: dict) -> list[str]:
 def _bwrap_argv(att: dict, command: list[str]) -> list[str]:
     argv = [BWRAP, "--bind", "/", "/", "--dev-bind", DEV_ROOT, DEV_ROOT,
             "--proc", "/proc", "--unshare-user"]
+    # Docker relays (docker_relay): hide every line's directory, then bind
+    # back only this line's own, so no other line can reach a relay.
+    argv += ["--tmpfs", docker_relay.ensure_root()]
+    if att.get("docker_socket"):
+        own = os.path.dirname(att["docker_socket"])
+        argv += ["--bind", own, own]
     for root in _protected_roots(att):
         argv += ["--ro-bind", root, root]
     for src, dst, read_only in write_set(att):

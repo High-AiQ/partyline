@@ -8,6 +8,7 @@ a live child, which is the state the one-line route refuses.
 
 from __future__ import annotations
 
+from . import docker_relay
 from .contracts import ConversationArchivedEvent, ConversationDeletedEvent
 from .hierarchy import descendants
 
@@ -17,6 +18,7 @@ async def archive_line(runtime, conv_id: str) -> list[str]:
     await runtime.broadcast(conv_id, ConversationArchivedEvent(conversation_id=conv_id))
     await runtime.broadcast(conv_id, ConversationDeletedEvent(conversation_id=conv_id))
     stopped = await runtime.stop_attachments(conv_id)
+    await docker_relay.stop(conv_id)
     runtime.db.archive_conversation(conv_id)
     runtime.sockets.pop(conv_id, None)
     return stopped
