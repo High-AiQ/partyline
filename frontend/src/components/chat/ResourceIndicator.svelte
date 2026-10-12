@@ -44,10 +44,6 @@
 
   onMount(() => {
     void resources.load();
-    resources.startPolling();
-    return () => {
-      resources.stopPolling();
-    };
   });
 
   function openSettings(): void {

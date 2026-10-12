@@ -57,6 +57,9 @@ export function onRoomWireEvent(room: RoomWireSink, event: WireEvent, context: W
       }
       break;
     }
+    case "resources":
+      resources.snapshot = event.snapshot;
+      break;
     case "line_live":
       resources.scheduleRefresh();
       room.conversations = applyLineLive(room.conversations, event);
