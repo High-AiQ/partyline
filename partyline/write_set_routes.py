@@ -40,6 +40,13 @@ def list_write_grants(db, conv_id: str) -> list[dict]:
     return [dict(r) for r in cur.fetchall()]
 
 
+def load_write_grants(db, att: dict) -> None:
+    """Load a spawning attachment's grants; the docker grant starts its relay."""
+    from . import docker_relay
+    att["write_grants"] = list_write_grants(db, att["conv_id"])
+    docker_relay.prepare(att)
+
+
 def add_write_grant(db, conv_id: str, path: str, granted_by: str) -> dict:
     """Record one granted path; re-granting an existing path is a no-op."""
     with db.lock:

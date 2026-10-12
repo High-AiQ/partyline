@@ -126,7 +126,7 @@ class LaunchArgvTest(unittest.TestCase):
         self.assertEqual(argv[-3:], ["--", "cli", "--go"])
         for flag in ("--bind", "--ro-bind", "--dev-bind", "--proc"):
             self.assertIn(flag, argv)
-        self.assertNotIn("--tmpfs", argv)
+        self.assertEqual(argv.count("--tmpfs"), 1)  # the docker relay root, hidden
         self.assertEqual(argv[argv.index("--bind") + 1:argv.index("--bind") + 3], ["/", "/"])
         self.assertEqual(argv[argv.index("--ro-bind") + 1:argv.index("--ro-bind") + 3],
                          [base, base])

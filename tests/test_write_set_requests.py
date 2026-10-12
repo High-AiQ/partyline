@@ -398,6 +398,24 @@ class WriteSetRequestTest(unittest.TestCase):
         grants = [g["path"] for g in list_write_grants(self.db, "kid")]
         self.assertIn(os.path.realpath(inner), grants)
 
+    def test_docker_access_is_a_grant_only_a_person_approves(self):
+        self._seed_subtree()
+        self.grant_on("line", "/run/docker.sock")  # the captain even holds it
+        filed = self.file_on_kid("/var/run/docker.sock")  # through the symlinked parent
+        self.assertEqual(filed.status_code, 200, filed.text)
+        request_id = filed.json()["id"]
+        refused = self.client.post(
+            f"/api/conversations/kid/write-set/request/{request_id}/approve",
+            headers=self.captain)
+        self.assertEqual(refused.status_code, 403)
+        self.assertIn("root-equivalent", refused.json()["detail"])
+        approved = self.client.post(
+            f"/api/conversations/kid/write-set/request/{request_id}/approve",
+            headers=self.human)
+        self.assertEqual(approved.status_code, 200, approved.text)
+        self.assertEqual([g["path"] for g in list_write_grants(self.db, "kid")],
+                         ["/var/run/docker.sock"])
+
     def test_a_non_ancestor_captain_gets_403_even_with_a_covering_grant(self):
         # the earlier version passed only because the other line held no
         # grant: give the non-ancestor line one covering the path and assert
