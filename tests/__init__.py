@@ -14,6 +14,7 @@ import os
 import shutil
 import tempfile
 
+from partyline import docker_bridge_client as _docker_bridge_client
 from partyline import docker_relay as _docker_relay
 from partyline import resource_budget as _resource_budget
 from partyline import resource_usage as _resource_usage
@@ -26,6 +27,7 @@ os.environ["PARTYLINE_DB"] = os.path.join(_SANDBOX, "partyline.db")
 os.environ["PARTYLINE_TMP_BASE"] = os.path.join(_SANDBOX, "tmp")
 # The docker relay directories live under the home directory; tests get their own.
 _docker_relay.RELAY_ROOT = os.path.join(_SANDBOX, "docker")
+_docker_bridge_client.BRIDGE_ROOT = os.path.join(_SANDBOX, "docker-bridge")
 # Pin runtime-derived capacity for every ordinary test. Tests of host discovery
 # and admission policy explicitly use their own fake Host values.
 PINNED_TEST_HOST = Host(cpus=32, ram_bytes=1024 * GIB)
