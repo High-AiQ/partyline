@@ -33,7 +33,10 @@ from pydantic import BaseModel, Field
 from .auth_guard import request_principal
 from .top_processes import _descendants, namespace_pid
 
-SIGNALS = {"TERM": signal_module.SIGTERM, "KILL": signal_module.SIGKILL}
+# Windows has no SIGKILL; os.kill(pid, SIGTERM) there is TerminateProcess —
+# the one signal that always stops the process on every platform.
+SIGNALS = {"TERM": signal_module.SIGTERM,
+           "KILL": getattr(signal_module, "SIGKILL", signal_module.SIGTERM)}
 
 
 class SignalIn(BaseModel):
