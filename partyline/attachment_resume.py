@@ -30,7 +30,7 @@ from .role_delivery import bind_role_delivery
 from .review_worktrees import list_review_worktrees
 from .reattach import ResumedAttachment, adapter_can_resume, resume_needs_session
 from .transcript_delivery import TranscriptDeliveryRecord
-from .write_set_routes import list_write_grants
+from .write_set_routes import load_write_grants
 from .resource_budget import cap_bytes, claim_resume, format_limit, settings
 
 logger = logging.getLogger(__name__)
@@ -220,7 +220,7 @@ async def _resume_adapter_locked(
     att["api_token"] = ensure_api_token(runtime.db, att_id)
     att["hook_url"] = hook_url(att_id, runtime_owner)
     att["review_worktrees"] = list_review_worktrees(runtime.db, att["conv_id"])
-    att["write_grants"] = list_write_grants(runtime.db, att["conv_id"])
+    load_write_grants(runtime.db, att)
     att["protected_roots"] = protected_repo_roots(runtime.db)
     att["global_prose"] = runtime.db.get_setting("global_prose")
     att["db_paths"] = database_paths(runtime.db)

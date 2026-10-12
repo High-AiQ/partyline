@@ -19,7 +19,7 @@ from .hook_routes import surface_attention
 from .review_worktrees import list_review_worktrees
 from .scratch_worktrees import list_scratch_worktrees
 from .role_delivery import bind_role_delivery
-from .write_set_routes import list_write_grants
+from .write_set_routes import load_write_grants
 from .resource_budget import format_limit, settings
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ def prepare_attachment(att, runtime, hook_url, checkpoint):
     att["global_prose"] = runtime.db.get_setting("global_prose")
     att["conv_name"], att["topic"] = conv["name"], conv["topic"]
     att["hook_url"] = hook_url(att["id"], att["runtime_owner"])
-    att["write_grants"] = list_write_grants(runtime.db, att["conv_id"])
+    load_write_grants(runtime.db, att)
     att["review_worktrees"] = list_review_worktrees(runtime.db, att["conv_id"])
     att["scratch_worktrees"] = list_scratch_worktrees(runtime.db, att["conv_id"])
     att["protected_roots"] = protected_repo_roots(runtime.db)

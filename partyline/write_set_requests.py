@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from .adapters import ADAPTER_METADATA
 from .approval_bubble import bubble_approval
+from . import docker_relay
 from .fence_protect import protected_repo_roots
 from .hierarchy import ancestors
 from .line_process_routes import detach_attachment, live_attachments
@@ -98,6 +99,8 @@ def validate_grantable(db, path: str) -> str:
     import os
 
     path = validate_path(path)
+    if docker_relay.is_docker_socket(path):
+        return path  # docker access: relayed, not bound; only a person approves
     resolved = os.path.realpath(path)
     roots = protected_repo_roots(db)
     if not any(
