@@ -144,6 +144,10 @@
       <TopBar />
       <Feed />
       {#if room.conversation}
+        <!-- The approvals banner sits in the flex column directly above the
+             composer, on every width: in flow, so the feed shrinks and the
+             pending decisions are on screen without scrolling (2.20). -->
+        <ApprovalsBanner />
         <Composer />
       {/if}
     </main>
@@ -165,7 +169,6 @@
 {/if}
 
 <WireBanner />
-<ApprovalsBanner />
 
 <!-- Rendered from the store rather than pushed onto the dialog stack: the
      server owns this offer's lifetime. It arrives unprompted after a restart
