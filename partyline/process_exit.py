@@ -82,7 +82,8 @@ async def report_exit(adapter, code: int) -> None:
         if getattr(adapter, "_ready_result", True) is not True and adapter.pastes_claim():
             evidence.startup = True
             tail = getattr(adapter, "output_tail", None)
-            evidence.last_output = "\n".join(tail.lines(15)) if tail else None
+            # Output is relayed into a notice: a quoted @handle must not ring anyone.
+            evidence.last_output = "\n".join(tail.lines(15)).replace("@", "＠") if tail else None
         await adapter.on_status("exited")
         callback = adapter.att.get("on_process_exit")
         if callback:
