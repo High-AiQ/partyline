@@ -63,6 +63,35 @@ def staffing_report(db, conv_id: str) -> dict:
     }
 
 
+def _free_presets(presets: list[dict], counts: dict[str, int]) -> list[dict]:
+    """Presets with capacity left, with a display string for each.
+
+    A worker preset (no ``can_manage``) stays free only while no live
+    process matches it — the old, single-instance view. A ``can_manage``
+    preset runs one instance per line and is always free, unless it
+    declares ``max_instances``: then it stays free while the live count is
+    below the cap. The display carries the remaining-seat count when more
+    than one seat is left ("astra (2 more)").
+    """
+    free = []
+    for preset in presets:
+        traits = coerce_traits(preset)
+        count = counts.get(preset["id"], 0)
+        max_instances = int(preset.get("max_instances") or 0)
+        remaining = None if max_instances == 0 else max_instances - count
+        if traits["can_manage"]:
+            if remaining is None or remaining > 0:
+                display = preset["name"] + (
+                    f" ({remaining} more)" if remaining is not None and remaining > 1
+                    else "")
+                free.append({"name": preset["name"], "traits": traits,
+                             "display": display})
+        elif count == 0:
+            free.append({"name": preset["name"], "traits": traits,
+                         "display": preset["name"]})
+    return free
+
+
 def staffing_line(db, conv_id: str, *, runtime=None) -> str:
     """One line for a captain's wake: subtree use and globally free presets.
 
@@ -77,7 +106,7 @@ def staffing_line(db, conv_id: str, *, runtime=None) -> str:
     if not presets and not pending:
         return ""
     in_use: list[str] = []
-    used_ids: set[str] = set()
+    matched_counts: dict[str, int] = {}
     subtree = set(subtree_conversation_ids(db, conv_id))
     compacted = compaction_counts(db)
     for conv in db.list_conversations():
@@ -86,7 +115,7 @@ def staffing_line(db, conv_id: str, *, runtime=None) -> str:
                 continue
             matched = match_preset(att, presets)
             if matched is not None:
-                used_ids.add(matched["id"])
+                matched_counts[matched["id"]] = matched_counts.get(matched["id"], 0) + 1
             if conv["id"] not in subtree:
                 continue
             role = " captain" if att.get("is_lead") else ""
@@ -95,10 +124,13 @@ def staffing_line(db, conv_id: str, *, runtime=None) -> str:
             if compactions:
                 label += f" ×{compactions} compactions"
             in_use.append(label)
-    free = [p for p in presets if p["id"] not in used_ids]
-    traits = {p["id"]: coerce_traits(p) for p in free}
-    captains = ", ".join(p["name"] for p in free if traits[p["id"]]["can_manage"]) or "none"
-    workers = ", ".join(p["name"] for p in free if traits[p["id"]]["implements"]) or "none"
+    free = _free_presets(presets, matched_counts)
+    captains = ", ".join(
+        entry["display"] for entry in free if entry["traits"]["can_manage"]
+    ) or "none"
+    workers = ", ".join(
+        entry["display"] for entry in free if entry["traits"]["implements"]
+    ) or "none"
     busy = "; ".join(in_use) or "nobody"
     parts = [f"in use: {busy}", f"free captains: {captains}", f"free workers: {workers}"]
     leases = describe_leases(db)

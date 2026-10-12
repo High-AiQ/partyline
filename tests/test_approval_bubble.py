@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from partyline import auth_store, auth_tokens, deployment
+from partyline.approval_bubble import register_approval_routes
 from partyline.auth_guard import install_auth_guard
 from partyline.db import Db
 from partyline.memory_requests import register_memory_request_routes
@@ -46,6 +47,7 @@ class ApprovalBubbleTest(unittest.TestCase):
         install_auth_guard(app, self.db)
         app.include_router(write_set_router(self.runtime))
         register_write_set_request_routes(app, self.runtime, self._resume)
+        register_approval_routes(app, self.runtime)
         register_memory_request_routes(app, self.runtime, self._resume)
         register_restart_request_routes(
             app, self.runtime, {"fake": {"capabilities": {"resume": True}}}, lambda: None)
@@ -91,13 +93,17 @@ class ApprovalBubbleTest(unittest.TestCase):
         return [m for m in self.recorder.delivered if "⚑ approval pending" in m["body"]]
 
     def file_write_set(self):
-        return self.client.post("/api/conversations/grand/write-set",
-                                json={"path": "/tmp/opencode/extra"}, headers=self.dig)
+        response = self.client.post("/api/conversations/grand/write-set",
+                                    json={"path": "/tmp/opencode/extra"}, headers=self.dig)
+        self.file_write_set_request_id = response.json()["id"]
+        return response
 
     def file_memory(self):
-        return self.client.post("/api/attachments/digger/memory-requests",
+        made = self.client.post("/api/attachments/digger/memory-requests",
                                 json={"requested_limit": "5G", "reason": "large test bundle"},
                                 headers=self.dig)
+        self.memory_request_id = made.json()["id"]
+        return made
 
     def file_restart(self):
         return self.client.post("/api/conversations/grand/restart-request",
@@ -175,6 +181,38 @@ class ApprovalBubbleTest(unittest.TestCase):
         self.assertIn("@terra", body)  # and so does the deliberate captain ring
         self.assertEqual(len(self.delivered_bubbles()), 1)  # the captain, once
         self.assertEqual(self.worker_recorder.delivered, [])  # @all rang nobody extra
+
+    def test_approvals_endpoint_lists_subtree_rows_for_people(self):
+        self.file_write_set()
+        self.file_memory()
+        seen = self.client.get("/api/conversations/root/approvals", headers=self.human)
+        self.assertEqual(seen.status_code, 200, seen.text)
+        rows = seen.json()["approvals"]
+        self.assertEqual([row["kind"] for row in rows], ["write-set", "memory"])
+        self.assertEqual([row["line"] for row in rows], ["Grand", "Grand"])
+        self.assertEqual([row["requester"] for row in rows], ["dig", "dig"])
+        self.assertIn(rows[0]["request_id"], (self.file_write_set_request_id,))
+        self.assertEqual(rows[1]["request_id"], self.memory_request_id)
+        approve_paths = [row["approve"] for row in rows]
+        self.assertIn("/api/conversations/grand/write-set/request/", approve_paths[0])
+        self.assertTrue(approve_paths[1].startswith("/api/memory-requests/"))
+        self.assertTrue(all(row["decline"] for row in rows))
+
+    def test_approvals_endpoint_is_people_only_and_covers_the_whole_subtree(self):
+        # a request on the grandchild is visible from the root; decided ones drop out
+        self.file_write_set()
+        dig = {"Authorization": "Bearer " + auth_store.ensure_api_token(self.db, "digger")}
+        seen = self.client.get("/api/conversations/root/approvals", headers=dig)
+        self.assertEqual(seen.status_code, 403, seen.text)
+        grant = self.db._exec(
+            "SELECT id FROM conversation_write_grant_requests WHERE conv_id='grand'"
+        ).fetchone()
+        declined = self.client.delete(
+            f"/api/conversations/grand/write-set/request/{grant['id']}", headers=self.human)
+        self.assertEqual(declined.status_code, 200, declined.text)
+        self.assertEqual(
+            self.client.get("/api/conversations/root/approvals",
+                            headers=self.human).json()["approvals"], [])
 
     def test_the_staffing_line_counts_pending_across_the_subtree_and_drops_on_decision(self):
         self.assertNotIn("approvals pending",

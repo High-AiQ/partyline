@@ -176,32 +176,56 @@ property of the CLI, not of partyline, so it is declared per adapter.
 capabilities = { immediate_mentions = true }
 ```
 
-### Compaction hooks
+### Compaction detection
 
-Only Claude Code today. A harness that reports compaction declares the capability, and
-partyline then adds two hooks to the `--settings` it already generates alongside
-`Notification`, `UserPromptSubmit` and `Stop`:
+Two routes, declared per adapter. Both feed the same counter, the same line notice
+(`⚠ @handle compacted (auto, Nth time)`) and the same thrash rule — three `auto`
+compactions within the last five hook turns ring the line's live captain once — so a
+compaction counts exactly once whichever route reports it.
+
+**The hook route** — Claude Code only. A harness that exposes partyline's hooks declares:
 
 ```toml
 capabilities = { compaction_hooks = true }
 ```
 
-- `PreCompact` (matchers `auto` and `manual`) POSTs to the attachment's hook URL. Each
-  event becomes a line notice (`⚠ @handle compacted (auto, Nth time)`), bumps the
-  attachment's persisted compactions counter — shown as `×N compactions` in the staffing
-  line — and three `auto` compactions within the last five hook turns ring the line's
-  live captain once: that is thrash, and the remedy is a fresh instance, not a re-prompt.
+- `PreCompact` (matchers `auto` and `manual`) POSTs to the attachment's hook URL, which
+  bumps the attachment's persisted compactions counter — shown as `×N compactions` in the
+  staffing line — and rings on thrash. That is the remedy signal: a fresh instance, not a
+  re-prompt.
 - `SessionStart` with matcher `compact` GETs
   `GET /api/hooks/<attachment>/<token>/rebrief` and prints the body to stdout, which the
-  harness appends to the model's context: the goal, the line's topic, and the latest
-  captain-or-person message that @mentions the process, verbatim, capped at ~4k
-  characters. That hook is a printing `command` curl on every platform — an `http` hook
+  harness appends to the model's context: the goal, the line's topic, the process's notes,
+  and the latest captain-or-person message that @mentions the process, verbatim, capped at
+  ~4k characters. That hook is a printing `command` curl on every platform — an `http` hook
   cannot add anything to context.
 
-Adapters without the capability get none of this: no extra hooks, no counting, and the
-rebrief endpoint answers 403. `adapters/compaction.py`'s transcript recognition is
-unchanged and deliberately not wired into the counter — the hooks are authoritative, so
-a compaction counts exactly once.
+**The transcript route** — codex and opencode-v2. Neither harness has a hook whose stdout
+reaches the model, so the adapter recognises the compaction in the structured transcript
+it already tails and declares:
+
+```toml
+capabilities = { compaction_detect = "transcript" }
+```
+
+- codex: a `{"type": "compacted"}` rollout record; opencode-v2: a `compaction` row in the
+  session store with `status: "completed"`. Each recognised record calls the same counter
+  and notice logic, deduplicated per record — codex by its freshness gate (a resumed
+  rollout's backlog never re-counts), opencode-v2 by its seen-set.
+- Because neither harness can print a rebrief into context, partyline delivers
+  `GET …/rebrief`'s text to the compacted process as a **private wake message**, which
+  arrives as its next prompt. The thrash turn window still works on this route: both
+  adapters report turn boundaries as receipts through the same hook door.
+
+Adapters with neither capability get none of this: no counting, no notices, and the
+rebrief endpoint answers 403.
+
+**Per-preset thresholds.** A preset may declare `auto_compact_tokens` (0 = unset, so the
+CLI's own tuned default applies). It is applied at spawn only where the CLI documents a
+per-attachment knob: Claude Code takes `CLAUDE_CODE_AUTO_COMPACT_WINDOW` (a plain token
+count) and codex takes a `-c model_auto_compact_token_limit=<n>` global flag. Adapters
+without such a knob — opencode v2's `compaction.buffer` is config-file-only, with no env
+var or flag — ignore the field.
 
 The claim is that a mention arrives at a turn **already in progress**. It is `false` for every
 adapter that does not say otherwise, because the failure mode of guessing is a room that believes
@@ -548,7 +572,8 @@ not submitted it. Subsequent messages use bracketed paste. Only the current acti
 structured user message opens readiness and speech.
 
 The v2 adapter reads `session_v2` / `session_message`, relays completed assistant
-text, filters reasoning/tool/compaction records, and closes turns on structured
+text, filters reasoning/tool records from speech, feeds `compaction` records to the
+compaction counter (see *Compaction detection*), and closes turns on structured
 `idle` records, including interruptions. V1 retains its existing `message` / `part`
 reader. V2 defaults `OPENCODE_DB` to `opencode-v2.db` to keep its migrations separate
 from v1; an explicit `OPENCODE_DB` override wins. The selected binary's

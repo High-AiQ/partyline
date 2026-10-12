@@ -58,16 +58,47 @@ def read_notes(db, conv_id: str, scope: str, attachment_id: str = "") -> dict:
 
 
 def write_notes(db, conv_id: str, scope: str, notes: str,
-                attachment_id: str = "") -> dict:
+                attachment_id: str = "", turn: int | None = None) -> dict:
     stored_at = time.time()
     conv, _ = _storage_id(db, conv_id, scope)
     att = attachment_id if scope == "attachment" else ""
     db._exec(
         "INSERT OR REPLACE INTO line_notes"
-        " (conv_id, scope, attachment_id, notes, updated_at) VALUES (?,?,?,?,?)",
-        (conv, scope, att, notes, stored_at),
+        " (conv_id, scope, attachment_id, notes, updated_at, turn) VALUES (?,?,?,?,?,?)",
+        (conv, scope, att, notes, stored_at, turn),
     )
     return {"scope": scope, "notes": notes, "updated_at": stored_at}
+
+
+NOTES_NUDGE_EVERY_TURNS = 8
+NOTES_STALE_SETTING = "notes_stale_turns"
+NOTES_STALE_TURNS = 16
+NUDGE = ("Update your attachment notes now: PUT "
+         "$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/notes?scope=attachment")
+
+
+def notes_nudge(db, conv_id: str, att_id: str, turns: int) -> str:
+    """The wake-rider nudge: every N turns, when this worker's notes are M turns stale.
+
+    The reliable route for finding 5.1: ``PreCompact`` stdout never reaches
+    the model (Claude Code discards its output fields and no model turn runs
+    between the hook and the compaction), so the prompt to write notes rides
+    the wake instead — before any compaction, not at it. The counter is the
+    harness's own turn count, so the rider keeps no state of its own. A
+    worker that never wrote notes is the stalest case of all and is nudged
+    too; the turn gate keeps that to once per N turns.
+    """
+    if turns <= 0 or turns % NOTES_NUDGE_EVERY_TURNS:
+        return ""
+    try:
+        stale = int(db.get_setting(NOTES_STALE_SETTING) or NOTES_STALE_TURNS)
+        row = db._exec(
+            "SELECT turn FROM line_notes WHERE conv_id=? AND scope='attachment'"
+            " AND attachment_id=?", (conv_id, att_id)).fetchone()
+    except (AttributeError, ValueError):
+        return ""  # a minimal db — the rider tests' fake — counts and stores nothing
+    written_at = row["turn"] if row and row["turn"] is not None else 0
+    return NUDGE if turns - written_at >= stale else ""
 
 
 def notes_router(runtime) -> APIRouter:
@@ -106,7 +137,15 @@ def notes_router(runtime) -> APIRouter:
             # grandchild's captain could overwrite the root's contracts.
             deny_unless(db, principal,
                         tree_root(db, conv_id) if scope == "tree" else conv_id, "assign")
-        return write_notes(db, conv_id, scope, body.notes.strip(), target
-                           if scope == "attachment" else "")
+        turn = None
+        if scope == "attachment" and principal.attachment_id == target:
+            # A process refreshing its own notes records the harness turn, so
+            # the wake rider knows how stale they are (5.1). A person writing
+            # someone else's notes leaves the turn unset.
+            from .compaction_events import current_turns
+
+            turn = current_turns(db, target)
+        return write_notes(db, conv_id, scope, body.notes.strip(),
+                           target if scope == "attachment" else "", turn)
 
     return router

@@ -86,7 +86,9 @@ from .accept_sha import register_accept_route
 from .accept_history import register_accept_history_route
 from .resource_leases import register_lease_routes
 from .review_worktrees import register_review_routes
+from .approval_bubble import register_approval_routes
 from .scratch_worktrees import register_scratch_routes
+from .line_gates import register_gates_routes
 from .prereview import register_prereview_route
 from .captain_docs import register_docs_route
 from .line_base import register_line_base_route
@@ -190,7 +192,9 @@ register_accept_route(app, runtime)
 register_accept_history_route(app, runtime)
 register_review_routes(app, runtime)
 register_scratch_routes(app, runtime)
+register_approval_routes(app, runtime)
 register_lease_routes(app, runtime)
+register_gates_routes(app, runtime)
 register_prereview_route(app, runtime)
 register_docs_route(app, runtime)
 register_line_base_route(app, runtime)

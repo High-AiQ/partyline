@@ -33,7 +33,12 @@ WORKER = (
     "meaningful step, PUT $PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/notes"
     '?scope=attachment with {"notes":"..."} (4,000 chars): what I am doing, files touched, '
     "last gate result, next step. The notes ride back into your context after any "
-    "compaction."
+    "compaction.\n"
+    "### A lease is for exclusive work only\n"
+    "POST /api/leases is for timing measurements and GPU- or device-exclusive work — not "
+    "for an ordinary build or test step, which needs no lease and must not queue another "
+    "line behind you. Name why you hold it: "
+    '{"name":"godot","ttl_s":900,"purpose":"timing run"}.'
 )
 
 WORKER_REMINDER = (

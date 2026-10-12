@@ -121,6 +121,15 @@ class RoleBriefingTests(unittest.TestCase):
         self.assertNotIn("## Captain pack", text)
         self.assertNotIn("You are the captain", text)
 
+    def test_the_worker_pack_limits_leases_to_exclusive_work(self):
+        # Finding 5.4: a worker took an exclusive lease for an ordinary step
+        # run and queued another line behind it.
+        text = worker_instructions(captained=True)
+        self.assertIn("A lease is for exclusive work only", text)
+        self.assertIn("timing measurements and GPU- or device-exclusive work", text)
+        self.assertIn("not for an ordinary build or test step", text)
+        self.assertIn('"purpose":"timing run"', text)
+
     def test_a_worker_on_an_uncaptained_line_is_told_nothing_new(self):
         self.assertEqual(worker_instructions(captained=False), "")
 
@@ -265,6 +274,11 @@ class RoleBriefingTests(unittest.TestCase):
         root = role_instructions(["assign", "create_child"], "root", None)
         self.assertIn("POST /api/leases", root)
         self.assertNotIn("POST {root}/leases", root)
+
+    def test_the_captain_pack_documents_declared_gates(self):
+        root = role_instructions(["assign", "create_child"], "root", None)
+        self.assertIn("PUT /api/conversations/root/gates", root)
+        self.assertIn('"run_gates": true', root)
 
     def test_the_split_brief_states_the_goal_and_topic_caps_and_points_at_a_brief_file(self):
         # Only the splitting pack POSTs /children; a leaf or staffed captain

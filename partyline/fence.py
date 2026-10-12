@@ -151,6 +151,38 @@ def _darwin_scope(att: dict) -> tuple[list[str], list[str], list[str], list[str]
     return deny, allow, deny_git, allow_git
 
 
+def command_argv(att: dict, command: list[str]) -> list[str]:
+    """A fenced argv for a one-off command run as this attachment (5.6).
+
+    Same write set, same protected roots, same fence args a spawned process
+    of this line would get — so gate commands declared by a captain never
+    run unfenced inside the server.
+    """
+    from . import fence_probe
+
+    if not features.enabled("write_fence"):
+        raise FenceUnavailable(_refusal("the write fence is disabled"))
+    result = fence_probe.cached_result()
+    if result is not None and not result[0]:
+        raise FenceUnavailable(_refusal(result[1], result[2]))
+    available, reason = backend_available()
+    if not available:
+        raise FenceUnavailable(_refusal(reason))
+    if backend() == "restricted-token":
+        # WindowsRuntime applies the restricted token around ConPTY itself; a
+        # one-off subprocess here would get no token at all. 501, never a
+        # fake fence.
+        raise FenceUnavailable(_refusal(
+            "gate commands cannot be fenced on this backend"))
+    if backend() == "sandbox-exec":
+        from . import fence_darwin
+
+        deny, allow, deny_git, allow_git = _darwin_scope(att)
+        return fence_darwin.argv(deny, allow, deny_git, allow_git,
+                                 command, _fence_args(att))
+    return _bwrap_argv(att, command)
+
+
 def launch_argv(adapter) -> list[str]:
     """Build a fenced spawn argv; adapters may replace incompatible CLI sandboxes."""
     command = adapter.build_command()

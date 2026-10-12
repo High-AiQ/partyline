@@ -25,6 +25,7 @@ from partyline.conversation_routes import register_conversation_routes
 from partyline.db import Db
 from partyline.goal import register_goal_route
 from partyline.hierarchy_routes import hierarchy_router
+from partyline.line_base import register_line_base_route
 from partyline.media import MediaStore
 from partyline.review_worktrees import register_review_routes
 from partyline.runtime import ChatRuntime
@@ -60,6 +61,7 @@ class AcceptShaTest(unittest.TestCase):
         register_goal_route(app, self.runtime)
         register_accept_route(app, self.runtime)
         register_accept_history_route(app, self.runtime)
+        register_line_base_route(app, self.runtime)
         register_review_routes(app, self.runtime)
         app.include_router(staffing_router(self.runtime))
 
@@ -507,7 +509,7 @@ class AcceptShaTest(unittest.TestCase):
         # porcelain HEAD tracks the branch ref, so a behind HEAD is rare —
         # but when it is reported, it names both the worktree's and the
         # accepted SHA, which is what makes the ⚠ actionable
-        from partyline import prereview as prereview_module
+        from partyline import tree_sync as tree_sync_module
 
         real = self.branch_head()
         first = self.commit("reviewed work")
@@ -517,14 +519,14 @@ class AcceptShaTest(unittest.TestCase):
         _git("update-ref", "refs/heads/line/kid", real, fenced, cwd=self.repo)
         porcelain = (f"worktree {self.worktree}\nHEAD {first}\n"
                      "branch refs/heads/line/kid\n")
-        original = prereview_module._git
+        original = tree_sync_module._git
 
         def stale_head(*args, cwd):
             if args[:3] == ("worktree", "list", "--porcelain"):
                 return subprocess.CompletedProcess(args, 0, porcelain, "")
             return original(*args, cwd=cwd)
 
-        with patch.object(prereview_module, "_git", side_effect=stale_head):
+        with patch.object(tree_sync_module, "_git", side_effect=stale_head):
             response = self.accept(fenced)
         self.assertEqual(response.status_code, 200, response.text)
         sync = self.tree_sync(response)

@@ -1,5 +1,6 @@
 """Lead-scoped staffing over a subtree, with conservative preset matching."""
 
+import os
 import tempfile
 import unittest
 
@@ -144,8 +145,125 @@ class StaffingLineTest(unittest.TestCase):
         line = staffing_line(db, "root")
         self.assertNotIn("glm-flash «Other»", line)
         self.assertNotIn("free workers: glm-flash", line)
+        # a can_manage preset with a live instance stays listed: captains run
+        # one instance per line, and the seat count says when they run out
         self.assertEqual(
             line,
             "(staffing — in use: opus «Kid» captain; luna «Kid». "
-            "free captains: astra. free workers: none)",
+            "free captains: astra, opus. free workers: none)",
         )
+
+
+class CaptainInstancesTest(unittest.TestCase):
+    """Numbered captain instances (finding 5.3): a can_manage preset holds one
+    live instance per line, the staffing line counts seats, and worker
+    presets keep their old hide-when-used behaviour."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.db = Db(os.path.join(self.directory.name, "partyline.db"))
+        self.addCleanup(self.db.close)
+        self.db.create_conversation("root", "Root")
+        self.db.create_conversation("a", "Alpha")
+        self.db.create_conversation("b", "Beta")
+        self.db._exec("UPDATE conversations SET parent_id='root' WHERE id IN ('a','b')")
+        self.db.save_preset("astra", "Astra", "astra", "raw", "raw --x",
+                            can_manage=True, implements=False, max_instances=3)
+        self.db.save_preset("luna", "Luna", "luna", "raw", "raw --x",
+                            can_manage=False, implements=True)
+
+    def seat(self, conv_id, att_id, handle):
+        self.db.add_attachment(att_id, conv_id, handle, "raw", ["raw", "--x"], "/tmp")
+        self.db._exec("UPDATE attachments SET status='running' WHERE id=?", (att_id,))
+
+    def staffing(self):
+        from partyline.staffing import staffing_line
+
+        return staffing_line(self.db, "root", runtime=None)
+
+    def captains(self, line):
+        return line.split("free captains: ", 1)[1].split(".")[0]
+
+    def test_two_lines_appoint_instances_of_the_same_captain_preset(self):
+        from partyline.hierarchy import set_lead
+
+        self.seat("a", "cap-a1", "astra")
+        self.seat("b", "cap-b1", "astra-2")
+        set_lead(self.db, "a", "cap-a1")
+        set_lead(self.db, "b", "cap-b1")
+        self.assertTrue(self.db.get_attachment("cap-a1")["is_lead"])
+        self.assertTrue(self.db.get_attachment("cap-b1")["is_lead"])
+        line = self.staffing()
+        # one seat left: shown plain — the "(N more)" count only appears when
+        # more than one instance is still available
+        self.assertEqual(self.captains(line), "astra")
+        self.db.save_preset("astra", "Astra", "astra", "raw", "raw --x",
+                            can_manage=True, implements=False, max_instances=4)
+        self.assertEqual(self.captains(self.staffing()), "astra (2 more)")
+        self.assertNotIn("free captains: none", line)
+
+    def test_the_preset_hides_only_when_max_instances_is_reached(self):
+        self.seat("a", "cap-a1", "astra")
+        self.seat("a", "cap-a2", "astra-2")
+        self.seat("b", "cap-b1", "astra-3")
+        line = self.staffing()
+        self.assertNotIn("(1 more)", line)  # one seat left: shown plain
+        self.assertIn("free captains: none", line)  # 3 of 3 seats live
+
+    def test_worker_presets_keep_their_old_behaviour(self):
+        self.seat("a", "w1", "luna")
+        line = self.staffing()
+        self.assertNotIn("luna", self.captains(line))
+        self.assertIn("free workers: none", line)  # in use: hidden, as before
+        self.assertIn("in use: luna «Alpha»", line)
+
+    def test_max_instances_round_trips_through_the_api(self):
+        from partyline.preset_routes import presets_router
+
+        runtime = ChatRuntime(self.db)
+        app = FastAPI()
+        app.include_router(presets_router(runtime, {"raw"}))
+        client = TestClient(app)
+        made = client.post("/api/presets", json={
+            "title": "Astra", "name": "astra", "adapter": "raw", "command": "raw --x",
+            "can_manage": True, "implements": False, "max_instances": 3})
+        self.assertEqual(made.status_code, 200, made.text)
+        self.assertEqual(made.json()["max_instances"], 3)
+        row = self.db._exec(
+            "SELECT max_instances FROM presets WHERE id=?", ("astra",)).fetchone()
+        self.assertEqual(row["max_instances"], 3)
+
+    def test_auto_compact_tokens_round_trips_and_resolves_at_spawn(self):
+        from partyline.preset_routes import presets_router
+        from partyline.preset_traits import auto_compact_tokens_for
+
+        runtime = ChatRuntime(self.db)
+        app = FastAPI()
+        app.include_router(presets_router(runtime, {"claude"}))
+        client = TestClient(app)
+        made = client.post("/api/presets", json={
+            "title": "Haiku", "name": "haiku", "adapter": "claude",
+            "command": "claude", "auto_compact_tokens": 80000})
+        self.assertEqual(made.status_code, 200, made.text)
+        self.assertEqual(made.json()["auto_compact_tokens"], 80000)
+
+        # The spawn seam resolves it from the matched preset; a preset the
+        # attachment does not match leaves the CLI default in place.
+        att = {"name": "haiku", "adapter": "claude", "command": ["claude"]}
+        self.assertEqual(auto_compact_tokens_for(self.db, att), 80000)
+        other = {"name": "dig", "adapter": "claude", "command": ["claude"]}
+        self.assertEqual(auto_compact_tokens_for(self.db, other), 0)
+
+        # Unset means unset: a fresh preset without the field stays 0.
+        made = client.post("/api/presets", json={
+            "title": "Opus", "name": "opus", "adapter": "claude", "command": "claude"})
+        self.assertEqual(made.json()["auto_compact_tokens"], 0)
+        att = {"name": "opus", "adapter": "claude", "command": ["claude"]}
+        self.assertEqual(auto_compact_tokens_for(self.db, att), 0)
+
+        # Over-limit values are refused at the contract, like max_instances.
+        refused = client.post("/api/presets", json={
+            "title": "Bad", "name": "bad", "adapter": "claude", "command": "claude",
+            "auto_compact_tokens": -1})
+        self.assertEqual(refused.status_code, 422)

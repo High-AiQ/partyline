@@ -22,7 +22,9 @@ resource: a captain that rations it well replaces fewer workers.
 
 Three compactions in three turns means the assignment does not fit the
 context: replace the worker with a fresh instance of the same preset and the
-same worktree. Do not re-prompt it — the summary it kept is not under your
+same worktree — `POST /api/attachments/<id>/replace` with a reason; the
+fresh instance keeps the captain role if it held one and starts from the
+re-briefing. Do not re-prompt it — the summary it kept is not under your
 control, and the next compact loses your acceptance criteria again.
 
 ## Visual acceptance needs eyes
@@ -45,9 +47,18 @@ that went in unreviewed. Read that count before you record the hand-off.
 Run the deterministic pre-review check before you review:
 `POST /api/conversations/<id>/prereview` with the SHA and the data paths —
 it finds referenced files that never reached git, including ones a gitignore
-hides, which is exactly the `out/` incident. After accept, read `tree_sync`
-in the response: a worktree left dirty or behind is reported there and as a
-⚠ in the ☏ notice.
+hides, which is exactly the `out/` incident. Tune it to the repository so
+the misses are real: `path_roots` (such as `["", "game/"]`) for tables that
+spell paths relative to a project folder, `skip_files` globs and `skip_keys`
+for provenance prose, and read the `summary` — misses grouped by table —
+before reading the flat list. After accept, read `tree_sync` in the
+response: a worktree left dirty or behind is reported there and as a ⚠ in
+the ☏ notice. Declare the line's gates (`PUT …/gates`) and accept with
+`{"run_gates": true}` to have those commands run fenced in a scratch
+checkout at the SHA before the branch moves. For a build against today's
+main, open the scratch checkout as a trial merge:
+`{"sha": "...", "merge_onto": "main"}` — conflicts come back as a 409 with
+the paths, nothing half-merged.
 
 ## Merge main by a verified SHA
 

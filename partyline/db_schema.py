@@ -1,13 +1,14 @@
 """The SQLite schema and its append-only migration history; append idempotent entries, never edit."""
-
 from .db_schema_base import SCHEMA  # noqa: F401
-from .idempotency_schema import MIGRATIONS as IDEMPOTENCY_MIGRATIONS
-from .memory_schema import MIGRATIONS as MEMORY_MIGRATIONS
-from .compaction_schema import MIGRATIONS as COMPACTION_MIGRATIONS
-from .accept_history_schema import MIGRATIONS as ACCEPT_HISTORY_MIGRATIONS
-from .notes_schema import MIGRATIONS as NOTES_MIGRATIONS
-from .scratch_schema import MIGRATIONS as SCRATCH_MIGRATIONS
-from .lease_schema import MIGRATIONS as LEASE_MIGRATIONS
+from .idempotency_schema import MIGRATIONS as IDEMPOTENCY
+from .memory_schema import MIGRATIONS as MEMORY
+from .compaction_schema import MIGRATIONS as COMPACTION
+from .accept_history_schema import MIGRATIONS as ACCEPT_HISTORY
+from .gates_schema import MIGRATIONS as GATES
+from .notes_schema import MIGRATIONS as NOTES
+from .scratch_schema import MIGRATIONS as SCRATCH
+from .lease_schema import MIGRATIONS as LEASE
+from .auto_compact_schema import MIGRATIONS as AUTO_COMPACT
 
 MIGRATIONS = [
     # cli_session: optional process session id, for adapters that support resume
@@ -16,8 +17,7 @@ MIGRATIONS = [
     "ALTER TABLE conversations ADD COLUMN topic TEXT NOT NULL DEFAULT ''",
     # archived_at: NULL while live. Archiving hides a line and stops processes.
     "ALTER TABLE conversations ADD COLUMN archived_at REAL",
-    # A deliberately singleton restart intent. It is saved before shutdown and
-    # only consumed after the requesting line accepts reattachment on startup.
+    # A singleton restart intent: saved before shutdown, consumed on reattachment.
     """CREATE TABLE IF NOT EXISTS restart_plan(
         singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
         conversation_id TEXT NOT NULL,
@@ -34,8 +34,7 @@ MIGRATIONS = [
     # Pre-token plans were never offered by a server route, so discard them.
     "ALTER TABLE restart_plan ADD COLUMN token TEXT",
     "DELETE FROM restart_plan WHERE token IS NULL",
-    # Automatic plans are trusted, hands-off recovery; ordinary UI plans remain
-    # manual offers. Existing plans must keep the safe manual behaviour.
+    # Automatic plans are hands-off recovery; UI plans stay manual offers.
     "ALTER TABLE restart_plan ADD COLUMN mode TEXT NOT NULL DEFAULT 'offer'",
     # A lease prevents two server lifespans from resuming the same automatic
     # plan. Nullable values mean no owner currently holds the plan.
@@ -217,6 +216,9 @@ MIGRATIONS = [
     "ALTER TABLE presets ADD COLUMN reads_images INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE presets ADD COLUMN can_manage INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE presets ADD COLUMN implements INTEGER NOT NULL DEFAULT 1",
+    # 5.3: numbered captain instances. 0 means the preset runs in as many
+    # instances as handles allow; a positive value caps the live count.
+    "ALTER TABLE presets ADD COLUMN max_instances INTEGER NOT NULL DEFAULT 0",
     """CREATE TABLE IF NOT EXISTS reactions(
         message_id INTEGER NOT NULL,
         reactor TEXT NOT NULL,
@@ -294,6 +296,5 @@ MIGRATIONS = [
         BEGIN DELETE FROM message_pins WHERE conv_id=OLD.conv_id AND message_id=OLD.id; END""",
 ]
 
-MIGRATIONS.extend(MEMORY_MIGRATIONS + IDEMPOTENCY_MIGRATIONS + NOTES_MIGRATIONS
-                  + COMPACTION_MIGRATIONS + ACCEPT_HISTORY_MIGRATIONS
-                  + SCRATCH_MIGRATIONS + LEASE_MIGRATIONS)
+MIGRATIONS.extend(MEMORY + IDEMPOTENCY + NOTES + COMPACTION + ACCEPT_HISTORY
+                  + SCRATCH + LEASE + GATES + AUTO_COMPACT)
