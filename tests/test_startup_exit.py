@@ -78,3 +78,10 @@ class StartupExitTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(incident["startup"])
         self.assertIsNone(incident["last_output"])
         self.assertNotIn("startup", self.db.list_messages("line")[-1]["body"])
+
+    async def test_mentions_in_the_output_are_defused(self):
+        await self.run_child("echo 'ping @opus'; exit 1")
+        body = self.db.list_messages("line")[-1]["body"]
+        self.assertIn("＠opus", body)
+        self.assertNotIn("@opus", body)
+        self.assertEqual(last_incident(self.db, "worker")["last_output"], "ping ＠opus")
