@@ -62,7 +62,9 @@ async def record_exit(runtime, att, evidence):
             detail += (f" Incident {saved.lastrowid}; recorded peak {peak} at the {backstop} "
                        f"emergency backstop (budget {budget}). {hint}")
         detail += (f" Inspect GET /api/attachments/{ident}/memory. "
-                   "Review the failed workload before resuming; the process remains stopped.")
+                   + ("It never claimed a session: replace it with a fresh process."
+                      if evidence.startup else
+                      "Review the failed workload before resuming; the process remains stopped."))
         message = db.add_owned_message(ident, owner, att["conv_id"], "system", "system", detail)
     if message is None:
         return
@@ -73,7 +75,10 @@ async def record_exit(runtime, att, evidence):
         captain = live_manager(runtime, line)
         if captain is None or captain["id"] == ident:
             continue
-        check = ("Check the last tool/test for unbounded allocations or huge error output; "
+        check = ("It died before its CLI started, so resuming cannot work: fix the cause above "
+                 "and replace it with a fresh process. "
+                 if evidence.startup else
+                 "Check the last tool/test for unbounded allocations or huge error output; "
                  if evidence.reason == "oom" else
                  "The exit cause is unconfirmed. Inspect the terminal and structured transcript; ")
         increase = (

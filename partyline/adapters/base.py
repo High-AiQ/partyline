@@ -213,7 +213,7 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
         loop.add_reader(self.master, readable)
         try:
             while (data := await queue.get()) is not None:
-                self.last_output_at = time.monotonic()
+                self.last_output_at = self._note_output(data)
                 try:
                     self._term_stream.feed(data)
                 except Exception:
