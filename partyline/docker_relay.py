@@ -41,6 +41,14 @@ def ensure_root() -> str:
     return RELAY_ROOT
 
 
+def in_use() -> bool:
+    """Whether any line currently has a relay directory to hide from the others."""
+    try:
+        return bool(os.listdir(RELAY_ROOT))
+    except OSError:
+        return False
+
+
 def relay_dir(conv_id: str) -> str:
     return os.path.join(RELAY_ROOT, conv_id)
 
