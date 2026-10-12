@@ -57,6 +57,21 @@ describe("approvals banner", () => {
     void unmount(component);
   });
 
+  it("caps its height and scrolls internally so the composer stays on screen", async () => {
+    // The mobile bug (2.20): a long banner overflowed below the fold and the
+    // composer could not be reached without scrolling. The banner now takes
+    // flow space above the composer, capped, scrolling inside itself.
+    vi.spyOn(approvalsApi, "list").mockResolvedValue(seed(6));
+    const component = mount(ApprovalsBanner, { target: document.body });
+    await approvals.load("root");
+    await flush();
+    const banner = document.querySelector("#approvalsPending");
+    expect(banner?.classList.contains("max-h-[38dvh]")).toBe(true);
+    expect(banner?.classList.contains("overflow-y-auto")).toBe(true);
+    expect(banner?.textContent).toContain("approvals pending (6)");
+    void unmount(component);
+  });
+
   it("decides through the item's own endpoints and drops the row", async () => {
     const list = seed(1);
     vi.spyOn(approvalsApi, "list").mockResolvedValueOnce(list).mockResolvedValue({ approvals: [] });
