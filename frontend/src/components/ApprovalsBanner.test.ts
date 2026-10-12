@@ -64,12 +64,6 @@ describe("approvals banner", () => {
     const component = mount(ApprovalsBanner, { target: document.body });
     await approvals.load("root");
     await flush();
-    console.log(
-      "DBG items:",
-      JSON.stringify(approvals.items),
-      "buttons:",
-      document.querySelectorAll("button").length,
-    );
     const approve = button("Approve");
     expect(approve).toBeDefined();
     approve.click();
