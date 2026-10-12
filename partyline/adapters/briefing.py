@@ -131,6 +131,10 @@ def child_env(env: Mapping[str, str], att: dict) -> dict[str, str]:
     are the fallback, never a guessed address.
     """
     result = dict(env)
+    # The attachment's own temp directory (5.12), provisioned per id.
+    from .attachment_tmp import env_for
+
+    result.update(env_for(att))
     api_base, sep, _ = str(att.get("hook_url") or "").partition("/api/hooks/")
     if not sep:
         host = env.get("PARTYLINE_HOST", DEFAULT_HOST)

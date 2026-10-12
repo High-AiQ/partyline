@@ -31,7 +31,6 @@ from .review_worktrees import list_review_worktrees
 from .reattach import ResumedAttachment, adapter_can_resume, resume_needs_session
 from .transcript_delivery import TranscriptDeliveryRecord
 from .write_set_routes import list_write_grants
-from .attachment_tmp import ensure_tmp_dir
 from .resource_budget import cap_bytes, claim_resume, format_limit, settings
 
 logger = logging.getLogger(__name__)
@@ -219,9 +218,6 @@ async def _resume_adapter_locked(
     # The machine token, unlike the activation owner, is stable on purpose:
     # a resumed process keeps the PARTYLINE_TOKEN its briefing already named.
     att["api_token"] = ensure_api_token(runtime.db, att_id)
-    # The same id resumes into the same temp directory (5.12): ensure is
-    # idempotent per id, so a restart-driven detach never loses the path.
-    att["tmp_dir"] = ensure_tmp_dir(att)
     att["hook_url"] = hook_url(att_id, runtime_owner)
     att["review_worktrees"] = list_review_worktrees(runtime.db, att["conv_id"])
     att["write_grants"] = list_write_grants(runtime.db, att["conv_id"])
