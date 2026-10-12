@@ -132,7 +132,7 @@ def child_env(env: Mapping[str, str], att: dict) -> dict[str, str]:
     """
     result = dict(env)
     # The attachment's own temp directory (5.12), provisioned per id.
-    from .attachment_tmp import env_for
+    from partyline.attachment_tmp import env_for
 
     result.update(env_for(att))
     api_base, sep, _ = str(att.get("hook_url") or "").partition("/api/hooks/")
