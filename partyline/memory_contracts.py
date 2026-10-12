@@ -12,6 +12,8 @@ class ProcessExit(BaseModel):
     peak_bytes: int | None = Field(default=None, ge=0)
     scope: str | None = None
     result: str | None = None
+    startup: bool = False
+    last_output: str | None = None
 
 
 class MemoryIncident(ProcessExit):

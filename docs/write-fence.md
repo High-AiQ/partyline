@@ -145,6 +145,14 @@ own failure goes upward. There is one incident per activation, no automatic
 restart, and no escalation for a deliberate detach or a normal exit. With no live
 captain, the line's notice and incident remain available to a person.
 
+A transcript adapter that exits before it is ready (it never claimed a CLI session)
+is a startup failure, not a memory event. Its incident carries `startup: true` and
+`last_output`, the last 15 non-blank lines of the pty with ANSI stripped (the adapter
+keeps a bounded ~4 KB tail; what is relayed is unchanged). The line notice reads
+`⚠ @name exited during startup (code N): <last 3 lines>`, and the captain is woken
+with advice to fix the cause and replace the process with a fresh one: resuming
+cannot work, and the resume endpoint answers 409.
+
 `GET /api/attachments/<id>/memory` returns the last incident, the saved override,
 the effective limit for the next launch, and the host's maximum allowed override.
 An authorized captain or person can change a **stopped** process with

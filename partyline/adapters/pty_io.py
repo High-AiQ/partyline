@@ -2,6 +2,9 @@
 
 import asyncio
 import os
+import time
+
+from .output_tail import OutputTail
 
 WRITE_TIMEOUT = 30.0
 
@@ -47,6 +50,13 @@ class PtyWriter:
     """Mixin exposing complete writes to adapters with a pty master fd."""
 
     master: int | None
+
+    def _note_output(self, data: bytes) -> float:
+        """Keep the output tail an early exit is explained from; return the arrival time."""
+        if not hasattr(self, "output_tail"):
+            self.output_tail = OutputTail()
+        self.output_tail.feed(data)
+        return time.monotonic()
 
     async def _write_all(self, data: bytes) -> None:
         if getattr(self, "_windows", None):
