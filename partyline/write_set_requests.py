@@ -174,11 +174,31 @@ async def resume_line_attachments(runtime, conv_id: str, resume) -> tuple[list[s
     return resumed, failed
 
 
-def non_resumable_live_attachments(runtime, conv_id: str) -> list[dict]:
+def grant_scope(runtime, conv_id: str, path: str) -> list[str]:
+    """The lines a grant of ``path`` resumes: its own, or — for docker access —
+    every line, since all of them must pick up the mount that hides the relays."""
+    if not docker_relay.is_docker_socket(path):
+        return [conv_id]
+    return [conv_id, *(c["id"] for c in runtime.db.list_conversations() if c["id"] != conv_id)]
+
+
+def non_resumable_live_attachments(runtime, conv_id: str, path: str | None = None) -> list[dict]:
     return [
-        att for att in live_attachments(runtime.db, conv_id, include_children=False)
+        att for line in (grant_scope(runtime, conv_id, path) if path else [conv_id])
+        for att in live_attachments(runtime.db, line, include_children=False)
         if not adapter_can_resume(ADAPTER_METADATA.get(att["adapter"], {}))
     ]
+
+
+async def resume_granted_scope(runtime, conv_id: str, path: str, resume,
+                               resumer=None) -> tuple[list[str], list[str]]:
+    resumed: list[str] = []
+    failed: list[str] = []
+    for line in grant_scope(runtime, conv_id, path):
+        done, broke = await (resumer or resume_line_attachments)(runtime, line, resume)
+        resumed += done
+        failed += broke
+    return resumed, failed
 
 
 async def file_write_set_request(

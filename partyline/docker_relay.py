@@ -41,12 +41,12 @@ def ensure_root() -> str:
     return RELAY_ROOT
 
 
-def in_use() -> bool:
-    """Whether any line currently has a relay directory to hide from the others."""
-    try:
-        return bool(os.listdir(RELAY_ROOT))
-    except OSError:
-        return False
+def any_grant(db) -> bool:
+    """Whether any live line on the host holds a docker grant (decided from the grant rows)."""
+    rows = db._exec(
+        "SELECT g.path FROM conversation_write_grants g JOIN conversations c ON c.id=g.conv_id "
+        "WHERE c.archived_at IS NULL").fetchall()
+    return any(is_docker_socket(row["path"]) for row in rows)
 
 
 def relay_dir(conv_id: str) -> str:
