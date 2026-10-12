@@ -202,8 +202,8 @@ describe("ResourceIndicator", () => {
       });
       const popover = document.querySelector(".resource-popover");
       expect(popover?.textContent).toContain("host memory 41 GB / 64 GB");
-      expect(popover?.querySelector(".host-bar .partyline")?.getAttribute("style")).toContain("49%");
-      expect(popover?.querySelector(".host-bar .other")?.getAttribute("style")).toContain("51%");
+      expect(popover?.querySelector(".host-bar .partyline")?.getAttribute("style")).toContain("31%");
+      expect(popover?.querySelector(".host-bar .other")?.getAttribute("style")).toContain("33%");
       expect(popover?.textContent).toContain("2.0 GB server + 18 GB");
       expect(popover?.textContent).toContain("23 GB"); // available
       expect(popover?.textContent).toContain("resource line"); // top lines
@@ -237,6 +237,34 @@ describe("ResourceIndicator", () => {
       expect(popover?.textContent).toContain("host memory — / 64 GB");
       expect(popover?.querySelector(".host-bar")).toBeNull();
       expect(popover?.querySelector(".top-line")).toBeNull();
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it("sizes the host bar against total memory, leaving the free remainder as track", async () => {
+    vi.spyOn(resourceApi, "getResources").mockResolvedValue({
+      ...snapshot,
+      host_used_bytes: 40 * 1024 ** 3,
+      host_available_bytes: 24 * 1024 ** 3,
+      partyline_used_bytes: 10 * 1024 ** 3,
+      partyline_server_bytes: 2 * 1024 ** 3,
+      partyline_processes_bytes: 8 * 1024 ** 3,
+      other_used_bytes: 30 * 1024 ** 3,
+    });
+    const component = mount(ResourceIndicator, { target: document.body });
+    try {
+      await vi.waitFor(() => {
+        expect(document.querySelector(".resource-host")?.textContent).toBe("40 GB/64 GB");
+      });
+      resources.popoverOpen = true;
+      await vi.waitFor(() => {
+        expect(document.querySelector(".host-bar")).not.toBeNull();
+      });
+      const bar = document.querySelector(".host-bar");
+      // 10/64 ≈ 16%, 30/64 ≈ 47% — the free 24 GB stays bare track
+      expect(bar?.querySelector(".partyline")?.getAttribute("style")).toContain("16%");
+      expect(bar?.querySelector(".other")?.getAttribute("style")).toContain("47%");
     } finally {
       await unmount(component);
     }
