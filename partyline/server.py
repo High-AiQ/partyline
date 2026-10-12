@@ -77,7 +77,7 @@ from . import deployment
 from .db import Db
 from .frontend_build import current_frontend_build
 from .hook_routes import hook_url, hooks_router
-from .line_process_routes import detach_attachment, register_line_process_routes
+from .line_process_routes import close_attachment, register_line_process_routes
 from .worktree_lifecycle import sweep_orphaned_worktrees
 from .message_routes import message_router
 from .message_forward import forward_router
@@ -88,6 +88,7 @@ from .accept_history import register_accept_history_route
 from .resource_leases import register_lease_routes
 from .review_worktrees import register_review_routes
 from .approval_bubble import register_approval_routes
+from .tmp_reap_routes import register_tmp_reap_routes
 from .scratch_worktrees import register_scratch_routes
 from .line_gates import register_gates_routes
 from .prereview import register_prereview_route
@@ -206,6 +207,7 @@ register_line_process_routes(app, runtime)
 register_goal_route(app, runtime)
 register_process_overview_route(app, runtime)
 register_resource_routes(app, runtime)
+register_tmp_reap_routes(app, runtime)
 register_restart_request_routes(app, runtime, ADAPTER_METADATA, lambda: request_exit())
 app.include_router(auth_router(runtime.db, on_handle_change=user_sockets.close_all))
 app.include_router(media_router(runtime, media))
@@ -491,7 +493,7 @@ async def edit_attachment(
 @app.delete("/api/attachments/{att_id}", response_model=OkResponse)
 async def detach(request: Request, att_id: str):
     deny_unless_attachment(runtime.db, request_principal(request), att_id, "close")
-    return await detach_attachment(runtime, att_id)
+    return await close_attachment(runtime, att_id)
 
 
 # -- attachment introspection ----------------------------------------------
