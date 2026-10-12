@@ -208,6 +208,47 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
     @patch("partyline.attachment_resume.bind_role_delivery")
     @patch("partyline.attachment_resume.bind_connection_hint")
     @patch("partyline.attachment_resume.provision_connection")
+    async def test_resume_resumes_into_the_same_temp_directory(self, *_mocks):
+        from pathlib import Path
+
+        await resume_adapter("one", None, **self.resume_arguments())
+        expected = str(Path(os.environ["PARTYLINE_TMP_BASE"], "partyline", "one"))
+        self.assertEqual(self.captured["att"]["tmp_dir"], expected)
+        self.assertTrue(Path(expected).is_dir())
+        arguments = self.resume_arguments()
+        arguments["adapter_metadata"] = {
+            "fake": {"capabilities": {"resume": True, "resume_needs_session": True}}}
+        with patch.object(FakeAdapter, "start", new_callable=AsyncMock) as start:
+            with self.assertRaises(HTTPException) as caught:
+                await resume_adapter("one", None, **arguments)
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertIn("@luna never claimed a CLI session", caught.exception.detail)
+        self.assertIn("replace it with a fresh process", caught.exception.detail)
+        # Refused before the spawn, so nothing could reach Popen.
+        start.assert_not_called()
+        self.assertNotIn("luna", self.runtime.live)
+
+    @patch("partyline.attachment_resume.bind_role_delivery")
+    @patch("partyline.attachment_resume.bind_connection_hint")
+    @patch("partyline.attachment_resume.provision_connection")
+    async def test_id_resuming_adapter_without_a_session_still_resumes(self, *_mocks):
+        # Claude resumes by attachment id and never declares the capability.
+        self.assertIsNone(self.db.get_attachment("one")["cli_session"])
+        await resume_adapter("one", None, **self.resume_arguments())
+        self.assertIn("att", self.captured)
+=======
+    async def test_resume_resumes_into_the_same_temp_directory(self, *_mocks):
+        from pathlib import Path
+
+        await resume_adapter("one", None, **self.resume_arguments())
+        expected = str(Path(os.environ["PARTYLINE_TMP_BASE"], "partyline", "one"))
+        self.assertEqual(self.captured["att"]["tmp_dir"], expected)
+        self.assertTrue(Path(expected).is_dir())
+>>>>>>> 4ac5507 (fix: a resumed attachment re-enters the same private temp directory instead of losing its TMPDIR at the resume seam)
+
+    @patch("partyline.attachment_resume.bind_role_delivery")
+    @patch("partyline.attachment_resume.bind_connection_hint")
+    @patch("partyline.attachment_resume.provision_connection")
     async def test_resumed_process_briefing_receives_saved_global_prose(self, *_mocks):
         prose = "Keep the saved release notes in view."
         self.db.set_setting("global_prose", prose)
