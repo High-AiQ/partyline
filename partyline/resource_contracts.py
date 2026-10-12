@@ -64,3 +64,6 @@ class ResourceSnapshot(BaseModel):
     other_used_bytes: int | None = None
     sampled_at: float | None = None
     top_lines: list[ResourceLineUsage] = []
+    tmp_total_bytes: int | None = None
+    tmp_used_bytes: int | None = None
+    tmp_partyline_bytes: int | None = None

@@ -157,6 +157,8 @@ def snapshot(db, host: Host | None = None, runtime=None) -> dict:
     busiest = busiest_family(db, rows)
     reserved = sum(lease_bytes(row, config) for row in rows)
     capped = sum(cap_bytes(row, config) for row in rows)
+    from .attachment_tmp import tmp_summary
+
     return {
         **config,
         "host_ram_bytes": host.ram_bytes,
@@ -167,6 +169,7 @@ def snapshot(db, host: Host | None = None, runtime=None) -> dict:
         "remaining_processes": max(0, config["max_live_processes"] - len(rows)),
         "remaining_memory_bytes": max(0, budget - reserved),
         "busiest_line": busiest,
+        **tmp_summary(),
         **usage_section(runtime, rows, host, family_roots(db)),
     }
 
