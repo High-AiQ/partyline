@@ -17,6 +17,7 @@ import { sayOnLine } from "../lib/room-say";
 import { sendOffLine } from "../lib/offline-wire";
 import type { WireIdentity } from "../lib/wire-commands";
 import { restart } from "./restart.svelte.js";
+import { approvals } from "./approvals.svelte";
 import { writeSet } from "./write-set.svelte.js";
 import { memoryRequest } from "./memory-request.svelte.js";
 import { leavePendingBanners, openPendingBanners, resyncPendingBanners } from "./room-pending-sync.js";
@@ -112,6 +113,7 @@ class Room {
     this.conversation = conversation;
     writeSet.activate(conversation.id);
     memoryRequest.activate(conversation.id);
+    approvals.activate(conversation.id);
     draft.openLine(conversation.id);
     this.history.reset();
     this.pins.clear();
