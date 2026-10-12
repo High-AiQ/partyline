@@ -26,12 +26,12 @@
   const hostLabel = $derived(
     view?.host_used_bytes != null ? `${gb(view.host_used_bytes)}/${gb(view.host_ram_bytes)}` : null,
   );
-  const partylineShare = $derived(usageShare(view?.host_used_bytes, view?.partyline_used_bytes));
-  const otherShare = $derived(usageShare(view?.host_used_bytes, view?.other_used_bytes));
+  const partylineShare = $derived(usageShare(view?.host_ram_bytes, view?.partyline_used_bytes));
+  const otherShare = $derived(usageShare(view?.host_ram_bytes, view?.other_used_bytes));
 
-  function usageShare(used: number | null | undefined, part: number | null | undefined): number {
-    if (used == null || part == null || used <= 0) return 0;
-    return Math.min(100, Math.round((part / used) * 100));
+  function usageShare(total: number | null | undefined, part: number | null | undefined): number {
+    if (total == null || part == null || total <= 0) return 0;
+    return Math.min(100, Math.round((part / total) * 100));
   }
 
   function gb(bytes: number): string {
