@@ -12,6 +12,7 @@ import os
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from . import docker_relay
 from .auth_guard import request_principal
 from .machine_scope import deny_unless, is_human
 from .mention_relay import post_private
@@ -41,6 +42,8 @@ def _machine_decision_error(db, principal, conv_id: str,
     grant the captain's own line already holds. Anything wider is a person's
     call.
     """
+    if docker_relay.is_docker_socket(request.path):
+        return "docker access is root-equivalent; a person decides"
     if not principal.is_lead:
         return "outside your grants; a person decides"
     if principal.conv_id not in ancestors(db, conv_id):

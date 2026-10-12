@@ -147,6 +147,8 @@ def child_env(env: Mapping[str, str], att: dict) -> dict[str, str]:
     # for an attachment dict that predates the auth migration's backfill.
     if token := att.get("api_token"):
         result["PARTYLINE_TOKEN"] = str(token)
+    if att.get("docker_socket"):
+        result["DOCKER_HOST"] = f"unix://{att['docker_socket']}"
     return result
 
 
