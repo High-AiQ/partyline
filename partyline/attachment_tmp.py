@@ -37,7 +37,7 @@ from pathlib import Path
 SIZE_BUDGET_SECONDS = 0.25
 SUMMARY_TTL_SECONDS = 5.0
 ID_PATTERN = re.compile(r"[A-Za-z0-9_-]+\Z")
-_cache: dict[str, object] = {"at": 0.0, "value": None}
+_summary_cache: dict[str, object] = {"at": 0.0, "value": None}
 
 
 def instance_key() -> str:
@@ -198,6 +198,6 @@ def tmp_resource_line(db, conv_id: str) -> str:
     mount, used = summary["tmp_total_bytes"], summary["tmp_used_bytes"]
     if mount is None or used is None:
         return ""
-    name = base_dir().parent.name
+    name = temp_root().name
     return (f"(tmp: /{name} {used / 2**30:.0f}/{mount / 2**30:.0f} GB · "
             f"this line's processes {line_tmp_bytes(db, conv_id) / 2**30:.1f} GB)")
