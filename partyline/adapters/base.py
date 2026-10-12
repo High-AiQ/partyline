@@ -27,6 +27,7 @@ from partyline.adapters.process_shutdown import stop_process_group
 from partyline.adapters.process_wait import wait_for_process
 from partyline.adapters.jsonl_receipts import JsonlPasteReceipts, tail_jsonl
 from partyline.adapters.task_logging import log_task_deaths
+from partyline.attachment_tmp import env_for
 from partyline.adapters.briefing import (
     fresh_checkpoint_briefing, connection_briefing,
     BRIEFING,
@@ -117,6 +118,7 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
             i = self.spawn_argv.index(None)
             raise ValueError(f"spawn argv element {i} is None (after {self.spawn_argv[i - 1]!r})")
         env = dict(child_env(os.environ, self.att), TERM="xterm-256color")
+        env.update(env_for(self.att))
         env.update(self.spawn_env())
         # Adapters declare what to strip so a spawned CLI doesn't mistake itself
         # for a nested harness. A trailing "*" clears a whole prefix.
