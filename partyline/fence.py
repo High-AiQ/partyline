@@ -45,12 +45,14 @@ access even under a protected root, and visible to the whole room.
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 
 from . import docker_relay, features, fence_darwin, fence_protect, git_fence
 from .fence_paths import darwin_write_set, write_set
 
+logger = logging.getLogger(__name__)
 BWRAP = "/usr/bin/bwrap"
 DEV_ROOT = "/dev"
 
@@ -158,11 +160,15 @@ def _bwrap_argv(att: dict, command: list[str]) -> list[str]:
     argv = [BWRAP, "--bind", "/", "/", "--dev-bind", DEV_ROOT, DEV_ROOT,
             "--proc", "/proc", "--unshare-user"]
     # Docker relays (docker_relay): hide every line's directory, then bind
-    # back only this line's own, so no other line can reach a relay.
-    argv += ["--tmpfs", docker_relay.ensure_root()]
-    if att.get("docker_socket"):
-        own = os.path.dirname(att["docker_socket"])
-        argv += ["--bind", own, own]
+    # back only this line's own, so no other line can reach a relay. With no
+    # relay anywhere the argv is exactly what it was before relays existed.
+    if docker_relay.in_use():
+        argv += ["--tmpfs", docker_relay.RELAY_ROOT]
+        own = os.path.dirname(att.get("docker_socket") or "")
+        if own and not existing([own]):
+            logger.warning("docker relay directory %s is missing; not binding it", own)
+        elif own:
+            argv += ["--bind", own, own]
     for root in _protected_roots(att):
         argv += ["--ro-bind", root, root]
     for src, dst, read_only in write_set(att):
