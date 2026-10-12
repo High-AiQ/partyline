@@ -17,6 +17,32 @@ from partyline.runtime import ChatRuntime
 
 
 class ResolveDescendantTest(unittest.TestCase):
+    def test_the_signal_map_survives_a_platform_without_sigkill(self):
+        # Windows has no signal.SIGKILL; importing the module must not crash
+        # there, and KILL must fall back to the one signal that always stops
+        # a process (os.kill(pid, SIGTERM) is TerminateProcess on Windows).
+        # The module re-executes `import signal` on reload, so the stand-in
+        # has to live in sys.modules, not just on the module object.
+        import importlib
+        import sys as sys_module
+        import signal as real_signal
+        from types import ModuleType
+
+        from partyline import process_signal
+
+        stand_in = ModuleType("signal")
+        stand_in.SIGTERM = real_signal.SIGTERM  # deliberately no SIGKILL
+        saved = sys_module.modules["signal"]
+        sys_module.modules["signal"] = stand_in
+        try:
+            importlib.reload(process_signal)
+            self.assertEqual(process_signal.SIGNALS["KILL"], real_signal.SIGTERM)
+        finally:
+            sys_module.modules["signal"] = saved
+            importlib.reload(process_signal)  # restore this platform's mapping
+        self.assertEqual(process_signal.SIGNALS["KILL"],
+                         getattr(real_signal, "SIGKILL", real_signal.SIGTERM))
+
     def test_a_real_child_resolves_and_the_agent_itself_never_does(self):
         child = subprocess.Popen(["sleep", "60"])
         self.addCleanup(lambda: (child.kill(), child.wait()))
