@@ -23,6 +23,7 @@ INTERVAL = 5.0
 CHUNK = 8
 REARM_RATIO = 0.65
 NOTICE_WINDOW = 600.0
+RECLAIM_BACKOFF_SECONDS = 60.0
 logger = logging.getLogger(__name__)
 _NO_PROCESS_TABLE = object()
 _NO_CGROUP_SAMPLE = object()
@@ -163,6 +164,8 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
     over: dict[str, bool] = {}
     # Warning state belongs to one activation: a resumed process starts fresh.
     activation: dict[str, object] = {}
+    # One reclaim attempt per scope per backoff window (EAGAIN retry guard).
+    reclaim_backoff: dict[str, float] = {}
     notified: dict[str, float] = {}
     cursor = 0
     pusher = ResourcePusher(clock)
@@ -217,21 +220,27 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
                         usage = sample[0]
                         cap = cap_bytes(row, config)
                         effective = warning_limit(cap)
-                        # The working-set fix (2.20 false alarms): file cache
-                        # inflates memory.current past the threshold while the
-                        # working set is fine. Ask the kernel to reclaim the
-                        # difference and re-read before any "decide now"
-                        # notice goes out. A failed reclaim simply leaves the
-                        # working-set decision standing.
+                        # The working-set fix: file cache inflates
+                        # memory.current past the threshold while the working
+                        # set is fine. Reclaim the difference off the event
+                        # loop (with a per-attachment backoff — the kernel
+                        # answers EAGAIN when it cannot reclaim the full
+                        # amount), re-read, and only then decide.
+                        attempted_recently = (
+                            clock() - reclaim_backoff.get(row["id"], -RECLAIM_BACKOFF_SECONDS)
+                            < RECLAIM_BACKOFF_SECONDS)
                         if (sample_dict is not None and usage < effective
                                 and crosses_warning(raw, effective,
-                                                    config["memory_warn_percent"])):
-                            reclaim_scope(sample_dict["root"],
-                                          sample_dict["current"] - usage)
+                                                    config["memory_warn_percent"])
+                                and not attempted_recently):
+                            reclaim_backoff[row["id"]] = clock()
+                            amount = sample_dict["current"] - usage
+                            await asyncio.to_thread(reclaim_scope,
+                                                    sample_dict["root"], amount)
                             pid = getattr(getattr(adapter, "proc", None),
                                           "pid", None)
-                            fresh = (cgroup_usage(pid) if isinstance(pid, int)
-                                     else None)
+                            fresh = (await asyncio.to_thread(cgroup_usage, pid)
+                                     if isinstance(pid, int) else None)
                             if fresh is not None:
                                 usage = fresh["working_set"]
                                 raw = fresh["current"]
