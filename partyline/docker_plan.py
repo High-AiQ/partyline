@@ -12,7 +12,7 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from . import docker_admission, docker_api
 from .docker_admission import admission_lock, max_seconds_cap
@@ -45,6 +45,7 @@ class Plan:
     target: str
     body: bytes | None = None
     content_type: str = "application/json"
+    answer: tuple[int, bytes] | None = None  # a reply built here, sent instead of forwarding
     slot: str | None = None  # admission slot to release once the request has run
     stream: bool = False  # the body is streamed to the daemon, not held (image builds)
 
@@ -191,6 +192,28 @@ async def plan_exec(runtime, conv_id: str, route: Route, req: Request) -> Plan:
     return Plan(f"{route.prefix}/exec/{route.ref}/{route.op}{query_of(route)}", body)
 
 
+async def plan_network(runtime, conv_id: str, route: Route) -> Plan:
+    """A network lookup, answered here: only this tree's containers stay in ``Containers``.
+
+    The daemon lists every container attached with its name, IP and MAC, which would show other
+    trees' containers; one tree-filtered container list decides which stay (swarm endpoint keys
+    and vanished containers are not in it), and ``Services`` and ``Peers`` are dropped.
+    Anything but a 200 (a missing network is the daemon's 404) is passed through as it came.
+    """
+    status, info = await docker_api.request("GET", f"{route.prefix}/networks/{route.ref}{query_of(route)}")
+    if status != 200 or not isinstance(info, dict):
+        return Plan("", answer=(status, json.dumps(info if info is not None else {}).encode()))
+    filters = json.dumps({"label": [f"{LABEL_TREE}={tree_of(runtime.db, conv_id)}"]})
+    listed, rows = await docker_api.request(
+        "GET", f"/containers/json?all=1&filters={quote(filters)}")
+    ours = {row.get("Id") for row in rows if isinstance(row, dict)} \
+        if listed == 200 and isinstance(rows, list) else set()  # no answer: show nothing, never everything
+    shown = info.get("Containers") if isinstance(info.get("Containers"), dict) else {}
+    info = {k: v for k, v in info.items() if k not in ("Services", "Peers")}
+    info["Containers"] = {ref: item for ref, item in shown.items() if ref in ours}
+    return Plan("", answer=(200, json.dumps(info).encode()))
+
+
 async def plan_build(route: Route) -> Plan:
     mode = dict(route.query).get("networkmode", "")
     if mode == "host" or mode.startswith("container:"):
@@ -202,7 +225,9 @@ async def plan_build(route: Route) -> Plan:
 
 async def decide(runtime, conv_id: str, route: Route, req: Request) -> Plan:
     tree = tree_of(runtime.db, conv_id)
-    if route.kind in ("open", "image"):
+    if route.kind == "network":
+        return await plan_network(runtime, conv_id, route)
+    if route.kind in ("open", "image", "lookup"):
         return Plan(f"{route.prefix}{route.path}{query_of(route)}")
     if route.kind in ("list", "events"):
         return Plan(f"{route.prefix}{route.path}?{narrow_filters(route, tree)}")

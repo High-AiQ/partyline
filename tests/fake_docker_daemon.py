@@ -67,6 +67,9 @@ class FakeDaemon:
         self.networks = {  # name or id -> driver
             "bridge": "bridge", "appnet": "bridge", "b" * 64: "bridge",
             "host": "host", "lan": "macvlan", "m" * 64: "macvlan", "vlan": "ipvlan"}
+        self.attached = {"appnet": ["mine", "other", "gone"]}  # network -> container keys on it
+        self.volumes = {"data"}
+        self.list_status = 200  # what the container list answers
         self.keepalive = False  # keep a connection open after an answer, recording what follows
         self.refuse_attach = False  # answer attach/exec start with a 500 instead of a 101
 
@@ -142,7 +145,18 @@ class FakeDaemon:
             return 200, b"OK", False
         if m := re.fullmatch(r"/networks/([^/]+)", path):
             driver = self.networks.get(m.group(1))
-            return (200, {"Name": m.group(1), "Driver": driver}, False) if driver else (404, {}, False)
+            if m.group(1) == "odd":
+                return 299, {"message": "an unusual status"}, False
+            if not driver:
+                return 404, {"message": f"network {m.group(1)} not found"}, False
+            on = {FULL.get(key, key * 64): {"Name": key, "IPv4Address": "172.18.0.2/16"}
+                  for key in self.attached.get(m.group(1), [])}
+            return 200, {"Name": m.group(1), "Driver": driver, "Containers": on, "Services": {"s": {}},
+                         "Peers": [{"Name": "node"}], "Options": {}}, False
+        if method == "GET" and (m := re.fullmatch(r"/volumes/([^/]+)", path)):
+            if m.group(1) not in self.volumes:
+                return 404, {"message": f"get {m.group(1)}: no such volume"}, False
+            return 200, {"Name": m.group(1), "Driver": "local"}, False
         if path == "/info":
             return 200, self.info, False
         if path in ("/session", "/grpc"):
@@ -152,6 +166,8 @@ class FakeDaemon:
         if path == "/volumes/create":
             return 201, json.loads(body), False
         if path == "/containers/json":
+            if self.list_status != 200:
+                return self.list_status, {"message": "list failed"}, False
             wanted = [x.split("=", 1) for x in json.loads(query.get("filters", ["{}"])[0]).get("label", [])]
             rows = [
                 c

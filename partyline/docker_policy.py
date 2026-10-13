@@ -41,6 +41,7 @@ QUERY = {  # per (kind, op) or kind: the only parameters that are forwarded, eve
     "open": {"all", "digests", "filters", "type"}, "list": {"all", "limit", "size", "filters"},
     "pull": {"fromImage", "tag", "platform"}, "create": {"name", "platform"}, "build": BUILD,
     "events": {"since", "until", "filters"}, "volume": set(), "session": set(), "image": set(),
+    "lookup": set(), "network": {"verbose", "scope"},
     ("container", "json"): {"size"}, ("container", "logs"): {
         "follow", "stdout", "stderr", "since", "until", "timestamps", "tail"},
     ("container", "stats"): {"stream", "one-shot"}, ("container", "top"): {"ps_args"},
@@ -84,7 +85,7 @@ def refuse_all(problems: list[tuple[str, str]], suffix: str = "", status: int = 
 
 @dataclass
 class Route:
-    kind: str  # open | events | list | pull | create | volume | build | session | image | container | exec
+    kind: str  # open events list pull create volume build session image lookup network container exec
     prefix: str = ""
     ref: str = ""  # container name/id, image name, or exec id
     op: str = ""
@@ -131,6 +132,10 @@ def _match(method: str, path: str) -> Route | None:
         return Route(kind)
     if method == "GET" and (m := re.fullmatch(rf"/images/({IMAGE})/json", path)):
         return Route("image", ref=m.group(1))
+    if method == "GET" and (m := re.fullmatch(rf"/volumes/({NAME})", path)):
+        return Route("lookup", ref=m.group(1))  # what `docker inspect <name>` falls through to
+    if method == "GET" and (m := re.fullmatch(rf"/networks/({NAME})", path)):
+        return Route("network", ref=m.group(1))
     if method == "DELETE" and (m := re.fullmatch(rf"/containers/({NAME})", path)):
         return Route("container", ref=m.group(1), op="remove")
     if m := re.fullmatch(rf"/containers/({NAME})/([a-z]+)", path):
