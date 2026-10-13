@@ -28,7 +28,7 @@ MOUNT = fields(
 DEVICE_REQUEST = fields("Driver Count DeviceIDs Capabilities Options")
 ENDPOINT = fields(
     "IPAMConfig Links Aliases NetworkID EndpointID Gateway IPAddress IPPrefixLen IPv6Gateway "
-    "GlobalIPv6Address GlobalIPv6PrefixLen MacAddress DriverOpts",
+    "GlobalIPv6Address GlobalIPv6PrefixLen MacAddress DriverOpts GwPriority DNSNames",
     IPAMConfig=fields("IPv4Address IPv6Address LinkLocalIPs"))
 FORBIDDEN = ("Privileged CapAdd Devices DeviceCgroupRules VolumesFrom CgroupParent Cgroup Links Sysctls "
              "StorageOpt OomKillDisable MaskedPaths ReadonlyPaths ContainerIDFile BlkioWeightDevice "
