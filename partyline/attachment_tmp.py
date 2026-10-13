@@ -134,42 +134,6 @@ def line_tmp_ids(db, conv_ids: list[str]) -> list[str]:
     return ids
 
 
-def reap_previous_tmp_root(db) -> int:
-    """Delete the previous tmpfs root after the disk-backed switch (5.15).
-
-    On server start, when ``<gettempdir()>/partyline/<instance key>`` differs
-    from ``base_dir()`` (i.e. the base moved to ``/var/tmp``), everything
-    under the old root is deleted: after the restart no live process still
-    points there, because every spawn recomputes TMPDIR. Same guards as the
-    per-attachment reap — no symlinks, ``ID_PATTERN`` names only, our own
-    uid — and the empty old root is removed last.
-    """
-    old_root = Path(tempfile.gettempdir()) / "partyline" / instance_key()
-    if old_root == base_dir() or not old_root.is_dir() or old_root.is_symlink():
-        return 0
-    try:
-        if os.stat(old_root).st_uid != os.getuid():
-            return 0
-        if os.path.realpath(old_root) != str(old_root):
-            return 0
-    except OSError:
-        return 0
-    freed = 0
-    for entry in sorted(old_root.iterdir()):
-        if entry.is_symlink() or not ID_PATTERN.match(entry.name):
-            continue
-        if not entry.is_dir() or os.path.realpath(entry) != str(entry):
-            continue
-        size = dir_size(entry, budget=None)
-        shutil.rmtree(entry, ignore_errors=True)
-        freed += size
-    try:
-        old_root.rmdir()
-    except OSError:
-        pass
-    return freed
-
-
 def reap_line_tmp(db, conv_id: str) -> int:
     """Reap every temp dir of a line's attachments; the bytes freed."""
     freed = 0

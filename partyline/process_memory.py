@@ -6,7 +6,6 @@ import os
 import shutil
 import subprocess
 import sys
-from .cgroup_sample import read_cgroup_sample
 
 DEFAULT_PROCESS_MEMORY_LIMIT = "4G"
 
@@ -127,37 +126,6 @@ def process_snapshot(platform: str | None = None) -> tuple[dict[int, int], dict[
         return parents, rss
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
-
-
-def cgroup_usage(pid: int, base: str = "/sys/fs/cgroup") -> dict | None:
-    """Locate one process's scope directory and sample it.
-
-    ``root`` names the scope, so a caller can write ``memory.reclaim``
-    there and re-read.
-    """
-    try:
-        with open(f"/proc/{pid}/cgroup", encoding="ascii") as stream:
-            relative = next(line.split("::", 1)[1].strip() for line in stream
-                            if line.startswith("0::"))
-        return read_cgroup_sample(f"{base}{relative}")
-    except (OSError, StopIteration, ValueError):
-        return None
-
-
-def reclaim_scope(root: str, amount: int) -> bool:
-    """Ask the kernel to reclaim ``amount`` bytes in the scope; best effort.
-
-    A failed write is reported, never raised: the caller falls back to the
-    working-set decision it already has.
-    """
-    if amount <= 0:
-        return True
-    try:
-        with open(f"{root}/memory.reclaim", "w", encoding="ascii") as stream:
-            stream.write(str(amount))
-        return True
-    except OSError:
-        return False
 
 
 def backstop_bytes(cap: int, host_ram: int | None = None) -> int:

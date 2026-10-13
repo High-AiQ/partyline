@@ -240,6 +240,7 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
         run_old.mkdir(parents=True, exist_ok=True)
         (run_old / "f.bin").write_bytes(b"x" * 64)
         os.utime(run_old, (old, old))
+        os.utime(run_old / "f.bin", (old, old))
         models = tmp_dir / "models"
         models.mkdir()
         (models / "weights.bin").write_bytes(b"x" * 300 * 1024**2)
@@ -296,6 +297,7 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
         run_old.mkdir(parents=True, exist_ok=True)
         (run_old / "f.bin").write_bytes(b"x" * 64)
         os.utime(run_old, (old, old))
+        os.utime(run_old / "f.bin", (old, old))
         sample = {"root": str(Path(self.temp.name, "scope")),
                   "current": 980 * 1024**2, "peak": None,
                   "shmem": 0, "working_set": 960 * 1024**2}

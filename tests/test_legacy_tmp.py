@@ -19,6 +19,13 @@ def write_file(path: Path, size: int) -> None:
     path.write_bytes(b"x" * size)
 
 
+def age_tree(root: Path, *, mtime: float) -> None:
+    """Set an old mtime on a directory and everything directly inside it."""
+    os.utime(root, (mtime, mtime))
+    for child in root.iterdir():
+        os.utime(child, (mtime, mtime))
+
+
 class LegacyTmpTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -56,7 +63,7 @@ class LegacyTmpTest(unittest.TestCase):
         old = time.time() - PYTEST_MAX_AGE_SECONDS - 60
         write_file(self.pytest / "pytest-3" / "f.bin", 256)
         write_file(self.pytest / "pytest-7" / "f.bin", 128)
-        os.utime(self.pytest / "pytest-3", (old, old))
+        age_tree(self.pytest / "pytest-3", mtime=old)
         target = Path(self.tmp.name, "pytest-8")
         write_file(target / "f.bin", 4096)
         self.pytest.mkdir(parents=True, exist_ok=True)
@@ -74,19 +81,36 @@ class LegacyTmpTest(unittest.TestCase):
         self.assertEqual(reap_pytest_temp(self.pytest, now=time.time()), 0)
         self.assertTrue((self.pytest / "cache" / "f.bin").exists())
 
+    def test_a_live_lock_or_a_hot_run_survives_past_the_age_limit(self):
+        """Review blocker: a suite longer than 30 minutes is live even when
+        its directory looks old. A lock naming a live pid, or any entry
+        touched in the last 10 minutes, keeps the run."""
+        old = time.time() - PYTEST_MAX_AGE_SECONDS - 60
+        holder = self.pytest / "pytest-of-u"
+        live = holder / "pytest-3"
+        live.mkdir(parents=True)
+        (live / ".lock").write_text(f"{os.getpid()}\n")
+        write_file(live / "f.bin", 64)
+        age_tree(live, mtime=old)  # dir and contents look old: only the lock says live
+        hot = holder / "pytest-5"
+        hot.mkdir(parents=True)
+        write_file(hot / "fresh.bin", 64)  # touched now, dir old
+        os.utime(hot, (old, old))
+        self.assertEqual(reap_pytest_temp(self.pytest, now=time.time()), 0)
+        self.assertTrue(live.exists())
+        self.assertTrue(hot.exists())
+
     def test_reap_legacy_temp_reports_both_locations(self):
         write_file(self.claude / "line" / "gone-1" / "f", 50)
         write_file(self.pytest / "pytest-9" / "f", 25)
-        os.utime(self.pytest / "pytest-9",
-                 (time.time() - PYTEST_MAX_AGE_SECONDS - 10,) * 2)
+        age_tree(self.pytest / "pytest-9", mtime=time.time() - PYTEST_MAX_AGE_SECONDS - 10)
         freed = reap_legacy_temp(self.db, claude=self.claude, pytest=self.pytest)
         self.assertEqual(freed, {"claude": 50, "pytest": 25})
 
     def test_windows_and_getuid_less_hosts_reap_nothing(self):
         write_file(self.claude / "line" / "gone-1" / "f", 50)
         write_file(self.pytest / "pytest-9" / "f", 25)
-        os.utime(self.pytest / "pytest-9",
-                 (time.time() - PYTEST_MAX_AGE_SECONDS - 10,) * 2)
+        age_tree(self.pytest / "pytest-9", mtime=time.time() - PYTEST_MAX_AGE_SECONDS - 10)
         with patch("partyline.legacy_tmp.sys.platform", "win32"):
             self.assertEqual(reap_legacy_temp(self.db), {})
         with patch("partyline.legacy_tmp.sys.platform", "linux"), \

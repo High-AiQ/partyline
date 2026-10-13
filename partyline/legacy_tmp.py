@@ -27,6 +27,8 @@ import re
 import shutil
 import sys
 import tempfile
+
+from .attachment_tmp import ID_PATTERN, base_dir, dir_size, instance_key
 import time
 from pathlib import Path
 
@@ -136,6 +138,44 @@ def reap_claude_temp(db, root: Path | None = None) -> int:
     return freed
 
 
+def _pytest_run_is_live(entry: Path) -> bool:
+    """True when the run holds a ``.lock`` naming a process that is alive."""
+    try:
+        pid = int((entry / ".lock").read_text(encoding="ascii").strip() or 0)
+    except (OSError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _recently_modified(entry: Path, *, now: float, lookback: float = 600.0) -> bool:
+    """True when the run dir or anything directly inside it changed lately.
+
+    Unreadable entries count as recently modified: the conservative answer.
+    """
+    try:
+        if now - entry.stat().st_mtime < lookback:
+            return True
+    except OSError:
+        return True
+    try:
+        with os.scandir(entry) as children:
+            for child in children:
+                try:
+                    if now - child.stat(follow_symlinks=False).st_mtime < lookback:
+                        return True
+                except OSError:
+                    continue
+    except OSError:
+        return True
+    return False
+
+
 def reap_pytest_temp(root: Path | None = None,
                      *, now: float | None = None,
                      max_age: float = PYTEST_MAX_AGE_SECONDS) -> int:
@@ -173,6 +213,11 @@ def reap_pytest_temp(root: Path | None = None,
                 continue
         except OSError:
             continue
+        # Finding 5.15: a run older than the age limit can still be live —
+        # a suite longer than 30 minutes, or a parallel runner. Skip runs
+        # holding a lock with a live pid, or touched in the last 10 minutes.
+        if _pytest_run_is_live(entry) or _recently_modified(entry, now=now):
+            continue
         if _guarded_tree(entry) is None:
             continue
         freed += _remove(entry)
@@ -189,6 +234,42 @@ def reap_pytest_under(tmp_dir: Path, *, now: float | None = None,
         if holder.is_dir() and not holder.is_symlink() \
                 and holder.name.startswith("pytest-of-"):
             freed += reap_pytest_temp(holder, now=now, max_age=max_age)
+    return freed
+
+
+def reap_previous_tmp_root(db) -> int:
+    """Delete the previous tmpfs root after the disk-backed switch (5.15).
+
+    On server start, when ``<gettempdir()>/partyline/<instance key>`` differs
+    from ``base_dir()`` (i.e. the base moved to ``/var/tmp``), everything
+    under the old root is deleted: after the restart no live process still
+    points there, because every spawn recomputes TMPDIR. Same guards as the
+    per-attachment reap — no symlinks, ``ID_PATTERN`` names only, our own
+    uid — and the empty old root is removed last.
+    """
+    old_root = Path(tempfile.gettempdir()) / "partyline" / instance_key()
+    if old_root == base_dir() or not old_root.is_dir() or old_root.is_symlink():
+        return 0
+    try:
+        if os.stat(old_root).st_uid != os.getuid():
+            return 0
+        if os.path.realpath(old_root) != str(old_root):
+            return 0
+    except OSError:
+        return 0
+    freed = 0
+    for entry in sorted(old_root.iterdir()):
+        if entry.is_symlink() or not ID_PATTERN.match(entry.name):
+            continue
+        if not entry.is_dir() or os.path.realpath(entry) != str(entry):
+            continue
+        size = dir_size(entry, budget=None)
+        shutil.rmtree(entry, ignore_errors=True)
+        freed += size
+    try:
+        old_root.rmdir()
+    except OSError:
+        pass
     return freed
 
 
