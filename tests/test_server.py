@@ -386,7 +386,8 @@ class ServerTest(unittest.TestCase):
         async def exercise():
             with overridden(write_fence=True), patch.object(
                 server.service_guard, "unit_from_cgroup", return_value="partyline.service"
-            ), patch.object(server.fence_probe, "probe", return_value=result) as probe:
+            ), patch.object(server.fence_probe, "probe", return_value=result) as probe, \
+               patch("partyline.server.reap_legacy_temp"):
                 async with server.lifespan(server.app):
                     probe.assert_called_once_with(
                         check_fence=True, service_unit="partyline.service",
@@ -1773,17 +1774,49 @@ class ShutdownTest(ServerTest):
         )
 
         async def exercise():
-            with patch.object(server.fence_probe, "probe", return_value=(True, "", "")):
+            with patch.object(server.fence_probe, "probe", return_value=(True, "", "")), \
+                 patch("partyline.server.reap_legacy_temp"):
                 async with server.lifespan(server.app):
                     await server.app.state.automatic_reattach_task
                     self.assertIn("a1", server.runtime.live)
                     self.assertIsNone(server.runtime.db.get_restart_plan())
-                    self.assertEqual(server.runtime.sockets, {})
 
         self.arun(exercise())
-
+        self.assertEqual(server.runtime.sockets, {})
         bodies = [message["body"] for message in server.runtime.db.list_messages("line")]
         self.assertTrue(any("restart plan started automatic" in body for body in bodies))
+
+    def test_lifespan_reaps_legacy_temp_inside_the_sandbox_only(self):
+        # Review fix: the legacy reap derives its roots from gettempdir(), so
+        # a run under a sandboxed TMPDIR reaps inside the sandbox and never
+        # touches the host's real /tmp. The assertion reads the reap's own
+        # return value, so the sandbox's cleanup cannot confuse it.
+        import getpass
+
+        from partyline.legacy_tmp import reap_legacy_temp
+
+        holder = {}
+        with tempfile.TemporaryDirectory() as sandbox:
+            tmp_root = Path(sandbox, "tmp")
+            old = time.time() - 25 * 3600
+            run_dir = tmp_root / f"pytest-of-{getpass.getuser()}" / "pytest-3"
+            run_dir.mkdir(parents=True)
+            (run_dir / "f.bin").write_bytes(b"x" * 64)
+            os.utime(run_dir, (old, old))
+
+            async def exercise():
+                with patch.object(
+                    server.fence_probe, "probe", return_value=(True, "", "")
+                ), patch("partyline.legacy_tmp.tempfile.gettempdir",
+                         return_value=str(tmp_root)), \
+                     patch("partyline.server.reap_legacy_temp",
+                           wraps=reap_legacy_temp) as reap:
+                    async with server.lifespan(server.app):
+                        pass
+                holder["freed"] = reap.return_value
+
+            self.arun(exercise())
+            self.assertEqual(holder["freed"], {"claude": 0, "pytest": 64})
 
     def test_running_processes_lists_live_attachments_with_their_line(self):
         server.runtime.db.add_attachment("a1", "line", "worker", "fake", ["fake"], "/tmp")
