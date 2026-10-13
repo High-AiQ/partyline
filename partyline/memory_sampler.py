@@ -11,14 +11,13 @@ import time
 from .attachment_tmp import attachment_tmp_dir
 from .docker_workloads import inventory
 from .hierarchy import ancestors
-from .legacy_tmp import reap_pytest_under
+from .legacy_tmp import reap_pytest_if_tmpfs
 from .memory_contracts import MemoryUsageEvent
 from .mention_relay import live_manager, post_private
 from .resource_budget import cap_bytes, live_rows, settings
 from .cgroup_sample import cgroup_usage, reclaim_scope
 from .process_memory import backstop_bytes, process_snapshot
 from .resource_push import ResourcePusher
-from .temp_mounts import on_tmpfs
 from .memory_warning import tmpfs_note_for, warning_text  # noqa: F401  re-exported for the sampler's tests
 from .top_processes import top_descendants
 
@@ -80,15 +79,15 @@ def warning_limit(budget: int) -> int:
     return min(budget, backstop_bytes(budget)) if sys.platform.startswith("linux") else budget
 
 
-async def _warn(runtime, row: dict, usage: int, cap: int,
-                tmp_note: str = "") -> None:
+async def _warn(runtime, row: dict, usage: int, cap: int, shmem: int = 0) -> None:
     """Tell the process itself, then the nearest captain above it, privately.
 
     Private copies still reach people on each line. A process near its cap is
     always told: a notice no process is rung for is one nobody acts on.
-    ``tmp_note`` carries the tmpfs-share sentence when the process holds a
-    meaningful share of its temp filesystem in memory (finding 5.15).
+    ``shmem`` is the scope's shared-memory figure; the sentence naming it (finding
+    5.15) is built here, once per warning actually sent, off the event loop.
     """
+    tmp_note = await tmpfs_note_for(str(attachment_tmp_dir(row["id"])), shmem) or ""
     adapter = runtime.live.get(row["id"])
     pid = getattr(getattr(adapter, "proc", None), "pid", None)
     top = top_descendants(pid) if isinstance(pid, int) else []
@@ -116,8 +115,6 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
     over: dict[str, bool] = {}
     # Warning state belongs to one activation: a resumed process starts fresh.
     activation: dict[str, object] = {}
-    # One tmp-housekeeping pass per process per backoff window (finding 5.15).
-    tmp_backoff: dict[str, float] = {}
     # One tmp-housekeeping pass per process per backoff window (finding 5.15).
     tmp_backoff: dict[str, float] = {}
     # One reclaim attempt per scope per backoff window (EAGAIN retry guard).
@@ -187,7 +184,7 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
                                 and clock() - tmp_backoff.get(row["id"], -60.0)
                                 >= 60.0):
                             tmp_backoff[row["id"]] = clock()
-                            await asyncio.to_thread(reap_pytest_under,
+                            await asyncio.to_thread(reap_pytest_if_tmpfs,
                                                     attachment_tmp_dir(row["id"]))
                             pid = getattr(getattr(adapter, "proc", None),
                                           "pid", None)
@@ -209,8 +206,7 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
                         if (sample_dict is not None and usage < effective
                                 and crosses_warning(raw, effective,
                                                     config["memory_warn_percent"])
-                                and not attempted_recently
-                                and on_tmpfs(sample_dict["root"])):
+                                and not attempted_recently):
                             reclaim_backoff[row["id"]] = clock()
                             amount = sample_dict["current"] - usage
                             await asyncio.to_thread(reclaim_scope,
@@ -222,13 +218,7 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
                             if fresh is not None:
                                 usage = fresh["working_set"]
                                 raw = fresh["current"]
-                        tmp_note = ""
-                        if (sample_dict is not None
-                                and crosses_warning(usage, effective,
-                                                    config["memory_warn_percent"])):
-                            tmp_note = await tmpfs_note_for(
-                                str(attachment_tmp_dir(row["id"])),
-                                sample_dict.get("shmem", 0)) or ""
+                        shmem = (sample_dict or {}).get("shmem", 0)
                         if usage < effective * REARM_RATIO:
                             armed[row["id"]] = True
                             over[row["id"]] = False
@@ -236,14 +226,14 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
                             over[row["id"]] = True
                             armed[row["id"]] = False
                             notified[row["id"]] = clock()
-                            await _warn(runtime, row, usage, cap, tmp_note=tmp_note)
+                            await _warn(runtime, row, usage, cap, shmem=shmem)
                         elif crosses_warning(usage, effective, config["memory_warn_percent"]):
                             now = clock()
                             inside_window = now - notified.get(row["id"], -NOTICE_WINDOW) < NOTICE_WINDOW
                             if armed.get(row["id"], True) and not inside_window:
                                 armed[row["id"]] = False
                                 notified[row["id"]] = now
-                                await _warn(runtime, row, usage, cap, tmp_note=tmp_note)
+                                await _warn(runtime, row, usage, cap, shmem=shmem)
                         runtime.memory_usage[row["id"]] = {
                             "usage_bytes": usage, "cap_bytes": cap,
                             "raw_bytes": raw,

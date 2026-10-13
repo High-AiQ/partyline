@@ -31,7 +31,8 @@ import logging
 import time
 from pathlib import Path
 
-from .legacy_tmp import reap_legacy_temp, reap_previous_tmp_root
+from .legacy_tmp import reap_legacy_temp
+from .tmp_migration import reap_previous_tmp_root
 
 logger = logging.getLogger(__name__)
 

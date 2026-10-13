@@ -37,6 +37,7 @@ import tempfile
 import time
 from pathlib import Path
 from .temp_mounts import on_tmpfs
+from .tmp_levels import private_levels
 
 SIZE_BUDGET_SECONDS = 0.25
 SUMMARY_TTL_SECONDS = 5.0
@@ -73,7 +74,6 @@ def temp_root(*, mountinfo: str = "/proc/self/mountinfo",
     return current
 
 
-
 def base_dir() -> Path:
     return temp_root() / "partyline" / instance_key()
 
@@ -84,10 +84,7 @@ def attachment_tmp_dir(att_id: str) -> Path:
 
 def ensure_tmp_dir(att: dict) -> str:
     """Create (or reuse) this attachment's private temp dir; idempotent per id."""
-    base_dir().mkdir(mode=0o700, parents=True, exist_ok=True)
-    path = attachment_tmp_dir(att["id"])
-    path.mkdir(mode=0o700, exist_ok=True)
-    return str(path)
+    return str(private_levels(temp_root(), "partyline", instance_key(), att["id"]))
 
 
 def env_for(att: dict) -> dict[str, str]:

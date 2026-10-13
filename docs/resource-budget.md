@@ -160,7 +160,19 @@ created with mode 0700. On Linux, when the platform temp directory is tmpfs
 `/var/tmp` instead: tmpfs pages count against the process's memory budget
 and the kernel cannot reclaim them, so a day of test runs could reach the
 budget on files alone. The `PARTYLINE_TMP_BASE` pin still wins over
-everything. The `<instance>` segment is twelve hex of the database path —
+everything. Each level Partyline creates under that base (`partyline`, the
+instance, the attachment) must be a real directory owned by the same user:
+new ones are 0700, an existing one with group or other write is tightened to
+0700, and a symlink or a foreign owner is refused with a clear error rather
+than used (the base itself, `/var/tmp`, is never touched).
+
+On the first start after the move, the old directories under
+`<platform temp>/partyline/<instance>` are removed, since they were RAM. This
+is skipped when the old and new roots are the same directory (a `/var/tmp`
+that links to `/tmp`, compared by real path), and any directory a live process
+of the same user still uses is kept: one that is a process's working directory,
+or that a process names in `TMPDIR`, `TMP` or `TEMP` (read best-effort from
+`/proc`), because background jobs outlive a restart. The `<instance>` segment is twelve hex of the database path —
 several partyline instances share a host and a temp, and one instance's
 reaper must never touch another's directories. The same id resumes into the
 same directory, so a restart never loses it. Temp only — CLI state and
@@ -187,12 +199,16 @@ mount's used and total bytes, the line's live processes' share, and the top
 lines by temp use — `/api/resources` adds `tmp_total_bytes`,
 `tmp_used_bytes` and `tmp_partyline_bytes`, and a memory warning whose
 `memory.stat` shmem figure exceeds 256 MiB names the share and the largest
-directory under that process's own temp dir: deleting those files frees
-real memory, which a reclaim cannot. One time-budgeted walk per few seconds
+directory under that process's own temp dir when that dir is on tmpfs, and
+otherwise says only that the shared memory comes from `/dev/shm`, `/tmp` or
+in-memory files: deleting those files frees real memory, which a reclaim
+cannot. The sentence is built once per warning actually sent, off the event
+loop. One time-budgeted walk per few seconds
 fills the mount totals and the per-id sizes together; riders and snapshots
 read that cache, so a huge tree costs a partial answer, never a stalled
-server. Before a warning fires, old `pytest-of-*/pytest-N` runs inside the
-process's own temp directory are reaped (older than 30 minutes, never
+server. Before a warning fires, and only when the process's own temp directory is on
+tmpfs (on disk they cost no memory), old `pytest-of-*/pytest-N` runs inside it
+are reaped (older than 30 minutes, never
 `pytest-current`), the sample is re-read, and only a still-over working set
 is reported. Tests pin `PARTYLINE_TMP_BASE` to their sandbox and never
 touch the real temp directories.

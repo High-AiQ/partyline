@@ -18,7 +18,7 @@ from partyline.attachment_tmp import (
     instance_key, line_tmp_bytes, reap_line_tmp, reap_missing_tmp, reap_tmp_dir,
     temp_root, tmp_resource_line, tmp_summary,
 )
-from partyline.legacy_tmp import reap_previous_tmp_root
+from partyline.tmp_migration import reap_previous_tmp_root
 from partyline.auth_guard import Principal
 from partyline.db import Db
 from partyline.runtime import ChatRuntime

@@ -49,32 +49,39 @@ def cap_enforcement(platform: str, cap: int) -> str:
             "eats into memory every other process needs.")
 
 
-def tmpfs_note(shmem: int, tmp_dir: str,
-               largest: tuple[str, int] | None) -> str | None:
-    """The tmpfs-share sentence (finding 5.15), or None under the threshold.
+def tmpfs_note(shmem: int, tmp_dir: str, largest: tuple[str, int] | None,
+               tmp_on_tmpfs: bool = True) -> str | None:
+    """The shared-memory sentence (finding 5.15), or None under the threshold.
 
-    ``shmem`` is the scope's ``memory.stat`` shmem figure; ``largest`` is
-    the biggest directory under the process's own temp directory, as
-    ``largest_dir_under`` reported it.
+    ``shmem`` is the scope's ``memory.stat`` shmem figure. When the process's
+    own TMPDIR is on tmpfs the files are likely there, so the sentence names the
+    directory and its largest child (``largest``); otherwise it only says where
+    shared memory comes from, because naming a disk directory would mislead.
     """
     if shmem <= SHMEM_NOTICE_BYTES:
         return None
+    size = f"{shmem / 1024**3:.1f} GiB"
+    if not tmp_on_tmpfs:
+        return (f"{size} of this is shared memory (files on tmpfs such as /dev/shm or /tmp, or "
+                "in-memory files); reclaim cannot free it, deleting those files does.")
     under = ""
     if largest:
-        under = (f" (largest under {tmp_dir}: {largest[0]} "
-                 f"{largest[1] / 1024**3:.1f} GiB)")
-    return (f"{shmem / 1024**3:.1f} GiB of this is files on tmpfs{under}. "
-            "Deleting them frees the memory; reclaim cannot.")
+        under = f" (largest under {tmp_dir}: {largest[0]} {largest[1] / 1024**3:.1f} GiB)"
+    return f"{size} of this is files on tmpfs{under}. Deleting them frees the memory; reclaim cannot."
 
 
 async def tmpfs_note_for(tmp_dir: str, shmem: int) -> str | None:
-    """``tmpfs_note`` with the bounded directory walk run off the loop."""
+    """``tmpfs_note`` with the mount lookup and the bounded directory walk run off the loop."""
     if shmem <= SHMEM_NOTICE_BYTES:
         return None
-    from .temp_mounts import largest_dir_under
+    from .temp_mounts import largest_dir_under, on_tmpfs
 
-    largest = await asyncio.to_thread(largest_dir_under, Path(tmp_dir))
-    return tmpfs_note(shmem, tmp_dir, largest)
+    def look() -> tuple[bool, tuple[str, int] | None]:
+        on = on_tmpfs(tmp_dir)
+        return on, (largest_dir_under(Path(tmp_dir)) if on else None)
+
+    on, largest = await asyncio.to_thread(look)
+    return tmpfs_note(shmem, tmp_dir, largest, on)
 
 
 def warning_text(row: dict, usage: int, cap: int, *, own: bool = False,

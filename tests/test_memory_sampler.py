@@ -273,7 +273,8 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
                       return_value=8 * gib), \
                 patch("partyline.memory_sampler.cgroup_usage",
                       return_value=sample), \
-                patch("partyline.memory_sampler.reap_pytest_under",
+                patch("partyline.temp_mounts.on_tmpfs", return_value=True), \
+                patch("partyline.memory_sampler.reap_pytest_if_tmpfs",
                       side_effect=recording), \
                 patch("partyline.memory_sampler.asyncio.sleep", tick):
             with self.assertRaises(StopSampling):
@@ -325,7 +326,8 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
                       return_value=8 * gib), \
                 patch("partyline.memory_sampler.cgroup_usage",
                       return_value=sample), \
-                patch("partyline.memory_sampler.reap_pytest_under",
+                patch("partyline.temp_mounts.on_tmpfs", return_value=True), \
+                patch("partyline.memory_sampler.reap_pytest_if_tmpfs",
                       side_effect=recording), \
                 patch("partyline.memory_sampler.asyncio.sleep", tick):
             with self.assertRaises(StopSampling):
@@ -333,6 +335,75 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state["ticks"], 2)
         self.assertEqual(len(reap_calls), 1)  # backoff: one pass in 60 s
         self.assertFalse(run_old.exists())
+
+    def _hot_runtime(self, shmem=0):
+        gib = 1024**3
+        runtime = ChatRuntime(self.db)
+        runtime.live["worker"] = SimpleNamespace(
+            att=self.db.get_attachment("worker"), proc=SimpleNamespace(pid=123))
+        runtime.deliver_pending = AsyncMock(return_value=True)
+        sample = {"root": str(Path(self.temp.name, "scope")), "current": 980 * 1024**2,
+                  "peak": None, "shmem": shmem, "working_set": 960 * 1024**2}
+        return runtime, sample, gib
+
+    async def _run_ticks(self, runtime, sample, gib, ticks=1, **patches):
+        class StopSampling(Exception):
+            pass
+
+        state = {"ticks": 0}
+
+        async def tick(_seconds):
+            state["ticks"] += 1
+            if state["ticks"] >= ticks:
+                raise StopSampling
+
+        with patch("partyline.memory_sampler.sys.platform", "linux"), \
+                patch("partyline.server_memory.host_memory_bytes", return_value=gib * 8), \
+                patch("partyline.memory_sampler.cgroup_usage", return_value=sample), \
+                patch("partyline.memory_sampler.asyncio.sleep", tick):
+            with patch("partyline.temp_mounts.on_tmpfs", **patches):
+                with self.assertRaises(StopSampling):
+                    await run(runtime, sampler=read_usage)
+
+    async def test_reclaim_does_not_depend_on_where_temp_lives(self):
+        """The reclaim runs on every filesystem: the cgroup directory is cgroup2, never tmpfs."""
+        scope = Path(self.temp.name, "scope")
+        scope.mkdir()
+        runtime, sample, gib = self._hot_runtime()
+        sample.update(root=str(scope), working_set=100 * 1024**2, current=900 * 1024**2)
+        for on_tmpfs in (True, False):
+            (scope / "memory.reclaim").unlink(missing_ok=True)
+            runtime.memory_usage.clear()
+            await self._run_ticks(runtime, sample, gib, return_value=on_tmpfs)
+            self.assertEqual(int((scope / "memory.reclaim").read_text()), 800 * 1024**2, on_tmpfs)
+
+    async def test_pytest_housekeeping_only_runs_when_temp_is_tmpfs(self):
+        tmp_dir = attachment_tmp_dir("worker")
+        old = time.time() - 31 * 60
+        run_old = tmp_dir / "pytest-of-u" / "pytest-3"
+        run_old.mkdir(parents=True, exist_ok=True)
+        (run_old / "f.bin").write_bytes(b"x" * 64)
+        os.utime(run_old, (old, old))
+        os.utime(run_old / "f.bin", (old, old))
+        runtime, sample, gib = self._hot_runtime()
+        await self._run_ticks(runtime, sample, gib, return_value=False)
+        self.assertTrue(run_old.exists())  # on disk the runs cost no memory: kept
+        runtime.memory_usage.clear()
+        await self._run_ticks(runtime, sample, gib, return_value=True)
+        self.assertFalse(run_old.exists())  # on tmpfs: reaped
+
+    async def test_the_tmpfs_note_is_built_only_when_a_warning_is_sent(self):
+        shmem = 2 * 1024**3
+        runtime, sample, gib = self._hot_runtime(shmem=shmem)
+        note = AsyncMock(return_value="NOTE")
+        with patch("partyline.memory_sampler.tmpfs_note_for", note):
+            # below the threshold: no warning, so no directory walk
+            quiet = dict(sample, current=100 * 1024**2, working_set=100 * 1024**2)
+            await self._run_ticks(runtime, quiet, gib, return_value=True)
+            note.assert_not_awaited()
+            await self._run_ticks(runtime, sample, gib, ticks=3, return_value=True)
+        self.assertEqual(note.await_count, 1)  # once for the one warning sent, not per tick
+        self.assertEqual(note.await_args.args[1], shmem)
 
     async def test_oversized_budget_warns_and_routes_before_the_backstop(self):
         gib = 1024**3

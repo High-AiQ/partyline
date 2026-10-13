@@ -7,17 +7,26 @@ from a time-budgeted walk that never follows symlinks.
 from __future__ import annotations
 
 import os
+import re
 import time
 from pathlib import Path
+
+_ESCAPE = re.compile(r"\\([0-7]{3})")
+
+
+def _unescape(mount_point: str) -> str:
+    """mountinfo writes a space, tab or newline in a path as ``\\040``-style octal."""
+    return _ESCAPE.sub(lambda m: chr(int(m.group(1), 8)), mount_point)
 
 
 def fstype_of(path: Path | str, mountinfo: str = "/proc/self/mountinfo") -> str | None:
     """The filesystem type of the mount that contains ``path``.
 
-    Picks the entry with the longest matching mount point; None when mount
-    information is unavailable.
+    The path is resolved first, so a symlink (``/var/tmp`` -> ``/tmp``) is
+    judged by where it really lands. Picks the entry with the longest matching
+    mount point; None when mount information is unavailable.
     """
-    target = str(path)
+    target = os.path.realpath(path)
     best_point, best_fstype = "", None
     try:
         with open(mountinfo, encoding="utf-8") as stream:
@@ -28,7 +37,7 @@ def fstype_of(path: Path | str, mountinfo: str = "/proc/self/mountinfo") -> str 
                 cut = fields.index("-")
                 if cut + 1 >= len(fields):
                     continue
-                mount_point, fstype = fields[4], fields[cut + 1]
+                mount_point, fstype = _unescape(fields[4]), fields[cut + 1]
                 if (target == mount_point
                         or target.startswith(mount_point.rstrip("/") + "/")) \
                         and len(mount_point) >= len(best_point):
