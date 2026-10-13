@@ -6,10 +6,14 @@ sampler stays the state machine, this module is only the prose it sends.
 
 from __future__ import annotations
 
+import asyncio
 import sys
+from pathlib import Path
 
 from .process_memory import backstop_bytes, format_memory_bytes, suggested_memory_limit
 from .resource_budget import memory_ceiling
+
+SHMEM_NOTICE_BYTES = 256 * 1024**2
 
 
 def suggested_limit(cap: int) -> str | None:
@@ -45,12 +49,49 @@ def cap_enforcement(platform: str, cap: int) -> str:
             "eats into memory every other process needs.")
 
 
+def tmpfs_note(shmem: int, tmp_dir: str, largest: tuple[str, int] | None,
+               tmp_on_tmpfs: bool = True) -> str | None:
+    """The shared-memory sentence (finding 5.15), or None under the threshold.
+
+    ``shmem`` is the scope's ``memory.stat`` shmem figure. When the process's
+    own TMPDIR is on tmpfs the files are likely there, so the sentence names the
+    directory and its largest child (``largest``); otherwise it only says where
+    shared memory comes from, because naming a disk directory would mislead.
+    """
+    if shmem <= SHMEM_NOTICE_BYTES:
+        return None
+    size = f"{shmem / 1024**3:.1f} GiB"
+    if not tmp_on_tmpfs:
+        return (f"{size} of this is shared memory (files on tmpfs such as /dev/shm or /tmp, or "
+                "in-memory files); reclaim cannot free it, deleting those files does.")
+    under = ""
+    if largest:
+        under = f" (largest under {tmp_dir}: {largest[0]} {largest[1] / 1024**3:.1f} GiB)"
+    return f"{size} of this is files on tmpfs{under}. Deleting them frees the memory; reclaim cannot."
+
+
+async def tmpfs_note_for(tmp_dir: str, shmem: int) -> str | None:
+    """``tmpfs_note`` with the mount lookup and the bounded directory walk run off the loop."""
+    if shmem <= SHMEM_NOTICE_BYTES:
+        return None
+    from .temp_mounts import largest_dir_under, on_tmpfs
+
+    def look() -> tuple[bool, tuple[str, int] | None]:
+        on = on_tmpfs(tmp_dir)
+        return on, (largest_dir_under(Path(tmp_dir)) if on else None)
+
+    on, largest = await asyncio.to_thread(look)
+    return tmpfs_note(shmem, tmp_dir, largest, on)
+
+
 def warning_text(row: dict, usage: int, cap: int, *, own: bool = False,
-                 top: list[dict] | None = None) -> str:
+                 top: list[dict] | None = None, tmp_note: str = "") -> str:
     """Build the warning; ``own`` words it for the process that is near its cap.
 
     ``top`` names the largest descendants (see ``top_processes``); both
     variants get the names, because both readers need to know what to stop.
+    ``tmp_note`` carries the tmpfs-share sentence (finding 5.15) when the
+    process holds a meaningful share of its temp filesystem in memory.
     """
     percent = usage * 100 // max(cap, 1)
     request_limit = suggested_limit(cap)
@@ -61,16 +102,17 @@ def warning_text(row: dict, usage: int, cap: int, *, own: bool = False,
         if request_limit else "The host ceiling prevents a larger budget."
     )
     guilty = format_top(top or [])
+    tmp = f" {tmp_note}" if tmp_note else ""
     used = (f"{format_memory_bytes(usage)} of {'your' if own else 'its'} {format_memory_bytes(cap)} "
             f"per-process memory budget ({percent}%)")
     if own:
         fate = cap_enforcement(sys.platform, cap)
-        return (f"⚠ {row['name']}, you are using {used}.{guilty} {fate} Commit or save your work "
+        return (f"⚠ {row['name']}, you are using {used}.{guilty}{tmp} {fate} Commit or save your work "
                 "now, then find and stop what is growing (a build, test run, or cache). If "
                 "the work genuinely needs more, file a request with a reason for a person to "
                 f"approve: {request_hint}")
     clamp = (cap_enforcement(sys.platform, cap) + " "
              if sys.platform.startswith("linux") and backstop_bytes(cap) <= cap else "")
-    return (f"⚠ {row['name']} is using {used}.{guilty} {clamp}It has been told to save its work. "
+    return (f"⚠ {row['name']} is using {used}.{guilty}{tmp} {clamp}It has been told to save its work. "
             "As its captain, decide now: have it cut what is growing, or file a justified higher "
             f"budget for a person to approve, and tell the person which you chose. {request_hint}")

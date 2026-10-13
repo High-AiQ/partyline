@@ -136,6 +136,44 @@ def reap_claude_temp(db, root: Path | None = None) -> int:
     return freed
 
 
+def _pytest_run_is_live(entry: Path) -> bool:
+    """True when the run holds a ``.lock`` naming a process that is alive."""
+    try:
+        pid = int((entry / ".lock").read_text(encoding="ascii").strip() or 0)
+    except (OSError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _recently_modified(entry: Path, *, now: float, lookback: float = 600.0) -> bool:
+    """True when the run dir or anything directly inside it changed lately.
+
+    Unreadable entries count as recently modified: the conservative answer.
+    """
+    try:
+        if now - entry.stat().st_mtime < lookback:
+            return True
+    except OSError:
+        return True
+    try:
+        with os.scandir(entry) as children:
+            for child in children:
+                try:
+                    if now - child.stat(follow_symlinks=False).st_mtime < lookback:
+                        return True
+                except OSError:
+                    continue
+    except OSError:
+        return True
+    return False
+
+
 def reap_pytest_temp(root: Path | None = None,
                      *, now: float | None = None,
                      max_age: float = PYTEST_MAX_AGE_SECONDS) -> int:
@@ -173,10 +211,38 @@ def reap_pytest_temp(root: Path | None = None,
                 continue
         except OSError:
             continue
+        # Finding 5.15: a run older than the age limit can still be live —
+        # a suite longer than 30 minutes, or a parallel runner. Skip runs
+        # holding a lock with a live pid, or touched in the last 10 minutes.
+        if _pytest_run_is_live(entry) or _recently_modified(entry, now=now):
+            continue
         if _guarded_tree(entry) is None:
             continue
         freed += _remove(entry)
     return freed
+
+
+def reap_pytest_under(tmp_dir: Path, *, now: float | None = None,
+                      max_age: float = 1800) -> int:
+    """Reap old ``pytest-of-*/pytest-N`` runs under a process's own temp
+    directory (finding 5.15): 30 minutes by default, never the
+    ``pytest-current`` target. Returns the bytes freed."""
+    freed = 0
+    for holder in _children(tmp_dir):
+        if holder.is_dir() and not holder.is_symlink() \
+                and holder.name.startswith("pytest-of-"):
+            freed += reap_pytest_temp(holder, now=now, max_age=max_age)
+    return freed
+
+
+def reap_pytest_if_tmpfs(tmp_dir: Path) -> int:
+    """``reap_pytest_under``, but only when the process's TMPDIR is RAM-backed.
+
+    On disk the runs cost no memory, so nothing is deleted.
+    """
+    from .temp_mounts import on_tmpfs
+
+    return reap_pytest_under(tmp_dir) if on_tmpfs(tmp_dir) else 0
 
 
 def reap_legacy_temp(db, *, claude: Path | None = None,

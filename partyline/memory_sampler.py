@@ -8,15 +8,17 @@ import logging
 import sys
 import time
 
+from .attachment_tmp import attachment_tmp_dir
 from .docker_workloads import inventory
 from .hierarchy import ancestors
+from .legacy_tmp import reap_pytest_if_tmpfs
 from .memory_contracts import MemoryUsageEvent
 from .mention_relay import live_manager, post_private
 from .resource_budget import cap_bytes, live_rows, settings
-from .process_memory import (
-    backstop_bytes, cgroup_usage, reclaim_scope)
+from .cgroup_sample import cgroup_usage, reclaim_scope
+from .process_memory import backstop_bytes, process_snapshot
 from .resource_push import ResourcePusher
-from .memory_warning import warning_text  # noqa: F401  re-exported for the sampler's tests
+from .memory_warning import tmpfs_note_for, warning_text  # noqa: F401  re-exported for the sampler's tests
 from .top_processes import top_descendants
 
 INTERVAL = 5.0
@@ -27,61 +29,6 @@ RECLAIM_BACKOFF_SECONDS = 60.0
 logger = logging.getLogger(__name__)
 _NO_PROCESS_TABLE = object()
 _NO_CGROUP_SAMPLE = object()
-
-
-def process_snapshot(platform: str | None = None) -> tuple[dict[int, int], dict[int, int]] | None:
-    """Read a bounded process table once for a fallback batch.
-
-    A process exiting between the listing and the read must not lose the
-    whole table: entries that vanish mid-scan are skipped, not fatal. The
-    sampler treats an empty table as no data; the signal endpoint's
-    descendant check treats a partial table as partial truth, so a churning
-    host degrades to an incomplete answer rather than a false refusal.
-    """
-    platform = sys.platform if platform is None else platform
-    if platform.startswith("linux"):
-        try:
-            import os
-            parents, rss = {}, {}
-            for name in os.listdir("/proc"):
-                if not name.isdigit():
-                    continue
-                try:
-                    with open(f"/proc/{name}/stat", encoding="ascii") as stream:
-                        fields = stream.read().rsplit(")", 1)[1].split()
-                    child = int(name)
-                    parents[child] = int(fields[1])
-                    with open(f"/proc/{child}/status", encoding="ascii") as stream:
-                        for line in stream:
-                            if line.startswith("VmRSS:"):
-                                rss[child] = int(line.split()[1]) * 1024
-                                break
-                except (OSError, ValueError, IndexError):
-                    continue  # exited mid-scan; the table is partial, not void
-            return parents, rss
-        except (OSError, ValueError):
-            return None
-    try:
-        import subprocess
-        if platform.startswith("win"):
-            command = ["powershell", "-NoProfile", "-Command",
-                       "Get-CimInstance Win32_Process | ForEach-Object { "
-                       "\"$($_.ProcessId),$($_.ParentProcessId),$($_.WorkingSetSize)\" }"]
-        else:
-            command = ["ps", "-axo", "pid=,ppid=,rss="]
-        done = subprocess.run(command, capture_output=True, text=True, timeout=3, check=False)
-        if done.returncode:
-            return None
-        parents, rss = {}, {}
-        for line in done.stdout.splitlines():
-            fields = line.strip().split(",") if platform.startswith("win") else line.split()
-            if len(fields) == 3:
-                child, parent, amount = map(int, fields)
-                parents[child] = parent
-                rss[child] = amount if platform.startswith("win") else amount * 1024
-        return parents, rss
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return None
 
 
 def process_tree_rss(
@@ -132,22 +79,26 @@ def warning_limit(budget: int) -> int:
     return min(budget, backstop_bytes(budget)) if sys.platform.startswith("linux") else budget
 
 
-async def _warn(runtime, row: dict, usage: int, cap: int) -> None:
+async def _warn(runtime, row: dict, usage: int, cap: int, shmem: int = 0) -> None:
     """Tell the process itself, then the nearest captain above it, privately.
 
     Private copies still reach people on each line. A process near its cap is
     always told: a notice no process is rung for is one nobody acts on.
+    ``shmem`` is the scope's shared-memory figure; the sentence naming it (finding
+    5.15) is built here, once per warning actually sent, off the event loop.
     """
+    tmp_note = await tmpfs_note_for(str(attachment_tmp_dir(row["id"])), shmem) or ""
     adapter = runtime.live.get(row["id"])
     pid = getattr(getattr(adapter, "proc", None), "pid", None)
     top = top_descendants(pid) if isinstance(pid, int) else []
     # The copy to the process itself must not name it as the speaker: routing
     # never rings a process with its own words.
     await post_private(runtime, row["conv_id"], "system", "system",
-                       warning_text(row, usage, cap, own=True, top=top),
+                       warning_text(row, usage, cap, own=True, top=top,
+                                    tmp_note=tmp_note),
                        audience=row["id"], source=(None, row["conv_id"]))
     source = (row["id"], row["conv_id"])
-    detail = warning_text(row, usage, cap, top=top)
+    detail = warning_text(row, usage, cap, top=top, tmp_note=tmp_note)
     for line in [row["conv_id"], *ancestors(runtime.db, row["conv_id"])]:
         captain = live_manager(runtime, line)
         if captain is not None and captain["id"] != row["id"]:
@@ -164,6 +115,8 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
     over: dict[str, bool] = {}
     # Warning state belongs to one activation: a resumed process starts fresh.
     activation: dict[str, object] = {}
+    # One tmp-housekeeping pass per process per backoff window (finding 5.15).
+    tmp_backoff: dict[str, float] = {}
     # One reclaim attempt per scope per backoff window (EAGAIN retry guard).
     reclaim_backoff: dict[str, float] = {}
     notified: dict[str, float] = {}
@@ -176,7 +129,8 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
             try:
                 rows = live_rows(runtime.db)
                 live_ids = {row["id"] for row in rows}
-                states = (runtime.memory_usage, armed, notified, over, activation)
+                states = (runtime.memory_usage, armed, notified, over, activation,
+                          reclaim_backoff, tmp_backoff)
                 for attachment_id in set().union(*states) - live_ids:
                     for state in states:
                         state.pop(attachment_id, None)
@@ -220,6 +174,26 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
                         usage = sample[0]
                         cap = cap_bytes(row, config)
                         effective = warning_limit(cap)
+                        # Finding 5.15: when the working set crosses the
+                        # threshold, first reap old pytest runs in this
+                        # process's own temp directory (once per backoff
+                        # window), then re-read before deciding.
+                        if (sample_dict is not None
+                                and crosses_warning(usage, effective,
+                                                    config["memory_warn_percent"])
+                                and clock() - tmp_backoff.get(row["id"], -60.0)
+                                >= 60.0):
+                            tmp_backoff[row["id"]] = clock()
+                            await asyncio.to_thread(reap_pytest_if_tmpfs,
+                                                    attachment_tmp_dir(row["id"]))
+                            pid = getattr(getattr(adapter, "proc", None),
+                                          "pid", None)
+                            fresh = (await asyncio.to_thread(cgroup_usage, pid)
+                                     if isinstance(pid, int) else None)
+                            if fresh is not None:
+                                usage = fresh["working_set"]
+                                raw = fresh["current"]
+                                sample_dict = fresh
                         # The working-set fix: file cache inflates
                         # memory.current past the threshold while the working
                         # set is fine. Reclaim the difference off the event
@@ -244,6 +218,7 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
                             if fresh is not None:
                                 usage = fresh["working_set"]
                                 raw = fresh["current"]
+                        shmem = (sample_dict or {}).get("shmem", 0)
                         if usage < effective * REARM_RATIO:
                             armed[row["id"]] = True
                             over[row["id"]] = False
@@ -251,14 +226,14 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
                             over[row["id"]] = True
                             armed[row["id"]] = False
                             notified[row["id"]] = clock()
-                            await _warn(runtime, row, usage, cap)
+                            await _warn(runtime, row, usage, cap, shmem=shmem)
                         elif crosses_warning(usage, effective, config["memory_warn_percent"]):
                             now = clock()
                             inside_window = now - notified.get(row["id"], -NOTICE_WINDOW) < NOTICE_WINDOW
                             if armed.get(row["id"], True) and not inside_window:
                                 armed[row["id"]] = False
                                 notified[row["id"]] = now
-                                await _warn(runtime, row, usage, cap)
+                                await _warn(runtime, row, usage, cap, shmem=shmem)
                         runtime.memory_usage[row["id"]] = {
                             "usage_bytes": usage, "cap_bytes": cap,
                             "raw_bytes": raw,

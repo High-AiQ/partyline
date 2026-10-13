@@ -1,6 +1,7 @@
 """Per-attachment temp directories: creation, env, guarded reaping, sizing (5.12)."""
 
 import os
+import shutil
 import stat
 import tempfile
 import unittest
@@ -17,6 +18,7 @@ from partyline.attachment_tmp import (
     instance_key, line_tmp_bytes, reap_line_tmp, reap_missing_tmp, reap_tmp_dir,
     temp_root, tmp_resource_line, tmp_summary,
 )
+from partyline.tmp_migration import reap_previous_tmp_root
 from partyline.auth_guard import Principal
 from partyline.db import Db
 from partyline.runtime import ChatRuntime
@@ -125,6 +127,23 @@ class AttachmentTmpTest(unittest.TestCase):
         self.assertTrue((other / "somewhere-else" / "f").exists())
         self.assertTrue((base_dir() / "cache.bin").exists())
 
+    def test_previous_tmpfs_root_reaps_on_start(self):
+        """Finding 5.15: after the disk-backed switch, the old tmpfs root is
+        deleted on start — everything under it, since no live process still
+        points there — while non-id names and symlinks are left alone."""
+        db = Db(f"{self.tmp.name}/partyline.db")
+        self.addCleanup(db.close)
+        db.add_attachment("old-1", "line", "a", "raw", ["cat"], self.tmp.name)
+        db._exec("UPDATE attachments SET status='exited' WHERE id='old-1'")
+        old_root = Path(tempfile.gettempdir()) / "partyline" / instance_key()
+        self.addCleanup(shutil.rmtree, old_root, ignore_errors=True)
+        old_root.mkdir(parents=True, exist_ok=True)
+        write_file(old_root / "old-1" / "f.bin", 64)
+        write_file(old_root / "keepsake.txt", 8)  # not an id: left alone
+        self.assertEqual(reap_previous_tmp_root(db), 64)
+        self.assertFalse((old_root / "old-1").exists())
+        self.assertTrue((old_root / "keepsake.txt").exists())
+
     def test_summary_reports_mount_totals_and_the_partyline_share(self):
         directory = attachment_tmp_dir("att-5")
         directory.mkdir(parents=True)
@@ -150,7 +169,7 @@ class AttachmentTmpTest(unittest.TestCase):
         write_file(attachment_tmp_dir("live-2") / "f", 4096)
         attachment_tmp.cached_usage(cached=False)  # fill the cache once
         rider = tmp_resource_line(db, "line")
-        self.assertTrue(rider.startswith(f"(tmp: /{temp_root().name} "))
+        self.assertTrue(rider.startswith(f"(tmp: {temp_root()} "))
         self.assertIn("GB · this line's processes", rider)
         # Finding 5.13: the rider names the top lines by temp for everyone,
         # not only the reader's own line.

@@ -20,11 +20,28 @@ from partyline import resource_budget as _resource_budget
 from partyline import resource_usage as _resource_usage
 from partyline.resource_budget import GIB, Host
 
-_SANDBOX = tempfile.mkdtemp(prefix="partyline-tests-")
+def _sandbox_base() -> str:
+    """Where the sandbox lives. Unix socket paths hold 107 bytes and tests bind sockets a few
+    levels below the sandbox, so a long ``TMPDIR`` (an agent's per-session directory) moves it to
+    ``/var/tmp``, which is short, shared and disk-backed."""
+    base = tempfile.gettempdir()
+    if len(base) > 40 and os.path.isdir("/var/tmp") and os.access("/var/tmp", os.W_OK):
+        return "/var/tmp"
+    return base
+
+
+_SANDBOX = tempfile.mkdtemp(prefix="partyline-tests-", dir=_sandbox_base())
 os.environ["PARTYLINE_DB"] = os.path.join(_SANDBOX, "partyline.db")
 # Temp directories never touch the real /tmp either: every attachment's
 # TMPDIR is created under the sandbox (finding 5.12).
 os.environ["PARTYLINE_TMP_BASE"] = os.path.join(_SANDBOX, "tmp")
+# The platform temp directory too: nothing a test creates through ``tempfile`` or
+# ``gettempdir()`` lands in the real /tmp (finding 5.15). (The sandbox itself, not a
+# subdirectory: Unix socket paths are short.) Not on Windows: there is no tmpfs /tmp to
+# keep out of, and ``mkdtemp`` gives the sandbox an owner-only ACL, so fixtures nested under
+# it are unreachable to the restricted child tokens the Windows fence tests start.
+if os.name != "nt":
+    os.environ["TMPDIR"] = tempfile.tempdir = _SANDBOX
 # The docker relay directories live under the home directory; tests get their own.
 _docker_relay.RELAY_ROOT = os.path.join(_SANDBOX, "docker")
 _docker_bridge_client.BRIDGE_ROOT = os.path.join(_SANDBOX, "docker-bridge")
