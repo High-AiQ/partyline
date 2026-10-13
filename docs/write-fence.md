@@ -219,10 +219,18 @@ filter can only narrow.
 | attach, exec start (with stdin), resize | in the tree; a raw pump after the daemon's `101` |
 | create | declares its limits (below) |
 | `volumes/create` | `local` driver, no `DriverOpts` |
+| volume inspect (`GET /volumes/<name>`) | no query parameters |
+| network inspect (`GET /networks/<name-or-id>`) | `verbose` and `scope` only; answered by the proxy with only the tree's containers listed |
 | `build` and the BuildKit `session`/`grpc` upgrades | no host network, no remote context |
 
-Everything else, including `containers/<id>/update`, rename, prune, networks, volume
-removal and image removal, is refused. Query parameters are allowlisted per call.
+The two inspect lookups exist because `docker inspect <name>` tries a container, then an image,
+a network and a volume, and a missing name should read as the daemon's plain "No such object"
+(its 404 is passed through unchanged), not as a policy refusal. A network's reply normally lists
+every attached container with its name, IP and MAC, so the proxy fetches it itself and keeps
+only the containers of the line's tree in `Containers`; `Services` and `Peers` are dropped.
+
+Everything else, including `containers/<id>/update`, rename, prune, the network list, network
+create, connect, disconnect and removal, volume removal and image removal, is refused. Query parameters are allowlisted per call.
 A hijacking call (attach, exec start, `session`) becomes a raw pump only when the daemon
 itself answers `101` (or a `200` raw stream); any other answer is relayed and the
 connection ends, so a refused upgrade never leaves a raw line to the daemon.
@@ -311,7 +319,7 @@ a generous lifetime, and treat a vanished container as an interrupted job.
   the tree, never `Privileged`; it runs inside that container's own limits.
 - *`rm`* accepts only `v` and `force`; `v=1` removes that container's anonymous volumes, never
   named ones, and volume removal is not on the allowlist.
-- *Networks:* `network create`, `connect` and `disconnect` are not allowed. Every network a create, a
+- *Networks:* `network create`, `connect`, `disconnect` and removal and the network list are not allowed (a single network may be inspected, with other trees' containers hidden). Every network a create, a
   start or a build names (`NetworkMode`, `EndpointsConfig` keys, `NetworkID`, build `networkmode`) is
   resolved through the daemon by name or id, and only `bridge`-driver networks, `none` and
   `default` pass (`network-driver`); `host`, `macvlan`, `ipvlan`, unresolvable names and

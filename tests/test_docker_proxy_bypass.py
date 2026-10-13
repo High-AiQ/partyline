@@ -6,6 +6,8 @@ import json
 import os
 import time
 import unittest
+from urllib.parse import unquote
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from partyline import docker_admission, docker_gpu, docker_lifetime, docker_plan, docker_proxy, docker_relay
@@ -894,6 +896,120 @@ class NetworkAndDeviceTest(ProxyBase):
             body = self.create_body(DeviceRequests=[ok])
             body["Labels"]["partyline.gpu-mem-mb"] = "9000"
             self.assertEqual((await self.call("POST", "/containers/create", body=body))[0], 201, ids)
+
+
+class InspectFallthroughTest(ProxyBase):
+    """`docker inspect <name>` tries containers, then images, networks and volumes: lookups pass."""
+
+    async def test_a_missing_container_then_network_then_volume_reads_as_on_a_raw_socket(self):
+        status, reply = await self.call("GET", "/containers/nothing-here/json")
+        self.assertEqual((status, reply["message"]), (404, "No such container: nothing-here"))
+        status, reply = await self.call("GET", "/networks/nothing-here")
+        self.assertEqual((status, reply), (404, {"message": "network nothing-here not found"}))
+        status, reply = await self.call("GET", "/volumes/nothing-here")
+        self.assertEqual((status, reply), (404, {"message": "get nothing-here: no such volume"}))
+        self.assertEqual(self.call_rules(reply), [])
+
+    @staticmethod
+    def call_rules(reply):
+        return reply.get("rules", []) if isinstance(reply, dict) else []
+
+    async def test_a_volume_lookup_is_forwarded_by_name_and_takes_no_query(self):
+        self.assertEqual(await self.call("GET", "/volumes/data"), (200, {"Name": "data", "Driver": "local"}))
+        self.assertEqual(self.forwarded("GET", "/volumes/data")[0][1], "/volumes/data")
+        status, reply = await self.call("GET", "/volumes/data?filters=x")
+        self.assertEqual((status, reply["rules"][0]), (403, "query-not-allowed"))
+        for target, rule in (
+            ("/volumes/da%20ta", "malformed-path"),
+            ("/volumes/../x", "malformed-path"),
+            ("/volumes/-x", "endpoint-not-allowed"),
+        ):
+            self.assertEqual((await self.call("GET", target))[1]["rules"][0], rule, target)
+
+    async def test_a_network_shows_only_this_trees_containers(self):
+        status, net = await self.call("GET", "/networks/appnet")
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            list(net["Containers"]), [FULL["mine"]]
+        )  # another tree's, and a vanished one, hidden
+        self.assertEqual((net["Name"], net["Driver"]), ("appnet", "bridge"))
+        self.assertNotIn("Services", net)
+        self.assertNotIn("Peers", net)
+        self.assertNotIn("elsewhere", json.dumps(net))
+        self.assertNotIn(FULL["other"], json.dumps(net))
+
+    async def test_one_tree_filtered_list_decides_with_no_per_container_inspects(self):
+        self.daemon.attached["appnet"] = ["mine", "other", "gone", "running", "sibling"]
+        await self.call("GET", "/networks/appnet")
+        lists = [r for r in self.daemon.requests if "/containers/json" in r[1]]
+        inspects = [
+            r
+            for r in self.daemon.requests
+            if r[1].startswith("/containers/") and "/json" in r[1] and "/containers/json" not in r[1]
+        ]
+        self.assertEqual(len(lists), 1)
+        self.assertEqual(inspects, [])
+        target = unquote(lists[0][1])
+        self.assertIn("all=1", target)
+        self.assertIn('"partyline.tree=root"', target)
+
+    async def test_a_swarm_endpoint_key_and_an_unlisted_id_are_not_shown(self):
+        self.daemon.attached["appnet"] = ["mine", "lb-appnet"]
+        _status, net = await self.call("GET", "/networks/appnet")
+        self.assertEqual(list(net["Containers"]), [FULL["mine"]])
+
+    async def test_a_failed_list_shows_no_containers_instead_of_all_of_them(self):
+        self.daemon.list_status = 500
+        status, net = await self.call("GET", "/networks/appnet")
+        self.assertEqual((status, net["Containers"]), (200, {}))
+        self.assertEqual((net["Name"], net["Driver"]), ("appnet", "bridge"))
+
+    async def test_a_status_the_standard_library_does_not_know_is_still_relayed(self):
+        self.assertEqual(await self.call("GET", "/networks/odd"), (299, {"message": "an unusual status"}))
+        from partyline.docker_proxy import phrase, reply
+
+        self.assertEqual((phrase(404), phrase(299)), ("Not Found", "Status"))
+        sink = SimpleNamespace(data=b"", write=lambda data: setattr(sink, "data", sink.data + data))
+        reply(sink, 299, "odd")
+        self.assertTrue(sink.data.startswith(b"HTTP/1.1 299 Status\r\n"))
+
+    async def test_a_network_with_nothing_of_ours_shows_an_empty_list(self):
+        self.daemon.attached["appnet"] = ["other"]
+        status, net = await self.call("GET", "/networks/appnet")
+        self.assertEqual((status, net["Containers"]), (200, {}))
+        self.daemon.attached["appnet"] = []
+        self.assertEqual((await self.call("GET", "/networks/appnet"))[1]["Containers"], {})
+
+    async def test_the_tree_decides_not_the_line(self):
+        self.daemon.attached["appnet"] = ["sibling", "mine"]
+        status, net = await self.call("GET", "/networks/appnet")
+        self.assertEqual(status, 200)
+        self.assertIn(FULL["mine"], net["Containers"])
+
+    async def test_only_verbose_and_scope_reach_the_daemon(self):
+        await self.call("GET", "/networks/appnet?verbose=true&scope=local")
+        self.assertEqual(
+            self.forwarded("GET", "/networks/appnet")[0][1], "/networks/appnet?verbose=true&scope=local"
+        )
+        status, reply = await self.call("GET", "/networks/appnet?filters=x")
+        self.assertEqual((status, reply["rules"][0]), (403, "query-not-allowed"))
+
+    async def test_listing_creating_changing_and_removing_networks_stays_refused(self):
+        for method, target in (
+            ("GET", "/networks"),
+            ("POST", "/networks/create"),
+            ("POST", "/networks/appnet/connect"),
+            ("POST", "/networks/appnet/disconnect"),
+            ("DELETE", "/networks/appnet"),
+            ("POST", "/networks/prune"),
+            ("POST", "/networks/appnet"),
+            ("DELETE", "/volumes/data"),
+            ("PUT", "/volumes/data"),
+            ("POST", "/volumes/data"),
+        ):
+            status, reply = await self.call(method, target, body=b"{}" if method != "GET" else None)
+            self.assertEqual((status, reply["rules"][0]), (403, "endpoint-not-allowed"), (method, target))
+        self.assertEqual(self.daemon.requests, [])
 
 
 if __name__ == "__main__":
