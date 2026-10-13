@@ -102,7 +102,7 @@ def register_attachment_lifecycle_routes(app, runtime, *, start, require_loopbac
         if not is_human(principal):
             deny_unless(db, principal, att["conv_id"], "assign")
         if att_id in runtime.live:
-            await detach_attachment(runtime, att_id)
+            await detach_attachment(runtime, att_id, survivors=False)
         stopped = require_stopped(db, att_id)
         try:
             validate(stopped)
