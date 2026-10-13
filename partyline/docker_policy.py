@@ -60,7 +60,7 @@ RULES = (  # every stable rule name a refusal can carry; docs/write-fence.md lis
     "privileged", "host-namespace", "runtime", "default-runtime", "gpu-env", "volume-driver", "bind-source",
     "forbidden-setting", "field-not-allowed", "security-opt", "device-request", "mount-type",
     "build-network", "build-remote", "upgrade-required", "connection-limit", "budget-exceeded", "gpu-busy",
-    "gpu-memory", "gpu-unhealthy")
+    "gpu-memory", "gpu-unhealthy", "log-driver", "port-exposure")
 
 
 class Denied(Exception):

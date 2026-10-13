@@ -190,7 +190,11 @@ rebuilds it from the parsed parts, so what was checked is what the daemon receiv
 never forwards the client's bytes or JSON: a body is parsed, every object must have keys
 that are distinct once lowercased (Docker's decoder matches keys without regard to case),
 and a *fresh* body is built from allowlists of known fields, emitted under their canonical
-names. A field not on the list is refused, so a field Docker adds later is closed until
+names. This is done at every level — mounts, volume and bind options, restart policy, device
+requests, log config, ports, ulimits, healthchecks and network endpoints are each rebuilt
+through their own list — and the checks run on the rebuilt object, never on what the client
+sent, because Docker reads the keys of nested objects without regard to case too. A field
+not on the list is refused, so a field Docker adds later is closed until
 someone decides it is safe. Anything it cannot parse (bad framing, `Content-Length` with
 `Transfer-Encoding`, an unknown HTTP version) closes the connection; a head and body must
 arrive within 30 s, a body is capped at 1 MB (image builds stream, capped at 4 GB), and a
@@ -238,7 +242,11 @@ running and uses nothing.
 **Create refuses**: `Privileged`; `CapAdd`; `NetworkMode`, `PidMode`, `IpcMode`, `UTSMode`,
 `UsernsMode` or `CgroupnsMode` of `host` or `container:…`; `Devices` and `DeviceCgroupRules`
 (only GPU `DeviceRequests` are allowed); `VolumesFrom`; `CgroupParent`; `Cgroup`; `Links`;
-`Sysctls`; `StorageOpt`; `OomKillDisable`; masked or read-only path overrides; any
+`Sysctls`; `StorageOpt`; `OomKillDisable`; `Annotations` (they can reach the OCI or CDI runtime
+and request devices outside admission); masked or read-only path overrides; any `LogConfig`
+driver but `json-file` or `local` (others make the daemon open network connections);
+`PublishAllPorts` and any published port whose `HostIp` is not `127.0.0.1` or `::1`
+(`port-exposure`; an empty `HostIp` is every interface); any
 `SecurityOpt` but `no-new-privileges`; any `Runtime` but `runc`; a `RestartPolicy` other
 than absent or `no`; any `VolumeDriver` but the default, and mount `DriverConfig`; bind or
 mount sources that expose the Docker socket (or a directory that contains it, such as `/run`),
@@ -282,6 +290,27 @@ daemon reports the container stopped.
 It stops, never removes, so outputs survive. A stop can land in the middle of a job: declare
 a generous lifetime, and treat a vanished container as an interrupted job.
 
+**What the other calls can and cannot do** (stated so nobody assumes more is enforced):
+
+- *Image names are shared across trees.* Pull and `build -t` can re-point a tag another tree's
+  new containers resolve, so give images distinct names. Existing containers keep their image
+  id, so a re-point never changes what is already running. `tag`, `push`, `commit`, image
+  removal and prune are not on the allowlist.
+- *BuildKit entitlements are not enforced here.* The proxy refuses `networkmode=host`,
+  `container:…` and `remote` on `/build`, but a BuildKit client asks for `network.host` or
+  `security.insecure` inside the gRPC stream of the `session` upgrade, which the proxy cannot
+  read. Whether the daemon grants them is its own builder configuration, which Partyline
+  neither reads nor changes; an operator who needs builds to be safe must not enable insecure
+  entitlements in the daemon.
+- *Exec* allows `Cmd`, `Env`, `User`, `WorkingDir`, `Tty` and the attach flags on a container in
+  the tree, never `Privileged`; it runs inside that container's own limits.
+- *`rm`* accepts only `v` and `force`; `v=1` removes that container's anonymous volumes, never
+  named ones, and volume removal is not on the allowlist.
+- *Networks:* `network create`, `connect` and `disconnect` are not allowed, and a create may
+  not name `host` or `container:…` (as `NetworkMode` or in `EndpointsConfig`). A container may
+  join any network that already exists; networks are not isolated per tree, and containers of
+  different trees on one network (including the default bridge) can reach each other.
+
 **Builds** (`POST /build`, BuildKit `session`) are allowed because images have to come from
 somewhere, but a build's steps run outside every memory budget; keep them off while heavy
 GPU work runs. `networkmode=host`, `container:…` and `remote` contexts are refused.
@@ -298,7 +327,7 @@ first, and tags the others). Rules:
 `gpu-env`, `volume-driver`, `bind-source`, `forbidden-setting`, `field-not-allowed`,
 `security-opt`, `device-request`, `mount-type`, `build-network`, `build-remote`,
 `upgrade-required`, `connection-limit`, `budget-exceeded`, `gpu-busy`, `gpu-memory`,
-`gpu-unhealthy`. (`update-refused`: limits cannot change in place, recreate the container;
+`gpu-unhealthy`, `log-driver`, `port-exposure`. (`update-refused`: limits cannot change in place, recreate the container;
 `not-managed`: it was not created through this path; `gpu-env`: `NVIDIA_*` without
 `DeviceRequests`; `field-not-allowed`: a field outside the allowlists.)
 

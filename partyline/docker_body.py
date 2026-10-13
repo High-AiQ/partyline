@@ -15,24 +15,8 @@ import os
 import re
 
 from .docker_policy import LABEL_GPU_MB, LABEL_MAX_SECONDS, NAME, refuse, refuse_all
+from .docker_schema import CREATE, EXEC_CREATE, EXEC_START, FORBIDDEN, VOLUME, rebuild
 
-TOP = ("Hostname Domainname User AttachStdin AttachStdout AttachStderr ExposedPorts Tty OpenStdin "
-       "StdinOnce Env Cmd Healthcheck ArgsEscaped Image Volumes WorkingDir Entrypoint NetworkDisabled "
-       "MacAddress OnBuild Labels StopSignal StopTimeout Shell HostConfig NetworkingConfig").split()
-HOST = ("Binds LogConfig NetworkMode PortBindings RestartPolicy AutoRemove VolumeDriver CapDrop CgroupnsMode "
-        "Dns DnsOptions DnsSearch ExtraHosts GroupAdd IpcMode OomScoreAdj PidMode PublishAllPorts "
-        "ReadonlyRootfs SecurityOpt Tmpfs UTSMode UsernsMode ShmSize Runtime CpuShares Memory "
-        "NanoCpus CpuPeriod CpuQuota CpusetCpus CpusetMems DeviceRequests MemoryReservation MemorySwap "
-        "MemorySwappiness PidsLimit Ulimits CpuCount CpuPercent Mounts Init ConsoleSize Annotations "
-        "BlkioWeight").split()
-# Known and dangerous: accepted only when empty, so a CLI that sends "CapAdd": null still works.
-FORBIDDEN = ("Privileged CapAdd Devices DeviceCgroupRules VolumesFrom CgroupParent Cgroup Links Sysctls "
-             "StorageOpt OomKillDisable MaskedPaths ReadonlyPaths ContainerIDFile BlkioWeightDevice "
-             "BlkioDeviceReadBps BlkioDeviceWriteBps BlkioDeviceReadIOps BlkioDeviceWriteIOps "
-             "CpuRealtimePeriod CpuRealtimeRuntime IOMaximumIOps IOMaximumBandwidth KernelMemory "
-             "Isolation").split()
-EXEC = ("AttachStdin AttachStdout AttachStderr DetachKeys Tty Env Cmd WorkingDir User ConsoleSize "
-        "Privileged").split()
 LR = "limits-required"
 SAFE_SECURITY = re.compile(r"^no-new-privileges([:=](true|false))?$")
 SHARE = {"NetworkMode": None, "PidMode": ("",), "IpcMode": ("", "private", "shareable", "none"),
@@ -54,22 +38,6 @@ def loads_strict(raw: bytes):
         return json.loads(raw.decode("utf-8"), object_pairs_hook=pairs)
     except (ValueError, RecursionError) as exc:
         raise refuse("malformed-body", f"request body is not valid JSON: {exc}", 400) from exc
-
-
-def pick(obj, allowed, where: str, problems: list[tuple[str, str]]) -> dict:
-    """The allowed fields of ``obj`` under their canonical names; the rest are named as problems."""
-    if obj is None:
-        return {}
-    if not isinstance(obj, dict):
-        raise refuse("malformed-body", f"{where} must be a JSON object", 400)
-    index = {name.lower(): name for name in allowed}
-    out = {}
-    for key, value in obj.items():
-        if canonical := index.get(key.lower()):
-            out[canonical] = value
-        else:
-            problems.append(("field-not-allowed", f"{where}.{key} is not allowed"))
-    return out
 
 
 def _int(value) -> int:
@@ -129,6 +97,22 @@ def _volume_driver(options) -> list[tuple[str, str]]:
     return []
 
 
+LOOPBACK = ("127.0.0.1", "::1")
+
+
+def _port_problems(host: dict) -> list[tuple[str, str]]:
+    """Published ports must bind loopback: an empty HostIp is every interface of the host."""
+    out = []
+    if host.get("PublishAllPorts"):
+        out.append(("port-exposure", "PublishAllPorts is refused: it publishes on every interface"))
+    for port, bindings in (host.get("PortBindings") or {}).items():
+        for binding in bindings or []:
+            if (binding or {}).get("HostIp") not in LOOPBACK:
+                out.append(("port-exposure", f"port {port} must bind HostIp 127.0.0.1 or ::1, not "
+                            f"{(binding or {}).get('HostIp') or 'every interface'}"))
+    return out
+
+
 def host_problems(host: dict, socket_paths: set[str], roots: list[str]) -> list[tuple[str, str]]:
     """Settings a managed container may never carry; read from a create body or an inspect."""
     out: list[tuple[str, str]] = []
@@ -142,6 +126,10 @@ def host_problems(host: dict, socket_paths: set[str], roots: list[str]) -> list[
         if allowed is None and (value == "host" or value.startswith("container:")) \
                 or allowed is not None and value not in allowed:
             out.append(("host-namespace", f"{key}={value} is refused"))
+    log = host.get("LogConfig")
+    if isinstance(log, dict) and log.get("Type") not in (None, "", "json-file", "local"):
+        out.append(("log-driver", f"LogConfig.Type={log['Type']} is refused: only json-file or local"))
+    out += _port_problems(host)
     if host.get("Runtime") not in (None, "", "runc"):
         out.append(("runtime", f"Runtime={host['Runtime']} is refused: GPUs come only through "
                     "DeviceRequests"))
@@ -176,8 +164,8 @@ def canonical_create(body, socket_paths: set[str], roots: list[str], cap: int):
     if not isinstance(body, dict):
         raise refuse("malformed-body", "create needs a JSON object body", 400)
     problems: list[tuple[str, str]] = []
-    fresh = pick(body, TOP, "create body", problems)
-    host = pick(fresh.get("HostConfig"), HOST + FORBIDDEN, "HostConfig", problems)
+    fresh = rebuild(body, CREATE, "create body", problems)
+    host = fresh.get("HostConfig") or {}
     labels = fresh.get("Labels") or {}
     if not fresh.get("Image") or not isinstance(fresh["Image"], str):
         raise refuse("malformed-body", "create needs an Image", 400)
@@ -194,8 +182,7 @@ def canonical_create(body, socket_paths: set[str], roots: list[str], cap: int):
             str(e).startswith(("NVIDIA_", "CUDA_VISIBLE_DEVICES")) for e in env if isinstance(e, str)):
         problems.append(("gpu-env", "NVIDIA_*/CUDA_VISIBLE_DEVICES in the request's Env need a GPU "
                          "DeviceRequests entry (GPU admission)"))
-    networks = pick(fresh.get("NetworkingConfig"), ["EndpointsConfig"], "NetworkingConfig", problems)
-    if "host" in (networks.get("EndpointsConfig") or {}):
+    if "host" in ((fresh.get("NetworkingConfig") or {}).get("EndpointsConfig") or {}):
         problems.append(("host-namespace", "joining the host network is refused"))
     fresh["HostConfig"], fresh["Labels"] = host, labels
     problems += host_problems(host, socket_paths, roots) + limit_problems(host, labels, cap)
@@ -204,7 +191,7 @@ def canonical_create(body, socket_paths: set[str], roots: list[str], cap: int):
 
 def canonical_exec_create(raw: bytes) -> dict:
     problems: list[tuple[str, str]] = []
-    fresh = pick(loads_strict(raw or b"{}"), EXEC, "exec body", problems)
+    fresh = rebuild(loads_strict(raw or b"{}"), EXEC_CREATE, "exec body", problems) or {}
     if fresh.pop("Privileged", False):
         problems.append(("privileged", "privileged exec is refused"))
     if problems:
@@ -214,7 +201,7 @@ def canonical_exec_create(raw: bytes) -> dict:
 
 def canonical_exec_start(raw: bytes) -> dict:
     problems: list[tuple[str, str]] = []
-    fresh = pick(loads_strict(raw or b"{}"), ["Detach", "Tty", "ConsoleSize"], "exec start body", problems)
+    fresh = rebuild(loads_strict(raw or b"{}"), EXEC_START, "exec start body", problems) or {}
     if problems:
         raise refuse_all(problems)
     return fresh
@@ -223,7 +210,9 @@ def canonical_exec_start(raw: bytes) -> dict:
 def canonical_volume(raw: bytes) -> dict:
     """Only default-driver volumes: a driver's options (``type=none,o=bind,device=/``) can bind any path."""
     problems: list[tuple[str, str]] = []
-    fresh = pick(loads_strict(raw), ["Name", "Driver", "DriverOpts", "Labels"], "volume body", problems)
+    fresh = rebuild(loads_strict(raw), VOLUME, "volume body", problems)
+    if not isinstance(fresh, dict):
+        raise refuse("malformed-body", "volume body must be a JSON object", 400)
     if fresh.get("Driver") not in (None, "", "local"):
         problems.append(("volume-driver", "only the local volume driver is allowed"))
     if fresh.get("DriverOpts"):
