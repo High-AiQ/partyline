@@ -6,6 +6,8 @@ import json
 import os
 import time
 import unittest
+from urllib.parse import unquote
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from partyline import docker_admission, docker_gpu, docker_lifetime, docker_plan, docker_proxy, docker_relay
@@ -935,6 +937,41 @@ class InspectFallthroughTest(ProxyBase):
         self.assertNotIn("Peers", net)
         self.assertNotIn("elsewhere", json.dumps(net))
         self.assertNotIn(FULL["other"], json.dumps(net))
+
+    async def test_one_tree_filtered_list_decides_with_no_per_container_inspects(self):
+        self.daemon.attached["appnet"] = ["mine", "other", "gone", "running", "sibling"]
+        await self.call("GET", "/networks/appnet")
+        lists = [r for r in self.daemon.requests if "/containers/json" in r[1]]
+        inspects = [
+            r
+            for r in self.daemon.requests
+            if r[1].startswith("/containers/") and "/json" in r[1] and "/containers/json" not in r[1]
+        ]
+        self.assertEqual(len(lists), 1)
+        self.assertEqual(inspects, [])
+        target = unquote(lists[0][1])
+        self.assertIn("all=1", target)
+        self.assertIn('"partyline.tree=root"', target)
+
+    async def test_a_swarm_endpoint_key_and_an_unlisted_id_are_not_shown(self):
+        self.daemon.attached["appnet"] = ["mine", "lb-appnet"]
+        _status, net = await self.call("GET", "/networks/appnet")
+        self.assertEqual(list(net["Containers"]), [FULL["mine"]])
+
+    async def test_a_failed_list_shows_no_containers_instead_of_all_of_them(self):
+        self.daemon.list_status = 500
+        status, net = await self.call("GET", "/networks/appnet")
+        self.assertEqual((status, net["Containers"]), (200, {}))
+        self.assertEqual((net["Name"], net["Driver"]), ("appnet", "bridge"))
+
+    async def test_a_status_the_standard_library_does_not_know_is_still_relayed(self):
+        self.assertEqual(await self.call("GET", "/networks/odd"), (299, {"message": "an unusual status"}))
+        from partyline.docker_proxy import phrase, reply
+
+        self.assertEqual((phrase(404), phrase(299)), ("Not Found", "Status"))
+        sink = SimpleNamespace(data=b"", write=lambda data: setattr(sink, "data", sink.data + data))
+        reply(sink, 299, "odd")
+        self.assertTrue(sink.data.startswith(b"HTTP/1.1 299 Status\r\n"))
 
     async def test_a_network_with_nothing_of_ours_shows_an_empty_list(self):
         self.daemon.attached["appnet"] = ["other"]

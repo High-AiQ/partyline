@@ -79,15 +79,23 @@ class Incoming:
         return self.conn.trailing_data[0]
 
 
+def phrase(status: int) -> str:
+    """The reason phrase for a status; a code the standard library does not know gets a generic one."""
+    try:
+        return http.HTTPStatus(status).phrase
+    except ValueError:
+        return "Status"
+
+
 def reply(writer: asyncio.StreamWriter, status: int, message: str, rules: tuple[str, ...] = ()) -> None:
     body = json.dumps({"message": message, **({"rules": list(rules)} if rules else {})}).encode()
-    writer.write(f"HTTP/1.1 {status} {http.HTTPStatus(status).phrase}\r\nContent-Type: application/json\r\n"
+    writer.write(f"HTTP/1.1 {status} {phrase(status)}\r\nContent-Type: application/json\r\n"
                  f"Connection: close\r\nContent-Length: {len(body)}\r\n\r\n".encode() + body)
 
 
 def answer(writer: asyncio.StreamWriter, status: int, body: bytes) -> None:
     """A reply the proxy built itself (or the daemon's own non-200, passed on as it came)."""
-    writer.write(f"HTTP/1.1 {status} {http.HTTPStatus(status).phrase}\r\nContent-Type: application/json\r\n"
+    writer.write(f"HTTP/1.1 {status} {phrase(status)}\r\nContent-Type: application/json\r\n"
                  f"Connection: close\r\nContent-Length: {len(body)}\r\n\r\n".encode() + body)
 
 

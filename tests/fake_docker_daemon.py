@@ -69,6 +69,7 @@ class FakeDaemon:
             "host": "host", "lan": "macvlan", "m" * 64: "macvlan", "vlan": "ipvlan"}
         self.attached = {"appnet": ["mine", "other", "gone"]}  # network -> container keys on it
         self.volumes = {"data"}
+        self.list_status = 200  # what the container list answers
         self.keepalive = False  # keep a connection open after an answer, recording what follows
         self.refuse_attach = False  # answer attach/exec start with a 500 instead of a 101
 
@@ -144,6 +145,8 @@ class FakeDaemon:
             return 200, b"OK", False
         if m := re.fullmatch(r"/networks/([^/]+)", path):
             driver = self.networks.get(m.group(1))
+            if m.group(1) == "odd":
+                return 299, {"message": "an unusual status"}, False
             if not driver:
                 return 404, {"message": f"network {m.group(1)} not found"}, False
             on = {FULL.get(key, key * 64): {"Name": key, "IPv4Address": "172.18.0.2/16"}
@@ -163,6 +166,8 @@ class FakeDaemon:
         if path == "/volumes/create":
             return 201, json.loads(body), False
         if path == "/containers/json":
+            if self.list_status != 200:
+                return self.list_status, {"message": "list failed"}, False
             wanted = [x.split("=", 1) for x in json.loads(query.get("filters", ["{}"])[0]).get("label", [])]
             rows = [
                 c

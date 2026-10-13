@@ -7,13 +7,12 @@ its creator's top-level line and any line under that line may operate on it.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import re
 import time
 from dataclasses import dataclass, field
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from . import docker_admission, docker_api
 from .docker_admission import admission_lock, max_seconds_cap
@@ -77,10 +76,6 @@ async def inspect(ref: str) -> dict:
     if status != 200:
         raise Denied(f"docker daemon answered {status} to the inspect", 502)
     return info
-
-
-def owned_tree(info: dict) -> str | None:
-    return ((info.get("Config") or {}).get("Labels") or {}).get(LABEL_TREE)
 
 
 def owned_labels(db, info: dict, conv_id: str, ref: str) -> dict:
@@ -201,24 +196,21 @@ async def plan_network(runtime, conv_id: str, route: Route) -> Plan:
     """A network lookup, answered here: only this tree's containers stay in ``Containers``.
 
     The daemon lists every container attached with its name, IP and MAC, which would show other
-    trees' containers; ``Services`` and ``Peers`` are dropped. Anything but a 200 (a missing
-    network is the daemon's 404) is passed through as it came.
+    trees' containers; one tree-filtered container list decides which stay (swarm endpoint keys
+    and vanished containers are not in it), and ``Services`` and ``Peers`` are dropped.
+    Anything but a 200 (a missing network is the daemon's 404) is passed through as it came.
     """
     status, info = await docker_api.request("GET", f"{route.prefix}/networks/{route.ref}{query_of(route)}")
     if status != 200 or not isinstance(info, dict):
         return Plan("", answer=(status, json.dumps(info if info is not None else {}).encode()))
-    tree = tree_of(runtime.db, conv_id)
-
-    async def mine(ref: str) -> bool:
-        try:
-            return owned_tree(await inspect(ref)) == tree
-        except Denied:
-            return False  # gone since the lookup, or not readable: not shown
-
+    filters = json.dumps({"label": [f"{LABEL_TREE}={tree_of(runtime.db, conv_id)}"]})
+    listed, rows = await docker_api.request(
+        "GET", f"/containers/json?all=1&filters={quote(filters)}")
+    ours = {row.get("Id") for row in rows if isinstance(row, dict)} \
+        if listed == 200 and isinstance(rows, list) else set()  # no answer: show nothing, never everything
     shown = info.get("Containers") if isinstance(info.get("Containers"), dict) else {}
-    keep = await asyncio.gather(*(mine(ref) for ref in shown))
     info = {k: v for k, v in info.items() if k not in ("Services", "Peers")}
-    info["Containers"] = {ref: item for (ref, item), ok in zip(shown.items(), keep, strict=True) if ok}
+    info["Containers"] = {ref: item for ref, item in shown.items() if ref in ours}
     return Plan("", answer=(200, json.dumps(info).encode()))
 
 
