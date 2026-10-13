@@ -1,6 +1,7 @@
 """Per-attachment temp directories: creation, env, guarded reaping, sizing (5.12)."""
 
 import os
+import shutil
 import stat
 import tempfile
 import unittest
@@ -13,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from partyline import attachment_tmp
 from partyline.attachment_tmp import (
+    reap_previous_tmp_root,
     attachment_tmp_dir, base_dir, dir_size, ensure_tmp_dir, env_for, guarded_path,
     instance_key, line_tmp_bytes, reap_line_tmp, reap_missing_tmp, reap_tmp_dir,
     temp_root, tmp_resource_line, tmp_summary,
@@ -124,6 +126,23 @@ class AttachmentTmpTest(unittest.TestCase):
         self.assertEqual((freed, reaped), (64, ["no-row-1"]))
         self.assertTrue((other / "somewhere-else" / "f").exists())
         self.assertTrue((base_dir() / "cache.bin").exists())
+
+    def test_previous_tmpfs_root_reaps_on_start(self):
+        """Finding 5.15: after the disk-backed switch, the old tmpfs root is
+        deleted on start — everything under it, since no live process still
+        points there — while non-id names and symlinks are left alone."""
+        db = Db(f"{self.tmp.name}/partyline.db")
+        self.addCleanup(db.close)
+        db.add_attachment("old-1", "line", "a", "raw", ["cat"], self.tmp.name)
+        db._exec("UPDATE attachments SET status='exited' WHERE id='old-1'")
+        old_root = Path(tempfile.gettempdir()) / "partyline" / instance_key()
+        self.addCleanup(shutil.rmtree, old_root, ignore_errors=True)
+        old_root.mkdir(parents=True, exist_ok=True)
+        write_file(old_root / "old-1" / "f.bin", 64)
+        write_file(old_root / "keepsake.txt", 8)  # not an id: left alone
+        self.assertEqual(reap_previous_tmp_root(db), 64)
+        self.assertFalse((old_root / "old-1").exists())
+        self.assertTrue((old_root / "keepsake.txt").exists())
 
     def test_summary_reports_mount_totals_and_the_partyline_share(self):
         directory = attachment_tmp_dir("att-5")

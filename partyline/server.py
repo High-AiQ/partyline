@@ -89,6 +89,7 @@ from .resource_leases import register_lease_routes
 from .review_worktrees import register_review_routes
 from .approval_bubble import register_approval_routes
 from .tmp_reap_routes import register_tmp_reap_routes
+from .attachment_tmp import reap_previous_tmp_root
 from .legacy_tmp import reap_legacy_temp
 from .scratch_worktrees import register_scratch_routes
 from .startup_state import post_interruption_notices
@@ -182,6 +183,12 @@ async def lifespan(app):
         await asyncio.to_thread(reap_legacy_temp, runtime.db)
     except Exception:
         logger.exception("legacy temp reap failed; continuing")
+    try:
+        # Finding 5.15: after the disk-backed switch, the old tmpfs root is
+        # reaped once — after the restart nothing live still points there.
+        await asyncio.to_thread(reap_previous_tmp_root, runtime.db)
+    except Exception:
+        logger.exception("previous tmp root reap failed; continuing")
     automatic_task = asyncio.create_task(_run_automatic_reattachment())
     app.state.automatic_reattach_task = automatic_task
     # The monitor's state is in the database, so a restart resumes whatever the
