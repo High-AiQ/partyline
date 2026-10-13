@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+from .cgroup_sample import read_cgroup_sample
 
 DEFAULT_PROCESS_MEMORY_LIMIT = "4G"
 
@@ -73,34 +74,59 @@ def parse_size(value: str) -> int:
     return int(value[:-1]) * multiplier
 
 
-def read_cgroup_sample(root: str) -> dict | None:
-    """Read ``memory.current``, ``memory.peak`` and ``memory.stat`` in a scope.
+def process_snapshot(platform: str | None = None) -> tuple[dict[int, int], dict[int, int]] | None:
+    """Read a bounded process table once for a fallback batch.
 
-    ``working_set`` is ``current`` minus ``inactive_file``, floored at 0 —
-    the figure kubelet and cAdvisor use, so file cache the kernel can
-    reclaim never reads as real pressure.
+    A process exiting between the listing and the read must not lose the
+    whole table: entries that vanish mid-scan are skipped, not fatal. The
+    sampler treats an empty table as no data; the signal endpoint's
+    descendant check treats a partial table as partial truth, so a churning
+    host degrades to an incomplete answer rather than a false refusal.
     """
+    platform = sys.platform if platform is None else platform
+    if platform.startswith("linux"):
+        try:
+            import os
+            parents, rss = {}, {}
+            for name in os.listdir("/proc"):
+                if not name.isdigit():
+                    continue
+                try:
+                    with open(f"/proc/{name}/stat", encoding="ascii") as stream:
+                        fields = stream.read().rsplit(")", 1)[1].split()
+                    child = int(name)
+                    parents[child] = int(fields[1])
+                    with open(f"/proc/{child}/status", encoding="ascii") as stream:
+                        for line in stream:
+                            if line.startswith("VmRSS:"):
+                                rss[child] = int(line.split()[1]) * 1024
+                                break
+                except (OSError, ValueError, IndexError):
+                    continue  # exited mid-scan; the table is partial, not void
+            return parents, rss
+        except (OSError, ValueError):
+            return None
     try:
-        with open(f"{root}/memory.current", encoding="ascii") as stream:
-            current = int(stream.read().strip())
-    except (OSError, ValueError):
+        import subprocess
+        if platform.startswith("win"):
+            command = ["powershell", "-NoProfile", "-Command",
+                       "Get-CimInstance Win32_Process | ForEach-Object { "
+                       "\"$($_.ProcessId),$($_.ParentProcessId),$($_.WorkingSetSize)\" }"]
+        else:
+            command = ["ps", "-axo", "pid=,ppid=,rss="]
+        done = subprocess.run(command, capture_output=True, text=True, timeout=3, check=False)
+        if done.returncode:
+            return None
+        parents, rss = {}, {}
+        for line in done.stdout.splitlines():
+            fields = line.strip().split(",") if platform.startswith("win") else line.split()
+            if len(fields) == 3:
+                child, parent, amount = map(int, fields)
+                parents[child] = parent
+                rss[child] = amount if platform.startswith("win") else amount * 1024
+        return parents, rss
+    except (OSError, ValueError, subprocess.SubprocessError):
         return None
-    try:
-        with open(f"{root}/memory.peak", encoding="ascii") as stream:
-            peak = int(stream.read().strip())
-    except (OSError, ValueError):
-        peak = None
-    inactive = 0
-    try:
-        with open(f"{root}/memory.stat", encoding="ascii") as stream:
-            for line in stream:
-                if line.startswith("inactive_file "):
-                    inactive = int(line.split()[1])
-                    break
-    except (OSError, ValueError):
-        pass
-    return {"root": root, "current": current, "peak": peak,
-            "working_set": max(0, current - inactive)}
 
 
 def cgroup_usage(pid: int, base: str = "/sys/fs/cgroup") -> dict | None:

@@ -32,9 +32,11 @@ import hashlib
 import os
 import re
 import shutil
+import sys
 import tempfile
 import time
 from pathlib import Path
+from .temp_mounts import on_tmpfs
 
 SIZE_BUDGET_SECONDS = 0.25
 SUMMARY_TTL_SECONDS = 5.0
@@ -48,10 +50,28 @@ def instance_key() -> str:
     return hashlib.sha256(os.path.realpath(os.path.expanduser(raw)).encode()).hexdigest()[:12]
 
 
-def temp_root() -> Path:
-    """The pinned or platform temp directory that hosts everything here."""
+def temp_root(*, mountinfo: str = "/proc/self/mountinfo",
+              var_tmp: str = "/var/tmp") -> Path:
+    """The pinned or platform temp directory that hosts everything here.
+
+    On Linux, tmpfs is RAM: every byte a process writes there counts
+    against its memory budget and the kernel cannot reclaim it. So when the
+    default temp directory is tmpfs and a writable ``/var/tmp`` exists on a
+    disk-backed filesystem, processes get their temp space there instead.
+    The ``PARTYLINE_TMP_BASE`` pin wins over everything (tests), and other
+    platforms keep today's behavior.
+    """
     pinned = os.environ.get("PARTYLINE_TMP_BASE", "").strip()
-    return Path(pinned) if pinned else Path(tempfile.gettempdir())
+    if pinned:
+        return Path(pinned)
+    current = Path(tempfile.gettempdir())
+    if sys.platform == "linux" and on_tmpfs(current, mountinfo):
+        candidate = Path(var_tmp)
+        if (candidate.is_dir() and not on_tmpfs(candidate, mountinfo)
+                and os.access(candidate, os.W_OK | os.X_OK)):
+            return candidate
+    return current
+
 
 
 def base_dir() -> Path:
@@ -268,8 +288,8 @@ def tmp_resource_line(db, conv_id: str) -> str:
         # Some callers hand the rider a partial db (role-delivery deltas);
         # a rider must never fail, so the share reads zero instead.
         share = 0
-    name = temp_root().name
-    line = (f"(tmp: /{name} {used / 2**30:.0f}/{mount / 2**30:.0f} GB · "
+    name = str(temp_root())
+    line = (f"(tmp: {name} {used / 2**30:.0f}/{mount / 2**30:.0f} GB · "
             f"this line's processes {share / 2**30:.1f} GB")
     tops = top_tmp_lines(db)
     if tops:
