@@ -140,7 +140,8 @@ is accepted as a *docker access* grant instead of refused, and the server, which
 outside the fence and holds the group, copies bytes between a per-line socket and
 the host socket.
 
-**This is root-equivalent access to the host.** Only a person may approve it; an
+**Unrestricted access is root-equivalent access to the host; the default, managed access,
+is a constrained policy proxy (see Managed Docker access).** Only a person may approve either; an
 ancestor captain cannot, even if it holds the grant itself. The grant is an ordinary
 row in the line's write set.
 
@@ -174,12 +175,107 @@ listening, open connections, the last upstream error, and a live probe. Starting
 a relay twice reuses the one listener. Revoking a grant has no route yet; archive
 the line to stop its relay.
 
+### Managed Docker access (the default)
+
+A docker grant has a mode, stored on the grant row (`docker_mode`, default `managed`,
+existing grants included). Only a person chooses `unrestricted`: in the approval dialog
+(*approve unrestricted*), through `POST …/write-set/request/<id>/approve {"docker_mode":
+"unrestricted"}`, or by granting directly with `{"docker_mode": …}`. A process cannot.
+
+**The managed relay is a default-deny policy proxy** (`docker_proxy.py`, rules in
+`docker_policy.py`). It parses each request strictly with h11 and rebuilds it from the
+parsed parts, so what was checked is what the daemon receives. Anything it cannot parse
+(bad framing, `Content-Length` with `Transfer-Encoding`, an unknown HTTP version, a body
+over 1 MB) closes the connection. It serves one request per connection and answers
+`Connection: close`; the docker CLI and SDKs reconnect, and a second request pipelined
+behind the first is never forwarded. Container names and short ids resolve through the
+daemon to the full id, and the forwarded path carries that id, so a name cannot dodge the
+ownership check. Paths with `//`, `.`/`..` segments, `%` escapes or odd characters are
+refused. A denial is an HTTP `403` with a JSON `message` the docker CLI prints, naming
+the rule; unknown containers are `404`.
+
+| Allowed | Condition |
+| --- | --- |
+| `_ping`, `version`, `info`, `events`, image list | none |
+| image inspect, image pull (`fromImage`, `tag`, `platform`) | none (`fromSrc` import is refused) |
+| container list | narrowed to this line's containers; a client filter can only narrow further |
+| inspect, logs, stats, wait, top, stop, kill, remove, exec create | container owned by this line |
+| start, restart | owned, **managed**, limits present, passes admission (below) |
+| attach, exec start | owned; the `101` upgrade then becomes a raw pump |
+| create | declares its limits (below) |
+
+Everything else, including `containers/<id>/update`, rename, prune, networks, volumes,
+build and image removal, is `403` (*default-deny*).
+
+**Create must declare** (one `403` names every gap, plus the managed-path pointer):
+
+- `HostConfig.Memory` > 0 and `MemorySwap` equal to it (no swap), because a container with
+  no cap is what the daemon work in finding 5.14 escaped through;
+- a CPU limit (`NanoCpus` or `CpuQuota` > 0) and `PidsLimit` > 0;
+- the label `partyline.max-seconds` (maximum lifetime, seconds);
+- the label `partyline.gpu-mem-mb` (VRAM need, MB) whenever it has GPU `DeviceRequests`.
+
+**Create refuses**: `Privileged`; `CapAdd`; `NetworkMode`, `PidMode`, `IpcMode`, `UTSMode`,
+`UsernsMode` or `CgroupnsMode` of `host` or `container:…`; `Devices` and `DeviceCgroupRules`
+(only GPU `DeviceRequests` are allowed); `VolumesFrom`; `CgroupParent`; `unconfined`
+`SecurityOpt`; bind or mount sources that expose the Docker socket (or a directory that
+contains it, such as `/run`) or lie outside the line's worktrees (its attachments' working
+directories) and its approved write-set paths. Named volumes and tmpfs are fine. Each of
+these would let a container leave its limits or the fence; the proxy refuses them rather
+than trusting the client to be well-behaved.
+
+The proxy sets `partyline.conversation=<line>`, `partyline.managed=1` and
+`partyline.attachment` itself, overriding anything the client sent (the attachment label
+keeps the client's value only if it names an attachment of this line, else it is the
+line's captain). **Admission:** the CLI memory reservations, plus the memory caps of every
+running managed container (read live from the daemon), plus the new cap, must fit the host
+budget in `resource_budget`; otherwise `409` with the numbers. Admission runs under one
+lock, so two starts cannot spend the same headroom.
+
+**Start and restart re-inspect** the container: it must be owned, carry
+`partyline.managed=1`, still satisfy the limits and refusals above, and pass admission,
+else `403 … recreate it through the managed path`. That is how containers created
+before this existed (`Memory=0`) are refused. A start takes no body.
+
+**GPU.** Only one managed GPU container runs at a time (setting `docker_gpu_slots`, default 1;
+`PUT /api/docker-gpu {"slots": n}`, a person). Before a GPU start, `nvidia-smi
+--query-gpu=memory.free` runs (10 s timeout, result cached 5 s); the start is admitted only
+if it succeeds and the declared VRAM fits. A failure, a timeout or a missing `nvidia-smi`
+marks the GPU **unhealthy**: GPU starts get `503`, and the line and its root line are told
+once. Only a person clears it, with `POST /api/docker-gpu/clear`; nothing resets the GPU
+automatically. `GET /api/docker-gpu` shows the state. The slot frees as soon as the
+daemon reports the container stopped.
+
+**Lifetime.** The inventory stops a managed container that has run longer than its
+`partyline.max-seconds` and tells its line. It stops, never removes, so outputs survive.
+
+**For launchers (gametime).** A launcher talks to `DOCKER_HOST` as usual, but its create
+must declare the limits above, or Docker work there stops working on purpose. A command
+that passes:
+
+```
+docker run -d --name voice-job \
+  --memory 8g --memory-swap 8g --cpus 4 --pids-limit 512 \
+  --label partyline.max-seconds=3600 \
+  --gpus all --label partyline.gpu-mem-mb=9000 \
+  -v "$PWD/out:/out" my-image:tag
+```
+
+Drop `--gpus` and the VRAM label for CPU work. `docker compose`, network and volume
+management and builds are not on the allowlist; use `docker run`/`create` with named
+volumes, or ask a person for an unrestricted grant.
+
+**Unrestricted** mode keeps the old byte-forwarding relay: root-equivalent access to the
+host, outside every budget and every rule above. Its approval text and dialog say so
+plainly. The daemon can start any container, change any limit and mount anything, so
+choose it only when you accept that.
+
 ### Docker workloads: outside CLI budgets
 
 Containers belong to the host daemon, not to an attachment's cgroup, so no CLI memory
-budget bounds them; a docker grant says so when it is requested. The relay is a byte
-forwarder and does not rewrite requests: that would enforce nothing, since the same
-access can start an existing container or change its limits.
+budget bounds them; a docker grant says so when it is requested. An *unrestricted* relay
+is a byte forwarder and enforces nothing; the *managed* relay (the default, below) is a
+policy proxy and does.
 
 **Label contract.** A container a line starts carries `partyline.conversation=<conv id>`
 and `partyline.attachment=<att id>`. A process with a docker grant finds both in
@@ -193,6 +289,13 @@ tick). `GET /api/docker-workloads` returns them with their line, `attribution` a
 `uncapped` (a running container with `Memory=0`): a person sees all, a process only its
 line's tree. The resource push and `ResourceIndicator` show a separate *Docker
 workloads: outside CLI budgets* figure with the count of containers that have no RAM cap.
+The sample runs in its own task with a 60 s timeout (a hung daemon cannot delay the memory
+warnings), tolerates malformed replies, and keeps going after the last docker grant ends
+for as long as labeled containers were running at the last look, since that is when
+survivors matter. Labels are trustworthy only on managed lines, where the proxy sets
+them; an *unrestricted* line can start containers with any labels, or none, and so can
+spoof ownership. Stopping is limited to the lines the caller can see (its own, and for a
+captain those under it).
 
 **Survivors and stop.** When a detach or close leaves a line with no live process, a
 notice lists that line's still-running labeled containers (once per set, per 10 minutes;

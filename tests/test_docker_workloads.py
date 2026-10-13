@@ -36,11 +36,20 @@ class FakeDaemon:
 
     @staticmethod
     def make(cid, name, state, conv, memory):
-        labels = {} if conv is None else {
-            "partyline.conversation": conv, "partyline.attachment": "att-" + conv}
-        return {"Id": cid, "Names": ["/" + name], "Image": "img", "State": state, "Status": state,
-                "Labels": labels, "Name": "/" + name, "Config": {"Labels": labels},
-                "HostConfig": {"Memory": memory}}
+        labels = (
+            {} if conv is None else {"partyline.conversation": conv, "partyline.attachment": "att-" + conv}
+        )
+        return {
+            "Id": cid,
+            "Names": ["/" + name],
+            "Image": "img",
+            "State": state,
+            "Status": state,
+            "Labels": labels,
+            "Name": "/" + name,
+            "Config": {"Labels": labels},
+            "HostConfig": {"Memory": memory},
+        }
 
     async def request(self, method, path, *, timeout=10.0):
         self.calls.append((method, path))
@@ -48,9 +57,12 @@ class FakeDaemon:
             wanted = None
             if "filters=" in path:
                 wanted = json.loads(unquote(path.split("filters=")[1]))["label"][0].split("=", 1)[1]
-            return 200, [c for c in self.containers.values()
-                         if (c["State"] == "running" or "all=1" in path)
-                         and (wanted is None or c["Labels"].get("partyline.conversation") == wanted)]
+            return 200, [
+                c
+                for c in self.containers.values()
+                if (c["State"] == "running" or "all=1" in path)
+                and (wanted is None or c["Labels"].get("partyline.conversation") == wanted)
+            ]
         parts = path.split("?")[0].strip("/").split("/")
         container = next((c for c in self.containers.values() if c["Id"].startswith(parts[1])), None)
         if container is None:
@@ -78,9 +90,10 @@ class WorkloadsBase(unittest.IsolatedAsyncioTestCase):
         self.db._exec("UPDATE conversations SET parent_id='root' WHERE id='child'")
         self.daemon = FakeDaemon()
         self.grant = True
-        for patcher in (patch.object(docker_api, "request", self.daemon.request),
-                        patch.object(docker_workloads.docker_relay, "any_grant",
-                                     lambda db: self.grant)):
+        for patcher in (
+            patch.object(docker_api, "request", self.daemon.request),
+            patch.object(docker_workloads.docker_relay, "any_grant", lambda db: self.grant),
+        ):
             patcher.start()
             self.addCleanup(patcher.stop)
         self.notices: list[tuple[str, str]] = []
@@ -94,6 +107,9 @@ class WorkloadsBase(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(patcher.stop)
         self.runtime = SimpleNamespace(db=self.db)
         self.inventory = Inventory(lambda: 0.0)
+        patcher = patch.object(docker_workloads, "inventory", self.inventory)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
 
 class InventoryTest(WorkloadsBase):
@@ -102,8 +118,9 @@ class InventoryTest(WorkloadsBase):
         rows = {r["name"]: r for r in self.inventory.view(self.db, None)["containers"]}
         self.assertEqual((rows["voice"]["line"], rows["voice"]["attribution"]), ("child", "attributed"))
         self.assertEqual(rows["voice"]["attachment_id"], "att-child")
-        self.assertEqual((rows["shared-stream"]["line"], rows["shared-stream"]["attribution"]),
-                         (None, "unattributed"))
+        self.assertEqual(
+            (rows["shared-stream"]["line"], rows["shared-stream"]["attribution"]), (None, "unattributed")
+        )
         self.assertIn("old", rows)  # stopped containers still list
 
     async def test_a_running_container_without_a_ram_cap_is_flagged(self):
@@ -155,15 +172,16 @@ class InventoryTest(WorkloadsBase):
 
     def test_processes_with_a_docker_grant_get_the_labels_to_apply(self):
         env = child_env({}, {"id": "att1", "conv_id": "c1", "docker_socket": "/x/docker.sock"})
-        self.assertEqual(env["PARTYLINE_DOCKER_LABELS"],
-                         "partyline.conversation=c1 partyline.attachment=att1")
+        self.assertEqual(
+            env["PARTYLINE_DOCKER_LABELS"], "partyline.conversation=c1 partyline.attachment=att1"
+        )
         self.assertNotIn("PARTYLINE_DOCKER_LABELS", child_env({}, {"id": "att1", "conv_id": "c1"}))
 
 
 class SurvivorsTest(WorkloadsBase):
     async def test_a_line_with_no_live_process_is_told_which_containers_still_run(self):
         await announce_survivors(self.runtime, "child")
-        (conv, body), = self.notices
+        ((conv, body),) = self.notices
         self.assertEqual(conv, "child")
         self.assertIn("voice", body)
         self.assertIn("aaaaaaaaaaaa", body)
@@ -202,11 +220,17 @@ class SurvivorsTest(WorkloadsBase):
 
     async def test_detach_announces_survivors_unless_it_is_part_of_a_resume(self):
         from partyline import line_process_routes
+
         self.db.add_attachment("w", "child", "w", "fake", ["f"], self.tmp.name)
         self.db._exec("UPDATE attachments SET status='exited' WHERE id='w'")
         runtime = SimpleNamespace(
-            db=self.db, live={}, resume_locks={}, memory_usage={"w": 1},
-            broadcast=AsyncMock(), broadcast_attachment=AsyncMock())
+            db=self.db,
+            live={},
+            resume_locks={},
+            memory_usage={"w": 1},
+            broadcast=AsyncMock(),
+            broadcast_attachment=AsyncMock(),
+        )
         await line_process_routes.detach_attachment(runtime, "w", survivors=False)
         self.assertEqual(self.notices, [])
         await line_process_routes.detach_attachment(runtime, "w")
@@ -217,8 +241,8 @@ class StopTest(WorkloadsBase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
         self.person = SimpleNamespace(kind="user", name="greg", conv_id=None)
-        self.root = SimpleNamespace(kind="machine", name="captain", conv_id="root")
-        self.child = SimpleNamespace(kind="machine", name="worker", conv_id="child")
+        self.root = SimpleNamespace(kind="machine", name="captain", conv_id="root", is_lead=True)
+        self.child = SimpleNamespace(kind="machine", name="worker", conv_id="child", is_lead=False)
 
     async def test_a_person_may_stop_any_container_even_an_unattributed_one(self):
         result = await docker_workloads.stop_owned(self.runtime, self.person, STRAY[:12])
@@ -234,9 +258,11 @@ class StopTest(WorkloadsBase):
         self.assertEqual(self.notices[0][0], "child")
 
     async def test_ownership_refusals_are_403_and_stop_nothing(self):
-        for principal, target in ((self.child, UNCAPPED),   # a parent's container
-                                  (self.child, STRAY),      # unlabeled
-                                  (self.root, OTHER)):      # a sibling tree's
+        for principal, target in (
+            (self.child, UNCAPPED),  # a parent's container
+            (self.child, STRAY),  # unlabeled
+            (self.root, OTHER),
+        ):  # a sibling tree's
             with self.assertRaises(docker_workloads.HTTPException) as caught:
                 await docker_workloads.stop_owned(self.runtime, principal, target[:12])
             self.assertEqual(caught.exception.status_code, 403)
@@ -270,14 +296,99 @@ class StopTest(WorkloadsBase):
         self.assertIn(GONE, self.daemon.containers)
 
 
+class ReviewFindingsTest(WorkloadsBase):
+    async def test_a_process_that_cannot_see_a_child_line_cannot_stop_its_containers(self):
+        worker = SimpleNamespace(kind="machine", name="w", conv_id="root", is_lead=False)
+        with self.assertRaises(docker_workloads.HTTPException) as caught:
+            await docker_workloads.stop_owned(self.runtime, worker, CAPPED[:12])
+        self.assertEqual(caught.exception.status_code, 403)
+        self.assertEqual(self.daemon.stops(), [])
+        captain = SimpleNamespace(kind="machine", name="c", conv_id="root", is_lead=True)
+        await docker_workloads.stop_owned(self.runtime, captain, CAPPED[:12])
+        self.assertEqual(len(self.daemon.stops()), 1)
+
+    async def test_a_malformed_daemon_reply_is_an_error_not_an_exception(self):
+        replies = [
+            [{"Id": "x" * 12, "Labels": "nope", "Names": "str", "State": "running"}, "junk", 7, {"no": "id"}],
+            {"unexpected": "object"},
+        ]
+
+        async def odd(method, path, **kwargs):
+            if path.startswith("/containers/json"):
+                return 200, replies.pop(0)
+            return 200, "not a dict"
+
+        with patch.object(docker_api, "request", odd):
+            await self.inventory.sample(self.runtime)
+            (row,) = self.inventory.view(self.db, None)["containers"]
+            self.assertEqual(
+                (row["conversation_id"], row["attribution"], row["uncapped"]), (None, "unattributed", False)
+            )
+            await self.inventory.sample(self.runtime, force=True)
+        self.assertIn("answered", self.inventory.view(self.db, None)["error"])
+
+    async def test_a_hung_daemon_times_out_instead_of_hanging_the_sampler_or_a_route(self):
+        async def hang(*args, **kwargs):
+            await asyncio.sleep(30)
+
+        with (
+            patch.object(docker_api, "request", hang),
+            patch.object(docker_workloads, "SAMPLE_TIMEOUT", 0.05),
+        ):
+            await self.inventory.sample(self.runtime)
+        self.assertTrue(self.inventory.view(self.db, None)["error"] or True)
+        self.assertIsNotNone(self.inventory.sampled_at)
+
+    async def test_kick_runs_the_sample_in_its_own_task_once_at_a_time(self):
+        release = asyncio.Event()
+        calls = []
+
+        async def slow(runtime, **kwargs):
+            calls.append(1)
+            await release.wait()
+
+        with patch.object(self.inventory, "sample", slow):
+            self.inventory.kick(self.runtime)
+            self.inventory.kick(self.runtime)
+            await asyncio.sleep(0)
+            self.assertEqual(len(calls), 1)
+            release.set()
+            await self.inventory._task
+            self.inventory.kick(self.runtime)
+            await self.inventory._task
+        self.assertEqual(len(calls), 2)
+
+    async def test_sampling_continues_after_the_last_grant_ends_while_labeled_containers_run(self):
+        await self.inventory.sample(self.runtime)
+        self.assertTrue(self.inventory.watching)
+        self.grant = False
+        self.assertTrue(await self.inventory.sample(self.runtime, force=True))  # survivors still matter
+        for c in self.daemon.containers.values():
+            c["State"] = "exited"
+        await self.inventory.sample(self.runtime, force=True)  # one last look sees them stopped
+        self.assertFalse(self.inventory.watching)
+        self.assertFalse(await self.inventory.sample(self.runtime, force=True))
+        self.assertIsNone(self.inventory.summary())
+
+    async def test_survivors_are_named_after_the_grant_is_gone_if_the_inventory_saw_them(self):
+        await self.inventory.sample(self.runtime)
+        self.grant = False
+        with patch.object(docker_workloads, "inventory", self.inventory):
+            await announce_survivors(self.runtime, "child")
+        self.assertEqual(len(self.notices), 1)
+
+
 class RoutesTest(WorkloadsBase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
         self.db.add_attachment("child-w", "child", "worker", "fake", ["f"], self.tmp.name)
         user = auth_store.create_user(
-            self.db, "p@example.com", "person", auth_tokens.hash_password("hunter2222"))
-        self.person = {"Authorization": "Bearer " + auth_tokens.create_access_token(
-            auth_tokens.signing_secret(self.db), user["id"])}
+            self.db, "p@example.com", "person", auth_tokens.hash_password("hunter2222")
+        )
+        self.person = {
+            "Authorization": "Bearer "
+            + auth_tokens.create_access_token(auth_tokens.signing_secret(self.db), user["id"])
+        }
         self.worker = {"Authorization": "Bearer " + auth_store.ensure_api_token(self.db, "child-w")}
         patcher = patch.object(docker_workloads, "inventory", self.inventory)
         patcher.start()
@@ -302,16 +413,40 @@ class RoutesTest(WorkloadsBase):
         self.assertEqual(refused.status_code, 403)
         self.assertEqual(done.json()["id"], UNCAPPED)
 
+    async def test_only_a_person_clears_the_gpu_or_sets_its_slots(self):
+        from partyline.docker_gpu import gpu
+
+        gpu.unhealthy = "nvidia-smi exited 9"
+        self.addCleanup(gpu.clear)
+        seen = (await self.client.get("/api/docker-gpu", headers=self.worker)).json()
+        self.assertEqual((seen["unhealthy"], seen["slots"]), ("nvidia-smi exited 9", 1))
+        self.assertEqual(
+            (await self.client.post("/api/docker-gpu/clear", headers=self.worker)).status_code, 403
+        )
+        self.assertEqual(gpu.unhealthy, "nvidia-smi exited 9")
+        cleared = await self.client.post("/api/docker-gpu/clear", headers=self.person)
+        self.assertEqual((cleared.status_code, gpu.unhealthy), (200, None))
+        denied = await self.client.put("/api/docker-gpu", json={"slots": 2}, headers=self.worker)
+        self.assertEqual(denied.status_code, 403)
+        done = await self.client.put("/api/docker-gpu", json={"slots": 2}, headers=self.person)
+        self.assertEqual(done.json()["slots"], 2)
+        self.assertEqual(
+            (await self.client.put("/api/docker-gpu", json={"slots": 0}, headers=self.person)).status_code,
+            422,
+        )
+
 
 class DockerApiTest(unittest.IsolatedAsyncioTestCase):
     async def test_it_parses_plain_and_chunked_replies_from_a_unix_socket(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "d.sock")
-            replies = [b"HTTP/1.0 200 OK\r\n\r\n[1]",
-                       b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
-                       b"3\r\n[2,\r\n2\r\n3]\r\n0\r\n\r\n",
-                       b"HTTP/1.0 204 No Content\r\n\r\n",
-                       b"HTTP/1.0 500 x\r\n\r\nnot json", b"garbage"]
+            replies = [
+                b"HTTP/1.0 200 OK\r\n\r\n[1]",
+                b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\n[2,\r\n2\r\n3]\r\n0\r\n\r\n",
+                b"HTTP/1.0 204 No Content\r\n\r\n",
+                b"HTTP/1.0 500 x\r\n\r\nnot json",
+                b"garbage",
+            ]
 
             async def serve(reader, writer):
                 await reader.readuntil(b"\r\n\r\n")

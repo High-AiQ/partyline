@@ -20,6 +20,7 @@ class DockerBridgeTest(unittest.IsolatedAsyncioTestCase):
         for patcher in (
                 patch.object(docker_relay, "RELAY_ROOT", os.path.join(self.tmp.name, "d")),
                 patch.object(docker_bridge_client, "BRIDGE_ROOT", os.path.join(self.tmp.name, "b")),
+                patch.object(docker_relay, "relay_mode", lambda conv_id: "unrestricted"),
                 patch.dict(os.environ, {"DOCKER_HOST": f"unix://{self.host}"})):
             patcher.start()
             self.addCleanup(patcher.stop)

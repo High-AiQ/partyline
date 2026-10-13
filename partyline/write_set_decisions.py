@@ -8,11 +8,12 @@ captain deciding strictly inside a write grant its own line already holds.
 from __future__ import annotations
 
 import os
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import docker_relay
+from . import docker_relay, docker_workloads
 from .auth_guard import request_principal
 from .machine_scope import deny_unless, is_human
 from .mention_relay import post_private
@@ -28,6 +29,10 @@ from .write_set_requests import (
 )
 from .contracts import WriteSetGrantRequestEvent
 from .write_set_routes import add_write_grant
+
+
+class ApproveIn(BaseModel):
+    docker_mode: Literal["managed", "unrestricted"] = "managed"
 
 
 class WriteSetDenyIn(BaseModel):
@@ -120,8 +125,9 @@ def register_write_set_request_routes(app: FastAPI, runtime, resume) -> None:
 
     @app.post("/api/conversations/{conv_id}/write-set/request/{request_id}/approve",
               response_model=PendingWriteSetGrant)
-    async def approve(request: Request, conv_id: str, request_id: str):
+    async def approve(request: Request, conv_id: str, request_id: str, body: ApproveIn | None = None):
         current, principal = _take_for_decision(request, conv_id, request_id)
+        mode = body.docker_mode if body else "managed"
         blocked = non_resumable_live_attachments(runtime, conv_id, current.path)
         if blocked:
             names = ", ".join(f"@{att['name']} ({att['adapter']})" for att in blocked)
@@ -131,7 +137,7 @@ def register_write_set_request_routes(app: FastAPI, runtime, resume) -> None:
                 "detach them first",
             )
         who = principal.name
-        add_write_grant(runtime.db, conv_id, current.path, who)
+        add_write_grant(runtime.db, conv_id, current.path, who, mode)
         with runtime.db.lock:
             runtime.db.conn.execute(
                 "DELETE FROM conversation_write_grant_requests WHERE conv_id=? AND id=?",
@@ -142,8 +148,8 @@ def register_write_set_request_routes(app: FastAPI, runtime, resume) -> None:
         text = (f"☏ write-set grant for `{current.path}` approved by @{who} — "
                 "live processes on this line are resumed with the widened bind")
         if docker_relay.is_docker_socket(current.path):
-            text = (f"☏ docker access granted by @{who} — every live process is resumed "
-                    "so other lines cannot reach the relay")
+            text = (f"☏ {docker_workloads.mode_text(mode)} granted by @{who} — every live process "
+                    "is resumed so other lines cannot reach the relay")
         if failed:
             text += (f" — could not resume @{', @'.join(failed)}; "
                      "re-attach them by hand")

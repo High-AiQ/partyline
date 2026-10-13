@@ -270,7 +270,7 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
                             raw_bytes=raw,
                             percent=min(100, usage * 100 // max(cap, 1)),
                         ))
-                await inventory.sample(runtime)
+                inventory.kick(runtime)
                 await pusher.tick(runtime)
             except asyncio.CancelledError:
                 raise
