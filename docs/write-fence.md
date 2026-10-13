@@ -181,89 +181,142 @@ A docker grant has a mode, stored on the grant row (`docker_mode`, default `mana
 existing grants included). Only a person chooses `unrestricted`: in the approval dialog
 (*approve unrestricted*), through `POST …/write-set/request/<id>/approve {"docker_mode":
 "unrestricted"}`, or by granting directly with `{"docker_mode": …}`. A process cannot.
+Changing a grant's mode closes the line's open relay connections, so no connection outlives
+the policy it was made under.
 
-**The managed relay is a default-deny policy proxy** (`docker_proxy.py`, rules in
-`docker_policy.py`). It parses each request strictly with h11 and rebuilds it from the
-parsed parts, so what was checked is what the daemon receives. Anything it cannot parse
-(bad framing, `Content-Length` with `Transfer-Encoding`, an unknown HTTP version, a body
-over 1 MB) closes the connection. It serves one request per connection and answers
-`Connection: close`; the docker CLI and SDKs reconnect, and a second request pipelined
-behind the first is never forwarded. Container names and short ids resolve through the
-daemon to the full id, and the forwarded path carries that id, so a name cannot dodge the
-ownership check. Paths with `//`, `.`/`..` segments, `%` escapes or odd characters are
-refused. A denial is an HTTP `403` with a JSON `message` the docker CLI prints, naming
-the rule; unknown containers are `404`.
+**The managed relay is a default-deny policy proxy** (`docker_proxy.py`, `docker_plan.py`,
+`docker_body.py`, `docker_policy.py`). It parses each request strictly with h11 and
+rebuilds it from the parsed parts, so what was checked is what the daemon receives. It
+never forwards the client's bytes or JSON: a body is parsed, every object must have keys
+that are distinct once lowercased (Docker's decoder matches keys without regard to case),
+and a *fresh* body is built from allowlists of known fields, emitted under their canonical
+names. A field not on the list is refused, so a field Docker adds later is closed until
+someone decides it is safe. Anything it cannot parse (bad framing, `Content-Length` with
+`Transfer-Encoding`, an unknown HTTP version) closes the connection; a head and body must
+arrive within 30 s, a body is capped at 1 MB (image builds stream, capped at 4 GB), and a
+line may hold 64 connections. It serves one request per connection and answers
+`Connection: close`; the docker CLI and SDKs reconnect, and a request pipelined behind
+the first is never forwarded. Container names and short ids resolve through the daemon to
+the full id, and the forwarded path carries that id.
+
+**Ownership is the line's tree.** A managed container belongs to its creator's top-level
+line (label `partyline.tree`); any line under that line may list, inspect, start, stop,
+exec in, log and remove it. Other trees get `not-owned`. Listing, `ps`, events and stop use
+the same scope: the proxy forces a `partyline.tree=<root>` label filter that a client
+filter can only narrow.
 
 | Allowed | Condition |
 | --- | --- |
-| `_ping`, `version`, `info`, `events`, image list | none |
-| image inspect, image pull (`fromImage`, `tag`, `platform`) | none (`fromSrc` import is refused) |
-| container list | narrowed to this line's containers; a client filter can only narrow further |
-| inspect, logs, stats, wait, top, stop, kill, remove, exec create | container owned by this line |
-| start, restart | owned, **managed**, limits present, passes admission (below) |
-| attach, exec start | owned; the `101` upgrade then becomes a raw pump |
+| `_ping`, `version`, `info`, image list and inspect, `volumes` list, `system/df` | none |
+| image pull (`fromImage`, `tag`, `platform`) | none (`fromSrc` import is refused) |
+| `events`, container list (`ps`, with filters) | narrowed to the line's tree |
+| inspect, logs, stats, wait, top, stop, kill, remove, exec create | container in the tree |
+| start, restart | in the tree, **managed**, limits present, passes admission |
+| attach, exec start (with stdin), resize | in the tree; a raw pump after the daemon's `101` |
 | create | declares its limits (below) |
+| `volumes/create` | `local` driver, no `DriverOpts` |
+| `build` and the BuildKit `session`/`grpc` upgrades | no host network, no remote context |
 
-Everything else, including `containers/<id>/update`, rename, prune, networks, volumes,
-build and image removal, is `403` (*default-deny*).
+Everything else, including `containers/<id>/update`, rename, prune, networks, volume
+removal and image removal, is refused. Query parameters are allowlisted per call.
+A hijacking call (attach, exec start, `session`) becomes a raw pump only when the daemon
+itself answers `101` (or a `200` raw stream); any other answer is relayed and the
+connection ends, so a refused upgrade never leaves a raw line to the daemon.
 
-**Create must declare** (one `403` names every gap, plus the managed-path pointer):
+**Create must declare** (one refusal names every gap):
 
 - `HostConfig.Memory` > 0 and `MemorySwap` equal to it (no swap), because a container with
   no cap is what the daemon work in finding 5.14 escaped through;
 - a CPU limit (`NanoCpus` or `CpuQuota` > 0) and `PidsLimit` > 0;
-- the label `partyline.max-seconds` (maximum lifetime, seconds);
+- the label `partyline.max-seconds` (maximum lifetime, seconds), at most the host cap
+  (setting `docker_max_seconds_cap`, default 24 h);
 - the label `partyline.gpu-mem-mb` (VRAM need, MB) whenever it has GPU `DeviceRequests`.
+
+Create is checked for limits but not against the budget: a created container is not
+running and uses nothing.
 
 **Create refuses**: `Privileged`; `CapAdd`; `NetworkMode`, `PidMode`, `IpcMode`, `UTSMode`,
 `UsernsMode` or `CgroupnsMode` of `host` or `container:…`; `Devices` and `DeviceCgroupRules`
-(only GPU `DeviceRequests` are allowed); `VolumesFrom`; `CgroupParent`; `unconfined`
-`SecurityOpt`; bind or mount sources that expose the Docker socket (or a directory that
-contains it, such as `/run`) or lie outside the line's worktrees (its attachments' working
-directories) and its approved write-set paths. Named volumes and tmpfs are fine. Each of
-these would let a container leave its limits or the fence; the proxy refuses them rather
-than trusting the client to be well-behaved.
+(only GPU `DeviceRequests` are allowed); `VolumesFrom`; `CgroupParent`; `Cgroup`; `Links`;
+`Sysctls`; `StorageOpt`; `OomKillDisable`; masked or read-only path overrides; any
+`SecurityOpt` but `no-new-privileges`; any `Runtime` but `runc`; a `RestartPolicy` other
+than absent or `no`; any `VolumeDriver` but the default, and mount `DriverConfig`; bind or
+mount sources that expose the Docker socket (or a directory that contains it, such as `/run`),
+lie outside the line's worktrees (its attachments' working directories) and approved
+write-set paths, or pass through a symlink. The symlink rule is checked at create and again
+immediately before a start is forwarded; a path swapped for a link between that check and the
+daemon's own mount remains a narrow race, so keep binds to directories only the line writes,
+or use named volumes. `NVIDIA_*` and `CUDA_VISIBLE_DEVICES` in the request's own `Env` are
+refused unless the container uses `DeviceRequests`; the image's baked-in environment is not
+judged. If the daemon's default runtime is not `runc` (read from `/info`, cached 60 s), every
+non-GPU create is refused (`default-runtime`) rather than guessing. Each of these would let a
+container leave its limits or the fence.
 
-The proxy sets `partyline.conversation=<line>`, `partyline.managed=1` and
-`partyline.attachment` itself, overriding anything the client sent (the attachment label
-keeps the client's value only if it names an attachment of this line, else it is the
-line's captain). **Admission:** the CLI memory reservations, plus the memory caps of every
-running managed container (read live from the daemon), plus the new cap, must fit the host
-budget in `resource_budget`; otherwise `409` with the numbers. Admission runs under one
-lock, so two starts cannot spend the same headroom.
+The proxy sets `partyline.conversation=<line>`, `partyline.tree=<root>`,
+`partyline.managed=1` and `partyline.attachment` itself, overriding anything the client
+sent (the attachment label keeps the client's value only if it names an attachment of
+this line, else it is the line's captain).
 
-**Start and restart re-inspect** the container: it must be owned, carry
+**Start and restart re-inspect** the container: it must be in the tree, carry
 `partyline.managed=1`, still satisfy the limits and refusals above, and pass admission,
-else `403 … recreate it through the managed path`. That is how containers created
-before this existed (`Memory=0`) are refused. A start takes no body.
+else `403 … recreate it through the managed path`. That is how containers created before
+this existed (`Memory=0`) are refused. A start takes no body.
+
+**Admission counts running containers only.** On a start, the CLI memory reservations, plus
+the caps of every managed container running at that moment (read live from the daemon, plus
+starts admitted but not yet running), plus this cap, must fit the host budget in
+`resource_budget`; otherwise `409 budget-exceeded` with the numbers. The admission lock is
+held for the decision and for recording the slot, never while the request is forwarded.
 
 **GPU.** Only one managed GPU container runs at a time (setting `docker_gpu_slots`, default 1;
 `PUT /api/docker-gpu {"slots": n}`, a person). Before a GPU start, `nvidia-smi
 --query-gpu=memory.free` runs (10 s timeout, result cached 5 s); the start is admitted only
 if it succeeds and the declared VRAM fits. A failure, a timeout or a missing `nvidia-smi`
-marks the GPU **unhealthy**: GPU starts get `503`, and the line and its root line are told
-once. Only a person clears it, with `POST /api/docker-gpu/clear`; nothing resets the GPU
-automatically. `GET /api/docker-gpu` shows the state. The slot frees as soon as the
+marks the GPU **unhealthy**: GPU starts get `409 gpu-unhealthy`, and the line and its root
+line are told once. Only a person clears it, with `POST /api/docker-gpu/clear`; nothing resets
+the GPU automatically. `GET /api/docker-gpu` shows the state. The slot frees as soon as the
 daemon reports the container stopped.
 
 **Lifetime.** The inventory stops a managed container that has run longer than its
-`partyline.max-seconds` and tells its line. It stops, never removes, so outputs survive.
+`partyline.max-seconds` (capped as above), counted from its last start, and tells its line.
+It stops, never removes, so outputs survive. A stop can land in the middle of a job: declare
+a generous lifetime, and treat a vanished container as an interrupted job.
 
-**For launchers (gametime).** A launcher talks to `DOCKER_HOST` as usual, but its create
-must declare the limits above, or Docker work there stops working on purpose. A command
-that passes:
+**Builds** (`POST /build`, BuildKit `session`) are allowed because images have to come from
+somewhere, but a build's steps run outside every memory budget; keep them off while heavy
+GPU work runs. `networkmode=host`, `container:…` and `remote` contexts are refused.
+
+**Refusal format.** Every refusal is `{"message": "refused: <rule-name>: <detail>", "rules":
+[...]}`: policy refusals are `403`, admission refusals `409`, malformed bodies `400`, an
+oversized body `413`, the connection cap `429`. The rule name is stable and kebab-case, so
+a client can act on it; `rules` lists every rule a request hit (the message leads with the
+first, and tags the others). Rules:
+
+`endpoint-not-allowed`, `update-refused`, `malformed-path`, `query-not-allowed`,
+`malformed-body`, `body-too-large`, `not-owned`, `not-managed`, `limits-required`,
+`lifetime-cap`, `restart-policy`, `privileged`, `host-namespace`, `runtime`, `default-runtime`,
+`gpu-env`, `volume-driver`, `bind-source`, `forbidden-setting`, `field-not-allowed`,
+`security-opt`, `device-request`, `mount-type`, `build-network`, `build-remote`,
+`upgrade-required`, `connection-limit`, `budget-exceeded`, `gpu-busy`, `gpu-memory`,
+`gpu-unhealthy`. (`update-refused`: limits cannot change in place, recreate the container;
+`not-managed`: it was not created through this path; `gpu-env`: `NVIDIA_*` without
+`DeviceRequests`; `field-not-allowed`: a field outside the allowlists.)
+
+**For launchers.** A launcher talks to `DOCKER_HOST` as usual, but its create must declare
+the limits above, or Docker work there stops working on purpose. A command that passes:
 
 ```
-docker run -d --name voice-job \
+docker run -d --name my-gpu-worker \
   --memory 8g --memory-swap 8g --cpus 4 --pids-limit 512 \
   --label partyline.max-seconds=3600 \
   --gpus all --label partyline.gpu-mem-mb=9000 \
-  -v "$PWD/out:/out" my-image:tag
+  -v models:/models my-image:tag
 ```
 
-Drop `--gpus` and the VRAM label for CPU work. `docker compose`, network and volume
-management and builds are not on the allowlist; use `docker run`/`create` with named
-volumes, or ask a person for an unrestricted grant.
+Drop `--gpus` and the VRAM label for CPU work. Use named volumes for data. `docker
+compose`, networks and volume removal are not on the allowlist; use `docker run`/`create`,
+or ask a person for an unrestricted grant. A limits change means recreating the container
+(`docker rm`, then `docker run`).
 
 **Unrestricted** mode keeps the old byte-forwarding relay: root-equivalent access to the
 host, outside every budget and every rule above. Its approval text and dialog say so

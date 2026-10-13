@@ -120,9 +120,9 @@ class AllowlistTest(ProxyBase):
     async def test_denied_calls_get_a_403_naming_the_rule_and_never_reach_the_daemon(self):
         for method, target in (
             ("POST", f"/containers/{FULL['mine']}/update"),
-            ("GET", "/volumes"),
+            ("POST", f"/containers/{FULL['mine']}/rename"),
             ("POST", "/networks/create"),
-            ("POST", "/build"),
+            ("POST", "/volumes/prune"),
             ("DELETE", "/images/alpine"),
             ("POST", "/containers/prune"),
             ("GET", "/containers/../version"),
@@ -130,19 +130,19 @@ class AllowlistTest(ProxyBase):
         ):
             status, body = await self.call(method, target, body={} if method == "POST" else None)
             self.assertEqual(status, 403, target)
-            self.assertIn("rule:", body["message"])
+            self.assertIn("refused:", body["message"])
         self.assertEqual(self.daemon.requests, [])
 
     async def test_update_is_refused_outright_even_on_an_owned_container(self):
         status, body = await self.call("POST", "/containers/mine/update", body={"Memory": 0})
         self.assertEqual(status, 403)
-        self.assertIn("default-deny", body["message"])
+        self.assertIn("update-refused", body["message"])
         self.assertEqual(self.forwarded("POST", "update"), [])
 
     async def test_the_list_shows_only_this_lines_containers(self):
         status, rows = await self.call("GET", "/containers/json?all=1")
         self.assertEqual({r["Name"] for r in rows}, {"/mine", "/unlimited", "/running", "/gpu", "/gpu2"})
-        widened = json.dumps({"label": ["partyline.conversation=elsewhere"]})
+        widened = json.dumps({"label": ["partyline.tree=elsewhere"]})
         _status, rows = await self.call("GET", "/containers/json?filters=" + quote(widened))
         self.assertEqual(rows, [])
 
@@ -169,7 +169,7 @@ class OwnershipTest(ProxyBase):
                     method, f"/containers/{ref}/{op}", body={} if op == "exec" else None
                 )
                 self.assertEqual(status, 403, (ref, op))
-                self.assertIn("ownership", body["message"])
+                self.assertIn("not-owned", body["message"])
             self.assertEqual((await self.call("DELETE", f"/containers/{ref}"))[0], 403)
         self.assertEqual([r for r in self.daemon.requests if r[0] != "GET"], [])
 
@@ -259,6 +259,7 @@ class CreateTest(ProxyBase):
             {
                 "partyline.max-seconds": "600",
                 "partyline.conversation": "line",
+                "partyline.tree": "root",
                 "partyline.managed": "1",
                 "partyline.attachment": "lead",
                 "keep": "me",
@@ -313,14 +314,16 @@ class CreateTest(ProxyBase):
         body = self.create_body(Binds=[f"{shared}:/s"])
         self.assertEqual((await self.call("POST", "/containers/create", body=body))[0], 201)
 
-    async def test_create_admission_counts_cli_reservations_and_running_managed_caps(self):
-        self.reserved, self.budget = 20 * GB, 30 * GB  # 8 GB already used by /running
-        status, reply = await self.call("POST", "/containers/create", body=self.create_body())
+    async def test_create_checks_limits_but_not_the_budget_and_start_does(self):
+        self.reserved, self.budget = 20 * GB, 30 * GB  # full: 16 GB of managed caps are running
+        status, _ = await self.call("POST", "/containers/create", body=self.create_body())
+        self.assertEqual(status, 201)  # created containers are not running, so they count for nothing
+        status, reply = await self.call("POST", f"/containers/{FULL['mine']}/start")
         self.assertEqual(status, 409)
         for fragment in ("20.0 GB", "16.0 GB", "4.0 GB", "30.0 GB"):  # 16: running, other, gpu2
             self.assertIn(fragment, reply["message"])
         self.budget = 40 * GB
-        self.assertEqual((await self.call("POST", "/containers/create", body=self.create_body()))[0], 201)
+        self.assertEqual((await self.call("POST", f"/containers/{FULL['mine']}/start"))[0], 204)
 
     async def test_bad_json_and_unknown_query_parameters(self):
         self.assertEqual((await self.call("POST", "/containers/create", body=b"{"))[0], 400)
@@ -402,7 +405,7 @@ class GpuTest(ProxyBase):
 
     async def test_only_one_heavy_gpu_job_runs_at_a_time(self):
         status, body = await self.call("POST", "/containers/gpu/start")  # gpu2 holds the slot
-        self.assertEqual((status, "slot busy" in body["message"]), (409, True))
+        self.assertEqual((status, "gpu-busy" in body["message"]), (409, True))
         self.db.set_setting("docker_gpu_slots", "2")
         self.assertEqual((await self.call("POST", "/containers/gpu/start"))[0], 204)
 
@@ -420,11 +423,11 @@ class GpuTest(ProxyBase):
         self.daemon.containers["gpu2"]["State"]["Status"] = "exited"
         self.probe.side_effect = OSError("nvidia-smi exited 9: NVRM: Xid 79")
         status, body = await self.call("POST", "/containers/gpu/start")
-        self.assertEqual((status, "unhealthy" in self.gpu.unhealthy or True), (503, True))
+        self.assertEqual((status, "unhealthy" in self.gpu.unhealthy or True), (409, True))
         self.assertIn("health check failed", body["message"])
         self.assertEqual(sorted(conv for conv, _ in self.notices), ["line", "root"])
         status, body = await self.call("POST", "/containers/gpu/start")  # no new probe, no new notice
-        self.assertEqual((status, "marked unhealthy" in body["message"]), (503, True))
+        self.assertEqual((status, "marked unhealthy" in body["message"]), (409, True))
         self.assertEqual((self.probe.await_count, len(self.notices)), (1, 2))
         self.assertEqual(self.forwarded("POST", "/start"), [])
         self.probe.side_effect = lambda: 24000

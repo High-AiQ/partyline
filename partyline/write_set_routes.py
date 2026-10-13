@@ -58,6 +58,7 @@ def add_write_grant(db, conv_id: str, path: str, granted_by: str, docker_mode: s
             "SELECT * FROM conversation_write_grants WHERE conv_id=? AND path=?",
             (conv_id, path)).fetchone()
         if row is not None and docker_mode and row["docker_mode"] != docker_mode:
+            docker_relay.disconnect(conv_id)  # open connections were made under the old policy
             db.conn.execute("UPDATE conversation_write_grants SET docker_mode=? WHERE conv_id=? AND path=?",
                             (docker_mode, conv_id, path))
             db.conn.commit()
