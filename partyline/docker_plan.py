@@ -18,7 +18,7 @@ from . import docker_admission, docker_api
 from .docker_admission import admission_lock, max_seconds_cap
 from .docker_body import (
     canonical_create, canonical_exec_create, canonical_exec_start, canonical_volume, host_problems,
-    limit_problems, loads_strict)
+    limit_problems, loads_strict, network_refs)
 from .docker_policy import (
     LABEL_ATTACHMENT, LABEL_CONVERSATION, LABEL_MANAGED, LABEL_TREE, NAME, RECREATE, Denied, Route,
     narrow_filters, refuse, refuse_all)
@@ -100,6 +100,24 @@ def _json(value: dict) -> bytes:
     return json.dumps(value).encode()
 
 
+SAFE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+
+
+async def check_networks(refs: list[str]) -> None:
+    """Resolve each named network through the daemon: only bridge-driver networks may be joined."""
+    for ref in dict.fromkeys(refs):
+        if not SAFE_REF.match(ref):
+            raise refuse("network-driver", f"network {ref!r} is not a plain name or id")
+        status, info = await docker_api.request("GET", f"/networks/{ref}")
+        if status == 404 or not isinstance(info, dict):
+            raise refuse("network-driver", f"network {ref} does not resolve")
+        if status != 200:
+            raise Denied(f"docker daemon answered {status} to the network lookup", 502)
+        if info.get("Driver") != "bridge":
+            raise refuse("network-driver", f"network {ref} uses the {info.get('Driver')!r} driver; only "
+                         "bridge-driver networks (and none or default) may be joined")
+
+
 async def default_runtime() -> str:
     """The daemon's default runtime, read from ``/info`` and cached briefly."""
     global _runtime_seen
@@ -120,6 +138,7 @@ async def plan_create(runtime, conv_id: str, route: Route, req: Request) -> Plan
     if not fresh["HostConfig"].get("DeviceRequests") and (name := await default_runtime()) != "runc":
         raise refuse("default-runtime", f"the daemon's default runtime is {name!r}, not runc: a non-GPU "
                      "container would get GPU access outside admission; ask a person to fix the daemon")
+    await check_networks(network_refs(fresh["HostConfig"], fresh.get("NetworkingConfig")))
     labels = fresh["Labels"]
     fresh["Labels"] = {**labels, LABEL_CONVERSATION: conv_id, LABEL_TREE: tree_of(db, conv_id),
                        LABEL_ATTACHMENT: line_attachment(db, conv_id, labels.get(LABEL_ATTACHMENT, "")),
@@ -151,6 +170,8 @@ async def plan_container(runtime, conv_id: str, route: Route, req: Request) -> P
     if route.op in ("start", "restart"):
         if problems := start_problems(runtime, conv_id, info, labels):
             raise refuse_all(problems, f" — container {route.ref} may not start; {RECREATE}")
+        await check_networks(network_refs(
+            info.get("HostConfig") or {}, None, (info.get("NetworkSettings") or {}).get("Networks")))
         async with admission_lock():
             slot = await docker_admission.admit_start(runtime, conv_id, info)
     suffix = "" if route.op == "remove" else f"/{route.op}"
@@ -170,10 +191,12 @@ async def plan_exec(runtime, conv_id: str, route: Route, req: Request) -> Plan:
     return Plan(f"{route.prefix}/exec/{route.ref}/{route.op}{query_of(route)}", body)
 
 
-def plan_build(route: Route) -> Plan:
+async def plan_build(route: Route) -> Plan:
     mode = dict(route.query).get("networkmode", "")
     if mode == "host" or mode.startswith("container:"):
         raise refuse("build-network", f"build networkmode={mode} is refused")
+    if mode not in ("", "default", "none"):
+        await check_networks([mode])
     return Plan(f"{route.prefix}/build{query_of(route)}", stream=True)
 
 
@@ -190,7 +213,7 @@ async def decide(runtime, conv_id: str, route: Route, req: Request) -> Plan:
     if route.kind == "volume":
         return Plan(f"{route.prefix}/volumes/create", _json(canonical_volume(req.body)))
     if route.kind == "build":
-        return plan_build(route)
+        return await plan_build(route)
     if route.kind == "session":
         if req.headers.get("upgrade", "").lower() != route.upgrade:
             raise refuse("upgrade-required", f"{route.path} is for {route.upgrade} upgrades only")

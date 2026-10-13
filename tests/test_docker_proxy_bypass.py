@@ -527,6 +527,7 @@ class RuleNamesTest(ProxyBase):
             self.note(
                 int(data.split()[1]), json.loads(data.partition(b"\r\n\r\n")[2]), "connection-limit", 429
             )
+        await self.refused("network-driver", "POST", c, self.create(NetworkMode="lan"))
         await self.refused("log-driver", "POST", c, self.create(LogConfig={"Type": "syslog"}))
         await self.refused("port-exposure", "POST", c, self.create(PublishAllPorts=True))
         self.reserved, self.budget = 39 * GB, 40 * GB
@@ -805,6 +806,94 @@ class DocumentedAnswersTest(ProxyBase):
         self.assertEqual(
             (await self.call("POST", "/containers/mine/exec", body={"Cmd": ["id"], "Mounts": []}))[0], 403
         )
+
+
+class NetworkAndDeviceTest(ProxyBase):
+    async def create(self, networking=None, **host):
+        body = self.create_body(**host)
+        if networking:
+            body["NetworkingConfig"] = networking
+        return await self.call("POST", "/containers/create", body=body)
+
+    def looked_up(self):
+        return [r[1] for r in self.daemon.requests if "/networks/" in r[1]]
+
+    async def test_networks_named_by_name_or_id_must_resolve_to_a_bridge_driver(self):
+        for host in (
+            {"NetworkMode": "lan"},
+            {"NetworkMode": "m" * 64},
+            {"NetworkMode": "vlan"},
+            {"NetworkMode": "nowhere"},
+            {"NetworkMode": "../x"},
+            {"networkmode": "host"},
+        ):
+            status, reply = await self.create(**host)
+            self.assertEqual(status, 403, host)
+            self.assertIn(reply["rules"][0], ("network-driver", "host-namespace"), host)
+        status, reply = await self.create({"EndpointsConfig": {"lan": {}}})
+        self.assertEqual((status, reply["rules"][0]), (403, "network-driver"))
+        status, reply = await self.create({"EndpointsConfig": {"bridge": {"NetworkID": "m" * 64}}})
+        self.assertEqual((status, reply["rules"][0]), (403, "network-driver"))
+        status, reply = await self.create({"endpointsconfig": {"bridge": {"networkid": "m" * 64}}})
+        self.assertEqual((status, reply["rules"][0]), (403, "network-driver"))
+        self.assertEqual(self.forwarded("POST", "/containers/create"), [])
+
+    async def test_bridge_networks_by_name_or_id_pass_and_none_and_default_need_no_lookup(self):
+        self.assertEqual((await self.create(NetworkMode="appnet"))[0], 201)
+        self.assertEqual((await self.create(NetworkMode="b" * 64))[0], 201)
+        self.assertEqual(
+            (await self.create({"EndpointsConfig": {"appnet": {"NetworkID": "b" * 64}}}))[0], 201
+        )
+        self.daemon.requests.clear()
+        for mode in ("none", "default", ""):
+            self.assertEqual((await self.create(NetworkMode=mode))[0], 201, mode)
+        self.assertEqual(self.looked_up(), [])
+
+    async def test_start_resolves_the_networks_the_container_is_on(self):
+        mine = self.daemon.containers["mine"]
+        mine["NetworkSettings"] = {"Networks": {"bridge": {"NetworkID": "b" * 64}}}
+        self.assertEqual((await self.call("POST", f"/containers/{FULL['mine']}/start"))[0], 204)
+        for where, value in (("lan", {}), ("bridge", {"NetworkID": "m" * 64})):
+            mine["NetworkSettings"] = {"Networks": {where: value}}
+            status, reply = await self.call("POST", f"/containers/{FULL['mine']}/start")
+            self.assertEqual((status, reply["rules"][0]), (403, "network-driver"), where)
+        mine["NetworkSettings"] = {}
+        mine["HostConfig"]["NetworkMode"] = "lan"
+        self.assertEqual(
+            (await self.call("POST", f"/containers/{FULL['mine']}/start"))[1]["rules"][0], "network-driver"
+        )
+
+    async def test_the_build_network_is_resolved_too(self):
+        for mode in ("lan", "m" * 64, "vlan", "nowhere"):
+            status, reply = await self.call("POST", f"/build?networkmode={mode}", body=b"")
+            self.assertEqual((status, reply["rules"][0]), (403, "network-driver"), mode)
+        for mode in ("appnet", "none", "default", ""):
+            self.assertEqual((await self.call("POST", f"/build?networkmode={mode}", body=b""))[0], 200, mode)
+
+    async def test_only_plain_nvidia_gpu_requests_are_device_requests(self):
+        bad = (
+            {"Driver": "cdi", "Capabilities": [["gpu"]], "DeviceIDs": ["vendor.com/x=all"]},
+            {"Driver": "", "Capabilities": [["gpu"]], "DeviceIDs": ["vendor.com/x=all"]},
+            {"Driver": "nvidia", "Capabilities": [["gpu"]], "DeviceIDs": ["/dev/sda"]},
+            {"Driver": "nvidia", "Capabilities": [["gpu"]], "Options": {"mount": "/"}},
+            {"Driver": "nvidia", "Capabilities": [["utility"]]},
+            {"Driver": "other", "Capabilities": [["gpu"]]},
+        )
+        for request in bad:
+            body = self.create_body(DeviceRequests=[request])
+            body["Labels"]["partyline.gpu-mem-mb"] = "9000"
+            status, reply = await self.call("POST", "/containers/create", body=body)
+            self.assertEqual((status, reply["rules"][0]), (403, "device-request"), request)
+        for ids in ([], ["0", "1"], ["GPU-3f2c1a9e-1111-2222-3333-444455556666"]):
+            ok = {
+                "Driver": "nvidia",
+                "Count": -1 if not ids else 0,
+                "Capabilities": [["gpu"]],
+                "DeviceIDs": ids,
+            }
+            body = self.create_body(DeviceRequests=[ok])
+            body["Labels"]["partyline.gpu-mem-mb"] = "9000"
+            self.assertEqual((await self.call("POST", "/containers/create", body=body))[0], 201, ids)
 
 
 if __name__ == "__main__":
