@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, patch
 
 from partyline.db import Db
 from partyline.memory_sampler import (
-    _warn, crosses_warning, read_usage, process_tree_rss, run, warning_limit,
-    warning_text,
+    _warn, crosses_warning, read_usage, process_tree_rss, reclaim_scope, run,
+    warning_limit, warning_text,
 )
 from partyline.runtime import ChatRuntime
 
@@ -174,6 +174,56 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
         runtime.deliver_pending.assert_awaited_once()  # warns on working set
         self.assertEqual([], [m for m in self.db.list_messages("line")
                               if "Raw" in m["body"]])
+
+    async def test_reclaim_backs_off_and_runs_off_the_event_loop(self):
+        """Two ticks with the same cache-heavy sample: one reclaim attempt
+        (60 s backoff), executed through asyncio.to_thread, and no warning."""
+        import asyncio as aio
+        import tempfile as tempfile_module
+
+        scope = Path(tempfile_module.mkdtemp())
+        sample = {"root": str(scope), "current": 900 * 1024**2,
+                  "peak": None, "working_set": 100 * 1024**2}
+        runtime = ChatRuntime(self.db)
+        runtime.live["worker"] = SimpleNamespace(
+            att=self.db.get_attachment("worker"), proc=SimpleNamespace(pid=123))
+        runtime.deliver_pending = AsyncMock(return_value=True)
+
+        calls = {"ticks": 0}
+
+        class StopSampling(Exception):
+            pass
+
+        async def tick(_seconds):
+            calls["ticks"] += 1
+            if calls["ticks"] >= 2:
+                raise StopSampling
+
+        real_to_thread = aio.to_thread
+        to_thread_calls = []
+
+        async def spy_to_thread(fn, *args, **kwargs):
+            to_thread_calls.append(fn)
+            return await real_to_thread(fn, *args, **kwargs)
+
+        with patch("partyline.memory_sampler.sys.platform", "linux"), \
+                patch("partyline.memory_sampler.cgroup_usage",
+                      return_value=sample) as cgroup, \
+                patch("partyline.memory_sampler.reclaim_scope",
+                      wraps=reclaim_scope) as reclaim, \
+                patch("partyline.memory_sampler.asyncio.to_thread",
+                      side_effect=spy_to_thread), \
+                patch("partyline.memory_sampler.asyncio.sleep", tick):
+            with self.assertRaises(StopSampling):
+                await run(runtime, sampler=read_usage)
+
+        self.assertEqual(calls["ticks"], 2)
+        self.assertEqual(reclaim.call_count, 1)  # backoff: one attempt
+        # Both the reclaim write and the re-read ran off the event loop.
+        self.assertIn(reclaim, to_thread_calls)
+        self.assertIn(cgroup, to_thread_calls)
+        self.assertTrue((scope / "memory.reclaim").exists())
+        self.assertEqual([], self.db.list_messages("line"))
 
     async def test_oversized_budget_warns_and_routes_before_the_backstop(self):
         gib = 1024**3
