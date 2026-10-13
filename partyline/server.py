@@ -91,6 +91,7 @@ from .approval_bubble import register_approval_routes
 from .tmp_reap_routes import register_tmp_reap_routes
 from .legacy_tmp import reap_legacy_temp
 from .scratch_worktrees import register_scratch_routes
+from .startup_state import post_interruption_notices
 from .line_gates import register_gates_routes
 from .prereview import register_prereview_route
 from .captain_docs import register_docs_route
@@ -168,6 +169,9 @@ async def lifespan(app):
                        probe_result[1], probe_result[2])
     fence_probe.set_result(probe_result)
     app.state.fence_status = fence_probe.status(probe_result)
+    # Finding 5.14 item 6: explain an unplanned stop before the stale rows
+    # are settled, so "mid-turn" names the processes that were actually live.
+    await post_interruption_notices(runtime)
     runtime.db.mark_stale_attachments()
     await asyncio.to_thread(sweep_orphaned_worktrees, runtime.db)
     # Finding 5.13: the pre-2.33 temp locations reap on start, guarded.
@@ -294,6 +298,11 @@ def request_exit():
     Never os._exit(): that skips `ChatRuntime.shutdown()`, which is what stops
     the ptys. Orphaned processes would outlive the server that owns them.
     """
+    # Finding 5.14 item 6: an approved stop leaves a marker, so the next
+    # startup can tell it apart from a crash or a host reboot.
+    from .startup_state import write_orderly_marker
+
+    write_orderly_marker()
     if _uvicorn_server is not None:
         _uvicorn_server.should_exit = True
     else:
