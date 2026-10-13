@@ -527,6 +527,8 @@ class RuleNamesTest(ProxyBase):
             self.note(
                 int(data.split()[1]), json.loads(data.partition(b"\r\n\r\n")[2]), "connection-limit", 429
             )
+        await self.refused("log-driver", "POST", c, self.create(LogConfig={"Type": "syslog"}))
+        await self.refused("port-exposure", "POST", c, self.create(PublishAllPorts=True))
         self.reserved, self.budget = 39 * GB, 40 * GB
         await self.refused("budget-exceeded", "POST", f"/containers/{mine}/start", None, 409)
         self.reserved = 10 * GB
@@ -552,6 +554,257 @@ class RuleNamesTest(ProxyBase):
         self.assertTrue(reply["message"].startswith("refused: privileged: "))
         self.assertIn("limits-required", reply["rules"])
         self.assertIn("[limits-required]", reply["message"])
+
+
+class NestedCaseTest(ProxyBase):
+    """Docker reads the keys of nested objects in any case too: every level is rebuilt, then checked."""
+
+    async def create(self, **host):
+        return await self.call("POST", "/containers/create", body=self.create_body(**host))
+
+    async def test_a_lowercase_mount_source_cannot_dodge_the_bind_check(self):
+        for mount in (
+            {"Type": "bind", "source": "/", "Target": "/h"},
+            {"type": "bind", "SOURCE": "/etc"},
+            {"Type": "bind", "Source": "/", "target": "/h"},
+        ):
+            status, reply = await self.create(Mounts=[mount])
+            self.assertEqual((status, reply["rules"][0]), (403, "bind-source"), mount)
+        ok = {"type": "bind", "source": f"{self.work}", "target": "/w"}
+        self.assertEqual((await self.create(Mounts=[ok]))[0], 201)
+        sent = json.loads(self.forwarded("POST", "/containers/create")[0][3])
+        self.assertEqual(
+            sent["HostConfig"]["Mounts"], [{"Type": "bind", "Source": self.work, "Target": "/w"}]
+        )
+
+    async def test_lowercase_volume_options_cannot_dodge_the_driver_check(self):
+        opts = {"Type": "volume", "Source": "v", "Target": "/v"}
+        for nested in (
+            {"volumeoptions": {"driverconfig": {"name": "local", "options": {"o": "bind", "device": "/"}}}},
+            {"VolumeOptions": {"DRIVERCONFIG": {"Name": "local", "OPTIONS": {"device": "/"}}}},
+            {"VolumeOptions": {"DriverConfig": {"name": "evil"}}},
+        ):
+            status, reply = await self.create(Mounts=[{**opts, **nested}])
+            self.assertEqual((status, reply["rules"][0]), (403, "volume-driver"), nested)
+
+    async def test_a_lowercase_restart_policy_name_is_still_a_restart_policy(self):
+        for policy in ({"name": "always"}, {"NAME": "unless-stopped"}, {"Name": "on-failure"}):
+            status, reply = await self.create(restartpolicy=policy)
+            self.assertEqual((status, reply["rules"][0]), (403, "restart-policy"), policy)
+
+    async def test_lowercase_device_request_keys_are_the_same_keys(self):
+        gpu = self.create_body(devicerequests=[{"driver": "nvidia", "count": -1, "capabilities": [["gpu"]]}])
+        gpu["Labels"]["partyline.gpu-mem-mb"] = "9000"
+        self.assertEqual((await self.call("POST", "/containers/create", body=gpu))[0], 201)
+        sent = json.loads(self.forwarded("POST", "/containers/create")[0][3])
+        self.assertEqual(sent["HostConfig"]["DeviceRequests"][0]["Driver"], "nvidia")
+        status, reply = await self.create(devicerequests=[{"driver": "evil", "capabilities": [["x"]]}])
+        self.assertEqual((status, reply["rules"][0]), (403, "device-request"))
+        status, reply = await self.create(DeviceRequests=[{"Driver": "nvidia", "Smuggled": 1}])
+        self.assertEqual((status, reply["rules"][0]), (403, "field-not-allowed"))
+
+    async def test_nested_unknown_fields_are_refused_at_every_level(self):
+        for host in (
+            {"Mounts": [{"Type": "volume", "Source": "v", "Target": "/v", "Extra": 1}]},
+            {"Mounts": [{"Type": "bind", "Source": self.work, "Target": "/w", "BindOptions": {"X": 1}}]},
+            {"LogConfig": {"Type": "json-file", "Extra": 1}},
+            {"RestartPolicy": {"Name": "no", "Extra": 1}},
+            {"Ulimits": [{"Name": "nofile", "Soft": 1, "Hard": 1, "Extra": 1}]},
+            {"PortBindings": {"80/tcp": [{"HostIp": "127.0.0.1", "HostPort": "80", "Extra": 1}]}},
+        ):
+            status, reply = await self.create(**host)
+            self.assertEqual((status, reply["rules"][0]), (403, "field-not-allowed"), host)
+        body = self.create_body()
+        body["NetworkingConfig"] = {"EndpointsConfig": {"bridge": {"Surprise": 1}}}
+        self.assertEqual((await self.call("POST", "/containers/create", body=body))[0], 403)
+        body["NetworkingConfig"] = {"endpointsconfig": {"host": {}}}
+        status, reply = await self.call("POST", "/containers/create", body=body)
+        self.assertEqual((status, reply["rules"][0]), (403, "host-namespace"))
+        body["NetworkingConfig"] = {"EndpointsConfig": {"bridge": {"aliases": ["x"]}}}
+        self.assertEqual((await self.call("POST", "/containers/create", body=body))[0], 201)
+
+    async def test_annotations_log_drivers_and_published_ports(self):
+        cases = {
+            "forbidden-setting": [
+                {"Annotations": {"io.kubernetes.cri.sandbox": "x"}},
+                {"annotations": {"run.oci.handler": "x"}},
+            ],
+            "log-driver": [
+                {"LogConfig": {"Type": "syslog", "Config": {"syslog-address": "tcp://x:1"}}},
+                {"logconfig": {"type": "fluentd"}},
+            ],
+            "port-exposure": [
+                {"PublishAllPorts": True},
+                {"PortBindings": {"80/tcp": [{"HostPort": "80"}]}},
+                {"PortBindings": {"80/tcp": [{"HostIp": "0.0.0.0", "HostPort": "80"}]}},
+                {"portbindings": {"80/tcp": [{"hostip": "", "hostport": "80"}]}},
+            ],
+        }
+        for rule, hosts in cases.items():
+            for host in hosts:
+                status, reply = await self.create(**host)
+                self.assertEqual((status, reply["rules"][0]), (403, rule), host)
+        for host in (
+            {"LogConfig": {"Type": "local", "Config": {"max-size": "10m"}}},
+            {"LogConfig": {}},
+            {"PortBindings": {"80/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8080"}]}},
+            {"PortBindings": {"80/tcp": [{"HostIp": "::1", "HostPort": "8080"}], "81/tcp": None}},
+        ):
+            self.assertEqual((await self.create(**host))[0], 201, host)
+
+    async def test_a_started_container_is_held_to_the_same_rules(self):
+        self.daemon.containers["mine"]["HostConfig"]["PortBindings"] = {
+            "80/tcp": [{"HostIp": "", "HostPort": "80"}]
+        }
+        status, reply = await self.call("POST", f"/containers/{FULL['mine']}/start")
+        self.assertEqual((status, reply["rules"][0]), (403, "port-exposure"))
+        self.daemon.containers["mine"]["HostConfig"]["PortBindings"] = {}
+        self.daemon.containers["mine"]["HostConfig"]["LogConfig"] = {"Type": "gelf", "Config": {}}
+        self.assertEqual(
+            (await self.call("POST", f"/containers/{FULL['mine']}/start"))[1]["rules"][0], "log-driver"
+        )
+
+    async def test_exec_and_volume_bodies_are_case_proof_too(self):
+        status, reply = await self.call(
+            "POST", "/containers/mine/exec", body={"Cmd": ["id"], "PRIVILEGED": True}
+        )
+        self.assertEqual((status, reply["rules"][0]), (403, "privileged"))
+        self.assertEqual(
+            (await self.call("POST", "/volumes/create", body={"name": "d", "driver": "local"}))[0], 201
+        )
+        sent = json.loads(self.forwarded("POST", "/volumes/create")[0][3])
+        self.assertEqual(sent, {"Name": "d", "Driver": "local"})
+        status, reply = await self.call(
+            "POST", "/volumes/create", body={"name": "d", "driveropts": {"o": "bind"}}
+        )
+        self.assertEqual((status, reply["rules"][0]), (403, "volume-driver"))
+
+    async def test_every_key_of_a_full_body_is_case_proof(self):
+        """Lowercase and upper-case each struct key in turn: refused, or identical once canonicalised."""
+        from partyline.docker_body import canonical_create
+        from partyline.docker_schema import CREATE
+
+        sample = {
+            "Image": "img",
+            "Hostname": "h",
+            "Env": ["A=1"],
+            "Labels": {"partyline.max-seconds": "60", "partyline.gpu-mem-mb": "1000"},
+            "Healthcheck": {"Test": ["CMD", "true"], "Interval": 1, "Retries": 2},
+            "NetworkingConfig": {
+                "EndpointsConfig": {"bridge": {"IPAMConfig": {"IPv4Address": "10.0.0.2"}, "Aliases": ["a"]}}
+            },
+            "HostConfig": {
+                **LIMITS,
+                "Binds": [f"{self.work}:/w"],
+                "Runtime": "runc",
+                "NetworkMode": "bridge",
+                "RestartPolicy": {"Name": "no", "MaximumRetryCount": 0},
+                "LogConfig": {"Type": "json-file", "Config": {"max-size": "1m"}},
+                "PortBindings": {"80/tcp": [{"HostIp": "127.0.0.1", "HostPort": "80"}]},
+                "DeviceRequests": [{"Driver": "nvidia", "Count": -1, "Capabilities": [["gpu"]]}],
+                "Ulimits": [{"Name": "nofile", "Soft": 1, "Hard": 2}],
+                "Mounts": [
+                    {
+                        "Type": "bind",
+                        "Source": self.work,
+                        "Target": "/b",
+                        "BindOptions": {"Propagation": "rprivate"},
+                    },
+                    {
+                        "Type": "volume",
+                        "Source": "v",
+                        "Target": "/v",
+                        "VolumeOptions": {"NoCopy": True, "DriverConfig": {"Name": "local"}},
+                    },
+                    {"Type": "tmpfs", "Target": "/t", "TmpfsOptions": {"SizeBytes": 1}},
+                ],
+            },
+        }
+        sockets, roots = {"/run/docker.sock"}, [self.work]
+        base, problems = canonical_create(sample, sockets, roots, 86400)
+        self.assertEqual(problems, [])
+        paths = []
+
+        def walk(value, spec, path):
+            if isinstance(spec, tuple):
+                for key, item in value.items():
+                    walk(item, spec[1], path + [(key, 1)])
+            elif isinstance(spec, list):
+                for index, item in enumerate(value):
+                    walk(item, spec[0], path + [(index, 0)])
+            elif isinstance(spec, dict) and isinstance(value, dict):
+                for key, item in value.items():
+                    paths.append(path + [(key, 0)])
+                    walk(item, spec[key], path + [(key, 0)])
+
+        walk(sample, CREATE, [])
+        self.assertGreater(len(paths), 40)
+
+        def variant(path, change):
+            def rec(value, rest):
+                (key, _), tail = rest[0], rest[1:]
+                if isinstance(value, list):
+                    return [rec(v, tail) if i == key else v for i, v in enumerate(value)]
+                renamed = {}
+                for name, item in value.items():
+                    new = change(name) if name == key and not tail else name
+                    renamed[new] = rec(item, tail) if name == key and tail else item
+                return renamed
+
+            return rec(sample, path)
+
+        for path in paths:
+            for change in (str.lower, str.upper):
+                fresh, found = canonical_create(variant(path, change), sockets, roots, 86400)
+                self.assertTrue(found or fresh == base, (path, change))
+                self.assertEqual(found, [], (path, change))
+
+
+class DocumentedAnswersTest(ProxyBase):
+    """Calls the docs say are not available, and ones they say are scoped, behave as written."""
+
+    async def test_image_networks_and_volume_management_calls_are_not_allowed(self):
+        for method, target in (
+            ("POST", "/images/img/tag?repo=x"),
+            ("POST", "/images/img/push"),
+            ("DELETE", "/images/img"),
+            ("POST", "/networks/create"),
+            ("POST", "/networks/bridge/connect"),
+            ("DELETE", "/networks/bridge"),
+            ("DELETE", "/volumes/data"),
+            ("POST", "/volumes/prune"),
+            ("POST", "/images/prune"),
+            ("POST", "/commit?container=x"),
+        ):
+            status, reply = await self.call(method, target, body=b"{}" if method == "POST" else None)
+            self.assertEqual((status, reply["rules"][0]), (403, "endpoint-not-allowed"), target)
+        self.assertEqual(self.daemon.requests, [])
+
+    async def test_rm_takes_only_v_and_force_and_only_in_the_tree(self):
+        ref = FULL["mine"]
+        self.assertEqual((await self.call("DELETE", f"/containers/{ref}?v=1&force=1"))[0], 204)
+        self.assertEqual(
+            (await self.call("DELETE", f"/containers/{ref}?link=1"))[1]["rules"][0], "query-not-allowed"
+        )
+        self.assertEqual(
+            (await self.call("DELETE", f"/containers/{FULL['other']}?v=1"))[1]["rules"][0], "not-owned"
+        )
+        self.assertEqual(self.forwarded("DELETE", "/containers")[0][1], f"/containers/{ref}?v=1&force=1")
+
+    async def test_exec_create_fields_are_an_allowlist(self):
+        ok = {
+            "Cmd": ["id"],
+            "User": "1000",
+            "Env": ["A=1"],
+            "WorkingDir": "/w",
+            "Tty": True,
+            "AttachStdin": True,
+        }
+        self.assertEqual((await self.call("POST", "/containers/mine/exec", body=ok))[0], 201)
+        self.assertEqual(json.loads(self.forwarded("POST", "/exec")[0][3]), ok)
+        self.assertEqual(
+            (await self.call("POST", "/containers/mine/exec", body={"Cmd": ["id"], "Mounts": []}))[0], 403
+        )
 
 
 if __name__ == "__main__":
