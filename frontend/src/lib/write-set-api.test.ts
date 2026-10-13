@@ -26,4 +26,12 @@ describe("write-set requests", () => {
       method: "DELETE",
     });
   });
+
+  it("sends a docker access mode only when one is chosen", async () => {
+    const fetch = vi.fn().mockResolvedValue(response({ request: null }));
+    vi.stubGlobal("fetch", fetch);
+    await writeSetApi.approve("line", "abc", "unrestricted");
+    const init = fetch.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(init.body as string)).toEqual({ docker_mode: "unrestricted" });
+  });
 });

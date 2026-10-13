@@ -16,23 +16,37 @@ import json
 import logging
 import re
 import time
+from datetime import datetime
 from urllib.parse import quote
 
 from fastapi import HTTPException
 
 from . import docker_api, docker_relay
-from .hierarchy import descendants
+from .docker_lifetime import enforce_lifetimes
+from .machine_scope import visible_conversation_ids
 from .system_notice import post_system_notice
 
 logger = logging.getLogger(__name__)
 LABEL_CONVERSATION = "partyline.conversation"
 LABEL_ATTACHMENT = "partyline.attachment"
+LABEL_MANAGED = "partyline.managed"
+LABEL_MAX_SECONDS = "partyline.max-seconds"
+LABEL_GPU_MB = "partyline.gpu-mem-mb"
 INTERVAL = 15.0
+SAMPLE_TIMEOUT = 60.0
 NOTICE_WINDOW = 600.0
 LIVE = ("starting", "running")
 ID = re.compile(r"[0-9a-f]{12,64}")
-BUDGET_WARNING = ("daemon work runs outside every attachment's memory budget and the write fence: "
-                  "a container is bounded only by limits set on it")
+BUDGET_WARNING = ("daemon work runs outside every attachment's memory budget and the write fence; "
+                  "a person approves it as managed (containers must declare limits and are admitted "
+                  "against the host budget) or, by explicit choice, unrestricted (root-equivalent)")
+
+
+def mode_text(mode: str) -> str:
+    if mode == "unrestricted":
+        return ("UNRESTRICTED docker access (root-equivalent, outside every memory budget and the "
+                "managed-container rules)")
+    return "managed docker access (containers must declare limits)"
 
 
 def label_env(att: dict) -> str:
@@ -47,26 +61,46 @@ def _used(stats) -> int | None:
     return max(0, memory["usage"] - ((memory.get("stats") or {}).get("inactive_file") or 0))
 
 
+def _digits(value) -> int | None:
+    return int(value) if isinstance(value, str) and value.isdigit() else None
+
+
+def started_epoch(text) -> float | None:
+    """``State.StartedAt`` (RFC 3339, nanoseconds) as epoch seconds; None if never started."""
+    try:
+        moment = datetime.fromisoformat(re.sub(r"(\.\d{6})\d*", r"\1", str(text)).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return moment.timestamp() if moment.year > 1 else None
+
+
 async def _describe(item: dict, gate: asyncio.Semaphore) -> dict:
-    labels = item.get("Labels") or {}
+    labels = item.get("Labels") if isinstance(item.get("Labels"), dict) else {}
     running = item.get("State") == "running"
-    limit = used = None
+    limit = used = started = None
     if running:
         async with gate:
             try:
                 status, inspected = await docker_api.request("GET", f"/containers/{item['Id']}/json")
-                if status == 200 and inspected:
+                if status == 200 and isinstance(inspected, dict):
                     limit = (inspected.get("HostConfig") or {}).get("Memory")
+                    state = inspected.get("State")
+                    started = started_epoch(state.get("StartedAt") if isinstance(state, dict) else None)
                 status, stats = await docker_api.request(
                     "GET", f"/containers/{item['Id']}/stats?stream=false&one-shot=true")
                 used = _used(stats) if status == 200 else None
-            except (OSError, TimeoutError):
+            except Exception:  # one odd container must not hide the rest
                 pass
-    return {"id": item["Id"], "name": ((item.get("Names") or ["?"])[0]).lstrip("/"),
+    names = item.get("Names") if isinstance(item.get("Names"), list) and item["Names"] else ["?"]
+    return {"id": item["Id"], "name": str(names[0]).lstrip("/"),
             "image": item.get("Image"), "state": item.get("State"), "status": item.get("Status"),
             "conversation_id": labels.get(LABEL_CONVERSATION), "attachment_id": labels.get(LABEL_ATTACHMENT),
-            "memory_limit_bytes": limit or None, "memory_used_bytes": used,
-            "uncapped": running and limit == 0}
+            "memory_limit_bytes": limit if isinstance(limit, int) and limit else None,
+            "memory_used_bytes": used, "uncapped": running and limit == 0,
+            "managed": labels.get(LABEL_MANAGED) == "1",
+            "max_seconds": _digits(labels.get(LABEL_MAX_SECONDS)),
+            "gpu_mem_mb": _digits(labels.get(LABEL_GPU_MB)),
+            "started_at": started}
 
 
 class Inventory:
@@ -76,27 +110,41 @@ class Inventory:
         self.containers: list[dict] = []
         self.sampled_at: float | None = None
         self.error: str | None = None
+        self._task: asyncio.Task | None = None
 
     async def sample(self, runtime, *, force: bool = False) -> bool:
         """Refresh at most every ``INTERVAL`` s, and only while a docker grant exists."""
         if not force and self._clock() - self._at < INTERVAL:
             return False
         self._at = self._clock()
-        if not await asyncio.to_thread(docker_relay.any_grant, runtime.db):
+        if not self.watching and not await asyncio.to_thread(docker_relay.any_grant, runtime.db):
             self.containers, self.sampled_at, self.error = [], None, None
             return False
         try:
-            status, items = await docker_api.request("GET", "/containers/json?all=1")
-            if status != 200 or not isinstance(items, list):
-                raise OSError(f"docker daemon answered {status} to the container list")
-            gate = asyncio.Semaphore(4)
-            self.containers = await asyncio.gather(*(_describe(item, gate) for item in items))
-            self.error = None
-        except (OSError, TimeoutError) as exc:
+            async with asyncio.timeout(SAMPLE_TIMEOUT):
+                status, items = await docker_api.request("GET", "/containers/json?all=1")
+                if status != 200 or not isinstance(items, list):
+                    raise OSError(f"docker daemon answered {status} to the container list")
+                gate = asyncio.Semaphore(4)
+                found = [item for item in items if isinstance(item, dict) and item.get("Id")]
+                self.containers = await asyncio.gather(*(_describe(item, gate) for item in found))
+                self.error = None
+                await enforce_lifetimes(runtime, self.containers)
+        except Exception as exc:  # a hung or malformed daemon must not take the sampler or a route down
             self.error = str(exc) or type(exc).__name__
             logger.warning("docker workloads: cannot list containers: %s", self.error)
         self.sampled_at = time.time()
         return True
+
+    @property
+    def watching(self) -> bool:
+        """Labeled containers were running at the last look: keep looking after the grant is gone."""
+        return any(c["conversation_id"] and c["state"] == "running" for c in self.containers)
+
+    def kick(self, runtime) -> None:
+        """Sample in its own task, so a hung daemon cannot delay the memory sampler's tick."""
+        if self._task is None or self._task.done():
+            self._task = asyncio.get_running_loop().create_task(self.sample(runtime))
 
     def summary(self) -> dict | None:
         if self.sampled_at is None:
@@ -133,8 +181,9 @@ def _line(c: dict) -> str:
 async def announce_survivors(runtime, conv_id: str) -> None:
     """After a detach left a line with no live process: name its containers still running."""
     try:
+        mine = any(c["conversation_id"] == conv_id and c["state"] == "running" for c in inventory.containers)
         if any(a["status"] in LIVE for a in runtime.db.list_attachments(conv_id)) \
-                or not await asyncio.to_thread(docker_relay.any_grant, runtime.db):
+                or not (mine or await asyncio.to_thread(docker_relay.any_grant, runtime.db)):
             return
         filters = json.dumps({"label": [f"{LABEL_CONVERSATION}={conv_id}"], "status": ["running"]})
         status, items = await docker_api.request("GET", f"/containers/json?filters={quote(filters)}")
@@ -166,9 +215,7 @@ async def stop_owned(runtime, principal, ident: str) -> dict:
             raise HTTPException(404, f"no container with id {ident}")
         owner = ((info.get("Config") or {}).get("Labels") or {}).get(LABEL_CONVERSATION)
         if principal.kind == "machine":
-            home = principal.conv_id
-            mine = {home, *descendants(runtime.db, home)} if home else set()
-            if owner not in mine:
+            if owner not in visible_conversation_ids(runtime.db, principal):
                 raise HTTPException(
                     403, "only a person may stop a container this line (or one under it) did not start")
         status, _body = await docker_api.request("POST", f"/containers/{info['Id']}/stop?t=10", timeout=30.0)

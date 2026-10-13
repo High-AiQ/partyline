@@ -433,6 +433,40 @@ class WriteSetRequestTest(unittest.TestCase):
         self.assertTrue(self.public_notices(
             "every live process is resumed so other lines cannot reach the relay"))
 
+    def test_a_person_chooses_unrestricted_docker_access_and_it_says_so(self):
+        request_id = self.file(self.worker, "/run/docker.sock").json()["id"]
+        self.go_live("cap")
+        approved = self.client.post(
+            f"/api/conversations/line/write-set/request/{request_id}/approve",
+            json={"docker_mode": "unrestricted"}, headers=self.human)
+        self.assertEqual(approved.status_code, 200, approved.text)
+        grant = list_write_grants(self.db, "line")[0]
+        self.assertEqual(grant["docker_mode"], "unrestricted")
+        self.assertTrue(self.public_notices("UNRESTRICTED docker access (root-equivalent"))
+
+    def test_docker_access_is_managed_by_default_when_approved_or_granted(self):
+        self._seed_subtree()
+        request_id = self.file(self.worker, "/run/docker.sock").json()["id"]
+        self.client.post(f"/api/conversations/line/write-set/request/{request_id}/approve",
+                         headers=self.human)
+        self.assertEqual(list_write_grants(self.db, "line")[0]["docker_mode"], "managed")
+        self.assertTrue(self.public_notices("managed docker access"))
+        granted = self.client.post("/api/conversations/kid/write-set",
+                                   json={"path": "/run/docker.sock"}, headers=self.human)
+        self.assertEqual(granted.status_code, 200, granted.text)
+        self.assertEqual(granted.json()[0]["docker_mode"], "managed")
+        again = self.client.post("/api/conversations/kid/write-set",
+                                 json={"path": "/run/docker.sock", "docker_mode": "unrestricted"},
+                                 headers=self.human)
+        self.assertEqual(again.json()[0]["docker_mode"], "unrestricted")
+
+    def test_a_process_cannot_choose_a_docker_mode(self):
+        refused = self.client.post("/api/conversations/line/write-set",
+                                   json={"path": "/run/docker.sock", "docker_mode": "unrestricted"},
+                                   headers=self.worker)
+        self.assertEqual(refused.status_code, 403)
+        self.assertEqual(list_write_grants(self.db, "line"), [])
+
     def test_a_non_ancestor_captain_gets_403_even_with_a_covering_grant(self):
         # the earlier version passed only because the other line held no
         # grant: give the non-ancestor line one covering the path and assert

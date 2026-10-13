@@ -114,7 +114,21 @@ def bind_runtime(runtime) -> None:
     _runtime = runtime
 
 
+def relay_mode(conv_id: str) -> str:
+    """``unrestricted`` only when the line's docker grant row says so; everything else is managed."""
+    if _runtime is None:
+        return "managed"
+    rows = _runtime.db._exec("SELECT path, docker_mode FROM conversation_write_grants WHERE conv_id=?",
+                             (conv_id,)).fetchall()
+    return "unrestricted" if any(is_docker_socket(row["path"]) and row["docker_mode"] == "unrestricted"
+                                 for row in rows) else "managed"
+
+
 async def _serve(conv_id: str, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    if relay_mode(conv_id) == "managed":
+        from . import docker_proxy
+        await docker_proxy.serve(_runtime, conv_id, reader, writer)
+        return
     relay = _relays.get(conv_id)
     host = host_socket()
     try:
@@ -215,7 +229,8 @@ async def status() -> list[dict]:
     reason = await probe()
     return [{"conv_id": conv_id, "socket": relay.path, "listening": relay.listening(),
              "connections": len(relay.clients), "last_error": relay.last_error,
-             "probe": "ok" if reason is None else reason, "bridge": bridge.info()}
+             "probe": "ok" if reason is None else reason, "bridge": bridge.info(),
+             "mode": relay_mode(conv_id)}
             for conv_id, relay in sorted(_relays.items())]
 
 
