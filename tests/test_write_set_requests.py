@@ -404,6 +404,8 @@ class WriteSetRequestTest(unittest.TestCase):
         filed = self.file_on_kid("/var/run/docker.sock")  # through the symlinked parent
         self.assertEqual(filed.status_code, 200, filed.text)
         request_id = filed.json()["id"]
+        text = " ".join(m["body"] for m in self.db.list_messages("kid"))
+        self.assertIn("outside every attachment's memory budget", text)
         refused = self.client.post(
             f"/api/conversations/kid/write-set/request/{request_id}/approve",
             headers=self.captain)

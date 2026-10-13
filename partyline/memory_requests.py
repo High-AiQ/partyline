@@ -118,7 +118,7 @@ def register_memory_request_routes(app: FastAPI, runtime, resume) -> None:
             raise HTTPException(409, f"@{att['name']} uses an adapter that cannot resume")
         from .line_process_routes import detach_attachment
         if att["id"] in runtime.live:
-            await detach_attachment(runtime, att["id"])
+            await detach_attachment(runtime, att["id"], survivors=False)
         with db.lock, db.conn:
             db.conn.execute("UPDATE attachments SET memory_limit=? WHERE id=?",
                             (current["requested_limit"], att["id"]))
