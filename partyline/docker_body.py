@@ -181,6 +181,21 @@ def host_problems(host: dict, socket_paths: set[str], roots: list[str]) -> list[
     return out
 
 
+def _endpoint_problems(endpoints: dict) -> list[tuple[str, str]]:
+    """The CLI always sends a default ``GwPriority`` and ``DNSNames``; hold them to their types."""
+    out = []
+    for name, endpoint in endpoints.items():
+        if not isinstance(endpoint, dict):
+            continue
+        if "GwPriority" in endpoint and _int(endpoint["GwPriority"]) != endpoint["GwPriority"]:
+            out.append(("malformed-body", f"endpoint {name} GwPriority must be an integer"))
+        names = endpoint.get("DNSNames")
+        if names is not None and not (isinstance(names, list) and all(
+                isinstance(n, str) and re.fullmatch(NAME, n) for n in names)):
+            out.append(("malformed-body", f"endpoint {name} DNSNames must be null or a list of short names"))
+    return out
+
+
 def canonical_create(body, socket_paths: set[str], roots: list[str], cap: int):
     """``(fresh body, problems)`` for a container create; the fresh body is all that is forwarded."""
     if not isinstance(body, dict):
@@ -204,8 +219,10 @@ def canonical_create(body, socket_paths: set[str], roots: list[str], cap: int):
             str(e).startswith(("NVIDIA_", "CUDA_VISIBLE_DEVICES")) for e in env if isinstance(e, str)):
         problems.append(("gpu-env", "NVIDIA_*/CUDA_VISIBLE_DEVICES in the request's Env need a GPU "
                          "DeviceRequests entry (GPU admission)"))
-    if "host" in ((fresh.get("NetworkingConfig") or {}).get("EndpointsConfig") or {}):
+    endpoints = (fresh.get("NetworkingConfig") or {}).get("EndpointsConfig") or {}
+    if "host" in endpoints:
         problems.append(("host-namespace", "joining the host network is refused"))
+    problems += _endpoint_problems(endpoints)
     fresh["HostConfig"], fresh["Labels"] = host, labels
     problems += host_problems(host, socket_paths, roots) + limit_problems(host, labels, cap)
     return fresh, problems
