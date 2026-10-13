@@ -85,6 +85,12 @@ def reply(writer: asyncio.StreamWriter, status: int, message: str, rules: tuple[
                  f"Connection: close\r\nContent-Length: {len(body)}\r\n\r\n".encode() + body)
 
 
+def answer(writer: asyncio.StreamWriter, status: int, body: bytes) -> None:
+    """A reply the proxy built itself (or the daemon's own non-200, passed on as it came)."""
+    writer.write(f"HTTP/1.1 {status} {http.HTTPStatus(status).phrase}\r\nContent-Type: application/json\r\n"
+                 f"Connection: close\r\nContent-Length: {len(body)}\r\n\r\n".encode() + body)
+
+
 def upstream_head(req: Request, route: Route, plan: Plan, upgrade: str) -> bytes:
     lines = [f"{req.method} {plan.target} HTTP/1.1", "Host: docker",
              "Connection: Upgrade" if upgrade else "Connection: close"]
@@ -196,6 +202,9 @@ async def _handle(runtime, conv_id: str, reader, writer, slots: list) -> None:
     except (OSError, TimeoutError) as exc:
         raise Denied(f"partyline docker proxy: cannot reach Docker: {exc}", 502) from exc
     slots.append(plan.slot)
+    if plan.answer:
+        answer(writer, *plan.answer)
+        return
     await forward(incoming, reader, writer, req, route, plan)
 
 

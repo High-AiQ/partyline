@@ -7,6 +7,7 @@ its creator's top-level line and any line under that line may operate on it.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -45,6 +46,7 @@ class Plan:
     target: str
     body: bytes | None = None
     content_type: str = "application/json"
+    answer: tuple[int, bytes] | None = None  # a reply built here, sent instead of forwarding
     slot: str | None = None  # admission slot to release once the request has run
     stream: bool = False  # the body is streamed to the daemon, not held (image builds)
 
@@ -75,6 +77,10 @@ async def inspect(ref: str) -> dict:
     if status != 200:
         raise Denied(f"docker daemon answered {status} to the inspect", 502)
     return info
+
+
+def owned_tree(info: dict) -> str | None:
+    return ((info.get("Config") or {}).get("Labels") or {}).get(LABEL_TREE)
 
 
 def owned_labels(db, info: dict, conv_id: str, ref: str) -> dict:
@@ -191,6 +197,31 @@ async def plan_exec(runtime, conv_id: str, route: Route, req: Request) -> Plan:
     return Plan(f"{route.prefix}/exec/{route.ref}/{route.op}{query_of(route)}", body)
 
 
+async def plan_network(runtime, conv_id: str, route: Route) -> Plan:
+    """A network lookup, answered here: only this tree's containers stay in ``Containers``.
+
+    The daemon lists every container attached with its name, IP and MAC, which would show other
+    trees' containers; ``Services`` and ``Peers`` are dropped. Anything but a 200 (a missing
+    network is the daemon's 404) is passed through as it came.
+    """
+    status, info = await docker_api.request("GET", f"{route.prefix}/networks/{route.ref}{query_of(route)}")
+    if status != 200 or not isinstance(info, dict):
+        return Plan("", answer=(status, json.dumps(info if info is not None else {}).encode()))
+    tree = tree_of(runtime.db, conv_id)
+
+    async def mine(ref: str) -> bool:
+        try:
+            return owned_tree(await inspect(ref)) == tree
+        except Denied:
+            return False  # gone since the lookup, or not readable: not shown
+
+    shown = info.get("Containers") if isinstance(info.get("Containers"), dict) else {}
+    keep = await asyncio.gather(*(mine(ref) for ref in shown))
+    info = {k: v for k, v in info.items() if k not in ("Services", "Peers")}
+    info["Containers"] = {ref: item for (ref, item), ok in zip(shown.items(), keep, strict=True) if ok}
+    return Plan("", answer=(200, json.dumps(info).encode()))
+
+
 async def plan_build(route: Route) -> Plan:
     mode = dict(route.query).get("networkmode", "")
     if mode == "host" or mode.startswith("container:"):
@@ -202,7 +233,9 @@ async def plan_build(route: Route) -> Plan:
 
 async def decide(runtime, conv_id: str, route: Route, req: Request) -> Plan:
     tree = tree_of(runtime.db, conv_id)
-    if route.kind in ("open", "image"):
+    if route.kind == "network":
+        return await plan_network(runtime, conv_id, route)
+    if route.kind in ("open", "image", "lookup"):
         return Plan(f"{route.prefix}{route.path}{query_of(route)}")
     if route.kind in ("list", "events"):
         return Plan(f"{route.prefix}{route.path}?{narrow_filters(route, tree)}")
