@@ -150,7 +150,7 @@ class AttachmentTmpTest(unittest.TestCase):
         write_file(attachment_tmp_dir("live-2") / "f", 4096)
         attachment_tmp.cached_usage(cached=False)  # fill the cache once
         rider = tmp_resource_line(db, "line")
-        self.assertTrue(rider.startswith(f"(tmp: /{temp_root().name} "))
+        self.assertTrue(rider.startswith(f"(tmp: {temp_root()} "))
         self.assertIn("GB · this line's processes", rider)
         # Finding 5.13: the rider names the top lines by temp for everyone,
         # not only the reader's own line.

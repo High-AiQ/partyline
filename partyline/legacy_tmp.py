@@ -179,6 +179,19 @@ def reap_pytest_temp(root: Path | None = None,
     return freed
 
 
+def reap_pytest_under(tmp_dir: Path, *, now: float | None = None,
+                      max_age: float = 1800) -> int:
+    """Reap old ``pytest-of-*/pytest-N`` runs under a process's own temp
+    directory (finding 5.15): 30 minutes by default, never the
+    ``pytest-current`` target. Returns the bytes freed."""
+    freed = 0
+    for holder in _children(tmp_dir):
+        if holder.is_dir() and not holder.is_symlink() \
+                and holder.name.startswith("pytest-of-"):
+            freed += reap_pytest_temp(holder, now=now, max_age=max_age)
+    return freed
+
+
 def reap_legacy_temp(db, *, claude: Path | None = None,
                      pytest: Path | None = None) -> dict[str, int]:
     """Reap both legacy locations; the bytes freed per location."""

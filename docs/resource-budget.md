@@ -155,14 +155,19 @@ platforms whose kernel limit does not enforce resident memory.
 
 Every attached process gets its own temp directory: at spawn, `TMPDIR`, `TMP`
 and `TEMP` point at `<platform temp>/partyline/<instance>/<attachment id>`,
-created with mode 0700. The `<instance>` segment is twelve hex of the
-database path — several partyline instances share a host and a temp, and
-one instance's reaper must never touch another's directories. The same id
-resumes into the same directory, so a restart never loses it. Temp only —
-CLI state and caches stay where the platform puts them. The directory sits
-inside the fence's writable set on every backend: Linux's bubblewrap leaves
-everything but the protected set writable, the macOS profile re-allows the
-temp directories, and Windows scopes already used a per-attachment temp.
+created with mode 0700. On Linux, when the platform temp directory is tmpfs
+(RAM) and `/var/tmp` exists on a disk-backed filesystem, the base moves to
+`/var/tmp` instead: tmpfs pages count against the process's memory budget
+and the kernel cannot reclaim them, so a day of test runs could reach the
+budget on files alone. The `PARTYLINE_TMP_BASE` pin still wins over
+everything. The `<instance>` segment is twelve hex of the database path —
+several partyline instances share a host and a temp, and one instance's
+reaper must never touch another's directories. The same id resumes into the
+same directory, so a restart never loses it. Temp only — CLI state and
+caches stay where the platform puts them. The directory sits inside the
+fence's writable set on every backend: Linux's bubblewrap leaves everything
+but the protected set writable, the macOS profile re-allows the temp
+directories, and Windows scopes already used a per-attachment temp.
 
 The directory is reaped only when the attachment ends: a person- or
 captain-called close (`DELETE /api/attachments/<id>`), record removal, a line
@@ -176,14 +181,21 @@ deletes leftover dirs in this instance's scope whose attachment row is gone
 (crash leftovers) and reports the bytes freed. It never touches live,
 detached or exited rows: all of them can resume; it never touches another
 instance's scope, and never a name that is not an attachment id. Visibility
-comes two ways: the captain rider carries a line like `(tmp: /tmp 13/31 GB ·
-this line's processes 2.1 GB)` — the temp mount's used and total bytes plus
-the line's live processes' share — and `/api/resources` adds
-`tmp_total_bytes`, `tmp_used_bytes` and `tmp_partyline_bytes`. One
-time-budgeted walk per few seconds fills the mount totals and the per-id
-sizes together; riders and snapshots read that cache, so a huge tree costs
-a partial answer, never a stalled server. Tests pin `PARTYLINE_TMP_BASE` to
-their sandbox and never touch the real `/tmp`.
+comes three ways: the captain rider carries a line like `(tmp: /var/tmp 13/104
+GB · this line's processes 2.1 GB · top tmp: «line» 1.9 GB, …)` — the temp
+mount's used and total bytes, the line's live processes' share, and the top
+lines by temp use — `/api/resources` adds `tmp_total_bytes`,
+`tmp_used_bytes` and `tmp_partyline_bytes`, and a memory warning whose
+`memory.stat` shmem figure exceeds 256 MiB names the share and the largest
+directory under that process's own temp dir: deleting those files frees
+real memory, which a reclaim cannot. One time-budgeted walk per few seconds
+fills the mount totals and the per-id sizes together; riders and snapshots
+read that cache, so a huge tree costs a partial answer, never a stalled
+server. Before a warning fires, old `pytest-of-*/pytest-N` runs inside the
+process's own temp directory are reaped (older than 30 minutes, never
+`pytest-current`), the sample is re-read, and only a still-over working set
+is reported. Tests pin `PARTYLINE_TMP_BASE` to their sandbox and never
+touch the real temp directories.
 
 ## Requesting a larger cap
 
