@@ -161,7 +161,10 @@
       aria-valuemax="100"
       aria-valuenow={attachment.memory_percent}
       use:tooltip={{
-        label: `${String(Math.round(attachment.memory_usage_bytes / 1024 ** 2))} MiB of ${String(Math.round(attachment.memory_cap_bytes / 1024 ** 2))} MiB`,
+        label:
+          attachment.memory_raw_bytes != null
+            ? `${String(Math.round(attachment.memory_usage_bytes / 1024 ** 2))} MiB working set of ${String(Math.round(attachment.memory_cap_bytes / 1024 ** 2))} MiB (raw ${String(Math.round(attachment.memory_raw_bytes / 1024 ** 2))} MiB)`
+            : `${String(Math.round(attachment.memory_usage_bytes / 1024 ** 2))} MiB of ${String(Math.round(attachment.memory_cap_bytes / 1024 ** 2))} MiB`,
       }}
     >
       <div

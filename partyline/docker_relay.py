@@ -114,7 +114,28 @@ def bind_runtime(runtime) -> None:
     _runtime = runtime
 
 
+def relay_mode(conv_id: str) -> str:
+    """``unrestricted`` only when the line's docker grant row says so; everything else is managed."""
+    if _runtime is None:
+        return "managed"
+    rows = _runtime.db._exec("SELECT path, docker_mode FROM conversation_write_grants WHERE conv_id=?",
+                             (conv_id,)).fetchall()
+    return "unrestricted" if any(is_docker_socket(row["path"]) and row["docker_mode"] == "unrestricted"
+                                 for row in rows) else "managed"
+
+
 async def _serve(conv_id: str, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    if relay_mode(conv_id) == "managed":
+        from . import docker_proxy
+        relay = _relays.get(conv_id)
+        if relay is not None:
+            relay.clients.add(writer)
+        try:
+            await docker_proxy.serve(_runtime, conv_id, reader, writer)
+        finally:
+            if relay is not None:
+                relay.clients.discard(writer)
+        return
     relay = _relays.get(conv_id)
     host = host_socket()
     try:
@@ -198,6 +219,15 @@ def _close_now(relay: Relay) -> None:
         relay.task.cancel()
 
 
+def disconnect(conv_id: str) -> int:
+    """Close the line's open relay connections (a changed access mode must not outlive its policy)."""
+    relay = _relays.get(conv_id)
+    clients = list(relay.clients) if relay is not None else []
+    for client in clients:
+        client.close()
+    return len(clients)
+
+
 async def stop(conv_id: str) -> None:
     relay = _relays.pop(conv_id, None)
     if relay is not None:
@@ -215,7 +245,8 @@ async def status() -> list[dict]:
     reason = await probe()
     return [{"conv_id": conv_id, "socket": relay.path, "listening": relay.listening(),
              "connections": len(relay.clients), "last_error": relay.last_error,
-             "probe": "ok" if reason is None else reason, "bridge": bridge.info()}
+             "probe": "ok" if reason is None else reason, "bridge": bridge.info(),
+             "mode": relay_mode(conv_id)}
             for conv_id, relay in sorted(_relays.items())]
 
 

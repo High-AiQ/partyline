@@ -52,6 +52,25 @@ class ResourcePushTest(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(await self.tick())
         self.assertEqual(self.runtime.broadcast_all.await_count, 1)
 
+    async def test_docker_workloads_moving_is_pushed_and_their_drift_is_not(self):
+        docker = {"running": 1, "memory_used_bytes": 4_000 * MB, "uncapped": 1,
+                  "unattributed": 0, "sampled_at": 1.0}
+        self.view["docker"] = docker
+        await self.tick()
+        self.view["docker"] = {**docker, "memory_used_bytes": 4_010 * MB}
+        self.assertFalse(await self.tick())
+        self.view["docker"] = {**docker, "memory_used_bytes": 4_100 * MB}
+        self.assertTrue(await self.tick())
+        self.view["docker"] = {**self.view["docker"], "uncapped": 2}
+        self.assertTrue(await self.tick())
+        self.view["docker"] = {**self.view["docker"], "memory_used_bytes": None}
+        self.assertTrue(await self.tick())
+        self.view["docker"] = None
+        self.assertTrue(await self.tick())
+        self.assertFalse(await self.tick())
+        event = self.runtime.broadcast_all.await_args_list[1].args[0]
+        self.assertEqual(event.snapshot.docker.uncapped, 1)
+
     async def test_small_drift_is_quiet_and_a_real_move_is_sent_once(self):
         await self.tick()
         self.view["host_used_bytes"] += 10 * MB

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from .contracts import ConversationsChangedEvent
 from .hierarchy import ancestors, child_ids
 from .machine_scope import deny_purge_if_parent_refs
@@ -9,6 +11,7 @@ from .reports import purge_conversation as purge_reports
 from .review_worktrees import prune_review_worktrees
 from .scratch_worktrees import prune_scratch_worktrees
 from .attachment_tmp import reap_line_tmp
+from .legacy_tmp import reap_legacy_temp
 from .worktree_lifecycle import remove_for_line
 
 
@@ -20,6 +23,8 @@ async def execute_purge(runtime, media, db, conv: dict) -> None:
     purge_reports(db, conv_id)
     remove_for_line(conv)
     reap_line_tmp(db, conv_id)
+    # The legacy walk touches /tmp; keep it off the event loop.
+    await asyncio.to_thread(reap_legacy_temp, db)
     prune_review_worktrees(db, conv_id)
     prune_scratch_worktrees(db, conv_id)
     db.delete_conversation(conv_id)

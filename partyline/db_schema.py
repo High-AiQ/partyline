@@ -9,7 +9,7 @@ from .notes_schema import MIGRATIONS as NOTES
 from .scratch_schema import MIGRATIONS as SCRATCH
 from .lease_schema import MIGRATIONS as LEASE
 from .auto_compact_schema import MIGRATIONS as AUTO_COMPACT
-
+from .docker_mode_schema import MIGRATIONS as DOCKER_MODE
 MIGRATIONS = [
     # cli_session: optional process session id, for adapters that support resume
     "ALTER TABLE attachments ADD COLUMN cli_session TEXT",
@@ -297,4 +297,4 @@ MIGRATIONS = [
 ]
 
 MIGRATIONS.extend(MEMORY + IDEMPOTENCY + NOTES + COMPACTION + ACCEPT_HISTORY
-                  + SCRATCH + LEASE + GATES + AUTO_COMPACT)
+                  + SCRATCH + LEASE + GATES + AUTO_COMPACT + DOCKER_MODE)

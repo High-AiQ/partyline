@@ -46,6 +46,7 @@ export const AttachmentSchema = z.object({
   cli_session: z.string().nullable().default(null),
   cwd_git: CwdGitStateSchema.nullable().default(null),
   memory_usage_bytes: z.number().int().nonnegative().nullable().optional(),
+  memory_raw_bytes: z.number().int().nonnegative().nullable().optional(),
   memory_cap_bytes: z.number().int().positive().nullable().optional(),
   memory_percent: z.number().int().min(0).max(100).nullable().optional(),
 });

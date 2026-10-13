@@ -226,8 +226,38 @@ def line_tmp_bytes(db, conv_id: str) -> int:
     return total
 
 
+def top_tmp_lines(db, limit: int = 3) -> list[tuple[str, int]]:
+    """The lines whose attachments hold the most temp, from the cached walk.
+
+    Finding 5.13: per-line temp is interesting for every line, not only the
+    reader's own — the top of the list is where the tmpfs pressure comes
+    from.
+    """
+    sizes = cached_usage().get("sizes", {})
+    if not sizes:
+        return []
+    try:
+        totals: dict[str, int] = {}
+        for conv in db.list_conversations():
+            for att in db.list_attachments(conv["id"]):
+                size = sizes.get(att["id"])
+                if size:
+                    totals[conv["id"]] = totals.get(conv["id"], 0) + size
+    except AttributeError:
+        # A partial db (role-delivery deltas) cannot answer line queries;
+        # the rider then names no top lines rather than failing.
+        return []
+    ranked = sorted(totals.items(), key=lambda item: -item[1])[:limit]
+    named = []
+    for conv_id, total in ranked:
+        conv = db.get_conversation(conv_id)
+        named.append((conv["name"] if conv else conv_id, total))
+    return named
+
+
 def tmp_resource_line(db, conv_id: str) -> str:
-    """One staffing-rider line: the temp mount, and this line's share of it."""
+    """One staffing-rider line: the temp mount, this line's share of it, and
+    the lines that hold the most temp."""
     summary = tmp_summary()
     mount, used = summary["tmp_total_bytes"], summary["tmp_used_bytes"]
     if mount is None or used is None:
@@ -239,5 +269,11 @@ def tmp_resource_line(db, conv_id: str) -> str:
         # a rider must never fail, so the share reads zero instead.
         share = 0
     name = temp_root().name
-    return (f"(tmp: /{name} {used / 2**30:.0f}/{mount / 2**30:.0f} GB · "
-            f"this line's processes {share / 2**30:.1f} GB)")
+    line = (f"(tmp: /{name} {used / 2**30:.0f}/{mount / 2**30:.0f} GB · "
+            f"this line's processes {share / 2**30:.1f} GB")
+    tops = top_tmp_lines(db)
+    if tops:
+        listing = ", ".join(f"«{line_name}» {total / 2**30:.1f} GB"
+                            for line_name, total in tops)
+        line += f" · top tmp: {listing}"
+    return line + ")"
