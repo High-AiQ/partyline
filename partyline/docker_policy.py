@@ -7,13 +7,13 @@ sends through its relay; every refusal names its rule so the docker CLI prints i
 from __future__ import annotations
 
 import json
-import os
 import re
 from dataclasses import dataclass, field
 from urllib.parse import parse_qsl, urlencode
 
 LABEL_CONVERSATION = "partyline.conversation"
 LABEL_ATTACHMENT = "partyline.attachment"
+LABEL_TREE = "partyline.tree"
 LABEL_MANAGED = "partyline.managed"
 LABEL_MAX_SECONDS = "partyline.max-seconds"
 LABEL_GPU_MB = "partyline.gpu-mem-mb"
@@ -28,29 +28,78 @@ CONTAINER_OPS = {
 }
 SIMPLE = {
     ("GET", "/_ping"): "open", ("HEAD", "/_ping"): "open", ("GET", "/version"): "open",
-    ("GET", "/info"): "open", ("GET", "/events"): "open", ("GET", "/images/json"): "open",
+    ("GET", "/info"): "open", ("GET", "/images/json"): "open", ("GET", "/volumes"): "open",
+    ("GET", "/system/df"): "open", ("GET", "/events"): "events",
     ("GET", "/containers/json"): "list", ("POST", "/images/create"): "pull",
-    ("POST", "/containers/create"): "create",
+    ("POST", "/containers/create"): "create", ("POST", "/volumes/create"): "volume",
+    ("POST", "/build"): "build", ("POST", "/session"): "session", ("POST", "/grpc"): "session",
 }
+BUILD = {"t", "dockerfile", "buildargs", "labels", "nocache", "rm", "forcerm", "pull", "q", "cachefrom",
+         "target", "platform", "version", "session", "networkmode", "memory", "memswap", "cpushares",
+         "cpuquota", "cpuperiod", "cpusetcpus", "shmsize", "outputs", "extrahosts", "buildid"}
+QUERY = {  # per (kind, op) or kind: the only parameters that are forwarded, everything else is refused
+    "open": {"all", "digests", "filters", "type"}, "list": {"all", "limit", "size", "filters"},
+    "pull": {"fromImage", "tag", "platform"}, "create": {"name", "platform"}, "build": BUILD,
+    "events": {"since", "until", "filters"}, "volume": set(), "session": set(), "image": set(),
+    ("container", "json"): {"size"}, ("container", "logs"): {
+        "follow", "stdout", "stderr", "since", "until", "timestamps", "tail"},
+    ("container", "stats"): {"stream", "one-shot"}, ("container", "top"): {"ps_args"},
+    ("container", "wait"): {"condition"}, ("container", "stop"): {"t", "signal"},
+    ("container", "restart"): {"t", "signal"}, ("container", "kill"): {"signal"},
+    ("container", "start"): {"detachKeys"}, ("container", "remove"): {"v", "force"},
+    ("container", "attach"): {"logs", "stream", "stdin", "stdout", "stderr", "detachKeys"},
+    ("container", "resize"): {"h", "w"}, ("container", "exec"): set(),
+    ("exec", "resize"): {"h", "w"}, ("exec", "start"): set(), ("exec", "json"): set(),
+}
+UPGRADES = {("container", "attach"): "tcp", ("exec", "start"): "tcp", ("session", ""): "h2c"}
+
+
+RULES = (  # every stable rule name a refusal can carry; docs/write-fence.md lists them too
+    "endpoint-not-allowed", "update-refused", "malformed-path", "query-not-allowed", "malformed-body",
+    "body-too-large", "not-owned", "not-managed", "limits-required", "lifetime-cap", "restart-policy",
+    "privileged", "host-namespace", "runtime", "default-runtime", "gpu-env", "volume-driver", "bind-source",
+    "forbidden-setting", "field-not-allowed", "security-opt", "device-request", "mount-type",
+    "build-network", "build-remote", "upgrade-required", "connection-limit", "budget-exceeded", "gpu-busy",
+    "gpu-memory", "gpu-unhealthy")
 
 
 class Denied(Exception):
-    def __init__(self, message: str, status: int = 403):
+    """A refusal: ``message`` reads ``refused: <rule-name>: <detail>``; ``rules`` names every rule hit."""
+
+    def __init__(self, message: str, status: int = 403, rules: tuple[str, ...] = ()):
         super().__init__(message)
-        self.status, self.message = status, message
+        self.status, self.message, self.rules = status, message, rules
+
+
+def refuse(rule: str, detail: str, status: int = 403) -> Denied:
+    return Denied(f"refused: {rule}: {detail}", status, (rule,))
+
+
+def refuse_all(problems: list[tuple[str, str]], suffix: str = "", status: int = 403) -> Denied:
+    """One refusal naming every problem; the first problem's rule leads, the rest are tagged."""
+    rules = tuple(dict.fromkeys(rule for rule, _ in problems))
+    detail = "; ".join(text if rule == rules[0] else f"{text} [{rule}]" for rule, text in problems)
+    return Denied(f"refused: {rules[0]}: {detail}{suffix}", status, rules)
 
 
 @dataclass
 class Route:
-    kind: str  # open | list | pull | create | image | container | exec
+    kind: str  # open | events | list | pull | create | volume | build | session | image | container | exec
     prefix: str = ""
     ref: str = ""  # container name/id, image name, or exec id
     op: str = ""
     query: list[tuple[str, str]] = field(default_factory=list)
 
+    path: str = ""
+
     @property
-    def upgradable(self) -> bool:
-        return (self.kind, self.op) in (("container", "attach"), ("exec", "start"))
+    def upgrade(self) -> str:
+        """The protocol a hijacking call upgrades to ('' when the call never hijacks)."""
+        return UPGRADES.get((self.kind, self.op), "")
+
+    @property
+    def allowed_query(self) -> set[str]:
+        return QUERY.get((self.kind, self.op), QUERY.get(self.kind, set()))
 
 
 def parse_target(method: str, target: str) -> Route:
@@ -58,16 +107,22 @@ def parse_target(method: str, target: str) -> Route:
     path, _, raw_query = target.partition("?")
     dotted = any(part in ("", ".", "..") for part in path.split("/")[1:-1])
     if not SAFE_PATH.match(path) or dotted:
-        raise Denied(f"{method} {path[:80]}: malformed path (rule: strict-path)")
+        raise refuse("malformed-path", f"{method} {path[:80]} is not a plain docker path")
     prefix = ""
     if match := VERSION.match(path):
         prefix, path = match.group(0), path[match.end():]
     route = _match(method, path)
     if route is None:
-        raise Denied(f"{method} {path} is not allowed on a managed docker line (rule: default-deny; "
-                     "see docs/write-fence.md, Docker access)")
-    route.prefix = prefix
+        if path.endswith("/update"):
+            raise refuse("update-refused", f"{method} {path}: limits cannot be changed in place; "
+                         "recreate the container through the managed path")
+        raise refuse("endpoint-not-allowed", f"{method} {path} is not allowed on a managed docker line "
+                     "(see docs/write-fence.md, Docker access)")
+    route.prefix, route.path = prefix, path
     route.query = parse_qsl(raw_query, keep_blank_values=True)
+    if extra := {k for k, _ in route.query} - route.allowed_query:
+        raise refuse("build-remote" if route.kind == "build" and "remote" in extra else "query-not-allowed",
+                     f"query parameter(s) {sorted(extra)} are not allowed on {method} {path}")
     return route
 
 
@@ -87,8 +142,8 @@ def _match(method: str, path: str) -> Route | None:
     return None
 
 
-def list_filters(route: Route, conv_id: str) -> str:
-    """The query for ``GET /containers/json`` narrowed to this line's containers."""
+def narrow_filters(route: Route, tree: str) -> str:
+    """The query with ``filters`` forced to this line's tree; a client filter can only narrow it."""
     query = [(k, v) for k, v in route.query if k != "filters"]
     filters: dict = {}
     for key, value in route.query:
@@ -96,89 +151,9 @@ def list_filters(route: Route, conv_id: str) -> str:
             try:
                 parsed = json.loads(value)
             except ValueError as exc:
-                raise Denied("containers filters: not valid JSON (rule: strict-query)") from exc
-            if not isinstance(parsed, dict):
-                raise Denied("containers filters: expected an object (rule: strict-query)")
+                raise refuse("query-not-allowed", "filters: not valid JSON") from exc
+            if not isinstance(parsed, dict) or not all(isinstance(v, (list, dict)) for v in parsed.values()):
+                raise refuse("query-not-allowed", "filters: expected an object of lists")
             filters = {k: list(v) for k, v in parsed.items()}
-    filters["label"] = [*filters.get("label", []), f"{LABEL_CONVERSATION}={conv_id}"]
+    filters["label"] = [*filters.get("label", []), f"{LABEL_TREE}={tree}"]
     return urlencode([*query, ("filters", json.dumps(filters))])
-
-
-def _int(value) -> int:
-    return value if isinstance(value, int) and not isinstance(value, bool) else 0
-
-
-def limit_problems(host: dict, labels: dict) -> list[str]:
-    """What a container must declare before it may run (create, and again at start)."""
-    memory = _int(host.get("Memory"))
-    problems = []
-    if memory <= 0:
-        problems.append("HostConfig.Memory must be a RAM cap > 0")
-    elif _int(host.get("MemorySwap")) != memory:
-        problems.append("HostConfig.MemorySwap must equal Memory (no swap)")
-    if _int(host.get("NanoCpus")) <= 0 and _int(host.get("CpuQuota")) <= 0:
-        problems.append("a CPU limit is required (NanoCpus or CpuQuota > 0)")
-    if _int(host.get("PidsLimit")) <= 0:
-        problems.append("HostConfig.PidsLimit must be > 0")
-    seconds = labels.get(LABEL_MAX_SECONDS, "")
-    if not (isinstance(seconds, str) and seconds.isdigit() and int(seconds) > 0):
-        problems.append(f"label {LABEL_MAX_SECONDS} (maximum lifetime in seconds) is required")
-    if host.get("DeviceRequests") and not str(labels.get(LABEL_GPU_MB, "")).isdigit():
-        problems.append(f"label {LABEL_GPU_MB} (VRAM need in MB) is required with GPU DeviceRequests")
-    return problems
-
-
-def _gpu_request(request) -> bool:
-    return isinstance(request, dict) and (
-        request.get("Driver") == "nvidia" or any("gpu" in caps for caps in request.get("Capabilities") or []))
-
-
-def refusals(host: dict, socket_paths: set[str], roots: list[str]) -> list[str]:
-    """Settings a managed container may never carry."""
-    out = ["Privileged is refused"] if host.get("Privileged") else []
-    for key, label in (("CapAdd", "added capabilities"), ("Devices", "host devices"),
-                       ("DeviceCgroupRules", "device cgroup rules"), ("VolumesFrom", "volumes-from")):
-        if host.get(key):
-            out.append(f"{label} are refused ({key})")
-    for key in ("NetworkMode", "PidMode", "IpcMode", "UTSMode", "UsernsMode", "CgroupnsMode"):
-        value = str(host.get(key) or "")
-        if value == "host" or value.startswith("container:"):
-            out.append(f"{key}={value} is refused")
-    if host.get("CgroupParent"):
-        out.append("CgroupParent is refused")
-    if any("unconfined" in str(opt) for opt in host.get("SecurityOpt") or []):
-        out.append("SecurityOpt unconfined is refused")
-    for request in host.get("DeviceRequests") or []:
-        if not _gpu_request(request):
-            out.append("only GPU DeviceRequests are allowed")
-    sources = [str(b).split(":")[0] for b in host.get("Binds") or []]
-    for mount in host.get("Mounts") or []:
-        if mount.get("Type") == "bind":
-            sources.append(str(mount.get("Source", "")))
-        elif mount.get("Type") not in ("volume", "tmpfs"):
-            out.append(f"mount type {mount.get('Type')} is refused")
-    for source in sources:
-        if source.startswith("/"):
-            out.extend(_bind_problem(source, socket_paths, roots))
-    return out
-
-
-def _bind_problem(source: str, socket_paths: set[str], roots: list[str]) -> list[str]:
-    real = os.path.realpath(source)
-    for sock in socket_paths:
-        if real == sock or sock.startswith(real.rstrip("/") + "/"):
-            return [f"bind source {source} exposes the Docker socket"]
-    if not any(real == root or real.startswith(root.rstrip("/") + "/") for root in roots):
-        return [f"bind source {source} is outside this line's worktrees and approved write-set paths"]
-    return []
-
-
-def create_problems(body, socket_paths: set[str], roots: list[str]) -> list[str]:
-    """Every reason a create body is refused; empty means it may be created."""
-    if not isinstance(body, dict) or not isinstance(body.get("HostConfig"), dict) or not body.get("Image"):
-        return ["create needs a JSON body with Image and HostConfig"]
-    labels = body.get("Labels") or {}
-    if not isinstance(labels, dict):
-        return ["Labels must be an object"]
-    host = body["HostConfig"]
-    return refusals(host, socket_paths, roots) + limit_problems(host, labels)

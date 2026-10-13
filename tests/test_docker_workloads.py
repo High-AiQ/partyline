@@ -28,7 +28,7 @@ class FakeDaemon:
         self.calls: list[tuple[str, str]] = []
         self.containers = {
             CAPPED: self.make(CAPPED, "voice", "running", "child", 4 * GB),
-            UNCAPPED: self.make(UNCAPPED, "comfy", "running", "root", 0),
+            UNCAPPED: self.make(UNCAPPED, "bigjob", "running", "root", 0),
             STRAY: self.make(STRAY, "shared-stream", "running", None, 0),
             GONE: self.make(GONE, "old", "exited", "child", 0),
             OTHER: self.make(OTHER, "elsewhere", "running", "sibling", 0),
@@ -128,10 +128,10 @@ class InventoryTest(WorkloadsBase):
         rows = {r["name"]: r for r in self.inventory.view(self.db, None)["containers"]}
         self.assertFalse(rows["voice"]["uncapped"])
         self.assertEqual(rows["voice"]["memory_limit_bytes"], 4 * GB)
-        self.assertTrue(rows["comfy"]["uncapped"])
+        self.assertTrue(rows["bigjob"]["uncapped"])
         self.assertTrue(rows["shared-stream"]["uncapped"])
         self.assertFalse(rows["old"]["uncapped"])  # not running: nothing to flag yet
-        self.assertEqual(rows["comfy"]["memory_used_bytes"], 2 * GB)  # inactive file cache excluded
+        self.assertEqual(rows["bigjob"]["memory_used_bytes"], 2 * GB)  # inactive file cache excluded
 
     async def test_the_summary_counts_running_uncapped_and_unattributed_apart_from_cli_budgets(self):
         self.assertIsNone(self.inventory.summary())
@@ -186,7 +186,7 @@ class SurvivorsTest(WorkloadsBase):
         self.assertIn("voice", body)
         self.assertIn("aaaaaaaaaaaa", body)
         self.assertIn("4.0 GB cap", body)
-        self.assertNotIn("comfy", body)  # root's, not this line's
+        self.assertNotIn("bigjob", body)  # root's, not this line's
         self.assertNotIn("old", body)  # exited
         self.assertNotIn("@", body)
 

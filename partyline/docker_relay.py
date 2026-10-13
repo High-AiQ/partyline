@@ -127,7 +127,14 @@ def relay_mode(conv_id: str) -> str:
 async def _serve(conv_id: str, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
     if relay_mode(conv_id) == "managed":
         from . import docker_proxy
-        await docker_proxy.serve(_runtime, conv_id, reader, writer)
+        relay = _relays.get(conv_id)
+        if relay is not None:
+            relay.clients.add(writer)
+        try:
+            await docker_proxy.serve(_runtime, conv_id, reader, writer)
+        finally:
+            if relay is not None:
+                relay.clients.discard(writer)
         return
     relay = _relays.get(conv_id)
     host = host_socket()
@@ -210,6 +217,15 @@ def _close_now(relay: Relay) -> None:
         relay.task.result().close()
     else:
         relay.task.cancel()
+
+
+def disconnect(conv_id: str) -> int:
+    """Close the line's open relay connections (a changed access mode must not outlive its policy)."""
+    relay = _relays.get(conv_id)
+    clients = list(relay.clients) if relay is not None else []
+    for client in clients:
+        client.close()
+    return len(clients)
 
 
 async def stop(conv_id: str) -> None:

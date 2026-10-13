@@ -15,12 +15,16 @@ FULL = {
         "running": "4",
         "gpu": "5",
         "gpu2": "6",
+        "sibling": "7",
     }.items()
 }
 
 
+TREE = {"line": "root"}
+
+
 def container(name, state, conv, memory, managed=True, gpu=False, extra_labels=None):
-    labels = {} if conv is None else {"partyline.conversation": conv}
+    labels = {} if conv is None else {"partyline.conversation": conv, "partyline.tree": TREE.get(conv, conv)}
     if managed:
         labels.update({"partyline.managed": "1", "partyline.max-seconds": "600"})
     if gpu:
@@ -59,6 +63,9 @@ class FakeDaemon:
         }
         self.execs = {"a" * 12: FULL["mine"], "b" * 12: FULL["other"]}
         self.server = None
+        self.info = {"DefaultRuntime": "runc"}
+        self.keepalive = False  # keep a connection open after an answer, recording what follows
+        self.refuse_attach = False  # answer attach/exec start with a 500 instead of a 101
 
     async def start(self):
         self.server = await asyncio.start_unix_server(self.handle, self.path)
@@ -75,32 +82,53 @@ class FakeDaemon:
     def seen(self, method, fragment):
         return [r for r in self.requests if r[0] == method and fragment in r[1]]
 
+    async def read_body(self, reader, headers):
+        if headers.get("transfer-encoding") == "chunked":
+            body = b""
+            while True:
+                size = int((await reader.readline()).strip() or b"0", 16)
+                body += (await reader.readexactly(size + 2))[:size] if size else b""
+                if not size:
+                    await reader.readline()
+                    return body
+        return await reader.readexactly(int(headers.get("content-length", 0)))
+
     async def handle(self, reader, writer):
-        try:
-            head = await reader.readuntil(b"\r\n\r\n")
-        except (asyncio.IncompleteReadError, ConnectionError):
-            writer.close()
-            return
-        lines = head.decode().split("\r\n")
-        method, target, _ = lines[0].split(" ", 2)
-        headers = {k.lower(): v for k, v in (line.split(": ", 1) for line in lines[1:] if ": " in line)}
-        body = await reader.readexactly(int(headers.get("content-length", 0)))
-        self.requests.append((method, target, headers, body))
-        status, payload, upgrade = self.route(method, target, body, headers)
-        if upgrade:
-            writer.write(b"HTTP/1.1 101 UPGRADED\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\n")
-            await writer.drain()
-            while data := await reader.read(1024):
-                writer.write(data.upper())
+        while True:
+            try:
+                head = await reader.readuntil(b"\r\n\r\n")
+                lines = head.decode().split("\r\n")
+                method, target, _ = lines[0].split(" ", 2)
+                headers = {
+                    k.lower(): v for k, v in (line.split(": ", 1) for line in lines[1:] if ": " in line)
+                }
+                body = await self.read_body(reader, headers)
+            except (asyncio.IncompleteReadError, ConnectionError, ValueError):
+                break
+            self.requests.append((method, target, headers, body))
+            status, payload, upgrade = self.route(method, target, body, headers)
+            if upgrade:
+                proto = headers.get("upgrade", "tcp")
+                writer.write(
+                    f"HTTP/1.1 101 UPGRADED\r\nConnection: Upgrade\r\nUpgrade: {proto}\r\n\r\n".encode()
+                )
                 await writer.drain()
-        else:
+                while data := await reader.read(1024):
+                    writer.write(data.upper())
+                    await writer.drain()
+                break
+            # only a hijack call stays open; the proxy's own lookups must end
+            keep = self.keepalive and ("/attach" in target or ("/exec/" in target and "/start" in target))
             raw = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
             writer.write(
-                f"HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nConnection: close\r\n"
+                f"HTTP/1.1 {status} X\r\nContent-Type: application/json\r\n"
+                f"Connection: {'keep-alive' if keep else 'close'}\r\n"
                 f"Content-Length: {len(raw)}\r\n\r\n".encode()
                 + raw
             )
-        await writer.drain()
+            await writer.drain()
+            if not keep:
+                break
         writer.close()
 
     def route(self, method, target, body, headers):
@@ -109,6 +137,14 @@ class FakeDaemon:
         query = parse_qs(parts.query)
         if path == "/_ping":
             return 200, b"OK", False
+        if path == "/info":
+            return 200, self.info, False
+        if path in ("/session", "/grpc"):
+            return (101, b"", True) if headers.get("upgrade") == "h2c" else (400, {}, False)
+        if path == "/build":
+            return 200, {"stream": "built"}, False
+        if path == "/volumes/create":
+            return 201, json.loads(body), False
         if path == "/containers/json":
             wanted = [x.split("=", 1) for x in json.loads(query.get("filters", ["{}"])[0]).get("label", [])]
             rows = [
@@ -141,6 +177,8 @@ class FakeDaemon:
                 return 200, found, False
             if op == "exec":
                 return 201, {"Id": "c" * 12}, False
+            if op == "attach" and self.refuse_attach:
+                return 500, {"message": "attach refused"}, False
             if op == "attach" and headers.get("upgrade") == "tcp":
                 return 101, b"", True
             if op in ("start", "restart"):
@@ -155,5 +193,7 @@ class FakeDaemon:
             if m.group(2) == "json":
                 owner = self.execs.get(m.group(1))
                 return (200, {"ContainerID": owner}, False) if owner else (404, {}, False)
+            if self.refuse_attach:
+                return 500, {"message": "exec start refused"}, False
             return (101, b"", True) if headers.get("upgrade") == "tcp" else (200, b"", False)
         return 200, {"path": path}, False

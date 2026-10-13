@@ -4,13 +4,25 @@ import tempfile
 import unittest
 from urllib.parse import parse_qs
 
-from partyline.docker_policy import Denied, create_problems, limit_problems, list_filters, parse_target
+from partyline.docker_body import canonical_create, limit_problems as _limits
+from partyline.docker_policy import Denied, narrow_filters, parse_target
 from partyline.docker_workloads import started_epoch
 
 GB = 1024**3
 LABELS = {"partyline.max-seconds": "600"}
 LIMITS = {"Memory": 4 * GB, "MemorySwap": 4 * GB, "NanoCpus": 2 * 10**9, "PidsLimit": 256}
 SOCK = {os.path.realpath("/run/docker.sock")}
+
+
+def limit_problems(host, labels):
+    return _limits(host, labels, 86400)
+
+
+def create_problems(payload, sockets, roots):
+    try:
+        return canonical_create(payload, sockets, roots, 86400)[1]
+    except Denied as denied:
+        return [denied.message]
 
 
 def body(**host):
@@ -24,7 +36,13 @@ class RouteTest(unittest.TestCase):
             ("HEAD", "/_ping"): "open",
             ("GET", "/v1.43/version"): "open",
             ("GET", "/info"): "open",
-            ("GET", "/events?since=1"): "open",
+            ("GET", "/events?since=1"): "events",
+            ("GET", "/volumes"): "open",
+            ("GET", "/system/df"): "open",
+            ("POST", "/volumes/create"): "volume",
+            ("POST", "/build?t=x"): "build",
+            ("POST", "/session"): "session",
+            ("POST", "/grpc"): "session",
             ("GET", "/images/json"): "open",
             ("GET", "/images/nvcr.io/nvidia/x:1.2/json"): "image",
             ("POST", "/images/create?fromImage=alpine&tag=3"): "pull",
@@ -45,11 +63,11 @@ class RouteTest(unittest.TestCase):
             ("POST", "/containers/abc/update"),
             ("POST", "/containers/abc/rename"),
             ("POST", "/containers/prune"),
-            ("GET", "/volumes"),
+            ("POST", "/volumes/prune"),
             ("POST", "/networks/create"),
-            ("POST", "/build"),
+            ("POST", "/build/cancel"),
             ("DELETE", "/images/alpine"),
-            ("GET", "/system/df"),
+            ("GET", "/system/events"),
             ("GET", "/containers/abc/attach/ws"),
             ("POST", "/images/create/x"),
             ("PUT", "/containers/abc/archive"),
@@ -60,7 +78,7 @@ class RouteTest(unittest.TestCase):
             with self.assertRaises(Denied, msg=(method, target)) as caught:
                 parse_target(method, target)
             self.assertEqual(caught.exception.status, 403)
-            self.assertIn("rule:", caught.exception.message)
+            self.assertIn("refused:", caught.exception.message)
 
     def test_path_tricks_are_refused(self):
         for target in (
@@ -85,17 +103,15 @@ class RouteTest(unittest.TestCase):
 
     def test_the_list_is_narrowed_to_the_line_and_cannot_be_widened(self):
         route = parse_target("GET", "/containers/json?all=1&filters=" + json.dumps({"label": ["x=y"]}))
-        query = parse_qs(list_filters(route, "line"))
+        query = parse_qs(narrow_filters(route, "root"))
         self.assertEqual(query["all"], ["1"])
-        self.assertEqual(json.loads(query["filters"][0])["label"], ["x=y", "partyline.conversation=line"])
-        other = parse_target(
-            "GET", "/containers/json?filters=" + json.dumps({"label": ["partyline.conversation=b"]})
-        )
-        labels = json.loads(parse_qs(list_filters(other, "a"))["filters"][0])["label"]
-        self.assertEqual(labels, ["partyline.conversation=b", "partyline.conversation=a"])  # ANDed: empty
+        self.assertEqual(json.loads(query["filters"][0])["label"], ["x=y", "partyline.tree=root"])
+        other = parse_target("GET", "/containers/json?filters=" + json.dumps({"label": ["partyline.tree=b"]}))
+        labels = json.loads(parse_qs(narrow_filters(other, "a"))["filters"][0])["label"]
+        self.assertEqual(labels, ["partyline.tree=b", "partyline.tree=a"])  # ANDed: empty
         for bad in ("{", "[1]"):
             with self.assertRaises(Denied):
-                list_filters(parse_target("GET", "/containers/json?filters=" + bad), "a")
+                narrow_filters(parse_target("GET", "/containers/json?filters=" + bad), "a")
 
 
 class LimitsTest(unittest.TestCase):

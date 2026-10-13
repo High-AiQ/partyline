@@ -13,7 +13,7 @@ import logging
 import shutil
 import time
 
-from .docker_policy import Denied
+from .docker_policy import refuse
 from .hierarchy import ancestors
 from .system_notice import post_system_notice
 
@@ -62,15 +62,15 @@ class Gpu:
 
     async def free_mb(self, runtime, conv_id: str) -> int:
         if self.unhealthy:
-            raise Denied(f"the GPU is marked unhealthy ({self.unhealthy}); GPU starts are refused until "
-                         "a person clears it (POST /api/docker-gpu/clear)", 503)
+            raise refuse("gpu-unhealthy", f"the GPU is marked unhealthy ({self.unhealthy}); GPU starts are "
+                         "refused until a person clears it (POST /api/docker-gpu/clear)", 409)
         if self._clock() - self._at >= TTL:
             try:
                 self._free = await probe()
             except OSError as exc:
                 await self.mark(runtime, conv_id, str(exc))
-                raise Denied(f"the GPU health check failed ({exc}); GPU starts are refused until a "
-                             "person clears it (POST /api/docker-gpu/clear)", 503) from exc
+                raise refuse("gpu-unhealthy", f"the GPU health check failed ({exc}); GPU starts are refused "
+                             "until a person clears it (POST /api/docker-gpu/clear)", 409) from exc
             self._at = self._clock()
         return self._free
 
