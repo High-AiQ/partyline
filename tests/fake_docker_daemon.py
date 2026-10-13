@@ -64,6 +64,9 @@ class FakeDaemon:
         self.execs = {"a" * 12: FULL["mine"], "b" * 12: FULL["other"]}
         self.server = None
         self.info = {"DefaultRuntime": "runc"}
+        self.networks = {  # name or id -> driver
+            "bridge": "bridge", "appnet": "bridge", "b" * 64: "bridge",
+            "host": "host", "lan": "macvlan", "m" * 64: "macvlan", "vlan": "ipvlan"}
         self.keepalive = False  # keep a connection open after an answer, recording what follows
         self.refuse_attach = False  # answer attach/exec start with a 500 instead of a 101
 
@@ -137,6 +140,9 @@ class FakeDaemon:
         query = parse_qs(parts.query)
         if path == "/_ping":
             return 200, b"OK", False
+        if m := re.fullmatch(r"/networks/([^/]+)", path):
+            driver = self.networks.get(m.group(1))
+            return (200, {"Name": m.group(1), "Driver": driver}, False) if driver else (404, {}, False)
         if path == "/info":
             return 200, self.info, False
         if path in ("/session", "/grpc"):

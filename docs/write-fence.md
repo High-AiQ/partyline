@@ -292,22 +292,30 @@ a generous lifetime, and treat a vanished container as an interrupted job.
 
 **What the other calls can and cannot do** (stated so nobody assumes more is enforced):
 
+- *Volume names are shared across trees too.* Volumes have no owner label the proxy can
+  check, so a managed line can mount, fill or overwrite another tree's named volume by name.
+  This is a known limit and is not enforced; give each project's volumes a distinct prefix,
+  and keep anything private on a bind inside the line's own worktree.
 - *Image names are shared across trees.* Pull and `build -t` can re-point a tag another tree's
   new containers resolve, so give images distinct names. Existing containers keep their image
   id, so a re-point never changes what is already running. `tag`, `push`, `commit`, image
   removal and prune are not on the allowlist.
-- *BuildKit entitlements are not enforced here.* The proxy refuses `networkmode=host`,
+- *BuildKit entitlements are not enforced here, and the daemon may allow them.* The proxy refuses `networkmode=host`,
   `container:…` and `remote` on `/build`, but a BuildKit client asks for `network.host` or
   `security.insecure` inside the gRPC stream of the `session` upgrade, which the proxy cannot
   read. Whether the daemon grants them is its own builder configuration, which Partyline
-  neither reads nor changes; an operator who needs builds to be safe must not enable insecure
-  entitlements in the daemon.
+  neither reads nor changes, and the daemon may allow `network.host` by default. A person can
+  turn it off as hardening on the host: `"builder": {"Entitlements": {"network-host": false}}`
+  in `daemon.json` (then restart the daemon), and should leave insecure entitlements off.
 - *Exec* allows `Cmd`, `Env`, `User`, `WorkingDir`, `Tty` and the attach flags on a container in
   the tree, never `Privileged`; it runs inside that container's own limits.
 - *`rm`* accepts only `v` and `force`; `v=1` removes that container's anonymous volumes, never
   named ones, and volume removal is not on the allowlist.
-- *Networks:* `network create`, `connect` and `disconnect` are not allowed, and a create may
-  not name `host` or `container:…` (as `NetworkMode` or in `EndpointsConfig`). A container may
+- *Networks:* `network create`, `connect` and `disconnect` are not allowed. Every network a create, a
+  start or a build names (`NetworkMode`, `EndpointsConfig` keys, `NetworkID`, build `networkmode`) is
+  resolved through the daemon by name or id, and only `bridge`-driver networks, `none` and
+  `default` pass (`network-driver`); `host`, `macvlan`, `ipvlan`, unresolvable names and
+  `container:…` are refused. A container may
   join any network that already exists; networks are not isolated per tree, and containers of
   different trees on one network (including the default bridge) can reach each other.
 
@@ -327,7 +335,7 @@ first, and tags the others). Rules:
 `gpu-env`, `volume-driver`, `bind-source`, `forbidden-setting`, `field-not-allowed`,
 `security-opt`, `device-request`, `mount-type`, `build-network`, `build-remote`,
 `upgrade-required`, `connection-limit`, `budget-exceeded`, `gpu-busy`, `gpu-memory`,
-`gpu-unhealthy`, `log-driver`, `port-exposure`. (`update-refused`: limits cannot change in place, recreate the container;
+`gpu-unhealthy`, `log-driver`, `port-exposure`, `network-driver`. (`update-refused`: limits cannot change in place, recreate the container;
 `not-managed`: it was not created through this path; `gpu-env`: `NVIDIA_*` without
 `DeviceRequests`; `field-not-allowed`: a field outside the allowlists.)
 

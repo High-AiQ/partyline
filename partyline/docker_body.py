@@ -67,9 +67,30 @@ def limit_problems(host: dict, labels: dict, cap: int) -> list[tuple[str, str]]:
     return problems
 
 
+GPU_ID = re.compile(r"^(\d+|GPU-[0-9A-Fa-f-]+|MIG-[0-9A-Za-z/-]+)$")
+FREE_NETWORKS = ("", "default", "none")
+
+
 def _gpu_request(request) -> bool:
-    return isinstance(request, dict) and (
-        request.get("Driver") == "nvidia" or any("gpu" in caps for caps in request.get("Capabilities") or []))
+    """A plain NVIDIA GPU request: no other driver (CDI injects devices), no options, GPU ids only."""
+    return (isinstance(request, dict) and request.get("Driver") in (None, "", "nvidia")
+            and not request.get("Options")
+            and all(isinstance(i, str) and GPU_ID.match(i) for i in request.get("DeviceIDs") or [])
+            and any(isinstance(caps, list) and "gpu" in caps for caps in request.get("Capabilities") or []))
+
+
+def network_refs(host: dict, networking: dict | None = None, attached: dict | None = None) -> list[str]:
+    """Every network a container names, by name or id, that must be resolved through the daemon."""
+    refs = []
+    mode = str(host.get("NetworkMode") or "")
+    if mode not in FREE_NETWORKS and not mode.startswith("container:"):
+        refs.append(mode)
+    for table in ((networking or {}).get("EndpointsConfig"), attached):
+        for name, endpoint in (table or {}).items():
+            refs.append(name)
+            if isinstance(endpoint, dict) and endpoint.get("NetworkID"):
+                refs.append(str(endpoint["NetworkID"]))
+    return refs
 
 
 def _bind_problem(source: str, socket_paths: set[str], roots: list[str]) -> list[tuple[str, str]]:
@@ -142,7 +163,8 @@ def host_problems(host: dict, socket_paths: set[str], roots: list[str]) -> list[
     if any(not SAFE_SECURITY.match(str(opt)) for opt in host.get("SecurityOpt") or []):
         out.append(("security-opt", "SecurityOpt: only no-new-privileges is allowed"))
     if not all(_gpu_request(r) for r in host.get("DeviceRequests") or []):
-        out.append(("device-request", "only GPU DeviceRequests are allowed"))
+        out.append(("device-request", "only plain NVIDIA GPU DeviceRequests are allowed (driver nvidia or "
+                    "empty, no Options, DeviceIDs only GPU indices or UUIDs)"))
     sources = [str(b).split(":")[0] for b in host.get("Binds") or []]
     for mount in host.get("Mounts") or []:
         if not isinstance(mount, dict):
