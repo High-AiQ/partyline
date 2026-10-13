@@ -15,7 +15,8 @@ class DockerRelayTest(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.tmp.cleanup)
         self.host = os.path.join(self.tmp.name, "host.sock")
         for target, value in (
-                (docker_relay, {"RELAY_ROOT": os.path.join(self.tmp.name, "docker")}),):
+                (docker_relay, {"RELAY_ROOT": os.path.join(self.tmp.name, "docker"),
+                                "relay_mode": lambda conv_id: "unrestricted"}),):
             patcher = patch.multiple(target, **value)
             patcher.start()
             self.addCleanup(patcher.stop)

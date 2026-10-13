@@ -25,6 +25,7 @@ from .retirement import archive_blockers
 from .review_worktrees import prune_review_worktrees
 from .scratch_worktrees import prune_scratch_worktrees
 from .attachment_tmp import reap_line_tmp
+from .legacy_tmp import reap_legacy_temp
 from .system_notice import post_system_notice
 from .worktree_lifecycle import archive_worktree_if_safe, discard_worktree
 
@@ -107,6 +108,9 @@ def register_archive_route(app: FastAPI, presence):
             await asyncio.to_thread(reap_line_tmp, db, line_id)
             if line_id == conv_id:
                 removed, kept_reason = line_removed, reason
+        # One walk of the legacy locations for the whole archive, after the
+        # per-line loop — not one walk per archived line.
+        await asyncio.to_thread(reap_legacy_temp, db)
         await runtime.broadcast_all(ConversationsChangedEvent())
         return {"ok": True, "archived": True, "stopped": stopped,
                 "archived_ids": archived, "worktree_removed": removed,

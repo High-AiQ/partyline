@@ -8,11 +8,13 @@ import logging
 import sys
 import time
 
+from .docker_workloads import inventory
 from .hierarchy import ancestors
 from .memory_contracts import MemoryUsageEvent
 from .mention_relay import live_manager, post_private
 from .resource_budget import cap_bytes, live_rows, settings
-from .process_memory import backstop_bytes
+from .process_memory import (
+    backstop_bytes, cgroup_usage, reclaim_scope)
 from .resource_push import ResourcePusher
 from .memory_warning import warning_text  # noqa: F401  re-exported for the sampler's tests
 from .top_processes import top_descendants
@@ -21,28 +23,10 @@ INTERVAL = 5.0
 CHUNK = 8
 REARM_RATIO = 0.65
 NOTICE_WINDOW = 600.0
+RECLAIM_BACKOFF_SECONDS = 60.0
 logger = logging.getLogger(__name__)
 _NO_PROCESS_TABLE = object()
 _NO_CGROUP_SAMPLE = object()
-
-
-def cgroup_usage(pid: int) -> tuple[int, int | None] | None:
-    """Read the process scope's current and peak cgroup-v2 memory in bytes."""
-    try:
-        with open(f"/proc/{pid}/cgroup", encoding="ascii") as stream:
-            relative = next(line.split("::", 1)[1].strip() for line in stream
-                            if line.startswith("0::"))
-        root = f"/sys/fs/cgroup{relative}"
-        with open(f"{root}/memory.current", encoding="ascii") as stream:
-            current = int(stream.read().strip())
-        try:
-            with open(f"{root}/memory.peak", encoding="ascii") as stream:
-                peak = int(stream.read().strip())
-        except (OSError, ValueError):
-            peak = None
-        return current, peak
-    except (OSError, StopIteration, ValueError):
-        return None
 
 
 def process_snapshot(platform: str | None = None) -> tuple[dict[int, int], dict[int, int]] | None:
@@ -119,19 +103,23 @@ def process_tree_rss(
 
 
 def read_usage(adapter, *, process_table=_NO_PROCESS_TABLE,
-               cgroup_sample=_NO_CGROUP_SAMPLE) -> tuple[int, int | None, str] | None:
+               cgroup_sample=_NO_CGROUP_SAMPLE) -> tuple[int, int | None, str, int] | None:
+    """Advisory usage (working set where cgroups exist), peak, source, and
+    the raw ``memory.current`` so nothing hides behind the working set."""
     proc = getattr(adapter, "proc", None)
     pid = getattr(proc, "pid", None)
     if not isinstance(pid, int):
         return None
     if sys.platform.startswith("linux"):
         usage = cgroup_usage(pid) if cgroup_sample is _NO_CGROUP_SAMPLE else cgroup_sample
+        if isinstance(usage, dict):
+            return (usage["working_set"], usage["peak"], "cgroup", usage["current"])
         if usage is not None:
-            return usage[0], usage[1], "cgroup"
+            return usage[0], usage[1], "cgroup", usage[0]
     if process_table is None:
         return None
     rss = process_tree_rss(pid, snapshot=process_table)
-    return (rss, None, "rss") if rss is not None else None
+    return (rss, None, "rss", rss) if rss is not None else None
 
 
 def crosses_warning(usage: int, cap: int, threshold: int) -> bool:
@@ -176,6 +164,8 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
     over: dict[str, bool] = {}
     # Warning state belongs to one activation: a resumed process starts fresh.
     activation: dict[str, object] = {}
+    # One reclaim attempt per scope per backoff window (EAGAIN retry guard).
+    reclaim_backoff: dict[str, float] = {}
     notified: dict[str, float] = {}
     cursor = 0
     pusher = ResourcePusher(clock)
@@ -225,9 +215,35 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
                             for state in (armed, notified, over):
                                 state.pop(row["id"], None)
                             activation[row["id"]] = adapter
+                        sample_dict = cgroup_samples.get(row["id"])
+                        raw = sample[3] if len(sample) > 3 else sample[0]
                         usage = sample[0]
                         cap = cap_bytes(row, config)
                         effective = warning_limit(cap)
+                        # The working-set fix: file cache inflates
+                        # memory.current past the threshold while the working
+                        # set is fine. Reclaim the difference off the event
+                        # loop (with a per-attachment backoff — the kernel
+                        # answers EAGAIN when it cannot reclaim the full
+                        # amount), re-read, and only then decide.
+                        attempted_recently = (
+                            clock() - reclaim_backoff.get(row["id"], -RECLAIM_BACKOFF_SECONDS)
+                            < RECLAIM_BACKOFF_SECONDS)
+                        if (sample_dict is not None and usage < effective
+                                and crosses_warning(raw, effective,
+                                                    config["memory_warn_percent"])
+                                and not attempted_recently):
+                            reclaim_backoff[row["id"]] = clock()
+                            amount = sample_dict["current"] - usage
+                            await asyncio.to_thread(reclaim_scope,
+                                                    sample_dict["root"], amount)
+                            pid = getattr(getattr(adapter, "proc", None),
+                                          "pid", None)
+                            fresh = (await asyncio.to_thread(cgroup_usage, pid)
+                                     if isinstance(pid, int) else None)
+                            if fresh is not None:
+                                usage = fresh["working_set"]
+                                raw = fresh["current"]
                         if usage < effective * REARM_RATIO:
                             armed[row["id"]] = True
                             over[row["id"]] = False
@@ -245,13 +261,16 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
                                 await _warn(runtime, row, usage, cap)
                         runtime.memory_usage[row["id"]] = {
                             "usage_bytes": usage, "cap_bytes": cap,
+                            "raw_bytes": raw,
                             "percent": min(100, usage * 100 // max(cap, 1)),
                             "source": sample[2], "sampled_at": time.time(),
                         }
                         await runtime.broadcast(row["conv_id"], MemoryUsageEvent(
                             attachment_id=row["id"], usage_bytes=usage, cap_bytes=cap,
+                            raw_bytes=raw,
                             percent=min(100, usage * 100 // max(cap, 1)),
                         ))
+                inventory.kick(runtime)
                 await pusher.tick(runtime)
             except asyncio.CancelledError:
                 raise

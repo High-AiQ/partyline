@@ -18,22 +18,27 @@
 
   let { close }: Props = $props();
 
-  let busy = $state<"approve" | "decline" | null>(null);
+  let busy = $state<"approve" | "unrestricted" | "decline" | null>(null);
+  const isDocker = $derived(Boolean(writeSet.request?.path.endsWith("docker.sock")));
   let error = $state("");
 
   $effect(() => {
     if (!writeSet.request) close();
   });
 
-  async function decide(action: "approve" | "decline"): Promise<void> {
+  async function decide(action: "approve" | "unrestricted" | "decline"): Promise<void> {
     const request = writeSet.request;
     const convId = room.conversation?.id;
     if (!request || !convId || busy) return;
     busy = action;
     error = "";
     try {
-      if (action === "approve") {
-        await writeSetApi.approve(convId, request.id);
+      if (action === "approve" || action === "unrestricted") {
+        await writeSetApi.approve(
+          convId,
+          request.id,
+          isDocker ? (action === "approve" ? "managed" : "unrestricted") : undefined,
+        );
       } else {
         await writeSetApi.decline(convId, request.id);
       }
@@ -57,13 +62,26 @@
       Every live process on this line is detached and resumed with the new bind. Only grant paths you intend
       this line to write.
     </p>
+    {#if isDocker}
+      <p class="dialog-text" data-testid="docker-modes">
+        <strong>Managed</strong> (the default): containers must declare RAM, swap, CPU, process and lifetime
+        limits, run only what this line owns, and are admitted against the host budget.
+        <strong>Unrestricted</strong> is root-equivalent access to the host's Docker daemon, outside every memory
+        budget and rule; choose it only if you accept that.
+      </p>
+    {/if}
     <div class="line-status" class:error={Boolean(error)} aria-live="polite">{error}</div>
     <div class="flex justify-end gap-2">
       <button type="button" disabled={busy !== null} onclick={() => void decide("decline")}
         >{busy === "decline" ? "declining…" : "decline"}</button
       >
+      {#if isDocker}
+        <button type="button" disabled={busy !== null} onclick={() => void decide("unrestricted")}
+          >{busy === "unrestricted" ? "granting…" : "approve unrestricted"}</button
+        >
+      {/if}
       <button type="button" class="primary" disabled={busy !== null} onclick={() => void decide("approve")}
-        >{busy === "approve" ? "granting…" : "approve grant"}</button
+        >{busy === "approve" ? "granting…" : isDocker ? "approve managed" : "approve grant"}</button
       >
     </div>
   {/if}

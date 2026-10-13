@@ -42,6 +42,15 @@ class ResourceLineUsage(BaseModel):
     usage_bytes: int
 
 
+class DockerWorkloadSummary(BaseModel):
+    """Daemon containers, which no attachment budget bounds."""
+    running: int
+    memory_used_bytes: int | None = None
+    uncapped: int
+    unattributed: int
+    sampled_at: float
+
+
 class ResourceSnapshot(BaseModel):
     max_live_processes: int
     memory_reserve_bytes: int
@@ -69,6 +78,7 @@ class ResourceSnapshot(BaseModel):
     tmp_total_bytes: int | None = None
     tmp_used_bytes: int | None = None
     tmp_partyline_bytes: int | None = None
+    docker: DockerWorkloadSummary | None = None
 
 
 class ResourceSnapshotEvent(BaseModel):

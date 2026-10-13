@@ -51,6 +51,7 @@ export function onRoomWireEvent(room: RoomWireSink, event: WireEvent, context: W
         room.upsertAttachment({
           ...attachment,
           memory_usage_bytes: event.usage_bytes,
+          memory_raw_bytes: event.raw_bytes ?? null,
           memory_cap_bytes: event.cap_bytes,
           memory_percent: event.percent,
         });

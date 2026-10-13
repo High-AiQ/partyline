@@ -147,7 +147,7 @@ class MemoryRequestTest(unittest.TestCase):
         self.actor = Principal(kind="machine", name="captain", conv_id="line",
                                attachment_id="captain", is_lead=True)
 
-        async def detach(_runtime, ident):
+        async def detach(_runtime, ident, **_kw):
             self.runtime.live.pop(ident, None)
             self.db._exec("UPDATE attachments SET status='stopped' WHERE id=?", (ident,))
             return {"ok": True}

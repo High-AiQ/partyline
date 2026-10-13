@@ -158,6 +158,7 @@ def snapshot(db, host: Host | None = None, runtime=None) -> dict:
     reserved = sum(lease_bytes(row, config) for row in rows)
     capped = sum(cap_bytes(row, config) for row in rows)
     from .attachment_tmp import tmp_summary
+    from .docker_workloads import inventory
 
     return {
         **config,
@@ -170,6 +171,7 @@ def snapshot(db, host: Host | None = None, runtime=None) -> dict:
         "remaining_memory_bytes": max(0, budget - reserved),
         "busiest_line": busiest,
         **tmp_summary(),
+        "docker": inventory.summary(),
         **usage_section(runtime, rows, host, family_roots(db)),
     }
 
