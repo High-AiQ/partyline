@@ -169,13 +169,19 @@ async def lifespan(app):
                        probe_result[1], probe_result[2])
     fence_probe.set_result(probe_result)
     app.state.fence_status = fence_probe.status(probe_result)
-    # Finding 5.14 item 6: explain an unplanned stop before the stale rows
-    # are settled, so "mid-turn" names the processes that were actually live.
-    await post_interruption_notices(runtime)
+    try:
+        # Finding 5.14 item 6: explain an unplanned stop before the stale
+        # rows are settled, so the notice names what was actually live.
+        await post_interruption_notices(runtime)
+    except Exception:
+        logger.exception("startup interruption notice failed; continuing")
     runtime.db.mark_stale_attachments()
     await asyncio.to_thread(sweep_orphaned_worktrees, runtime.db)
-    # Finding 5.13: the pre-2.33 temp locations reap on start, guarded.
-    await asyncio.to_thread(reap_legacy_temp, runtime.db)
+    try:
+        # Finding 5.13: the pre-2.33 temp locations reap on start, guarded.
+        await asyncio.to_thread(reap_legacy_temp, runtime.db)
+    except Exception:
+        logger.exception("legacy temp reap failed; continuing")
     automatic_task = asyncio.create_task(_run_automatic_reattachment())
     app.state.automatic_reattach_task = automatic_task
     # The monitor's state is in the database, so a restart resumes whatever the
@@ -221,7 +227,9 @@ register_docker_relay_routes(app)
 register_docker_workload_routes(app, runtime)
 docker_relay.bind_runtime(runtime)
 register_tmp_reap_routes(app, runtime)
-register_restart_request_routes(app, runtime, ADAPTER_METADATA, lambda: request_exit())
+register_restart_request_routes(
+    app, runtime, ADAPTER_METADATA,
+    lambda: request_exit(runtime.db.path))
 app.include_router(auth_router(runtime.db, on_handle_change=user_sockets.close_all))
 app.include_router(media_router(runtime, media))
 app.include_router(message_router(runtime, media))
@@ -292,17 +300,20 @@ def save_restart_plan(body: RestartPlanRequest) -> RestartPlanResponse:
         raise HTTPException(exc.status_code, exc.detail) from exc
 
 
-def request_exit():
+def request_exit(db_path: str | None = None):
     """Ask the process to come down gracefully, running lifespan teardown.
 
     Never os._exit(): that skips `ChatRuntime.shutdown()`, which is what stops
     the ptys. Orphaned processes would outlive the server that owns them.
     """
-    # Finding 5.14 item 6: an approved stop leaves a marker, so the next
-    # startup can tell it apart from a crash or a host reboot.
-    from .startup_state import write_orderly_marker
+    # Finding 5.14 item 6: an approved stop leaves a per-instance marker so
+    # the next startup can tell a crash or reboot from an orderly restart.
+    try:
+        from .startup_state import write_orderly_marker
 
-    write_orderly_marker()
+        write_orderly_marker(db_path)
+    except Exception:
+        logger.exception("could not write the orderly-stop marker")
     if _uvicorn_server is not None:
         _uvicorn_server.should_exit = True
     else:
@@ -367,7 +378,7 @@ async def shutdown(request: Request, body: ShutdownRequest | None = None):
     )
     return JSONResponse(
         payload.model_dump(exclude_none=True),
-        background=BackgroundTask(request_exit),
+        background=BackgroundTask(request_exit, runtime.db.path),
     )
 
 

@@ -3,21 +3,24 @@
 Partyline's approved restarts come down gracefully through
 ``request_exit``; a host reboot or a crash does not. On the way out of an
 orderly stop a small marker records the boot id and the time; the next
-startup reads it:
+startup reads it, then unlinks it:
 
 - marker present, same host boot → the stop was an orderly approved
   restart; nothing is posted.
 - marker present, different boot → the host rebooted since the marker was
   written: partyline died with the host, which is unplanned.
-- marker absent → the process stopped without reaching its orderly path:
-  unplanned.
+- marker absent → unplanned — but not on the very first start after this
+  feature deploys: the previous server wrote no marker, so the first run
+  only records that the watch exists. Every later marker-less start is an
+  unplanned stop.
 
-After an unplanned stop, every line that had live processes is told so —
-which processes were mid-turn, whether the host rebooted — and that
-resumed processes must not replay interrupted heavy work (GPU or Docker
-batches) without a person's go-ahead. The marker itself lives under
-``~/.partyline``; both paths are injectable, so tests use temp files and
-never the real ``/proc`` or home.
+The marker is keyed per instance — it sits next to that instance's
+database — so a dev instance's orderly restart can never mask the LAN
+instance's crash. After an unplanned stop, every line that had live
+processes is told so, which processes were running, and that resumed
+processes must not replay interrupted heavy work (GPU or Docker batches)
+without a person's go-ahead. Every path is injectable: tests use temp
+files and never the real ``/proc`` or home.
 """
 
 from __future__ import annotations
@@ -27,50 +30,60 @@ import time
 from pathlib import Path
 
 LIVE = ("starting", "running")
-DEFAULT_MARKER = Path.home() / ".partyline" / "last-stop.json"
-DEFAULT_BOOT_ID = "/proc/sys/kernel/random/boot_id"
+WATCH_SETTING = "interruption_watch_seen"
 
 
-def boot_id(path: str | Path = DEFAULT_BOOT_ID) -> str | None:
+def default_marker(db_path: str | None) -> str | None:
+    """The marker sits next to the instance's database, keying it per instance."""
+    return f"{db_path}.last-stop" if db_path else None
+
+
+def boot_id(path: str | Path = "/proc/sys/kernel/random/boot_id") -> str | None:
     try:
         return Path(path).read_text(encoding="utf-8").strip() or None
     except OSError:
         return None
 
 
-def write_orderly_marker(marker_path: str | Path | None = None,
-                         boot_id_path: str | Path = DEFAULT_BOOT_ID) -> None:
+def write_orderly_marker(db_path: str | None, *,
+                         marker_path: str | Path | None = None,
+                         boot_id_path: str | Path = "/proc/sys/kernel/random/boot_id") -> None:
     """Record an orderly stop, for the next startup to recognise."""
-    path = Path(marker_path) if marker_path else DEFAULT_MARKER
+    path = Path(marker_path) if marker_path else Path(default_marker(db_path) or "")
+    if not str(path):
+        return
     payload = {"boot": boot_id(boot_id_path), "at": time.time()}
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def _read_marker(marker_path: str | Path | None) -> dict | None:
-    path = Path(marker_path) if marker_path else DEFAULT_MARKER
+def take_marker(marker_path: str | Path) -> dict | None:
+    """Read the marker and unlink it: every start consumes it exactly once."""
+    path = Path(marker_path)
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        path.unlink()
+        return payload
     except (OSError, ValueError):
         return None
 
 
-def interruption_state(marker_path: str | Path | None = None,
-                       boot_id_path: str | Path = DEFAULT_BOOT_ID) -> dict:
-    """Classify the previous stop: ``orderly``, ``rebooted``, and whether a
-    marker existed at all."""
-    marker = _read_marker(marker_path)
+def interruption_state(marker: dict | None, *,
+                       boot_id_path: str | Path = "/proc/sys/kernel/random/boot_id") -> dict:
+    """Classify a consumed marker: ``orderly``, ``rebooted``, ``present``."""
     current = boot_id(boot_id_path)
     if marker is None:
-        return {"orderly": False, "rebooted": False, "marker": False}
+        return {"orderly": False, "rebooted": False, "present": False}
     rebooted = bool(current) and marker.get("boot") != current
-    return {"orderly": not rebooted, "rebooted": rebooted, "marker": True}
+    return {"orderly": not rebooted, "rebooted": rebooted, "present": True}
 
 
 def stale_live_rows(db) -> list[dict]:
     """Rows still marked live from before the stop, per line.
 
-    Called before ``mark_stale_attachments`` flips them to exited.
+    Called before ``mark_stale_attachments`` flips them to exited. Partyline
+    persists no mid-turn flag, so the notice says these processes *were
+    running*, nothing stronger.
     """
     with db.lock:
         rows = db.conn.execute(
@@ -92,7 +105,7 @@ def interruption_notice(state: dict, rows: list[dict]) -> dict[str, str]:
     return {
         conv_id: (
             f"⚠ the last partyline stop was unplanned: {reason}. "
-            f"Mid-turn at the time: {', '.join(names)}. "
+            f"Processes that were running: {', '.join(names)}. "
             "Do not replay interrupted heavy work (GPU or Docker batches) "
             "without a person's go-ahead."
         )
@@ -100,15 +113,35 @@ def interruption_notice(state: dict, rows: list[dict]) -> dict[str, str]:
     }
 
 
-async def post_interruption_notices(runtime, *, marker_path: str | Path | None = None,
-                                    boot_id_path: str | Path = DEFAULT_BOOT_ID) -> bool:
-    """Post the notices for an unplanned stop; True when one was posted."""
+async def post_interruption_notices(runtime, *,
+                                    marker_path: str | Path | None = None,
+                                    boot_id_path: str | Path = "/proc/sys/kernel/random/boot_id") -> bool:
+    """Consume the marker and post the notices for an unplanned stop.
+
+    Returns True when a notice was posted. The very first start after this
+    feature deploys stays silent: the previous server wrote no marker, and
+    posting "unplanned" to every line for that would be the bug finding
+    5.14 item 6 warns about.
+    """
     from .system_notice import post_system_notice
 
-    state = interruption_state(marker_path, boot_id_path)
-    rows = stale_live_rows(runtime.db)
-    posted = False
-    for conv_id, body in interruption_notice(state, rows).items():
+    db = runtime.db
+    path = Path(marker_path) if marker_path else default_marker(db.path)
+    if not str(path):
+        return False
+    seen = db.get_setting(WATCH_SETTING)
+    marker = take_marker(path)
+    state = interruption_state(marker, boot_id_path=boot_id_path)
+    with db.lock, db.conn:
+        db.conn.execute(
+            "INSERT INTO settings(key,value) VALUES(?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (WATCH_SETTING, "1"))
+    if marker is None and not seen:
+        # First start after this feature deploys: the old server wrote no
+        # marker, and a crash-free history must not read as unplanned.
+        return False
+    bodies = interruption_notice(state, stale_live_rows(db))
+    for conv_id, body in bodies.items():
         await post_system_notice(runtime, conv_id, body)
-        posted = True
-    return posted
+    return bool(bodies)

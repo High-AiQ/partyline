@@ -1933,7 +1933,14 @@ class ShutdownTest(ServerTest):
 
         original, server._uvicorn_server = server._uvicorn_server, FakeServer()
         try:
-            server.request_exit()
+            home_marker = Path.home() / ".partyline" / "last-stop.json"
+            before = home_marker.stat().st_mtime if home_marker.exists() else None
+            server.request_exit(server.runtime.db.path)
             self.assertTrue(server._uvicorn_server.should_exit)
+            # Review B2: the orderly-stop marker is per instance, next to the
+            # sandbox database — a test must never write under Path.home().
+            self.assertTrue(Path(f"{server.runtime.db.path}.last-stop").exists())
+            if before is not None:
+                self.assertEqual(home_marker.stat().st_mtime, before)
         finally:
             server._uvicorn_server = original
