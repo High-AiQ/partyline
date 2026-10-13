@@ -387,7 +387,7 @@ class ServerTest(unittest.TestCase):
             with overridden(write_fence=True), patch.object(
                 server.service_guard, "unit_from_cgroup", return_value="partyline.service"
             ), patch.object(server.fence_probe, "probe", return_value=result) as probe, \
-               patch("partyline.server.reap_legacy_temp"):
+               patch("partyline.startup_state.reap_legacy_temp"):
                 async with server.lifespan(server.app):
                     probe.assert_called_once_with(
                         check_fence=True, service_unit="partyline.service",
@@ -1775,7 +1775,7 @@ class ShutdownTest(ServerTest):
 
         async def exercise():
             with patch.object(server.fence_probe, "probe", return_value=(True, "", "")), \
-                 patch("partyline.server.reap_legacy_temp"):
+                 patch("partyline.startup_state.reap_legacy_temp"):
                 async with server.lifespan(server.app):
                     await server.app.state.automatic_reattach_task
                     self.assertIn("a1", server.runtime.live)
@@ -1803,6 +1803,7 @@ class ShutdownTest(ServerTest):
             run_dir.mkdir(parents=True)
             (run_dir / "f.bin").write_bytes(b"x" * 64)
             os.utime(run_dir, (old, old))
+            os.utime(run_dir / "f.bin", (old, old))
 
             captured = {}
 
@@ -1815,7 +1816,7 @@ class ShutdownTest(ServerTest):
                     server.fence_probe, "probe", return_value=(True, "", "")
                 ), patch("partyline.legacy_tmp.tempfile.gettempdir",
                          return_value=str(tmp_root)), \
-                     patch("partyline.server.reap_legacy_temp", new=recording):
+                     patch("partyline.startup_state.reap_legacy_temp", new=recording):
                     async with server.lifespan(server.app):
                         pass
             # The assertion reads the recording: this sandbox's tmp tree is
