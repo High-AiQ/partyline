@@ -1795,7 +1795,7 @@ class ShutdownTest(ServerTest):
 
         from partyline.legacy_tmp import reap_legacy_temp
 
-        holder = {}
+        captured = {}
         with tempfile.TemporaryDirectory() as sandbox:
             tmp_root = Path(sandbox, "tmp")
             old = time.time() - 25 * 3600
@@ -1804,19 +1804,25 @@ class ShutdownTest(ServerTest):
             (run_dir / "f.bin").write_bytes(b"x" * 64)
             os.utime(run_dir, (old, old))
 
+            captured = {}
+
+            def recording(db):
+                captured["freed"] = reap_legacy_temp(db)
+                return captured["freed"]
+
             async def exercise():
                 with patch.object(
                     server.fence_probe, "probe", return_value=(True, "", "")
                 ), patch("partyline.legacy_tmp.tempfile.gettempdir",
                          return_value=str(tmp_root)), \
-                     patch("partyline.server.reap_legacy_temp",
-                           wraps=reap_legacy_temp) as reap:
+                     patch("partyline.server.reap_legacy_temp", new=recording):
                     async with server.lifespan(server.app):
                         pass
-                holder["freed"] = reap.return_value
-
+            # The assertion reads the recording: this sandbox's tmp tree is
+            # pruned by an external janitor, so filesystem aftermath is not
+            # reliable evidence.
             self.arun(exercise())
-            self.assertEqual(holder["freed"], {"claude": 0, "pytest": 64})
+            self.assertEqual(captured["freed"], {"claude": 0, "pytest": 64})
 
     def test_running_processes_lists_live_attachments_with_their_line(self):
         server.runtime.db.add_attachment("a1", "line", "worker", "fake", ["fake"], "/tmp")
