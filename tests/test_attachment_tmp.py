@@ -139,14 +139,23 @@ class AttachmentTmpTest(unittest.TestCase):
         db = Db(f"{self.tmp.name}/partyline.db")
         self.addCleanup(db.close)
         db.create_conversation("line", "Line")
+        db.create_conversation("other", "Other")
         db.add_attachment("live-1", "line", "a", "raw", ["cat"], self.tmp.name)
         db._exec("UPDATE attachments SET status='running' WHERE id='live-1'")
+        db.add_attachment("live-2", "other", "b", "raw", ["cat"], self.tmp.name)
+        db._exec("UPDATE attachments SET status='running' WHERE id='live-2'")
         ensure_tmp_dir({"id": "live-1"})
         write_file(attachment_tmp_dir("live-1") / "f", 2048)
+        ensure_tmp_dir({"id": "live-2"})
+        write_file(attachment_tmp_dir("live-2") / "f", 4096)
         attachment_tmp.cached_usage(cached=False)  # fill the cache once
         rider = tmp_resource_line(db, "line")
         self.assertTrue(rider.startswith(f"(tmp: /{temp_root().name} "))
         self.assertIn("GB · this line's processes", rider)
+        # Finding 5.13: the rider names the top lines by temp for everyone,
+        # not only the reader's own line.
+        self.assertIn("top tmp: «Other»", rider)
+        self.assertIn("«Line»", rider)
         self.assertTrue(rider.endswith(")"))
         self.assertGreater(line_tmp_bytes(db, "line"), 0)
 
