@@ -341,6 +341,7 @@ class TmpfsNoteTest(Scratch):
         self.assertIsNone(asyncio.run(tmpfs_note_for(str(self.root), 1)))
 
 
+@unittest.skipIf(os.name == "nt", "the Windows sandbox keeps the platform temp")
 class SandboxTest(unittest.TestCase):
     def test_tests_never_use_the_real_tmp(self):
         sandbox = Path(tempfile.gettempdir())

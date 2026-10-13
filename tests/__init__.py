@@ -36,9 +36,12 @@ os.environ["PARTYLINE_DB"] = os.path.join(_SANDBOX, "partyline.db")
 # TMPDIR is created under the sandbox (finding 5.12).
 os.environ["PARTYLINE_TMP_BASE"] = os.path.join(_SANDBOX, "tmp")
 # The platform temp directory too: nothing a test creates through ``tempfile`` or
-# ``gettempdir()`` lands in the real /tmp (finding 5.15).
-# (The sandbox itself, not a subdirectory: Unix socket paths are short.)
-os.environ["TMPDIR"] = tempfile.tempdir = _SANDBOX
+# ``gettempdir()`` lands in the real /tmp (finding 5.15). (The sandbox itself, not a
+# subdirectory: Unix socket paths are short.) Not on Windows: there is no tmpfs /tmp to
+# keep out of, and ``mkdtemp`` gives the sandbox an owner-only ACL, so fixtures nested under
+# it are unreachable to the restricted child tokens the Windows fence tests start.
+if os.name != "nt":
+    os.environ["TMPDIR"] = tempfile.tempdir = _SANDBOX
 # The docker relay directories live under the home directory; tests get their own.
 _docker_relay.RELAY_ROOT = os.path.join(_SANDBOX, "docker")
 _docker_bridge_client.BRIDGE_ROOT = os.path.join(_SANDBOX, "docker-bridge")
