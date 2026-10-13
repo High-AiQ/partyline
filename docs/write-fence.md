@@ -223,6 +223,11 @@ filter can only narrow.
 | network inspect (`GET /networks/<name-or-id>`) | `verbose` and `scope` only; answered by the proxy with only the tree's containers listed |
 | `build` and the BuildKit `session`/`grpc` upgrades | no host network, no remote context |
 
+After upgrading Docker, and before a release, rerun `python scripts/capture_docker_create.py`: it
+records the `containers/create` body the installed `docker` CLI sends for a spread of flag sets into
+`tests/fixtures/docker_create/`, and `tests/test_docker_cli_fixtures.py` runs each through the create
+checks, so a field the CLI starts sending by default shows up as a failing fixture, not a refused create.
+
 The two inspect lookups exist because `docker inspect <name>` tries a container, then an image,
 a network and a volume, and a missing name should read as the daemon's plain "No such object"
 (its 404 is passed through unchanged), not as a policy refusal. A network's reply normally lists
