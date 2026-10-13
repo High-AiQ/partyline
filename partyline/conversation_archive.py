@@ -106,9 +106,11 @@ def register_archive_route(app: FastAPI, presence):
             await asyncio.to_thread(prune_review_worktrees, db, line_id)
             await asyncio.to_thread(prune_scratch_worktrees, db, line_id)
             await asyncio.to_thread(reap_line_tmp, db, line_id)
-            await asyncio.to_thread(reap_legacy_temp, db)
             if line_id == conv_id:
                 removed, kept_reason = line_removed, reason
+        # One walk of the legacy locations for the whole archive, after the
+        # per-line loop — not one walk per archived line.
+        await asyncio.to_thread(reap_legacy_temp, db)
         await runtime.broadcast_all(ConversationsChangedEvent())
         return {"ok": True, "archived": True, "stopped": stopped,
                 "archived_ids": archived, "worktree_removed": removed,
