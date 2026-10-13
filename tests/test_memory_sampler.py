@@ -1,13 +1,15 @@
 """Advisory sampling state is deterministic under fake usage and time."""
 
 import tempfile
+from pathlib import Path
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from partyline.db import Db
 from partyline.memory_sampler import (
-    _warn, crosses_warning, process_tree_rss, run, warning_limit, warning_text,
+    _warn, crosses_warning, read_usage, process_tree_rss, run, warning_limit,
+    warning_text,
 )
 from partyline.runtime import ChatRuntime
 
@@ -79,6 +81,99 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
                         self.assertIn('6.0 GiB emergency backstop is at or below', text)
                         self.assertIn('Warnings use the backstop', text)
                         self.assertNotIn('nothing stops you there', text)
+
+    async def test_cache_heavy_usage_reclaims_then_stays_silent(self):
+        """File cache over the threshold with a healthy working set: the
+        sampler reclaims the difference and posts no "decide now" notice."""
+        import tempfile as tempfile_module
+
+        scope = Path(tempfile_module.mkdtemp())
+        sample_one = {"root": str(scope), "current": 900 * 1024**2,
+                      "peak": None, "working_set": 100 * 1024**2}
+        sample_two = {"root": str(scope), "current": 850 * 1024**2,
+                      "peak": None, "working_set": 90 * 1024**2}
+        runtime = ChatRuntime(self.db)
+        runtime.live["worker"] = SimpleNamespace(proc=SimpleNamespace(pid=123))
+        runtime.deliver_pending = AsyncMock(return_value=True)
+
+        class StopSampling(Exception):
+            pass
+
+        async def tick(_seconds):
+            raise StopSampling
+
+        with patch("partyline.memory_sampler.sys.platform", "linux"), \
+                patch("partyline.memory_sampler.cgroup_usage",
+                      side_effect=[sample_one, sample_two]) as cgroup, \
+                patch("partyline.memory_sampler.asyncio.sleep", tick):
+            with self.assertRaises(StopSampling):
+                await run(runtime, sampler=read_usage)
+        reclaim = scope / "memory.reclaim"
+        self.assertTrue(reclaim.exists())
+        self.assertEqual(int(reclaim.read_text()), 800 * 1024**2)
+        self.assertEqual(cgroup.call_count, 2)  # the re-read happened
+        self.assertEqual([], self.db.list_messages("line"))
+        self.assertEqual(runtime.memory_usage["worker"]["raw_bytes"],
+                         850 * 1024**2)
+
+    async def test_anon_heavy_usage_warns_on_the_working_set(self):
+        gib = 1024**3
+        runtime = ChatRuntime(self.db)
+        runtime.live["worker"] = SimpleNamespace(
+            att=self.db.get_attachment("worker"), proc=SimpleNamespace(pid=123))
+        runtime.deliver_pending = AsyncMock(return_value=True)
+        sample = {"root": str(Path(self.temp.name, "scope")),
+                  "current": 980 * 1024**2, "peak": None,
+                  "working_set": 960 * 1024**2}  # all anonymous: reclaim is futile
+
+        class StopSampling(Exception):
+            pass
+
+        async def tick(_seconds):
+            raise StopSampling
+
+        with patch("partyline.memory_sampler.sys.platform", "linux"), \
+                patch("partyline.server_memory.host_memory_bytes",
+                      return_value=8 * gib), \
+                patch("partyline.memory_sampler.cgroup_usage",
+                      return_value=sample), \
+                patch("partyline.memory_sampler.asyncio.sleep", tick):
+            with self.assertRaises(StopSampling):
+                await run(runtime, sampler=read_usage)
+        runtime.deliver_pending.assert_awaited_once()
+        text = self.db.list_messages("line")[-1]["body"]
+        self.assertIn("memory budget (93%)", text)
+        self.assertEqual(runtime.memory_usage["worker"]["raw_bytes"],
+                         980 * 1024**2)
+
+    async def test_a_failed_reclaim_falls_back_to_the_working_set_decision(self):
+        gib = 1024**3
+        runtime = ChatRuntime(self.db)
+        runtime.live["worker"] = SimpleNamespace(
+            att=self.db.get_attachment("worker"), proc=SimpleNamespace(pid=123))
+        runtime.deliver_pending = AsyncMock(return_value=True)
+        # A root that cannot hold a memory.reclaim file at all.
+        sample = {"root": str(Path(self.temp.name, "gone", "scope")),
+                  "current": 980 * 1024**2, "peak": None,
+                  "working_set": 960 * 1024**2}
+
+        class StopSampling(Exception):
+            pass
+
+        async def tick(_seconds):
+            raise StopSampling
+
+        with patch("partyline.memory_sampler.sys.platform", "linux"), \
+                patch("partyline.server_memory.host_memory_bytes",
+                      return_value=8 * gib), \
+                patch("partyline.memory_sampler.cgroup_usage",
+                      return_value=sample), \
+                patch("partyline.memory_sampler.asyncio.sleep", tick):
+            with self.assertRaises(StopSampling):
+                await run(runtime, sampler=read_usage)  # must not raise
+        runtime.deliver_pending.assert_awaited_once()  # warns on working set
+        self.assertEqual([], [m for m in self.db.list_messages("line")
+                              if "Raw" in m["body"]])
 
     async def test_oversized_budget_warns_and_routes_before_the_backstop(self):
         gib = 1024**3
@@ -226,8 +321,14 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
 
         with patch("partyline.memory_sampler.sys.platform", "linux"), \
                 patch("partyline.memory_sampler.cgroup_usage",
-                      side_effect=[(500 * 1024**2, 600 * 1024**2),
-                                   (550 * 1024**2, 650 * 1024**2)]) as cgroup, \
+                      side_effect=[{"root": "/sys/fs/cgroup/fake",
+                                    "current": 500 * 1024**2,
+                                    "peak": 600 * 1024**2,
+                                    "working_set": 500 * 1024**2},
+                                   {"root": "/sys/fs/cgroup/fake",
+                                    "current": 550 * 1024**2,
+                                    "peak": 650 * 1024**2,
+                                    "working_set": 550 * 1024**2}]) as cgroup, \
                 patch("partyline.memory_sampler.process_snapshot") as snapshot, \
                 patch("partyline.memory_sampler.asyncio.sleep", stop_after_tick):
             with self.assertRaises(StopSampling):

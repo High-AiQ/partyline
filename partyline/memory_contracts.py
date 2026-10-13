@@ -39,11 +39,17 @@ class MemoryRequestEvent(BaseModel):
 
 
 class MemoryUsageEvent(BaseModel):
-    """Best-effort memory reading for one live attachment."""
+    """Best-effort memory reading for one live attachment.
+
+    ``usage_bytes`` is the advisory working set — ``memory.current`` minus
+    reclaimable file cache — and ``raw_bytes`` keeps the raw
+    ``memory.current`` beside it, so nothing hides behind the working set.
+    """
     type: Literal["memory_usage"] = "memory_usage"
     attachment_id: str
     usage_bytes: int
     cap_bytes: int
+    raw_bytes: int | None = None
     percent: int
 
 
