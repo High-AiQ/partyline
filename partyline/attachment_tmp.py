@@ -236,12 +236,17 @@ def top_tmp_lines(db, limit: int = 3) -> list[tuple[str, int]]:
     sizes = cached_usage().get("sizes", {})
     if not sizes:
         return []
-    totals: dict[str, int] = {}
-    for conv in db.list_conversations():
-        for att in db.list_attachments(conv["id"]):
-            size = sizes.get(att["id"])
-            if size:
-                totals[conv["id"]] = totals.get(conv["id"], 0) + size
+    try:
+        totals: dict[str, int] = {}
+        for conv in db.list_conversations():
+            for att in db.list_attachments(conv["id"]):
+                size = sizes.get(att["id"])
+                if size:
+                    totals[conv["id"]] = totals.get(conv["id"], 0) + size
+    except AttributeError:
+        # A partial db (role-delivery deltas) cannot answer line queries;
+        # the rider then names no top lines rather than failing.
+        return []
     ranked = sorted(totals.items(), key=lambda item: -item[1])[:limit]
     named = []
     for conv_id, total in ranked:
