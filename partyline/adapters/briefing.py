@@ -148,7 +148,10 @@ def child_env(env: Mapping[str, str], att: dict) -> dict[str, str]:
     if token := att.get("api_token"):
         result["PARTYLINE_TOKEN"] = str(token)
     if att.get("docker_socket"):
+        from partyline.docker_workloads import label_env
+
         result["DOCKER_HOST"] = f"unix://{att['docker_socket']}"
+        result["PARTYLINE_DOCKER_LABELS"] = label_env(att)
     return result
 
 

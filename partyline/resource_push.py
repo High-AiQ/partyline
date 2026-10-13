@@ -21,9 +21,20 @@ USED = ("host_used_bytes", "partyline_used_bytes", "tmp_used_bytes")
 EXACT = ("live_processes", "max_live_processes", "memory_reserve_bytes")
 
 
+def _docker_moved(before: dict | None, after: dict | None) -> bool:
+    if before is None or after is None:
+        return before is not after
+    if any(before.get(key) != after.get(key) for key in ("running", "uncapped", "unattributed")):
+        return True
+    a, b = before.get("memory_used_bytes"), after.get("memory_used_bytes")
+    return (a is None) != (b is None) or (a is not None and abs(a - b) >= MOVE_BYTES)
+
+
 def moved(previous: dict, current: dict) -> bool:
     """Whether the numbers a tab shows changed enough to be worth a frame."""
     if any(previous.get(key) != current.get(key) for key in EXACT):
+        return True
+    if _docker_moved(previous.get("docker"), current.get("docker")):
         return True
     threshold = min(MOVE_BYTES, MOVE_FRACTION * (current.get("host_ram_bytes") or MOVE_BYTES * 200))
     for key in USED:

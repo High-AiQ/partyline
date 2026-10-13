@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from .adapters import ADAPTER_METADATA
 from .approval_bubble import bubble_approval
-from . import docker_relay
+from . import docker_relay, docker_workloads
 from .fence_protect import protected_repo_roots
 from .hierarchy import ancestors
 from .line_process_routes import detach_attachment, live_attachments
@@ -159,7 +159,7 @@ async def resume_line_attachments(runtime, conv_id: str, resume) -> tuple[list[s
     failed: list[str] = []
     for att_id in att_ids:
         try:
-            await detach_attachment(runtime, att_id)
+            await detach_attachment(runtime, att_id, survivors=False)
         except Exception:
             logger.exception("write-set approval could not detach %s on %s", att_id, conv_id)
             failed.append(names[att_id])
@@ -227,15 +227,16 @@ async def file_write_set_request(
             (conv_id, request.id, path, request.requester,
              request.requester_attachment_id, request.created_at))
         db.conn.commit()
+    warning = f" — {docker_workloads.BUDGET_WARNING}" if docker_relay.is_docker_socket(path) else ""
     await announce_fn(
         conv_id,
-        f"☏ @{principal.name} asks a person to grant write-set scope for `{path}` — "
+        f"☏ @{principal.name} asks a person to grant write-set scope for `{path}`{warning} — "
         "approve or decline from the banner",
         actor=principal,
     )
     await bubble_approval(
         runtime, conv_id, kind="write-set", requester=principal.name,
-        detail=f"grant write scope for `{path}`",
+        detail=f"grant write scope for `{path}`{warning}",
         approve=f"POST /api/conversations/{conv_id}/write-set/request/{request.id}/approve",
         decline=f"POST /api/conversations/{conv_id}/write-set/request/{request.id}/deny",
         actor=principal,

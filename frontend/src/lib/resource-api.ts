@@ -18,6 +18,14 @@ export const ResourceLineUsageSchema = z.object({
 });
 export type ResourceLineUsage = z.infer<typeof ResourceLineUsageSchema>;
 
+export const DockerWorkloadSummarySchema = z.object({
+  running: z.number().int(),
+  memory_used_bytes: z.number().int().nullable(),
+  uncapped: z.number().int(),
+  unattributed: z.number().int(),
+  sampled_at: z.number(),
+});
+
 export const ResourceSnapshotSchema = z.object({
   max_live_processes: z.number().int(),
   memory_reserve_bytes: z.number().int(),
@@ -42,6 +50,7 @@ export const ResourceSnapshotSchema = z.object({
   other_used_bytes: z.number().int().nullable(),
   sampled_at: z.number().nullable(),
   top_lines: z.array(ResourceLineUsageSchema),
+  docker: DockerWorkloadSummarySchema.nullish(),
 });
 export type ResourceSnapshot = z.infer<typeof ResourceSnapshotSchema>;
 
