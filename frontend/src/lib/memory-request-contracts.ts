@@ -5,7 +5,7 @@ export const MemoryRequestSchema = z.object({
   attachment_id: z.string(),
   conv_id: z.string(),
   requester: z.string(),
-  requester_attachment_id: z.string().nullable(),
+  requester_attachment_id: z.string().nullable().default(null),
   requested_limit: z.string(),
   reason: z.string(),
   created_at: z.number(),
