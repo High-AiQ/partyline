@@ -48,7 +48,7 @@ def mid_turn_blocker(live: list[dict], presence) -> dict | None:
     }
 
 
-async def detach_attachment(runtime, att_id: str) -> dict:
+async def detach_attachment(runtime, att_id: str, *, survivors: bool = True) -> dict:
     """Run the one-jack detach transaction used by both REST commands."""
     lock = runtime.resume_locks.setdefault(att_id, asyncio.Lock())
     try:
@@ -139,6 +139,10 @@ async def detach_attachment(runtime, att_id: str) -> dict:
         if adapter is not None and runtime.live.get(att_id) is adapter:
             runtime.live.pop(att_id, None)
         runtime.memory_usage.pop(att_id, None)
+        if survivors:
+            from .docker_workloads import announce_survivors
+
+            await announce_survivors(runtime, att["conv_id"])
         return {"ok": True}
     finally:
         lock.release()

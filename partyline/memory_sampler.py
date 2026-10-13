@@ -8,6 +8,7 @@ import logging
 import sys
 import time
 
+from .docker_workloads import inventory
 from .hierarchy import ancestors
 from .memory_contracts import MemoryUsageEvent
 from .mention_relay import live_manager, post_private
@@ -252,6 +253,7 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
                             attachment_id=row["id"], usage_bytes=usage, cap_bytes=cap,
                             percent=min(100, usage * 100 // max(cap, 1)),
                         ))
+                await inventory.sample(runtime)
                 await pusher.tick(runtime)
             except asyncio.CancelledError:
                 raise

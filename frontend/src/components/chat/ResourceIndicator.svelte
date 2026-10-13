@@ -123,6 +123,18 @@
         >
       </div>
       <div>most processes (line + child lines) <strong>{view.busiest_line ?? "none"}</strong></div>
+      {#if view.docker}
+        <div class="docker-workloads" data-testid="docker-workloads">
+          Docker workloads: outside CLI budgets
+          <strong>{view.docker.running} running · {gbText(view.docker.memory_used_bytes)}</strong>
+          {#if view.docker.uncapped > 0}
+            <span class="docker-flag">{view.docker.uncapped} with no RAM cap</span>
+          {/if}
+          {#if view.docker.unattributed > 0}
+            <span class="docker-note">{view.docker.unattributed} unattributed</span>
+          {/if}
+        </div>
+      {/if}
       {#if blocked}
         <p class="capacity-blocked">New attaches are blocked until usage drops or the limit is raised.</p>
       {/if}
@@ -228,6 +240,19 @@
   .edit-budget {
     margin-top: 7px;
     color: var(--color-copper-hot);
+  }
+  .docker-workloads {
+    margin-top: 4px;
+    padding-top: 4px;
+    border-top: 1px solid var(--color-panel-line);
+  }
+  .docker-flag {
+    display: block;
+    color: var(--color-red);
+  }
+  .docker-note {
+    display: block;
+    opacity: 0.72;
   }
   .capacity-blocked {
     margin-top: 5px;

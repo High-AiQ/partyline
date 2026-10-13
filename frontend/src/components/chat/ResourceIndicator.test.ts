@@ -75,6 +75,45 @@ describe("ResourceIndicator", () => {
     }
   });
 
+  it("shows Docker workloads apart from the CLI budget, flagging uncapped containers", async () => {
+    const docker = {
+      running: 3,
+      memory_used_bytes: 9 * 1024 ** 3,
+      uncapped: 2,
+      unattributed: 1,
+      sampled_at: 1760000000,
+    };
+    vi.spyOn(resourceApi, "getResources").mockResolvedValue({ ...snapshot, docker });
+    const component = mount(ResourceIndicator, { target: document.body });
+    try {
+      resources.popoverOpen = true;
+      await vi.waitFor(() => {
+        const row = document.querySelector("[data-testid=docker-workloads]")?.textContent ?? "";
+        expect(row).toContain("outside CLI budgets");
+        expect(row).toContain("3 running");
+        expect(row).toContain("9.0 GB");
+        expect(row).toContain("2 with no RAM cap");
+        expect(row).toContain("1 unattributed");
+      });
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it("hides the Docker row when no docker grant exists", async () => {
+    vi.spyOn(resourceApi, "getResources").mockResolvedValue({ ...snapshot, docker: null });
+    const component = mount(ResourceIndicator, { target: document.body });
+    try {
+      resources.popoverOpen = true;
+      await vi.waitFor(() => {
+        expect(document.querySelector(".resource-popover")).not.toBeNull();
+      });
+      expect(document.querySelector("[data-testid=docker-workloads]")).toBeNull();
+    } finally {
+      await unmount(component);
+    }
+  });
+
   it("uses shared topbar interaction styling without state colours on hover", async () => {
     vi.spyOn(resourceApi, "getResources").mockResolvedValue(snapshot);
     const component = mount(ResourceIndicator, { target: document.body });

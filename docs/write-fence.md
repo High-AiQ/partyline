@@ -174,6 +174,33 @@ listening, open connections, the last upstream error, and a live probe. Starting
 a relay twice reuses the one listener. Revoking a grant has no route yet; archive
 the line to stop its relay.
 
+### Docker workloads: outside CLI budgets
+
+Containers belong to the host daemon, not to an attachment's cgroup, so no CLI memory
+budget bounds them; a docker grant says so when it is requested. The relay is a byte
+forwarder and does not rewrite requests: that would enforce nothing, since the same
+access can start an existing container or change its limits.
+
+**Label contract.** A container a line starts carries `partyline.conversation=<conv id>`
+and `partyline.attachment=<att id>`. A process with a docker grant finds both in
+`PARTYLINE_DOCKER_LABELS` (space-separated `key=value` words) so a launcher can pass
+`--label`/`labels:` itself. Unlabeled containers still show, as *unattributed*.
+
+**Inventory.** While any docker grant exists the server lists the daemon's containers
+(`/containers/json?all=1`), inspects running ones for `HostConfig.Memory` and takes a
+one-shot stats reading, at most every 15 s (`docker_workloads.py`, in the memory sampler's
+tick). `GET /api/docker-workloads` returns them with their line, `attribution` and
+`uncapped` (a running container with `Memory=0`): a person sees all, a process only its
+line's tree. The resource push and `ResourceIndicator` show a separate *Docker
+workloads: outside CLI budgets* figure with the count of containers that have no RAM cap.
+
+**Survivors and stop.** When a detach or close leaves a line with no live process, a
+notice lists that line's still-running labeled containers (once per set, per 10 minutes;
+approval resumes and replaces do not post it). `POST /api/docker-workloads/{id}/stop`
+stops a container by its hex id (never a name) when its `partyline.conversation` label
+names the caller's line or one under it; a person may stop any. It stops, never removes,
+so outputs and shared services survive.
+
 ## Memory failures and recovery
 
 A process killed by the kernel cannot catch its own OOM. The Partyline host stays
