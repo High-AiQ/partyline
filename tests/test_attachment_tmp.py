@@ -14,11 +14,11 @@ from fastapi.testclient import TestClient
 
 from partyline import attachment_tmp
 from partyline.attachment_tmp import (
-    reap_previous_tmp_root,
     attachment_tmp_dir, base_dir, dir_size, ensure_tmp_dir, env_for, guarded_path,
     instance_key, line_tmp_bytes, reap_line_tmp, reap_missing_tmp, reap_tmp_dir,
     temp_root, tmp_resource_line, tmp_summary,
 )
+from partyline.legacy_tmp import reap_previous_tmp_root
 from partyline.auth_guard import Principal
 from partyline.db import Db
 from partyline.runtime import ChatRuntime

@@ -25,9 +25,15 @@ files and never the real ``/proc`` or home.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import time
 from pathlib import Path
+
+from .legacy_tmp import reap_legacy_temp, reap_previous_tmp_root
+
+logger = logging.getLogger(__name__)
 
 LIVE = ("starting", "running")
 WATCH_SETTING = "interruption_watch_seen"
@@ -145,3 +151,34 @@ async def post_interruption_notices(runtime, *,
     for conv_id, body in bodies.items():
         await post_system_notice(runtime, conv_id, body)
     return bool(bodies)
+
+
+async def engage_startup(runtime) -> None:
+    """The guarded startup housekeeping (findings 5.13, 5.14 item 6, 5.15).
+
+    Posts the unplanned-stop notices, settles the stale rows, reaps the
+    legacy temp locations, and reaps the previous tmpfs root once after the
+    disk-backed switch. Every step is guarded: a failure logs and continues,
+    and the blocking walks run in threads off the event loop.
+    """
+    try:
+        await post_interruption_notices(runtime)
+    except Exception:
+        logger.exception("startup interruption notice failed; continuing")
+    runtime.db.mark_stale_attachments()
+    await asyncio.to_thread(sweep_orphaned_worktrees, runtime.db)
+    try:
+        await asyncio.to_thread(reap_legacy_temp, runtime.db)
+    except Exception:
+        logger.exception("legacy temp reap failed; continuing")
+    try:
+        await asyncio.to_thread(reap_previous_tmp_root, runtime.db)
+    except Exception:
+        logger.exception("previous tmp root reap failed; continuing")
+
+
+def sweep_orphaned_worktrees(db):
+    """Delegate to the worktree sweeper without importing the server here."""
+    from .worktree_lifecycle import sweep_orphaned_worktrees as sweep
+
+    return sweep(db)

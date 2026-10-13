@@ -18,6 +18,7 @@ from .resource_budget import cap_bytes, live_rows, settings
 from .cgroup_sample import cgroup_usage, reclaim_scope
 from .process_memory import backstop_bytes, process_snapshot
 from .resource_push import ResourcePusher
+from .temp_mounts import on_tmpfs
 from .memory_warning import tmpfs_note_for, warning_text  # noqa: F401  re-exported for the sampler's tests
 from .top_processes import top_descendants
 
@@ -131,7 +132,8 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
             try:
                 rows = live_rows(runtime.db)
                 live_ids = {row["id"] for row in rows}
-                states = (runtime.memory_usage, armed, notified, over, activation)
+                states = (runtime.memory_usage, armed, notified, over, activation,
+                          reclaim_backoff, tmp_backoff)
                 for attachment_id in set().union(*states) - live_ids:
                     for state in states:
                         state.pop(attachment_id, None)
@@ -207,7 +209,8 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
                         if (sample_dict is not None and usage < effective
                                 and crosses_warning(raw, effective,
                                                     config["memory_warn_percent"])
-                                and not attempted_recently):
+                                and not attempted_recently
+                                and on_tmpfs(sample_dict["root"])):
                             reclaim_backoff[row["id"]] = clock()
                             amount = sample_dict["current"] - usage
                             await asyncio.to_thread(reclaim_scope,
