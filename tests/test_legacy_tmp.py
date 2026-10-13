@@ -5,6 +5,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from partyline.db import Db
 from partyline.legacy_tmp import (
@@ -57,6 +58,7 @@ class LegacyTmpTest(unittest.TestCase):
         os.utime(self.pytest / "pytest-3", (old, old))
         target = Path(self.tmp.name, "pytest-8")
         write_file(target / "f.bin", 4096)
+        self.pytest.mkdir(parents=True, exist_ok=True)
         os.symlink(target, self.pytest / "pytest-current")
         os.utime(self.pytest / "pytest-current", (old, old))
         self.assertEqual(reap_pytest_temp(self.pytest, now=time.time()), 256)
@@ -78,6 +80,47 @@ class LegacyTmpTest(unittest.TestCase):
                  (time.time() - PYTEST_MAX_AGE_SECONDS - 10,) * 2)
         freed = reap_legacy_temp(self.db, claude=self.claude, pytest=self.pytest)
         self.assertEqual(freed, {"claude": 50, "pytest": 25})
+
+    def test_windows_and_getuid_less_hosts_reap_nothing(self):
+        write_file(self.claude / "line" / "gone-1" / "f", 50)
+        write_file(self.pytest / "pytest-9" / "f", 25)
+        os.utime(self.pytest / "pytest-9",
+                 (time.time() - PYTEST_MAX_AGE_SECONDS - 10,) * 2)
+        with patch("partyline.legacy_tmp.sys.platform", "win32"):
+            self.assertEqual(reap_legacy_temp(self.db), {})
+        with patch("partyline.legacy_tmp.sys.platform", "linux"), \
+                patch("partyline.legacy_tmp.os.getuid",
+                      side_effect=AttributeError):
+            self.assertEqual(reap_claude_temp(self.db, self.claude), 0)
+            self.assertEqual(reap_pytest_temp(self.pytest), 0)
+        self.assertTrue((self.claude / "line" / "gone-1" / "f").exists())
+        self.assertTrue((self.pytest / "pytest-9" / "f").exists())
+
+    def test_a_root_owned_by_someone_else_is_skipped(self):
+        write_file(self.claude / "line" / "gone-1" / "f", 50)
+        fake = os.stat_result((16877, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+        with patch("partyline.legacy_tmp.os.stat", return_value=fake):
+            self.assertEqual(reap_claude_temp(self.db, self.claude), 0)
+        self.assertTrue((self.claude / "line" / "gone-1" / "f").exists())
+
+    def test_an_unreadable_directory_degrades_to_an_empty_walk(self):
+        write_file(self.claude / "line" / "gone-1" / "f", 50)
+        with patch.object(Path, "iterdir", side_effect=PermissionError):
+            self.assertEqual(reap_claude_temp(self.db, self.claude), 0)
+            self.assertEqual(reap_pytest_temp(self.pytest), 0)
+        self.assertTrue((self.claude / "line" / "gone-1" / "f").exists())
+
+    def test_pytest_current_and_its_old_target_survive_together(self):
+        old = time.time() - PYTEST_MAX_AGE_SECONDS - 60
+        target = Path(self.tmp.name, "pytest-8")
+        write_file(target / "f.bin", 4096)
+        os.utime(target, (old, old))  # even the target aged past the day
+        self.pytest.mkdir(parents=True, exist_ok=True)
+        os.symlink(target, self.pytest / "pytest-current")
+        os.utime(self.pytest / "pytest-current", (old, old))
+        self.assertEqual(reap_pytest_temp(self.pytest, now=time.time()), 0)
+        self.assertTrue((self.pytest / "pytest-current").is_symlink())
+        self.assertTrue((target / "f.bin").exists())
 
 
 if __name__ == "__main__":
