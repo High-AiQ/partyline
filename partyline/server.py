@@ -89,6 +89,7 @@ from .resource_leases import register_lease_routes
 from .review_worktrees import register_review_routes
 from .approval_bubble import register_approval_routes
 from .tmp_reap_routes import register_tmp_reap_routes
+from .legacy_tmp import reap_legacy_temp
 from .scratch_worktrees import register_scratch_routes
 from .line_gates import register_gates_routes
 from .prereview import register_prereview_route
@@ -111,6 +112,7 @@ from .line_notes import notes_router
 from .settings_routes import settings_router
 from . import docker_relay
 from .docker_relay_routes import register_docker_relay_routes
+from .docker_workload_routes import register_docker_workload_routes
 from .resource_routes import register_resource_routes
 from .restart_report import restart_report_router
 from .static_cache import install_static_cache
@@ -168,6 +170,8 @@ async def lifespan(app):
     app.state.fence_status = fence_probe.status(probe_result)
     runtime.db.mark_stale_attachments()
     await asyncio.to_thread(sweep_orphaned_worktrees, runtime.db)
+    # Finding 5.13: the pre-2.33 temp locations reap on start, guarded.
+    await asyncio.to_thread(reap_legacy_temp, runtime.db)
     automatic_task = asyncio.create_task(_run_automatic_reattachment())
     app.state.automatic_reattach_task = automatic_task
     # The monitor's state is in the database, so a restart resumes whatever the
@@ -210,6 +214,7 @@ register_goal_route(app, runtime)
 register_process_overview_route(app, runtime)
 register_resource_routes(app, runtime)
 register_docker_relay_routes(app)
+register_docker_workload_routes(app, runtime)
 docker_relay.bind_runtime(runtime)
 register_tmp_reap_routes(app, runtime)
 register_restart_request_routes(app, runtime, ADAPTER_METADATA, lambda: request_exit())
