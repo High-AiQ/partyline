@@ -9,7 +9,8 @@ from unittest.mock import patch
 
 from partyline.db import Db
 from partyline.legacy_tmp import (
-    PYTEST_MAX_AGE_SECONDS, reap_claude_temp, reap_legacy_temp, reap_pytest_temp,
+    PYTEST_MAX_AGE_SECONDS, claude_root, pytest_root, reap_claude_temp,
+    reap_legacy_temp, reap_pytest_temp,
 )
 
 
@@ -111,16 +112,59 @@ class LegacyTmpTest(unittest.TestCase):
         self.assertTrue((self.claude / "line" / "gone-1" / "f").exists())
 
     def test_pytest_current_and_its_old_target_survive_together(self):
+        # The target lives INSIDE the root as a sibling pytest-8: it is
+        # protected by name, by the link skip, and by resolving the link.
         old = time.time() - PYTEST_MAX_AGE_SECONDS - 60
-        target = Path(self.tmp.name, "pytest-8")
+        self.pytest.mkdir(parents=True, exist_ok=True)
+        target = self.pytest / "pytest-8"
         write_file(target / "f.bin", 4096)
         os.utime(target, (old, old))  # even the target aged past the day
-        self.pytest.mkdir(parents=True, exist_ok=True)
         os.symlink(target, self.pytest / "pytest-current")
         os.utime(self.pytest / "pytest-current", (old, old))
         self.assertEqual(reap_pytest_temp(self.pytest, now=time.time()), 0)
         self.assertTrue((self.pytest / "pytest-current").is_symlink())
         self.assertTrue((target / "f.bin").exists())
+
+    def test_roots_are_derived_from_the_tempdir_so_the_sandbox_applies(self):
+        sandbox = Path(self.tmp.name, "tmpdir")
+        sandbox.mkdir()
+        import pwd as pwd_module
+
+        name = pwd_module.getpwuid(os.getuid()).pw_name
+        with patch("partyline.legacy_tmp.tempfile.gettempdir",
+                   return_value=str(sandbox)), \
+                patch("partyline.legacy_tmp.sys.platform", "linux"):
+            self.assertEqual(claude_root(),
+                             sandbox / f"claude-{os.getuid()}")
+            self.assertEqual(pytest_root(), sandbox / f"pytest-of-{name}")
+
+    def test_windows_roots_are_none(self):
+        with patch("partyline.legacy_tmp.sys.platform", "win32"):
+            self.assertIsNone(claude_root())
+            self.assertIsNone(pytest_root())
+
+    def test_a_missing_getuid_means_no_roots(self):
+        # An os module without getuid: hasattr must send the guards the
+        # "not available" signal, not an attribute error mid-format.
+        from types import SimpleNamespace as NS
+
+        with patch("partyline.legacy_tmp.os",
+                   NS(path=os.path, sep=os.sep)), \
+                patch("partyline.legacy_tmp.sys.platform", "linux"):
+            self.assertIsNone(claude_root())
+            self.assertIsNone(pytest_root())
+
+    def test_a_missing_user_falls_back_to_the_uid(self):
+        import pwd as pwd_module
+
+        with patch("partyline.legacy_tmp.sys.platform", "linux"), \
+                patch.object(pwd_module, "getpwuid",
+                             side_effect=KeyError("no user")), \
+                patch("partyline.legacy_tmp.tempfile.gettempdir",
+                      return_value=str(Path(self.tmp.name, "tmpdir"))):
+            self.assertEqual(pytest_root(),
+                             Path(self.tmp.name, "tmpdir",
+                                  f"pytest-of-{os.getuid()}"))
 
 
 if __name__ == "__main__":

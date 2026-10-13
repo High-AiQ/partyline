@@ -26,6 +26,7 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -36,7 +37,9 @@ PYTEST_RUN = re.compile(r"pytest-\d+\Z")
 def claude_root() -> Path | None:
     if sys.platform == "win32" or not hasattr(os, "getuid"):
         return None
-    return Path(f"/tmp/claude-{os.getuid()}")
+    # Under gettempdir(), so a sandboxed TMPDIR keeps tests inside their
+    # sandbox and away from the host's real temp locations.
+    return Path(tempfile.gettempdir()) / f"claude-{os.getuid()}"
 
 
 def pytest_root() -> Path | None:
@@ -48,7 +51,7 @@ def pytest_root() -> Path | None:
         name = pwd.getpwuid(os.getuid()).pw_name
     except (KeyError, OSError):
         name = str(os.getuid())
-    return Path(f"/tmp/pytest-of-{name}")
+    return Path(tempfile.gettempdir()) / f"pytest-of-{name}"
 
 
 def _owned_by_us(path: Path) -> bool:
@@ -136,16 +139,32 @@ def reap_claude_temp(db, root: Path | None = None) -> int:
 def reap_pytest_temp(root: Path | None = None,
                      *, now: float | None = None,
                      max_age: float = PYTEST_MAX_AGE_SECONDS) -> int:
-    """Remove pytest run dirs older than a day; never ``pytest-current``."""
+    """Remove pytest run dirs older than a day; never ``pytest-current``.
+
+    The current link's target is protected too: it is a sibling
+    ``pytest-<N>`` run that pytest is still presenting as current, however
+    old its timestamps look.
+    """
     root = root if root is not None else pytest_root()
     if root is None or not root.is_dir() or not _owned_by_us(root):
         return 0
     now = now if now is not None else time.time()
+    protected: set[Path] = set()
+    link = root / "pytest-current"
+    if link.is_symlink():
+        try:
+            resolved = link.resolve()
+            if resolved.parent == root:
+                protected.add(resolved)
+        except OSError:
+            pass
     freed = 0
     for entry in _children(root):
         # The explicit skip: pytest-current is a symlink to the newest run
         # and its target is somebody's live work, however old it looks.
         if entry.name == "pytest-current":
+            continue
+        if entry in protected:
             continue
         if entry.is_symlink() or not PYTEST_RUN.match(entry.name):
             continue
