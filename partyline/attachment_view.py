@@ -80,6 +80,7 @@ def attach_memory_usage(
     if memory_usage:
         payload.update({
             "memory_usage_bytes": memory_usage.get("usage_bytes"),
+            "memory_raw_bytes": memory_usage.get("raw_bytes"),
             "memory_cap_bytes": memory_usage.get("cap_bytes"),
             "memory_percent": memory_usage.get("percent"),
         })

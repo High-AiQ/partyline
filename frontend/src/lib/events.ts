@@ -171,6 +171,7 @@ export const MemoryUsageEventSchema = z.object({
   attachment_id: z.string(),
   usage_bytes: z.number().int().nonnegative(),
   cap_bytes: z.number().int().positive(),
+  raw_bytes: z.number().int().nonnegative().nullable().optional(),
   percent: z.number().int().min(0).max(100),
 });
 export const ResourcesEventSchema = z.object({
