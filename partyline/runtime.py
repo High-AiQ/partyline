@@ -208,7 +208,7 @@ class ChatRuntime(DeliveryCreditMixin):
             )
             if route:
                 await self.route_mentions(conv_id, msg)
-            if sender_type == "agent":
+            if sender_type == "agent" and not msg.get("bridge_id"):
                 from .first_hello import deliver_pending_first_hello
 
                 await deliver_pending_first_hello(self, att_id, sender, body)
@@ -328,6 +328,10 @@ class ChatRuntime(DeliveryCreditMixin):
                         )
                         continue
                     error = await reattacher.choose(conv_id, data, claimed_handle)
+                    if error is None and self.db.get_restart_plan() is None:
+                        from .bridge_service import reconcile_after_restart
+
+                        await reconcile_after_restart(self)
                     if error is not None:
                         await ws.send_json(
                             ErrorEvent(

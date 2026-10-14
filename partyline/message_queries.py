@@ -20,9 +20,13 @@ def as_message(row) -> dict:
     return data
 
 
-def select_message_by_id(execute, conv_id: str, message_id: int) -> dict | None:
+def select_message_by_id(
+    execute, conv_id: str, message_id: int, *, visible: bool = False
+) -> dict | None:
+    """One message; ``visible`` hides line-bridge rows from callers a person or process drives."""
+    hidden = " AND m.bridge_id IS NULL" if visible else ""
     row = execute(
-        MESSAGE_SELECT + " WHERE m.conv_id=? AND m.id=?", (conv_id, message_id)
+        MESSAGE_SELECT + " WHERE m.conv_id=? AND m.id=?" + hidden, (conv_id, message_id)
     ).fetchone()
     return as_message(row) if row else None
 

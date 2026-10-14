@@ -12,6 +12,7 @@ from .hierarchy import lead_attachment, parent_id_of
 from .goal_stall import wait_until_quiet
 from .mention_relay import LIVE, is_foreign, post_private, reaches_a_process, speaker_attachment
 from .mentions import addressees, line_addressed, mentioned_names
+from .bridge_delivery import speaks_over_bridge
 from .return_notice import format_notice, is_undeliverable_closing
 
 # Long enough for a transcript tail to post the turn's last message after the
@@ -132,6 +133,14 @@ class ReturnPath:
         """The process said something; a mention of a live process settles the turn."""
         me = self._row(att_id)
         if me is None:
+            return
+        if speaks_over_bridge(self.runtime.db, att_id, body):
+            # Words to its counterpart are a hand-off, but never "last said":
+            # the return notice would quote hidden bridge text to the captain.
+            self.addressed.add(att_id)
+            if task := self.pending.pop(att_id, None):
+                task.cancel()
+                self._close_speech(att_id)
             return
         self.last_said[att_id] = body
         self._release_reached(att_id, body)

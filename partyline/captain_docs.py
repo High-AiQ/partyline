@@ -119,7 +119,7 @@ def reminder_line(db, conv_id: str, last_seen_id: int | None) -> tuple[str, int]
     try:
         row = db._exec(
             "SELECT COALESCE(MAX(id), 0) AS top, COUNT(*) AS fresh FROM messages "
-            "WHERE conv_id=? AND id>?", (conv_id, last_seen_id or 0)).fetchone()
+            "WHERE conv_id=? AND id>? AND bridge_id IS NULL", (conv_id, last_seen_id or 0)).fetchone()
         if last_seen_id is None:
             return "", row["top"]
         every = int(db.get_setting(REMINDER_SETTING) or REMINDER_DEFAULT)

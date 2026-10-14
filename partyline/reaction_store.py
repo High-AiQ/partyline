@@ -16,7 +16,7 @@ def valid_emoji(emoji: str) -> bool:
 
 
 def message(db, message_id: int) -> dict | None:
-    row = db._exec(MESSAGE_SELECT + " WHERE m.id=?", (message_id,)).fetchone()
+    row = db._exec(MESSAGE_SELECT + " WHERE m.id=? AND m.bridge_id IS NULL", (message_id,)).fetchone()
     return as_message(row) if row else None
 
 
