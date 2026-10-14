@@ -12,6 +12,16 @@ class CwdGitState(BaseModel):
     dirty: bool
 
 
+class BridgeRef(BaseModel):
+    """The open line bridge this process is the ambassador of."""
+
+    bridge_id: str
+    peer_name: str
+    peer_attachment_id: str
+    peer_conv_id: str
+    peer_conv_name: str
+
+
 class AttachmentResponse(BaseModel):
     id: str
     conv_id: str
@@ -27,3 +37,4 @@ class AttachmentResponse(BaseModel):
     memory_usage_bytes: int | None = Field(default=None, ge=0)
     memory_cap_bytes: int | None = Field(default=None, gt=0)
     memory_percent: int | None = Field(default=None, ge=0, le=100)
+    bridge: BridgeRef | None = None

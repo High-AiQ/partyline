@@ -82,6 +82,8 @@ from .message_routes import message_router
 from .message_forward import forward_router
 from .reaction_routes import reaction_router
 from .pin_routes import pin_router
+from .bridge_routes import bridge_router
+from .bridge_service import reconcile_after_restart
 from .accept_sha import register_accept_route
 from .accept_history import register_accept_history_route
 from .resource_leases import register_lease_routes
@@ -147,6 +149,7 @@ async def _run_automatic_reattachment() -> None:
     """Run a trusted automatic plan at startup without depending on a browser."""
     try:
         await ReattachCoordinator(runtime, _resume_adapter).run_automatic()
+        await reconcile_after_restart(runtime)  # an unanswered offer exempts only its own processes
     except Exception:
         logger.exception(
             "automatic reattachment stopped unexpectedly; the durable plan was preserved "
@@ -223,6 +226,7 @@ app.include_router(media_router(runtime, media))
 app.include_router(message_router(runtime, media))
 app.include_router(reaction_router(runtime))
 app.include_router(pin_router(runtime))
+app.include_router(bridge_router(runtime))
 app.include_router(hierarchy_router(runtime))
 app.include_router(write_set_router(runtime, lambda *a, **k: _resume_adapter(*a, **k)))
 app.include_router(heartbeat_router(runtime))

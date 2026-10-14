@@ -9,6 +9,8 @@ from fastapi import WebSocket, WebSocketDisconnect
 from .adapter_capabilities import claims_transcript, transcript_claimed
 from .adapters import Adapter
 from .attachment_broadcast import broadcast_attachment_state
+from .bridge_delivery import stamp_outbound
+from .bridge_service import close_for_attachment
 from .contracts import ErrorEvent, Event, MessageEvent, MessageResponse
 from .handshake import hello_payload
 from .db import Db
@@ -52,6 +54,7 @@ class ChatRuntime(DeliveryCreditMixin):
         self.unclaimed_noticed: set[str] = set()
         self.memory_usage: dict[str, dict] = {}
         self.first_hello_pending: set[str] = set()
+        self.stopping = False  # shutdown in progress: a restart must not close bridges
 
     @staticmethod
     def activation_matches(adapter: Adapter, attachment: dict) -> bool:
@@ -78,6 +81,7 @@ class ChatRuntime(DeliveryCreditMixin):
         return found
 
     async def shutdown(self):
+        self.stopping = True
         for adapter in list(self.live.values()):
             try:
                 await adapter.stop()
@@ -85,6 +89,8 @@ class ChatRuntime(DeliveryCreditMixin):
                 pass
 
     async def broadcast(self, conv_id: str, event: Event):
+        if getattr(getattr(event, "message", None), "bridge_id", None):
+            return  # bridge traffic is never shown to people (message_visibility)
         payload = event.model_dump(exclude_none=True)
         for ws in list(self.sockets.get(conv_id, ())):
             try:
@@ -183,6 +189,8 @@ class ChatRuntime(DeliveryCreditMixin):
                     and adapter.att.get("runtime_owner") == runtime_owner
                 ):
                     self.live.pop(att_id, None)
+            if status in ("exited", "detached"):
+                await close_for_attachment(self, att_id, f"ambassador {status}")
             await self.broadcast_attachment(conv_id, att_id)
 
         return on_status
@@ -194,12 +202,13 @@ class ChatRuntime(DeliveryCreditMixin):
             )
             if msg is None:
                 return
+            msg = stamp_outbound(self.db, conv_id, msg)
             await self.broadcast(
                 conv_id, MessageEvent(message=MessageResponse.model_validate(msg))
             )
             if route:
                 await self.route_mentions(conv_id, msg)
-            if sender_type == "agent":
+            if sender_type == "agent" and not msg.get("bridge_id"):
                 from .first_hello import deliver_pending_first_hello
 
                 await deliver_pending_first_hello(self, att_id, sender, body)
@@ -319,6 +328,10 @@ class ChatRuntime(DeliveryCreditMixin):
                         )
                         continue
                     error = await reattacher.choose(conv_id, data, claimed_handle)
+                    if error is None:
+                        from .bridge_service import reconcile_after_restart
+
+                        await reconcile_after_restart(self)
                     if error is not None:
                         await ws.send_json(
                             ErrorEvent(

@@ -15,6 +15,7 @@ from .db_sidecars import ensure as ensure_db_sidecars
 from .query_result import materialize
 from .conversation_queries import ACTIVE_CONVERSATIONS, ARCHIVED_CONVERSATIONS, CONVERSATION_BY_ID
 from .message_queries import MESSAGE_SELECT, as_message, select_message_by_id, select_message_page
+from .message_visibility import BRIDGE_DIGEST_CLAUSE
 from . import runtime_lock
 
 
@@ -81,8 +82,8 @@ class Db:
             for mig in MIGRATIONS:
                 try:
                     self.conn.execute(mig)
-                except sqlite3.OperationalError:
-                    pass  # already applied
+                except (sqlite3.OperationalError, sqlite3.IntegrityError):
+                    pass  # already applied, or an index the data cannot yet satisfy
             self.conn.commit()
         ensure_db_sidecars(self)
 
@@ -262,11 +263,11 @@ class Db:
         return select_message_page(self._exec, conv_id, before_id, after_id, limit)
 
     def message_by_id(self, conv_id: str, message_id: int):
-        return select_message_by_id(self._exec, conv_id, message_id)
+        return select_message_by_id(self._exec, conv_id, message_id, visible=True)
 
     def messages_after(self, conv_id, after_id, exclude_sender=None, exclude_attachment_id=None):
         """Unseen by one reader: never its own speech, never a copy private to another."""
-        q = MESSAGE_SELECT + " WHERE m.conv_id=? AND m.id>?"
+        q = MESSAGE_SELECT + " WHERE m.conv_id=? AND m.id>?" + BRIDGE_DIGEST_CLAUSE
         args = [conv_id, after_id]
         if exclude_attachment_id is not None:
             q += " AND IFNULL(source_attachment_id,'') != ? AND IFNULL(audience_attachment_id,?) = ?"

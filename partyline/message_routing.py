@@ -4,6 +4,7 @@ import logging
 
 from fastapi import HTTPException
 
+from .bridge_delivery import route_bridge, stamp_outbound
 from .contracts import MessageEvent, MessageResponse
 from .ack_limits import capture_notice, pingpong_refusal, refusal_message
 from .hierarchy import stamp_source, tree_conversation_ids
@@ -103,6 +104,7 @@ async def post_identified(runtime, conv_id, principal, body: str, client_key: st
         raise HTTPException(429, refusal_message(bare))
     stored = runtime.db.add_message(conv_id, principal.name, "agent", body)
     stored = {**stored, **stamp_source(runtime.db, stored["id"], principal)}
+    stored = stamp_outbound(runtime.db, conv_id, stored)
     if client_key:
         remember_key(runtime.db, principal.name, client_key, conv_id, stored["id"])
     if (returns := getattr(runtime, "returns", None)) is not None:
@@ -126,6 +128,8 @@ async def route_message(
     writes *to* a process — the return path's "your worker went quiet".
     """
     if message["sender_type"] == "system" and not force:
+        return
+    if await route_bridge(runtime, conv_id, message):
         return
     if (message["sender_type"] == "agent"
             and not message.get("source_attachment_id")
@@ -217,7 +221,7 @@ async def route_message(
         and name.lower() not in queued
         and name.lower() not in elsewhere
     ]
-    for name in unavailable:
+    for name in [] if message.get("bridge_id") else unavailable:
         await runtime.post_message(
             conv_id,
             "system",

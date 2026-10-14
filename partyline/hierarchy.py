@@ -162,6 +162,10 @@ def _set_parent(db: Db, conv_id: str, parent_id: str | None) -> dict:
             raise HierarchyError(409, "restore both lines before linking them")
         if would_cycle(db, conv_id, parent_id):
             raise HierarchyError(400, "that parent would cycle the line tree")
+        from .bridge_store import bridged_across
+
+        if bridged_across(db, conv_id, parent_id):
+            raise HierarchyError(409, "linking would put two bridged lines in one tree")
         # Set-once link only: the merge guard never sees a re-save.
         conflicts = tree_merge_name_conflicts(db, conv_id, parent_id)
         if conflicts:

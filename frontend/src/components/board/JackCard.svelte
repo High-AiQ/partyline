@@ -3,6 +3,7 @@
   import { hue } from "../../lib/markdown";
   import { tooltip } from "../../lib/tooltip";
   import { isLive, overrideExplanation } from "../../lib/attachments";
+  import { bridgeLabel } from "../../lib/bridge-api";
   import { ApiError, api } from "../../lib/api";
   import type { Attachment } from "../../lib/contracts";
   import { room } from "../../state/room.svelte.js";
@@ -104,6 +105,13 @@
       <span
         class="captain-badge inline-flex flex-none items-center gap-1 rounded-[3px] border border-copper-hot/80 bg-copper-hot/15 px-[5px] py-px text-[9px] font-semibold tracking-[0.05em] text-copper-hot"
         aria-label="captain for this line">★ captain</span
+      >
+    {/if}
+    {#if attachment.bridge}
+      <span
+        class="bridge-badge inline-flex flex-none items-center gap-1 rounded-[3px] border border-copper/60 bg-copper/10 px-[5px] py-px text-[9px] font-semibold tracking-[0.05em] text-copper"
+        use:tooltip={{ label: bridgeLabel(attachment.bridge) }}
+        aria-label={bridgeLabel(attachment.bridge)}>⇄ bridge</span
       >
     {/if}
     {#if entry}
