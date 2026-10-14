@@ -14,7 +14,10 @@ FIXTURES = sorted((Path(__file__).parent / "fixtures" / "docker_create").glob("*
 
 
 async def bridge(method, path, *args, **kwargs):
-    return 200, {"Driver": "bridge"}
+    """A daemon that knows only real networks: ``default`` is not one you can look up."""
+    if path.removeprefix("/networks/") in ("bridge", "appnet"):
+        return 200, {"Driver": "bridge"}
+    return 404, {"message": "network not found"}
 
 
 def create_checks(body):
@@ -53,3 +56,24 @@ class CliFixtureTests(unittest.TestCase):
         record = next(json.loads(p.read_text()) for p in FIXTURES if "bridge-network" in p.name)
         with patch.object(docker_plan.docker_api, "request", overlay), self.assertRaises(Denied):
             create_checks(record["body"])
+
+
+class NetworkRefsTests(unittest.TestCase):
+    def test_a_default_endpoint_key_is_skipped(self):
+        self.assertEqual(network_refs({"NetworkMode": "default"}, {"EndpointsConfig": {"default": {}}}), [])
+
+    def test_a_default_key_with_a_network_id_is_still_checked(self):
+        refs = network_refs({}, {"EndpointsConfig": {"default": {"NetworkID": "abc123"}}})
+        self.assertEqual(refs, ["abc123"])
+
+        async def overlay(*args, **kwargs):
+            return 200, {"Driver": "overlay"}
+
+        with patch.object(docker_plan.docker_api, "request", overlay), self.assertRaises(Denied):
+            asyncio.run(docker_plan.check_networks(refs))
+
+    def test_an_unknown_name_does_not_resolve(self):
+        refs = network_refs({}, {"EndpointsConfig": {"ghost": {}}})
+        with patch.object(docker_plan.docker_api, "request", bridge), \
+                self.assertRaisesRegex(Denied, "does not resolve"):
+            asyncio.run(docker_plan.check_networks(refs))
