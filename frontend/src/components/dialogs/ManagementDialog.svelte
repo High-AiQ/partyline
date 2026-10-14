@@ -1,5 +1,6 @@
 <script lang="ts">
   import Modal from "../Modal.svelte";
+  import BridgeSection from "./BridgeSection.svelte";
   import { ApiError, api } from "../../lib/api";
   import { hierarchyApi } from "../../lib/hierarchy-api";
   import type { Conversation } from "../../lib/contracts";
@@ -132,5 +133,8 @@
     </div>
   {:else}
     <button type="button" onclick={close}>close</button>
+  {/if}
+  {#if ready}
+    <BridgeSection {conversation} />
   {/if}
 </Modal>
