@@ -73,6 +73,14 @@ async def attachment_response(
     return AttachmentResponse.model_validate(payload).model_dump()
 
 
+def attach_bridge(payload: dict[str, object], db) -> dict[str, object]:
+    """Add the open line bridge this process is the ambassador of, if any."""
+    from .bridge_store import attachment_ref
+
+    payload["bridge"] = attachment_ref(db, str(payload["id"]))
+    return payload
+
+
 def attach_memory_usage(
     payload: dict[str, object], memory_usage: Mapping[str, object] | None,
 ) -> dict[str, object]:

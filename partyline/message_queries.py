@@ -15,7 +15,7 @@ def as_message(row) -> dict:
     """Every message dict carries source identity, even when the columns are null."""
     data = dict(row)
     for key in ("source_attachment_id", "source_conv_id", "source_conv_name",
-                "audience_attachment_id"):
+                "audience_attachment_id", "bridge_id"):
         data.setdefault(key, None)
     return data
 

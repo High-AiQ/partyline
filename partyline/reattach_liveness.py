@@ -79,3 +79,6 @@ async def mark_unlive_exited(
                 attachment_id, "exited", attachment["runtime_owner"]
             )
         runtime.reattaching.discard(attachment_id)
+    from .bridge_service import reconcile_after_restart
+
+    await reconcile_after_restart(runtime)

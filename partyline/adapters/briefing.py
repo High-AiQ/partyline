@@ -82,7 +82,8 @@ def _speaker(message: dict) -> str:
     """
     source, name = message.get("source_conv_id"), message.get("source_conv_name")
     if source and name and source != message.get("conv_id"):
-        return f"{message['sender']} via «{name}»"
+        bridge = "bridge " if message.get("bridge_id") else ""
+        return f"{message['sender']} via {bridge}«{name}»"
     return message["sender"]
 
 
