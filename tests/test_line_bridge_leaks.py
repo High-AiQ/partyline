@@ -13,6 +13,7 @@ from partyline.message_forward import forward_router
 from partyline.pin_routes import pin_router
 from partyline.reaction_routes import reaction_router
 from partyline.reaction_store import message as reaction_message
+from partyline.return_notice import format_notice
 from partyline.return_path import ReturnPath
 from tests import test_line_bridge as _bridge_tests
 
@@ -35,17 +36,24 @@ class BridgeLeakTest(unittest.TestCase):
     def test_the_return_notice_never_quotes_bridge_speech_but_counts_as_a_handoff(self):
         self.opened()
         returns = ReturnPath(self.runtime)
+        finisher = self.db.get_attachment("x-amb")
+
+        def notice():
+            return format_notice(self.runtime, "gem", finisher, "x", returns.last_said.get("x-amb"))
+
         returns.note_spoke("x-amb", "@[bridge]fable the secret plan")
-        self.assertNotIn("x-amb", returns.last_said)
+        self.assertNotIn("secret plan", notice())
+        self.assertIn("said nothing", notice())
         self.assertIn("x-amb", returns.addressed)
         returns.note_spoke("x-amb", "ordinary words to nobody")
-        self.assertEqual(returns.last_said["x-amb"], "ordinary words to nobody")
+        self.assertIn("ordinary words to nobody", notice())
 
     def test_a_stamped_message_does_not_count_ordinary_mentions_as_handoffs(self):
         self.opened()
         returns = ReturnPath(self.runtime)
+        returns.requesters["x-amb"] = {"r1": {"name": "gem"}}
         returns.note_spoke("x-amb", "@[bridge]fable psst, tell @gem nothing")
-        self.assertEqual(returns.requesters, {})
+        self.assertIn("r1", returns.requesters["x-amb"])  # @gem inside bridge speech reached no one
         self.assertFalse(speaks_over_bridge(self.db, "x-other", "@[bridge]luna hi"))
 
     def test_by_id_reads_hide_bridge_rows_from_forward_reaction_and_pin(self):
@@ -105,3 +113,34 @@ class BridgeLeakTest(unittest.TestCase):
         self.opened()
         quoted = self.say("x", "x-amb", "see `@[bridge]fable` in the docs")
         self.assertIsNone(quoted.json().get("bridge_id"))
+
+    def test_an_unanswered_offer_exempts_only_its_own_processes_from_reconciliation(self):
+        from partyline.bridge_service import reconcile_after_restart
+        from partyline.bridge_store import open_bridge_for_line
+
+        self.opened()
+        self.runtime.live.pop("x-amb")
+        self.db._exec("UPDATE attachments SET status='exited' WHERE id='x-amb'")
+        plan = {"attachment_ids": ["x-amb"]}
+        with patch.object(self.db, "get_restart_plan", return_value=plan):
+            asyncio.run(reconcile_after_restart(self.runtime))
+        self.assertIsNotNone(open_bridge_for_line(self.db, "x"))
+        with patch.object(self.db, "get_restart_plan", return_value={"attachment_ids": ["other"]}):
+            asyncio.run(reconcile_after_restart(self.runtime))
+        self.assertIsNone(open_bridge_for_line(self.db, "x"))
+
+    def test_a_copy_for_an_absent_ambassador_tells_the_sender_and_posts_no_public_notice(self):
+        self.opened()
+        self.runtime.live.pop("y-amb")
+        self.db._exec("UPDATE attachments SET status='exited' WHERE id='y-amb'")
+        self.say("x", "x-amb", "@[bridge]fable are you there")
+        told = [r["body"] for r in self.rows("x") if r["audience_attachment_id"] == "x-amb"]
+        self.assertTrue(any("is not attached — your message is waiting" in t for t in told))
+        self.assertFalse(any("was mentioned but is not attached" in r["body"]
+                             for line in ("x", "y") for r in self.rows(line)))
+
+    def test_a_raced_second_open_is_a_409_not_a_500(self):
+        self.assertEqual(self.open().status_code, 200)
+        with patch("partyline.bridge_store.refusal", return_value=None):
+            raced = self.open(a=("x", "x-other"), b=("y", "y-other"))
+        self.assertEqual(raced.status_code, 409)

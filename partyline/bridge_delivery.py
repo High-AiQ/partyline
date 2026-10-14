@@ -129,6 +129,11 @@ async def _deliver(runtime, conv_id: str, message: dict) -> bool:
         await _tell(runtime, conv_id, speaker["id"],
                     f"⚠ @{peer['name']} is gone — nothing crossed")
         return True
+    plan = db.get_restart_plan()
+    if target["status"] not in ("starting", "running") and peer["attachment_id"] not in (
+            plan["attachment_ids"] if plan else []):
+        await _tell(runtime, conv_id, speaker["id"],
+                    f"@{peer['name']} is not attached — your message is waiting for it")
     copy = db.add_message(peer["conv_id"], message["sender"], "agent", message["body"])
     db._exec(
         "UPDATE messages SET source_attachment_id=?, source_conv_id=?,"

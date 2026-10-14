@@ -34,7 +34,7 @@ async def resume_with_backlog(runtime, att_id: str, resume, *, timeout=READY_TIM
     if att is None:
         raise HTTPException(404)
     await turn_marker.announce_if_interrupted(runtime, att)
-    await announce_restored(runtime, att)  # before the backlog is collected, so it rides the wake
+    await announce_restored(runtime, att, restart=False)  # before the backlog, so it rides the wake
     pending = addressed_backlog(runtime, att)
     resumed = await resume(att_id, pending)
     if pending:

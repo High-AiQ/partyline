@@ -328,7 +328,7 @@ class ChatRuntime(DeliveryCreditMixin):
                         )
                         continue
                     error = await reattacher.choose(conv_id, data, claimed_handle)
-                    if error is None and self.db.get_restart_plan() is None:
+                    if error is None:
                         from .bridge_service import reconcile_after_restart
 
                         await reconcile_after_restart(self)
