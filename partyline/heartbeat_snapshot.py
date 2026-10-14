@@ -51,7 +51,7 @@ def _line_snapshot(
     """
     rows = db._exec(
         "SELECT id, sender, sender_type FROM messages"
-        " WHERE conv_id=? AND id>? ORDER BY id",
+        " WHERE conv_id=? AND id>? AND bridge_id IS NULL ORDER BY id",
         (conv["id"], since_id),
     ).fetchall()
     # The monitor's own reminders are not news. Counting them would make the
@@ -72,7 +72,8 @@ def _line_snapshot(
         # forever and quiet suppression dies after the very first wake.
         unread = db._exec(
             "SELECT COUNT(*) AS behind FROM messages"
-            " WHERE conv_id=? AND id>? AND NOT (sender_type='system' AND ?)",
+            " WHERE conv_id=? AND id>? AND bridge_id IS NULL"
+            " AND NOT (sender_type='system' AND ?)",
             (conv["id"], att["last_seen"], conv["id"] == heartbeat_conv),
         ).fetchone()["behind"]
         if unread or att["status"] not in ("running", "starting"):

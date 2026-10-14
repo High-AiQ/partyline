@@ -61,3 +61,17 @@ export function descendantLineIds(rootId: string, lines: readonly ParentLinkedLi
   }
   return result;
 }
+
+/** The root of a line's tree; lines in one tree already reach each other, so a bridge needs two roots. */
+export function treeRootId(lineId: string, lines: readonly ParentLinkedLine[]): string {
+  const parents = new Map(lines.map((line) => [line.id, line.parent_id ?? null]));
+  const seen = new Set<string>();
+  let current = lineId;
+  while (!seen.has(current)) {
+    seen.add(current);
+    const parent = parents.get(current);
+    if (!parent || !parents.has(parent)) break;
+    current = parent;
+  }
+  return current;
+}

@@ -829,3 +829,40 @@ changed digest and suppression never fires.
 | Let a quiet skip advance `next_due_at` only — the delta stays owed | Advance `since_id` on a wake nobody read |
 | Exclude the monitor's own reminders from the delta | Let the heartbeat become permanently actionable because of itself |
 | Break the quiet when a line holds open tasks and shows nothing for several checks | Treat every silence as healthy — that is the stall this exists to catch |
+
+## Line bridges
+
+Lines in one tree reach each other through the hierarchy. Lines in *different*
+trees have no such path, so a person can open a **bridge**: a direct,
+event-driven channel between one process on each line (the *ambassadors*). The
+full contract is `docs/contracts/line-bridge.md`; the code is
+`bridge_store.py` (rows), `bridge_service.py` (open and close),
+`bridge_delivery.py` (speech), `bridge_routes.py` (API) and `bridge_pack.py`
+(text).
+
+- **Only a person opens or closes one** (`POST /api/bridges`,
+  `DELETE /api/bridges/<id>`); a process token gets 403. A bridge is refused
+  with 409 for lines in one tree, a line that already has a bridge, a
+  non-live ambassador, or an archived line.
+- **Speaking.** An ambassador's message containing `@[bridge]<peer>` is
+  delivered whole to the peer as a private copy (audience = the peer, stamped
+  `bridge_id`, forced wake). The ordinary `@name` regex never matches `@[`. A
+  person's `@[bridge]` is ignored; a non-ambassador or wrong handle gets a
+  private notice. A copy is foreign-sourced, so it is never relayed onward.
+- **Hidden.** Rows with `bridge_id` are excluded from human transcript reads
+  and the WebSocket fan-out (`message_visibility.py`), and from every
+  digest except the copy's addressee. They stay in the table as an audit log,
+  readable by a person at `GET /api/bridges/<id>/messages`.
+- **Rate limit.** 30 delivered messages per side per 10 minutes; past that the
+  sender is told privately and both lines get one "bridge paused" notice per
+  window.
+- **Closing.** A person, or automatically when either ambassador detaches,
+  exits or is removed, or either line is archived. Each present ambassador is
+  told, and each line gets one ordinary notice for the open and the close.
+- **The pack** rides startup, resume and post-compaction briefings only while
+  the bridge is open (`bridge_pack.pack_for`).
+
+| DO | DO NOT |
+| --- | --- |
+| Let a process ask its people in plain text to open a bridge | Open or close a bridge from a process |
+| Report anything people need in a normal message | Expect people to see bridge traffic in the chat |

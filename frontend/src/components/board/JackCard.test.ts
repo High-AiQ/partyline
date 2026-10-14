@@ -302,3 +302,41 @@ describe("JackCard captain status", () => {
     }
   });
 });
+
+describe("JackCard bridge badge", () => {
+  const bridge = {
+    bridge_id: "b1",
+    peer_name: "fable",
+    peer_attachment_id: "att-fable",
+    peer_conv_id: "conv-2",
+    peer_conv_name: "tool",
+  };
+
+  it("shows the badge with its label only while the process is an ambassador", async () => {
+    const card = mount(JackCard, {
+      target: document.body,
+      props: { attachment, resumable: false, overridesBundled: false, onmention: vi.fn() },
+    });
+    try {
+      expect(document.querySelector(".bridge-badge")).toBeNull();
+    } finally {
+      await unmount(card);
+    }
+    const bridged = mount(JackCard, {
+      target: document.body,
+      props: {
+        attachment: { ...attachment, bridge },
+        resumable: false,
+        overridesBundled: false,
+        onmention: vi.fn(),
+      },
+    });
+    try {
+      const badge = document.querySelector(".bridge-badge");
+      expect(badge?.textContent).toContain("⇄ bridge");
+      expect(badge?.getAttribute("aria-label")).toBe("bridged with @fable on «tool»");
+    } finally {
+      await unmount(bridged);
+    }
+  });
+});

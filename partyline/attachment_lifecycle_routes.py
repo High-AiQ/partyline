@@ -6,6 +6,7 @@ import os
 from fastapi import HTTPException, Request
 
 from .agent_connection import remove_connection
+from .bridge_service import close_for_attachment
 from .auth_guard import request_principal
 from .machine_scope import deny_unless, deny_unless_attachment, is_human
 from .attachment_contracts import AttachmentResponse
@@ -142,6 +143,7 @@ def register_attachment_lifecycle_routes(app, runtime, *, start, require_loopbac
 
 
     async def _removed_event(att):
+        await close_for_attachment(runtime, att["id"], "ambassador removed")
         remove_connection(runtime.db.path, att["id"])
         runtime.uncredited.pop(att["id"], None)
         runtime.unclaimed_noticed.discard(att["id"])

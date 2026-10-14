@@ -1947,6 +1947,33 @@ class ShutdownTest(ServerTest):
             server.runtime.db.list_messages("line")[-1]["body"],
         )
 
+    def test_declining_the_offer_closes_a_bridge_whose_ambassador_is_gone(self):
+        from partyline import bridge_store
+
+        db = server.runtime.db
+        self.add_attachment("a1", "worker")
+        db.create_conversation("far", "Far")
+        db.add_attachment("f1", "far", "pal", "fake", ["fake"], self.directory.name, None)
+        db.set_attachment_status("f1", "running", None)
+        bridge = bridge_store.create(
+            db, {"conv_id": "line", "attachment_id": "a1"},
+            {"conv_id": "far", "attachment_id": "f1"}, "greg")
+        server.runtime.live["a1"] = FakeAdapter()
+        server.runtime.live["f1"] = FakeAdapter()
+        planned = server.save_restart_plan(
+            server.RestartPlanRequest(conversation_id="line", debrief="Continue."))
+        server.runtime.live.pop("a1", None)
+        db.mark_stale_attachments()
+        socket = StreamWebSocket(
+            {"type": "hello", "client_id": "browser"},
+            {"type": "reattach", "token": planned.token, "action": "cancel"},
+            token=self.user_token("greg"),
+        )
+
+        self.arun(server.ws_endpoint(socket, "line"))
+
+        self.assertIsNotNone(bridge_store.get_bridge(db, bridge["id"])["closed_at"])
+
     def test_other_lines_never_receive_or_consume_a_restart_offer(self):
         self.add_attachment("a1", "worker")
         server.runtime.live["a1"] = FakeAdapter()

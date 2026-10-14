@@ -6,6 +6,7 @@ from typing import NamedTuple
 
 from .goal import goal_rider
 from .accept_sha import handoff_rider
+from .bridge_pack import pack_for
 from .captain_docs import reminder_line
 from .compaction_events import current_turns
 from .line_depth import depth as line_depth, has_captain, staffed_split_reason
@@ -87,7 +88,8 @@ def briefing_pointer(conv_id: str) -> str:
 
 def bind_role_delivery(db, att: dict, runtime=None) -> None:
     initial = current_role(db, att["id"])
-    att["role_briefing"] = _instructions(initial, db)
+    att["role_briefing"] = "\n\n".join(
+        part for part in (_instructions(initial, db), pack_for(db, att["id"])) if part)
     original_rider = att["digest_rider"]
     # The startup briefing already carries the pack for both fresh and resumed
     # attachments.  A resume therefore starts at the current role just like a
@@ -170,3 +172,24 @@ def _delta(value: str, previous: str | None, label: str) -> str:
     if value:
         return value
     return f"({label} cleared)" if previous else ""
+
+
+async def announce_restored(runtime, att: dict, *, restart: bool = True) -> None:
+    """Tell a resumed bridge ambassador its bridge survived the restart.
+
+    Queued on its cursor, not forced: the reattachment's own continuation wake
+    delivers the backlog, this notice and any bridge copy that was waiting.
+    """
+    from .bridge_store import open_bridge_for_attachment, side, side_view
+    from .mention_relay import post_private
+
+    bridge = open_bridge_for_attachment(runtime.db, att["id"])
+    if bridge is None:
+        return
+    peer = side_view(runtime.db, bridge, side(bridge, att["id"])[1])
+    after = " after the restart" if restart else ""
+    await post_private(
+        runtime, att["conv_id"], "system", "system",
+        f"⇄ bridge restored{after}: you are still this line's ambassador to "
+        f"@{peer['name']} on «{peer['conv_name']}»; the bridge pack is in your briefing",
+        audience=att["id"], source=(None, att["conv_id"]), route=False)

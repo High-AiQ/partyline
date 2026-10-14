@@ -4,7 +4,7 @@ import asyncio
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from .attachment_view import attach_memory_usage, attachment_response
+from .attachment_view import attach_bridge, attach_memory_usage, attachment_response
 from .auth_guard import request_principal
 from .contracts import MessageResponse
 from .hierarchy_contracts import MessageIn
@@ -33,9 +33,9 @@ async def conversation_detail_response(runtime, presence, media, conv_id: str, p
 
 
 async def _attachment_response(runtime, attachment):
-    return attach_memory_usage(
+    return attach_bridge(attach_memory_usage(
         await attachment_response(attachment), runtime.memory_usage.get(attachment["id"])
-    )
+    ), runtime.db)
 
 
 def message_router(runtime, media) -> APIRouter:
@@ -79,7 +79,7 @@ def message_router(runtime, media) -> APIRouter:
         principal = request_principal(request)
         deny_unless(runtime.db, principal, conv_id, "read")
         limit = max(1, min(limit, 50))
-        target = select_message_by_id(runtime.db._exec, conv_id, message_id)
+        target = select_message_by_id(runtime.db._exec, conv_id, message_id, visible=True)
         if target is None:
             raise HTTPException(404, "message not found on this line")
         before, has_before = runtime.db.message_page(

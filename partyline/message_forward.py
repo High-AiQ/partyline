@@ -43,7 +43,7 @@ def forward_router(runtime) -> APIRouter:
         principal = request_principal(request)
         deny_unless(db, principal, conv_id, "read")
         deny_unless(db, principal, body.to, "write")
-        message = select_message_by_id(db._exec, conv_id, message_id)
+        message = select_message_by_id(db._exec, conv_id, message_id, visible=True)
         if message is None:
             raise HTTPException(404, "message not found on this line")
         source = db.get_conversation(conv_id) or {}
