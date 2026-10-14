@@ -9,22 +9,32 @@ recipient writes a fresh ``@[bridge]`` message.
 """
 
 import re
+import unicodedata
 import time
 
 from .bridge_store import (
     WINDOW_LIMIT, WINDOW_SECONDS, open_bridge_for_attachment, side, side_view,
     sent_in_window,
 )
+from .message_queries import select_message_by_id
 from .mention_relay import is_foreign, post_private, speaker_attachment
 
 BRIDGE_RE = re.compile(r"(?<![A-Za-z0-9_])@\[bridge\]([A-Za-z0-9][A-Za-z0-9_.-]*)", re.I)
 PAUSED = "⇄ bridge paused: rate limit"
 
 
+CODE_RE = re.compile(r"```.*?```|`[^`\n]*`", re.S)
+
+
 def bridge_names(body: str) -> set[str]:
-    """Handles named with ``@[bridge]``, trailing sentence punctuation tolerated."""
+    """Handles named with ``@[bridge]``, trailing sentence punctuation tolerated.
+
+    Quoted code is not speech, and copied text can carry invisible formatting
+    characters, so both are cleared the way ordinary mentions clear them.
+    """
+    text = "".join(c for c in CODE_RE.sub(" ", body or "") if unicodedata.category(c) != "Cf")
     names: set[str] = set()
-    for name in BRIDGE_RE.findall(body or ""):
+    for name in BRIDGE_RE.findall(text):
         names |= {name.lower(), name.rstrip(".-_").lower()}
     return names - {""}
 
@@ -58,9 +68,19 @@ def stamp_outbound(db, conv_id: str, message: dict) -> dict:
     return {**message, "bridge_id": bridge["id"]}
 
 
+def speaks_over_bridge(db, att_id: str, body: str) -> bool:
+    """True when this ambassador's words address its counterpart across its open bridge."""
+    names = bridge_names(body)
+    bridge = open_bridge_for_attachment(db, att_id) if names else None
+    if bridge is None:
+        return False
+    peer = side_view(db, bridge, side(bridge, att_id)[1])
+    return peer["name"].lower() in names
+
+
 async def _tell(runtime, conv_id: str, att_id: str, text: str) -> None:
     await post_private(runtime, conv_id, "system", "system", text, audience=att_id,
-                       source=(None, conv_id))
+                       source=(None, conv_id), route=False)
 
 
 async def route_bridge(runtime, conv_id: str, message: dict) -> bool:
@@ -115,7 +135,7 @@ async def _deliver(runtime, conv_id: str, message: dict) -> bool:
         " audience_attachment_id=?, bridge_id=? WHERE id=?",
         (speaker["id"], conv_id, peer["attachment_id"], bridge["id"], copy["id"]),
     )
-    copy = db.message_by_id(peer["conv_id"], copy["id"])
+    copy = select_message_by_id(db._exec, peer["conv_id"], copy["id"])
     await runtime.route_mentions(peer["conv_id"], copy, force=True)
     return True
 

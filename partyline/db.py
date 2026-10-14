@@ -263,7 +263,7 @@ class Db:
         return select_message_page(self._exec, conv_id, before_id, after_id, limit)
 
     def message_by_id(self, conv_id: str, message_id: int):
-        return select_message_by_id(self._exec, conv_id, message_id)
+        return select_message_by_id(self._exec, conv_id, message_id, visible=True)
 
     def messages_after(self, conv_id, after_id, exclude_sender=None, exclude_attachment_id=None):
         """Unseen by one reader: never its own speech, never a copy private to another."""

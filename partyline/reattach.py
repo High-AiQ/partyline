@@ -19,6 +19,7 @@ from .restart_lease import run_automatic_restart_plan
 from .reattach_liveness import mark_unlive_exited, report_live, report_reattach_failure
 from .restart_scope import covered_conversation_ids, planned_conversation_ids, select_attachment_ids
 from .resume_backlog import addressed_backlog
+from .role_delivery import announce_restored
 from .resource_budget import clear_stale_restart_rows
 
 READY_TIMEOUT_SECONDS = 90.0
@@ -273,7 +274,6 @@ class ReattachCoordinator:
                     failed.append(attachment_id)
                     self.runtime.reattaching.discard(attachment_id)
                     continue
-
                 expected_owners[attachment_id] = attachment["runtime_owner"]
                 line, name = attachment["conv_id"], attachment["name"]
                 if await report_live(self.runtime, attachment_id, line, name):
@@ -283,6 +283,7 @@ class ReattachCoordinator:
                 try:
                     cut = turn_marker.was_interrupted(self.runtime.db, attachment_id)
                     await turn_marker.announce_if_interrupted(self.runtime, attachment)
+                    await announce_restored(self.runtime, attachment)
                     notice_ids = (restart_notice_ids[line],) if cut or (
                         plan["debrief"].strip() and line == conv_id
                     ) else ()
@@ -313,7 +314,6 @@ class ReattachCoordinator:
                                 "attachment ownership changed before cursor advancement"
                             )
                         continuation_confirmed = True
-
                     is_ready = await asyncio.wait_for(
                         adapter.wait_ready(), timeout=self.ready_timeout
                     )

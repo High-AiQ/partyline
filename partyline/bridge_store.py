@@ -57,6 +57,19 @@ def side(bridge: dict, att_id: str) -> tuple[str, str] | None:
     return None
 
 
+def bridged_across(db, conv_id: str, parent_id: str) -> bool:
+    """True when linking ``conv_id`` under ``parent_id`` joins the two ends of an open bridge."""
+    from .hierarchy import subtree_conversation_ids
+
+    moving = set(subtree_conversation_ids(db, conv_id))
+    target = set(subtree_conversation_ids(db, tree_root(db, parent_id)))
+    return any(
+        (b["a_conv_id"] in moving and b["b_conv_id"] in target)
+        or (b["b_conv_id"] in moving and b["a_conv_id"] in target)
+        for b in open_bridges(db)
+    )
+
+
 def lines_of(bridge: dict) -> tuple[str, str]:
     return bridge["a_conv_id"], bridge["b_conv_id"]
 

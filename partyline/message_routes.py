@@ -79,8 +79,8 @@ def message_router(runtime, media) -> APIRouter:
         principal = request_principal(request)
         deny_unless(runtime.db, principal, conv_id, "read")
         limit = max(1, min(limit, 50))
-        target = select_message_by_id(runtime.db._exec, conv_id, message_id)
-        if target is None or target.get("bridge_id"):
+        target = select_message_by_id(runtime.db._exec, conv_id, message_id, visible=True)
+        if target is None:
             raise HTTPException(404, "message not found on this line")
         before, has_before = runtime.db.message_page(
             conv_id, before_id=message_id, limit=limit

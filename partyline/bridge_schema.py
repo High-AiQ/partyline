@@ -24,4 +24,9 @@ MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS idx_line_bridges_a ON line_bridges(a_conv_id, closed_at)",
     "CREATE INDEX IF NOT EXISTS idx_line_bridges_b ON line_bridges(b_conv_id, closed_at)",
     "ALTER TABLE messages ADD COLUMN bridge_id TEXT",
+    "CREATE INDEX IF NOT EXISTS idx_messages_bridge ON messages(bridge_id, created_at)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_line_bridges_open_a ON line_bridges(a_conv_id)"
+    " WHERE closed_at IS NULL",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_line_bridges_open_b ON line_bridges(b_conv_id)"
+    " WHERE closed_at IS NULL",
 ]
