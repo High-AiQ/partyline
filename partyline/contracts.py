@@ -4,7 +4,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from .memory_contracts import MemoryEvent
-
 from .attachment_contracts import AttachmentResponse
 from .media_contracts import FileRef
 from .line_process_contracts import LineLiveEvent
@@ -104,6 +103,7 @@ class MessageResponse(BaseModel):
     source_conv_id: str | None = None
     source_conv_name: str | None = None
     audience_attachment_id: str | None = None
+    bridge_id: str | None = None
     reactions: list[ReactionResponse] = Field(default_factory=list)
     replayed: bool = False  # a client_key replay answered with a stored message
 

@@ -11,6 +11,7 @@ chatty topic must not eat the budget either.
 
 from __future__ import annotations
 
+from .bridge_pack import pack_for
 from .mentions import addresses
 from .role_briefing import WORKER_REMINDER
 
@@ -34,7 +35,7 @@ def latest_assignment(db, att: dict, scan: int = 300,
     rows = db._exec(
         "SELECT sender, sender_type, source_attachment_id, body FROM messages "
         "WHERE conv_id=? AND sender_type IN ('human','agent') AND audience_attachment_id "
-        "IS NULL ORDER BY id DESC LIMIT ?", (att["conv_id"], scan)).fetchall()
+        "IS NULL AND bridge_id IS NULL ORDER BY id DESC LIMIT ?", (att["conv_id"], scan)).fetchall()
     for row in rows:
         if row["sender_type"] == "agent":
             if person_only:
@@ -123,7 +124,8 @@ def render_rebrief(db, att: dict, limit: int = REBRIEF_LIMIT, reason: str = "") 
     # model, so this is where the worker is told to refresh its notes (5.1).
     from .line_notes import NUDGE
 
-    fixed = [part for part in (header, assignment, reminder, NUDGE) if part]
+    bridge = pack_for(db, att["id"])
+    fixed = [part for part in (header, assignment, reminder, NUDGE, bridge) if part]
     # Two more parts (context, notes) may join the join, so reserve their
     # separators up front: the budget must cover the "\n\n" between parts.
     remaining = max(0, limit - sum(len(part) for part in fixed)
@@ -140,5 +142,6 @@ def render_rebrief(db, att: dict, limit: int = REBRIEF_LIMIT, reason: str = "") 
         context += ("\n\n" if context else "") + f"Standing context (the line's topic):\n{topic}"
     if context and len(context) + len(pointer) + 2 > context_budget:
         context = context[:max(0, context_budget - len(pointer) - 2)].rstrip() + "\n" + pointer
-    parts = [part for part in (header, context, notes, assignment, reminder, NUDGE) if part]
+    parts = [part for part in (header, context, notes, assignment, reminder, NUDGE, bridge)
+             if part]
     return "\n\n".join(parts)

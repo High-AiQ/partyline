@@ -26,7 +26,7 @@ from .fence_protect import database_paths, protected_repo_roots
 from .hook_routes import surface_attention
 from .process_incidents import exit_callback
 from .hierarchy import tree_live_name_conflict
-from .role_delivery import bind_role_delivery
+from .role_delivery import announce_restored, bind_role_delivery
 from .review_worktrees import list_review_worktrees
 from .reattach import ResumedAttachment, adapter_can_resume, resume_needs_session
 from .transcript_delivery import TranscriptDeliveryRecord
@@ -296,4 +296,5 @@ async def _resume_adapter_locked(
         f"@{att['name']} resumed with full context · "
         f"session {att.get('cli_session') or att_id}",
     )
+    await announce_restored(runtime, att)
     return ResumedAttachment(adapter, startup_staged)
