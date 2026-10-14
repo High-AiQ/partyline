@@ -82,8 +82,8 @@ class Db:
             for mig in MIGRATIONS:
                 try:
                     self.conn.execute(mig)
-                except sqlite3.OperationalError:
-                    pass  # already applied
+                except sqlite3.DatabaseError:
+                    pass  # already applied, or an index the data cannot yet satisfy
             self.conn.commit()
         ensure_db_sidecars(self)
 

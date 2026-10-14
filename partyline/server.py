@@ -149,8 +149,7 @@ async def _run_automatic_reattachment() -> None:
     """Run a trusted automatic plan at startup without depending on a browser."""
     try:
         await ReattachCoordinator(runtime, _resume_adapter).run_automatic()
-        if runtime.db.get_restart_plan() is None:  # nothing will reattach: settle bridges
-            await reconcile_after_restart(runtime)
+        await reconcile_after_restart(runtime)  # an unanswered offer exempts only its own processes
     except Exception:
         logger.exception(
             "automatic reattachment stopped unexpectedly; the durable plan was preserved "

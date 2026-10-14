@@ -174,7 +174,7 @@ def _delta(value: str, previous: str | None, label: str) -> str:
     return f"({label} cleared)" if previous else ""
 
 
-async def announce_restored(runtime, att: dict) -> None:
+async def announce_restored(runtime, att: dict, *, restart: bool = True) -> None:
     """Tell a resumed bridge ambassador its bridge survived the restart.
 
     Queued on its cursor, not forced: the reattachment's own continuation wake
@@ -187,8 +187,9 @@ async def announce_restored(runtime, att: dict) -> None:
     if bridge is None:
         return
     peer = side_view(runtime.db, bridge, side(bridge, att["id"])[1])
+    after = " after the restart" if restart else ""
     await post_private(
         runtime, att["conv_id"], "system", "system",
-        f"⇄ bridge restored after the restart: you are still this line's ambassador to "
+        f"⇄ bridge restored{after}: you are still this line's ambassador to "
         f"@{peer['name']} on «{peer['conv_name']}»; the bridge pack is in your briefing",
         audience=att["id"], source=(None, att["conv_id"]), route=False)

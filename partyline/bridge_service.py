@@ -5,6 +5,8 @@ ambassador goes away or either line is archived. Every path funnels through
 `close_bridge`, so the notices and the badge refresh happen exactly once.
 """
 
+import sqlite3
+
 from fastapi import HTTPException
 
 from . import bridge_store as store
@@ -23,7 +25,10 @@ async def open_bridge(runtime, a: dict, b: dict, opened_by: str) -> dict:
     reason = store.refusal(db, a, b)
     if reason is not None:
         raise HTTPException(409, reason)
-    bridge = store.create(db, a, b, opened_by)
+    try:
+        bridge = store.create(db, a, b, opened_by)
+    except sqlite3.IntegrityError:
+        raise HTTPException(409, "a line in this pair already has an open bridge") from None
     views = {key: store.side_view(db, bridge, key) for key in ("a", "b")}
     for mine, theirs in (("a", "b"), ("b", "a")):
         me, peer = views[mine], views[theirs]
@@ -83,9 +88,12 @@ async def reconcile_after_restart(runtime) -> None:
     """
     from .reattach_liveness import is_live
 
+    plan = runtime.db.get_restart_plan()
+    waiting = set(plan["attachment_ids"]) if plan else set()  # an offer may still bring them back
     for bridge in store.open_bridges(runtime.db):
         for key in ("a", "b"):
-            if not is_live(runtime, bridge[f"{key}_attachment_id"]):
+            att_id = bridge[f"{key}_attachment_id"]
+            if att_id not in waiting and not is_live(runtime, att_id):
                 name = store.side_view(runtime.db, bridge, key)["name"]
                 await close_bridge(
                     runtime, bridge, "system",

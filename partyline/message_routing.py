@@ -221,7 +221,7 @@ async def route_message(
         and name.lower() not in queued
         and name.lower() not in elsewhere
     ]
-    for name in unavailable:
+    for name in [] if message.get("bridge_id") else unavailable:
         await runtime.post_message(
             conv_id,
             "system",
