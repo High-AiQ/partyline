@@ -87,7 +87,8 @@ def network_refs(host: dict, networking: dict | None = None, attached: dict | No
         refs.append(mode)
     for table in ((networking or {}).get("EndpointsConfig"), attached):
         for name, endpoint in (table or {}).items():
-            refs.append(name)
+            if name not in FREE_NETWORKS:
+                refs.append(name)
             if isinstance(endpoint, dict) and endpoint.get("NetworkID"):
                 refs.append(str(endpoint["NetworkID"]))
     return refs
