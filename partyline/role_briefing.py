@@ -127,7 +127,10 @@ SPLIT = (
     "Pass ?clear_goal=true to waive the goal blocker — a goal on its own no longer blocks "
     "the retirement, and the goal is cleared only once every other blocker is gone. "
     "A merged branch's dirty worktree is the one you may throw away: pass ?discard=true with "
-    "the DELETE; partyline refuses it for an unmerged branch, whose commits live only there."
+    "the DELETE; partyline refuses it for an unmerged branch. The root captain may instead inspect "
+    "retirement-preview and use force_discard=true with that preview_token to retire strict descendants "
+    "including superseded unmerged history. Preserve deliverables first; recovery refs capture tracked "
+    "and untracked files, while ignored files are discarded. Non-root captains gain no override."
 )
 
 LEAF = (

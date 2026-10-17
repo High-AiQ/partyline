@@ -70,6 +70,16 @@ fenced view, so `git merge <branch>` inside the line resolves to today's
 main. Merge by that verified SHA — never from a stale belief about where
 main is. An accept on a line refreshes its children's views automatically.
 
+## Retire finished descendant lines
+
+After durable preservation and handoff, retire finished children through the API or native
+`retire_child`. A root captain can inspect `retirement_preview`, assess dirty files and
+superseded commits, and explicitly use `force_discard` with its `preview_token`; add
+`stop_processes`, `clear_goal` and `include_children` only when intended. The root makes this
+decision without requesting human UI cleanup. Recovery snapshots retain tracked/untracked
+files; ignored files are lost. Non-root captains retain guarded retirement. See
+[root retirement decisions](hierarchy.md#root-decisions-about-obsolete-descendants).
+
 ## Reactions instead of acknowledgements
 
 Every @ spends a turn and a wake. Acknowledge with a 👀 reaction, not a
