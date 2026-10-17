@@ -183,7 +183,8 @@ class LifecycleTest(unittest.TestCase):
                 self.assertEqual(response.status_code, 500, response.text)
                 self.assertEqual(len(self.db.list_attachments("line")), 1)
                 self.assertEqual(self.db.get_attachment("old")["cli_session"], "previous-cli-session")
-                self.assertIsNotNone(attachment_by_api_token(self.db, self.old_token))
+                self.assertIsNone(attachment_by_api_token(self.db, self.old_token))
+                self.assertEqual(self.db.get_attachment("old")["api_token"], self.old_token)
                 setattr(self, failure, False)
         self.assertTrue(self.adapters[0].stopped)
 
@@ -347,7 +348,7 @@ class LifecycleTest(unittest.TestCase):
         self.assertIn("still tracked", response.text)
         self.assertEqual(len(self.runtime.live), 1)
         self.assertEqual(len(self.db.list_attachments("line")), 2)
-        self.assertIsNotNone(attachment_by_api_token(self.db, self.old_token))
+        self.assertIsNone(attachment_by_api_token(self.db, self.old_token))
 
     def test_stale_checkpoint_refuses_unbounded_replay_without_spawning(self):
         boundary = self.db.add_message("line", "greg", "human", "checkpoint")

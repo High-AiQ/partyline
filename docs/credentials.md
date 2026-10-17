@@ -65,10 +65,12 @@ request POST /api/conversations/<conversation-id>/messages --json-file message.j
 `context` displays identity and coordinates without the credential. JSON bodies can
 also arrive on stdin using `--json-file -`. The helper sends credentials only in
 an Authorization header, accepts only local `/api/` paths, and refuses redirects.
-Do not print, upload, or copy connection-file contents. A resumed attachment keeps
-its credential and file path; Start fresh receives a new identity and removes the
-retired file after a successful replacement. Removing a stopped card removes its
-file and database credential. A missing credential prevents launch.
+Do not print, upload, or copy connection-file contents. A stopped or detached
+attachment's credential is rejected immediately. Resume rotates it before launch
+and rewrites the connection file and per-invocation MCP config at the same paths;
+the resumed process receives the new token. Start fresh receives a new identity
+and removes the retired file after a successful replacement. Removing a stopped
+card removes its file and database credential. A missing credential prevents launch.
 
 These files avoid accidental disclosure, not access by another process running as
 the same OS user. Partyline's existing trusted-local-process security model still

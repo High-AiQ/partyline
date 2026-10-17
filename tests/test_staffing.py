@@ -63,7 +63,7 @@ class StaffingApiTest(unittest.TestCase):
     def test_implementer_is_forbidden_and_lead_sees_subtree(self):
         self.assertEqual(
             self.client.get("/api/conversations/parent/staffing", headers=self.impl).status_code,
-            403,
+            401,
         )
         child = self.client.post(
             "/api/conversations/parent/children",

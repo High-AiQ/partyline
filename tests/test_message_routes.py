@@ -155,7 +155,7 @@ class MessageRoutesTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.text)
 
-    def test_agent_posts_and_system_notices_do_not_require_a_live_attachment(self):
+    def test_stopped_machine_cannot_post_but_system_notices_remain_available(self):
         self.db.set_attachment_status("worker", "exited", "owner")
         self.client.headers["Authorization"] = "Bearer " + auth_store.ensure_api_token(
             self.db, "worker"
@@ -163,7 +163,7 @@ class MessageRoutesTest(unittest.TestCase):
         agent = self.client.post(
             "/api/conversations/line/messages", json={"body": "agent update"}
         )
-        self.assertEqual(agent.status_code, 200, agent.text)
+        self.assertEqual(agent.status_code, 401, agent.text)
         system = asyncio.run(self.runtime.post_message("line", "system", "system", "notice"))
         self.assertEqual(system["sender_type"], "system")
 

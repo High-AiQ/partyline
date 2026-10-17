@@ -99,6 +99,10 @@ class HierarchyApiTest(unittest.TestCase):
         self.db.close()
         self.directory.cleanup()
 
+    def activate_impl(self):
+        self.db.set_attachment_status("impl-att", "running", None)
+        return self.impl
+
     def test_machine_identity_includes_line_and_lead(self):
         principal = resolve_principal(
             self.db, auth_store.ensure_api_token(self.db, "lead-att")
@@ -108,10 +112,11 @@ class HierarchyApiTest(unittest.TestCase):
         self.assertTrue(principal.is_lead)
 
     def test_a_captain_can_fetch_its_current_pack_but_a_worker_cannot(self):
+        worker = self.activate_impl()
         briefing = self.client.get("/api/conversations/parent/briefing", headers=self.lead)
         self.assertEqual(briefing.status_code, 200, briefing.text)
         self.assertIn("## Captain pack", briefing.json()["briefing"])
-        denied = self.client.get("/api/conversations/parent/briefing", headers=self.impl)
+        denied = self.client.get("/api/conversations/parent/briefing", headers=worker)
         self.assertEqual(denied.status_code, 403)
 
     def fake_spawn(self, calls):
@@ -279,12 +284,13 @@ class HierarchyApiTest(unittest.TestCase):
         self.assertEqual(self.client.get(url, headers=bystander).status_code, 403)
 
     def test_implementer_cannot_post_media_on_an_unrelated_line(self):
+        worker = self.activate_impl()
         self.db.create_conversation("other", "Other")
         posted = self.client.post(
             "/api/conversations/other/files",
             data={"title": "nope"},
             files=[("file", ("a.png", png(), "image/png"))],
-            headers=self.impl,
+            headers=worker,
         )
         self.assertEqual(posted.status_code, 403)
 
@@ -378,18 +384,20 @@ class HierarchyApiTest(unittest.TestCase):
         self.assertEqual(listed.json()[0]["author_attachment_id"], "child-lead")
 
     def test_same_line_machine_message_posts_as_agent(self):
+        worker = self.activate_impl()
         posted = self.client.post(
             "/api/conversations/parent/messages",
             json={"body": "hello line"},
-            headers=self.impl,
+            headers=worker,
         )
         self.assertEqual(posted.status_code, 200)
         self.assertEqual(posted.json()["sender_type"], "agent")
         self.assertEqual(posted.json()["sender"], "grok")
 
     def test_unrelated_line_is_hidden_from_implementer_list(self):
+        worker = self.activate_impl()
         self.db.create_conversation("secret", "Secret")
-        listed = self.client.get("/api/conversations", headers=self.impl)
+        listed = self.client.get("/api/conversations", headers=worker)
         ids = {row["id"] for row in listed.json()}
         self.assertIn("parent", ids)
         self.assertNotIn("secret", ids)
@@ -409,9 +417,8 @@ class HierarchyApiTest(unittest.TestCase):
         body = caps.json()
         self.assertEqual(body["role"], "lead")
         self.assertIn("create_child", body["actions"])
-        impl = self.client.get("/api/capabilities", headers=self.impl).json()
-        self.assertEqual(impl["role"], "implementer")
-        self.assertNotIn("create_child", impl["actions"])
+        impl = self.client.get("/api/capabilities", headers=self.impl)
+        self.assertEqual(impl.status_code, 401)
 
     def test_appointing_a_live_manager_rings_it_at_once(self):
         deliveries = []
@@ -564,10 +571,11 @@ class HierarchyApiTest(unittest.TestCase):
         )
         self.assertEqual(linked.status_code, 200)
         self.assertEqual(linked.json()["parent_id"], "parent")
+        worker = self.activate_impl()
         refused = self.client.put(
             "/api/conversations/book/parent",
             json={"parent_id": "parent"},
-            headers=self.impl,
+            headers=worker,
         )
         self.assertEqual(refused.status_code, 403)
 
@@ -589,21 +597,23 @@ class HierarchyApiTest(unittest.TestCase):
         self.assertEqual(appointed.json()["attachment_id"], "kid-mgr")
 
     def test_non_lead_cannot_repoint_a_live_manager(self):
+        worker = self.activate_impl()
         self.db.set_attachment_status("lead-att", "running", None)
         refused = self.client.post(
             "/api/conversations/parent/lead",
             json={"attachment_id": "impl-att"},
-            headers=self.impl,
+            headers=worker,
         )
         self.assertEqual(refused.status_code, 403)
 
     def test_a_machine_cannot_appoint_a_captain_even_after_the_captain_detaches(self):
         """No natural-language handoff: a line with no captain waits for a person."""
+        worker = self.activate_impl()
         self.db.set_attachment_status("lead-att", "detached", None)
         refused = self.client.post(
             "/api/conversations/parent/lead",
             json={"attachment_id": "impl-att"},
-            headers=self.impl,
+            headers=worker,
         )
         self.assertEqual(refused.status_code, 403)
         appointed = self.client.post(
@@ -611,12 +621,13 @@ class HierarchyApiTest(unittest.TestCase):
         self.assertEqual(appointed.status_code, 200)  # the person may
 
     def test_machine_cannot_appoint_a_foreign_line_after_its_lead_detaches(self):
+        worker = self.activate_impl()
         self.db.create_conversation("other", "Other")
         self.db.add_attachment("other-mgr", "other", "astra-other", "fake", ["fake"], "/tmp")
         refused = self.client.post(
             "/api/conversations/other/lead",
             json={"attachment_id": "other-mgr"},
-            headers=self.impl,
+            headers=worker,
         )
         self.assertEqual(refused.status_code, 403)
 
@@ -986,6 +997,7 @@ class HierarchyApiTest(unittest.TestCase):
         self.assertEqual(purged.status_code, 200)
 
     def test_attachment_id_scope_matches_the_line(self):
+        self.activate_impl()
         self.db.create_conversation("other", "Other")
         self.db.add_attachment("other-att", "other", "x", "fake", ["fake"], "/tmp")
         principal = resolve_principal(
@@ -999,6 +1011,7 @@ class HierarchyApiTest(unittest.TestCase):
     def test_implementer_cannot_type_into_a_peer_process(self):
         from types import SimpleNamespace
         from unittest.mock import AsyncMock
+        self.activate_impl()
         principal = resolve_principal(self.db, auth_store.ensure_api_token(self.db, "impl-att"))
         request = SimpleNamespace(state=SimpleNamespace(principal=principal))
         adapter = SimpleNamespace(send_key=AsyncMock())
@@ -1031,13 +1044,14 @@ class HierarchyApiTest(unittest.TestCase):
         hidden = self.client.get(
             f"/api/conversations/{created['id']}", headers=self.impl
         )
-        self.assertEqual(hidden.status_code, 403)
+        self.assertEqual(hidden.status_code, 401)
 
     def test_machine_message_stamps_source_identity(self):
+        worker = self.activate_impl()
         posted = self.client.post(
             "/api/conversations/parent/messages",
             json={"body": "hello line"},
-            headers=self.impl,
+            headers=worker,
         )
         self.assertEqual(posted.json()["source_attachment_id"], "impl-att")
         self.assertEqual(posted.json()["source_conv_id"], "parent")

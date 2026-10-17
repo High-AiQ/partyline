@@ -67,8 +67,8 @@ MIGRATIONS = [
         secret TEXT NOT NULL,
         created_at REAL NOT NULL
     )""",
-    # api_token: the per-attachment machine credential, minted once and stable
-    # across activations and resumes, injected as PARTYLINE_TOKEN.
+    # api_token: the current per-attachment activation credential, injected
+    # as PARTYLINE_TOKEN and rotated whenever a stopped process resumes.
     "ALTER TABLE attachments ADD COLUMN api_token TEXT",
     # report_token: the plan's failure-report capability. The restart watchdog
     # runs outside any attachment or user session, so it authenticates its one

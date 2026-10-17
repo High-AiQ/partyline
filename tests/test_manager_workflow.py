@@ -140,6 +140,7 @@ class ManagerWorkflowTest(unittest.TestCase):
         self.assertEqual(acked.status_code, 200)
         self.assertIsNotNone(acked.json()["acknowledged_at"])
 
+        self.db.set_attachment_status("root-impl", "running", None)
         refused = self.client.get(
             f"/api/conversations/{child_id}", headers=self.impl
         )
