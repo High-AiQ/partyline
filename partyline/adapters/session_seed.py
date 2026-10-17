@@ -3,6 +3,7 @@
 import os
 import shutil
 import sys
+import tempfile
 
 
 def seed(source, target):
@@ -20,6 +21,27 @@ def seed(source, target):
             os.symlink(source, target)
         except OSError:
             pass
+
+
+def seed_private_file(source, target):
+    """Copy a shared config into the attachment home, replacing old links."""
+    if not os.path.isfile(source):
+        if os.path.islink(target):
+            os.unlink(target)
+        return
+    if os.path.lexists(target) and not os.path.islink(target):
+        os.chmod(target, 0o600)
+        return
+    directory = os.path.dirname(target)
+    fd, scratch = tempfile.mkstemp(prefix=".partyline-config-", dir=directory)
+    os.close(fd)
+    try:
+        shutil.copy2(source, scratch)
+        os.chmod(scratch, 0o600)
+        os.replace(scratch, target)
+    finally:
+        if os.path.exists(scratch):
+            os.unlink(scratch)
 
 
 def seed_claude_home():

@@ -10,7 +10,8 @@ Runtime columns come from the retained service-managed logs under `fixture/` and
 the run reports for those attachments. Source and documentation evidence is in the
 sections below. The fixture logs incoming requests only, so the outgoing
 `tools/list_changed` send is shown by the fixture code (`_notify_changed`), not by
-the log.
+the log. The logs contain no attachment IDs or CLI version strings; those labels
+come from the run reports.
 
 | Client | Version | Refreshes on `list_changed` (runtime) | New tool directly callable (runtime) | Dispatcher fallback worked (runtime) | Per-invocation config injection |
 | --- | --- | --- | --- | --- | --- |
@@ -86,20 +87,21 @@ environment per attachment; no persistent user preset needs to change:
 | Adapter | Current launch path | Attach-time MCP injection point |
 | --- | --- | --- |
 | Claude Code | `partyline/adapters/bundled/claude/adapter.py` builds the existing `att["command"]`; `spawn_env()` sets the seeded per-attachment `CLAUDE_CONFIG_DIR`. | `mcp_argv()` adds the private MCP config with `--mcp-config`, preserving any user config. Server credentials stay in the generated file's stdio `env` or inherited child environment. |
-| Codex CLI | `partyline/adapters/bundled/codex/adapter.py` builds `att["command"]`; `spawn_env()` supplies the private `CODEX_HOME`. | `mcp_argv()` inserts per-server `-c 'mcp_servers.<id>....=...'` overrides before a `resume` subcommand. An inline `-c`/`--config` key already present in argv is preserved; this observation does not establish precedence against `CODEX_HOME/config.toml`. |
+| Codex CLI | `partyline/adapters/bundled/codex/adapter.py` builds `att["command"]`; `spawn_env()` supplies the private `CODEX_HOME` and a private copy of `~/.codex/config.toml`. | `mcp_argv()` inserts per-server `-c 'mcp_servers.partyline....=...'` overrides before a `resume` subcommand. Per key, user values in the copied config or inline argv are preserved and Partyline fills only missing keys. `enabled = false` skips local injection; a user `url` keeps the remote entry and skips local injection. See `design.md` for the precise precedence and tests. |
 | OpenCode V2 | `partyline/adapters/bundled/opencode/v2.py` starts `opencode2 --standalone --auto --prompt ...`; `spawn_env()` returns `OPENCODE_DB` plus `mcp_env()`. | `mcp_env()` merges `mcp.partyline` into the process's `OPENCODE_CONFIG_CONTENT` through `opencode_config_content()`. It preserves other JSON settings and does not set `OPENCODE_CONFIG_DIR`; the runtime probe below added private config/XDG paths to isolate this compatibility run. V2 docs do not establish V1 `OPENCODE_CONFIG` support. |
 
-The per-invocation hooks are implemented. Any generated config and environment
-remain scoped to the attachment process and its existing write fence.
+The per-invocation hooks are implemented. The Codex generated config is subject to
+the user-config precedence described in `design.md`; probe summaries below do not
+establish isolation or non-bypass approval behavior.
 
-## Partyline `whoami` runtime proof (2026-10-17)
+## Partyline `whoami` probe summaries (2026-10-17)
 
-Three service-managed CLI probes called Partyline's real `whoami` MCP tool and
-received their own attachment identity and the `mcp-implementation` line. Each
-probe launcher finds its connection file by comparing the inherited token in
-memory, generates configuration through this branch's `mcp_attach` and adapter
-hooks, then execs the installed CLI or preset. The recorded results contain no
-credential values.
+The three retained `.txt` files are prose summaries, not raw output or
+version-bearing RPC logs. The probe scripts invoked `mcp_attach` and adapter
+configuration hooks and called Partyline's `whoami` tool. They did not exercise
+service-managed provisioning from a stale or shadowing working directory. The
+summaries contain no credential values. The subprocess regression for generated
+provisioning/helper entries is listed in `review-disposition.md`.
 
 | Client | Probe identity | Attachment | Result record |
 | --- | --- | --- | --- |

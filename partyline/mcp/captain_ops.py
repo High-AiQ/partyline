@@ -43,6 +43,8 @@ def execute(client, op, args, state):
         if topic:
             path += "/" + quote(topic, safe="")
         return client.request("GET", path)
+    if op == "reports":
+        return _reports(client, state, args)
     if op == "detach_worker":
         conv = args.get("conv_id")
         target = _target(client, state, conv, ("close",))
@@ -158,3 +160,25 @@ def _decide_write_set(client, state, args):
             raise ApiError("only the requesting attachment may withdraw")
         return client.request("POST", base + "/withdraw")
     raise ValueError("decision must be approve, deny, or withdraw; decline is person-only")
+
+
+def _reports(client, state, args):
+    operation = args["operation"]
+    actions = set(state.get("actions", []))
+    if operation == "list":
+        if "read_reports" not in actions:
+            raise ApiError("current attachment cannot read child reports")
+        return client.request("GET", _path(client.home, "reports"))
+    if operation != "post":
+        raise ValueError("reports operation must be list or post")
+    notify = bool(args.get("notify", False))
+    required = "notify" if notify else "report"
+    if required not in actions:
+        raise ApiError("current attachment cannot post that report")
+    body = args.get("body")
+    if not isinstance(body, str) or not body.strip():
+        raise ValueError("report body is required")
+    if len(body) > 2000:
+        raise ValueError("report body is capped at 2000 characters")
+    return client.request("POST", _path(client.home, "reports"),
+                          {"body": body, "notify": notify})

@@ -47,6 +47,9 @@ def schema(name):
         "process_overview": obj({**line}, ["conv_id"]),
         "ack_report": obj({**line, "report_id": {"type": "integer", "minimum": 1},
             "revision": {"type": "integer", "minimum": 1}}, ["conv_id", "report_id", "revision"]),
+        "reports": obj({"operation": {"type": "string", "enum": ["list", "post"]},
+            "body": text("Report body for post; at most 2000 characters.", 2000, 1),
+            "notify": {"type": "boolean"}}, ["operation"]),
         "set_goal": obj({**line, "goal": text("Goal text; empty clears it.", 3000)},
                         ["conv_id", "goal"]),
         "set_gates": obj({**line, "commands": {"type": "array", "items": text("Gate command.", 2000),
@@ -61,7 +64,7 @@ OPERATIONS = tuple(schema_name for schema_name in (
     "staffing", "write_set_requests", "list_presets", "attach_worker", "detach_worker", "create_child",
     "appoint_lead", "retire_child", "accept", "review_worktree", "request_write_set",
     "decide_write_set", "request_restart", "process_overview", "ack_report", "set_goal",
-    "set_gates", "docs_read"))
+    "set_gates", "docs_read", "reports"))
 
 
 def validate(name, args):

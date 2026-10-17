@@ -27,19 +27,20 @@ Route-level dispositions are in [`api-inventory.md`](api-inventory.md); per-clie
 
 ## 2. Attach per client
 
-Partyline adds the server for one invocation only. Global CLI configuration, presets, and
-`OPENCODE_CONFIG_DIR` are never written. Each attachment's config lives in its connection directory,
-`<db>.agent-connections/` (mode 0700, `code`: `partyline/agent_connection.py`).
+Partyline adds the MCP server for one invocation only. It does not write the global Codex
+configuration. The generated Partyline MCP config lives in the per-attachment connection directory,
+`<db>.agent-connections/` (mode 0700; `partyline/agent_connection.py`). Codex's effective
+`config.toml` is a private copy under that attachment's `CODEX_HOME`.
 
 | Client | How the entry is injected | User configuration | Code |
 | --- | --- | --- | --- |
 | Claude Code 2.1.302 | `--mcp-config <att>.mcp.json` added to the command, after any user `--mcp-config` values | Non-strict: the user's own MCP servers still load | `mcp_attach.claude_command` |
-| Codex CLI 0.163.0 | `-c mcp_servers.partyline.{command,args,env}=<TOML>` inserted right after the executable, before the rest of the command (so before a `resume` subcommand). Values are rendered by `mcp_attach.codex_overrides`: strings are JSON-escaped, and arrays and inline tables are rendered recursively. Before 5efa2cf the whole value was `json.dumps`, so the `env` object was written as a JSON object (`{"KEY": "value"}`), which is not TOML because TOML uses `=`, not `:`. | An inline `-c`/`--config` key already present in argv is preserved; precedence against `CODEX_HOME/config.toml` is not established | `mcp_attach.codex_overrides`, `adapters/bundled/codex/adapter.py` `mcp_argv` |
+| Codex CLI 0.163.0 | The user's `~/.codex/config.toml` is copied into each attachment's `CODEX_HOME`; it is never symlinked. A private regular copy is kept on later starts; an old symlink is replaced when the attachment resumes. Partyline adds `-c mcp_servers.partyline.{command,args,env}=<TOML>` only for keys the user did not set in the copied config or inline argv. | A configured `enabled = false` or `url` suppresses the generated stdio entry. User-provided partial `command`, `args`, or `env` values are retained; only missing keys are generated. Inline settings are preserved. A user's own command/URL can therefore replace the Partyline server behavior. | `mcp_attach.codex_overrides`, `adapters/bundled/codex/adapter.py` `mcp_argv`, `adapters/session_seed.py` `seed_private_file` |
 | OpenCode V2 2.0.32 | `OPENCODE_CONFIG_CONTENT` with `mcp.partyline` merged in; every other key passes through | If the existing content is unparseable or not a JSON object, nothing is added and no error is raised | `mcp_attach.opencode_config_content`, `adapters/bundled/opencode/v2.py` `mcp_env` |
 | OpenCode V1 and any adapter without an override | None. The `McpHooks` defaults return the command and environment unchanged | — | `adapters/mcp_hooks.py` |
 
 The Claude config file is written mode 0600 and holds `mcpServers.partyline` with the server's
-command, `-m partyline.mcp`, and an `env` carrying the connection file path and `PYTHONPATH`. It
+command, `-P -m partyline.mcp`, and an `env` carrying the connection file path and `PYTHONPATH`. It
 never holds the token. The connection file is a separate private file (section 7).
 
 ## 3. Tool surface
@@ -50,16 +51,16 @@ The server lists tools for the caller's live state only. Names are short and uni
 
 | Tool | Requires | Routes | Notes |
 | --- | --- | --- | --- |
-| `whoami` | always | line detail, attachments, children | identity, role, actions, members, parent, children |
+| `whoami` | always | own line detail and children; capability state is refreshed by MCP before tool dispatch | identity, role, actions, members, parent, children |
 | `guide` | always | `/api/docs` by category and topic for leads; local tool schemas for other roles | on-demand docs for leads; workers get their current permission-filtered core tools without a docs request; with `topic: captain` and no category, returns the caller's captain operations (empty unless a live lead) |
 | `read_messages` | `read` | messages, messages around an id | limit clamped to 1 to 50 |
 | `post_message` | listed for `write` or `assign` | message post | refuses the caller's own line; `client_key` required; no action check in MCP, the message route decides |
-| `react` | listed for `write` | reactions, by message id | no line check in MCP; the route decides |
+| `react` | listed for `write` | reactions, by message id | POST toggles the reaction; `remove: true` uses DELETE; the route decides line authorization |
 | `upload_file` | `write` on the target line | files | one regular file of at most 20 MiB; `client_key` required |
 | `get_media` | `read` | media download | writes a new local file, mode 0600 |
 | `notes` | `read`; set needs `assign` for line or tree | notes | attachment notes are own line only; 4,000 characters |
 | `goal` | `read`; set needs `assign` | line detail; goal set | 3,000 characters |
-| `reports` | listed for `read_reports`, `report`, or `notify`; list needs `read_reports`; post needs `report` (or `notify` when `notify` is set) | reports | body required, at most 12,000 characters; the limit is enforced by the argument validator before the handler runs |
+| `reports` | listed for `read_reports`, `report`, or `notify`; non-leads use the core tool and live leads use the fixed captain dispatcher; list needs `read_reports`; post needs `report` (or `notify` when `notify` is set) | reports | body required, at most 2,000 characters; both schemas and handlers enforce the route limit |
 
 **Argument validation (core tools).** `MCPServer._call` checks a core tool's arguments against the
 `inputSchema` the server advertises, using `partyline/mcp/validation.py`, before the handler or any
@@ -87,7 +88,7 @@ Both `validation.py` and `captain_schemas.validate` are hand-written subsets of 
 - The operations are a fixed allowlist: `staffing`, `list_presets`, `attach_worker`, `detach_worker`,
   `create_child`, `appoint_lead`, `retire_child`, `accept`, `review_worktree`, `request_write_set`,
   `decide_write_set`, `request_restart`, `process_overview`, `ack_report`, `set_goal`, `set_gates`,
-  `docs_read`, and `write_set_requests`. Each has a fixed argument schema with length, enum, and range
+  `docs_read`, `write_set_requests`, and `reports`. Each has a fixed argument schema with length, enum, and range
   checks. No caller supplies a route or method.
 - `list_presets` is read-only. Presets are never mutated through MCP.
 - `retire_child` is limited to a direct child that the caller's home line may archive. Purge stays
@@ -145,13 +146,16 @@ are in its Decisions section (1 to 14):
 | Tool result text | 20,000 characters, then cut with a marker | `render.MAX_TEXT` |
 | `upload_file` | one regular file of at most 20 MiB, streamed; size and identity re-checked during the stream | `client.MAX_UPLOAD` |
 | `get_media` | at most 20 MiB, streamed; a partial oversize file is removed | `client.MAX_DOWNLOAD` |
-| Text fields | notes 4,000; goal 3,000; report body 12,000; upload title 200, description 2,000, caption 3,000; captain free text per schema. The core limits are checked by `validation.py` before the handler; captain limits by `captain_schemas.validate` | `tools_core.py`, `validation.py`, `client.py`, `captain_schemas.py` |
+| Text fields | notes 4,000; goal 3,000; report body 2,000; upload title 200, description 2,000, caption 3,000; captain free text per schema. The core limits are checked by `validation.py` before the handler; captain limits by `captain_schemas.validate` | `tools_core.py`, `validation.py`, `client.py`, `captain_schemas.py`, and the report route's `ReportIn` |
 | `set_gates` | up to 20 commands; timeout 1 to 14,400 s | `captain_schemas.py` |
 | `client_key` | 1 to 64 characters, required on `post_message` and `upload_file` | `tools_core.py`, `client.py` |
 
 **Idempotency.** `post_message` and `upload_file` require a caller key. The server remembers each key
 per sender, conversation, and `client_key` for a 600 s window (`idempotent_posts.py`), and a retry
-with the same key returns the original result instead of posting again. Keys with the `d:` prefix are
+with the same key returns the original result instead of posting again when the remembered key is
+present. Insertion and key recording use separate commits, so a process crash between them can leave
+a durable post without its retry record. The in-process claim locks also assume one service runtime
+per database; they do not coordinate competing server processes. Keys with the `d:` prefix are
 stamped by the CLI helper (`agent_client.py`), not by MCP, and have a 120 s window.
 
 **Truncation.** A result cut at the character cap is not valid JSON and has no cursor. The marker
@@ -227,24 +231,26 @@ connection file is not a credential boundary against another process running as 
 
 Revocation takes effect at the next request, not at the next poll. A running MCP server whose token
 stops resolving gets HTTP 401 on its next API call and marks itself revoked (`_revoked`, `mcp/server.py`).
-Later tool calls fail with "attachment credential is no longer valid", and the poller sends a
-`notifications/message` error and stops. The test that checks this without disclosing the token is
-`test_revoked_credential_produces_short_error_without_disclosing_token` (`tests/test_mcp.py`).
+That state remains set after later failed calls. Later tool calls fail with "attachment credential is no
+longer valid", and the poller sends a `notifications/message` error and stops. The revocation tests are
+listed in `review-disposition.md`.
 The lifecycle paths that make a token stop resolving are listed in the table above.
 
 ## 8. Errors
 
 Tool errors return as results with `isError: true`. `ApiError` and `ValueError` messages are returned
 as written, so the server's refusal text reaches the caller. `KeyError`, `TypeError`, and `OSError`
-return "invalid tool arguments or local file". Any other exception returns "Partyline MCP operation
-failed" and logs the traceback through the Python logger. A request with an ID and an unknown method
-gets JSON-RPC `-32601`.
+return "invalid tool arguments or local file". A deeply nested JSON value that exceeds Python's parser
+recursion limit returns a structured JSON-RPC parse error and the helper continues reading input.
+Any other exception returns "Partyline MCP operation failed" and logs the traceback through the Python
+logger. A request with an ID and an unknown method gets JSON-RPC `-32601`.
 
 ## 9. Writes that must not duplicate speech
 
 `post_message` refuses the caller's own line. A line's agent speaks through its transcript, so posting
-into its own line over MCP would duplicate that speech. Each post requires a `client_key`, so a
-retried call does not post twice.
+into its own line over MCP would duplicate that speech. Each post requires a `client_key`; retry keys
+are remembered before delivery starts. This handles a delivery failure after the key was recorded, but
+does not close the separate-commit crash window described in section 6.
 
 ## 10. Limitations
 
@@ -289,17 +295,23 @@ retried call does not post twice.
 - **Truncated results** are not valid JSON and have no cursor (section 6).
 - **OpenCode V2 merge is skipped without an error** when an existing `OPENCODE_CONFIG_CONTENT` is
   unparseable or not an object. The server is then absent from that invocation, and nothing reports it.
+- **Media links in tool results.** Same-service `/api/media/` URLs are rendered as host-relative
+  paths, including links embedded in prose. Other absolute URLs are left as supplied by the source.
 - **Versions.** Behaviour is recorded for Claude Code 2.1.302, Codex CLI 0.163.0, and OpenCode V2
   2.0.32 only. OpenCode V1 has no per-invocation MCP hook in this code.
-- **Probe runs need local setup.** The whoami probes (`fixture/probe_*.py`) need a live Partyline
+- **Probe runs need local setup.** The whoami hook probes (`fixture/probe_*.py`) need a live Partyline
   attachment and checkout; the OpenCode V2 launcher also needs a locally configured preset, and the
   launchers name their CLI models. Set `PARTYLINE_PROBE_SCRATCH` to a fresh per-run scratch directory
   to keep generated MCP config there. Otherwise the config is written beside the attachment connection
-  file. These probes are evidence from one host, not portable fixtures.
-- **Runtime home provenance (unresolved).** A 516 MB Codex home appeared under `docs/mcp/isolate` during
-  this work and was emptied before the audit. The record does not identify its creator or show whether an
-  auth file was present. The earlier audit reported that it was not found in commits, stashes, or Git
-  objects, and that a credential-pattern scan of the history, the tree, and the scratchpad found no hits.
-  That audit is not repeated at 5efa2cf. A pattern scan proves only the patterns it checks. The
-  `isolate/` directory must stay empty. See `docs/lessons.md`, "Runtime homes belong only in per-run
-  scratchpads".
+  file. Their retained `.txt` files are prose summaries, not raw RPC output or version-bearing logs.
+  These probes are evidence from one host and exercise adapter hooks, not service provisioning; the
+  generated-entry subprocess regression is separate test evidence.
+- **Codex attachment-home lifecycle and platform differences.** The shipping review observed
+  `~/.partyline/sessions/codex/<attachment-id>` directories with mode 0775 and no cleanup; about 217
+  existed at review time. It found `auth.json` symlinked on Linux and copied on Windows. These are
+  existing adapter-home behaviors; the config copy fix does not change them. No real credential was
+  copied for MCP evidence.
+- **Runtime home provenance (unresolved).** A 516 MB Codex home appeared under `docs/mcp/isolate`
+  during this work and was emptied before the audit. Its creator and whether it contained auth material
+  are unknown. The `isolate/` directory must stay empty. See `docs/lessons.md`, "Runtime homes belong
+  only in per-run scratchpads".

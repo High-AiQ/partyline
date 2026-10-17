@@ -2,7 +2,7 @@
 
 Each attachment runs Codex with a ``CODEX_HOME`` of its own under
 ``~/.partyline/sessions/codex/<attachment-id>``, seeded with the user's
-auth and config: the CLI creates every other file it needs there (verified
+auth and a private copy of config: the CLI creates every other file it needs there (verified
 against codex-cli 0.156), and its rollouts land in a directory no other
 attachment writes. A resume links the prior activation's rollout into the
 same home so ``codex resume <id>`` resolves it there.
@@ -29,7 +29,7 @@ import json
 import os
 
 from partyline.adapters.base import Adapter as BaseAdapter
-from partyline.adapters.session_seed import seed
+from partyline.adapters.session_seed import seed, seed_private_file
 from partyline.adapters.bundled.codex.thread_history import tail_thread_history
 from partyline.adapters.compaction import is_compaction_record
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
@@ -59,7 +59,10 @@ class PartylineAdapter(BaseAdapter):
         os.makedirs(os.path.join(home, "sessions"), exist_ok=True)
         for name in SHARED:
             link = os.path.join(home, name)
-            seed(os.path.join(SHARED_HOME, name), link)
+            if name == "config.toml":
+                seed_private_file(os.path.join(SHARED_HOME, name), link)
+            else:
+                seed(os.path.join(SHARED_HOME, name), link)
         if prior := self.att.get("cli_session"):
             self._link_prior_session(home, prior)
         return home
@@ -86,7 +89,11 @@ class PartylineAdapter(BaseAdapter):
 
     def mcp_argv(self, cmd: list[str]) -> list[str]:
         # -c overrides are global flags: they go before the subcommand.
-        return [cmd[0], *codex_overrides(cmd, self.att), *cmd[1:]]
+        home = getattr(self, "_home", "")
+        if not home and self.att.get("id"):
+            home = self.codex_home()
+        config = os.path.join(home, "config.toml") if home else None
+        return [cmd[0], *codex_overrides(cmd, self.att, config), *cmd[1:]]
 
     async def start(self):
         self._home = self.codex_home()

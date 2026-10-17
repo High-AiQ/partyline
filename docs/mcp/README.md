@@ -15,9 +15,10 @@ Placeholders in the commands below:
 
 | File | What it is | What it proves |
 | --- | --- | --- |
-| [`api-inventory.md`](api-inventory.md) | Every HTTP route in the app (Set 1, 136 routes from an AST pass) and the agent-reachable subset (Set 2, 104 routes) with a disposition for each | Each reachable route maps to a named tool, a captain operation, a guide topic, or an exclusion with a reason. The names table lists the 10 core tools and 18 captain operations. Decisions 1 to 14 explain the non-obvious dispositions. |
+| [`api-inventory.md`](api-inventory.md) | Every HTTP route in the app (Set 1, 136 routes from an AST pass) and the agent-reachable subset (Set 2, 104 routes) with a disposition for each | Each reachable route maps to a named tool, a captain operation, a guide topic, or an exclusion with a reason. Source references use handler names so line shifts do not stale the inventory. The names table lists the core tools and captain operations. |
 | [`compat-matrix.md`](compat-matrix.md) | Per-client facts for Claude Code, Codex CLI, OpenCode V1 and V2: refresh behaviour, direct callability, dispatcher fallback, and config injection | Which clients re-list on `list_changed` and which need the dispatcher. Each runtime claim cites its retained log or is marked as a run report. |
 | [`design.md`](design.md) | Current design and source behaviour, plus client observations tied to their retained evidence | What the server does and its documented limits. Runtime claims remain pinned to the recorded client versions and logs. |
+| [`review-disposition.md`](review-disposition.md) | Finding-by-finding disposition of the shipping review | The exact fix/test or bounded limitation for each review finding. |
 | [`fixture/stdio_server.py`](fixture/stdio_server.py) | The compatibility fixture: a stdio MCP server with `tool_a`, a `dispatch` tool, and a `tool_b` added after its first `tools/list` | Its behaviour is the test subject for every refresh claim. It emits `list_changed` about 2 s after the first listing, and it logs each incoming method and each tool call to `MCP_FIXTURE_LOG`. It does not log its own outgoing notification. |
 | [`fixture/claude-service-managed.log`](fixture/claude-service-managed.log) | Retained log from a service-managed Claude Code 2.1.302 run with the fixture attached | Claude re-lists about 2 s after the first `tools/list`, then calls `tool_b` directly about 38 s later. The direct call shows `tool_b` was in the model's catalog. |
 | [`fixture/codex-service-managed.log`](fixture/codex-service-managed.log) | Retained log from a service-managed Codex CLI 0.163.0 run with the fixture attached | Codex makes one `tools/list` and never re-lists. The `dispatch({"name": "tool_b"})` call succeeds, so the dispatcher is the working fallback. |
@@ -25,27 +26,33 @@ Placeholders in the commands below:
 | [`fixture/opencode-v2-glm-flash-wrapper.txt`](fixture/opencode-v2-glm-flash-wrapper.txt) | A sanitized copy of the preset wrapper that merged the fixture into `OPENCODE_CONFIG_CONTENT` | The injection form used for that run. It names the server `fixture`; the adapter's own `mcp_env()` uses `partyline`. The wrapper runs the preset unchanged otherwise. |
 | `isolate/` | Empty directory (git does not store empty directories, so it is not in the commit) | Nothing. A 516 MB Codex home appeared here during the work and was emptied before the audit. Its creator is unknown, and this directory must stay empty. See `design.md` section 10 and `docs/lessons.md`. |
 
-## Whoami proofs (credentialed, service-managed)
+The fixture refresh logs contain protocol methods and tool-call records only; they do
+not carry attachment IDs or CLI version strings. Those labels come from the associated
+run reports, not from the retained log bytes.
 
-These are kept apart from the fixture capability results above. Each file shows that a real client,
-started with the Partyline MCP config that the branch generates for it, reached the branch's MCP server
-and got its own attachment identity. They say nothing about refresh or direct calls; those are in the
+## Whoami probe summaries (hook-level)
+
+These are kept apart from the fixture capability results above. The retained `.txt` files are
+human-written prose summaries of probe outcomes, not raw client output or version-bearing RPC
+transcripts. The probes called `whoami` through adapter configuration hooks; they did not exercise
+service provisioning. They say nothing about refresh or direct calls; those observations are from the
 fixture logs.
 
-| File | Client and launcher | Identity returned |
+| File | Client and launcher | Summary reports |
 | --- | --- | --- |
 | [`fixture/partyline-whoami-claude.txt`](fixture/partyline-whoami-claude.txt) | Claude Code 2.1.302, via [`fixture/probe_claude.py`](fixture/probe_claude.py) (`PartylineAdapter.mcp_argv`) | `probe-claude` on `mcp-implementation`, role implementer |
 | [`fixture/partyline-whoami-codex.txt`](fixture/partyline-whoami-codex.txt) | Codex CLI, via [`fixture/probe_codex.py`](fixture/probe_codex.py) (`codex_command`, which applies `mcp_argv`) | `probe-codex` on `mcp-implementation` |
 | [`fixture/partyline-whoami-opencode-v2.txt`](fixture/partyline-whoami-opencode-v2.txt) | OpenCode V2 `glm-flash` preset, via [`fixture/probe_opencode_v2.py`](fixture/probe_opencode_v2.py) (`mcp_env`) | `probe-opencode` on `mcp-implementation`, role implementer, no children |
 
-Each file states that no credential value was recorded. The shared connection lookup is
+Each summary states that no credential value was recorded. The shared connection lookup is
 [`fixture/probe_common.py`](fixture/probe_common.py). It finds the connection file by comparing the
 inherited `PARTYLINE_TOKEN` without printing it. With `PARTYLINE_PROBE_SCRATCH` set, the generated
 MCP config goes under `<scratch>/partyline-mcp-probe.agent-connections/`; without it, the config is
 written beside the attachment connection file. The launchers need a live Partyline attachment, a
-checkout, and (for OpenCode V2) a locally configured preset, so they are host-run probes rather than
-portable fixtures (design.md section 10). Reproduction paths use placeholders such as `<repo>` and
-`<scratch>`; do not replace them with a user's home path.
+checkout, and (for OpenCode V2) a locally configured preset, so they are host-run hook-level probes
+rather than provisioning tests or portable fixtures (design.md section 10). The generated-entry
+subprocess regression is tracked in `review-disposition.md`. Reproduction paths use placeholders such
+as `<repo>` and `<scratch>`; do not replace them with a user's home path.
 
 ## Reproduce the fixture runs
 
@@ -125,8 +132,8 @@ config that holds a credential.
 
 1. Read [`design.md`](design.md) section 10 first. Each limitation there names the evidence or the gap.
 2. Check the code against the claims. Every design section names its module.
-3. Run the tests, under the memory cap that `AGENTS.md` requires. The tests use their own temporary
-   database; do not point them at a real one:
+3. Run the relevant tests under the memory cap that `AGENTS.md` requires. The tests use their own
+   temporary database; do not point them at a real one:
 
    ```bash
    ./scripts/capped-test uv run --locked python -m unittest \
@@ -134,36 +141,11 @@ config that holds a credential.
      tests.test_agent_connection tests.test_terminal_authorization
    ```
 
-   The credential-lifecycle and validation tests named above are a separate run. Run against a clean
-   `git archive` of 5efa2cf, this command gave `Ran 151 tests ... OK`, exit 0, under `capped-test` with
-   `MemoryMax=2G`. The run on the shared worktree was not used as evidence, because that worktree had an
-   uncommitted change to `tests/test_line_process_routes.py` while it ran.
-
-   ```bash
-   ./scripts/capped-test uv run --locked python -m unittest \
-     tests.test_auth tests.test_mcp tests.test_mcp_attach tests.test_mcp_captain \
-     tests.test_line_process_routes tests.test_attachment_lifecycle \
-     tests.test_server.ShutdownTest.test_lifespan_starts_automatic_reattachment_without_a_browser \
-     tests.test_server.ServerTest.test_resume_screen_keys_and_detach
-   ```
-
-   That run's log is in the per-run scratchpad and is not committed. Coverage, ruff, line caps, and the
-   frontend gates were not run for this docs refresh.
-
-   Where each claim is covered:
-
-   - `tests/test_mcp.py`: the JSON-RPC protocol and bounds (`test_rpc_rejects_non_object_missing_method_and_pre_revoked_calls`), core argument validation (`test_core_schema_constraints_reject_calls_before_backend`, `test_required_types_and_array_bounds_are_validated`, `test_non_object_arguments_are_not_coerced_to_empty_object`), upload and download limits (`test_upload_*`, `test_download_*`), and revocation without disclosing the token (`test_revoked_credential_produces_short_error_without_disclosing_token`).
-   - `tests/test_mcp_captain.py`: captain operations and their gates (`test_dispatcher_denies_non_lead_and_target_line_authorization`), demotion (`test_demoted_cached_named_tool_is_denied_without_side_effect`), revoked dispatch (`test_revoked_credential_while_connected_blocks_dispatch`), child retirement limits (`test_retire_child_is_limited_to_direct_child_and_one_line`), and write-set listing (`test_write_set_requests_*`).
-   - `tests/test_mcp_attach.py`: per-client injection for Claude, Codex, and OpenCode (`test_claude_adapter_command_carries_the_config`, `test_codex_overrides_precede_resume_subcommand`, `test_user_inline_config_is_merged_not_replaced`). Codex values are TOML (`test_adds_entry_fields_as_toml_values` parses every override with `tomllib`, and `test_codex_toml_values_escape_awkward_environment_paths` checks an awkward path). `test_resume_regenerates_and_detach_removes` calls `provision_connection` and `remove_connection` directly; it does not run `detach_attachment`.
-   - Credential lifecycle (`tests/test_auth.py`, `tests/test_line_process_routes.py`, `tests/test_server.py`, `tests/test_attachment_lifecycle.py`): stopped rows reject their token, rotation on resume and restart recovery, single detach and bulk close revoking a running helper. `design.md` section 7 gives each test name and what it asserts.
-   - `tests/test_agent_connection.py`: connection-file publication, resume hints, and cleanup after a failed publish.
-   - `tests/test_terminal_authorization.py`: the terminal socket fix in `bf8573a` (`test_revoked_token_stops_input`, `test_moved_target_stops_input_even_for_human`, `test_idle_demotion_revokes_descendant_read`).
-
-   Adapter suites (`tests/test_claude_adapter.py`, `tests/test_codex_adapter.py`,
-   `tests/test_opencode_v2_adapter.py`) cover adapter behaviour; the MCP-specific argv and environment
-   checks are in `tests/test_mcp_attach.py`.
-4. Run the gates from `AGENTS.md`: `uv run --locked ruff check .`, the capped coverage run (≥90%),
-   `./check-code-lines`, and `cd frontend && npm run verify && npm run build`.
-5. For a claim about a client, find its label in `design.md` or `compat-matrix.md`. A "retained run"
-   claim should point at a log in `fixture/`. A "run report" claim has no log here and cannot be
-   checked from this directory.
+   The regression test names for the shipping review findings are listed in
+   [`review-disposition.md`](review-disposition.md). Historical runs from earlier MCP commits are not
+   evidence for a replacement tip.
+4. Run all gates from `AGENTS.md` on the final unchanged SHA: Ruff, one `./scripts/capped-test` run
+   with coverage ≥90%, `./check-code-lines`, then the frontend verify and build sequentially. Record
+   the exact SHA and gate results in the handoff; do not point tests at a real database.
+5. For a client behavior claim, use `compat-matrix.md` and distinguish retained fixture logs from the
+   associated run report. The logs record protocol methods and calls, not attachment IDs or CLI versions.

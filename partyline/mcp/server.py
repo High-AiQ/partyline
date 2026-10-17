@@ -85,7 +85,7 @@ class MCPServer:
                 tools = tools_core.tool_list(state) + tools_captain.tool_list(state)
                 return self.response(ident, {"tools": tools})
             except ApiError as exc:
-                self._revoked = "HTTP 401" in str(exc)
+                self._revoked = self._revoked or "HTTP 401" in str(exc)
                 return self.response(ident, error={"code": -32001, "message": str(exc)})
         if method == "tools/call":
             return self._call(ident, params)
@@ -115,8 +115,8 @@ class MCPServer:
             text = render(value, self.client.connection["api"].rstrip("/"))
             return self.response(ident, {"content": [{"type": "text", "text": text}]})
         except (ApiError, ValueError, KeyError, TypeError, OSError) as exc:
-            self._revoked = isinstance(exc, ApiError) and (
-                "HTTP 401" in str(exc))
+            self._revoked = self._revoked or (
+                isinstance(exc, ApiError) and "HTTP 401" in str(exc))
             message = (str(exc) if isinstance(exc, (ApiError, ValueError))
                        else "invalid tool arguments or local file")
             return self.response(ident, {
@@ -141,7 +141,7 @@ class MCPServer:
                     self._state_signature = signature
                     self.send({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
             except ApiError as exc:
-                self._revoked = "HTTP 401" in str(exc)
+                self._revoked = self._revoked or "HTTP 401" in str(exc)
                 if self._revoked:
                     self.send({
                         "jsonrpc": "2.0", "method": "notifications/message",
@@ -164,6 +164,10 @@ class MCPServer:
                     break
                 try:
                     message = json.loads(line)
+                except RecursionError:
+                    self.response(None, error={
+                        "code": -32700, "message": "request nesting exceeds parser limit"})
+                    continue
                 except ValueError:
                     self.response(None, error={"code": -32700, "message": "parse error"})
                     continue

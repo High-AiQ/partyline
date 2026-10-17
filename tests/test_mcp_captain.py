@@ -81,6 +81,47 @@ class CaptainToolTests(unittest.TestCase):
         self.assertTrue(server._revoked)
         self.assertEqual(client.calls, [])
 
+    def test_reports_use_lead_dispatcher_with_live_scope_and_schema(self):
+        client = Client()
+        client.state["actions"].append("notify")
+        names = [tool["name"] for tool in tools_captain.tool_list(client.state)]
+        self.assertEqual(names.count("reports"), 1)
+        tools_captain.call(client, "captain", {"op": "reports", "args": {
+            "operation": "list"}}, client.state)
+        tools_captain.call(client, "reports", {"operation": "post", "body": "status",
+            "notify": True}, client.state)
+        self.assertEqual(client.calls[-2:], [
+            ("GET", "/api/conversations/home/reports", None),
+            ("POST", "/api/conversations/home/reports", {"body": "status", "notify": True}),
+        ])
+        with self.assertRaisesRegex(ValueError, "allowed length"):
+            tools_captain.call(client, "captain", {"op": "reports", "args": {
+                "operation": "post", "body": "x" * 2001}}, client.state)
+        denied = {**client.state, "actions": ["read", "report"]}
+        with self.assertRaisesRegex(ApiError, "cannot read"):
+            tools_captain.call(client, "captain", {"op": "reports", "args": {
+                "operation": "list"}}, denied)
+        with self.assertRaisesRegex(ApiError, "cannot post"):
+            tools_captain.call(client, "captain", {"op": "reports", "args": {
+                "operation": "post", "body": "status", "notify": True}}, denied)
+
+    def test_reports_fallback_is_denied_after_demotion_and_revocation(self):
+        client = Client()
+        output = io.StringIO()
+        server = MCPServer(client, output)
+        client.state = {**client.state, "role": "implementer", "is_lead": False}
+        server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+            "name": "captain", "arguments": {"op": "reports", "args": {
+                "operation": "list"}}}})
+        self.assertTrue(json.loads(output.getvalue())["result"]["isError"])
+        self.assertEqual(client.calls, [])
+        client.capabilities = lambda *_args: (_ for _ in ()).throw(ApiError("Partyline HTTP 401"))
+        server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
+            "name": "captain", "arguments": {"op": "reports", "args": {
+                "operation": "list"}}}})
+        self.assertTrue(server._revoked)
+        self.assertEqual(client.calls, [])
+
     def test_guide_only_returns_current_operations_and_schemas(self):
         client = Client()
         guide = tools_captain.guide(client.state)

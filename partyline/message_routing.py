@@ -73,11 +73,22 @@ def self_mention_reason(db, principal, conv_id: str, body: str) -> str | None:
     return None
 
 
-async def post_human_message(runtime, conv_id: str, handle: str, body: str) -> dict:
+async def post_human_message(
+    runtime, conv_id: str, handle: str, body: str,
+    client_key: str | None = None, caller_id: str | None = None,
+) -> dict:
     """A person speaking on the wire or through REST — one routing path."""
     text = body.strip()
     if not text:
         raise HTTPException(400, "message body is required")
+    if client_key and caller_id:
+        stored = runtime.db.add_message(conv_id, handle, "human", text)
+        remember_key(runtime.db, caller_id, client_key, conv_id, stored["id"])
+        await runtime.broadcast(
+            conv_id, MessageEvent(message=MessageResponse.model_validate(stored))
+        )
+        await runtime.route_mentions(conv_id, stored)
+        return stored
     return await runtime.post_message(conv_id, handle, "human", text)
 
 
@@ -110,10 +121,9 @@ async def _post_identified_claimed(
     ) is not None:
         return {**original, "replayed": True}
     if principal.kind != "machine":
-        stored = await post_human_message(runtime, conv_id, principal.name, body)
-        if client_key and caller_id:
-            remember_key(runtime.db, caller_id, client_key, conv_id, stored["id"])
-        return stored
+        return await post_human_message(
+            runtime, conv_id, principal.name, body, client_key, caller_id
+        )
     if (capture := capture_echo(runtime.db, principal.name, conv_id, body)) is not None:
         # The tail posted these words first; the API copy is the twin (2.7).
         return {**capture, "replayed": True}

@@ -13,6 +13,7 @@ import json
 import os
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 
 SERVER_NAME = "partyline"
@@ -36,11 +37,11 @@ def config_path(db_path: str, att_id: str) -> Path:
 
 
 def server_entry(connection_file: str) -> dict:
-    """The stdio server, run with this checkout on the import path."""
+    """The stdio server, imported from the service checkout despite cwd shadows."""
     root = str(Path(__file__).resolve().parent.parent)
     return {
         "command": sys.executable,
-        "args": ["-m", "partyline.mcp"],
+        "args": ["-P", "-m", "partyline.mcp"],
         "env": {CONNECTION_ENV: connection_file, "PYTHONPATH": root},
     }
 
@@ -96,7 +97,7 @@ def claude_command(cmd: list[str], att: dict) -> list[str]:
     return [*merged, "--mcp-config", config]
 
 
-def _codex_user_keys(cmd: list[str]) -> set[str]:
+def _codex_user_keys(cmd: list[str], config_file: str | None = None) -> set[str]:
     """Keys the user already set under mcp_servers.partyline via -c/--config."""
     prefix = f"mcp_servers.{SERVER_NAME}."
     keys: set[str] = set()
@@ -110,15 +111,18 @@ def _codex_user_keys(cmd: list[str]) -> set[str]:
         name = value.split("=", 1)[0].strip()
         if name.startswith(prefix):
             keys.add(name[len(prefix):].split(".", 1)[0])
+    if config_file:
+        keys.update(_codex_config_server(config_file))
     return keys
 
 
-def codex_overrides(cmd: list[str], att: dict) -> list[str]:
+def codex_overrides(cmd: list[str], att: dict, config_file: str | None = None) -> list[str]:
     """Per-invocation ``-c`` overrides for the Partyline server.
 
-    Each key we would set is skipped when the user set it, so their value
-    wins. Values are rendered using TOML syntax because Codex parses each
-    override as a TOML assignment.
+    Existing server keys in the effective config and user ``-c`` arguments
+    win per key. An explicit ``enabled = false`` or ``url`` keeps the user's
+    server entry intact and disables local injection. Values are rendered
+    using TOML syntax because Codex parses each override as an assignment.
     """
     def toml_key(value: str) -> str:
         if value and all(char.isalnum() or char in "_-" for char in value):
@@ -143,13 +147,44 @@ def codex_overrides(cmd: list[str], att: dict) -> list[str]:
     entry = server_for(att)
     if entry is None:
         return []
-    user = _codex_user_keys(cmd)
+    user = _codex_user_keys(cmd, config_file)
+    if "url" in user or "enabled" in user and _codex_disabled(cmd, config_file):
+        return []
     overrides: list[str] = []
     for key in CODEX_KEYS:
         if key in user:
             continue
         overrides += ["-c", f"mcp_servers.{SERVER_NAME}.{key}={toml_value(entry[key])}"]
     return overrides
+
+
+def _codex_disabled(cmd: list[str], config_file: str | None) -> bool:
+    """Whether the user explicitly disabled this server in any config layer."""
+    prefix = f"mcp_servers.{SERVER_NAME}.enabled="
+    for index, arg in enumerate(cmd):
+        value = cmd[index + 1] if arg in ("-c", "--config") and index + 1 < len(cmd) else arg
+        if value.startswith(prefix):
+            return value[len(prefix):].strip().lower() == "false"
+        if value.startswith("--config="):
+            value = value.split("=", 1)[1]
+            if value.startswith(prefix):
+                return value[len(prefix):].strip().lower() == "false"
+    if config_file:
+        server = _codex_config_server(config_file)
+        return isinstance(server, dict) and server.get("enabled") is False
+    return False
+
+
+def _codex_config_server(config_file: str) -> dict:
+    try:
+        with open(config_file, "rb") as stream:
+            servers = tomllib.load(stream).get("mcp_servers", {})
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+    if not isinstance(servers, dict):
+        return {}
+    server = servers.get(SERVER_NAME, {})
+    return server if isinstance(server, dict) else {}
 
 
 def opencode_config_content(existing: str, server: dict) -> str | None:
