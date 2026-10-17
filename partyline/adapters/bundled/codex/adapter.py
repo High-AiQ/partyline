@@ -88,12 +88,16 @@ class PartylineAdapter(BaseAdapter):
         return {"CODEX_HOME": getattr(self, "_home", "") or self.codex_home()}
 
     def mcp_argv(self, cmd: list[str]) -> list[str]:
-        # -c overrides are global flags: they go before the subcommand.
         home = getattr(self, "_home", "")
         if not home and self.att.get("id"):
             home = self.codex_home()
         config = os.path.join(home, "config.toml") if home else None
-        return [cmd[0], *codex_overrides(cmd, self.att, config), *cmd[1:]]
+        overrides = codex_overrides(cmd, self.att, config)
+        if cmd[1:2] == ["resume"]:
+            # Codex 0.163 accepts resume-specific -c flags after the session id;
+            # root-level -c flags before `resume` are ignored by that path.
+            return [*cmd[:3], *overrides, *cmd[3:]]
+        return [cmd[0], *overrides, *cmd[1:]]
 
     async def start(self):
         self._home = self.codex_home()
@@ -105,11 +109,10 @@ class PartylineAdapter(BaseAdapter):
             cmd = [cmd[0], "resume", self.att["cli_session"], *cmd[1:]]
             if prompt := getattr(self, "_startup_prompt", ""):
                 cmd.append(prompt)
-        # -c is a codex global flag: it must sit before the subcommand,
-        # which is why the insertions run after the resume rewrite.
         cmd = self.mcp_argv(cmd)
         if limit := int(self.att.get("auto_compact_tokens") or 0):
-            cmd[1:1] = ["-c", f"model_auto_compact_token_limit={limit}"]
+            index = 3 if cmd[1:2] == ["resume"] else 1
+            cmd[index:index] = ["-c", f"model_auto_compact_token_limit={limit}"]
         return cmd
 
     def stage_startup_delivery(self, messages: list[dict]) -> bool:
