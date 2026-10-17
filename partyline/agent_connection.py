@@ -65,12 +65,18 @@ def provision_connection(db_path: str, att: dict) -> None:
         att['agent_shell'] = 'PowerShell'
     else:
         att['agent_command'] = shlex.join(arguments)
+    from .mcp_attach import write_config  # lazy: mcp_attach imports this module
+
+    write_config(db_path, att)
 
 
 def remove_connection(db_path: str, att_id: str) -> None:
     if Path(att_id).name != att_id or att_id in (".", ".."):
         raise ValueError("invalid attachment ID")
     (connection_directory(db_path) / (att_id + ".json")).unlink(missing_ok=True)
+    from .mcp_attach import remove_config
+
+    remove_config(db_path, att_id)
 
 
 def connection_hint(att: dict) -> str:

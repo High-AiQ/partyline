@@ -1,5 +1,6 @@
 import asyncio
 from contextlib import asynccontextmanager, contextmanager
+import json
 import os
 import tempfile
 import threading
@@ -1434,10 +1435,47 @@ class ServerTest(unittest.TestCase):
 
     def test_resume_screen_keys_and_detach(self):
         self.add_attachment("old", status="exited")
+        old_token = auth_store.ensure_api_token(server.runtime.db, "old")
+        from partyline.agent_connection import provision_connection
+
+        old_attachment = server.runtime.db.get_attachment("old")
+        old_attachment["api_token"] = old_token
+        provision_connection(server.runtime.db.path, old_attachment)
+        connection_path = Path(server.runtime.db.path + ".agent-connections/old.json")
+        previous_connection_inode = connection_path.stat().st_ino
+        mcp_path = Path(old_attachment["mcp_config"])
+        previous_mcp_inode = mcp_path.stat().st_ino
         server.runtime.db.add_message("line", "terra", "agent", "already delivered")
         resumed = self.arun(server.resume_attachment(self.principal_request(), "old"))
         self.assertEqual(resumed["status"], "running")
         adapter = server.runtime.live["old"]
+        new_token = adapter.att["api_token"]
+        self.assertNotEqual(old_token, new_token)
+        connection = json.loads(connection_path.read_text())
+        self.assertEqual(connection["token"], new_token)
+        self.assertNotEqual(connection_path.stat().st_ino, previous_connection_inode)
+        mcp_path = Path(adapter.att["mcp_config"])
+        self.assertNotEqual(mcp_path.stat().st_ino, previous_mcp_inode)
+        mcp_config = json.loads(mcp_path.read_text())
+        self.assertEqual(
+            mcp_config["mcpServers"]["partyline"]["env"]["PARTYLINE_MCP_CONNECTION"],
+            str(connection_path),
+        )
+
+        auth_app = FastAPI()
+        install_auth_guard(auth_app, server.runtime.db)
+
+        @auth_app.get("/api/probe")
+        async def probe():
+            return {"ok": True}
+
+        with TestClient(auth_app) as auth_client:
+            self.assertEqual(auth_client.get(
+                "/api/probe", headers={"Authorization": f"Bearer {old_token}"}
+            ).status_code, 401)
+            self.assertEqual(auth_client.get(
+                "/api/probe", headers={"Authorization": f"Bearer {new_token}"}
+            ).status_code, 200)
         self.assertEqual(adapter.att["delivered_bodies"], ["already delivered"])
         server.runtime.db.add_owned_message(
             "old", adapter.att["runtime_owner"], "line", "terra", "agent", "late relay"
@@ -1769,6 +1807,10 @@ class FakeRequest:
 class ShutdownTest(ServerTest):
     def test_lifespan_starts_automatic_reattachment_without_a_browser(self):
         self.add_attachment("a1", "worker")
+        previous_token = auth_store.ensure_api_token(server.runtime.db, "a1")
+        self.add_attachment("detached", "stopped", status="running")
+        revoked_token = auth_store.ensure_api_token(server.runtime.db, "detached")
+        server.runtime.db.set_attachment_status("detached", "detached", None)
         server.runtime.db.save_restart_plan(
             "line", ["a1"], "Continue without a browser.", "automatic"
         )
@@ -1780,6 +1822,24 @@ class ShutdownTest(ServerTest):
                     await server.app.state.automatic_reattach_task
                     self.assertIn("a1", server.runtime.live)
                     self.assertIsNone(server.runtime.db.get_restart_plan())
+                    recovered_token = server.runtime.db.get_attachment("a1")["api_token"]
+                    self.assertEqual(
+                        server.runtime.db.get_attachment("a1")["status"], "running"
+                    )
+                    self.assertNotEqual(previous_token, recovered_token)
+                    auth_app = FastAPI()
+                    install_auth_guard(auth_app, server.runtime.db)
+
+                    @auth_app.get("/api/probe")
+                    async def probe():
+                        return {"ok": True}
+
+                    with TestClient(auth_app) as auth_client:
+                        for token, expected in ((previous_token, 401), (revoked_token, 401),
+                                                (recovered_token, 200)):
+                            self.assertEqual(auth_client.get(
+                                "/api/probe", headers={"Authorization": f"Bearer {token}"}
+                            ).status_code, expected)
 
         self.arun(exercise())
         self.assertEqual(server.runtime.sockets, {})

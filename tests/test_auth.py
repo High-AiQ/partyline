@@ -116,6 +116,18 @@ class MachineTokenTest(DbBackedTest):
         self.assertEqual("a1", principal.attachment_id)
         self.assertFalse(principal.is_lead)
 
+    def test_machine_token_is_rejected_after_attachment_stops(self):
+        token = auth_store.ensure_api_token(self.db, "a1")
+        self.db.set_attachment_status("a1", "detached", None)
+        self.assertIsNone(resolve_principal(self.db, token))
+
+    def test_rotating_machine_token_revokes_previous_credential(self):
+        previous = auth_store.ensure_api_token(self.db, "a1")
+        current = auth_store.rotate_api_token(self.db, "a1")
+        self.assertNotEqual(previous, current)
+        self.assertIsNone(resolve_principal(self.db, previous))
+        self.assertEqual(resolve_principal(self.db, current).attachment_id, "a1")
+
     def test_child_env_carries_the_token(self):
         token = auth_store.ensure_api_token(self.db, "a1")
         env = child_env({}, self.db.get_attachment("a1"))

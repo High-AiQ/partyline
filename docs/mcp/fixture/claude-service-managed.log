@@ -1,0 +1,7 @@
+157572.317 server/discover
+157572.342 initialize
+157572.355 notifications/initialized
+157572.355 tools/list
+157574.359 tools/list
+157609.918 tools/call
+157609.918 call tool_b {}

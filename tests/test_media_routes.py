@@ -5,23 +5,31 @@ surface: canonical vs alias paths, digest lines, serving headers, and the
 non-image size cap. Fixtures are tiny in-process bytes — no files on disk.
 """
 
+import asyncio
+import hashlib
 import tempfile
+import threading
+import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 from PIL import Image
 
 from partyline import auth_store, auth_tokens
 from partyline.adapters.briefing import BRIEFING
 from partyline.auth_guard import install_auth_guard
 from partyline.db import Db
-from partyline.media import MediaStore
+from partyline.media import MediaError, MediaStore
+from partyline.idempotent_posts import _KEY_CLAIMS, _KEY_CLAIMS_GUARD
 from partyline.media_files import MAX_FILE_BYTES
-from partyline.media_routes import media_router
+from partyline.media_routes import handed_to, media_router
 from partyline.runtime import ChatRuntime
 from partyline.server import app as server_app
 
@@ -92,12 +100,14 @@ class FileRoutesTest(unittest.TestCase):
         app = FastAPI()
         install_auth_guard(app, self.db)
         app.include_router(media_router(self.runtime, self.store))
+        self.app = app
         self.client = TestClient(app)
         self.db.create_conversation("line", "Line")
         self.socket = CollectingSocket()
         self.runtime.sockets["line"] = {self.socket}
         user = auth_store.create_user(
             self.db, "opus@example.com", "opus", auth_tokens.hash_password("hunter2222"))
+        self.user = user
         access = auth_tokens.create_access_token(
             auth_tokens.signing_secret(self.db), user["id"])
         self.client.headers["Authorization"] = f"Bearer {access}"
@@ -113,6 +123,18 @@ class FileRoutesTest(unittest.TestCase):
             files=files if files is not None else [("file", ("a.png", png(), "image/png"))],
         )
 
+    def wait_for_claim_waiter(self, key):
+        storage_key = "upload:" + hashlib.sha256(key.encode()).hexdigest()
+        identity = (id(self.db), f"user:{self.user['id']}", "line", storage_key)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            with _KEY_CLAIMS_GUARD:
+                state = _KEY_CLAIMS.get(identity)
+                if state and state.waiters:
+                    return
+            time.sleep(0.005)
+        self.fail(f"claim waiter did not arrive for {identity}")
+
     def test_briefing_teaches_any_file_type_and_how_to_read_a_pdf(self):
         self.assertIn("$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/files", BRIEFING)
         self.assertIn("thumb, slim, readable and original URLs", BRIEFING)
@@ -120,8 +142,6 @@ class FileRoutesTest(unittest.TestCase):
         self.assertIn('Authorization: Bearer $PARTYLINE_TOKEN', BRIEFING)
 
     def test_upload_preparation_runs_off_the_event_loop(self):
-        import asyncio
-
         from partyline.media_files import PreparedFile
 
         seen = {}
@@ -142,6 +162,253 @@ class FileRoutesTest(unittest.TestCase):
             response = self.post(files=[("file", ("notes.txt", b"hello", "text/plain"))])
         self.assertEqual(response.status_code, 200)
         self.assertTrue(seen["off_loop"])
+
+    def test_upload_client_key_replays_same_message_and_file(self):
+        first = self.post(
+            files=[("file", ("notes.txt", txt(), "text/plain"))],
+            client_key="stable-upload-key",
+        ).json()
+        replay = self.post(
+            files=[("file", ("different.txt", b"different", "text/plain"))],
+            client_key="stable-upload-key",
+        ).json()
+        self.assertEqual(replay["message"]["id"], first["message"]["id"])
+        self.assertTrue(replay["message"]["replayed"])
+        self.assertEqual(replay["files"][0]["id"], first["files"][0]["id"])
+        self.assertEqual(len(self.db.list_messages("line")), 1)
+
+    def test_same_display_name_human_and_machine_uploads_never_cross_replay(self):
+        self.db.add_attachment("opus-machine", "line", "opus", "fake", ["fake"],
+                               "/tmp", "owner")
+        self.db.set_attachment_status("opus-machine", "running", "owner")
+        machine = {"Authorization": "Bearer " + auth_store.ensure_api_token(
+            self.db, "opus-machine")}
+        human_first = self.post(client_key="same-name")
+        machine_second = self.client.post(
+            "/api/conversations/line/files", data={"client_key": "same-name"},
+            files=[("file", ("machine.txt", txt(), "text/plain"))], headers=machine)
+        machine_first = self.client.post(
+            "/api/conversations/line/files", data={"client_key": "reverse-name"},
+            files=[("file", ("machine.txt", txt(), "text/plain"))], headers=machine)
+        human_second = self.post(client_key="reverse-name")
+
+        responses = [human_first, machine_second, machine_first, human_second]
+        self.assertEqual([response.status_code for response in responses], [200] * 4)
+        payloads = [response.json() for response in responses]
+        self.assertNotEqual(payloads[0]["message"]["id"], payloads[1]["message"]["id"])
+        self.assertNotEqual(payloads[2]["message"]["id"], payloads[3]["message"]["id"])
+        self.assertEqual(len(self.db.list_messages("line")), 4)
+
+    def test_reused_machine_upload_handle_gets_a_fresh_retry_identity(self):
+        self.db.add_attachment("old-opus", "line", "opus", "fake", ["fake"],
+                               "/tmp", "owner")
+        old_headers = {"Authorization": "Bearer " + auth_store.ensure_api_token(
+            self.db, "old-opus")}
+        first = self.client.post(
+            "/api/conversations/line/files", data={"client_key": "reattach"},
+            files=[("file", ("old.txt", txt(), "text/plain"))], headers=old_headers)
+        self.db._exec("DELETE FROM attachments WHERE id=?", ("old-opus",))
+        self.db.add_attachment("new-opus", "line", "opus", "fake", ["fake"],
+                               "/tmp", "owner")
+        new_headers = {"Authorization": "Bearer " + auth_store.ensure_api_token(
+            self.db, "new-opus")}
+
+        retry = self.client.post(
+            "/api/conversations/line/files", data={"client_key": "reattach"},
+            files=[("file", ("new.txt", b"new bytes", "text/plain"))], headers=new_headers)
+
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(retry.status_code, 200, retry.text)
+        self.assertNotEqual(first.json()["message"]["id"], retry.json()["message"]["id"])
+
+    def test_legacy_name_owned_upload_row_never_matches_typed_identity(self):
+        old = self.db.add_message("line", "opus", "human", "legacy")
+        legacy_key = "upload:" + hashlib.sha256(b"legacy-upload").hexdigest()
+        self.db._exec(
+            "INSERT INTO idempotent_posts"
+            " (sender, client_key, conv_id, message_id, created_at)"
+            " VALUES (?,?,?,?,?)",
+            ("opus", f"line\x1f{legacy_key}", "line", old["id"], time.time()),
+        )
+        response = self.post(client_key="legacy-upload")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertNotEqual(response.json()["message"]["id"], old["id"])
+
+    def test_concurrent_upload_retries_reserve_once_and_broadcast_once(self):
+        entered = threading.Event()
+        release = threading.Event()
+        calls = []
+        from partyline.media_files import PreparedFile
+
+        self.db.add_attachment("att", "line", "kimi", "fake", ["fake"], "/tmp", "owner")
+        self.db.set_attachment_status("att", "running", "owner")
+        adapter = RecordingAdapter({"runtime_owner": "owner"})
+        self.runtime.live["att"] = adapter
+
+        def prepare(_uploads):
+            calls.append(True)
+            entered.set()
+            self.assertTrue(release.wait(5))
+            return [PreparedFile(b"hello", "file", "notes.txt", "text/plain", "txt")]
+
+        with mock.patch("partyline.media_routes.prepared_files", side_effect=prepare):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                first = pool.submit(self.post, files=[(
+                    "file", ("notes.txt", txt(), "text/plain"))],
+                    client_key="same", body="@kimi read this")
+                self.assertTrue(entered.wait(5))
+                second = pool.submit(self.post, files=[(
+                    "file", ("other.txt", b"other", "text/plain"))],
+                    client_key="same", body="@kimi read this")
+                self.wait_for_claim_waiter("same")
+                release.set()
+                responses = [first.result(timeout=10), second.result(timeout=10)]
+        payloads = [response.json() for response in responses]
+        self.assertEqual([response.status_code for response in responses], [200, 200])
+        self.assertEqual(payloads[0]["message"]["id"], payloads[1]["message"]["id"])
+        self.assertCountEqual(
+            [payload["message"]["replayed"] for payload in payloads], [False, True]
+        )
+        self.assertEqual(
+            payloads[0]["files"][0]["id"], payloads[1]["files"][0]["id"]
+        )
+        self.assertEqual(len(self.db.list_messages("line")), 1)
+        self.assertEqual(self.db._exec("SELECT COUNT(*) AS n FROM images").fetchone()["n"], 1)
+        self.assertEqual(len(self.socket.events), 1)
+        self.assertEqual(len(adapter.deliveries), 1)
+        self.assertIn("@kimi read this", adapter.deliveries[0][-1]["body"])
+        self.assertEqual(len(calls), 1)
+
+    def test_same_key_uploads_do_not_starve_a_tiny_default_executor(self):
+        from partyline.media_files import PreparedFile
+
+        started = threading.Event()
+        release = threading.Event()
+
+        def prepare(_uploads):
+            started.set()
+            if not release.wait(5):
+                raise AssertionError("upload preparation was not released")
+            return [PreparedFile(b"hello", "file", "notes.txt", "text/plain", "txt")]
+
+        async def upload_many():
+            loop = asyncio.get_running_loop()
+            loop.set_default_executor(ThreadPoolExecutor(max_workers=2))
+            async with AsyncClient(
+                transport=ASGITransport(app=self.app), base_url="http://test"
+            ) as client:
+                requests = [
+                    client.post(
+                        "/api/conversations/line/files",
+                        headers=self.client.headers,
+                        data={"client_key": "tiny-pool"},
+                        files=[("file", (f"{index}.txt", txt(), "text/plain"))],
+                    )
+                    for index in range(5)
+                ]
+                batch = asyncio.gather(*requests)
+                for _ in range(500):
+                    if started.is_set():
+                        break
+                    await asyncio.sleep(0.01)
+                else:
+                    self.fail("no upload reached preparation")
+                storage_key = "upload:" + hashlib.sha256(b"tiny-pool").hexdigest()
+                identity = (id(self.db), f"user:{self.user['id']}", "line", storage_key)
+                for _ in range(500):
+                    with _KEY_CLAIMS_GUARD:
+                        state = _KEY_CLAIMS.get(identity)
+                        if state and state.waiters == 4:
+                            break
+                    await asyncio.sleep(0.01)
+                else:
+                    self.fail("all same-key uploads did not wait on the claim")
+                release.set()
+                return await asyncio.wait_for(batch, timeout=10)
+
+        with mock.patch("partyline.media_routes.prepared_files", side_effect=prepare):
+            responses = asyncio.run(upload_many())
+        self.assertEqual([response.status_code for response in responses], [200] * 5)
+        self.assertEqual(len(self.db.list_messages("line")), 1)
+
+    def test_distinct_upload_keys_do_not_wait_for_each_other(self):
+        both_preparing = threading.Barrier(2)
+        from partyline.media_files import PreparedFile
+
+        def prepare(_uploads):
+            both_preparing.wait(timeout=5)
+            return [PreparedFile(b"hello", "file", "notes.txt", "text/plain", "txt")]
+
+        with mock.patch("partyline.media_routes.prepared_files", side_effect=prepare):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = [pool.submit(self.post, files=[(
+                    "file", (f"{key}.txt", txt(), "text/plain"))], client_key=key)
+                    for key in ("first", "second")]
+                responses = [future.result(timeout=10) for future in futures]
+        self.assertEqual([response.status_code for response in responses], [200, 200])
+        self.assertEqual(len(self.db.list_messages("line")), 2)
+
+    def test_upload_key_is_scoped_to_caller_and_destination(self):
+        first = self.post(client_key="scoped-key").json()
+        self.db.create_conversation("other-line", "Other line")
+        other_line = self.post("/api/conversations/other-line/files",
+                               client_key="scoped-key").json()
+        user = auth_store.create_user(
+            self.db, "other@example.com", "other", auth_tokens.hash_password("hunter2222"))
+        other_access = auth_tokens.create_access_token(
+            auth_tokens.signing_secret(self.db), user["id"])
+        other_caller = self.client.post(
+            "/api/conversations/line/files", data={"client_key": "scoped-key"},
+            files=[("file", ("a.png", png(), "image/png"))],
+            headers={"Authorization": f"Bearer {other_access}"},
+        ).json()
+        self.assertNotEqual(first["message"]["id"], other_line["message"]["id"])
+        self.assertNotEqual(first["files"][0]["id"], other_line["files"][0]["id"])
+        self.assertNotEqual(first["message"]["id"], other_caller["message"]["id"])
+        self.assertNotEqual(first["files"][0]["id"], other_caller["files"][0]["id"])
+        self.assertEqual(len(self.db.list_messages("line")), 2)
+        self.assertEqual(len(self.db.list_messages("other-line")), 1)
+
+    def test_upload_replay_still_requires_write_authorization(self):
+        self.post(client_key="authorized-key")
+        self.db._exec("UPDATE conversations SET archived_at=? WHERE id=?", ("now", "line"))
+        response = self.post(client_key="authorized-key")
+        self.assertEqual(response.status_code, 409)
+
+    def test_upload_client_key_length_is_bounded(self):
+        response = self.post(
+            files=[("file", ("notes.txt", txt(), "text/plain"))],
+            client_key="x" * 65,
+        )
+        self.assertEqual(response.status_code, 422)
+
+    def test_storage_failure_removes_placeholder_message(self):
+        with mock.patch.object(self.store, "store", side_effect=MediaError(400, "failed")):
+            response = self.post(
+                files=[("file", ("notes.txt", txt(), "text/plain"))],
+                client_key="failed-upload",
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.db.list_messages("line"), [])
+        retry = self.post(
+            files=[("file", ("notes.txt", txt(), "text/plain"))],
+            client_key="failed-upload",
+        )
+        self.assertEqual(retry.status_code, 200, retry.text)
+        self.assertEqual(len(self.db.list_messages("line")), 1)
+
+    def test_private_media_handoff_is_attachment_scoped(self):
+        message = self.db.add_message(
+            "line", "system", "system", "/api/media/file-1/slim")
+        self.db._exec(
+            "UPDATE messages SET audience_attachment_id=? WHERE id=?", ("att-1", message["id"]))
+        machine = SimpleNamespace(kind="machine", attachment_id="att-1")
+        other = SimpleNamespace(kind="machine", attachment_id="att-2")
+        person = SimpleNamespace(kind="user", attachment_id=None)
+        self.assertTrue(handed_to(self.db, machine, "file-1"))
+        self.assertFalse(handed_to(self.db, other, "file-1"))
+        self.assertFalse(handed_to(self.db, person, "file-1"))
 
     def test_briefing_formats_cleanly_despite_table_syntax(self):
         """The attach-time .format() must never trip on a stray brace."""

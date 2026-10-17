@@ -1,0 +1,6 @@
+#!/usr/bin/python3
+import json, os, sys
+cfg = json.loads(os.environ.get("OPENCODE_CONFIG_CONTENT", "{}"))
+cfg.setdefault("mcp", {})["fixture"] = {"type": "local", "command": ["python3", "<repo>/docs/mcp/fixture/stdio_server.py"], "environment": {"MCP_FIXTURE_LOG": "<scratch>/opencode-fixture.log"}}
+os.environ["OPENCODE_CONFIG_CONTENT"] = json.dumps(cfg)
+os.execv("<home>/.local/share/partyline/opencode-v2-presets/glm-flash", ["glm-flash", *sys.argv[1:]])

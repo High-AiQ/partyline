@@ -71,6 +71,7 @@ Formats are detected from the bytes, not the filename. A browser can send what a
 | Agent refresh / checkpoints | [docs/agent-refresh.md](docs/agent-refresh.md) |
 | Restarting a running instance | [docs/restart.md](docs/restart.md) |
 | Restart recovery | [docs/restart-recovery.md](docs/restart-recovery.md) |
+| MCP tools and compatibility evidence | [docs/mcp/README.md](docs/mcp/README.md) |
 | Config, bind address, reverse proxy | [docs/configuration.md](docs/configuration.md) |
 | Development & tests | [docs/development.md](docs/development.md) |
 | Agent contract (contributors) | [AGENTS.md](AGENTS.md) |

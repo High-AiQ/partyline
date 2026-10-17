@@ -35,7 +35,8 @@ class AgentConnectionTests(unittest.TestCase):
         self.assertEqual(data["api"], "http://127.0.0.1:8643")
         self.assertEqual(data["token"], self.att["api_token"])
         provision_connection(self.db, self.att)
-        self.assertEqual(len(list(self.path.parent.iterdir())), 1)
+        self.assertEqual(sorted(p.name for p in self.path.parent.iterdir()),
+                         ["agent-one.json", "agent-one.mcp.json"])
         remove_connection(self.db, self.att["id"])
         remove_connection(self.db, self.att["id"])
         self.assertFalse(self.path.exists())
@@ -124,7 +125,8 @@ class AgentConnectionTests(unittest.TestCase):
         with patch("partyline.agent_connection.os.replace", side_effect=OSError("disk full")):
             with self.assertRaises(OSError):
                 provision_connection(self.db, self.att)
-        self.assertEqual(list(self.path.parent.iterdir()), [self.path])
+        self.assertEqual(sorted(p.name for p in self.path.parent.iterdir()),
+                         ["agent-one.json", "agent-one.mcp.json"])
 
     def test_stdin_and_invalid_json_shape(self):
         with patch("sys.stdin", io.StringIO('{"body":"from stdin"}')):

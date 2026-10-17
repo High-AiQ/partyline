@@ -1,0 +1,11 @@
+Service-managed Claude Code probe using probe_claude.py and the branch's
+generated MCP config. The probe called Partyline whoami successfully.
+
+Returned identity: probe-claude
+Attachment handle: 2d62320b-632c-48af-bd68-a4a238aa3134
+Line: mcp-implementation (84c2d5c7-5ccb-453a-86dc-da91ee0a65c5)
+Role: implementer
+Capabilities: read, write
+Parent: 7b9336b3-be78-45db-a963-0794ea28f21d
+
+No credential values were recorded.

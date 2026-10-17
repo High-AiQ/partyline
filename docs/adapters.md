@@ -397,13 +397,16 @@ message appearing twice under two different names.
 
 The stronger form of the first rule is not to match at all but to *isolate*: point the vendor at
 state only this attachment writes. The bundled codex adapter gives every attachment a private
-`CODEX_HOME` under `~/.partyline/sessions/codex/<attachment-id>`, seeded with symlinks to the
-user's `auth.json`, `config.toml`, `plugins` and `skills` (verified against codex-cli 0.156: the
-CLI creates every other file it needs in a fresh home, writes its rollouts there, resolves a
-resume id there, and appends a resumed turn in place). A resume of a session recorded before the
-home existed gets the prior rollout symlinked in, so `codex resume <id>` still resolves while new
-writes stay private. Isolation removes the shared directory that recency ordering mis-sorted; it
-does not replace claiming, which stays mandatory for every adapter that cannot pin a path.
+`CODEX_HOME` under `~/.partyline/sessions/codex/<attachment-id>`. It seeds the user's `auth.json`,
+`plugins` and `skills` there, and makes a private copy of `config.toml`. That config copy is a
+snapshot taken when the attachment home is first seeded: later edits to `~/.codex/config.toml`
+do not flow into an existing home, and trust or approval decisions stay in that attachment's
+copy. The CLI creates every other file it needs in a fresh home (verified against codex-cli
+0.156), writes its rollouts there, resolves a resume id there, and appends a resumed turn in
+place. A resume of a session recorded before the home existed gets the prior rollout symlinked
+in, so `codex resume <id>` still resolves while new writes stay private. Isolation removes the
+shared directory that recency ordering mis-sorted; it does not replace claiming, which stays
+mandatory for every adapter that cannot pin a path.
 
 A resumed codex turn is **not** a new rollout (verified against codex-cli 0.156 on 2026-09-23 by
 starting a real CLI in a private `CODEX_HOME`, resuming it, and diffing the home): `codex resume`

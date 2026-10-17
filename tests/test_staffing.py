@@ -61,10 +61,12 @@ class StaffingApiTest(unittest.TestCase):
         self.directory.cleanup()
 
     def test_implementer_is_forbidden_and_lead_sees_subtree(self):
+        self.db.set_attachment_status("impl-att", "running", None)
         self.assertEqual(
             self.client.get("/api/conversations/parent/staffing", headers=self.impl).status_code,
             403,
         )
+        self.db.set_attachment_status("impl-att", "detached", None)
         child = self.client.post(
             "/api/conversations/parent/children",
             json={"name": "Slice"},
