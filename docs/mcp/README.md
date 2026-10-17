@@ -1,5 +1,8 @@
 # Partyline MCP evidence
 
+Service-managed native tool calls and the Codex resume comparison for the
+2026-10-17 live verification are indexed in [`live/README.md`](live/README.md).
+
 Index of the evidence behind the MCP server on the `mcp-implementation` line. Start with
 [`design.md`](design.md) for what is built and its limitations; the files below show where each
 claim comes from.
