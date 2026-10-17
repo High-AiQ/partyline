@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from fastapi import FastAPI
@@ -19,9 +20,9 @@ from partyline import auth_store, auth_tokens
 from partyline.adapters.briefing import BRIEFING
 from partyline.auth_guard import install_auth_guard
 from partyline.db import Db
-from partyline.media import MediaStore
+from partyline.media import MediaError, MediaStore
 from partyline.media_files import MAX_FILE_BYTES
-from partyline.media_routes import media_router
+from partyline.media_routes import handed_to, media_router
 from partyline.runtime import ChatRuntime
 from partyline.server import app as server_app
 
@@ -142,6 +143,48 @@ class FileRoutesTest(unittest.TestCase):
             response = self.post(files=[("file", ("notes.txt", b"hello", "text/plain"))])
         self.assertEqual(response.status_code, 200)
         self.assertTrue(seen["off_loop"])
+
+    def test_upload_client_key_replays_same_message_and_file(self):
+        first = self.post(
+            files=[("file", ("notes.txt", txt(), "text/plain"))],
+            client_key="stable-upload-key",
+        ).json()
+        replay = self.post(
+            files=[("file", ("different.txt", b"different", "text/plain"))],
+            client_key="stable-upload-key",
+        ).json()
+        self.assertEqual(replay["message"]["id"], first["message"]["id"])
+        self.assertTrue(replay["message"]["replayed"])
+        self.assertEqual(replay["files"][0]["id"], first["files"][0]["id"])
+        self.assertEqual(len(self.db.list_messages("line")), 1)
+
+    def test_upload_client_key_length_is_bounded(self):
+        response = self.post(
+            files=[("file", ("notes.txt", txt(), "text/plain"))],
+            client_key="x" * 65,
+        )
+        self.assertEqual(response.status_code, 422)
+
+    def test_storage_failure_removes_placeholder_message(self):
+        with mock.patch.object(self.store, "store", side_effect=MediaError(400, "failed")):
+            response = self.post(
+                files=[("file", ("notes.txt", txt(), "text/plain"))],
+                client_key="failed-upload",
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.db.list_messages("line"), [])
+
+    def test_private_media_handoff_is_attachment_scoped(self):
+        message = self.db.add_message(
+            "line", "system", "system", "/api/media/file-1/slim")
+        self.db._exec(
+            "UPDATE messages SET audience_attachment_id=? WHERE id=?", ("att-1", message["id"]))
+        machine = SimpleNamespace(kind="machine", attachment_id="att-1")
+        other = SimpleNamespace(kind="machine", attachment_id="att-2")
+        person = SimpleNamespace(kind="user", attachment_id=None)
+        self.assertTrue(handed_to(self.db, machine, "file-1"))
+        self.assertFalse(handed_to(self.db, other, "file-1"))
+        self.assertFalse(handed_to(self.db, person, "file-1"))
 
     def test_briefing_formats_cleanly_despite_table_syntax(self):
         """The attach-time .format() must never trip on a stray brace."""
