@@ -21,13 +21,11 @@ class RetirementGitRecoveryTest(unittest.TestCase):
 
     def commit(self, cwd, message="unique work"):
         _git("add", "-A", cwd=cwd)
-        _git("-c", "user.name=test", "-c", "user.email=test@example.com",
-             "commit", "-qm", message, cwd=cwd)
+        _git("commit", "-qm", message, cwd=cwd)
         return _git("rev-parse", "HEAD", cwd=cwd).stdout.strip()
 
     def show(self, ref, path):
-        return subprocess.run(["git", "show", f"{ref}:{path}"], cwd=self.repo,
-                              capture_output=True, check=True).stdout
+        return _git("show", f"{ref}:{path}", cwd=self.repo, text=False).stdout
 
     def test_unique_review_and_scratch_heads_are_disclosed_and_anchored_before_pruning(self):
         child = self.child()
@@ -105,8 +103,9 @@ class RetirementGitRecoveryTest(unittest.TestCase):
         _git("checkout", "-q", branch, cwd=cwd)
         Path(cwd, "conflict").write_text("ours\n")
         tip = self.commit(cwd, "ours")
-        with self.assertRaises(subprocess.CalledProcessError):
+        with self.assertRaises(subprocess.CalledProcessError) as failure:
             _git("merge", "conflict-side", cwd=cwd)
+        self.assertIn("CONFLICT", failure.exception.stdout + failure.exception.stderr)
         stages = _git("ls-files", "--unmerged", cwd=cwd).stdout
         self.assertTrue(stages)
         index_path = _git(
