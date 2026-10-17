@@ -19,7 +19,7 @@ from fastapi import HTTPException
 
 from .adapter_capabilities import adapter_completion
 from .activation_diagnostics import activation_context, line_name
-from .auth_store import ensure_api_token
+from .auth_store import rotate_api_token
 from .agent_connection import provision_connection, bind_connection_hint
 from .fence import FenceUnavailable
 from .fence_protect import database_paths, protected_repo_roots
@@ -215,9 +215,9 @@ async def _resume_adapter_locked(
     # the one the previous activation's harness was configured with.
     runtime_owner = str(uuid.uuid4())
     att["runtime_owner"] = runtime_owner
-    # The machine token, unlike the activation owner, is stable on purpose:
-    # a resumed process keeps the PARTYLINE_TOKEN its briefing already named.
-    att["api_token"] = ensure_api_token(runtime.db, att_id)
+    # Each process activation gets a distinct credential. This prevents a
+    # token disclosed to a detached process from becoming valid again.
+    att["api_token"] = rotate_api_token(runtime.db, att_id)
     att["hook_url"] = hook_url(att_id, runtime_owner)
     att["review_worktrees"] = list_review_worktrees(runtime.db, att["conv_id"])
     load_write_grants(runtime.db, att)

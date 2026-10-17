@@ -224,7 +224,10 @@ class WriteSetRequestTest(unittest.TestCase):
         self.assertEqual(self.client.post(
             f"/api/conversations/line/write-set/request/{request_id}/approve",
             headers=self.human).status_code, 404)
-        request_id = self.file(self.worker).json()["id"]
+        self.db.add_attachment("next-worker", "line", "next", "fake", ["fake"], self.repo)
+        next_worker = {"Authorization": "Bearer " + auth_store.ensure_api_token(
+            self.db, "next-worker")}
+        request_id = self.file(next_worker).json()["id"]
         self.assertEqual(self.client.delete(
             f"/api/conversations/line/write-set/request/{request_id}",
             headers=self.human).status_code, 200)
@@ -365,8 +368,8 @@ class WriteSetRequestTest(unittest.TestCase):
         """line (captain) -> kid (worker files there); a shared dir on disk."""
         self.db.create_conversation("kid", "Kid")
         self.db._exec("UPDATE conversations SET parent_id='line' WHERE id='kid'")
-        self.db.add_attachment("kid-worker", "kid", "digger", "raw", ["raw"], "/tmp")
-        self.db._exec("UPDATE attachments SET status='detached' WHERE id='kid-worker'")
+        self.db.add_attachment("kid-worker", "kid", "digger", "fake", ["fake"], "/tmp")
+        self.db._exec("UPDATE attachments SET status='running' WHERE id='kid-worker'")
         self.kid_worker = {"Authorization": "Bearer " + auth_store.ensure_api_token(
             self.db, "kid-worker")}
         shared = os.path.join(self.repo, "shared")
@@ -380,9 +383,11 @@ class WriteSetRequestTest(unittest.TestCase):
             (conv_id, path))
 
     def file_on_kid(self, path=None):
-        return self.client.post("/api/conversations/kid/write-set",
-                                json={"path": path or self.target},
-                                headers=self.kid_worker)
+        response = self.client.post("/api/conversations/kid/write-set",
+                                    json={"path": path or self.target},
+                                    headers=self.kid_worker)
+        self.db.set_attachment_status("kid-worker", "detached", None)
+        return response
 
     def test_an_ancestor_captain_approves_inside_its_own_grant(self):
         shared = self._seed_subtree()
@@ -533,9 +538,9 @@ class WriteSetRequestTest(unittest.TestCase):
         # strict-ancestor levels above the request, and still decides it
         self.db.create_conversation("mid", "Mid")
         self.db._exec("UPDATE conversations SET parent_id='line' WHERE id='mid'")
-        self.db.add_attachment("mid-worker", "mid", "leafy", "raw", ["raw"], "/tmp")
+        self.db.add_attachment("mid-worker", "mid", "leafy", "fake", ["fake"], "/tmp")
         self.db._exec(
-            "UPDATE attachments SET status='detached' WHERE id='mid-worker'")
+            "UPDATE attachments SET status='running' WHERE id='mid-worker'")
         mid_worker = {"Authorization": "Bearer " + auth_store.ensure_api_token(
             self.db, "mid-worker")}
         other = os.path.join(self.repo, "other")
@@ -545,6 +550,7 @@ class WriteSetRequestTest(unittest.TestCase):
         self.client.post("/api/conversations/mid/write-set",
                          json={"path": os.path.join(other, "inner")},
                          headers=mid_worker)
+        self.db.set_attachment_status("mid-worker", "detached", None)
         request_id = self.db._exec(
             "SELECT id FROM conversation_write_grant_requests").fetchone()["id"]
         approved = self.client.post(
@@ -589,10 +595,10 @@ class WriteSetRequestTest(unittest.TestCase):
         withdrawn = self.client.post(
             f"/api/conversations/kid/write-set/request/{request_id}/withdraw",
             headers=self.kid_worker)
-        self.assertEqual(withdrawn.status_code, 200, withdrawn.text)
+        self.assertEqual(withdrawn.status_code, 401, withdrawn.text)
         self.assertEqual(
             self.db._exec("SELECT COUNT(*) AS n FROM conversation_write_grant_requests"
-                          ).fetchone()["n"], 0)
+                          ).fetchone()["n"], 1)
 
 
 if __name__ == "__main__":
