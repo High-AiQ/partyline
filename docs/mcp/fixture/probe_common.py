@@ -43,6 +43,7 @@ def probe_attachment():
         scratch_dir = Path(scratch).expanduser()
         scratch_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
         config_db = str(scratch_dir / "partyline-mcp-probe")
+        connection_directory(config_db).mkdir(mode=0o700, exist_ok=True)
     else:
         config_db = db_path
     attachment["mcp_config"] = str(write_config(config_db, attachment))

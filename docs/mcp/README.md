@@ -17,7 +17,7 @@ Placeholders in the commands below:
 | --- | --- | --- |
 | [`api-inventory.md`](api-inventory.md) | Every HTTP route in the app (Set 1, 136 routes from an AST pass) and the agent-reachable subset (Set 2, 104 routes) with a disposition for each | Each reachable route maps to a named tool, a captain operation, a guide topic, or an exclusion with a reason. The names table lists the 10 core tools and 18 captain operations. Decisions 1 to 14 explain the non-obvious dispositions. |
 | [`compat-matrix.md`](compat-matrix.md) | Per-client facts for Claude Code, Codex CLI, OpenCode V1 and V2: refresh behaviour, direct callability, dispatcher fallback, and config injection | Which clients re-list on `list_changed` and which need the dispatcher. Each runtime claim cites its retained log or is marked as a run report. |
-| [`design.md`](design.md) | The design as committed at `HEAD` 5efa2cf: process model, per-client attach, tool surface, argument validation, refresh, reauthorization, bounds, credentials and lifecycle, and the limitations | What the committed server does, and what it does not yet do (section 10). Work that is not committed is not described. |
+| [`design.md`](design.md) | Current design and source behaviour, plus client observations tied to their retained evidence | What the server does and its documented limits. Runtime claims remain pinned to the recorded client versions and logs. |
 | [`fixture/stdio_server.py`](fixture/stdio_server.py) | The compatibility fixture: a stdio MCP server with `tool_a`, a `dispatch` tool, and a `tool_b` added after its first `tools/list` | Its behaviour is the test subject for every refresh claim. It emits `list_changed` about 2 s after the first listing, and it logs each incoming method and each tool call to `MCP_FIXTURE_LOG`. It does not log its own outgoing notification. |
 | [`fixture/claude-service-managed.log`](fixture/claude-service-managed.log) | Retained log from a service-managed Claude Code 2.1.302 run with the fixture attached | Claude re-lists about 2 s after the first `tools/list`, then calls `tool_b` directly about 38 s later. The direct call shows `tool_b` was in the model's catalog. |
 | [`fixture/codex-service-managed.log`](fixture/codex-service-managed.log) | Retained log from a service-managed Codex CLI 0.163.0 run with the fixture attached | Codex makes one `tools/list` and never re-lists. The `dispatch({"name": "tool_b"})` call succeeds, so the dispatcher is the working fallback. |
@@ -40,9 +40,12 @@ fixture logs.
 
 Each file states that no credential value was recorded. The shared connection lookup is
 [`fixture/probe_common.py`](fixture/probe_common.py). It finds the connection file by comparing the
-inherited `PARTYLINE_TOKEN` without printing it, and it writes the generated MCP config under the system
-temp directory. The launchers need a live Partyline attachment and this host's paths, so they are not
-portable (design.md section 10).
+inherited `PARTYLINE_TOKEN` without printing it. With `PARTYLINE_PROBE_SCRATCH` set, the generated
+MCP config goes under `<scratch>/partyline-mcp-probe.agent-connections/`; without it, the config is
+written beside the attachment connection file. The launchers need a live Partyline attachment, a
+checkout, and (for OpenCode V2) a locally configured preset, so they are host-run probes rather than
+portable fixtures (design.md section 10). Reproduction paths use placeholders such as `<repo>` and
+`<scratch>`; do not replace them with a user's home path.
 
 ## Reproduce the fixture runs
 

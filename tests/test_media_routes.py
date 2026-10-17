@@ -6,7 +6,9 @@ non-image size cap. Fixtures are tiny in-process bytes — no files on disk.
 """
 
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -158,6 +160,94 @@ class FileRoutesTest(unittest.TestCase):
         self.assertEqual(replay["files"][0]["id"], first["files"][0]["id"])
         self.assertEqual(len(self.db.list_messages("line")), 1)
 
+    def test_concurrent_upload_retries_reserve_once_and_broadcast_once(self):
+        entered = threading.Event()
+        release = threading.Event()
+        calls = []
+        from partyline.media_files import PreparedFile
+
+        self.db.add_attachment("att", "line", "kimi", "fake", ["fake"], "/tmp", "owner")
+        self.db.set_attachment_status("att", "running", "owner")
+        adapter = RecordingAdapter({"runtime_owner": "owner"})
+        self.runtime.live["att"] = adapter
+
+        def prepare(_uploads):
+            calls.append(True)
+            entered.set()
+            self.assertTrue(release.wait(5))
+            return [PreparedFile(b"hello", "file", "notes.txt", "text/plain", "txt")]
+
+        with mock.patch("partyline.media_routes.prepared_files", side_effect=prepare):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                first = pool.submit(self.post, files=[(
+                    "file", ("notes.txt", txt(), "text/plain"))],
+                    client_key="same", body="@kimi read this")
+                self.assertTrue(entered.wait(5))
+                second = pool.submit(self.post, files=[(
+                    "file", ("other.txt", b"other", "text/plain"))],
+                    client_key="same", body="@kimi read this")
+                release.set()
+                responses = [first.result(timeout=10), second.result(timeout=10)]
+        payloads = [response.json() for response in responses]
+        self.assertEqual([response.status_code for response in responses], [200, 200])
+        self.assertEqual(payloads[0]["message"]["id"], payloads[1]["message"]["id"])
+        self.assertCountEqual(
+            [payload["message"]["replayed"] for payload in payloads], [False, True]
+        )
+        self.assertEqual(
+            payloads[0]["files"][0]["id"], payloads[1]["files"][0]["id"]
+        )
+        self.assertEqual(len(self.db.list_messages("line")), 1)
+        self.assertEqual(self.db._exec("SELECT COUNT(*) AS n FROM images").fetchone()["n"], 1)
+        self.assertEqual(len(self.socket.events), 1)
+        self.assertEqual(len(adapter.deliveries), 1)
+        self.assertIn("@kimi read this", adapter.deliveries[0][-1]["body"])
+        self.assertEqual(len(calls), 1)
+
+    def test_distinct_upload_keys_do_not_wait_for_each_other(self):
+        both_preparing = threading.Barrier(2)
+        from partyline.media_files import PreparedFile
+
+        def prepare(_uploads):
+            both_preparing.wait(timeout=5)
+            return [PreparedFile(b"hello", "file", "notes.txt", "text/plain", "txt")]
+
+        with mock.patch("partyline.media_routes.prepared_files", side_effect=prepare):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = [pool.submit(self.post, files=[(
+                    "file", (f"{key}.txt", txt(), "text/plain"))], client_key=key)
+                    for key in ("first", "second")]
+                responses = [future.result(timeout=10) for future in futures]
+        self.assertEqual([response.status_code for response in responses], [200, 200])
+        self.assertEqual(len(self.db.list_messages("line")), 2)
+
+    def test_upload_key_is_scoped_to_caller_and_destination(self):
+        first = self.post(client_key="scoped-key").json()
+        self.db.create_conversation("other-line", "Other line")
+        other_line = self.post("/api/conversations/other-line/files",
+                               client_key="scoped-key").json()
+        user = auth_store.create_user(
+            self.db, "other@example.com", "other", auth_tokens.hash_password("hunter2222"))
+        other_access = auth_tokens.create_access_token(
+            auth_tokens.signing_secret(self.db), user["id"])
+        other_caller = self.client.post(
+            "/api/conversations/line/files", data={"client_key": "scoped-key"},
+            files=[("file", ("a.png", png(), "image/png"))],
+            headers={"Authorization": f"Bearer {other_access}"},
+        ).json()
+        self.assertNotEqual(first["message"]["id"], other_line["message"]["id"])
+        self.assertNotEqual(first["files"][0]["id"], other_line["files"][0]["id"])
+        self.assertNotEqual(first["message"]["id"], other_caller["message"]["id"])
+        self.assertNotEqual(first["files"][0]["id"], other_caller["files"][0]["id"])
+        self.assertEqual(len(self.db.list_messages("line")), 2)
+        self.assertEqual(len(self.db.list_messages("other-line")), 1)
+
+    def test_upload_replay_still_requires_write_authorization(self):
+        self.post(client_key="authorized-key")
+        self.db._exec("UPDATE conversations SET archived_at=? WHERE id=?", ("now", "line"))
+        response = self.post(client_key="authorized-key")
+        self.assertEqual(response.status_code, 409)
+
     def test_upload_client_key_length_is_bounded(self):
         response = self.post(
             files=[("file", ("notes.txt", txt(), "text/plain"))],
@@ -173,6 +263,12 @@ class FileRoutesTest(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(self.db.list_messages("line"), [])
+        retry = self.post(
+            files=[("file", ("notes.txt", txt(), "text/plain"))],
+            client_key="failed-upload",
+        )
+        self.assertEqual(retry.status_code, 200, retry.text)
+        self.assertEqual(len(self.db.list_messages("line")), 1)
 
     def test_private_media_handoff_is_attachment_scoped(self):
         message = self.db.add_message(

@@ -43,6 +43,27 @@ class McpConfigFileTests(unittest.TestCase):
         self.assertEqual(entry["env"]["PARTYLINE_MCP_CONNECTION"], str(self.connection))
         self.assertEqual(self.att["mcp_config"], str(self.config))
 
+    def test_probe_scratch_creates_a_fresh_connection_directory(self):
+        from docs.mcp.fixture.probe_common import probe_attachment
+
+        source_dir = Path(self.db + ".agent-connections")
+        source_dir.mkdir(mode=0o700, exist_ok=True)
+        (source_dir / "probe.json").write_text(json.dumps({
+            "token": "probe-token", "attachment_id": "probe",
+            "handle": "probe-agent",
+        }), encoding="utf-8")
+        scratch = Path(self.temp.name) / "fresh-scratch"
+        with patch.dict(os.environ, {
+            "PARTYLINE_TOKEN": "probe-token",
+            "PARTYLINE_DB": self.db,
+            "PARTYLINE_PROBE_SCRATCH": str(scratch),
+        }, clear=True):
+            attachment = probe_attachment()
+        generated_dir = scratch / "partyline-mcp-probe.agent-connections"
+        self.assertTrue(generated_dir.is_dir())
+        self.assertEqual(Path(attachment["mcp_config"]).parent, generated_dir)
+        self.assertTrue(Path(attachment["mcp_config"]).is_file())
+
     def test_resume_regenerates_and_detach_removes(self):
         self.config.unlink()
         provision_connection(self.db, self.att)  # the resume path provisions again

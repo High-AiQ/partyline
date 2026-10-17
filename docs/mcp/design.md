@@ -1,11 +1,10 @@
 # Partyline MCP design
 
-This describes the MCP server as committed at `HEAD` 5efa2cf on the `mcp-implementation` line. It
-includes the credential-lifecycle fix (`f15ea27`), the argument validation and Codex TOML fix
-(`5efa2cf`), and the `write_set_requests` operation (`5085f95`). Sections 2, 3, 6, 7 and 10 were
-updated against that HEAD. Facts about client behaviour are labelled by their evidence: **retained
-run** (a sanitized log under `fixture/`), **source** (read from pinned upstream code), or **code**
-(read from this repository). Evidence files and how to reproduce them are indexed in [`README.md`](README.md).
+This document describes the MCP implementation and its known limits. Current source claims refer to
+the checked-out code; client behaviour is labelled by its evidence: **retained run** (a sanitized log
+under `fixture/`), **source** (read from pinned upstream code), or **code** (read from this
+repository). Historical gate runs are recorded only at the exact commit where they ran. Evidence
+files and reproduction notes are indexed in [`README.md`](README.md).
 Route-level dispositions are in [`api-inventory.md`](api-inventory.md); per-client facts are in
 [`compat-matrix.md`](compat-matrix.md).
 
@@ -292,10 +291,11 @@ retried call does not post twice.
   unparseable or not an object. The server is then absent from that invocation, and nothing reports it.
 - **Versions.** Behaviour is recorded for Claude Code 2.1.302, Codex CLI 0.163.0, and OpenCode V2
   2.0.32 only. OpenCode V1 has no per-invocation MCP hook in this code.
-- **Probe runs are not portable.** The whoami probes (`fixture/probe_*.py`) hardcode this host's paths
-  and the glm-flash preset path, and they name a Codex model. `probe_common.py` writes its generated MCP
-  config under the system temp directory (`tempfile.gettempdir()`), not under a per-run scratchpad, which
-  is a deviation from the scratchpad rule in `docs/lessons.md`. The probes are evidence from one host.
+- **Probe runs need local setup.** The whoami probes (`fixture/probe_*.py`) need a live Partyline
+  attachment and checkout; the OpenCode V2 launcher also needs a locally configured preset, and the
+  launchers name their CLI models. Set `PARTYLINE_PROBE_SCRATCH` to a fresh per-run scratch directory
+  to keep generated MCP config there. Otherwise the config is written beside the attachment connection
+  file. These probes are evidence from one host, not portable fixtures.
 - **Runtime home provenance (unresolved).** A 516 MB Codex home appeared under `docs/mcp/isolate` during
   this work and was emptied before the audit. The record does not identify its creator or show whether an
   auth file was present. The earlier audit reported that it was not found in commits, stashes, or Git

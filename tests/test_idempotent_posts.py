@@ -1,9 +1,12 @@
 """Finding 2.7: a retry and a terminal echo each land exactly one message."""
 
+import asyncio
 import json
 from pathlib import Path
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -132,6 +135,30 @@ class IdempotentPostsTest(unittest.TestCase):
 
         self.assertEqual(first.json()["id"], second.json()["id"])
         self.assertEqual(self.bodies().count("suite green"), 1)
+
+    def test_concurrent_human_posts_with_one_key_create_one_message(self):
+        entered = threading.Event()
+        release = threading.Event()
+        original_broadcast = self.runtime.broadcast
+
+        async def blocked_broadcast(*args, **kwargs):
+            entered.set()
+            await asyncio.to_thread(release.wait, 5)
+            await original_broadcast(*args, **kwargs)
+
+        self.runtime.broadcast = blocked_broadcast
+        try:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                first = pool.submit(self.post, "one post", key="shared-human-key")
+                self.assertTrue(entered.wait(5))
+                second = pool.submit(self.post, "one post", key="shared-human-key")
+                release.set()
+                responses = [first.result(timeout=10), second.result(timeout=10)]
+        finally:
+            self.runtime.broadcast = original_broadcast
+        self.assertEqual([response.status_code for response in responses], [200, 200])
+        self.assertEqual(responses[0].json()["id"], responses[1].json()["id"])
+        self.assertEqual(self.bodies().count("one post"), 1)
 
     # -- terminal-capture echo --------------------------------------------
 
