@@ -150,6 +150,10 @@ are in its Decisions section (1 to 14):
 | `set_gates` | up to 20 commands; timeout 1 to 14,400 s | `captain_schemas.py` |
 | `client_key` | 1 to 64 characters, required on `post_message` and `upload_file` | `tools_core.py`, `client.py` |
 
+**Follow-up limit gap.** The MCP upload helper caps files at 20 MiB while the server accepts up to
+100 MiB. Its 64 KiB chunks still travel in one HTTP request, so they do not bypass reverse-proxy
+request-size caps. Limit alignment or resumable uploads are separate work.
+
 **Idempotency.** `post_message` and `upload_file` require a caller key. The server remembers each key
 per sender, conversation, and `client_key` for a 600 s window (`idempotent_posts.py`), and a retry
 with the same key returns the original result instead of posting again when the remembered key is
