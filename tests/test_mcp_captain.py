@@ -102,6 +102,47 @@ class CaptainToolTests(unittest.TestCase):
                 "conv_id": "outside"}}, client.state)
         self.assertEqual(len(client.calls), 1)
 
+    def test_write_set_requests_lists_pending_and_bounded_grants(self):
+        client = Client()
+        pending = {"request": {"id": "req-1", "path": "/work", "requester": "worker"}}
+        grants = [{"path": f"/grant/{n}", "granted_by": "person", "granted_at": n,
+                   "docker_mode": "managed", "extra": "not exposed"}
+                  for n in range(75)]
+
+        def request(method, path, payload=None):
+            client.calls.append((method, path, payload))
+            return pending if path.endswith("/write-set/request") else grants
+
+        client.request = request
+        result = tools_captain.call(client, "write_set_requests", {"conv_id": "child"},
+                                    client.state)
+        self.assertEqual(result["request"], pending["request"])
+        self.assertEqual(len(result["grants"]), 50)
+        self.assertTrue(result["grants_truncated"])
+        self.assertNotIn("extra", result["grants"][0])
+        self.assertEqual(client.calls, [
+            ("GET", "/api/conversations/child/write-set/request", None),
+            ("GET", "/api/conversations/child/write-set", None),
+        ])
+        self.assertIn("write_set_requests", {tool["name"]
+                                             for tool in tools_captain.tool_list(client.state)})
+        self.assertIn("write_set_requests", {row["name"]
+                                             for row in tools_captain.guide(client.state)["operations"]})
+        dispatched = tools_captain.call(client, "captain", {"op": "write_set_requests",
+                                      "args": {"conv_id": "child"}}, client.state)
+        self.assertEqual(dispatched["request"], pending["request"])
+
+    def test_write_set_requests_requires_target_read_and_lead_dispatcher(self):
+        client = Client()
+        client.target = {**client.target, "actions": []}
+        with self.assertRaisesRegex(ApiError, "not authorized"):
+            tools_captain.call(client, "write_set_requests", {"conv_id": "child"}, client.state)
+        worker = {**client.state, "role": "implementer", "is_lead": False}
+        with self.assertRaisesRegex(ApiError, "not a line captain"):
+            tools_captain.call(client, "captain", {"op": "write_set_requests", "args": {
+                "conv_id": "home"}}, worker)
+        self.assertEqual(client.calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,7 +7,8 @@ _ACTION = {
     "staffing": "assign", "attach_worker": "attach", "detach_worker": "close",
     "create_child": "create_child", "appoint_lead": "appoint_lead", "retire_child": "assign",
     "accept": "accept", "review_worktree": "write", "request_write_set": "write",
-    "decide_write_set": "read", "request_restart": "assign", "process_overview": "read",
+    "decide_write_set": "read", "write_set_requests": "read",
+    "request_restart": "assign", "process_overview": "read",
     "ack_report": "read_reports", "set_goal": "assign", "set_gates": "assign",
 }
 
