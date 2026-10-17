@@ -15,6 +15,7 @@ def schema(name):
     line = {"conv_id": text("Authorized target line id.", 80)}
     specs = {
         "staffing": obj(line, ["conv_id"]),
+        "write_set_requests": obj(line, ["conv_id"]),
         "list_presets": obj(),
         "attach_worker": obj({**line, "name": text("Exact worker handle.", 32, 1),
             "adapter": text("Exact adapter id.", 80, 1), "command": text("Optional command.", 2000),
@@ -57,7 +58,7 @@ def schema(name):
 
 
 OPERATIONS = tuple(schema_name for schema_name in (
-    "staffing", "list_presets", "attach_worker", "detach_worker", "create_child",
+    "staffing", "write_set_requests", "list_presets", "attach_worker", "detach_worker", "create_child",
     "appoint_lead", "retire_child", "accept", "review_worktree", "request_write_set",
     "decide_write_set", "request_restart", "process_overview", "ack_report", "set_goal",
     "set_gates", "docs_read"))

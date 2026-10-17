@@ -5,6 +5,8 @@ from urllib.parse import quote
 from .client import ApiError
 from .captain_schemas import OPERATIONS
 
+_MAX_WRITE_SET_GRANTS = 50
+
 
 def _path(conv, tail):
     return f"/api/conversations/{quote(conv, safe='')}/{tail}"
@@ -67,6 +69,20 @@ def execute(client, op, args, state):
     if op == "staffing":
         _target(client, state, conv, ("assign",))
         return client.request("GET", _path(conv, "staffing"))
+    if op == "write_set_requests":
+        _target(client, state, conv, ("read",))
+        pending = client.request("GET", _path(conv, "write-set/request"))
+        grants = client.request("GET", _path(conv, "write-set"))
+        rows = grants if isinstance(grants, list) else []
+        return {
+            "request": pending.get("request") if isinstance(pending, dict) else None,
+            "grants": [
+                {key: row[key] for key in ("path", "granted_by", "granted_at", "docker_mode")
+                 if key in row}
+                for row in rows[:_MAX_WRITE_SET_GRANTS] if isinstance(row, dict)
+            ],
+            "grants_truncated": len(rows) > _MAX_WRITE_SET_GRANTS,
+        }
     if op == "attach_worker":
         _target(client, state, conv, ("attach",))
         body = {key: args[key] for key in ("name", "adapter")}
