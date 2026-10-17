@@ -29,8 +29,11 @@ def schema(name):
             "repository": text("Optional repository path.", 4096)}, ["conv_id", "name"]),
         "appoint_lead": obj({**line, "attachment_id": text("Lead attachment id; empty clears lead.", 80)},
                               ["conv_id", "attachment_id"]),
-        "retire_child": obj({"conv_id": text("Direct child line id.", 80),
-            "stop_processes": {"type": "boolean"}}, ["conv_id"]),
+        "retirement_preview": obj({**line, "include_children": {"type": "boolean"}}, ["conv_id"]),
+        "retire_child": obj({"conv_id": text("Child id; root captains may target any strict descendant.", 80),
+            **{key: {"type": "boolean"} for key in
+               ("stop_processes", "clear_goal", "include_children", "discard", "force_discard")},
+            "preview_token": text("Echo retirement_preview token for force_discard.", 64)}, ["conv_id"]),
         "accept": obj({**line, "sha": text("Commit SHA.", 64, 4),
             "allow_descendant": {"type": "boolean"}, "findings": {"type": "array",
                 "items": text("Review finding.", 300), "maxItems": 20},
@@ -62,7 +65,7 @@ def schema(name):
 
 OPERATIONS = tuple(schema_name for schema_name in (
     "staffing", "write_set_requests", "list_presets", "attach_worker", "detach_worker", "create_child",
-    "appoint_lead", "retire_child", "accept", "review_worktree", "request_write_set",
+    "appoint_lead", "retire_child", "retirement_preview", "accept", "review_worktree", "request_write_set",
     "decide_write_set", "request_restart", "process_overview", "ack_report", "set_goal",
     "set_gates", "docs_read", "reports"))
 

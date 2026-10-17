@@ -10,6 +10,7 @@ the goal of a line that is not finished.
 from __future__ import annotations
 
 import asyncio
+import json
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -18,6 +19,7 @@ from .auth_guard import request_principal
 from .conversation_contracts import BlockedArchiveResponse
 from .contracts import ArchiveResponse, ConversationEvent, ConversationsChangedEvent
 from .goal import set_goal
+from .hierarchy import descendants
 from .line_process_routes import detach_attachment, live_attachments, mid_turn_blocker
 from .line_subtree import archive_line, archive_subtree
 from .machine_scope import deny_unless, is_human
@@ -28,6 +30,9 @@ from .attachment_tmp import reap_line_tmp
 from .legacy_tmp import reap_legacy_temp
 from .system_notice import post_system_notice
 from .worktree_lifecycle import archive_worktree_if_safe, discard_worktree
+from .retirement_preview import preview
+from .retirement_contracts import RetirementAudit, RetirementPreview
+from .retirement_force import admission, retire
 
 
 def _server():
@@ -38,6 +43,23 @@ def _server():
 def register_archive_route(app: FastAPI, presence):
     """Mount DELETE /api/conversations/{id}; return the handler for server re-export."""
 
+    @app.get("/api/conversations/{conv_id}/retirement-preview", response_model=RetirementPreview)
+    async def retirement_preview(request: Request, conv_id: str, include_children: bool = False):
+        runtime = _server().runtime
+        return await asyncio.to_thread(
+            preview, runtime.db, request_principal(request), conv_id, include_children,
+            getattr(runtime, "presence", None) or presence)
+
+    @app.get("/api/conversations/{conv_id}/retirement-audit", response_model=list[RetirementAudit])
+    def retirement_audit(request: Request, conv_id: str):
+        db = _server().runtime.db
+        deny_unless(db, request_principal(request), conv_id, "read")
+        rows = db._exec(
+            "SELECT * FROM retirement_audit WHERE target=? ORDER BY created_at DESC LIMIT 20",
+            (conv_id,)).fetchall()
+        return [{**dict(row), **{key: json.loads(row[key]) for key in
+                                ("principal", "evidence", "recovery")}} for row in rows]
+
     @app.delete(
         "/api/conversations/{conv_id}",
         response_model=ArchiveResponse,
@@ -46,14 +68,23 @@ def register_archive_route(app: FastAPI, presence):
     async def archive_conversation(
         request: Request, conv_id: str, include_children: bool = False, discard: bool = False,
         stop_processes: bool = False, clear_goal: bool = False,
+        force_discard: bool = False, preview_token: str | None = None,
     ):
         runtime = _server().runtime
         db = runtime.db
         principal = request_principal(request)
         deny_unless(db, principal, conv_id, "archive")
+        if conv_id in getattr(db, "retiring_lines", set()):
+            raise HTTPException(409, "retirement is already in progress")
         conv = db.get_conversation(conv_id)
         if conv["archived_at"]:
             raise HTTPException(409, "line is already archived")
+        if force_discard:
+            with admission(db, conv_id, include_children):
+                return await retire(runtime, principal, conv_id, include_children=include_children,
+                                    stop_processes=stop_processes, clear_goal=clear_goal,
+                                    preview_token=preview_token,
+                                    presence=getattr(runtime, "presence", None) or presence)
         pre_stopped: list[str] = []
         live: list[dict] = []
         if stop_processes:
@@ -78,14 +109,18 @@ def register_archive_route(app: FastAPI, presence):
             return JSONResponse(
                 status_code=409, content={"detail": summary, "blockers": blockers}
             )
-        if clear_goal and conv.get("goal"):
-            set_goal(db, conv_id, "")
+        clear_ids = ([conv_id, *descendants(db, conv_id, include_archived=False)]
+                     if include_children else [conv_id])
+        for goal_id in clear_ids if clear_goal else []:
+            if not db.get_conversation(goal_id).get("goal"):
+                continue
+            set_goal(db, goal_id, "")
             await post_system_notice(
-                runtime, conv_id, f"☏ goal cleared by @{principal.name} (retirement)",
+                runtime, goal_id, f"☏ goal cleared by @{principal.name} (retirement)",
                 actor=principal,
             )
             await runtime.broadcast(
-                conv_id, ConversationEvent(conversation=db.get_conversation(conv_id)))
+                goal_id, ConversationEvent(conversation=db.get_conversation(goal_id)))
         for attachment in live:
             await detach_attachment(runtime, attachment["id"])
             pre_stopped.append(attachment["name"])
@@ -96,7 +131,7 @@ def register_archive_route(app: FastAPI, presence):
         stopped = [*pre_stopped, *stopped]
         removed, kept_reason = False, None
         for line_id in archived:
-            if discard and line_id == conv_id:
+            if discard:
                 # The explicit discard: a merged branch's dirty worktree goes.
                 line_removed = await asyncio.to_thread(discard_worktree, db, line_id)
                 reason = None

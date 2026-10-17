@@ -1,5 +1,4 @@
 """Named HTTP and WebSocket contracts shared by the server and runtime."""
-
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -11,6 +10,7 @@ from .presence_contracts import WorkingEvent
 from .reaction_contracts import ReactionEvent, ReactionResponse
 from .pin_contracts import PinsChangedEvent
 from .resource_contracts import ResourceSnapshotEvent
+from .retirement_contracts import RetirementRecovery
 
 RestartPlanMode = Literal["offer", "automatic"]
 RestartPlanScope = Literal["line", "all"]
@@ -164,7 +164,7 @@ class AdapterRemoveResponse(BaseModel):
     message: str
 
 
-class ArchiveResponse(BaseModel):
+class ArchiveResponse(RetirementRecovery):
     ok: bool
     archived: bool
     stopped: list[str]

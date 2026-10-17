@@ -11,8 +11,8 @@ from .lease_schema import MIGRATIONS as LEASE
 from .auto_compact_schema import MIGRATIONS as AUTO_COMPACT
 from .docker_mode_schema import MIGRATIONS as DOCKER_MODE
 from .bridge_schema import MIGRATIONS as BRIDGE
+from .retirement_schema import MIGRATIONS as RETIREMENT
 MIGRATIONS = [
-    # cli_session: optional process session id, for adapters that support resume
     "ALTER TABLE attachments ADD COLUMN cli_session TEXT",
     # topic: free-text line topic, relayed to agents in briefings and digests
     "ALTER TABLE conversations ADD COLUMN topic TEXT NOT NULL DEFAULT ''",
@@ -297,4 +297,4 @@ MIGRATIONS = [
         BEGIN DELETE FROM message_pins WHERE conv_id=OLD.conv_id AND message_id=OLD.id; END""",
 ]
 MIGRATIONS.extend(MEMORY + IDEMPOTENCY + NOTES + COMPACTION + ACCEPT_HISTORY
-                  + SCRATCH + LEASE + GATES + AUTO_COMPACT + DOCKER_MODE + BRIDGE)
+                  + SCRATCH + LEASE + GATES + AUTO_COMPACT + DOCKER_MODE + BRIDGE + RETIREMENT)

@@ -190,6 +190,10 @@ def deny_unless(
         raise HTTPException(404)
     if not allows(db, principal, conv_id, capability):
         raise HTTPException(403, "this credential cannot act on that line")
+    if (conv_id in getattr(db, "retiring_lines", set())
+            and capability in ("attach", "create_child", "accept", "assign", "write", "appoint_lead",
+                               "link_parent")):
+        raise HTTPException(409, "retirement is in progress; this line cannot change")
 
 
 def parallel_worker_reason(db: Db, conv_id: str) -> bool:
