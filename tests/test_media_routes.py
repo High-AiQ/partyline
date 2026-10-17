@@ -5,8 +5,11 @@ surface: canonical vs alias paths, digest lines, serving headers, and the
 non-image size cap. Fixtures are tiny in-process bytes — no files on disk.
 """
 
+import asyncio
+import hashlib
 import tempfile
 import threading
+import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
@@ -16,6 +19,7 @@ from unittest import mock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 from PIL import Image
 
 from partyline import auth_store, auth_tokens
@@ -23,6 +27,7 @@ from partyline.adapters.briefing import BRIEFING
 from partyline.auth_guard import install_auth_guard
 from partyline.db import Db
 from partyline.media import MediaError, MediaStore
+from partyline.idempotent_posts import _KEY_CLAIMS, _KEY_CLAIMS_GUARD
 from partyline.media_files import MAX_FILE_BYTES
 from partyline.media_routes import handed_to, media_router
 from partyline.runtime import ChatRuntime
@@ -95,6 +100,7 @@ class FileRoutesTest(unittest.TestCase):
         app = FastAPI()
         install_auth_guard(app, self.db)
         app.include_router(media_router(self.runtime, self.store))
+        self.app = app
         self.client = TestClient(app)
         self.db.create_conversation("line", "Line")
         self.socket = CollectingSocket()
@@ -116,6 +122,18 @@ class FileRoutesTest(unittest.TestCase):
             files=files if files is not None else [("file", ("a.png", png(), "image/png"))],
         )
 
+    def wait_for_claim_waiter(self, key):
+        storage_key = "upload:" + hashlib.sha256(key.encode()).hexdigest()
+        identity = (id(self.db), "opus", "line", storage_key)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            with _KEY_CLAIMS_GUARD:
+                state = _KEY_CLAIMS.get(identity)
+                if state and state.waiters:
+                    return
+            time.sleep(0.005)
+        self.fail(f"claim waiter did not arrive for {identity}")
+
     def test_briefing_teaches_any_file_type_and_how_to_read_a_pdf(self):
         self.assertIn("$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/files", BRIEFING)
         self.assertIn("thumb, slim, readable and original URLs", BRIEFING)
@@ -123,8 +141,6 @@ class FileRoutesTest(unittest.TestCase):
         self.assertIn('Authorization: Bearer $PARTYLINE_TOKEN', BRIEFING)
 
     def test_upload_preparation_runs_off_the_event_loop(self):
-        import asyncio
-
         from partyline.media_files import PreparedFile
 
         seen = {}
@@ -186,6 +202,7 @@ class FileRoutesTest(unittest.TestCase):
                 second = pool.submit(self.post, files=[(
                     "file", ("other.txt", b"other", "text/plain"))],
                     client_key="same", body="@kimi read this")
+                self.wait_for_claim_waiter("same")
                 release.set()
                 responses = [first.result(timeout=10), second.result(timeout=10)]
         payloads = [response.json() for response in responses]
@@ -203,6 +220,58 @@ class FileRoutesTest(unittest.TestCase):
         self.assertEqual(len(adapter.deliveries), 1)
         self.assertIn("@kimi read this", adapter.deliveries[0][-1]["body"])
         self.assertEqual(len(calls), 1)
+
+    def test_same_key_uploads_do_not_starve_a_tiny_default_executor(self):
+        from partyline.media_files import PreparedFile
+
+        started = threading.Event()
+        release = threading.Event()
+
+        def prepare(_uploads):
+            started.set()
+            if not release.wait(5):
+                raise AssertionError("upload preparation was not released")
+            return [PreparedFile(b"hello", "file", "notes.txt", "text/plain", "txt")]
+
+        async def upload_many():
+            loop = asyncio.get_running_loop()
+            loop.set_default_executor(ThreadPoolExecutor(max_workers=2))
+            async with AsyncClient(
+                transport=ASGITransport(app=self.app), base_url="http://test"
+            ) as client:
+                requests = [
+                    client.post(
+                        "/api/conversations/line/files",
+                        headers=self.client.headers,
+                        data={"client_key": "tiny-pool"},
+                        files=[("file", (f"{index}.txt", txt(), "text/plain"))],
+                    )
+                    for index in range(5)
+                ]
+                batch = asyncio.gather(*requests)
+                for _ in range(500):
+                    if started.is_set():
+                        break
+                    await asyncio.sleep(0.01)
+                else:
+                    self.fail("no upload reached preparation")
+                storage_key = "upload:" + hashlib.sha256(b"tiny-pool").hexdigest()
+                identity = (id(self.db), "opus", "line", storage_key)
+                for _ in range(500):
+                    with _KEY_CLAIMS_GUARD:
+                        state = _KEY_CLAIMS.get(identity)
+                        if state and state.waiters == 4:
+                            break
+                    await asyncio.sleep(0.01)
+                else:
+                    self.fail("all same-key uploads did not wait on the claim")
+                release.set()
+                return await asyncio.wait_for(batch, timeout=10)
+
+        with mock.patch("partyline.media_routes.prepared_files", side_effect=prepare):
+            responses = asyncio.run(upload_many())
+        self.assertEqual([response.status_code for response in responses], [200] * 5)
+        self.assertEqual(len(self.db.list_messages("line")), 1)
 
     def test_distinct_upload_keys_do_not_wait_for_each_other(self):
         both_preparing = threading.Barrier(2)

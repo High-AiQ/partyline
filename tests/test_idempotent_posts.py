@@ -1,6 +1,7 @@
 """Finding 2.7: a retry and a terminal echo each land exactly one message."""
 
 import asyncio
+import time
 import json
 from pathlib import Path
 import tempfile
@@ -16,6 +17,11 @@ from partyline.agent_client import derived_client_key, with_client_key
 from partyline.auth_guard import install_auth_guard
 from partyline.db import Db
 from partyline.idempotency_schema import MIGRATIONS as IDEMPOTENCY_MIGRATIONS
+from partyline.idempotent_posts import (
+    _KEY_CLAIMS,
+    _KEY_CLAIMS_GUARD,
+    claim_key,
+)
 from partyline.media import MediaStore
 from partyline.message_routes import message_router
 from partyline.runtime import ChatRuntime
@@ -57,6 +63,17 @@ class IdempotentPostsTest(unittest.TestCase):
     def backdate(self, body, seconds):
         self.db._exec("UPDATE messages SET created_at = created_at - ? WHERE body = ?",
                       (seconds, body))
+
+    def wait_for_claim_waiter(self, sender, key):
+        identity = (id(self.db), sender, "line", key)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            with _KEY_CLAIMS_GUARD:
+                state = _KEY_CLAIMS.get(identity)
+                if state and state.waiters:
+                    return
+            time.sleep(0.005)
+        self.fail(f"claim waiter did not arrive for {identity}")
 
     # -- client_key idempotency -------------------------------------------
 
@@ -152,6 +169,7 @@ class IdempotentPostsTest(unittest.TestCase):
                 first = pool.submit(self.post, "one post", key="shared-human-key")
                 self.assertTrue(entered.wait(5))
                 second = pool.submit(self.post, "one post", key="shared-human-key")
+                self.wait_for_claim_waiter("greg", "shared-human-key")
                 release.set()
                 responses = [first.result(timeout=10), second.result(timeout=10)]
         finally:
@@ -159,6 +177,36 @@ class IdempotentPostsTest(unittest.TestCase):
         self.assertEqual([response.status_code for response in responses], [200, 200])
         self.assertEqual(responses[0].json()["id"], responses[1].json()["id"])
         self.assertEqual(self.bodies().count("one post"), 1)
+
+    def test_double_cancelled_claim_waiter_does_not_poison_key_or_table(self):
+        identity = (id(self.db), "greg", "line", "cancel-key")
+
+        async def exercise():
+            async with claim_key(self.db, "greg", "line", "cancel-key"):
+                waiter = asyncio.create_task(self.join_claim())
+                for _ in range(100):
+                    with _KEY_CLAIMS_GUARD:
+                        state = _KEY_CLAIMS.get(identity)
+                        if state and state.waiters:
+                            break
+                    await asyncio.sleep(0.001)
+                else:
+                    self.fail("claim waiter did not park")
+                waiter.cancel()
+                waiter.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await waiter
+
+            async with claim_key(self.db, "greg", "line", "cancel-key"):
+                pass
+
+        asyncio.run(exercise())
+        with _KEY_CLAIMS_GUARD:
+            self.assertNotIn(identity, _KEY_CLAIMS)
+
+    async def join_claim(self):
+        async with claim_key(self.db, "greg", "line", "cancel-key"):
+            return
 
     # -- terminal-capture echo --------------------------------------------
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 import threading
 import time
 
@@ -28,8 +29,16 @@ DERIVED_PREFIX = "d:"
 DERIVED_WINDOW_SECONDS = 120.0
 PRUNE_AFTER_SECONDS = 3600.0
 
-_KEY_LOCKS: dict[tuple[int, str, str, str], tuple[threading.Lock, int]] = {}
-_KEY_LOCKS_GUARD = threading.Lock()
+
+@dataclass
+class _ClaimState:
+    claimed: bool = False
+    users: int = 0
+    waiters: int = 0
+
+
+_KEY_CLAIMS: dict[tuple[int, str, str, str], _ClaimState] = {}
+_KEY_CLAIMS_GUARD = threading.Lock()
 
 
 @asynccontextmanager
@@ -41,31 +50,35 @@ async def claim_key(db, sender: str, conv_id: str, client_key: str):
     the completed message or can retry after a failed attempt releases it.
     """
     identity = (id(db), sender, conv_id, client_key)
-    with _KEY_LOCKS_GUARD:
-        lock, users = _KEY_LOCKS.get(identity, (threading.Lock(), 0))
-        _KEY_LOCKS[identity] = (lock, users + 1)
-    acquire = asyncio.create_task(asyncio.to_thread(lock.acquire))
+    with _KEY_CLAIMS_GUARD:
+        state = _KEY_CLAIMS.setdefault(identity, _ClaimState())
+        state.users += 1
     acquired = False
+    waiting = False
     try:
-        try:
-            await asyncio.shield(acquire)
-            acquired = True
-        except asyncio.CancelledError:
-            # A worker thread cannot be cancelled while waiting on acquire.
-            # Wait for its result and release so cancellation cannot leak a claim.
-            await acquire
-            lock.release()
-            raise
+        while not acquired:
+            with _KEY_CLAIMS_GUARD:
+                if not state.claimed:
+                    state.claimed = True
+                    acquired = True
+                    if waiting:
+                        state.waiters -= 1
+                        waiting = False
+                elif not waiting:
+                    state.waiters += 1
+                    waiting = True
+            if not acquired:
+                await asyncio.sleep(0.01)
         yield
     finally:
-        if acquired:
-            lock.release()
-        with _KEY_LOCKS_GUARD:
-            current_lock, users = _KEY_LOCKS[identity]
-            if users == 1:
-                del _KEY_LOCKS[identity]
-            else:
-                _KEY_LOCKS[identity] = (current_lock, users - 1)
+        with _KEY_CLAIMS_GUARD:
+            if waiting:
+                state.waiters -= 1
+            if acquired:
+                state.claimed = False
+            state.users -= 1
+            if state.users == 0:
+                del _KEY_CLAIMS[identity]
 
 
 def _storage_key(conv_id: str, client_key: str) -> str:
