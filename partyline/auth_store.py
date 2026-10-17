@@ -105,11 +105,7 @@ def set_handle(db, user_id: int, handle: str) -> dict | None:
 
 # -- attachment machine tokens ----------------------------------------------
 def ensure_api_token(db, att_id: str) -> str:
-    """Mint the attachment's stable machine credential, once.
-
-    The token survives activations and resumes on purpose: a resumed process
-    is handed the same PARTYLINE_TOKEN its briefing already told it about.
-    """
+    """Mint an attachment's machine credential once, for its first activation."""
     with db.lock:
         db.conn.execute(
             "UPDATE attachments SET api_token=? WHERE id=? AND api_token IS NULL",
@@ -124,9 +120,23 @@ def ensure_api_token(db, att_id: str) -> str:
     return row["api_token"]
 
 
+def rotate_api_token(db, att_id: str) -> str:
+    """Replace the credential before starting a new process activation."""
+    token = secrets.token_urlsafe(32)
+    with db.lock:
+        changed = db.conn.execute(
+            "UPDATE attachments SET api_token=? WHERE id=?", (token, att_id)
+        )
+        db.conn.commit()
+    if changed.rowcount != 1:
+        raise KeyError(f"no attachment {att_id}")
+    return token
+
+
 def attachment_by_api_token(db, token: str) -> dict | None:
     with db.lock:
         row = db.conn.execute(
-            "SELECT * FROM attachments WHERE api_token=?", (token,)
+            "SELECT * FROM attachments WHERE api_token=? "
+            "AND status IN ('starting','running')", (token,)
         ).fetchone()
     return dict(row) if row else None

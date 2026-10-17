@@ -8,7 +8,12 @@ from .bridge_delivery import route_bridge, stamp_outbound
 from .contracts import MessageEvent, MessageResponse
 from .ack_limits import capture_notice, pingpong_refusal, refusal_message
 from .hierarchy import stamp_source, tree_conversation_ids
-from .idempotent_posts import original_for_key, remember_key
+from .idempotent_posts import (
+    claim_key,
+    original_for_key,
+    principal_identity,
+    remember_key,
+)
 from .interrupts import interrupt_for
 from .mention_relay import relay_mentions
 from .mentions import (
@@ -68,11 +73,22 @@ def self_mention_reason(db, principal, conv_id: str, body: str) -> str | None:
     return None
 
 
-async def post_human_message(runtime, conv_id: str, handle: str, body: str) -> dict:
+async def post_human_message(
+    runtime, conv_id: str, handle: str, body: str,
+    client_key: str | None = None, caller_id: str | None = None,
+) -> dict:
     """A person speaking on the wire or through REST — one routing path."""
     text = body.strip()
     if not text:
         raise HTTPException(400, "message body is required")
+    if client_key and caller_id:
+        stored = runtime.db.add_message(conv_id, handle, "human", text)
+        remember_key(runtime.db, caller_id, client_key, conv_id, stored["id"])
+        await runtime.broadcast(
+            conv_id, MessageEvent(message=MessageResponse.model_validate(stored))
+        )
+        await runtime.route_mentions(conv_id, stored)
+        return stored
     return await runtime.post_message(conv_id, handle, "human", text)
 
 
@@ -86,15 +102,28 @@ async def post_identified(runtime, conv_id, principal, body: str, client_key: st
     """
     if (reason := self_mention_reason(runtime.db, principal, conv_id, body)) is not None:
         raise HTTPException(422, reason)
-    if client_key and (
-        original := original_for_key(runtime.db, principal.name, client_key, conv_id)
+    caller_id = principal_identity(principal)
+    if client_key and caller_id:
+        async with claim_key(runtime.db, caller_id, conv_id, client_key):
+            return await _post_identified_claimed(
+                runtime, conv_id, principal, body, client_key, caller_id
+            )
+    return await _post_identified_claimed(
+        runtime, conv_id, principal, body, None, caller_id
+    )
+
+
+async def _post_identified_claimed(
+    runtime, conv_id, principal, body, client_key, caller_id
+):
+    if client_key and caller_id and (
+        original := original_for_key(runtime.db, caller_id, client_key, conv_id)
     ) is not None:
         return {**original, "replayed": True}
     if principal.kind != "machine":
-        stored = await post_human_message(runtime, conv_id, principal.name, body)
-        if client_key:
-            remember_key(runtime.db, principal.name, client_key, conv_id, stored["id"])
-        return stored
+        return await post_human_message(
+            runtime, conv_id, principal.name, body, client_key, caller_id
+        )
     if (capture := capture_echo(runtime.db, principal.name, conv_id, body)) is not None:
         # The tail posted these words first; the API copy is the twin (2.7).
         return {**capture, "replayed": True}
@@ -105,8 +134,8 @@ async def post_identified(runtime, conv_id, principal, body: str, client_key: st
     stored = runtime.db.add_message(conv_id, principal.name, "agent", body)
     stored = {**stored, **stamp_source(runtime.db, stored["id"], principal)}
     stored = stamp_outbound(runtime.db, conv_id, stored)
-    if client_key:
-        remember_key(runtime.db, principal.name, client_key, conv_id, stored["id"])
+    if client_key and caller_id:
+        remember_key(runtime.db, caller_id, client_key, conv_id, stored["id"])
     if (returns := getattr(runtime, "returns", None)) is not None:
         # An API post is the process speaking: a hand-off here settles its turn
         # exactly as one said through its own pty would.

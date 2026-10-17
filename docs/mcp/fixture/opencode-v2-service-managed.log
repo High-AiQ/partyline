@@ -1,0 +1,8 @@
+157856.719 initialize
+157856.736 notifications/initialized
+157856.736 tools/list
+157858.741 tools/list
+157946.410 tools/call
+157946.410 call dispatch {"name": "tool_b"}
+157946.412 tools/call
+157946.412 call tool_b {}

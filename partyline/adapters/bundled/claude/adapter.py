@@ -8,20 +8,14 @@ import shlex
 import sys
 
 from partyline.adapters.base import Adapter as BaseAdapter
-from partyline.adapters.compaction import is_compaction_record
+from partyline.adapters.compaction import compaction_hooks_declared, is_compaction_record
 from partyline.adapters.session_seed import seed_claude_home
+from partyline.mcp_attach import claude_command
 
 # A session that recorded our claim token recorded it near the top, in the
 # briefing or the first wake. Bounding the scan keeps a stranger's
 # multi-megabyte transcript from being read in full on every poll.
 SCAN_BYTES = 512 * 1024
-
-
-def _compaction_hooks(att: dict) -> bool:
-    """Whether the manifest declares compaction hooks; stamped metadata (an
-    import of the helper would cycle through this package)."""
-    capabilities = (att.get("adapter_metadata") or {}).get("capabilities") or {}
-    return bool(capabilities.get("compaction_hooks"))
 
 
 class PartylineAdapter(BaseAdapter):
@@ -43,6 +37,9 @@ class PartylineAdapter(BaseAdapter):
             env['CLAUDE_CODE_AUTO_COMPACT_WINDOW'] = str(limit)  # plain token count
         return env
 
+    def mcp_argv(self, cmd: list[str]) -> list[str]:
+        return claude_command(cmd, self.att)
+
     async def stop(self):
         self._CLAIMED.discard(self._transcript)
         await super().stop()
@@ -55,8 +52,8 @@ class PartylineAdapter(BaseAdapter):
             cmd += ["--session-id", self.att["id"]]
         hook_url = self.att.get("hook_url")
         if hook_url and "--settings" not in cmd:
-            cmd += ["--settings", json.dumps(self._hook_settings(
-                hook_url, _compaction_hooks(self.att)))]
+            settings = self._hook_settings(hook_url, compaction_hooks_declared(self.att))
+            cmd += ["--settings", json.dumps(settings)]
         if not self.resume:
             # Claude snapshots this system prompt with the session and reapplies
             # it on resume. Keep the user-facing briefing for after startup dialogs.
@@ -65,7 +62,7 @@ class PartylineAdapter(BaseAdapter):
                 cmd[position] += "\n\n" + self.briefing()
             else:
                 cmd += ["--append-system-prompt", self.briefing()]
-        return cmd
+        return self.mcp_argv(cmd)
 
     @staticmethod
     def _hook_settings(hook_url: str, with_compaction: bool = False) -> dict:

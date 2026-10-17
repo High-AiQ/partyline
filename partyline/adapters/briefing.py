@@ -144,8 +144,8 @@ def child_env(env: Mapping[str, str], att: dict) -> dict[str, str]:
     result["PARTYLINE_API"] = api_base
     result["PARTYLINE_CONV_ID"] = str(att.get("conv_id", ""))
     result["PARTYLINE_HANDLE"] = str(att.get("name", ""))
-    # The stable machine credential the auth guard accepts. Only ever absent
-    # for an attachment dict that predates the auth migration's backfill.
+    # The current activation's machine credential. Only absent for an
+    # attachment dict that predates the auth migration's backfill.
     if token := att.get("api_token"):
         result["PARTYLINE_TOKEN"] = str(token)
     if att.get("docker_socket"):

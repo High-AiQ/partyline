@@ -27,3 +27,9 @@ def is_compaction_record(adapter: str, record: object) -> bool:
     if adapter == "pi":
         return record.get("type") == "compaction"
     return False
+
+
+def compaction_hooks_declared(att: dict) -> bool:
+    """Whether the manifest declares compaction hooks (stamped into the attachment)."""
+    capabilities = (att.get("adapter_metadata") or {}).get("capabilities") or {}
+    return bool(capabilities.get("compaction_hooks"))

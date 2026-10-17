@@ -101,7 +101,7 @@ class ReplaceAttachmentTest(unittest.TestCase):
         self.db._exec("UPDATE attachments SET runtime_owner='cap-owner', "
                       "status='detached' WHERE id='cap'")
         self.runtime.live.pop("cap")
-        headers = {"Authorization": "Bearer " + auth_store.ensure_api_token(self.db, "cap")}
+        headers = self.human
         self.start_failure = True
         failed = self.replace(att_id="cap",
                               body={"reason": "thrashing on compaction"}, headers=headers)
@@ -116,7 +116,7 @@ class ReplaceAttachmentTest(unittest.TestCase):
         self.db._exec("UPDATE attachments SET runtime_owner='cap-owner', "
                       "status='detached' WHERE id='cap'")
         self.runtime.live.pop("cap")  # detached: no live process to stop
-        headers = {"Authorization": "Bearer " + auth_store.ensure_api_token(self.db, "cap")}
+        headers = self.human
         response = self.replace(att_id="cap", headers=headers)
         self.assertEqual(response.status_code, 200, response.text)
         replacement = response.json()
