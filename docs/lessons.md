@@ -1,5 +1,25 @@
 # Lessons: the false-assumptions ledger
 
+## WebSocket authentication does not grant target authority
+
+The terminal WebSocket assumed a valid credential could view and type into
+any live attachment. The REST screen and keys routes already required `read`
+and `attach` on the target line; the socket bypassed both checks. Apply the
+same `allows()` policy before subscribing or sending geometry/snapshot, before
+each output payload, and before every PTY write. A read-only viewer sending
+input closes with 4403. Expired or revoked credentials close with 4401 so
+the human client can refresh its token. Re-resolve credentials and target rows
+each time; an idle one-second check also closes revoked sockets. Pin the original line
+and live adapter so moving, deleting, or replacing the target ends access.
+`tests.test_terminal_authorization` guards unrelated-machine denial without
+snapshot disclosure, read-only input denial, legitimate human use, demotion,
+revocation (including queued output and idle sockets), and target changes.
+The only other registered socket is human-only chat; humans have access to
+all lines under the current REST policy. `WebSocketAuditGuardTest` enumerates
+the registered routes and fails when that audited set changes. Audit new
+WebSocket routes against their corresponding REST target checks, not just
+their authentication gate.
+
 ## A startup dialog must not hold the instance's ownership lock
 
 On 2026-10-08, appointing the hero-benchmark captain rang a Claude worker
