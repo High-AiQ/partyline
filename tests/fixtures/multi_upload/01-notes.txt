@@ -1,0 +1,2 @@
+Multi upload fixture 01
+Readable UTF-8 text.

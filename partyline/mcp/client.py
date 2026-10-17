@@ -148,6 +148,13 @@ class PartylineClient:
         finally:
             conn.close()
 
+    def upload_files(self, conv_id: str, paths: list[str], *, client_key: str,
+                     title: str = "", description: str = "", body: str = "") -> dict:
+        from .uploads import upload_files
+
+        return upload_files(self, conv_id, paths, client_key=client_key,
+                            title=title, description=description, body=body)
+
     def download(self, file_id: str, variant: str, destination: str) -> dict:
         if variant not in {"original", "thumb", "slim", "readable"}:
             raise ValueError("variant must be original, thumb, slim, or readable")
