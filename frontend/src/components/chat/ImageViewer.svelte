@@ -52,11 +52,13 @@
 {#if image}
   <Modal title={image.title ?? `image ${String(index + 1)} of ${String(images.length)}`} wide {close}>
     <div class="flex min-h-0 flex-col gap-2.5">
+      <!-- Reserve room inside the 82dvh modal for its header, details and controls.
+           A flex stage avoids intrinsic grid tracks exceeding the visible frame. -->
       <div
-        class="stage relative grid min-h-[180px] place-items-center overflow-hidden rounded-md border border-line bg-ink"
+        class="stage relative flex h-[min(62dvh,calc(82dvh-210px))] min-h-0 flex-none items-center justify-center overflow-hidden rounded-md border border-line bg-ink"
       >
         <img
-          class="block h-auto max-h-[62dvh] w-auto max-w-full object-contain"
+          class="block h-auto max-h-full min-h-0 w-auto max-w-full min-w-0 object-contain"
           src={authenticatedResourceUrl(image.urls.slim ?? image.urls.original)}
           alt={fileLabel(image, index)}
           width={image.slim?.width ?? image.width}

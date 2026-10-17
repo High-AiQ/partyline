@@ -1,5 +1,19 @@
 # Lessons: the false-assumptions ledger
 
+## An image height cap does not guarantee the whole image is visible
+
+The image viewer assumed `max-height: 62dvh` would fit inside an `82dvh`
+modal. Header, metadata, gaps and controls consume the rest, and the flex
+layout shrank the image stage while the image kept its viewport-based height.
+The stage's hidden overflow cropped the portrait card despite a visible header
+and a valid image aspect ratio. Give the stage an explicit viewport budget that
+reserves room for the surrounding controls, and constrain the image to that
+stage. `tests/ui/test_multi_upload_viewer.py` uploads real landscape and portrait
+fixtures, checks image and control geometry at desktop and phone sizes, drives
+navigation, and compares browser downloads byte-for-byte. The portrait stage
+containment assertion fails against the old bundle; checking only the modal
+header or image aspect ratio missed this clipping.
+
 ## WebSocket authentication does not grant target authority
 
 The terminal WebSocket assumed a valid credential could view and type into
