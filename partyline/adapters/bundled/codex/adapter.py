@@ -33,6 +33,7 @@ from partyline.adapters.session_seed import seed
 from partyline.adapters.bundled.codex.thread_history import tail_thread_history
 from partyline.adapters.compaction import is_compaction_record
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
+from partyline.mcp_attach import codex_overrides
 
 HOME_ROOT = os.path.expanduser("~/.partyline/sessions/codex")
 SHARED_HOME = os.path.expanduser("~/.codex")
@@ -83,6 +84,10 @@ class PartylineAdapter(BaseAdapter):
     def spawn_env(self) -> dict[str, str]:
         return {"CODEX_HOME": getattr(self, "_home", "") or self.codex_home()}
 
+    def mcp_argv(self, cmd: list[str]) -> list[str]:
+        # -c overrides are global flags: they go before the subcommand.
+        return [cmd[0], *codex_overrides(cmd, self.att), *cmd[1:]]
+
     async def start(self):
         self._home = self.codex_home()
         await super().start()
@@ -93,9 +98,10 @@ class PartylineAdapter(BaseAdapter):
             cmd = [cmd[0], "resume", self.att["cli_session"], *cmd[1:]]
             if prompt := getattr(self, "_startup_prompt", ""):
                 cmd.append(prompt)
+        # -c is a codex global flag: it must sit before the subcommand,
+        # which is why the insertions run after the resume rewrite.
+        cmd = self.mcp_argv(cmd)
         if limit := int(self.att.get("auto_compact_tokens") or 0):
-            # -c is a codex global flag: it must sit before the subcommand,
-            # which is why the insertion runs after the resume rewrite.
             cmd[1:1] = ["-c", f"model_auto_compact_token_limit={limit}"]
         return cmd
 
