@@ -143,6 +143,12 @@ def call(client, name: str, args: dict, home_state: dict):
         category, topic = args.get("category"), args.get("topic")
         if topic == "captain" and not category:
             return tools_captain.guide(home_state)
+        if not (home_state.get("kind") == "machine"
+                and home_state.get("role") == "lead"
+                and home_state.get("is_lead") is True):
+            return {"title": "Partyline MCP tools",
+                    "description": "Available tools and schemas for this attachment's current permissions.",
+                    "tools": tool_list(home_state)}
         path = "/api/docs"
         if category:
             path += "/" + quote(category, safe="")

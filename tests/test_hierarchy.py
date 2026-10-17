@@ -417,8 +417,11 @@ class HierarchyApiTest(unittest.TestCase):
         body = caps.json()
         self.assertEqual(body["role"], "lead")
         self.assertIn("create_child", body["actions"])
-        impl = self.client.get("/api/capabilities", headers=self.impl)
-        self.assertEqual(impl.status_code, 401)
+        worker = self.activate_impl()
+        impl = self.client.get("/api/capabilities", headers=worker)
+        self.assertEqual(impl.status_code, 200)
+        self.assertEqual(impl.json()["role"], "implementer")
+        self.assertNotIn("create_child", impl.json()["actions"])
 
     def test_appointing_a_live_manager_rings_it_at_once(self):
         deliveries = []
@@ -1041,10 +1044,11 @@ class HierarchyApiTest(unittest.TestCase):
             ).status_code,
             200,
         )
+        worker = self.activate_impl()
         hidden = self.client.get(
-            f"/api/conversations/{created['id']}", headers=self.impl
+            f"/api/conversations/{created['id']}", headers=worker
         )
-        self.assertEqual(hidden.status_code, 401)
+        self.assertEqual(hidden.status_code, 403)
 
     def test_machine_message_stamps_source_identity(self):
         worker = self.activate_impl()

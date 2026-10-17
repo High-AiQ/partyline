@@ -1,4 +1,4 @@
-#!/home/gmccarthy/code/partyline/.venv/bin/python
+#!/usr/bin/env python3
 """Host-specific Claude probe launcher; paths and preset need local adaptation."""
 
 import os

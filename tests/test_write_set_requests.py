@@ -592,13 +592,14 @@ class WriteSetRequestTest(unittest.TestCase):
             f"/api/conversations/kid/write-set/request/{request_id}/withdraw",
             headers=stranger)
         self.assertEqual(refused.status_code, 403, refused.text)
+        self.db.set_attachment_status("kid-worker", "running", None)
         withdrawn = self.client.post(
             f"/api/conversations/kid/write-set/request/{request_id}/withdraw",
             headers=self.kid_worker)
-        self.assertEqual(withdrawn.status_code, 401, withdrawn.text)
+        self.assertEqual(withdrawn.status_code, 200, withdrawn.text)
         self.assertEqual(
             self.db._exec("SELECT COUNT(*) AS n FROM conversation_write_grant_requests"
-                          ).fetchone()["n"], 1)
+                          ).fetchone()["n"], 0)
 
 
 if __name__ == "__main__":
