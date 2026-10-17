@@ -3,18 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 
 from .auth_guard import request_principal
-from .hierarchy import stamp_source
-from .machine_scope import deny_unless
 from .contracts import FileRef, FileUploadResponse, MessageEvent, MessageResponse
+from .hierarchy import stamp_source
+from .idempotent_posts import original_for_key, remember_key
 from .media import MediaError, MediaStore, prepared_files, validated_metadata
 from .media_digest import digest_body
 from .media_rows import VARIANTS
-from .machine_scope import is_human
+from .machine_scope import deny_unless, is_human
 
 
 def handed_to(db, principal, file_id: str) -> bool:
@@ -81,6 +82,7 @@ def media_router(runtime, store: MediaStore) -> APIRouter:
         title: str | None = Form(None),
         description: str | None = Form(None),
         body: str | None = Form(None),
+        client_key: str | None = Form(None, max_length=64),
     ):
         require_line(conv_id, writing=True)
         principal = request_principal(request)
@@ -91,6 +93,19 @@ def media_router(runtime, store: MediaStore) -> APIRouter:
         ):
             raise HTTPException(409, "attach a process to this line before sending")
         who = principal.name
+        upload_key = (
+            "upload:" + hashlib.sha256(client_key.encode()).hexdigest()
+            if client_key else None
+        )
+        if upload_key and (original := original_for_key(
+            runtime.db, who, upload_key, conv_id
+        )) is not None:
+            base = str(request.base_url).rstrip("/")
+            files = store.for_message(original["id"], base)
+            replayed = MessageResponse.model_validate({
+                **original, "files": files, "replayed": True,
+            })
+            return {"message": replayed, "files": files}
         try:
             # Preparation decodes bytes and may fall back to an ffmpeg
             # subprocess with a minute-long timeout — none of that may run
@@ -117,6 +132,8 @@ def media_router(runtime, store: MediaStore) -> APIRouter:
         runtime.db._exec(
             "UPDATE messages SET body=? WHERE id=?", (caption, placeholder["id"])
         )
+        if upload_key:
+            remember_key(runtime.db, who, upload_key, conv_id, placeholder["id"])
         stored = {**placeholder, "body": caption, "files": relative}
         message = MessageResponse.model_validate(
             {**placeholder, "body": caption, "files": absolute}
