@@ -11,6 +11,7 @@ from .. import __version__
 from .client import ApiError, PartylineClient
 from .render import render
 from . import tools_captain, tools_core
+from .validation import validate_arguments
 
 logger = logging.getLogger(__name__)
 MAX_LINE = 1_000_000
@@ -95,7 +96,7 @@ class MCPServer:
         return self.response(ident, error={"code": -32601, "message": "method not found"})
 
     def _call(self, ident, params):
-        name, args = params.get("name"), params.get("arguments") or {}
+        name, args = params.get("name"), params.get("arguments", {})
         if not isinstance(name, str) or not isinstance(args, dict):
             return self.response(ident, error={"code": -32602, "message": "invalid tool arguments"})
         try:
@@ -103,6 +104,9 @@ class MCPServer:
             core_names = {tool["name"] for tool in tools_core.tool_list(state)}
             captain_names = {tool["name"] for tool in tools_captain.tool_list(state)}
             if name in core_names:
+                schema = next(tool["inputSchema"] for tool in tools_core.tool_list(state)
+                              if tool["name"] == name)
+                validate_arguments(schema, args)
                 value = tools_core.call(self.client, name, args, state)
             elif name in captain_names:
                 value = tools_captain.call(self.client, name, args, state)

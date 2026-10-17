@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import tomllib
 import unittest
 
 from unittest.mock import patch
@@ -94,11 +95,20 @@ class CodexMergeTests(unittest.TestCase):
     def test_adds_entry_fields_as_toml_values(self):
         overrides = codex_overrides(["codex"], self.ATT)
         self.assertEqual(overrides[0::2], ["-c", "-c", "-c"])
-        text = overrides[1::2]
-        self.assertIn('mcp_servers.partyline.command="' + sys.executable + '"', text)
-        self.assertIn('mcp_servers.partyline.args=["-m", "partyline.mcp"]', text)
-        env = [t for t in text if t.startswith("mcp_servers.partyline.env=")][0]
-        self.assertIn('"PARTYLINE_MCP_CONNECTION": "/c/agent.json"', env)
+        entry = mcp_attach.server_for(self.ATT)
+        for override in overrides[1::2]:
+            parsed = tomllib.loads(override)
+            field, value = override.split("=", 1)
+            key = field.rsplit(".", 1)[1]
+            self.assertEqual(parsed["mcp_servers"]["partyline"][key], entry[key])
+            self.assertEqual(tomllib.loads(f"probe = {value}")["probe"], entry[key])
+
+    def test_codex_toml_values_escape_awkward_environment_paths(self):
+        att = {"_agent_connection_file": '/c/worker "one"\\agent.json'}
+        overrides = codex_overrides(["codex"], att)[1::2]
+        env = next(value for value in overrides if value.startswith("mcp_servers.partyline.env="))
+        parsed = tomllib.loads("probe = " + env.split("=", 1)[1])["probe"]
+        self.assertEqual(parsed, mcp_attach.server_for(att)["env"])
 
     def test_user_keys_win_and_are_not_overridden(self):
         cmd = ["codex", "-c", 'mcp_servers.partyline.command="/mine"',
