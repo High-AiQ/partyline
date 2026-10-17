@@ -571,17 +571,23 @@ class RenderAndServerTests(unittest.TestCase):
 
     def test_demotion_and_promotion_change_catalog(self):
         client = FakeClient(actions=("read", "write"))
+        client.state.update(role="implementer", is_lead=False)
         output = io.StringIO()
         server = MCPServer(client, output)
         server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
         client.state["actions"] = ["read", "write", "assign", "read_reports"]
+        client.state.update(role="lead", is_lead=True)
         server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         client.state["actions"] = ["read"]
+        client.state.update(role="implementer", is_lead=False)
         server.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/list"})
         first, promoted, demoted = [json.loads(line)["result"]["tools"]
                                     for line in output.getvalue().splitlines()]
         self.assertNotIn("reports", [item["name"] for item in first])
         self.assertIn("reports", [item["name"] for item in promoted])
+        self.assertIn("set_goal", [item["name"] for item in promoted])
+        self.assertNotIn("set_goal", [item["name"] for item in demoted])
+        self.assertIn("captain", [item["name"] for item in demoted])
         self.assertNotIn("post_message", [item["name"] for item in demoted])
 
     def test_revoked_credential_produces_short_error_without_disclosing_token(self):
@@ -617,10 +623,12 @@ class RenderAndServerTests(unittest.TestCase):
                 patch.object(MCPServer, "run", return_value=None):
             self.assertEqual(server_module.main(), 0)
 
-    def test_captain_registry_is_safe_empty_extension_hook(self):
-        self.assertEqual(tools_captain.tool_list({"actions": ["assign"]}), [])
+    def test_captain_registry_keeps_only_fixed_dispatcher_for_non_lead(self):
+        self.assertEqual(tools_captain.tool_list({"kind": "machine", "role": "implementer",
+                                                  "is_lead": False, "actions": ["assign"]})[
+                             0]["name"], "captain")
         with self.assertRaisesRegex(ValueError, "unknown captain"):
-            tools_captain.call(FakeClient(), "captain", {}, {})
+            tools_captain.call(FakeClient(), "captain", {"op": "purge", "args": {}}, {})
 
 
 if __name__ == "__main__":

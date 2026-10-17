@@ -3,6 +3,7 @@
 from urllib.parse import quote
 
 from .client import ApiError
+from . import tools_captain
 
 
 def _schema(properties=None, required=None):
@@ -140,6 +141,8 @@ def call(client, name: str, args: dict, home_state: dict):
         return _whoami(client, home_state)
     if name == "guide":
         category, topic = args.get("category"), args.get("topic")
+        if topic == "captain" and not category:
+            return tools_captain.guide(home_state)
         path = "/api/docs"
         if category:
             path += "/" + quote(category, safe="")
