@@ -8,6 +8,7 @@ import tempfile
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -86,6 +87,22 @@ class IdempotentPostsTest(unittest.TestCase):
         self.assertEqual(second.status_code, 200, second.text)
         self.assertEqual(first.json()["id"], second.json()["id"])
         self.assertEqual(self.bodies().count("deploy finished"), 1)
+
+    def test_human_key_is_saved_before_delivery_can_fail(self):
+        with patch.object(self.runtime, "broadcast",
+                          new=AsyncMock(side_effect=RuntimeError("delivery failed"))):
+            with self.assertRaisesRegex(RuntimeError, "delivery failed"):
+                self.post("retry after delivery failure", key="human-failure")
+
+        durable = self.db.list_messages("line")
+        self.assertEqual([message["body"] for message in durable],
+                         ["retry after delivery failure"])
+        retry = self.post("retry after delivery failure", key="human-failure")
+
+        self.assertEqual(retry.status_code, 200, retry.text)
+        self.assertTrue(retry.json()["replayed"])
+        self.assertEqual(retry.json()["id"], durable[0]["id"])
+        self.assertEqual(len(self.db.list_messages("line")), 1)
 
     def test_same_display_name_human_and_machine_never_cross_replay(self):
         user = auth_store.create_user(

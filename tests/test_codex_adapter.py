@@ -7,6 +7,7 @@ import shutil
 import sqlite3
 import tempfile
 import time
+import tomllib
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -652,7 +653,12 @@ class CodexHomeTest(unittest.IsolatedAsyncioTestCase):
         self.codex.HOME_ROOT = os.path.join(self.root.name, "homes")
         codex.SHARED_HOME = self.shared.name
         for name in self.codex.SHARED:
-            os.makedirs(os.path.join(self.shared.name, name), exist_ok=True)
+            path = os.path.join(self.shared.name, name)
+            if name == "config.toml":
+                with open(path, "w", encoding="utf-8") as stream:
+                    stream.write('[ui]\ntheme = "dark"\n')
+            else:
+                os.makedirs(path, exist_ok=True)
 
     def tearDown(self):
         self.codex.HOME_ROOT, self.codex.SHARED_HOME = self.old_roots
@@ -695,11 +701,59 @@ class CodexHomeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(home, os.path.join(self.codex.HOME_ROOT, "att-1"))
         self.assertTrue(os.path.isdir(os.path.join(home, "sessions")))
         for name in self.codex.SHARED:
-            self.assertEqual(os.path.realpath(os.path.join(home, name)),
-                             os.path.join(self.shared.name, name), name)
+            path = os.path.join(home, name)
+            if name == "config.toml":
+                self.assertTrue(os.path.isfile(path))
+                self.assertFalse(os.path.islink(path))
+                with open(path, encoding="utf-8") as stream:
+                    self.assertEqual(stream.read(), '[ui]\ntheme = "dark"\n')
+            else:
+                self.assertEqual(os.path.realpath(path),
+                                 os.path.join(self.shared.name, name), name)
         # The one directory that must stay private is never a link.
         sessions = os.path.join(home, "sessions")
         self.assertFalse(os.path.islink(sessions), "sessions must belong to this attachment")
+
+    def test_old_config_symlink_becomes_private_on_resume_and_non_bypass_write_stays_local(self):
+        from partyline.mcp_attach import codex_overrides
+
+        shared = os.path.join(self.shared.name, "config.toml")
+        shared_bytes = (b'[ui]\ntheme = "light"\n'
+                        b'[mcp_servers.partyline]\nenabled = true\n')
+        Path(shared).write_bytes(shared_bytes)
+        old_home = os.path.join(self.codex.HOME_ROOT, "old-attachment")
+        os.makedirs(os.path.join(old_home, "sessions"), exist_ok=True)
+        os.symlink(shared, os.path.join(old_home, "config.toml"))
+        adapter = self.make(att_id="old-attachment", resume=True, session="old-session")
+        adapter.att["_agent_connection_file"] = "/tmp/synthetic-agent.json"
+
+        home = adapter.codex_home()
+        adapter._home = home
+        config = Path(home) / "config.toml"
+        self.assertFalse(config.is_symlink())
+        self.assertEqual(config.read_bytes(), shared_bytes)
+        self.assertEqual(adapter.spawn_env(), {"CODEX_HOME": home})
+        command = adapter.build_command()
+        self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", command)
+        self.assertTrue(codex_overrides(["codex"], adapter.att, str(config)))
+
+        with config.open("ab") as stream:
+            stream.write(b'\n[notice]\n"approval recorded" = true\n')
+
+        self.assertEqual(Path(shared).read_bytes(), shared_bytes)
+        self.assertIn(b"approval recorded", config.read_bytes())
+        self.assertEqual(tomllib.loads(config.read_text())["ui"]["theme"], "light")
+
+    def test_old_dangling_config_symlink_is_removed(self):
+        old_home = os.path.join(self.codex.HOME_ROOT, "old-attachment")
+        os.makedirs(os.path.join(old_home, "sessions"), exist_ok=True)
+        config = os.path.join(old_home, "config.toml")
+        os.unlink(os.path.join(self.shared.name, "config.toml"))
+        os.symlink(os.path.join(self.shared.name, "config.toml"), config)
+
+        self.make(att_id="old-attachment").codex_home()
+
+        self.assertFalse(os.path.lexists(config))
 
     def test_a_second_prepare_leaves_existing_links_alone(self):
         adapter = self.make(att_id="att-1")

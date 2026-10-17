@@ -4,7 +4,7 @@ Scope: every HTTP and WebSocket route registered under `partyline/`, found by an
 
 This document has two labelled sets:
 
-- **Set 1: all routes found by the AST pass (136).** Method, path, file:line, caller class, and whether an agent principal can call the route.
+- **Set 1: all routes found by the AST pass (136).** Method, path, source handler and current registration line, caller class, and whether an agent principal can call the route. Handler names are the stable reference; registration lines are a locator for this source revision.
 - **Set 2: agent-reachable subset (104).** Every route Set 1 marks reachable, with its MCP disposition and reason.
 
 **Agent-reachable** means a machine token or an attachment token passes the route's guard. Routes exempt from the bearer guard count as reachable because the guard admits any caller (rows 7-9, 108, 109). Human-only routes, the operator-token route (77), and the restart report-token route (98) are not agent-reachable.
@@ -13,7 +13,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 
 ## Caller key
 
-**H** = human (JWT user, `Principal.kind == "user"`); **M** = any machine token on its own line (`allows(...)` decides); **L** = machine that is the line's lead/captain (`is_lead`) acting on its home line or a descendant; **LB** = loopback request (`require_loopback`). `allows()` rules come from `partyline/machine_scope.py:88`; anything not listed there is refused for machines. **Attachment token** = the per-attachment `runtime_owner` token in the path. **Operator token** = one-use token for local operator approval. **Report token** = restart machinery capability.
+**H** = human (JWT user, `Principal.kind == "user"`); **M** = any machine token on its own line (`allows(...)` decides); **L** = machine that is the line's lead/captain (`is_lead`) acting on its home line or a descendant; **LB** = loopback request (`require_loopback`). `allows()` rules come from `partyline/machine_scope.py:allows`; anything not listed there is refused for machines. **Attachment token** = the per-attachment `runtime_owner` token in the path. **Operator token** = one-use token for local operator approval. **Report token** = restart machinery capability.
 
 ## Disposition vocabulary
 
@@ -24,144 +24,144 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 
 ## Set 1: all 136 routes (AST pass)
 
-| # | Method | Path | file:line | Caller | Agent-reachable | Note |
+| # | Method | Path | Source handler (registration line) | Caller | Agent-reachable | Note |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | GET | `/api/conversations/{conv_id}/accepts` | partyline/accept_history.py:39 | M with `read` | yes | see Set 2 |
-| 2 | POST | `/api/conversations/{conv_id}/accept` | partyline/accept_sha.py:240 | L with `accept` | yes | see Set 2 |
-| 3 | GET | `/api/conversations/{conv_id}/approvals` | partyline/approval_bubble.py:133 | H only | no | approval queue is decided by people; machines never see it |
-| 4 | POST | `/api/attachments/{att_id}/fresh` | partyline/attachment_lifecycle_routes.py:70 | LB with `attach` (human or lead) | yes | see Set 2 |
-| 5 | POST | `/api/attachments/{att_id}/replace` | partyline/attachment_lifecycle_routes.py:88 | H, or M with `assign` | yes | see Set 2 |
-| 6 | DELETE | `/api/attachments/{att_id}/record` | partyline/attachment_lifecycle_routes.py:157 | M with `close` | yes | see Set 2 |
-| 7 | POST | `/api/auth/register` | partyline/auth_routes.py:120 | anyone (exempt) | yes | see Set 2 |
-| 8 | POST | `/api/auth/login` | partyline/auth_routes.py:131 | anyone (exempt) | yes | see Set 2 |
-| 9 | POST | `/api/auth/refresh` | partyline/auth_routes.py:141 | anyone (exempt) | yes | see Set 2 |
-| 10 | GET | `/api/auth/me` | partyline/auth_routes.py:154 | H only | no | human account; a machine token gets 401; identity comes from `/api/capabilities` (row 42) |
-| 11 | PATCH | `/api/auth/me` | partyline/auth_routes.py:158 | H only | no | human account management |
-| 12 | POST | `/api/bridges` | partyline/bridge_routes.py:39 | H only | no | bridges are opened only by people |
-| 13 | GET | `/api/bridges` | partyline/bridge_routes.py:45 | M with `read` | yes | see Set 2 |
-| 14 | DELETE | `/api/bridges/{bridge_id}` | partyline/bridge_routes.py:53 | H only | no | bridges are closed only by people |
-| 15 | GET | `/api/bridges/{bridge_id}/messages` | partyline/bridge_routes.py:60 | H only | no | bridge traffic crosses lines; person-only audit |
-| 16 | GET | `/api/docs` | partyline/captain_docs.py:141 | H, or lead | yes | see Set 2 |
-| 17 | GET | `/api/docs/{category}` | partyline/captain_docs.py:146 | H, or lead | yes | see Set 2 |
-| 18 | GET | `/api/docs/{category}/{topic}` | partyline/captain_docs.py:154 | H, or lead | yes | see Set 2 |
-| 19 | POST | `/api/attachments/{att_id}/compact` | partyline/compact_routes.py:31 | M with `attach` | yes | see Set 2 |
-| 20 | DELETE | `/api/conversations/{conv_id}` | partyline/conversation_archive.py:46 | H, or M lead with `archive` on a descendant | yes | see Set 2 |
-| 21 | GET | `/api/conversations` | partyline/conversation_routes.py:59 | H; M for visible lines | yes | see Set 2 |
-| 22 | POST | `/api/conversations` | partyline/conversation_routes.py:68 | H only | no | only a person opens a top-level line |
-| 23 | GET | `/api/conversations/{conv_id}` | partyline/conversation_routes.py:78 | M with `read` | yes | see Set 2 |
-| 24 | PUT | `/api/conversations/{conv_id}/topic` | partyline/conversation_routes.py:86 | M with `write` | yes | see Set 2 |
-| 25 | PUT | `/api/conversations/{conv_id}/name` | partyline/conversation_routes.py:106 | M with `write` | yes | see Set 2 |
-| 26 | DELETE | `/api/conversations/archived` | partyline/conversation_routes.py:130 | H only | no | purge of all archived lines; person-only and destructive |
-| 27 | POST | `/api/conversations/{conv_id}/restore` | partyline/conversation_routes.py:141 | M with `archive` | yes | see Set 2 |
-| 28 | DELETE | `/api/conversations/{conv_id}/purge` | partyline/conversation_routes.py:156 | M with `archive` | yes | see Set 2 |
-| 29 | POST | `/api/conversations/{conv_id}/attachments` | partyline/conversation_routes.py:172 | M with `attach` | yes | see Set 2 |
-| 30 | GET | `/api/docker-relay` | partyline/docker_relay_routes.py:12 | H, or lead (own rows) | yes | see Set 2 |
-| 31 | GET | `/api/docker-workloads` | partyline/docker_workload_routes.py:22 | H; M for visible rows | yes | see Set 2 |
-| 32 | POST | `/api/docker-workloads/{container_id}/stop` | partyline/docker_workload_routes.py:29 | owning principal | yes | see Set 2 |
-| 33 | GET | `/api/docker-gpu` | partyline/docker_workload_routes.py:33 | any principal | yes | see Set 2 |
-| 34 | POST | `/api/docker-gpu/clear` | partyline/docker_workload_routes.py:38 | H only | no | GPU admission clear is person-only |
-| 35 | PUT | `/api/docker-gpu` | partyline/docker_workload_routes.py:44 | H only | no | GPU slot count is person-only |
-| 36 | PUT | `/api/conversations/{conv_id}/goal` | partyline/goal.py:63 | M with `assign`, or H | yes | see Set 2 |
-| 37 | GET | `/api/heartbeat` | partyline/heartbeat_routes.py:70 | H, or root-lead attachment | yes | see Set 2 |
-| 38 | POST | `/api/heartbeat` | partyline/heartbeat_routes.py:75 | root-lead machine (H refused) | yes | see Set 2 |
-| 39 | GET | `/api/heartbeat/status` | partyline/heartbeat_routes.py:96 | root-lead attachment | yes | see Set 2 |
-| 40 | GET | `/api/heartbeat/snapshots/{digest}` | partyline/heartbeat_routes.py:117 | root-lead attachment | yes | see Set 2 |
-| 41 | DELETE | `/api/heartbeat` | partyline/heartbeat_routes.py:131 | root-lead attachment | yes | see Set 2 |
-| 42 | GET | `/api/capabilities` | partyline/hierarchy_routes.py:66 | any principal | yes | see Set 2 |
-| 43 | GET | `/api/conversations/{conv_id}/briefing` | partyline/hierarchy_routes.py:70 | M with `read`, and lead | yes | see Set 2 |
-| 44 | GET | `/api/conversations/{conv_id}/lead` | partyline/hierarchy_routes.py:83 | M with `read`, or H | yes | see Set 2 |
-| 45 | POST | `/api/conversations/{conv_id}/lead` | partyline/hierarchy_routes.py:89 | H, or M with `appoint_lead` | yes | see Set 2 |
-| 46 | PUT | `/api/conversations/{conv_id}/parent` | partyline/hierarchy_routes.py:133 | H only | no | parent links are person-only |
-| 47 | POST | `/api/conversations/{conv_id}/children` | partyline/hierarchy_routes.py:147 | L with `create_child` | yes | see Set 2 |
-| 48 | GET | `/api/conversations/{conv_id}/children` | partyline/hierarchy_routes.py:207 | M with `read` | yes | see Set 2 |
-| 49 | GET | `/api/conversations/{conv_id}/reports` | partyline/hierarchy_routes.py:212 | L with `read_reports` | yes | see Set 2 |
-| 50 | POST | `/api/conversations/{conv_id}/reports` | partyline/hierarchy_routes.py:221 | L with `report` (or `notify`) | yes | see Set 2 |
-| 51 | POST | `/api/conversations/{conv_id}/reports/{report_id}/ack` | partyline/hierarchy_routes.py:274 | L with `read_reports` | yes | see Set 2 |
-| 52 | POST | `/api/hooks/{att_id}/{token}` | partyline/hook_routes.py:116 | attachment token in path | yes | see Set 2 |
-| 53 | GET | `/api/hooks/{att_id}/{token}/rebrief` | partyline/hook_routes.py:120 | attachment token in path | yes | see Set 2 |
-| 54 | GET | `/api/conversations/{conv_id}/base` | partyline/line_base.py:168 | M with `read` | yes | see Set 2 |
-| 55 | GET | `/api/conversations/{conv_id}/tip` | partyline/line_base.py:180 | M with `read` | yes | see Set 2 |
-| 56 | POST | `/api/conversations/{conv_id}/refresh-base` | partyline/line_base.py:203 | M with `write` | yes | see Set 2 |
-| 57 | PUT | `/api/conversations/{conv_id}/gates` | partyline/line_gates.py:152 | H, or M with `assign` | yes | see Set 2 |
-| 58 | GET | `/api/conversations/{conv_id}/gates` | partyline/line_gates.py:167 | M with `read` | yes | see Set 2 |
-| 59 | GET | `/api/conversations/{conv_id}/notes` | partyline/line_notes.py:108 | M with `read` | yes | see Set 2 |
-| 60 | PUT | `/api/conversations/{conv_id}/notes` | partyline/line_notes.py:120 | M, by scope | yes | see Set 2 |
-| 61 | POST | `/api/conversations/{conv_id}/attachments/close` | partyline/line_process_routes.py:237 | M with `close` | yes | see Set 2 |
-| 62 | GET | `/api/media/{file_id}/{variant}` | partyline/media_routes.py:166 | H; M with `read`; handed-to process | yes | see Set 2 |
-| 63 | POST | `/api/conversations/{conv_id}/files` | partyline/media_routes.py:130 | M with `write` | yes | see Set 2 |
-| 64 | POST | `/api/conversations/{conv_id}/images` | partyline/media_routes.py:137 | M with `write` | yes | see Set 2 |
-| 65 | GET | `/api/conversations/{conv_id}/files` | partyline/media_routes.py:150 | M with `read` | yes | see Set 2 |
-| 66 | GET | `/api/conversations/{conv_id}/images` | partyline/media_routes.py:157 | M with `read` | yes | see Set 2 |
-| 67 | GET | `/api/conversations/{conv_id}/memory-request` | partyline/memory_requests.py:43 | M with `read` | yes | see Set 2 |
-| 68 | POST | `/api/attachments/{att_id}/memory-requests` | partyline/memory_requests.py:48 | M with `attach` | yes | see Set 2 |
-| 69 | POST | `/api/memory-requests/{request_id}/approve` | partyline/memory_requests.py:112 | M with `assign`, not the requester; or H | yes | see Set 2 |
-| 70 | DELETE | `/api/memory-requests/{request_id}` | partyline/memory_requests.py:153 | M with `assign`, not the requester; or H | yes | see Set 2 |
-| 71 | GET | `/api/attachments/{att_id}/memory` | partyline/memory_routes.py:32 | M with `read` | yes | see Set 2 |
-| 72 | PUT | `/api/attachments/{att_id}/memory` | partyline/memory_routes.py:37 | M with `attach` (self-grant refused); H | yes | see Set 2 |
-| 73 | POST | `/api/conversations/{conv_id}/messages/{message_id}/forward` | partyline/message_forward.py:40 | M with `read` (source), `write` (target) | yes | see Set 2 |
-| 74 | GET | `/api/conversations/{conv_id}/messages` | partyline/message_routes.py:48 | M with `read` | yes | see Set 2 |
-| 75 | GET | `/api/conversations/{conv_id}/messages/around` | partyline/message_routes.py:71 | M with `read` | yes | see Set 2 |
-| 76 | POST | `/api/conversations/{conv_id}/messages` | partyline/message_routes.py:102 | M with `write` (own) or `assign` (other) | yes | see Set 2 |
-| 77 | POST | `/api/restart-request/operator-approve` | partyline/operator_restart.py:60 | operator token (loopback) | no | local operator approval with a one-use operator token |
-| 78 | GET | `/api/conversations/{conv_id}/pins` | partyline/pin_routes.py:37 | M with `read` | yes | see Set 2 |
-| 79 | POST | `/api/conversations/{conv_id}/pins` | partyline/pin_routes.py:42 | H only | no | pins are person-only |
-| 80 | PUT | `/api/conversations/{conv_id}/pins/{message_id}` | partyline/pin_routes.py:57 | H only | no | pin aliases are person-only |
-| 81 | DELETE | `/api/conversations/{conv_id}/pins/{message_id}` | partyline/pin_routes.py:72 | H only | no | pin removal is person-only |
-| 82 | POST | `/api/conversations/{conv_id}/prereview` | partyline/prereview.py:285 | M with `read` | yes | see Set 2 |
-| 83 | GET | `/api/presets` | partyline/preset_routes.py:19 | any authenticated caller | yes | see Set 2 |
-| 84 | POST | `/api/presets` | partyline/preset_routes.py:23 | H only | no | instance configuration; person-only |
-| 85 | PUT | `/api/presets/{preset_id}` | partyline/preset_routes.py:27 | H only | no | instance configuration; person-only |
-| 86 | DELETE | `/api/presets/{preset_id}` | partyline/preset_routes.py:33 | H only | no | instance configuration; person-only |
-| 87 | GET | `/api/conversations/{conv_id}/process-overview` | partyline/process_overview.py:102 | M with `read` | yes | see Set 2 |
-| 88 | POST | `/api/attachments/{att_id}/signal` | partyline/process_signal.py:81 | owning process or line captain | yes | see Set 2 |
-| 89 | POST | `/api/messages/{message_id}/reactions` | partyline/reaction_routes.py:105 | H, or machine on the message's line | yes | see Set 2 |
-| 90 | DELETE | `/api/messages/{message_id}/reactions/{emoji}` | partyline/reaction_routes.py:109 | H, or machine on the message's line | yes | see Set 2 |
-| 91 | POST | `/api/leases` | partyline/resource_leases.py:218 | process (`attachment_id` required) | yes | see Set 2 |
-| 92 | GET | `/api/leases` | partyline/resource_leases.py:237 | any authenticated caller | yes | see Set 2 |
-| 93 | DELETE | `/api/leases/{name}` | partyline/resource_leases.py:242 | holding process | yes | see Set 2 |
-| 94 | GET | `/api/resources` | partyline/resource_routes.py:17 | any authenticated caller | yes | see Set 2 |
-| 95 | GET | `/api/settings/resources` | partyline/resource_routes.py:23 | H only | no | resource settings are person-only |
-| 96 | PUT | `/api/settings/resources` | partyline/resource_routes.py:36 | H only | no | resource settings are person-only |
-| 97 | POST | `/api/settings/resources/reset` | partyline/resource_routes.py:65 | H only | no | resource settings are person-only |
-| 98 | POST | `/api/restart-plan/failure` | partyline/restart_report.py:32 | report token (loopback) | no | restart machinery capability, not an agent credential |
-| 99 | GET | `/api/restart-request` | partyline/restart_requests.py:122 | any authenticated caller | yes | see Set 2 |
-| 100 | POST | `/api/conversations/{conv_id}/restart-request` | partyline/restart_requests.py:127 | M with `assign`, or H | yes | see Set 2 |
-| 101 | POST | `/api/restart-request/{request_id}/approve` | partyline/restart_requests.py:172 | H only | no | restart approval is a person's decision |
-| 102 | DELETE | `/api/restart-request/{request_id}` | partyline/restart_requests.py:206 | H only | no | restart decline is person-only |
-| 103 | POST | `/api/conversations/{conv_id}/review-worktrees` | partyline/review_worktrees.py:247 | M with `write` | yes | see Set 2 |
-| 104 | GET | `/api/conversations/{conv_id}/review-worktrees` | partyline/review_worktrees.py:269 | M with `read` | yes | see Set 2 |
-| 105 | POST | `/api/conversations/{conv_id}/scratch-worktrees` | partyline/scratch_worktrees.py:255 | M with `write` | yes | see Set 2 |
-| 106 | GET | `/api/conversations/{conv_id}/scratch-worktrees` | partyline/scratch_worktrees.py:278 | M with `read` | yes | see Set 2 |
-| 107 | DELETE | `/api/conversations/{conv_id}/scratch-worktrees/{sha}` | partyline/scratch_worktrees.py:283 | M with `write` | yes | see Set 2 |
-| 108 | GET | `/` | partyline/server.py:244 | anyone (exempt) | yes | see Set 2 |
-| 109 | GET | `/api/version` | partyline/server.py:264 | anyone (exempt) | yes | see Set 2 |
-| 110 | GET | `/api/running` | partyline/server.py:316 | any authenticated caller (visible lines for M) | yes | see Set 2 |
-| 111 | POST | `/api/restart-plan` | partyline/server.py:328 | loopback with `allows_restart_plan` | yes | see Set 2 |
-| 112 | POST | `/api/shutdown` | partyline/server.py:344 | H only (loopback) | no | instance shutdown is a human operator act |
-| 113 | GET | `/api/features` | partyline/server.py:378 | any authenticated caller | yes | see Set 2 |
-| 114 | GET | `/api/fence/status` | partyline/server.py:384 | any authenticated caller | yes | see Set 2 |
-| 115 | GET | `/api/adapters` | partyline/server.py:390 | any authenticated caller | yes | see Set 2 |
-| 116 | POST | `/api/adapters/import` | partyline/server.py:395 | H only | no | adapter import is human-only instance configuration |
-| 117 | POST | `/api/adapters/reload` | partyline/server.py:404 | H only | no | adapter reload is human-only instance configuration |
-| 118 | DELETE | `/api/adapters/{adapter_name}` | partyline/server.py:413 | H only | no | adapter removal is human-only instance configuration |
-| 119 | POST | `/api/attachments/{att_id}/resume` | partyline/server.py:459 | M with `attach`, or H | yes | see Set 2 |
-| 120 | PATCH | `/api/attachments/{att_id}` | partyline/server.py:490 | M with `attach`, loopback, stopped attachment | yes | see Set 2 |
-| 121 | DELETE | `/api/attachments/{att_id}` | partyline/server.py:515 | M with `close`, or H | yes | see Set 2 |
-| 122 | GET | `/api/attachments/{att_id}/screen` | partyline/server.py:525 | M with `read` | yes | see Set 2 |
-| 123 | POST | `/api/attachments/{att_id}/keys` | partyline/server.py:544 | M with `attach` | yes | see Set 2 |
-| 124 | WEBSOCKET | `/ws/{conv_id}` | partyline/server.py:557 | H only | no | chat socket is for humans; machine tokens are closed with 4403; agents poll `read_messages` |
-| 125 | GET | `/api/settings/global_prose` | partyline/settings_routes.py:13 | H only | no | global prose is person-only |
-| 126 | PUT | `/api/settings/global_prose` | partyline/settings_routes.py:18 | H only | no | global prose is person-only |
-| 127 | GET | `/api/conversations/{conv_id}/staffing` | partyline/staffing_routes.py:18 | M with `assign` | yes | see Set 2 |
-| 128 | WS | `/ws/attachments/{att_id}/terminal` | partyline/terminal_stream.py:64 | M with `read` on the attachment's line (input needs `attach`) | yes | see Set 2 |
-| 129 | POST | `/api/conversations/{conv_id}/tmp/reap` | partyline/tmp_reap_routes.py:25 | H, or root captain | yes | see Set 2 |
-| 130 | GET | `/api/conversations/{conv_id}/write-set/request` | partyline/write_set_decisions.py:99 | M with `read` | yes | see Set 2 |
-| 131 | POST | `/api/conversations/{conv_id}/write-set/request/{request_id}/approve` | partyline/write_set_decisions.py:128 | H, or ancestor captain | yes | see Set 2 |
-| 132 | DELETE | `/api/conversations/{conv_id}/write-set/request/{request_id}` | partyline/write_set_decisions.py:162 | H only | no | decline is person-only |
-| 133 | POST | `/api/conversations/{conv_id}/write-set/request/{request_id}/deny` | partyline/write_set_decisions.py:176 | H, or ancestor captain | yes | see Set 2 |
-| 134 | POST | `/api/conversations/{conv_id}/write-set/request/{request_id}/withdraw` | partyline/write_set_decisions.py:191 | requesting attachment | yes | see Set 2 |
-| 135 | GET | `/api/conversations/{conv_id}/write-set` | partyline/write_set_routes.py:87 | M with `read` | yes | see Set 2 |
-| 136 | POST | `/api/conversations/{conv_id}/write-set` | partyline/write_set_routes.py:93 | H grants; M files a request | yes | see Set 2 |
+| 1 | GET | `/api/conversations/{conv_id}/accepts` | partyline/accept_history.py:accepts (registration line 38) | M with `read` | yes | see Set 2 |
+| 2 | POST | `/api/conversations/{conv_id}/accept` | partyline/accept_sha.py:accept (registration line 239) | L with `accept` | yes | see Set 2 |
+| 3 | GET | `/api/conversations/{conv_id}/approvals` | partyline/approval_bubble.py:approvals (registration line 132) | H only | no | approval queue is decided by people; machines never see it |
+| 4 | POST | `/api/attachments/{att_id}/fresh` | partyline/attachment_lifecycle_routes.py:fresh_attachment (registration line 69) | LB with `attach` (human or lead) | yes | see Set 2 |
+| 5 | POST | `/api/attachments/{att_id}/replace` | partyline/attachment_lifecycle_routes.py:replace_attachment (registration line 87) | H, or M with `assign` | yes | see Set 2 |
+| 6 | DELETE | `/api/attachments/{att_id}/record` | partyline/attachment_lifecycle_routes.py:remove_attachment_record (registration line 156) | M with `close` | yes | see Set 2 |
+| 7 | POST | `/api/auth/register` | partyline/auth_routes.py:register (registration line 119) | anyone (exempt) | yes | see Set 2 |
+| 8 | POST | `/api/auth/login` | partyline/auth_routes.py:login (registration line 130) | anyone (exempt) | yes | see Set 2 |
+| 9 | POST | `/api/auth/refresh` | partyline/auth_routes.py:refresh (registration line 140) | anyone (exempt) | yes | see Set 2 |
+| 10 | GET | `/api/auth/me` | partyline/auth_routes.py:me (registration line 153) | H only | no | human account; a machine token gets 401; identity comes from `/api/capabilities` (row 42) |
+| 11 | PATCH | `/api/auth/me` | partyline/auth_routes.py:change_handle (registration line 157) | H only | no | human account management |
+| 12 | POST | `/api/bridges` | partyline/bridge_routes.py:post_bridge (registration line 38) | H only | no | bridges are opened only by people |
+| 13 | GET | `/api/bridges` | partyline/bridge_routes.py:get_bridge (registration line 44) | M with `read` | yes | see Set 2 |
+| 14 | DELETE | `/api/bridges/{bridge_id}` | partyline/bridge_routes.py:delete_bridge (registration line 52) | H only | no | bridges are closed only by people |
+| 15 | GET | `/api/bridges/{bridge_id}/messages` | partyline/bridge_routes.py:bridge_messages (registration line 59) | H only | no | bridge traffic crosses lines; person-only audit |
+| 16 | GET | `/api/docs` | partyline/captain_docs.py:docs_index (registration line 140) | H, or lead | yes | see Set 2 |
+| 17 | GET | `/api/docs/{category}` | partyline/captain_docs.py:docs_category (registration line 145) | H, or lead | yes | see Set 2 |
+| 18 | GET | `/api/docs/{category}/{topic}` | partyline/captain_docs.py:docs_topic (registration line 153) | H, or lead | yes | see Set 2 |
+| 19 | POST | `/api/attachments/{att_id}/compact` | partyline/compact_routes.py:compact_attachment (registration line 30) | M with `attach` | yes | see Set 2 |
+| 20 | DELETE | `/api/conversations/{conv_id}` | partyline/conversation_archive.py:archive_conversation (registration line 41) | H, or M lead with `archive` on a descendant | yes | see Set 2 |
+| 21 | GET | `/api/conversations` | partyline/conversation_routes.py:conversations (registration line 58) | H; M for visible lines | yes | see Set 2 |
+| 22 | POST | `/api/conversations` | partyline/conversation_routes.py:create_conversation (registration line 67) | H only | no | only a person opens a top-level line |
+| 23 | GET | `/api/conversations/{conv_id}` | partyline/conversation_routes.py:conversation_detail (registration line 77) | M with `read` | yes | see Set 2 |
+| 24 | PUT | `/api/conversations/{conv_id}/topic` | partyline/conversation_routes.py:set_topic (registration line 85) | M with `write` | yes | see Set 2 |
+| 25 | PUT | `/api/conversations/{conv_id}/name` | partyline/conversation_routes.py:rename_conversation (registration line 105) | M with `write` | yes | see Set 2 |
+| 26 | DELETE | `/api/conversations/archived` | partyline/conversation_routes.py:purge_all_archived (registration line 129) | H only | no | purge of all archived lines; person-only and destructive |
+| 27 | POST | `/api/conversations/{conv_id}/restore` | partyline/conversation_routes.py:restore_conversation (registration line 140) | M with `archive` | yes | see Set 2 |
+| 28 | DELETE | `/api/conversations/{conv_id}/purge` | partyline/conversation_routes.py:purge_conversation (registration line 155) | M with `archive` | yes | see Set 2 |
+| 29 | POST | `/api/conversations/{conv_id}/attachments` | partyline/conversation_routes.py:attach (registration line 168) | M with `attach` | yes | see Set 2 |
+| 30 | GET | `/api/docker-relay` | partyline/docker_relay_routes.py:relay_status (registration line 11) | H, or lead (own rows) | yes | see Set 2 |
+| 31 | GET | `/api/docker-workloads` | partyline/docker_workload_routes.py:workloads (registration line 21) | H; M for visible rows | yes | see Set 2 |
+| 32 | POST | `/api/docker-workloads/{container_id}/stop` | partyline/docker_workload_routes.py:stop (registration line 28) | owning principal | yes | see Set 2 |
+| 33 | GET | `/api/docker-gpu` | partyline/docker_workload_routes.py:gpu_state (registration line 32) | any principal | yes | see Set 2 |
+| 34 | POST | `/api/docker-gpu/clear` | partyline/docker_workload_routes.py:gpu_clear (registration line 37) | H only | no | GPU admission clear is person-only |
+| 35 | PUT | `/api/docker-gpu` | partyline/docker_workload_routes.py:gpu_slots (registration line 43) | H only | no | GPU slot count is person-only |
+| 36 | PUT | `/api/conversations/{conv_id}/goal` | partyline/goal.py:put_goal (registration line 62) | M with `assign`, or H | yes | see Set 2 |
+| 37 | GET | `/api/heartbeat` | partyline/heartbeat_routes.py:get_heartbeat (registration line 69) | H, or root-lead attachment | yes | see Set 2 |
+| 38 | POST | `/api/heartbeat` | partyline/heartbeat_routes.py:enable_heartbeat (registration line 74) | root-lead machine (H refused) | yes | see Set 2 |
+| 39 | GET | `/api/heartbeat/status` | partyline/heartbeat_routes.py:get_heartbeat_snapshot (registration line 95) | root-lead attachment | yes | see Set 2 |
+| 40 | GET | `/api/heartbeat/snapshots/{digest}` | partyline/heartbeat_routes.py:get_saved_snapshot (registration line 116) | root-lead attachment | yes | see Set 2 |
+| 41 | DELETE | `/api/heartbeat` | partyline/heartbeat_routes.py:disable_heartbeat (registration line 130) | root-lead attachment | yes | see Set 2 |
+| 42 | GET | `/api/capabilities` | partyline/hierarchy_routes.py:get_capabilities (registration line 65) | any principal | yes | see Set 2 |
+| 43 | GET | `/api/conversations/{conv_id}/briefing` | partyline/hierarchy_routes.py:get_briefing (registration line 69) | M with `read`, and lead | yes | see Set 2 |
+| 44 | GET | `/api/conversations/{conv_id}/lead` | partyline/hierarchy_routes.py:get_lead (registration line 82) | M with `read`, or H | yes | see Set 2 |
+| 45 | POST | `/api/conversations/{conv_id}/lead` | partyline/hierarchy_routes.py:appoint_lead (registration line 88) | H, or M with `appoint_lead` | yes | see Set 2 |
+| 46 | PUT | `/api/conversations/{conv_id}/parent` | partyline/hierarchy_routes.py:link_parent (registration line 132) | H only | no | parent links are person-only |
+| 47 | POST | `/api/conversations/{conv_id}/children` | partyline/hierarchy_routes.py:create_child (registration line 142) | L with `create_child` | yes | see Set 2 |
+| 48 | GET | `/api/conversations/{conv_id}/children` | partyline/hierarchy_routes.py:list_children (registration line 203) | M with `read` | yes | see Set 2 |
+| 49 | GET | `/api/conversations/{conv_id}/reports` | partyline/hierarchy_routes.py:list_reports (registration line 211) | L with `read_reports` | yes | see Set 2 |
+| 50 | POST | `/api/conversations/{conv_id}/reports` | partyline/hierarchy_routes.py:post_report (registration line 216) | L with `report` (or `notify`) | yes | see Set 2 |
+| 51 | POST | `/api/conversations/{conv_id}/reports/{report_id}/ack` | partyline/hierarchy_routes.py:ack_report (registration line 270) | L with `read_reports` | yes | see Set 2 |
+| 52 | POST | `/api/hooks/{att_id}/{token}` | partyline/hook_routes.py:hook_event (registration line 115) | attachment token in path | yes | see Set 2 |
+| 53 | GET | `/api/hooks/{att_id}/{token}/rebrief` | partyline/hook_routes.py:rebrief (registration line 119) | attachment token in path | yes | see Set 2 |
+| 54 | GET | `/api/conversations/{conv_id}/base` | partyline/line_base.py:get_base (registration line 167) | M with `read` | yes | see Set 2 |
+| 55 | GET | `/api/conversations/{conv_id}/tip` | partyline/line_base.py:line_tip (registration line 179) | M with `read` | yes | see Set 2 |
+| 56 | POST | `/api/conversations/{conv_id}/refresh-base` | partyline/line_base.py:post_refresh_base (registration line 202) | M with `write` | yes | see Set 2 |
+| 57 | PUT | `/api/conversations/{conv_id}/gates` | partyline/line_gates.py:put_gates (registration line 151) | H, or M with `assign` | yes | see Set 2 |
+| 58 | GET | `/api/conversations/{conv_id}/gates` | partyline/line_gates.py:get_gates_route (registration line 166) | M with `read` | yes | see Set 2 |
+| 59 | GET | `/api/conversations/{conv_id}/notes` | partyline/line_notes.py:get_notes (registration line 107) | M with `read` | yes | see Set 2 |
+| 60 | PUT | `/api/conversations/{conv_id}/notes` | partyline/line_notes.py:put_notes (registration line 119) | M, by scope | yes | see Set 2 |
+| 61 | POST | `/api/conversations/{conv_id}/attachments/close` | partyline/line_process_routes.py:close_line_processes (registration line 235) | M with `close` | yes | see Set 2 |
+| 62 | GET | `/api/media/{file_id}/{variant}` | partyline/media_routes.py:serve_media (registration line 200) | H; M with `read`; handed-to process | yes | see Set 2 |
+| 63 | POST | `/api/conversations/{conv_id}/files` | partyline/media_routes.py:upload_files (registration line 165) | M with `write` | yes | see Set 2 |
+| 64 | POST | `/api/conversations/{conv_id}/images` | partyline/media_routes.py:upload_files (registration line 172) | M with `write` | yes | see Set 2 |
+| 65 | GET | `/api/conversations/{conv_id}/files` | partyline/media_routes.py:list_files (registration line 185) | M with `read` | yes | see Set 2 |
+| 66 | GET | `/api/conversations/{conv_id}/images` | partyline/media_routes.py:list_files (registration line 192) | M with `read` | yes | see Set 2 |
+| 67 | GET | `/api/conversations/{conv_id}/memory-request` | partyline/memory_requests.py:pending (registration line 42) | M with `read` | yes | see Set 2 |
+| 68 | POST | `/api/attachments/{att_id}/memory-requests` | partyline/memory_requests.py:file (registration line 47) | M with `attach` | yes | see Set 2 |
+| 69 | POST | `/api/memory-requests/{request_id}/approve` | partyline/memory_requests.py:approve (registration line 111) | M with `assign`, not the requester; or H | yes | see Set 2 |
+| 70 | DELETE | `/api/memory-requests/{request_id}` | partyline/memory_requests.py:deny (registration line 152) | M with `assign`, not the requester; or H | yes | see Set 2 |
+| 71 | GET | `/api/attachments/{att_id}/memory` | partyline/memory_routes.py:get_memory (registration line 31) | M with `read` | yes | see Set 2 |
+| 72 | PUT | `/api/attachments/{att_id}/memory` | partyline/memory_routes.py:set_memory (registration line 36) | M with `attach` (self-grant refused); H | yes | see Set 2 |
+| 73 | POST | `/api/conversations/{conv_id}/messages/{message_id}/forward` | partyline/message_forward.py:forward_message (registration line 39) | M with `read` (source), `write` (target) | yes | see Set 2 |
+| 74 | GET | `/api/conversations/{conv_id}/messages` | partyline/message_routes.py:messages (registration line 44) | M with `read` | yes | see Set 2 |
+| 75 | GET | `/api/conversations/{conv_id}/messages/around` | partyline/message_routes.py:messages_around (registration line 67) | M with `read` | yes | see Set 2 |
+| 76 | POST | `/api/conversations/{conv_id}/messages` | partyline/message_routes.py:post_message (registration line 98) | M with `write` (own) or `assign` (other) | yes | see Set 2 |
+| 77 | POST | `/api/restart-request/operator-approve` | partyline/operator_restart.py:operator_approve (registration line 59) | operator token (loopback) | no | local operator approval with a one-use operator token |
+| 78 | GET | `/api/conversations/{conv_id}/pins` | partyline/pin_routes.py:get_pins (registration line 36) | M with `read` | yes | see Set 2 |
+| 79 | POST | `/api/conversations/{conv_id}/pins` | partyline/pin_routes.py:post_pin (registration line 41) | H only | no | pins are person-only |
+| 80 | PUT | `/api/conversations/{conv_id}/pins/{message_id}` | partyline/pin_routes.py:put_alias (registration line 54) | H only | no | pin aliases are person-only |
+| 81 | DELETE | `/api/conversations/{conv_id}/pins/{message_id}` | partyline/pin_routes.py:delete_pin (registration line 69) | H only | no | pin removal is person-only |
+| 82 | POST | `/api/conversations/{conv_id}/prereview` | partyline/prereview.py:prereview (registration line 284) | M with `read` | yes | see Set 2 |
+| 83 | GET | `/api/presets` | partyline/preset_routes.py:presets (registration line 18) | any authenticated caller | yes | see Set 2 |
+| 84 | POST | `/api/presets` | partyline/preset_routes.py:create_preset (registration line 22) | H only | no | instance configuration; person-only |
+| 85 | PUT | `/api/presets/{preset_id}` | partyline/preset_routes.py:update_preset (registration line 26) | H only | no | instance configuration; person-only |
+| 86 | DELETE | `/api/presets/{preset_id}` | partyline/preset_routes.py:delete_preset (registration line 32) | H only | no | instance configuration; person-only |
+| 87 | GET | `/api/conversations/{conv_id}/process-overview` | partyline/process_overview.py:get_process_overview (registration line 98) | M with `read` | yes | see Set 2 |
+| 88 | POST | `/api/attachments/{att_id}/signal` | partyline/process_signal.py:signal_descendant (registration line 80) | owning process or line captain | yes | see Set 2 |
+| 89 | POST | `/api/messages/{message_id}/reactions` | partyline/reaction_routes.py:post_reaction (registration line 104) | H, or machine on the message's line | yes | see Set 2 |
+| 90 | DELETE | `/api/messages/{message_id}/reactions/{emoji}` | partyline/reaction_routes.py:delete_reaction (registration line 108) | H, or machine on the message's line | yes | see Set 2 |
+| 91 | POST | `/api/leases` | partyline/resource_leases.py:post_lease (registration line 217) | process (`attachment_id` required) | yes | see Set 2 |
+| 92 | GET | `/api/leases` | partyline/resource_leases.py:list_leases (registration line 236) | any authenticated caller | yes | see Set 2 |
+| 93 | DELETE | `/api/leases/{name}` | partyline/resource_leases.py:delete_lease (registration line 241) | holding process | yes | see Set 2 |
+| 94 | GET | `/api/resources` | partyline/resource_routes.py:resources (registration line 16) | any authenticated caller | yes | see Set 2 |
+| 95 | GET | `/api/settings/resources` | partyline/resource_routes.py:get_resource_settings (registration line 22) | H only | no | resource settings are person-only |
+| 96 | PUT | `/api/settings/resources` | partyline/resource_routes.py:put_resource_settings (registration line 35) | H only | no | resource settings are person-only |
+| 97 | POST | `/api/settings/resources/reset` | partyline/resource_routes.py:reset_resource_settings (registration line 64) | H only | no | resource settings are person-only |
+| 98 | POST | `/api/restart-plan/failure` | partyline/restart_report.py:report_restart_failure (registration line 31) | report token (loopback) | no | restart machinery capability, not an agent credential |
+| 99 | GET | `/api/restart-request` | partyline/restart_requests.py:pending (registration line 121) | any authenticated caller | yes | see Set 2 |
+| 100 | POST | `/api/conversations/{conv_id}/restart-request` | partyline/restart_requests.py:file_request (registration line 126) | M with `assign`, or H | yes | see Set 2 |
+| 101 | POST | `/api/restart-request/{request_id}/approve` | partyline/restart_requests.py:approve (registration line 171) | H only | no | restart approval is a person's decision |
+| 102 | DELETE | `/api/restart-request/{request_id}` | partyline/restart_requests.py:decline (registration line 205) | H only | no | restart decline is person-only |
+| 103 | POST | `/api/conversations/{conv_id}/review-worktrees` | partyline/review_worktrees.py:create (registration line 243) | M with `write` | yes | see Set 2 |
+| 104 | GET | `/api/conversations/{conv_id}/review-worktrees` | partyline/review_worktrees.py:index (registration line 265) | M with `read` | yes | see Set 2 |
+| 105 | POST | `/api/conversations/{conv_id}/scratch-worktrees` | partyline/scratch_worktrees.py:create (registration line 251) | M with `write` | yes | see Set 2 |
+| 106 | GET | `/api/conversations/{conv_id}/scratch-worktrees` | partyline/scratch_worktrees.py:index (registration line 274) | M with `read` | yes | see Set 2 |
+| 107 | DELETE | `/api/conversations/{conv_id}/scratch-worktrees/{sha}` | partyline/scratch_worktrees.py:drop (registration line 282) | M with `write` | yes | see Set 2 |
+| 108 | GET | `/` | partyline/server.py:index (registration line 243) | anyone (exempt) | yes | see Set 2 |
+| 109 | GET | `/api/version` | partyline/server.py:version (registration line 263) | anyone (exempt) | yes | see Set 2 |
+| 110 | GET | `/api/running` | partyline/server.py:running (registration line 315) | any authenticated caller (visible lines for M) | yes | see Set 2 |
+| 111 | POST | `/api/restart-plan` | partyline/server.py:plan_restart (registration line 327) | loopback with `allows_restart_plan` | yes | see Set 2 |
+| 112 | POST | `/api/shutdown` | partyline/server.py:shutdown (registration line 343) | H only (loopback) | no | instance shutdown is a human operator act |
+| 113 | GET | `/api/features` | partyline/server.py:list_features (registration line 377) | any authenticated caller | yes | see Set 2 |
+| 114 | GET | `/api/fence/status` | partyline/server.py:fence_status (registration line 383) | any authenticated caller | yes | see Set 2 |
+| 115 | GET | `/api/adapters` | partyline/server.py:adapters (registration line 389) | any authenticated caller | yes | see Set 2 |
+| 116 | POST | `/api/adapters/import` | partyline/server.py:import_adapters (registration line 394) | H only | no | adapter import is human-only instance configuration |
+| 117 | POST | `/api/adapters/reload` | partyline/server.py:reload_adapter_definitions (registration line 403) | H only | no | adapter reload is human-only instance configuration |
+| 118 | DELETE | `/api/adapters/{adapter_name}` | partyline/server.py:remove_adapter (registration line 412) | H only | no | adapter removal is human-only instance configuration |
+| 119 | POST | `/api/attachments/{att_id}/resume` | partyline/server.py:resume_attachment (registration line 458) | M with `attach`, or H | yes | see Set 2 |
+| 120 | PATCH | `/api/attachments/{att_id}` | partyline/server.py:edit_attachment (registration line 489) | M with `attach`, loopback, stopped attachment | yes | see Set 2 |
+| 121 | DELETE | `/api/attachments/{att_id}` | partyline/server.py:detach (registration line 514) | M with `close`, or H | yes | see Set 2 |
+| 122 | GET | `/api/attachments/{att_id}/screen` | partyline/server.py:attachment_screen (registration line 524) | M with `read` | yes | see Set 2 |
+| 123 | POST | `/api/attachments/{att_id}/keys` | partyline/server.py:attachment_key (registration line 543) | M with `attach` | yes | see Set 2 |
+| 124 | WEBSOCKET | `/ws/{conv_id}` | partyline/server.py:ws_endpoint (registration line 556) | H only | no | chat socket is for humans; machine tokens are closed with 4403; agents poll `read_messages` |
+| 125 | GET | `/api/settings/global_prose` | partyline/settings_routes.py:get_global_prose (registration line 12) | H only | no | global prose is person-only |
+| 126 | PUT | `/api/settings/global_prose` | partyline/settings_routes.py:put_global_prose (registration line 17) | H only | no | global prose is person-only |
+| 127 | GET | `/api/conversations/{conv_id}/staffing` | partyline/staffing_routes.py:staffing (registration line 14) | M with `assign` | yes | see Set 2 |
+| 128 | WS | `/ws/attachments/{att_id}/terminal` | partyline/terminal_stream.py:terminal_endpoint (registration line 105) | M with `read` on the attachment's line (input needs `attach`) | yes | see Set 2 |
+| 129 | POST | `/api/conversations/{conv_id}/tmp/reap` | partyline/tmp_reap_routes.py:reap_tmp (registration line 24) | H, or root captain | yes | see Set 2 |
+| 130 | GET | `/api/conversations/{conv_id}/write-set/request` | partyline/write_set_decisions.py:pending (registration line 97) | M with `read` | yes | see Set 2 |
+| 131 | POST | `/api/conversations/{conv_id}/write-set/request/{request_id}/approve` | partyline/write_set_decisions.py:approve (registration line 126) | H, or ancestor captain | yes | see Set 2 |
+| 132 | DELETE | `/api/conversations/{conv_id}/write-set/request/{request_id}` | partyline/write_set_decisions.py:decline (registration line 160) | H only | no | decline is person-only |
+| 133 | POST | `/api/conversations/{conv_id}/write-set/request/{request_id}/deny` | partyline/write_set_decisions.py:deny (registration line 175) | H, or ancestor captain | yes | see Set 2 |
+| 134 | POST | `/api/conversations/{conv_id}/write-set/request/{request_id}/withdraw` | partyline/write_set_decisions.py:withdraw (registration line 190) | requesting attachment | yes | see Set 2 |
+| 135 | GET | `/api/conversations/{conv_id}/write-set` | partyline/write_set_routes.py:list_write_set (registration line 85) | M with `read` | yes | see Set 2 |
+| 136 | POST | `/api/conversations/{conv_id}/write-set` | partyline/write_set_routes.py:grant_or_request_write_set (registration line 92) | H grants; M files a request | yes | see Set 2 |
 
 ## Set 2: agent-reachable subset (104 routes)
 
@@ -181,7 +181,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 18 | GET | `/api/docs/{category}/{topic}` | H, or lead | **guide**: `guide` (category, topic); captain op `docs_read` | bounded doc slice; `docs_read` is the lead-only form |
 | 19 | POST | `/api/attachments/{att_id}/compact` | M with `attach` | **excluded** | adapter-specific process control; not a captain op |
 | 20 | DELETE | `/api/conversations/{conv_id}` | H, or M lead with `archive` on a descendant | **op**: captain op `retire_child` | archive a direct child only; `stop_processes` optional; purge stays excluded (row 28) |
-| 21 | GET | `/api/conversations` | H; M for visible lines | **excluded** | `whoami` gives parent, children and home line, which is the targeting the tool set needs; no cross-line listing |
+| 21 | GET | `/api/conversations` | H; M for visible lines | **excluded** | no tool lists conversations across the caller's visible lines; `whoami` reports only its own line and children |
 | 23 | GET | `/api/conversations/{conv_id}` | M with `read` | **tool**: via `whoami` (members) and `goal` (get) | line detail is read inside those tools, not as its own tool |
 | 24 | PUT | `/api/conversations/{conv_id}/topic` | M with `write` | **excluded** | topic is line context; the captain's goal carries direction (`set_goal`) |
 | 25 | PUT | `/api/conversations/{conv_id}/name` | M with `write` | **excluded** | rename is not a captain or worker duty |
@@ -198,12 +198,12 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 39 | GET | `/api/heartbeat/status` | root-lead attachment | **excluded** | root heartbeat belongs to the root manager |
 | 40 | GET | `/api/heartbeat/snapshots/{digest}` | root-lead attachment | **excluded** | root heartbeat belongs to the root manager |
 | 41 | DELETE | `/api/heartbeat` | root-lead attachment | **excluded** | root heartbeat belongs to the root manager |
-| 42 | GET | `/api/capabilities` | any principal | **tool**: `whoami` | identity, role, actions and depth; the first call for every agent |
+| 42 | GET | `/api/capabilities` | any principal | **excluded** | MCP authorization preflight and capability refresh use this route; it is not a separately named tool route |
 | 43 | GET | `/api/conversations/{conv_id}/briefing` | M with `read`, and lead | **excluded** | captain briefing is not exposed; the role brief reaches the process through the hook path (rows 52-53) |
-| 44 | GET | `/api/conversations/{conv_id}/lead` | M with `read`, or H | **tool**: via `whoami` (members, `is_lead`, parent) | who captains the line is reported inside `whoami` |
+| 44 | GET | `/api/conversations/{conv_id}/lead` | M with `read`, or H | **excluded** | `whoami` does not call the lead route; its role/action state comes from capability preflight |
 | 45 | POST | `/api/conversations/{conv_id}/lead` | H, or M with `appoint_lead` | **op**: captain op `appoint_lead` | lead appointment is a captain op; an empty `attachment_id` clears the lead |
 | 47 | POST | `/api/conversations/{conv_id}/children` | L with `create_child` | **op**: captain op `create_child` | refused with live workers and at the depth cap |
-| 48 | GET | `/api/conversations/{conv_id}/children` | M with `read` | **tool**: via `whoami` (children) | children are reported inside `whoami` |
+| 48 | GET | `/api/conversations/{conv_id}/children` | M with `read` | **tool**: `whoami` | child summaries are fetched by the `whoami` handler |
 | 49 | GET | `/api/conversations/{conv_id}/reports` | L with `read_reports` | **tool**: `reports` (list) | reports received from child lines |
 | 50 | POST | `/api/conversations/{conv_id}/reports` | L with `report` (or `notify`) | **tool**: `reports` (post; `notify` flag) | captain reports to its parent |
 | 51 | POST | `/api/conversations/{conv_id}/reports/{report_id}/ack` | L with `read_reports` | **op**: captain op `ack_report` | acknowledges a child report |
@@ -237,8 +237,8 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 83 | GET | `/api/presets` | any authenticated caller | **op**: captain op `list_presets` (read-only) | presets are read-only for captains; writes are person-only (rows 84-86) |
 | 87 | GET | `/api/conversations/{conv_id}/process-overview` | M with `read` | **op**: captain op `process_overview` | live phase and RSS for the line's attachments |
 | 88 | POST | `/api/attachments/{att_id}/signal` | owning process or line captain | **excluded** | destructive pid signal; pids do not resolve through the host namespace from inside the fence |
-| 89 | POST | `/api/messages/{message_id}/reactions` | H, or machine on the message's line | **tool**: `react` (add) | own line only; the reactor's line must be the message's line |
-| 90 | DELETE | `/api/messages/{message_id}/reactions/{emoji}` | H, or machine on the message's line | **tool**: `react` (remove) | own line only; same rule as row 89 |
+| 89 | POST | `/api/messages/{message_id}/reactions` | H, or machine on the message's line | **tool**: `react` (POST toggles the reaction) | own line only; the reactor's line must be the message's line |
+| 90 | DELETE | `/api/messages/{message_id}/reactions/{emoji}` | H, or machine on the message's line | **tool**: `react` (DELETE removes the reaction) | own line only; same rule as row 89 |
 | 91 | POST | `/api/leases` | process (`attachment_id` required) | **excluded** | leases are for timing and device-exclusive runs taken by the process itself (AGENTS.md) |
 | 92 | GET | `/api/leases` | any authenticated caller | **excluded** | leases are for timing and device-exclusive runs (AGENTS.md) |
 | 93 | DELETE | `/api/leases/{name}` | holding process | **excluded** | leases are for timing and device-exclusive runs (AGENTS.md) |
@@ -276,7 +276,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 
 | Name | Kind | Routes |
 | --- | --- | --- |
-| `whoami` | core tool | 23, 42, 44, 48 |
+| `whoami` | core tool | 23, 48 |
 | `guide` | core tool | 16, 17, 18 |
 | `read_messages` | core tool | 74, 75 |
 | `notes` | core tool | 59, 60 |
@@ -284,7 +284,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | `post_message` | core tool | 76 |
 | `upload_file` | core tool | 63 |
 | `get_media` | core tool | 62 |
-| `reports` | core tool | 49, 50 |
+| `reports` | core tool; captain fallback operation | 49, 50 |
 | `react` | core tool | 89, 90 |
 | `staffing` | captain op | 127 |
 | `list_presets` | captain op | 83 |

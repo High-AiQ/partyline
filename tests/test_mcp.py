@@ -430,6 +430,10 @@ class CoreToolTests(unittest.TestCase):
         self.assertIn("/messages/around?message_id=5", client.requests[-1][1])
         tools_core.call(client, "react", {"message_id": 9, "emoji": "✅"}, client.state)
         self.assertEqual(client.requests[-1][0], "POST")
+        reaction = next(tool for tool in tools_core.tool_list(client.state)
+                        if tool["name"] == "react")
+        self.assertIn("toggle", reaction["description"].lower())
+        self.assertIn("POST adds or removes", reaction["description"])
         tools_core.call(client, "react", {"message_id": 9, "emoji": "✅", "remove": True}, client.state)
         self.assertEqual(client.requests[-1][0], "DELETE")
         tools_core.call(client, "get_media", {"file_id": "file", "variant": "slim",
@@ -439,6 +443,15 @@ class CoreToolTests(unittest.TestCase):
         self.assertIn(("UPLOAD", "child", "in.txt", {
             "title": "", "description": "", "body": "", "client_key": "file-key"}),
             client.requests)
+        tools_core.call(client, "upload_file", {
+            "path": "in.txt", "client_key": "own-file-key"}, client.state)
+        self.assertEqual(client.requests[-1][0], "UPLOAD")
+        request_count = len(client.requests)
+        with self.assertRaisesRegex(ValueError, "cannot post free prose"):
+            tools_core.call(client, "upload_file", {
+                "path": "in.txt", "body": "caption", "client_key": "own-caption"},
+                client.state)
+        self.assertEqual(len(client.requests), request_count)
 
     def test_non_lead_guide_returns_local_permission_filtered_tools(self):
         client = FakeClient(actions=("read",))
@@ -528,9 +541,11 @@ class CoreArgumentValidationTests(unittest.TestCase):
 
 class RenderAndServerTests(unittest.TestCase):
     def test_render_relativizes_media_links_and_caps_output(self):
-        text = render({"url": "http://127.0.0.1:8643/api/media/id/slim", "body": "x"},
+        text = render({"url": "http://127.0.0.1:8643/api/media/id/slim",
+                       "body": "open http://127.0.0.1:8643/api/media/other/readable"},
                       "http://127.0.0.1:8643")
         self.assertIn("/api/media/id/slim", text)
+        self.assertIn("open /api/media/other/readable", text)
         self.assertNotIn("127.0.0.1", text)
         large = render("x" * MAX_TEXT, "http://127.0.0.1:8643")
         self.assertLessEqual(len(large), MAX_TEXT)
@@ -663,13 +678,22 @@ class RenderAndServerTests(unittest.TestCase):
         client.state["actions"] = ["read", "write", "assign", "read_reports"]
         client.state.update(role="lead", is_lead=True)
         server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+        server.handle({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {
+            "name": "captain", "arguments": {"op": "reports", "args": {
+                "operation": "list"}}}})
         client.state["actions"] = ["read"]
         client.state.update(role="implementer", is_lead=False)
         server.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/list"})
-        first, promoted, demoted = [json.loads(line)["result"]["tools"]
-                                    for line in output.getvalue().splitlines()]
+        listings = {row["id"]: row["result"]["tools"]
+                    for row in map(json.loads, output.getvalue().splitlines())
+                    if row["id"] in {1, 2, 3}}
+        first, promoted, demoted = (listings[index] for index in (1, 2, 3))
         self.assertNotIn("reports", [item["name"] for item in first])
         self.assertIn("reports", [item["name"] for item in promoted])
+        self.assertEqual([item["name"] for item in promoted].count("reports"), 1)
+        reports_tool = next(item for item in promoted if item["name"] == "reports")
+        self.assertIn("2000", reports_tool["inputSchema"]["properties"]["body"]["description"])
+        self.assertIn("/api/conversations/home/reports", str(client.requests))
         self.assertIn("set_goal", [item["name"] for item in promoted])
         self.assertNotIn("set_goal", [item["name"] for item in demoted])
         self.assertIn("captain", [item["name"] for item in demoted])
@@ -677,10 +701,22 @@ class RenderAndServerTests(unittest.TestCase):
 
     def test_revoked_credential_produces_short_error_without_disclosing_token(self):
         client = FakeClient()
-        client.capabilities = lambda conv_id=None: (_ for _ in ()).throw(ApiError("Partyline HTTP 401"))
+        capability_calls = []
+
+        def revoke_then_deny(conv_id=None):
+            capability_calls.append(conv_id)
+            raise ApiError("Partyline HTTP 401")
+
+        client.capabilities = revoke_then_deny
         server = MCPServer(client, io.StringIO())
         server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
         self.assertTrue(server._revoked)
+        client.capabilities = lambda conv_id=None: (_ for _ in ()).throw(
+            ApiError("Partyline HTTP 403"))
+        server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+        self.assertTrue(server._revoked)
+        self.assertEqual(capability_calls, [None])
+        self.assertIn("credential is no longer valid", server.output.getvalue())
         self.assertNotIn("secret", server.output.getvalue())
 
     def test_run_handles_parse_error_oversized_input_and_eof(self):
@@ -692,6 +728,15 @@ class RenderAndServerTests(unittest.TestCase):
         server = MCPServer(FakeClient(), output)
         server.run(io.StringIO("x" * (server_module.MAX_LINE + 1)))
         self.assertIn("input limit", output.getvalue())
+
+    def test_run_returns_structured_error_for_deeply_nested_json(self):
+        output = io.StringIO()
+        server = MCPServer(FakeClient(), output)
+        nested = "[" * 15000 + "0" + "]" * 15000
+        server.run(io.StringIO(nested + "\n"))
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["error"]["code"], -32700)
+        self.assertIn("nesting", result["error"]["message"])
 
     def test_module_entrypoint_exits_with_server_status(self):
         import runpy

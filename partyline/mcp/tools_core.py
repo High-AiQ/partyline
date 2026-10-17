@@ -104,24 +104,26 @@ def tool_list(state):
                 }, ["file_id", "variant", "destination"]),
             },
         ])
-    if {"read_reports", "report", "notify"} & actions:
+    if ({"read_reports", "report", "notify"} & actions
+            and not (state.get("kind") == "machine" and state.get("role") == "lead"
+                     and state.get("is_lead") is True)):
         tools.append({
             "name": "reports",
             "description": "Read reports or post a report where authorized.",
             "inputSchema": _schema({
                 "operation": _prop("string", "list or post.", enum=["list", "post"]),
-                "body": _prop("string", "Report body for post.", maxLength=12000),
+                "body": _prop("string", "Report body for post; at most 2000 characters.", maxLength=2000),
                 "notify": _prop("boolean", "Wake the parent lead when posting."),
             }, ["operation"]),
         })
     if "write" in actions:
         tools.append({
             "name": "react",
-            "description": "Add or remove a reaction on a message in your own line.",
+            "description": "Toggle a reaction on a message in your own line; POST adds or removes it.",
             "inputSchema": _schema({
                 "message_id": _prop("integer", "Message id."),
                 "emoji": _prop("string", "Supported reaction emoji."),
-                "remove": _prop("boolean", "Remove instead of adding."),
+                "remove": _prop("boolean", "Use DELETE to remove; omit or set false to toggle with POST."),
             }, ["message_id", "emoji"]),
         })
     return tools
@@ -193,8 +195,11 @@ def call(client, name: str, args: dict, home_state: dict):
         return client.download(args["file_id"], args["variant"], args["destination"])
     if name == "upload_file":
         conv, _ = _target(client, home_state, args.get("conv_id"), ("write",))
+        body = args.get("body", "")
+        if conv == client.home and body.strip():
+            raise ValueError("an upload caption cannot post free prose on your own line")
         return client.upload(conv, args["path"], title=args.get("title", ""),
-                             description=args.get("description", ""), body=args.get("body", ""),
+                             description=args.get("description", ""), body=body,
                              client_key=args["client_key"])
     if name == "notes":
         return _notes(client, home_state, args)

@@ -11,8 +11,11 @@ def safe_links(value, api_origin: str):
         return {key: safe_links(item, api_origin) for key, item in value.items()}
     if isinstance(value, list):
         return [safe_links(item, api_origin) for item in value]
-    if isinstance(value, str) and value.startswith(api_origin + "/api/media/"):
-        return value[len(api_origin):]
+    if isinstance(value, str):
+        media_origin = api_origin + "/api/media/"
+        if value.startswith(media_origin):
+            return value[len(api_origin):]
+        return value.replace(media_origin, "/api/media/")
     return value
 
 

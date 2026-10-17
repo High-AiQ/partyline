@@ -23,6 +23,7 @@ def permitted(state):
         return ()
     actions = set(state.get("actions", []))
     return tuple(op for op in OPERATIONS if op in {"list_presets", "docs_read"}
+                 or (op == "reports" and bool({"read_reports", "report", "notify"} & actions))
                  or _ACTION.get(op) in actions)
 
 

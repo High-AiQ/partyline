@@ -1,8 +1,11 @@
 """Per-invocation MCP wiring: private config files and argv merge precedence."""
 
+import builtins
+import io
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import tomllib
@@ -38,7 +41,7 @@ class McpConfigFileTests(unittest.TestCase):
         text = self.config.read_text()
         self.assertNotIn(self.att["api_token"], text)
         entry = json.loads(text)["mcpServers"]["partyline"]
-        self.assertEqual(entry["args"], ["-m", "partyline.mcp"])
+        self.assertEqual(entry["args"], ["-P", "-m", "partyline.mcp"])
         self.assertEqual(entry["command"], sys.executable)
         self.assertEqual(entry["env"]["PARTYLINE_MCP_CONNECTION"], str(self.connection))
         self.assertEqual(self.att["mcp_config"], str(self.config))
@@ -63,6 +66,34 @@ class McpConfigFileTests(unittest.TestCase):
         self.assertTrue(generated_dir.is_dir())
         self.assertEqual(Path(attachment["mcp_config"]).parent, generated_dir)
         self.assertTrue(Path(attachment["mcp_config"]).is_file())
+
+    def test_generated_helper_loads_service_package_from_any_cwd(self):
+        import partyline
+
+        entry = json.loads(self.config.read_text())["mcpServers"]["partyline"]
+        env = {**os.environ, **entry["env"]}
+        stale = Path(self.temp.name) / "stale-checkout"
+        stale_package = stale / "partyline"
+        stale_package.mkdir(parents=True)
+        (stale_package / "__init__.py").write_text("__version__ = 'stale'\n")
+        shadow = Path(self.temp.name) / "shadow-checkout"
+        shadow_package = shadow / "partyline"
+        (shadow_package / "mcp").mkdir(parents=True)
+        (shadow_package / "__init__.py").write_text("__version__ = 'shadow'\n")
+        (shadow_package / "mcp" / "__main__.py").write_text(
+            "raise SystemExit('shadow package was imported')\n")
+        working_dirs = (stale, Path(self.temp.name), shadow)
+        for cwd in working_dirs:
+            with self.subTest(cwd=cwd):
+                result = subprocess.run(
+                    [entry["command"], *entry["args"]], cwd=cwd, env=env,
+                    input='{"jsonrpc":"2.0","id":1,"method":"initialize",'
+                          '"params":{"protocolVersion":"2024-11-05"}}\n',
+                    capture_output=True, text=True, timeout=10, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                reply = json.loads(result.stdout.splitlines()[0])
+                self.assertEqual(reply["result"]["serverInfo"], {
+                    "name": "partyline", "version": partyline.__version__})
 
     def test_resume_regenerates_and_detach_removes(self):
         self.config.unlink()
@@ -137,11 +168,98 @@ class CodexMergeTests(unittest.TestCase):
         names = [arg.split("=", 1)[0] for arg in codex_overrides(cmd, self.ATT)[1::2]]
         self.assertEqual(names, ["mcp_servers.partyline.args"])
 
+    def test_user_disabled_or_url_server_is_left_untouched(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "config.toml"
+            config.write_text('[mcp_servers.partyline]\nenabled = false\n')
+            self.assertEqual(codex_overrides(["codex"], self.ATT, str(config)), [])
+            self.assertEqual(codex_overrides(
+                ["codex", "-c", "mcp_servers.partyline.enabled=false"], self.ATT), [])
+            config.write_text('[mcp_servers.partyline]\nurl = "https://user.example/mcp"\n')
+            self.assertEqual(codex_overrides(["codex"], self.ATT, str(config)), [])
+            self.assertEqual(codex_overrides(
+                ["codex", "--config=mcp_servers.partyline.url=\"https://user.example/mcp\""],
+                self.ATT), [])
+
+    def test_partial_user_config_and_argv_values_keep_precedence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "config.toml"
+            config.write_text('[mcp_servers.partyline]\nargs = ["--user-arg"]\n')
+            overrides = codex_overrides(
+                ["codex", "-c", 'mcp_servers.partyline.command="/user-codex"'],
+                self.ATT, str(config))[1::2]
+        self.assertEqual(len(overrides), 1)
+        parsed = tomllib.loads(overrides[0])
+        self.assertEqual(parsed["mcp_servers"]["partyline"]["env"],
+                         mcp_attach.server_for(self.ATT)["env"])
+
     def test_without_connection_file_nothing_is_added(self):
         self.assertEqual(codex_overrides(["codex"], {}), [])
 
 
-class AdapterCommandTests(unittest.TestCase):
+class CodexCommandIsolationMixin:
+    def setUp(self):
+        from partyline.adapters.bundled.codex import adapter as codex
+
+        self.codex = codex
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.old_roots = (codex.HOME_ROOT, codex.SHARED_HOME)
+        self.addCleanup(self._restore_codex_roots)
+        codex.HOME_ROOT = str(Path(self.temp.name) / "homes")
+        codex.SHARED_HOME = str(Path(self.temp.name) / "shared")
+        shared = Path(codex.SHARED_HOME)
+        shared.mkdir()
+        for name in codex.SHARED:
+            path = shared / name
+            if name == "config.toml":
+                path.write_text('[ui]\ntheme = "synthetic"\n', encoding="utf-8")
+            elif name in {"plugins", "skills"}:
+                path.mkdir()
+            else:
+                path.write_text("synthetic auth fixture\n", encoding="utf-8")
+
+        # All command construction in this class is confined to temporary roots.
+        # This assertion makes the real user Codex and Partyline homes an explicit
+        # forbidden target for the regression.
+        user_codex = Path.home() / ".codex"
+        user_partyline = Path.home() / ".partyline"
+        self.assertFalse(Path(codex.SHARED_HOME).is_relative_to(user_codex))
+        self.assertFalse(Path(codex.HOME_ROOT).is_relative_to(user_partyline))
+
+        def guard(path):
+            if not isinstance(path, (str, bytes, os.PathLike)):
+                return
+            candidate = Path(os.fsdecode(path))
+            if any(candidate == root or root in candidate.parents
+                   for root in (user_codex, user_partyline)):
+                raise AssertionError("Codex command test accessed a real user home")
+
+        def guarded(function):
+            def call(path, *args, **kwargs):
+                guard(path)
+                for value in args:
+                    guard(value)
+                return function(path, *args, **kwargs)
+            return call
+
+        for owner, name in (
+            (builtins, "open"), (io, "open"), (os, "open"), (os, "stat"),
+            (os, "lstat"), (os, "makedirs"), (os, "symlink"), (os, "unlink"),
+            (os, "chmod"), (os, "replace"), (os, "rename"),
+            (os.path, "exists"), (os.path, "lexists"), (os.path, "isfile"),
+            (os.path, "isdir"), (os.path, "islink"),
+        ):
+            original = getattr(owner, name)
+            patcher = patch.object(owner, name, guarded(original))
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def _restore_codex_roots(self):
+        self.codex.HOME_ROOT, self.codex.SHARED_HOME = self.old_roots
+
+
+class AdapterCommandTests(CodexCommandIsolationMixin, unittest.TestCase):
     def test_claude_adapter_command_carries_the_config(self):
         adapter = ClaudeAdapter.__new__(ClaudeAdapter)
         adapter.att = {"command": ["claude"], "id": "a1", "name": "c", "conv_name": "l",
@@ -166,7 +284,7 @@ class AdapterCommandTests(unittest.TestCase):
 
 
 class OpenCodeMergeTests(unittest.TestCase):
-    ENTRY = {"command": "/py", "args": ["-m", "partyline.mcp"],
+    ENTRY = {"command": "/py", "args": ["-P", "-m", "partyline.mcp"],
              "env": {"PARTYLINE_MCP_CONNECTION": "/c.json"}}
 
     def test_merge_adds_partyline_and_keeps_user_servers(self):
@@ -175,13 +293,14 @@ class OpenCodeMergeTests(unittest.TestCase):
         self.assertEqual(merged["model"], "glm")
         self.assertEqual(merged["mcp"]["other"], {"type": "local", "command": ["x"]})
         self.assertEqual(merged["mcp"]["partyline"], {
-            "type": "local", "command": ["/py", "-m", "partyline.mcp"],
+            "type": "local", "command": ["/py", "-P", "-m", "partyline.mcp"],
             "environment": {"PARTYLINE_MCP_CONNECTION": "/c.json"}})
 
     def test_partyline_entry_replaces_only_a_stale_partyline_entry(self):
         existing = json.dumps({"mcp": {"partyline": {"type": "local", "command": ["old"]}}})
         merged = json.loads(opencode_config_content(existing, self.ENTRY))
-        self.assertEqual(merged["mcp"]["partyline"]["command"], ["/py", "-m", "partyline.mcp"])
+        self.assertEqual(merged["mcp"]["partyline"]["command"],
+                         ["/py", "-P", "-m", "partyline.mcp"])
 
     def test_empty_input_starts_fresh(self):
         merged = json.loads(opencode_config_content("", self.ENTRY))
@@ -230,7 +349,7 @@ class OpenCodeAdapterTests(unittest.TestCase):
         self.assertNotIn("OPENCODE_CONFIG_CONTENT", env)
 
 
-class UnsupportedAdapterTests(unittest.TestCase):
+class UnsupportedAdapterTests(CodexCommandIsolationMixin, unittest.TestCase):
     def test_base_hooks_leave_command_and_env_unchanged(self):
         self.assertEqual(BaseAdapter.mcp_argv(None, ["tool", "--flag"]), ["tool", "--flag"])
         self.assertEqual(BaseAdapter.mcp_env(None), {})
