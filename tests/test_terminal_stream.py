@@ -152,6 +152,7 @@ class TerminalEndpointTest(unittest.IsolatedAsyncioTestCase):
         self.db.create_conversation("line", "Line")
         self.db.add_attachment("att-1", "line", "opus", "fake", ["fake"], "/tmp")
         self.token = ensure_api_token(self.db, "att-1")
+        self.db._exec("UPDATE attachments SET is_lead=1 WHERE id=?", ("att-1",))
 
     async def test_endpoint_orders_geometry_snapshot_then_live_bytes_and_writes_raw_input(self):
         adapter = FakeTerminalAdapter()
