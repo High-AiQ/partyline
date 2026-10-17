@@ -187,6 +187,20 @@ Every entry here was a belief an agent acted on that turned out to be wrong, pai
 evidence that disproved it and the guard that replaced it. Read this file when an incident
 feels familiar — most of them rhyme.
 
+## Runtime homes belong only in per-run scratchpads
+
+During MCP client compatibility work, a 516 MB Codex home appeared under
+`docs/mcp/isolate`. A contemporaneous report noted SQLite databases, a Unix
+socket, and `config.toml`; the directory was later emptied before the audit.
+The available record does not identify who created it or establish whether an
+auth file was present. It was not found in commits, stashes, or Git objects.
+
+The false assumption was that a private-looking repository subdirectory was a
+safe place for a disposable runtime home. Keep runtime homes, sockets, and logs
+in a private per-run scratchpad outside the worktree. Never copy a credential
+home; if existing authentication is needed, use authorized access in place
+without copying it. Commit only sanitized fixtures and evidence.
+
 ## The self-learning protocol
 
 When an assumption proves wrong, a test passes for the wrong reason, or tooling produces
