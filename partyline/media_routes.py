@@ -11,7 +11,12 @@ from fastapi.responses import FileResponse
 from .auth_guard import request_principal
 from .contracts import FileRef, FileUploadResponse, MessageEvent, MessageResponse
 from .hierarchy import stamp_source
-from .idempotent_posts import claim_key, original_for_key, remember_key
+from .idempotent_posts import (
+    claim_key,
+    original_for_key,
+    principal_identity,
+    remember_key,
+)
 from .media import MediaError, MediaStore, prepared_files, validated_metadata
 from .media_digest import digest_body
 from .media_rows import VARIANTS
@@ -93,13 +98,14 @@ def media_router(runtime, store: MediaStore) -> APIRouter:
         ):
             raise HTTPException(409, "attach a process to this line before sending")
         who = principal.name
+        caller_id = principal_identity(principal)
         upload_key = (
             "upload:" + hashlib.sha256(client_key.encode()).hexdigest()
             if client_key else None
         )
         async def save_or_replay():
-            if upload_key and (original := original_for_key(
-                runtime.db, who, upload_key, conv_id
+            if upload_key and caller_id and (original := original_for_key(
+                runtime.db, caller_id, upload_key, conv_id
             )) is not None:
                 base = str(request.base_url).rstrip("/")
                 files = store.for_message(original["id"], base)
@@ -139,8 +145,8 @@ def media_router(runtime, store: MediaStore) -> APIRouter:
             runtime.db._exec(
                 "UPDATE messages SET body=? WHERE id=?", (caption, placeholder["id"])
             )
-            if upload_key:
-                remember_key(runtime.db, who, upload_key, conv_id, placeholder["id"])
+            if upload_key and caller_id:
+                remember_key(runtime.db, caller_id, upload_key, conv_id, placeholder["id"])
             stored = {**placeholder, "body": caption, "files": relative}
             message = MessageResponse.model_validate(
                 {**placeholder, "body": caption, "files": absolute}
@@ -151,8 +157,8 @@ def media_router(runtime, store: MediaStore) -> APIRouter:
             await runtime.route_mentions(conv_id, stored)
             return {"message": message, "files": absolute}
 
-        if upload_key:
-            async with claim_key(runtime.db, who, conv_id, upload_key):
+        if upload_key and caller_id:
+            async with claim_key(runtime.db, caller_id, conv_id, upload_key):
                 return await save_or_replay()
         return await save_or_replay()
 
