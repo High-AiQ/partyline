@@ -12,6 +12,7 @@ from .attachment_lifecycle import expire_unowned_attachment
 from .hierarchy import descendants
 from .line_process_contracts import CloseProcessesResponse
 from .machine_scope import deny_unless
+from .mcp_attach import remove_config
 from .attachment_tmp import reap_tmp_dir
 
 LIVE = ("starting", "running")
@@ -136,6 +137,7 @@ async def detach_attachment(runtime, att_id: str, *, survivors: bool = True) -> 
         from .resource_leases import release_attachment_leases
 
         release_attachment_leases(runtime.db, att_id)
+        remove_config(runtime.db.path, att_id)
         if adapter is not None and runtime.live.get(att_id) is adapter:
             runtime.live.pop(att_id, None)
         runtime.memory_usage.pop(att_id, None)

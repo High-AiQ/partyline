@@ -18,6 +18,7 @@ from partyline.adapters import Adapter
 from partyline.adapters.bundled.opencode.wakes import WakeSettlement
 from partyline.adapters.compaction import is_compaction_record
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
+from partyline.mcp_attach import opencode_config_content, server_for
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,16 @@ class PartylineAdapter(WakeSettlement, Adapter):
 
     def spawn_env(self) -> dict[str, str]:
         # V1 and v2 otherwise share opencode.db. Keep their schema migrations apart.
-        return {"OPENCODE_DB": os.environ.get("OPENCODE_DB", "opencode-v2.db")}
+        return {"OPENCODE_DB": os.environ.get("OPENCODE_DB", "opencode-v2.db"), **self.mcp_env()}
+
+    def mcp_env(self) -> dict[str, str]:
+        # Merged into the inline config the preset wrapper also merges into;
+        # OPENCODE_CONFIG_DIR is not used because it can hide the user's config.
+        server = server_for(self.att)
+        if server is None:
+            return {}
+        content = opencode_config_content(os.environ.get("OPENCODE_CONFIG_CONTENT", ""), server)
+        return {} if content is None else {"OPENCODE_CONFIG_CONTENT": content}
 
     def _resolve_store(self) -> Path:
         # This diagnostic prints a path only: no server, session, or model call.

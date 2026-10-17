@@ -22,7 +22,7 @@ if sys.platform != "win32":
     import termios
 
 from partyline import process_memory, process_exit
-from partyline.adapters import activation, fence, pty_io, startup_prompt
+from partyline.adapters import activation, fence, mcp_hooks, pty_io, startup_prompt
 from partyline.adapters.process_shutdown import stop_process_group
 from partyline.adapters.process_wait import wait_for_process
 from partyline.adapters.jsonl_receipts import JsonlPasteReceipts, tail_jsonl
@@ -44,7 +44,7 @@ Status = Callable[[str], Awaitable[None]]
 
 
 class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
-              startup_prompt.StartupPromptGuard):
+              startup_prompt.StartupPromptGuard, mcp_hooks.McpHooks):
     """Base class for a process connected through a pseudo-terminal."""
 
     kind = "process"
