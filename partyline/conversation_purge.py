@@ -13,12 +13,14 @@ from .scratch_worktrees import prune_scratch_worktrees
 from .attachment_tmp import reap_line_tmp
 from .legacy_tmp import reap_legacy_temp
 from .worktree_lifecycle import remove_for_line
+from .retirement_auxiliary import clear_preserved
 
 
 async def execute_purge(runtime, media, db, conv: dict) -> None:
     conv_id = conv["id"]
     deny_purge_if_parent_refs(db, conv_id)
     await runtime.stop_attachments(conv_id)
+    clear_preserved(db, conv_id)
     media.delete_conversation(conv_id)
     purge_reports(db, conv_id)
     remove_for_line(conv)

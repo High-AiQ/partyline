@@ -1,5 +1,12 @@
 # Partyline MCP evidence
 
+Captain tools include `retirement_preview` and an extended `retire_child`. Preview returns
+bounded evidence and a token bound to the caller; forced retirement requires explicit
+`force_discard` and that `preview_token`. Only a tree's root captain can override descendant
+dirty/unmerged guards. `include_children`, `stop_processes` and `clear_goal` are explicit.
+The result records recovery refs and an audit ID. See the
+[retirement contract](../hierarchy.md#root-decisions-about-obsolete-descendants).
+
 Service-managed native tool calls and the Codex resume comparison for the
 2026-10-17 live verification are indexed in [`live/README.md`](live/README.md).
 

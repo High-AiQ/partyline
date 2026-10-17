@@ -143,6 +143,26 @@ class CaptainToolTests(unittest.TestCase):
                 "conv_id": "outside"}}, client.state)
         self.assertEqual(len(client.calls), 1)
 
+    def test_root_retirement_preview_and_explicit_force_fields(self):
+        client = Client()
+        client.state["parent_id"] = None
+        tools_captain.call(client, "retirement_preview", {
+            "conv_id": "grandchild", "include_children": True}, client.state)
+        self.assertEqual(client.calls[-1], (
+            "GET", "/api/conversations/grandchild/retirement-preview?include_children=true", None))
+        tools_captain.call(client, "retire_child", {"conv_id": "grandchild", "force_discard": True,
+            "include_children": True, "clear_goal": True, "preview_token": "abc"}, client.state)
+        method, path, _ = client.calls[-1]
+        self.assertEqual(method, "DELETE")
+        self.assertIn("force_discard=true", path)
+        self.assertIn("preview_token=abc", path)
+        self.assertIn("clear_goal=true", path)
+
+    def test_retirement_tool_descriptions_explain_discard_and_recovery(self):
+        tools = {tool["name"]: tool for tool in tools_captain.tool_list(Client().state)}
+        self.assertIn("Ignored files are lost", tools["retire_child"]["description"])
+        self.assertIn("principal-bound", tools["retirement_preview"]["description"])
+
     def test_write_set_requests_lists_pending_and_bounded_grants(self):
         client = Client()
         pending = {"request": {"id": "req-1", "path": "/work", "requester": "worker"}}

@@ -1,6 +1,6 @@
 """Explicit captain operation handlers; every route is fixed in this module."""
 
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from .client import ApiError
 from .captain_schemas import OPERATIONS
@@ -59,13 +59,24 @@ def execute(client, op, args, state):
         if not any(isinstance(row, dict) and row.get("id") == att for row in rows):
             raise ApiError("attachment is not on the authorized target line")
         return client.request("DELETE", f"/api/attachments/{quote(att, safe='')}")
+    if op == "retirement_preview":
+        conv = args.get("conv_id")
+        _target(client, state, conv, ("archive",))
+        query = "?include_children=true" if args.get("include_children") is True else ""
+        return client.request("GET", _path(conv, "retirement-preview") + query)
     if op == "retire_child":
         conv = args.get("conv_id")
         children = client.request("GET", _path(client.home, "children"))
-        if not any(isinstance(row, dict) and row.get("id") == conv for row in children):
+        if (state.get("parent_id", "unknown") is not None
+                and not any(isinstance(row, dict) and row.get("id") == conv for row in children)):
             raise ApiError("retire_child only accepts a direct child line")
         _target(client, state, conv, ("archive",))
-        query = "?stop_processes=true" if args.get("stop_processes") is True else ""
+        params = {key: "true" for key in
+                  ("stop_processes", "clear_goal", "include_children", "discard", "force_discard")
+                  if args.get(key) is True}
+        if args.get("preview_token"):
+            params["preview_token"] = args["preview_token"]
+        query = "?" + urlencode(params) if params else ""
         return client.request("DELETE", f"/api/conversations/{quote(conv, safe='')}{query}")
     conv = args.get("conv_id")
     if op == "staffing":

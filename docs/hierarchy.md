@@ -149,6 +149,71 @@ touched.
 Operational hierarchy rules ignore archived children, while purge ordering and restore traversal
 continue to include them.
 
+### Root decisions about obsolete descendants
+
+The tree's root captain may explicitly retire a strict descendant with dirty files or
+superseded unmerged history. This grants no self-retirement, sibling or cross-tree access,
+and no extra authority to non-root captains. People have the same API option. The existing
+guarded DELETE and merged-only `discard=true` behavior remain the default.
+
+First read `GET /api/conversations/<id>/retirement-preview?include_children=true` (omit the
+query for one line). It reports tracked/untracked/ignored paths and counts, unmerged SHAs
+and subjects, host and fenced tips, live processes, goals, descendants, uploads and assets.
+Paths and history are displayed at most 100 entries each, with truncation markers. A plan
+is limited to 50 lines, 2,000 tracked/untracked dirty files and 256 MiB of those files across
+the tree. Ignored files have a separate metadata-only scan capped at 100,000 files and 4 GiB,
+so virtualenvs and dependency directories do not consume the recovery snapshot budget.
+Individual small files are hashed up to 1 MiB, with a 16 MiB per-line hashing budget; larger
+files use size, nanosecond modification/change times and inode. Large-file metadata cannot
+prove unchanged content against a concurrent external writer.
+
+After preserving deliverables, verifying read-back and recording the handoff, the root
+decides: `DELETE /api/conversations/<id>?force_discard=true&preview_token=<token>`, adding
+`include_children=true`, `stop_processes=true` and `clear_goal=true` explicitly as needed.
+No human approval is required for this root decision. Native MCP `retirement_preview` and
+`retire_child` expose the same fields. The token is bound to its principal, target and
+subtree evidence; it grants no authority. Authority and state are checked again at execution.
+A changed preview returns 409; fetch and assess a new preview rather than retrying blindly.
+
+Before stopping any processes, all lines receive Git recovery commits made with a temporary
+index and `git add -A` semantics, without stash or modifications to the real index. A separate
+commit captures a copy of the real index, including bytes staged differently from working files.
+Recovery refs live at `refs/partyline/discarded/<audit-id>/<line-id>/{index,snapshot,head,branch,mirror}`
+(available tips only). A failed snapshot refuses retirement. **Ignored files are not backed
+up**; the preview and audit list them. `snapshot` preserves the final tracked/untracked working
+files; `index` preserves the independently staged files. A conflicted index refuses retirement
+with a request to resolve or commit it first. Inspect either recovery tree with
+`git show <recovery-ref>:<path>` or create a recovery branch from it.
+
+Retirement checks the whole selected subtree, then removes owned worktrees and host branch
+refs deepest first. Recovery refs remain; private fence mirror refs are also retained.
+Explicit stopping may interrupt mid-turn work, but an unconfirmed stop refuses deletion.
+State is checked after snapshots and process stops. During execution this server refuses new
+Partyline writes, staffing, acceptance and child creation on selected lines. These guards
+serialize forced retirement requests, not arbitrary host filesystem writers. A failure returns completed
+and pending IDs plus recovery refs. Completed lines cannot be rolled back; a failure after
+worktree removal can require restoration from its recovery ref. Remaining lines stay intact.
+
+Uploads/messages remain intact. As in ordinary archive, forced retirement removes line temporary
+directories, runs the legacy temporary sweep once, and prunes clean auxiliary review/scratch
+worktrees. Only auxiliary worktrees with a non-empty `git status --porcelain` are retained:
+their paths appear in the preview, audit and response's `preserved_paths`. They are exempted
+from startup sweeping while retained. Explicit purge releases their exemptions; deleting an
+auxiliary worktree's record also clears its exemption. A later forced retirement reassesses
+the line's auxiliary worktrees and removes any that are now clean. Preserve intended deliverables
+outside these locations before cleanup. Retirement is not purge, which destroys uploads too.
+Every auxiliary preview entry also names its HEAD and whether that commit is unique (not
+reachable from any existing ref). Changed auxiliary HEADs invalidate the preview. Before a
+clean auxiliary checkout is removed, its HEAD is saved under
+`refs/partyline/discarded/<audit-id>/<line-id>/aux/<table>/<n>` even when already referenced.
+These refs appear in the response and audit and keep detached unique commits reachable.
+
+`retirement_audit` stores the principal, target, decision, flags, complete bounded plan,
+discarded paths/SHAs, recovery refs and failure outcome independently of conversation purge.
+`GET /api/conversations/<id>/retirement-audit` returns the latest 20 records to callers who
+can read that line. Recovery references and preservation records require deliberate later
+cleanup; this feature never garbage-collects its recovery copies.
+
 ## Approvals at the root
 
 Requests that need a person bubble to the root. A write-set, memory-cap or restart request

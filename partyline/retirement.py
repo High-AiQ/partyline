@@ -10,7 +10,7 @@ worktree may be thrown away, and only a merged one.
 
 from __future__ import annotations
 
-from .hierarchy import child_ids
+from .hierarchy import child_ids, descendants
 from .worktree_lifecycle import worktree_state
 
 LIVE = ("starting", "running")
@@ -71,4 +71,12 @@ def archive_blockers(
                 "uncommitted changes: the worktree is dirty; commit them, or pass discard=true "
                 "(allowed only for an already-merged branch)",
             ))
+    if include_children:
+        for line_id in descendants(db, conv_id, include_archived=False):
+            for item in archive_blockers(
+                db, line_id, include_children=False, discard=discard, strict=strict,
+                ignore_live_processes=ignore_live_processes,
+            ):
+                if item["code"] != "child_lines":
+                    blockers.append({**item, "message": f"{line_id}: {item['message']}"})
     return blockers

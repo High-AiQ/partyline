@@ -1,5 +1,17 @@
 # Lessons: the false-assumptions ledger
 
+## Clean auxiliary checkouts and working snapshots do not cover every Git copy
+
+Forced retirement assumed a clean auxiliary checkout was disposable and `git add -A`
+captured all uncommitted bytes. A detached auxiliary HEAD can have commits reachable from no
+ref, while the index can hold staged bytes absent from the working tree. Cleanup could lose
+both despite a successful working snapshot. Inventory auxiliary HEADs and reachability in the
+preview, anchor each pruned HEAD in recovery refs, and capture the real index through a copy
+before staging working files in a separate temporary index. Refuse unmerged index stages.
+`tests/test_retirement_git_recovery.py` uses real review/scratch commits, changed HEADs,
+different binary index/working bytes, an index-only file and a real merge conflict. It checks
+durable ref reachability and byte-for-byte read-back, not just that cleanup returned success.
+
 ## An image height cap does not guarantee the whole image is visible
 
 The image viewer assumed `max-height: 62dvh` would fit inside an `82dvh`
