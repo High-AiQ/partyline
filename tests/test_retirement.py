@@ -19,8 +19,12 @@ from partyline.runtime import ChatRuntime
 from partyline.worktree_lifecycle import worktree_state
 
 
-def _git(*args, cwd):
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
+def _git(*args, cwd, text=True):
+    # Even a merge that will conflict needs a committer identity on clean CI hosts.
+    return subprocess.run(
+        ["git", "-c", "user.name=test", "-c", "user.email=test@example.com", *args],
+        cwd=cwd, capture_output=True, text=text, check=True,
+    )
 
 
 class RetirementTest(unittest.TestCase):
