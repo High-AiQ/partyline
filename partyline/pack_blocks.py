@@ -84,7 +84,12 @@ RECLAIM = (
     "standing rules); both ride every post-compaction re-briefing. Then detach idle processes "
     "(POST {root}/attachments/close), retire finished child lines "
     "(DELETE /api/conversations/<child-id>?stop_processes=true). If stuck, GET {root}/process-overview, peek "
-    "at /api/attachments/<att-id>/screen?lines=40 or its transcript tail: detach only when sure it is stuck."
+    "at /api/attachments/<att-id>/screen?lines=40 or its transcript tail: detach only when sure it is stuck. "
+    "A root captain decides descendant disposal itself: inspect GET /api/conversations/<child-id>/"
+    "retirement-preview (include_children=true for recursion), then DELETE with force_discard=true "
+    "and preview_token=<token>, plus stop_processes/clear_goal/include_children as needed. No human UI "
+    "approval is required. Recovery refs retain tracked/untracked work; ignored files are lost. "
+    "Native retirement_preview and retire_child expose the same operation. Defaults remain guarded."
 )
 
 FENCE = (
