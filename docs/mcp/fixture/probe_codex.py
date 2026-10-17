@@ -1,4 +1,4 @@
-#!/home/gmccarthy/code/partyline/.venv/bin/python
+#!/usr/bin/env python3
 """Host-specific Codex probe launcher; paths and model need local adaptation."""
 
 import os

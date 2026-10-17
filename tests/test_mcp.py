@@ -440,6 +440,15 @@ class CoreToolTests(unittest.TestCase):
             "title": "", "description": "", "body": "", "client_key": "file-key"}),
             client.requests)
 
+    def test_non_lead_guide_returns_local_permission_filtered_tools(self):
+        client = FakeClient(actions=("read",))
+        state = {**client.state, "role": "implementer", "is_lead": False}
+        guide = tools_core.call(client, "guide", {}, state)
+        names = {tool["name"] for tool in guide["tools"]}
+        self.assertIn("read_messages", names)
+        self.assertNotIn("post_message", names)
+        self.assertEqual(client.requests, [])
+
 
 class CoreArgumentValidationTests(unittest.TestCase):
     @staticmethod

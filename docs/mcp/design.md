@@ -35,7 +35,7 @@ Partyline adds the server for one invocation only. Global CLI configuration, pre
 | Client | How the entry is injected | User configuration | Code |
 | --- | --- | --- | --- |
 | Claude Code 2.1.302 | `--mcp-config <att>.mcp.json` added to the command, after any user `--mcp-config` values | Non-strict: the user's own MCP servers still load | `mcp_attach.claude_command` |
-| Codex CLI 0.163.0 | `-c mcp_servers.partyline.{command,args,env}=<TOML>` inserted right after the executable, before the rest of the command (so before a `resume` subcommand). Values are rendered by `mcp_attach.codex_overrides`: strings are JSON-escaped, and arrays and inline tables are rendered recursively. Before 5efa2cf the whole value was `json.dumps`, so the `env` object was written as a JSON object (`{"KEY": "value"}`), which is not TOML because TOML uses `=`, not `:`. | A key the user already set under `mcp_servers.partyline` wins and is skipped | `mcp_attach.codex_overrides`, `adapters/bundled/codex/adapter.py` `mcp_argv` |
+| Codex CLI 0.163.0 | `-c mcp_servers.partyline.{command,args,env}=<TOML>` inserted right after the executable, before the rest of the command (so before a `resume` subcommand). Values are rendered by `mcp_attach.codex_overrides`: strings are JSON-escaped, and arrays and inline tables are rendered recursively. Before 5efa2cf the whole value was `json.dumps`, so the `env` object was written as a JSON object (`{"KEY": "value"}`), which is not TOML because TOML uses `=`, not `:`. | An inline `-c`/`--config` key already present in argv is preserved; precedence against `CODEX_HOME/config.toml` is not established | `mcp_attach.codex_overrides`, `adapters/bundled/codex/adapter.py` `mcp_argv` |
 | OpenCode V2 2.0.32 | `OPENCODE_CONFIG_CONTENT` with `mcp.partyline` merged in; every other key passes through | If the existing content is unparseable or not a JSON object, nothing is added and no error is raised | `mcp_attach.opencode_config_content`, `adapters/bundled/opencode/v2.py` `mcp_env` |
 | OpenCode V1 and any adapter without an override | None. The `McpHooks` defaults return the command and environment unchanged | — | `adapters/mcp_hooks.py` |
 
@@ -52,7 +52,7 @@ The server lists tools for the caller's live state only. Names are short and uni
 | Tool | Requires | Routes | Notes |
 | --- | --- | --- | --- |
 | `whoami` | always | line detail, attachments, children | identity, role, actions, members, parent, children |
-| `guide` | always | `/api/docs` by category and topic | on-demand docs; with `topic: captain` and no category, returns the caller's captain operations (empty unless a live lead) |
+| `guide` | always | `/api/docs` by category and topic for leads; local tool schemas for other roles | on-demand docs for leads; workers get their current permission-filtered core tools without a docs request; with `topic: captain` and no category, returns the caller's captain operations (empty unless a live lead) |
 | `read_messages` | `read` | messages, messages around an id | limit clamped to 1 to 50 |
 | `post_message` | listed for `write` or `assign` | message post | refuses the caller's own line; `client_key` required; no action check in MCP, the message route decides |
 | `react` | listed for `write` | reactions, by message id | no line check in MCP; the route decides |
