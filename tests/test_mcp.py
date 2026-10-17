@@ -441,6 +441,82 @@ class CoreToolTests(unittest.TestCase):
             client.requests)
 
 
+class CoreArgumentValidationTests(unittest.TestCase):
+    @staticmethod
+    def valid_value(rule):
+        if "enum" in rule:
+            return rule["enum"][0]
+        kind = rule.get("type")
+        if kind == "string":
+            return "x" * rule.get("minLength", 0)
+        if kind == "integer":
+            return rule.get("minimum", 1)
+        if kind == "boolean":
+            return False
+        if kind == "array":
+            return []
+        if kind == "object":
+            return {}
+        return "x"
+
+    def test_core_schema_constraints_reject_calls_before_backend(self):
+        client = FakeClient()
+        server = MCPServer(client, io.StringIO())
+        for tool in tools_core.tool_list(client.state):
+            schema = tool["inputSchema"]
+            args = {key: self.valid_value(schema["properties"][key])
+                    for key in schema.get("required", [])}
+            for key, rule in schema.get("properties", {}).items():
+                cases = []
+                if "enum" in rule:
+                    cases.append("__invalid__")
+                if "minLength" in rule:
+                    cases.append("" * max(0, rule["minLength"] - 1))
+                if "maxLength" in rule:
+                    cases.append("x" * (rule["maxLength"] + 1))
+                if "minimum" in rule:
+                    cases.append(rule["minimum"] - 1)
+                if "maximum" in rule:
+                    cases.append(rule["maximum"] + 1)
+                if "minItems" in rule:
+                    cases.append([])
+                if "maxItems" in rule:
+                    cases.append([None] * (rule["maxItems"] + 1))
+                for value in cases:
+                    invalid_args = {**args, key: value}
+                    before = len(client.requests)
+                    server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                   "params": {"name": tool["name"],
+                                              "arguments": invalid_args}})
+                    rows = [json.loads(line) for line in server.output.getvalue().splitlines()]
+                    self.assertTrue(rows[-1]["result"]["isError"], (tool["name"], key, value))
+                    self.assertIn("invalid tool arguments", rows[-1]["result"]["content"][0]["text"])
+                    self.assertFalse(any(request[0] != "CAP" for request in client.requests[before:]))
+
+    def test_required_types_and_array_bounds_are_validated(self):
+        with self.assertRaisesRegex(ValueError, "missing required"):
+            server_module.validate_arguments({"required": ["x"]}, {})
+        with self.assertRaisesRegex(ValueError, "wrong type"):
+            server_module.validate_arguments(
+                {"properties": {"x": {"type": "integer"}}}, {"x": True})
+        schema = {"properties": {"items": {"type": "array", "minItems": 1,
+                                            "maxItems": 2, "items": {"type": "string"}}}}
+        for value in ([], ["a", "b", "c"], [1]):
+            with self.assertRaises(ValueError):
+                server_module.validate_arguments(schema, {"items": value})
+
+    def test_non_object_arguments_are_not_coerced_to_empty_object(self):
+        client = FakeClient()
+        output = io.StringIO()
+        server = MCPServer(client, output)
+        for args in ([], None, "bad"):
+            server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                           "params": {"name": "whoami", "arguments": args}})
+            result = json.loads(output.getvalue().splitlines()[-1])
+            self.assertEqual(result["error"]["message"], "invalid tool arguments")
+        self.assertFalse(client.requests)
+
+
 class RenderAndServerTests(unittest.TestCase):
     def test_render_relativizes_media_links_and_caps_output(self):
         text = render({"url": "http://127.0.0.1:8643/api/media/id/slim", "body": "x"},

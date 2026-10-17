@@ -117,9 +117,29 @@ def codex_overrides(cmd: list[str], att: dict) -> list[str]:
     """Per-invocation ``-c`` overrides for the Partyline server.
 
     Each key we would set is skipped when the user set it, so their value
-    wins. Codex parses values as TOML, which JSON strings, arrays, and
-    objects already are for these shapes.
+    wins. Values are rendered using TOML syntax because Codex parses each
+    override as a TOML assignment.
     """
+    def toml_key(value: str) -> str:
+        if value and all(char.isalnum() or char in "_-" for char in value):
+            return value
+        return json.dumps(value, ensure_ascii=False)
+
+    def toml_value(value) -> str:
+        if isinstance(value, str):
+            return json.dumps(value, ensure_ascii=False)
+        if isinstance(value, bool):
+            return str(value).lower()
+        if isinstance(value, (int, float)):
+            return repr(value)
+        if isinstance(value, list):
+            return "[" + ", ".join(toml_value(item) for item in value) + "]"
+        if isinstance(value, dict):
+            pairs = (f"{toml_key(key)} = {toml_value(item)}"
+                     for key, item in value.items())
+            return "{ " + ", ".join(pairs) + " }"
+        raise ValueError("unsupported Codex TOML override value")
+
     entry = server_for(att)
     if entry is None:
         return []
@@ -128,7 +148,7 @@ def codex_overrides(cmd: list[str], att: dict) -> list[str]:
     for key in CODEX_KEYS:
         if key in user:
             continue
-        overrides += ["-c", f"mcp_servers.{SERVER_NAME}.{key}={json.dumps(entry[key])}"]
+        overrides += ["-c", f"mcp_servers.{SERVER_NAME}.{key}={toml_value(entry[key])}"]
     return overrides
 
 
