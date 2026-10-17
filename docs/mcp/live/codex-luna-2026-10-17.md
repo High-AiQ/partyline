@@ -1,5 +1,10 @@
 # Live Codex Partyline MCP check — luna (2026-10-17)
 
+This is the initial fresh-session check, before the resumed-session diagnosis
+and adapter fix. For the decisive same-attachment comparison, see
+[`resume-before.md`](resume-before.md), [`resume-after.md`](resume-after.md),
+and [`resume-after-diagnostic-override.md`](resume-after-diagnostic-override.md).
+
 This records calls made from luna's actual service-managed Codex CLI attachment,
 not an adapter hook or a separately launched probe. No credential values or raw
 environment/configuration were copied here.
@@ -53,10 +58,11 @@ The private `CODEX_HOME/config.toml` top-level keys were `model`,
 `model_reasoning_effort`, `projects`, and `tui`; it had no persisted
 `mcp_servers` table. The MCP entry was supplied by the observed command-line
 overrides. Adapter construction is at
-[`adapter.py`](../../../../partyline/adapters/bundled/codex/adapter.py#L90),
-which puts overrides before any `resume` subcommand. Override generation and
+[`adapter.py`](../../../partyline/adapters/bundled/codex/adapter.py#L90),
+which now puts overrides after the resume session ID for resumed commands.
+Override generation and
 its exact per-key precedence are at
-[`mcp_attach.py`](../../../../partyline/mcp_attach.py#L119).
+[`mcp_attach.py`](../../../partyline/mcp_attach.py#L119).
 
 ## Codex MCP log observation
 
@@ -87,21 +93,23 @@ later config layer supplies its transport. That is a plausible failure mode,
 not a proven explanation for this thread: the live argv below supplied a
 `command`, `args`, and `env`, and no raw intermediate config was available.
 
-## Fresh versus resume
+## Initial fresh-versus-resume source inspection (superseded by live probe)
 
 Source inspection shows that a resumed invocation is assembled as
 `codex resume <session-id> ...` first at
-[`adapter.py:102-107`](../../../../partyline/adapters/bundled/codex/adapter.py#L102),
-then passed through `mcp_argv()` at lines 108-110. That function inserts all
-Partyline `-c mcp_servers.partyline.{command,args,env}=...` overrides after
-the executable and before `resume`; `codex_overrides()` is at
-[`mcp_attach.py:119-158`](../../../../partyline/mcp_attach.py#L119). The exact
-placement is also asserted by
-[`test_codex_overrides_precede_resume_subcommand`](../../../../tests/test_mcp_attach.py#L273).
-Installed `codex resume --help` lists `-c/--config` as a resume option, and
-[The official CLI reference](https://learn.chatgpt.com/docs/config-file/config-reference) describes it as a nested config override. So the
-adapter's `-c` placement is accepted by the CLI shape and does not explain a
-missing `partyline` entry by itself.
+[`adapter.py:102-107`](../../../partyline/adapters/bundled/codex/adapter.py#L102),
+then passed through `mcp_argv()` at lines 108-110. At the time of this initial
+inspection, that function inserted all Partyline
+`-c mcp_servers.partyline.{command,args,env}=...` overrides before `resume`;
+the deployed-adapter resume experiment in `resume-after.md` later showed this
+placement fails. The fix now inserts them after the resume session ID;
+`codex_overrides()` is at
+[`mcp_attach.py:119-158`](../../../partyline/mcp_attach.py#L119). The exact
+placement is covered by
+[`test_codex_overrides_follow_resume_session`](../../../tests/test_mcp_attach.py#L273).
+Installed `codex resume --help` lists `-c/--config` as a resume option. The
+diagnostic override experiment confirms that putting the generated overrides
+after `resume <id>` restores the Partyline registry for the same attachment.
 
 For this fresh attachment, the actual `-c` argv contained all three keys and
 the private config file had no `mcp_servers` table. Its Codex `logs_2.sqlite`
@@ -113,30 +121,19 @@ registry exposes and can execute `whoami` and `guide`; they do not independently
 prove that Codex spawned the generated local stdio server, which is why the
 server startup log is kept separate here.
 
-The delivery captain reported that its resumed sol process had the same three
-generated override keys, while its sanitized startup log showed Codex's
-`codex_apps` and `codex_worktrees` MCP services but no `partyline` mention.
-That supports a gap between config argv and a successful Partyline MCP startup,
-but does not establish that resume discarded the overrides. This worker could
-not read the other attachments' private process environments or log databases
-through its fence, and no `codex resume` was launched against this still-live
-attachment's `CODEX_HOME` because doing so concurrently could alter its session
-state. No fresh-versus-resume runtime reproduction is claimed.
-
-Current evidence does not show Codex persisting and then preferring a session's
-old MCP catalog over startup configuration. Nor does it rule that out. To
-attribute the resumed failure, the missing evidence is a correlated read of
-each resumed process's effective `mcp_servers.partyline` field shapes and its
-own `logs_2.sqlite`/stderr around startup. Do not treat creation of the private
-config or the presence of `-c` arguments as proof of a connection.
+The same-attachment normal service detach/resume experiment is recorded in
+`resume-after.md`: the deployed adapter's pre-resume overrides yielded no
+Partyline tools, and the bounded log selection contained no Partyline row. The
+attachment-only diagnostic override is recorded in
+`resume-after-diagnostic-override.md`: placing the same overrides after
+`resume <id>` yielded ten Partyline tool names and successful native calls.
+That comparison identifies argument placement as the failure and confirms the
+current adapter fix; the diagnostic override itself was not the deployed
+adapter.
 
 ## Scope limit
 
-The host showed two other Codex resume processes, with the same three override
-key names. This attachment's process fence denied reads of their `/proc`
-environment (`PermissionError`), so their private `CODEX_HOME` log databases
-and config keys could not be correlated to those PIDs here. No exact
-startup-failure attribution for the resumed sol/astra sessions is claimed from
-this worker's evidence. The service-managed processes should be correlated by
-their own sanitized logs before assigning the auxiliary `invalid transport`
-message as their cause.
+The auxiliary title-generation `invalid transport` row above does not expose
+which field was absent or malformed, so it is not used to explain the resumed
+session failure. The same-attachment service experiment is the direct evidence
+for the resume argument-order defect.

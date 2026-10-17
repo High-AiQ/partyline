@@ -270,17 +270,76 @@ class AdapterCommandTests(CodexCommandIsolationMixin, unittest.TestCase):
         index = command.index("--mcp-config")
         self.assertEqual(command[index + 1], "/p/a1.mcp.json")
 
-    def test_codex_overrides_precede_resume_subcommand(self):
+    def test_codex_fresh_overrides_remain_before_user_flags(self):
+        adapter = CodexAdapter.__new__(CodexAdapter)
+        adapter.att = {"command": ["codex", "--model", "gpt-6-luna"], "id": "a1",
+                       "_agent_connection_file": "/c/agent.json", "auto_compact_tokens": 100}
+        adapter.resume = False
+
+        command = adapter.build_command()
+
+        self.assertEqual(command[0], "codex")
+        compact_index = command.index("model_auto_compact_token_limit=100")
+        mcp_indexes = [
+            command.index("mcp_servers.partyline.command=" + json.dumps(sys.executable)),
+            next(i for i, arg in enumerate(command)
+                 if arg.startswith("mcp_servers.partyline.args=")),
+            next(i for i, arg in enumerate(command)
+                 if arg.startswith("mcp_servers.partyline.env=")),
+        ]
+        self.assertEqual(command[compact_index - 1], "-c")
+        self.assertTrue(all(command[index - 1] == "-c" for index in mcp_indexes))
+        self.assertTrue(all(compact_index < index for index in mcp_indexes))
+        self.assertTrue(all(index < command.index("--model") for index in mcp_indexes))
+
+    def test_codex_overrides_follow_resume_session(self):
         adapter = CodexAdapter.__new__(CodexAdapter)
         adapter.att = {"command": ["codex"], "id": "a1", "cli_session": "s1",
                        "_agent_connection_file": "/c/agent.json", "auto_compact_tokens": 100}
         adapter.resume = True
         adapter._startup_prompt = ""
         command = adapter.build_command()
-        self.assertEqual(command[1], "-c")
-        self.assertLess(command.index("mcp_servers.partyline.command=" + json.dumps(sys.executable)),
-                        command.index("resume"))
-        self.assertEqual(command[command.index("resume") + 1], "s1")
+        self.assertEqual(command[:3], ["codex", "resume", "s1"])
+        compact_index = command.index("model_auto_compact_token_limit=100")
+        self.assertGreater(compact_index, 2)
+        generated_indexes = [
+            command.index("mcp_servers.partyline.command=" + json.dumps(sys.executable)),
+            next(i for i, arg in enumerate(command)
+                 if arg.startswith("mcp_servers.partyline.args=")),
+            next(i for i, arg in enumerate(command)
+                 if arg.startswith("mcp_servers.partyline.env=")),
+        ]
+        self.assertTrue(all(command[index - 1] == "-c" for index in generated_indexes))
+        self.assertTrue(all(index > 2 for index in generated_indexes))
+        self.assertTrue(all(compact_index < index for index in generated_indexes))
+
+    def test_codex_resume_keeps_user_mcp_keys_and_appends_startup_prompt_last(self):
+        adapter = CodexAdapter.__new__(CodexAdapter)
+        adapter.att = {
+            "command": ["codex", "--model", "gpt-6-luna", "-c",
+                        'mcp_servers.partyline.command="user-mcp"', "-c",
+                        'mcp_servers.partyline.args=["user-arg"]'],
+            "id": "a1", "cli_session": "s1",
+            "_agent_connection_file": "/c/agent.json", "auto_compact_tokens": 100,
+        }
+        adapter.resume = True
+        adapter._startup_prompt = "continue this session"
+
+        command = adapter.build_command()
+
+        self.assertEqual(command[:3], ["codex", "resume", "s1"])
+        self.assertIn('mcp_servers.partyline.command="user-mcp"', command)
+        self.assertIn('mcp_servers.partyline.args=["user-arg"]', command)
+        self.assertTrue(any(arg.startswith("mcp_servers.partyline.env=") for arg in command))
+        self.assertFalse(any("mcp_servers.partyline.command=" + json.dumps(sys.executable) == arg
+                             for arg in command))
+        self.assertFalse(any(arg.startswith("mcp_servers.partyline.args=") and "user-arg" not in arg
+                             for arg in command))
+        compact_index = command.index("model_auto_compact_token_limit=100")
+        self.assertGreater(compact_index, 2)
+        self.assertLess(compact_index, command.index('mcp_servers.partyline.command="user-mcp"'))
+        self.assertLess(compact_index, command.index('mcp_servers.partyline.args=["user-arg"]'))
+        self.assertEqual(command[-1], "continue this session")
 
 
 class OpenCodeMergeTests(unittest.TestCase):
