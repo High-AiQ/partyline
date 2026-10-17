@@ -1,0 +1,14 @@
+Service-managed OpenCode V2 probe using probe_opencode_v2.py and the branch's
+generated OPENCODE_CONFIG_CONTENT from the adapter hook. The probe called
+Partyline whoami successfully.
+
+Returned identity: probe-opencode
+Attachment handle: f762a12d-8bdf-48c2-b917-dd6386275b7c
+Line: mcp-implementation (84c2d5c7-5ccb-453a-86dc-da91ee0a65c5)
+Role: implementer
+Capabilities: read, write
+Parent: 7b9336b3-be78-45db-a963-0794ea28f21d
+No children.
+
+No credential values were recorded. The roster also contained older detached
+and exited probe rows; they were not used for this identity check.

@@ -1,0 +1,5 @@
+157521.837 initialize
+157521.838 notifications/initialized
+157521.838 tools/list
+157554.738 tools/call
+157554.738 call dispatch {"name": "tool_b"}

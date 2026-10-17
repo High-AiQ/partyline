@@ -1,0 +1,8 @@
+Service-managed Codex CLI probe using probe_codex.py and the branch's
+generated Codex overrides. The probe called Partyline whoami successfully.
+
+Returned identity: probe-codex
+Attachment handle: 45a4267a-34ae-464a-877c-4630417df90a
+Line: mcp-implementation
+
+No credential values were recorded.
