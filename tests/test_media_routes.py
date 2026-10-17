@@ -107,6 +107,7 @@ class FileRoutesTest(unittest.TestCase):
         self.runtime.sockets["line"] = {self.socket}
         user = auth_store.create_user(
             self.db, "opus@example.com", "opus", auth_tokens.hash_password("hunter2222"))
+        self.user = user
         access = auth_tokens.create_access_token(
             auth_tokens.signing_secret(self.db), user["id"])
         self.client.headers["Authorization"] = f"Bearer {access}"
@@ -124,7 +125,7 @@ class FileRoutesTest(unittest.TestCase):
 
     def wait_for_claim_waiter(self, key):
         storage_key = "upload:" + hashlib.sha256(key.encode()).hexdigest()
-        identity = (id(self.db), "opus", "line", storage_key)
+        identity = (id(self.db), f"user:{self.user['id']}", "line", storage_key)
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
             with _KEY_CLAIMS_GUARD:
@@ -175,6 +176,64 @@ class FileRoutesTest(unittest.TestCase):
         self.assertTrue(replay["message"]["replayed"])
         self.assertEqual(replay["files"][0]["id"], first["files"][0]["id"])
         self.assertEqual(len(self.db.list_messages("line")), 1)
+
+    def test_same_display_name_human_and_machine_uploads_never_cross_replay(self):
+        self.db.add_attachment("opus-machine", "line", "opus", "fake", ["fake"],
+                               "/tmp", "owner")
+        self.db.set_attachment_status("opus-machine", "running", "owner")
+        machine = {"Authorization": "Bearer " + auth_store.ensure_api_token(
+            self.db, "opus-machine")}
+        human_first = self.post(client_key="same-name")
+        machine_second = self.client.post(
+            "/api/conversations/line/files", data={"client_key": "same-name"},
+            files=[("file", ("machine.txt", txt(), "text/plain"))], headers=machine)
+        machine_first = self.client.post(
+            "/api/conversations/line/files", data={"client_key": "reverse-name"},
+            files=[("file", ("machine.txt", txt(), "text/plain"))], headers=machine)
+        human_second = self.post(client_key="reverse-name")
+
+        responses = [human_first, machine_second, machine_first, human_second]
+        self.assertEqual([response.status_code for response in responses], [200] * 4)
+        payloads = [response.json() for response in responses]
+        self.assertNotEqual(payloads[0]["message"]["id"], payloads[1]["message"]["id"])
+        self.assertNotEqual(payloads[2]["message"]["id"], payloads[3]["message"]["id"])
+        self.assertEqual(len(self.db.list_messages("line")), 4)
+
+    def test_reused_machine_upload_handle_gets_a_fresh_retry_identity(self):
+        self.db.add_attachment("old-opus", "line", "opus", "fake", ["fake"],
+                               "/tmp", "owner")
+        old_headers = {"Authorization": "Bearer " + auth_store.ensure_api_token(
+            self.db, "old-opus")}
+        first = self.client.post(
+            "/api/conversations/line/files", data={"client_key": "reattach"},
+            files=[("file", ("old.txt", txt(), "text/plain"))], headers=old_headers)
+        self.db._exec("DELETE FROM attachments WHERE id=?", ("old-opus",))
+        self.db.add_attachment("new-opus", "line", "opus", "fake", ["fake"],
+                               "/tmp", "owner")
+        new_headers = {"Authorization": "Bearer " + auth_store.ensure_api_token(
+            self.db, "new-opus")}
+
+        retry = self.client.post(
+            "/api/conversations/line/files", data={"client_key": "reattach"},
+            files=[("file", ("new.txt", b"new bytes", "text/plain"))], headers=new_headers)
+
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(retry.status_code, 200, retry.text)
+        self.assertNotEqual(first.json()["message"]["id"], retry.json()["message"]["id"])
+
+    def test_legacy_name_owned_upload_row_never_matches_typed_identity(self):
+        old = self.db.add_message("line", "opus", "human", "legacy")
+        legacy_key = "upload:" + hashlib.sha256(b"legacy-upload").hexdigest()
+        self.db._exec(
+            "INSERT INTO idempotent_posts"
+            " (sender, client_key, conv_id, message_id, created_at)"
+            " VALUES (?,?,?,?,?)",
+            ("opus", f"line\x1f{legacy_key}", "line", old["id"], time.time()),
+        )
+        response = self.post(client_key="legacy-upload")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertNotEqual(response.json()["message"]["id"], old["id"])
 
     def test_concurrent_upload_retries_reserve_once_and_broadcast_once(self):
         entered = threading.Event()
@@ -256,7 +315,7 @@ class FileRoutesTest(unittest.TestCase):
                 else:
                     self.fail("no upload reached preparation")
                 storage_key = "upload:" + hashlib.sha256(b"tiny-pool").hexdigest()
-                identity = (id(self.db), "opus", "line", storage_key)
+                identity = (id(self.db), f"user:{self.user['id']}", "line", storage_key)
                 for _ in range(500):
                     with _KEY_CLAIMS_GUARD:
                         state = _KEY_CLAIMS.get(identity)

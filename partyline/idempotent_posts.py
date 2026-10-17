@@ -41,15 +41,24 @@ _KEY_CLAIMS: dict[tuple[int, str, str, str], _ClaimState] = {}
 _KEY_CLAIMS_GUARD = threading.Lock()
 
 
+def principal_identity(principal) -> str | None:
+    """Return the stable, namespaced identity proven by the credential."""
+    if principal.kind == "user" and principal.user_id is not None:
+        return f"user:{principal.user_id}"
+    if principal.kind == "machine" and principal.attachment_id:
+        return f"machine:{principal.attachment_id}"
+    return None
+
+
 @asynccontextmanager
-async def claim_key(db, sender: str, conv_id: str, client_key: str):
+async def claim_key(db, caller_id: str, conv_id: str, client_key: str):
     """Serialize one caller's retries for one destination and key.
 
     Authorization is deliberately performed by the route before entering this
     claim. The lock spans persistence and delivery, so a waiter either replays
     the completed message or can retry after a failed attempt releases it.
     """
-    identity = (id(db), sender, conv_id, client_key)
+    identity = (id(db), caller_id, conv_id, client_key)
     with _KEY_CLAIMS_GUARD:
         state = _KEY_CLAIMS.setdefault(identity, _ClaimState())
         state.users += 1
@@ -82,7 +91,7 @@ async def claim_key(db, sender: str, conv_id: str, client_key: str):
 
 
 def _storage_key(conv_id: str, client_key: str) -> str:
-    """Keep keys independent across destination conversations in the legacy table."""
+    """Keep persisted client keys independent across destination conversations."""
     return f"{conv_id}\x1f{client_key}"
 
 
@@ -91,33 +100,25 @@ def window_for(client_key: str) -> float:
     return DERIVED_WINDOW_SECONDS if client_key.startswith(DERIVED_PREFIX) else WINDOW_SECONDS
 
 
-def original_for_key(db, sender: str, client_key: str, conv_id: str) -> dict | None:
-    """The message this sender already posted with this key, within its window."""
+def original_for_key(db, caller_id: str, client_key: str, conv_id: str) -> dict | None:
+    """The message this typed caller posted with this key, within its window."""
     storage_key = _storage_key(conv_id, client_key)
     row = db._exec(
         "SELECT message_id, created_at FROM idempotent_posts"
-        " WHERE sender=? AND client_key=?",
-        (sender, storage_key),
+        " WHERE sender=? AND client_key=? AND conv_id=?",
+        (caller_id, storage_key, conv_id),
     ).fetchone()
-    # Existing keys written before destination scoping remain replayable only
-    # on the conversation recorded alongside them.
-    if row is None:
-        row = db._exec(
-            "SELECT message_id, created_at FROM idempotent_posts"
-            " WHERE sender=? AND client_key=? AND conv_id=?",
-            (sender, client_key, conv_id),
-        ).fetchone()
     if row is None or row["created_at"] < time.time() - window_for(client_key):
         return None
     return select_message_by_id(db._exec, conv_id, row["message_id"])
 
 
-def remember_key(db, sender: str, client_key: str, conv_id: str, message_id: int) -> None:
+def remember_key(db, caller_id: str, client_key: str, conv_id: str, message_id: int) -> None:
     """Record a successful post under its key; expired rows cannot replay, so prune."""
     db._exec("DELETE FROM idempotent_posts WHERE created_at < ?",
              (time.time() - PRUNE_AFTER_SECONDS,))
     db._exec(
         "INSERT OR REPLACE INTO idempotent_posts"
         " (sender, client_key, conv_id, message_id, created_at) VALUES (?,?,?,?,?)",
-        (sender, _storage_key(conv_id, client_key), conv_id, message_id, time.time()),
+        (caller_id, _storage_key(conv_id, client_key), conv_id, message_id, time.time()),
     )
