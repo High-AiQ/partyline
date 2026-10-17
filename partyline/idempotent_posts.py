@@ -16,6 +16,9 @@ only, and the response says ``replayed`` so the caller can tell.
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
+import threading
 import time
 
 from .message_queries import select_message_by_id
@@ -25,6 +28,50 @@ DERIVED_PREFIX = "d:"
 DERIVED_WINDOW_SECONDS = 120.0
 PRUNE_AFTER_SECONDS = 3600.0
 
+_KEY_LOCKS: dict[tuple[int, str, str, str], tuple[threading.Lock, int]] = {}
+_KEY_LOCKS_GUARD = threading.Lock()
+
+
+@asynccontextmanager
+async def claim_key(db, sender: str, conv_id: str, client_key: str):
+    """Serialize one caller's retries for one destination and key.
+
+    Authorization is deliberately performed by the route before entering this
+    claim. The lock spans persistence and delivery, so a waiter either replays
+    the completed message or can retry after a failed attempt releases it.
+    """
+    identity = (id(db), sender, conv_id, client_key)
+    with _KEY_LOCKS_GUARD:
+        lock, users = _KEY_LOCKS.get(identity, (threading.Lock(), 0))
+        _KEY_LOCKS[identity] = (lock, users + 1)
+    acquire = asyncio.create_task(asyncio.to_thread(lock.acquire))
+    acquired = False
+    try:
+        try:
+            await asyncio.shield(acquire)
+            acquired = True
+        except asyncio.CancelledError:
+            # A worker thread cannot be cancelled while waiting on acquire.
+            # Wait for its result and release so cancellation cannot leak a claim.
+            await acquire
+            lock.release()
+            raise
+        yield
+    finally:
+        if acquired:
+            lock.release()
+        with _KEY_LOCKS_GUARD:
+            current_lock, users = _KEY_LOCKS[identity]
+            if users == 1:
+                del _KEY_LOCKS[identity]
+            else:
+                _KEY_LOCKS[identity] = (current_lock, users - 1)
+
+
+def _storage_key(conv_id: str, client_key: str) -> str:
+    """Keep keys independent across destination conversations in the legacy table."""
+    return f"{conv_id}\x1f{client_key}"
+
 
 def window_for(client_key: str) -> float:
     """The replay window: caller-made keys state intent, derived keys only retry."""
@@ -33,11 +80,20 @@ def window_for(client_key: str) -> float:
 
 def original_for_key(db, sender: str, client_key: str, conv_id: str) -> dict | None:
     """The message this sender already posted with this key, within its window."""
+    storage_key = _storage_key(conv_id, client_key)
     row = db._exec(
         "SELECT message_id, created_at FROM idempotent_posts"
         " WHERE sender=? AND client_key=?",
-        (sender, client_key),
+        (sender, storage_key),
     ).fetchone()
+    # Existing keys written before destination scoping remain replayable only
+    # on the conversation recorded alongside them.
+    if row is None:
+        row = db._exec(
+            "SELECT message_id, created_at FROM idempotent_posts"
+            " WHERE sender=? AND client_key=? AND conv_id=?",
+            (sender, client_key, conv_id),
+        ).fetchone()
     if row is None or row["created_at"] < time.time() - window_for(client_key):
         return None
     return select_message_by_id(db._exec, conv_id, row["message_id"])
@@ -50,5 +106,5 @@ def remember_key(db, sender: str, client_key: str, conv_id: str, message_id: int
     db._exec(
         "INSERT OR REPLACE INTO idempotent_posts"
         " (sender, client_key, conv_id, message_id, created_at) VALUES (?,?,?,?,?)",
-        (sender, client_key, conv_id, message_id, time.time()),
+        (sender, _storage_key(conv_id, client_key), conv_id, message_id, time.time()),
     )

@@ -8,7 +8,7 @@ from .bridge_delivery import route_bridge, stamp_outbound
 from .contracts import MessageEvent, MessageResponse
 from .ack_limits import capture_notice, pingpong_refusal, refusal_message
 from .hierarchy import stamp_source, tree_conversation_ids
-from .idempotent_posts import original_for_key, remember_key
+from .idempotent_posts import claim_key, original_for_key, remember_key
 from .interrupts import interrupt_for
 from .mention_relay import relay_mentions
 from .mentions import (
@@ -86,6 +86,15 @@ async def post_identified(runtime, conv_id, principal, body: str, client_key: st
     """
     if (reason := self_mention_reason(runtime.db, principal, conv_id, body)) is not None:
         raise HTTPException(422, reason)
+    if client_key:
+        async with claim_key(runtime.db, principal.name, conv_id, client_key):
+            return await _post_identified_claimed(
+                runtime, conv_id, principal, body, client_key
+            )
+    return await _post_identified_claimed(runtime, conv_id, principal, body, None)
+
+
+async def _post_identified_claimed(runtime, conv_id, principal, body, client_key):
     if client_key and (
         original := original_for_key(runtime.db, principal.name, client_key, conv_id)
     ) is not None:

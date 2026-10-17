@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from .auth_guard import request_principal
 from .contracts import FileRef, FileUploadResponse, MessageEvent, MessageResponse
 from .hierarchy import stamp_source
-from .idempotent_posts import original_for_key, remember_key
+from .idempotent_posts import claim_key, original_for_key, remember_key
 from .media import MediaError, MediaStore, prepared_files, validated_metadata
 from .media_digest import digest_body
 from .media_rows import VARIANTS
@@ -97,52 +97,64 @@ def media_router(runtime, store: MediaStore) -> APIRouter:
             "upload:" + hashlib.sha256(client_key.encode()).hexdigest()
             if client_key else None
         )
-        if upload_key and (original := original_for_key(
-            runtime.db, who, upload_key, conv_id
-        )) is not None:
+        async def save_or_replay():
+            if upload_key and (original := original_for_key(
+                runtime.db, who, upload_key, conv_id
+            )) is not None:
+                base = str(request.base_url).rstrip("/")
+                files = store.for_message(original["id"], base)
+                replayed = MessageResponse.model_validate({
+                    **original, "files": files, "replayed": True,
+                })
+                return {"message": replayed, "files": files}
+            try:
+                # Preparation decodes bytes and may fall back to an ffmpeg
+                # subprocess with a minute-long timeout — none of that may run
+                # on the event loop every wake and WebSocket depends on.
+                prepared = await asyncio.to_thread(prepared_files, await _uploads(file))
+                prepared_title, prepared_description = validated_metadata(title, description)
+            except MediaError as exc:
+                raise _http(exc) from exc
+            kind = "agent" if principal.kind == "machine" else "human"
+            placeholder = runtime.db.add_message(conv_id, who, kind, "")
+            placeholder = {
+                **placeholder,
+                **stamp_source(runtime.db, placeholder["id"], principal),
+            }
+            try:
+                store.store(
+                    conv_id, placeholder["id"], prepared,
+                    prepared_title, prepared_description,
+                )
+            except MediaError as exc:
+                runtime.db._exec("DELETE FROM messages WHERE id=?", (placeholder["id"],))
+                raise _http(exc) from exc
+            except Exception:
+                runtime.db._exec("DELETE FROM messages WHERE id=?", (placeholder["id"],))
+                raise
             base = str(request.base_url).rstrip("/")
-            files = store.for_message(original["id"], base)
-            replayed = MessageResponse.model_validate({
-                **original, "files": files, "replayed": True,
-            })
-            return {"message": replayed, "files": files}
-        try:
-            # Preparation decodes bytes and may fall back to an ffmpeg
-            # subprocess with a minute-long timeout — none of that may run
-            # on the event loop every wake and WebSocket depends on.
-            prepared = await asyncio.to_thread(prepared_files, await _uploads(file))
-            title, description = validated_metadata(title, description)
-        except MediaError as exc:
-            raise _http(exc) from exc
-        kind = "agent" if principal.kind == "machine" else "human"
-        placeholder = runtime.db.add_message(conv_id, who, kind, "")
-        placeholder = {**placeholder, **stamp_source(runtime.db, placeholder["id"], principal)}
-        try:
-            store.store(conv_id, placeholder["id"], prepared, title, description)
-        except MediaError as exc:
-            runtime.db._exec("DELETE FROM messages WHERE id=?", (placeholder["id"],))
-            raise _http(exc) from exc
-        except Exception:
-            runtime.db._exec("DELETE FROM messages WHERE id=?", (placeholder["id"],))
-            raise
-        base = str(request.base_url).rstrip("/")
-        absolute = store.for_message(placeholder["id"], base)
-        relative = store.for_message(placeholder["id"])
-        caption = digest_body(body or "", absolute, base)
-        runtime.db._exec(
-            "UPDATE messages SET body=? WHERE id=?", (caption, placeholder["id"])
-        )
+            absolute = store.for_message(placeholder["id"], base)
+            relative = store.for_message(placeholder["id"])
+            caption = digest_body(body or "", absolute, base)
+            runtime.db._exec(
+                "UPDATE messages SET body=? WHERE id=?", (caption, placeholder["id"])
+            )
+            if upload_key:
+                remember_key(runtime.db, who, upload_key, conv_id, placeholder["id"])
+            stored = {**placeholder, "body": caption, "files": relative}
+            message = MessageResponse.model_validate(
+                {**placeholder, "body": caption, "files": absolute}
+            )
+            await runtime.broadcast(
+                conv_id, MessageEvent(message=MessageResponse.model_validate(stored))
+            )
+            await runtime.route_mentions(conv_id, stored)
+            return {"message": message, "files": absolute}
+
         if upload_key:
-            remember_key(runtime.db, who, upload_key, conv_id, placeholder["id"])
-        stored = {**placeholder, "body": caption, "files": relative}
-        message = MessageResponse.model_validate(
-            {**placeholder, "body": caption, "files": absolute}
-        )
-        await runtime.broadcast(
-            conv_id, MessageEvent(message=MessageResponse.model_validate(stored))
-        )
-        await runtime.route_mentions(conv_id, stored)
-        return {"message": message, "files": absolute}
+            async with claim_key(runtime.db, who, conv_id, upload_key):
+                return await save_or_replay()
+        return await save_or_replay()
 
     router.add_api_route(
         "/api/conversations/{conv_id}/files",
