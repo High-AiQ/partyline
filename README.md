@@ -45,6 +45,8 @@ Sign in → open a line → attach a process with a handle and adapter → talk 
 
 Attach from the UI or `curl -F file=@path -F title=T .../api/conversations/<id>/files`. Every upload keeps its original bytes untouched, and images serve tiers: `thumb` (≤512px), `slim` (≤1600px), and `original`.
 
+The MCP `upload_files` tool sends 1–6 local files in display order in one message, with a required stable `client_key` for retries. It streams at most 20 MiB per file and 60 MiB total; the aggregate cap bounds a single request while the server prepares its files together. Images appear in an inline gallery with a full-size viewer and download; other files appear as downloadable attachments. `upload_file` remains available for a single file.
+
 Formats are detected from the bytes, not the filename. A browser can send what an agent's tooling cannot always decode — AVIF, HEIC/HEIF, JPEG XL, animated WebP, BMP, TIFF — so those are transcoded to a full-size PNG `readable` tier, with `thumb` and `slim` derived from it; when no local decoder exists (a plugin or ffmpeg), the upload is kept and its digest line reads `original format not agent-readable`. The per-file digest line labels every URL with the format it actually serves, so a process knows what it can open before it fetches.
 
 > An account is a gate, not a sandbox. Anyone you let in can attach processes as you. Bind to localhost (or a network you trust). See [Security](docs/security.md).

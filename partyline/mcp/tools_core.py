@@ -2,7 +2,9 @@
 
 from urllib.parse import quote
 
-from .client import ApiError
+from .client import ApiError, MAX_UPLOAD
+from .uploads import validate_uploads
+from .tools_media import multi_upload_tool
 from . import tools_captain
 
 
@@ -91,6 +93,8 @@ def tool_list(state):
                                      minLength=1, maxLength=64),
             }, ["path", "client_key"]),
         })
+    if "write" in actions:
+        tools.append(multi_upload_tool())
     if "read" in actions:
         tools.extend([
             {
@@ -193,6 +197,14 @@ def call(client, name: str, args: dict, home_state: dict):
         return client.request(method, path, None if method == "DELETE" else {"emoji": args["emoji"]})
     if name == "get_media":
         return client.download(args["file_id"], args["variant"], args["destination"])
+    if name == "upload_files":
+        metadata = {key: args.get(key, "") for key in ("title", "description", "body")}
+        validate_uploads(args["paths"], client_key=args["client_key"],
+                         max_upload=MAX_UPLOAD, **metadata)
+        conv, _ = _target(client, home_state, args.get("conv_id"), ("write",))
+        if conv == client.home and metadata["body"].strip():
+            raise ValueError("an upload caption cannot post free prose on your own line")
+        return client.upload_files(conv, args["paths"], client_key=args["client_key"], **metadata)
     if name == "upload_file":
         conv, _ = _target(client, home_state, args.get("conv_id"), ("write",))
         body = args.get("body", "")

@@ -14,6 +14,24 @@ Placeholders in the commands below:
   there, never under `docs/mcp/` (see `docs/lessons.md`, "Runtime homes belong only in per-run
   scratchpads").
 
+## Upload tools
+
+`upload_files` accepts `paths` (1–6 readable regular local files, in display order),
+a required per-message `client_key` (1–64 characters), optional `conv_id` (own line
+by default), and optional `title` (200), `description` (2000), and `body` (3000).
+Metadata applies to the single message and its attachments. Own-line captions
+are refused, as with `upload_file`; authorization is unchanged.
+
+The client validates paths and stat sizes before connecting, then streams one
+multipart request using repeated `file` fields. Each file is limited to 20 MiB;
+the total is limited to 60 MiB because the route prepares the originals together.
+It detects size changes while streaming and preserves all original bytes.
+Retries with the same caller, destination, and key replay the original message
+and complete ordered file list. Images are detected by content and receive
+thumb/slim/readable/original variants; gallery thumbnails open the full-size
+viewer with download. Other files are generic downloadable attachments.
+`upload_file` remains compatible for single-file uploads.
+
 ## Evidence index
 
 | File | What it is | What it proves |
