@@ -118,7 +118,7 @@ class PartylineClient:
             if value:
                 fields.append((f"--{boundary}\r\nContent-Disposition: form-data; "
                                f"name=\"{key}\"\r\n\r\n{value}\r\n").encode())
-        suffix = b"".join(fields) + f"--{boundary}--\r\n".encode()
+        suffix = b"\r\n" + b"".join(fields) + f"--{boundary}--\r\n".encode()
         target = f"/api/conversations/{quote(conv_id, safe='')}/files"
         conn = self._origin()
         try:
