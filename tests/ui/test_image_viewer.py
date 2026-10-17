@@ -6,7 +6,7 @@ from scripts.uishot import ui_session
 
 
 # A seeded fixture, not an upload: `kind` is what the feed branches on, and the
-# svg data URLs are here so the modal has real pixels without a network fetch.
+# routed SVG URLs give the modal real pixels without requiring stored media.
 # A real svg upload would arrive as kind "file" — Pillow decides what an image is.
 IMAGE = {
     "id": "image-1",
@@ -21,12 +21,9 @@ IMAGE = {
     "thumb": None,
     "slim": {"mime": "image/webp", "width": 800, "height": 560, "bytes": 80},
     "urls": {
-        "original": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' "
-        "width='800' height='560'%3E%3Crect width='800' height='560' fill='%23d98e4a'/%3E%3C/svg%3E",
-        "thumb": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' "
-        "width='800' height='560'%3E%3Crect width='800' height='560' fill='%23d98e4a'/%3E%3C/svg%3E",
-        "slim": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' "
-        "width='800' height='560'%3E%3Crect width='800' height='560' fill='%23c8793e'/%3E%3C/svg%3E",
+        "original": "/viewer-fixture/original.svg",
+        "thumb": "/viewer-fixture/thumb.svg",
+        "slim": "/viewer-fixture/slim.svg",
     },
 }
 
@@ -40,6 +37,10 @@ class ImageViewerLayoutTest(unittest.TestCase):
         """
         with ui_session(["image line"]) as ui:
             page = ui.page
+            page.route("**/viewer-fixture/*.svg*", lambda route: route.fulfill(
+                content_type="image/svg+xml",
+                body='<svg xmlns="http://www.w3.org/2000/svg" width="800" height="560">'
+                     '<rect width="800" height="560" fill="#d98e4a"/></svg>'))
             with page.expect_response(
                 lambda response: "/api/conversations/" in response.url
                 and response.request.method == "GET"
@@ -55,9 +56,11 @@ class ImageViewerLayoutTest(unittest.TestCase):
                 "files": [IMAGE],
             }
             page.evaluate("(value) => { window.partyline.room.messages = [value]; }", message)
-            self.assertEqual(page.locator(".grid .tile img").get_attribute("src"), IMAGE["urls"]["thumb"])
+            self.assertEqual(page.locator(".grid .tile img").get_attribute("src").split("?")[0],
+                             IMAGE["urls"]["thumb"])
             page.locator(".grid .tile").click()
-            self.assertEqual(page.locator(".stage img").get_attribute("src"), IMAGE["urls"]["slim"])
+            self.assertEqual(page.locator(".stage img").get_attribute("src").split("?")[0],
+                             IMAGE["urls"]["slim"])
 
             modal = page.locator(".modal").bounding_box()
             header = page.locator(".modal header").bounding_box()
