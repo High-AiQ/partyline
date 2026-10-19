@@ -111,6 +111,8 @@ from .process_signal import signal_router
 from .staffing_routes import staffing_router
 from .line_notes import notes_router
 from .settings_routes import settings_router
+from .orchestrator_routes import orchestrator_router
+from .orchestrator_cleanup import run as run_task_maintenance
 from . import docker_relay
 from .docker_relay_routes import register_docker_relay_routes
 from .docker_workload_routes import register_docker_workload_routes
@@ -179,7 +181,8 @@ async def lifespan(app):
     # lead had configured — including an unsettled wake, which stays unsettled.
     # Behind the `heartbeat` flag (off by default since 1.23.0): a switched-off
     # server neither ticks nor answers the routes.
-    tasks = [automatic_task, asyncio.create_task(run_memory_sampler(runtime))]
+    tasks = [automatic_task, asyncio.create_task(run_memory_sampler(runtime)),
+             asyncio.create_task(run_task_maintenance(runtime))]
     if features.enabled("heartbeat"):
         tasks.append(asyncio.create_task(heartbeat_scheduler.run(runtime)))
     try:
@@ -235,6 +238,7 @@ app.include_router(presets_router(runtime, ADAPTERS))
 app.include_router(staffing_router(runtime))
 app.include_router(notes_router(runtime))
 app.include_router(settings_router(runtime))
+app.include_router(orchestrator_router(runtime))
 app.include_router(restart_report_router(runtime, lambda r: require_loopback(r)))
 app.include_router(signal_router(runtime))
 app.include_router(forward_router(runtime))

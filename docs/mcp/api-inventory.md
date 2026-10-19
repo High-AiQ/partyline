@@ -336,3 +336,24 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 ## Coverage
 
 136 routes in total: 104 agent-reachable (Set 2) + 32 not agent-reachable (Set 1 notes) = 136. Route numbers 1-136 each appear exactly once in Set 1, and each agent-reachable number appears exactly once in Set 2. Dispositions in Set 2: 16 tool, 19 op, 3 guide, 66 excluded.
+
+## Orchestrator additions
+
+These entries extend both inventory sets above. Registration handlers are in
+`orchestrator_routes.orchestrator_router` and `settings_routes.settings_router`.
+
+| Method | Path | Handler | Caller | Agent-reachable | MCP disposition |
+| --- | --- | --- | --- | --- | --- |
+| PUT | `/api/conversations/{conv_id}/captain-style` | `captain_style` | H, root line only | no | excluded: human chooses captain style and default review policy |
+| POST | `/api/conversations/{conv_id}/tasks` | `create` | H or orchestrator root captain | yes | tool: `create_task` |
+| GET | `/api/conversations/{conv_id}/tasks` | `listing` | H or orchestrator root captain | yes | tool: `tasks` |
+| GET | `/api/conversations/{conv_id}/task` | `detail` | M with `read` | yes | guide: current structured task state, including after compaction |
+| POST | `/api/conversations/{conv_id}/blocked` | `block` | exact task implementer | yes | tool: `blocked` |
+| POST | `/api/conversations/{conv_id}/request-review` | `review` | exact task implementer | yes | tool: `request_review` |
+| POST | `/api/conversations/{conv_id}/review-verdict` | `verdict` | exact task reviewer or captain-policy root captain | yes | tool: `review_verdict` |
+| GET | `/api/settings/auto_clean_task_history` | `get_auto_clean` | H only | no | excluded: global history-retention setting |
+| PUT | `/api/settings/auto_clean_task_history` | `put_auto_clean` | H only | no | excluded: human opt-in to task history cleanup |
+
+Existing archive/retire operations refuse machine requests for task lines, including
+root-captain `force_discard` and recursive retirement containing task descendants.
+Task attachment creation is server-owned; shared-branch overrides do not bypass it.

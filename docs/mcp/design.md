@@ -323,3 +323,30 @@ does not close the separate-commit crash window described in section 6.
   during this work and was emptied before the audit. Its creator and whether it contained auth material
   are unknown. The `isolate/` directory must stay empty. See `docs/lessons.md`, "Runtime homes belong
   only in per-run scratchpads".
+
+## Orchestrator task tools
+
+`partyline/mcp/tools_tasks.py` adds four named tools, filtered by the live actions
+from `/api/capabilities`. Every HTTP handler independently authorizes the caller.
+
+| Tool | Caller | HTTP operation |
+| --- | --- | --- |
+| `create_task(name, goal, implementer, review?)` | Orchestrator root captain | POST `/api/conversations/{root}/tasks` |
+| `tasks()` | Orchestrator root captain | GET `/api/conversations/{root}/tasks` |
+| `blocked(reason)` | Exact assigned implementer attachment | POST `/api/conversations/{task}/blocked` |
+| `request_review(sha?, what, where)` | Exact assigned implementer attachment | POST `/api/conversations/{task}/request-review` |
+| `review_verdict(verdict, findings)` | Exact assigned reviewer, or root captain for captain policy | POST `/api/conversations/{task}/review-verdict` |
+
+The root captain supplies `conv_id` to `review_verdict`; assigned reviewers use
+their home task line. Policies are `none`, `captain` (default), or an exact reviewer
+preset name. Worker tools grant no staffing rights. Reviewer assignment is stored
+and reused across unlimited rounds; reviewer approval is acceptance. Task state
+is structured database state, never parsed from transcript prose. Reports notify
+the root once on approved, done without review, or captain review requested;
+return routing and idle-goal guards do not spend additional root turns during review.
+See [the task lifecycle](../hierarchy.md#orchestrator-captains-and-task-lines).
+
+`blocked(reason)` reports a dependency or other blocker to the root and sets the
+blocked rail status. A new review attempt resumes implementation. A task without
+a peer gets one structured-tool reminder on an unstructured return; returning
+again after consuming it sends a deduplicated stalled report to the root.

@@ -119,7 +119,8 @@ def render_rebrief(db, att: dict, limit: int = REBRIEF_LIMIT, reason: str = "") 
 
         reminder = briefing_pointer(conv_id)
     else:
-        reminder = WORKER_REMINDER
+        from .orchestrator_pack import task_rebrief
+        reminder = task_rebrief(db, att) or WORKER_REMINDER
     # The nudge rides every re-briefing: PreCompact stdout cannot reach the
     # model, so this is where the worker is told to refresh its notes (5.1).
     from .line_notes import NUDGE
