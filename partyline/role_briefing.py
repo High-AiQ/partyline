@@ -14,6 +14,7 @@ from . import features
 from .line_depth import MAX_CAPTAIN_DEPTH
 from .pack_blocks import (
     ASK_FIRST,
+    ORCHESTRATOR,
     EXAMPLE,
     FENCE,
     RECLAIM,
@@ -174,7 +175,7 @@ HEARTBEAT = (
 
 def role_instructions(
     actions: Collection[str], conv_id: str, parent_id: str | None, depth: int = 0,
-    staffed: bool = False,
+    staffed: bool = False, captain_mode: str = "manager_tree",
 ) -> str:
     """Render knowledge for the capabilities actually granted on this line.
 
@@ -186,6 +187,8 @@ def role_instructions(
     """
     if "assign" not in actions:
         return ""  # captains are appointed by a person or a captain, never inferred from chat
+    if captain_mode == "orchestrator":
+        return "\n\n" + ORCHESTRATOR
     root = f"/api/conversations/{conv_id}"
     top = (" At the root that scope is the whole user request and shipping readiness."
            if parent_id is None else "")

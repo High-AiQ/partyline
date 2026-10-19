@@ -11,6 +11,7 @@
   import { dialogs } from "../../state/dialogs.svelte.js";
   import { layout } from "../../state/layout.svelte.js";
   import { isLive, latestJacks } from "../../lib/attachments";
+  import TaskLineHeader from "./TaskLineHeader.svelte";
   import TopicDialog from "../dialogs/TopicDialog.svelte";
   import AccountMenu from "./AccountMenu.svelte";
   import ColumnToggle from "./ColumnToggle.svelte";
@@ -84,6 +85,8 @@
     {liveJacks}
   </button>
 </div>
+
+<TaskLineHeader />
 
 <style>
   @media (min-width: 1201px) {

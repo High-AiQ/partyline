@@ -34,6 +34,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   room.conversation = null;
   room.attachments = [];
+  room.conversations = [];
   room.captains = {};
   document.body.replaceChildren();
 });
@@ -62,7 +63,7 @@ describe("Board captain status", () => {
       if (!(select instanceof HTMLSelectElement)) throw new Error("missing captain select");
       select.value = attachment.id;
       select.dispatchEvent(new Event("change", { bubbles: true }));
-      document.querySelector<HTMLButtonElement>(".line-actions .primary")?.click();
+      document.querySelector<HTMLButtonElement>("#appointCaptain")?.click();
       await vi.waitFor(() => {
         expect(appoint).toHaveBeenCalledWith("line", attachment.id);
         expect(document.querySelector(".captain-badge")).not.toBeNull();
@@ -72,4 +73,28 @@ describe("Board captain status", () => {
       await unmount(board);
     }
   });
+});
+
+it("hides task staffing controls using refreshed rail metadata", async () => {
+  vi.spyOn(hierarchyApi, "lead").mockResolvedValue({ attachment_id: null });
+  room.conversation = conversation;
+  room.conversations = [conversation];
+  const board = mount(Board, { target: document.body, props: { onmention: vi.fn() } });
+  try {
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain("patch in a process");
+    });
+    room.conversations = [{ ...conversation, task_status: "blocked" }];
+    await vi.waitFor(() => {
+      expect(document.body.textContent).not.toContain("patch in a process");
+    });
+    expect(document.querySelector("#jacks")).not.toBeNull();
+    expect(document.querySelector("#attach")).toBeNull();
+    room.conversations = [conversation];
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain("patch in a process");
+    });
+  } finally {
+    await unmount(board);
+  }
 });

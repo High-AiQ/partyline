@@ -178,6 +178,8 @@ def register_conversation_routes(
         conv = db.get_conversation(conv_id)
         if conv["archived_at"]:
             raise HTTPException(409, "restore the line before attaching to it")
+        from .orchestrator_store import refuse_task_attach
+        refuse_task_attach(db, conv_id)
         deny_sideways_attach(db, principal, conv_id)
         # Finding 2.14: a second implementer on a captained, staffed line puts
         # two slices on one branch, which accepts all-or-nothing. A machine

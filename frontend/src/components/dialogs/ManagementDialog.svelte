@@ -1,5 +1,6 @@
 <script lang="ts">
   import Modal from "../Modal.svelte";
+  import CaptainStyleSection from "./CaptainStyleSection.svelte";
   import BridgeSection from "./BridgeSection.svelte";
   import { ApiError, api } from "../../lib/api";
   import { hierarchyApi } from "../../lib/hierarchy-api";
@@ -12,6 +13,7 @@
     close: () => void;
   }
   let { conversation, close }: Props = $props();
+  let managed = $state<Conversation | null>(null);
   let parentId = $state("");
   let captainId = $state("");
   let appointing = $state(false);
@@ -35,6 +37,7 @@
       .conversation(conversation.id)
       .then((detail) => {
         if (cancelled) return;
+        managed = detail.conversation;
         parentId = detail.conversation.parent_id ?? "";
         return hierarchyApi.lead(conversation.id);
       })
@@ -72,6 +75,12 @@
     }
   }
 
+  async function updateStyle(updated: Conversation): Promise<void> {
+    managed = updated;
+    if (room.conversation?.id === updated.id) room.conversation = updated;
+    await room.loadConversations();
+  }
+
   async function saveParent(value: string | null): Promise<void> {
     saving = true;
     error = "";
@@ -95,42 +104,56 @@
   {#if loading}
     <p class="py-5 text-cream-faint">loading management…</p>
   {:else if ready}
-    <div class="line-form">
-      <label for="captain">captain</label>
-      <select id="captain" bind:value={captainId} disabled={appointing}>
-        <option value="">none · no captain on this line</option>
-        {#each room.attachments.filter(isLive) as process (process.id)}
-          <option value={process.id}>{process.name} · {process.adapter}</option>
-        {/each}
-      </select>
-      <div class="line-actions">
-        <button class="primary" type="button" disabled={appointing} onclick={appointCaptain}
-          >appoint captain</button
-        >
-      </div>
-      {#if parentId}
-        <p class="dialog-note">parent line</p>
-        <p class="dialog-note">linked to {parentName} · unlink to make it independent</p>
-        <div class="line-actions">
-          <button type="button" onclick={close}>close</button>
-          <button type="button" disabled={saving} onclick={() => saveParent(null)}>unlink parent</button>
-        </div>
-      {:else}
-        <label for="parentLine">parent line</label>
-        <select id="parentLine" bind:value={parentId} disabled={saving}>
-          <option value="">none · independent line</option>
-          {#each room.conversations.filter((line) => line.id !== conversation.id) as line (line.id)}
-            <option value={line.id}>{line.name}</option>
+    {#if managed && !managed.parent_id}
+      <CaptainStyleSection conversation={managed} onupdate={updateStyle} />
+    {/if}
+    {#if managed?.task_status}
+      <p class="dialog-note">Task staffing and review are managed by its orchestrator.</p>
+    {:else}
+      <div class="line-form">
+        <label for="captain">captain</label>
+        <select id="captain" bind:value={captainId} disabled={appointing}>
+          <option value="">none · no captain on this line</option>
+          {#each room.attachments.filter(isLive) as process (process.id)}
+            <option value={process.id}>{process.name} · {process.adapter}</option>
           {/each}
         </select>
         <div class="line-actions">
-          <button type="button" onclick={close}>close</button>
-          <button class="primary" type="button" disabled={saving} onclick={() => saveParent(parentId || null)}
-            >save parent</button
+          <button
+            id="appointCaptain"
+            class="primary"
+            type="button"
+            disabled={appointing}
+            onclick={appointCaptain}>appoint captain</button
           >
         </div>
-      {/if}
-    </div>
+        {#if parentId}
+          <p class="dialog-note">parent line</p>
+          <p class="dialog-note">linked to {parentName} · unlink to make it independent</p>
+          <div class="line-actions">
+            <button type="button" onclick={close}>close</button>
+            <button type="button" disabled={saving} onclick={() => saveParent(null)}>unlink parent</button>
+          </div>
+        {:else if managed?.captain_mode !== "orchestrator"}
+          <label for="parentLine">parent line</label>
+          <select id="parentLine" bind:value={parentId} disabled={saving}>
+            <option value="">none · independent line</option>
+            {#each room.conversations.filter((line) => line.id !== conversation.id) as line (line.id)}
+              <option value={line.id}>{line.name}</option>
+            {/each}
+          </select>
+          <div class="line-actions">
+            <button type="button" onclick={close}>close</button>
+            <button
+              class="primary"
+              type="button"
+              disabled={saving}
+              onclick={() => saveParent(parentId || null)}>save parent</button
+            >
+          </div>
+        {/if}
+      </div>
+    {/if}
   {:else}
     <button type="button" onclick={close}>close</button>
   {/if}

@@ -2,6 +2,7 @@
   /** Instance settings that affect the next briefing sent to a process. */
   import { onMount } from "svelte";
   import { tick } from "svelte";
+  import TaskHistorySetting from "./TaskHistorySetting.svelte";
   import Modal from "../Modal.svelte";
   import { ApiError } from "../../lib/api";
   import { getGlobalProse, setGlobalProse } from "../../lib/settings-api";
@@ -250,6 +251,7 @@
       </div>
     </form>
   </section>
+  <TaskHistorySetting />
   <p class="dialog-text">
     This text is added after the opening line of every process briefing. Changes apply when a process next
     joins or resumes.
