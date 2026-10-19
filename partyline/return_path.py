@@ -14,6 +14,9 @@ from .mention_relay import LIVE, is_foreign, post_private, reaches_a_process, sp
 from .mentions import addressees, line_addressed, mentioned_names
 from .bridge_delivery import speaks_over_bridge
 from .return_notice import format_notice, is_undeliverable_closing
+from . import orchestrator_stall as task_stall
+from .orchestrator_store import task as line_task
+from .orchestrator_notices import peer as task_peer
 
 # Long enough for a transcript tail to post the turn's last message after the
 # harness receipt, short enough that a manager is not kept waiting.
@@ -72,6 +75,7 @@ class ReturnPath:
         me = self._row(att_id)
         if me is None:
             return
+        task_stall.delivered(self.runtime.db, me, messages)
         if messages:
             self.cancel_check(att_id)
         self.last_said.pop(att_id, None)  # what was said before the wake is not an answer
@@ -81,7 +85,9 @@ class ReturnPath:
             if me["name"].lower() not in addressees(body) | line_addressed(body):
                 continue
             kind = message.get("sender_type")
-            if kind == "agent":
+            task_request = (kind == "system" and not body.startswith("↩ ")
+                            and line_task(self.runtime.db, me["conv_id"]))
+            if kind == "agent" or task_request:
                 origin = message.get("source_conv_id") or me["conv_id"]
                 asker = speaker_attachment(self.runtime.db, origin, message)
                 if asker is not None and asker["id"] != att_id:
@@ -144,11 +150,18 @@ class ReturnPath:
             return
         self.last_said[att_id] = body
         self._release_reached(att_id, body)
-        if reaches_a_process(self.runtime.db, me, mentioned_names(body) | line_addressed(body)):
+        if (not task_stall.candidate(self.runtime.db, me)
+                and reaches_a_process(self.runtime.db, me, mentioned_names(body) | line_addressed(body))):
             self.addressed.add(att_id)
             if task := self.pending.pop(att_id, None):
                 task.cancel()  # the last words handed off after all
                 self._close_speech(att_id)
+
+    def handed_to(self, att_id: str, target_id: str) -> None:
+        """A structured task operation delivered a hand-off, without inventing speech."""
+        self.requesters.get(att_id, {}).pop(target_id, None)
+        self.addressed.add(att_id)
+        self.cancel_check(att_id)
 
     async def turn_ended(self, att_id: str) -> None:
         """The harness closed the turn: deliver what was deferred for this process,
@@ -185,6 +198,8 @@ class ReturnPath:
         owed = bool(self.requesters.get(att_id) or self.askers.get(att_id) or line_captain or parent)
         # A hand-off, or a turn a notice alone woke, carries unreached requesters and
         # sends nothing. Silence after a real wake still owes those requesters.
+        if finisher and task_stall.candidate(self.runtime.db, finisher):
+            handed_off, real, owed = False, True, True
         if handed_off or (not real and not line_captain) or not owed:
             if handed_off or (not real and not line_captain):
                 self._close_speech(att_id)
@@ -239,6 +254,11 @@ class ReturnPath:
         finisher = self._row(att_id)
         if finisher is None:
             return []
+        if line_task(self.runtime.db, finisher["conv_id"]):
+            await task_stall.settle(self.runtime, finisher)
+            peer = task_peer(self.runtime.db, finisher)
+            requesters = {peer['id']: peer} if peer else {}
+            askers = {}
         if said and is_undeliverable_closing(self.runtime.db, finisher, said) and not finisher.get("is_lead"):
             manager = lead_attachment(self.runtime.db, finisher["conv_id"])
             if manager and manager["status"] in LIVE and manager["id"] != att_id:

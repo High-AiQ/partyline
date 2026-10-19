@@ -10,6 +10,9 @@
   import Message from "./Message.svelte";
   import { room } from "../../state/room.svelte.js";
 
+  const line = $derived(
+    room.conversations.find((line) => line.id === room.conversation?.id) ?? room.conversation,
+  );
   let feed = $state<HTMLDivElement | null>(null);
   /** Within this much of the bottom counts as "following". */
   const STICK_PX = 140;
@@ -153,7 +156,11 @@
   {:else if !room.messages.length}
     <div class="empty mt-[12vh] text-center text-[12.5px] text-cream-faint">
       <div class="art mb-2.5 font-serif text-[26px] italic text-cream-dim">the line is open</div>
-      patch in a process on the right, or just start talking
+      {#if line?.task_status}
+        start talking about this task
+      {:else}
+        patch in a process on the right, or just start talking
+      {/if}
     </div>
   {:else}
     {#if room.history.loadingOlder}

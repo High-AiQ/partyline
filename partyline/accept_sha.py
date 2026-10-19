@@ -241,6 +241,11 @@ def register_accept_route(app, runtime) -> None:
         db = runtime.db
         principal = request_principal(request)
         deny_unless(db, principal, conv_id, "accept")
+        from .orchestrator_store import task
+        task_row = task(db, conv_id)
+        if task_row and (task_row['status'] not in ('approved', 'done') or body.allow_descendant
+                         or len(body.sha) != 40 or task_row['sha'] != body.sha):
+            raise HTTPException(409, 'accept only the approved task SHA, without allow_descendant')
         gate_results = None
         if body.run_gates:
             from .line_gates import get_gates, run_line_gates

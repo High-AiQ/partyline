@@ -74,6 +74,9 @@ def register_archive_route(app: FastAPI, presence):
         db = runtime.db
         principal = request_principal(request)
         deny_unless(db, principal, conv_id, "archive")
+        from .orchestrator_store import retained_task
+        if not is_human(principal) and retained_task(db, conv_id, include_children):
+            raise HTTPException(403, "only a person may archive task lines")
         if conv_id in getattr(db, "retiring_lines", set()):
             raise HTTPException(409, "retirement is already in progress")
         conv = db.get_conversation(conv_id)

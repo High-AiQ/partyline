@@ -101,3 +101,19 @@ FENCE = (
     "the parent SHA as the host sees it and how far behind the line is, and POST "
     "{root}/refresh-base re-copies it before merging main."
 )
+
+ORCHESTRATOR = (
+    "## Orchestrator captain pack\n"
+    "Create tasks, read their structured results, merge and push. Do not implement. "
+    "Use create_task(name, goal, implementer, review) to create a task line with exactly one "
+    "implementer; tasks() lists status, reviewer and round count without reading every line. "
+    "Review defaults to captain; alternatives are none or an exact reviewer preset name. "
+    "The server owns reviewer staffing and reuses the same reviewer for every round, without "
+    "a round cap. Review only tasks whose policy is captain, at the reported exact SHA in "
+    "a managed review worktree, and call review_verdict with approve or changes and findings. "
+    "A preset reviewer's structured approval IS acceptance. Read the one terminal task report; "
+    "you always own merging and pushing. Record the accepted SHA before integrating the task. "
+    "Processes detach after shipping. Task lines and their review history stay for the person "
+    "to archive; never retire or archive them yourself. Global auto-clean is off by default "
+    "and only archives approved/done, merged tasks with no live processes."
+)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import uuid
+
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
@@ -17,7 +17,6 @@ from .message_routing import post_identified
 from .hierarchy import (
     HierarchyError,
     child_ids,
-    create_child_conversation,
     lead_attachment,
     parent_id_of,
     set_lead,
@@ -34,10 +33,10 @@ from .hierarchy_contracts import (
     Report,
     ReportIn,
 )
-from . import checkout_health
 from .accept_sha import accepted_note
-from .line_worktree import describe, line_cwd, place_child, placement_root
-from .machine_scope import capability_state, deny_staffed_split, deny_unless, is_human
+from . import checkout_health
+from .line_worktree import line_cwd
+from .machine_scope import capability_state, deny_unless
 from .reports import (
     ReportError,
     acknowledge,
@@ -132,6 +131,13 @@ def hierarchy_router(runtime) -> APIRouter:
     @router.put("/api/conversations/{conv_id}/parent", response_model=ConversationResponse)
     async def link_parent(request: Request, conv_id: str, body: ParentIn):
         deny_unless(db, request_principal(request), conv_id, "link_parent")
+        from .orchestrator_store import task
+        current = db.get_conversation(conv_id)
+        if task(db, conv_id) or (body.parent_id and current.get('captain_mode') == 'orchestrator'):
+            raise HTTPException(409, 'task parents and orchestrator root placement cannot change')
+        if (body.parent_id and
+                (db.get_conversation(body.parent_id) or {}).get('captain_mode') == 'orchestrator'):
+            raise HTTPException(409, 'orchestrator children are created through create_task')
         try:
             conv = set_parent(db, conv_id, body.parent_id)
         except HierarchyError as exc:
@@ -145,60 +151,10 @@ def hierarchy_router(runtime) -> APIRouter:
         status_code=201,
     )
     async def create_child(request: Request, conv_id: str, body: ChildIn):
-        principal = request_principal(request)
-        deny_staffed_split(db, principal, conv_id)  # the loud reason first
-        deny_unless(db, principal, conv_id, "create_child")
-        cwd = line_cwd(db, conv_id)
-        target, target_error = await asyncio.to_thread(placement_root, body.repository)
-        if target_error:
-            raise HTTPException(400, target_error)
-        # The stale-base guard reads the parent's checkout, or the target's when placed there.
-        base_health = await asyncio.to_thread(
-            checkout_health.inspect, cwd if target is None else target)
-        base_ref, base_error = await asyncio.to_thread(
-            checkout_health.child_base_ref, target or cwd, body.base == "upstream",
-            is_human(principal), base_health)
-        if base_error:
-            raise HTTPException(409, base_error)
-        name = body.name.strip() or "untitled"
-        try:
-            conv = create_child_conversation(db, conv_id, str(uuid.uuid4()), name)
-        except HierarchyError as exc:
-            raise _http(exc) from exc
-        placed = place_child(db, conv_id, conv["id"], base=base_ref, root=target)
-        if (base_ref or target) and not placed.get("branch"):
-            # A failed placement must not silently inherit the parent checkout — not
-            # for an explicit upstream base, not for an explicit repository — so the
-            # line is rolled back and the caller is told instead of left seated there.
-            db.delete_conversation(conv["id"])
-            raise HTTPException(
-                409, f"the child worktree could not be created on {base_ref or target}")
-        if where := describe(placed):
-            await post_system_notice(runtime, conv["id"], where, actor=principal)
-        if placed.get("branch"):
-            # The base notice describes the checkout the child actually starts from.
-            if notice := checkout_health.describe(base_health):
-                notice = notice.replace("☏ checkout:", "☏ base checkout:", 1)
-                await post_system_notice(runtime, conv["id"], notice, actor=principal)
-        conv = db.get_conversation(conv["id"])
-        goal, topic = body.goal.strip(), body.topic.strip()
-        if goal or topic:
-            # Born briefed: the goal rides the child manager's wakes, the topic
-            # is standing context for everyone on the child line. Both are
-            # announced there so the hand-off is on the record.
-            db._exec("UPDATE conversations SET goal=?, topic=? WHERE id=?", (goal, topic, conv["id"]))
-            conv = db.get_conversation(conv["id"])
-            who = f"@{principal.name}"
-            if topic:
-                await post_system_notice(
-                    runtime, conv["id"], f"☏ topic set by {who}: {topic}", actor=principal)
-            if goal:
-                await post_system_notice(
-                    runtime, conv["id"], f"☏ goal set by {who}: {goal}", actor=principal)
-        await runtime.broadcast_all(ConversationsChangedEvent())
-        return ChildCreatedResponse(
-            conversation=ConversationResponse.model_validate(conv)
-        )
+        from .child_create import create_child as create
+        if (db.get_conversation(conv_id) or {}).get("captain_mode") == "orchestrator":
+            raise HTTPException(409, "use create_task for an orchestrator root")
+        return await create(runtime, request_principal(request), conv_id, body)
 
     @router.get(
         "/api/conversations/{conv_id}/children",

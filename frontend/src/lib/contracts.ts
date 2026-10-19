@@ -2,6 +2,9 @@
 
 import { z } from "zod";
 import { AttachmentSchema } from "./attachment-contracts";
+import { ConversationSchema } from "./conversation-contracts";
+export { ConversationSchema } from "./conversation-contracts";
+export type { Conversation } from "./conversation-contracts";
 import { ReactionResponseSchema } from "./reaction-contracts";
 
 export { AttachmentSchema, AttachmentStatusSchema, CwdGitStateSchema } from "./attachment-contracts";
@@ -15,18 +18,6 @@ export type SenderType = z.infer<typeof SenderTypeSchema>;
 // be None on the server must read omitted and null as the same fact — `.nullable()`
 // alone rejects the omitted spelling, which surfaced as "client/server protocol
 // mismatch" when a fresh attachment (no cli_session yet) arrived. Absent means null.
-
-export const ConversationSchema = z.object({
-  id: z.string(),
-  parent_id: z.string().nullable().optional(),
-  name: z.string(),
-  topic: z.string(),
-  cwd: z.string().nullable().optional(),
-  created_at: z.number(),
-  archived_at: z.number().nullable().default(null),
-  live_count: z.number().int().nonnegative().default(0),
-});
-export type Conversation = z.infer<typeof ConversationSchema>;
 
 export const ImageVariantSchema = z.object({
   mime: z.string(),

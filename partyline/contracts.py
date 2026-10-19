@@ -1,6 +1,8 @@
 """Named HTTP and WebSocket contracts shared by the server and runtime."""
 from typing import Any, Literal
 
+from .conversation_contracts import ConversationResponse  # noqa: F401 (public re-export)
+
 from pydantic import BaseModel, ConfigDict, Field
 from .memory_contracts import MemoryEvent
 from .attachment_contracts import AttachmentResponse
@@ -77,18 +79,6 @@ class AdapterMetadataResponse(BaseModel):
     overrides_bundled: bool = False
     update_command: list[str] | None = None
     compact_paste: str | None = None
-
-
-class ConversationResponse(BaseModel):
-    id: str
-    name: str
-    created_at: float
-    topic: str = ""
-    goal: str = ""
-    cwd: str | None = None
-    archived_at: float | None = None
-    live_count: int = Field(default=0, ge=0)
-    parent_id: str | None = None
 
 
 class MessageResponse(BaseModel):
