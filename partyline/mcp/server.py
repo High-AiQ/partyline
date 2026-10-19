@@ -10,7 +10,7 @@ import threading
 from .. import __version__
 from .client import ApiError, PartylineClient
 from .render import render
-from . import tools_captain, tools_core
+from . import tools_captain, tools_core, tools_tasks
 from .validation import validate_arguments
 
 logger = logging.getLogger(__name__)
@@ -78,7 +78,8 @@ class MCPServer:
             try:
                 state = self._state()
                 self._state_signature = self._signature(state)
-                tools = tools_core.tool_list(state) + tools_captain.tool_list(state)
+                tools = (tools_core.tool_list(state) + tools_captain.tool_list(state)
+                         + tools_tasks.tool_list(state))
                 return self.response(ident, {"tools": tools})
             except ApiError as exc:
                 self._revoked = self._revoked or "HTTP 401" in str(exc)
@@ -105,7 +106,10 @@ class MCPServer:
                     self.send({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
             core_names = {tool["name"] for tool in tools_core.tool_list(state)}
             captain_names = {tool["name"] for tool in tools_captain.tool_list(state)}
-            if name in core_names:
+            task_names = {tool["name"] for tool in tools_tasks.tool_list(state)}
+            if name in task_names:
+                value = tools_tasks.call(self.client, name, args, state)
+            elif name in core_names:
                 schema = next(tool["inputSchema"] for tool in tools_core.tool_list(state)
                               if tool["name"] == name)
                 validate_arguments(schema, args)

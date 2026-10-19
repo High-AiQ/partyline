@@ -1,5 +1,16 @@
 # Lessons: the false-assumptions ledger
 
+## Frontend workers share the attachment's memory budget
+
+Running frontend verification alone was assumed to fit an attachment's 4 GB
+budget. Vitest sized its worker pool from host resources and reached an 89%
+attachment-budget warning even without the backend suite running. Limit its
+fork and thread pools to two workers with `VITEST_MAX_FORKS=2`,
+`VITEST_MIN_FORKS=1`, `VITEST_MAX_THREADS=2` and `VITEST_MIN_THREADS=1` when
+running `npm run verify` inside an attachment. Keep backend gates and browser
+captures serial with frontend verification. The bounded run passed all 491
+tests; raising the attachment budget was unnecessary.
+
 ## Clean auxiliary checkouts and working snapshots do not cover every Git copy
 
 Forced retirement assumed a clean auxiliary checkout was disposable and `git add -A`

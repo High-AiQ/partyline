@@ -7,6 +7,7 @@
    * actions lit, so the ⋯ does not vanish out from under the pointer on the way
    * down to the menu.
    */
+  import TaskStatusChip from "./TaskStatusChip.svelte";
   import LineMenu from "./LineMenu.svelte";
   import { orderedLines } from "../../lib/line-hierarchy";
   import { toggleSelection } from "../../lib/bulk-select";
@@ -105,7 +106,10 @@
             checked={selected.has(conversation.id)}
           />{/if}
         {#if depth > 0}<span class="text-cream-faint" aria-label="child line">↳</span>{/if}
-        <span class="conv-name min-w-0 truncate">{conversation.name}</span>
+        <span class="min-w-0 flex flex-col items-start gap-1">
+          <span class="conv-name w-full min-w-0 truncate">{conversation.name}</span>
+          <TaskStatusChip status={conversation.task_status} round={conversation.task_round} />
+        </span>
         {#if conversation.live_count > 0}
           <span
             class="line-live inline-flex flex-none"

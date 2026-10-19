@@ -114,6 +114,9 @@ class GoalStallGuard:
         conv = self.runtime.db.get_conversation(conv_id)
         if conv is None or not str(conv.get("goal") or "").strip():
             return
+        from .orchestrator_store import task
+        if conv.get('captain_mode') == 'orchestrator' or task(self.runtime.db, conv_id):
+            return  # structured task reports own the orchestrator's wake budget
         actor = self.runtime.db.get_attachment(actor_id) if actor_id else None
         if actor and actor["conv_id"] == conv_id and actor.get("is_lead"):
             return

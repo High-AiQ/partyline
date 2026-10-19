@@ -139,3 +139,20 @@ Object-shaped values that cross a function, component, store, REST, or wire
 boundary need a named interface, type, or schema. Local object literals are
 normal implementation code; anonymous object *contracts* are what is banned.
 
+
+Orchestrator controls live in `CaptainStyleSection` (root-line management only)
+and `TaskHistorySetting` (beside the resource budget). Line responses carry derived
+task status, round and participant names, shared by `TaskStatusChip` and
+`TaskLineHeader`. The header reads the refreshed rail entry so a task verdict
+updates it through `conversations_changed`, including after reconnect; it needs
+no per-task polling. Captain-style and retention writes use named Zod contracts
+in `orchestrator-api.ts`; failed retention writes restore the previous toggle.
+
+Inside an attached process, bound Vitest's worker pools to stay within the
+attachment memory budget: `VITEST_MAX_FORKS=2 VITEST_MIN_FORKS=1
+VITEST_MAX_THREADS=2 VITEST_MIN_THREADS=1 npm run verify` (one shell command).
+Run it serially with backend gates and browser captures; host CPU count does
+not describe the attachment's available memory.
+
+Task rows also show `blocked` when the implementer reports a blocker. Task lines
+hide the manual process attachment panel because their staffing is server-owned.

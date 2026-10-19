@@ -28,6 +28,7 @@ Capability = Literal[
     "appoint_lead",
     "archive",
     "link_parent",
+    "create_task", "tasks", "request_review", "review_verdict", "blocked",
 ]
 
 ALL_CAPABILITIES: tuple[Capability, ...] = (
@@ -44,6 +45,7 @@ ALL_CAPABILITIES: tuple[Capability, ...] = (
     "appoint_lead",
     "archive",
     "link_parent",
+    "create_task", "tasks", "request_review", "review_verdict", "blocked",
 )
 
 
@@ -93,6 +95,18 @@ def allows(db: Db, principal: Principal, conv_id: str, capability: Capability) -
     home = principal.conv_id
     conv = db.get_conversation(conv_id)
     if conv is None:
+        return False
+    from .orchestrator_store import task, task_actions
+    task_row = task(db, conv_id)
+    if capability in ("request_review", "review_verdict", "blocked"):
+        if (capability == "review_verdict" and conv_id == home and principal.is_lead
+                and conv.get('captain_mode', 'manager_tree') == 'orchestrator'):
+            return True
+        return capability in task_actions(db, principal, conv_id)
+    if capability in ("create_task", "tasks"):
+        return (conv_id == home and principal.is_lead and conv['parent_id'] is None
+                and conv.get('captain_mode', 'manager_tree') == 'orchestrator')
+    if task_row and capability in ("archive", "attach", "appoint_lead", "create_child", "report", "notify"):
         return False
     if capability == "archive":
         # A captain may retire a descendant line it accepted, never itself or
@@ -255,6 +269,10 @@ def capability_state(db: Db, principal: Principal, conv_id: str | None = None) -
         role = "lead"
     else:
         role = "implementer"
+    from .orchestrator_store import task
+    task_row = task(db, principal.conv_id) if principal.conv_id else None
+    if task_row and task_row["reviewer_id"] == principal.attachment_id:
+        role = "reviewer"
     actions = [
         cap
         for cap in ALL_CAPABILITIES

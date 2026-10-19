@@ -95,6 +95,7 @@ describe("management dialog parent control", () => {
         expect(document.body.textContent).toContain("unlink parent");
       });
       expect(document.querySelector("#parentLine")).toBeNull();
+      expect(document.querySelector("#captainStyle")).toBeNull();
       expect([...document.querySelectorAll("button")].some((b) => b.textContent === "save parent")).toBe(
         false,
       );

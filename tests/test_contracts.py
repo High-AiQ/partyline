@@ -31,6 +31,13 @@ class ContractTest(unittest.TestCase):
         self.assertEqual(
             conversation.model_dump(),
             {
+                "captain_mode": "manager_tree",
+                "default_review_policy": "captain",
+                "task_status": None,
+                "task_round": None,
+                "task_root_name": None,
+                "task_implementer_name": None,
+                "task_reviewer_name": None,
                 "id": "line",
                 "name": "Line",
                 "created_at": 12.5,

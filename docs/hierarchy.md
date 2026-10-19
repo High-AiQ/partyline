@@ -931,3 +931,69 @@ full contract is `docs/contracts/line-bridge.md`; the code is
 | --- | --- |
 | Let a process ask its people in plain text to open a bridge | Open or close a bridge from a process |
 | Report anything people need in a normal message | Expect people to see bridge traffic in the chat |
+
+## Orchestrator captains and task lines
+
+A person can choose `captain_mode: "orchestrator"` on a root line using
+`PUT /api/conversations/<root>/captain-style`. The existing `manager_tree` mode
+remains the default. A child cannot be an orchestrator, and style cannot change
+while children exist. The root's `default_review_policy` defaults to `captain`;
+it may also be `none` or an exact reviewer preset name.
+
+An orchestrator creates tasks through `create_task(name, goal, implementer, review)`.
+The server creates each task line in a managed worktree, attaches exactly one
+implementer from the named preset and briefs it. Direct attach, including the
+shared-branch override, cannot add an implementer. Task lines have no subcaptain
+and cannot split further. `tasks()` returns every task's policy, status, round,
+assigned attachment IDs, SHA, checkout path and merge state without reading chat.
+GET `/api/conversations/<task>/task` reads one task; task participants retain their
+role, current review SHA and request after compaction.
+
+The implementer calls `request_review(sha?, what, where)`. Without a SHA the server
+uses the task's current fenced tip. Policies determine the next action:
+
+- `none`: mark the task done and notify the root once.
+- `captain`: create an exact-SHA managed review checkout and notify the root once.
+  The root reviews and calls `review_verdict` with the task's `conv_id`.
+- A reviewer preset: the server reserves a different reviewer attachment, creates
+  the exact-SHA review checkout, and starts the reviewer there. The implementer
+  cannot select, attach or replace the reviewer. The same attachment and CLI
+  session are resumed across rounds; launch failures without a session retry a
+  fresh PTY under the same attachment identity. Reviewers never implement or push.
+
+The reviewer's structured `review_verdict(approve | changes, findings)` drives the
+state machine; prose is never a verdict. Changes wake the implementer and advance
+the round count. There is no round cap. Approval marks the task approved and sends
+one root report. **Reviewer approval is acceptance in orchestrator mode.** This is
+a deliberate exception to the manager-tree rule that acceptance cannot be delegated.
+The root reviews only captain-policy tasks and always owns merging and pushing.
+`accept` records only the approved task SHA and refuses `allow_descendant` for tasks.
+
+While review work proceeds, implicit return notices stay between implementer and
+reviewer. A return notice does not create another return debt. The general idle-goal
+guard does not wake orchestrators or task lines; structured terminal reports own
+that wake path. Failed reviewer admission tells the implementer and root explicitly
+and leaves the request retryable. Reviewers are ordinary managed PTY attachments,
+so fleet restart plans include them alongside implementers. Terminal reports are
+stored once per task and notification delivery is retried if the root is unavailable.
+
+Task history is retained: machines, including the root captain with the descendant
+retirement override, cannot archive or retire task lines, including recursively.
+After the approved SHA has been merged into the root's current checkout and the
+whole task worktree is clean and merged, idle implementer/reviewer processes detach.
+People may archive task lines. The optional global
+[`auto_clean_task_history` setting](resource-budget.md#task-history-retention)
+archives merged, approved/done task lines once no process is live and removes their
+managed worktrees. It is disabled by default.
+
+An implementer that cannot proceed calls `blocked(reason)`. This sets the task's
+status to `blocked` and sends a deduplicated notify report to its root. Calling
+`request_review` resumes implementation and clears the blocked state before the
+review attempt. When an implementer returns without a structured result and has
+no reviewer peer, the server rings it once to call `request_review` or
+`blocked(reason)`. If the turn consuming that reminder also returns without
+either, the server sends one `stalled` report to the root. Duplicate turn receipts
+and restarts do not repeat the reminder or escalation. The rail shows blocked
+tasks, and task lines hide manual staffing controls because staffing is owned by
+the server. Notify reports follow the existing inbox coalescing and acknowledgement
+rules: a new task state updates an outstanding report rather than ringing again.

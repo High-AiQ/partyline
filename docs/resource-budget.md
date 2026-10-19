@@ -225,3 +225,22 @@ request for its own cap. Only one memory request can be pending on a line at a
 time; further requests receive HTTP 409 until it is approved or declined. The
 warning threshold and captain ceiling are people-only settings in the resource
 budget dialog.
+
+## Task history retention
+
+`auto_clean_task_history` is a global boolean preference, disabled by default.
+Read or change it as a person with GET or PUT
+`/api/settings/auto_clean_task_history`; PUT accepts `{"enabled": true}` or
+`{"enabled": false}`. The Settings control belongs beside the resource budget.
+Machine credentials cannot change it.
+
+With retention enabled (the default), orchestrator task lines and review history
+stay visible after shipping. Idle task processes detach once the approved/done SHA
+is merged into the root checkout and the whole task worktree is clean and merged.
+Machines cannot archive task lines, including the root captain's retirement override.
+
+Enabling auto-clean lets the server archive approved/done, merged task lines after
+all processes are inactive, and remove their managed task, review and scratch
+worktrees. The maintenance loop retries every 30 seconds and resumes after restart.
+Unmerged, dirty, still-running or unverifiable work is retained. Archiving preserves
+the transcript and structured task review record; permanent purge remains human-only.

@@ -101,6 +101,9 @@ def _require_stopped(att):
 
 async def create_fresh_record(db, expected, body):
     """Reserve the handle before awaiting spawn; leave the old session on failure."""
+    from .orchestrator_store import attachment_task
+    if attachment_task(db, expected["id"]):
+        raise HTTPException(409, "task attachments retain their identity; resume the stopped process")
     existing = db.get_attachment(expected["id"])
     if existing is not None:
         # Ahead of the locked block: the tree walk takes db.lock per query,

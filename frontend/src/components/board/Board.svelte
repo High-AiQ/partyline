@@ -14,6 +14,9 @@
 
   let { onmention }: Props = $props();
 
+  const line = $derived(
+    room.conversations.find((line) => line.id === room.conversation?.id) ?? room.conversation,
+  );
   const jacks = $derived(latestJacks(room.attachments));
   let captainRequest = 0;
   const captainId = $derived(room.captains[room.conversation?.id ?? ""] ?? null);
@@ -59,8 +62,10 @@
 
   <PinsAccordion />
 
-  <h3 class="font-serif italic font-normal text-[17px] text-cream-dim px-[18px] pt-5 pb-2.5">
-    patch in a process
-  </h3>
-  <AttachForm />
+  {#if !line?.task_status}
+    <h3 class="font-serif italic font-normal text-[17px] text-cream-dim px-[18px] pt-5 pb-2.5">
+      patch in a process
+    </h3>
+    <AttachForm />
+  {/if}
 </aside>

@@ -46,6 +46,7 @@ class RoleState(NamedTuple):
     depth: int = 0
     staffed: bool = False
     captained: bool = False
+    captain_mode: str = "manager_tree"
 
 
 def current_role(db, attachment_id: str) -> RoleState:
@@ -62,13 +63,15 @@ def current_role(db, attachment_id: str) -> RoleState:
     return RoleState(state.role, att["conv_id"], state.parent_id, tuple(state.actions),
                      line_depth(db, att["conv_id"]),
                      staffed_split_reason(db, att["conv_id"]) is not None,
-                     has_captain(db, att["conv_id"]))
+                     has_captain(db, att["conv_id"]),
+                     db.get_conversation(att["conv_id"]).get("captain_mode", "manager_tree"))
 
 
 def _instructions(state: RoleState, db=None) -> str:
     """The pack for a state: the captain's, else the worker's when a captain is live."""
-    pack = role_instructions(
-        state.actions, state.conv_id, state.parent_id, state.depth, state.staffed
+    from .orchestrator_pack import task_pack
+    pack = task_pack(db, state.conv_id, state.role) or role_instructions(
+        state.actions, state.conv_id, state.parent_id, state.depth, state.staffed, state.captain_mode
     ) or worker_instructions(state.captained)
     if state.role == "lead" and state.parent_id is None and hasattr(db, "get_setting"):
         from .resource_budget import snapshot
@@ -114,10 +117,11 @@ def bind_role_delivery(db, att: dict, runtime=None) -> None:
         worker_was = previous is not None and previous.role != "lead" and previous.captained
         if current.role != "lead":
             last_goal = last_staffing = last_handoff = None
+        mode_transition = current.captain_mode != previous.captain_mode
         if current != previous:
             demoted = previous is not None and previous.role == "lead" and current.role != "lead"
             previous = current
-            if captain_transition or (worker_now and worker_transition):
+            if captain_transition or (worker_now and worker_transition) or mode_transition:
                 update = _instructions(current, db)
             if demoted and update:
                 update += ("\nYour current role is ordinary participant, not captain. "
