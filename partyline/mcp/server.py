@@ -15,7 +15,6 @@ from .validation import validate_arguments
 
 logger = logging.getLogger(__name__)
 MAX_LINE = 1_000_000
-POLL_SECONDS = 5
 
 
 class MCPServer:
@@ -23,8 +22,6 @@ class MCPServer:
         self.client = client
         self.output = output or sys.stdout
         self._write_lock = threading.Lock()
-        self._stop = threading.Event()
-        self._poller = None
         self._state_signature = None
         self._revoked = False
 
@@ -68,7 +65,6 @@ class MCPServer:
         if not isinstance(params, dict):
             return self.response(ident, error={"code": -32602, "message": "invalid params"})
         if method == "initialize":
-            self._start_poller()
             return self.response(ident, {
                 "protocolVersion": params.get("protocolVersion", "2024-11-05"),
                 "capabilities": {"tools": {"listChanged": True}},
@@ -101,6 +97,12 @@ class MCPServer:
             return self.response(ident, error={"code": -32602, "message": "invalid tool arguments"})
         try:
             state = self._state()  # Each call checks the live attachment capability.
+            signature = self._signature(state)
+            if signature != self._state_signature:
+                changed = self._state_signature is not None
+                self._state_signature = signature
+                if changed:
+                    self.send({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
             core_names = {tool["name"] for tool in tools_core.tool_list(state)}
             captain_names = {tool["name"] for tool in tools_captain.tool_list(state)}
             if name in core_names:
@@ -127,55 +129,25 @@ class MCPServer:
                 "content": [{"type": "text", "text": "Partyline MCP operation failed"}],
                 "isError": True})
 
-    def _start_poller(self):
-        if self._poller is None:
-            self._poller = threading.Thread(target=self._poll, name="partyline-mcp-capabilities", daemon=True)
-            self._poller.start()
-
-    def _poll(self):
-        while not self._stop.wait(POLL_SECONDS):
-            try:
-                state = self.client.capabilities()
-                signature = self._signature(state)
-                if self._state_signature is not None and signature != self._state_signature:
-                    self._state_signature = signature
-                    self.send({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
-            except ApiError as exc:
-                self._revoked = self._revoked or "HTTP 401" in str(exc)
-                if self._revoked:
-                    self.send({
-                        "jsonrpc": "2.0", "method": "notifications/message",
-                        "params": {"level": "error",
-                                   "data": "Partyline attachment credential is no longer valid"}})
-                    return
-                logger.warning("MCP capability poll failed: %s", exc)
-            except Exception:
-                logger.exception("MCP capability poll failed")
-
     def run(self, input_stream=None):
         stream = input_stream or sys.stdin
-        try:
-            while True:
-                line = stream.readline(MAX_LINE + 1)
-                if not line:
-                    break
-                if len(line) > MAX_LINE:
-                    self.response(None, error={"code": -32700, "message": "request exceeds MCP input limit"})
-                    break
-                try:
-                    message = json.loads(line)
-                except RecursionError:
-                    self.response(None, error={
-                        "code": -32700, "message": "request nesting exceeds parser limit"})
-                    continue
-                except ValueError:
-                    self.response(None, error={"code": -32700, "message": "parse error"})
-                    continue
-                self.handle(message)
-        finally:
-            self._stop.set()
-            if self._poller and self._poller.is_alive():
-                self._poller.join(timeout=1)
+        while True:
+            line = stream.readline(MAX_LINE + 1)
+            if not line:
+                break
+            if len(line) > MAX_LINE:
+                self.response(None, error={"code": -32700, "message": "request exceeds MCP input limit"})
+                break
+            try:
+                message = json.loads(line)
+            except RecursionError:
+                self.response(None, error={
+                    "code": -32700, "message": "request nesting exceeds parser limit"})
+                continue
+            except ValueError:
+                self.response(None, error={"code": -32700, "message": "parse error"})
+                continue
+            self.handle(message)
 
 
 def main():
