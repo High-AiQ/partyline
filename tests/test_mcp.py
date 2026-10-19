@@ -1,4 +1,5 @@
 import io
+import threading
 import json
 import os
 from pathlib import Path
@@ -564,14 +565,11 @@ class RenderAndServerTests(unittest.TestCase):
                            "conv_id": "home", "body": "dup", "client_key": "k"}}})
         called = json.loads(output.getvalue().splitlines()[2])
         self.assertTrue(called["result"]["isError"])
-        server._stop.set()
         server.run(io.StringIO())
-        self.assertTrue(server._stop.is_set())
 
     def test_rpc_validation_notifications_and_unknown_method(self):
         output = io.StringIO()
         server = MCPServer(FakeClient(), output)
-        server._start_poller = lambda: None
         server.handle({"jsonrpc": "1.0", "id": 1, "method": "ping"})
         server.handle({"jsonrpc": "2.0", "id": 2, "method": "unknown"})
         server.handle({"jsonrpc": "2.0", "id": 3, "method": "ping", "params": []})
@@ -586,12 +584,10 @@ class RenderAndServerTests(unittest.TestCase):
         self.assertEqual(rows[2]["error"]["code"], -32602)
         self.assertEqual(rows[3]["result"]["protocolVersion"], "2025-11-25")
         self.assertEqual(rows[4]["error"]["code"], -32602)
-        server._stop.set()
 
     def test_rpc_rejects_non_object_missing_method_and_pre_revoked_calls(self):
         output = io.StringIO()
         server = MCPServer(FakeClient(), output)
-        server._start_poller = lambda: None
         server.handle(None)
         server.handle({"jsonrpc": "2.0", "id": 1})
         rows = [json.loads(line) for line in output.getvalue().splitlines()]
@@ -611,25 +607,11 @@ class RenderAndServerTests(unittest.TestCase):
         self.assertFalse(server._revoked)
         self.assertIn("HTTP 403", output.getvalue())
 
-    def test_poller_handles_initial_state_and_transient_failures(self):
-        class StopAfterOne:
-            def __init__(self):
-                self.calls = 0
-
-            def wait(self, _seconds):
-                self.calls += 1
-                return self.calls > 1
-
-        client = FakeClient()
-        output = io.StringIO()
-        server = MCPServer(client, output)
-        server._stop = StopAfterOne()
-        server._poll()
-        self.assertEqual(output.getvalue(), "")
-        client.capabilities = lambda conv_id=None: (_ for _ in ()).throw(RuntimeError("transient"))
-        server._stop = StopAfterOne()
-        server._poll()
-        self.assertEqual(output.getvalue(), "")
+    def test_initialize_starts_no_background_thread(self):
+        server = MCPServer(FakeClient(), io.StringIO())
+        before = threading.active_count()
+        server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+        self.assertEqual(threading.active_count(), before)
 
     def test_tool_call_invalid_arguments_and_generic_failure_are_structured(self):
         client = FakeClient()
@@ -645,29 +627,19 @@ class RenderAndServerTests(unittest.TestCase):
         self.assertEqual(second["result"]["content"][0]["text"], "Partyline MCP operation failed")
         self.assertNotIn("secret detail", server.output.getvalue())
 
-    def test_capability_poll_notifies_once_for_change_and_reports_revocation(self):
-        class StopAfterOne:
-            def __init__(self):
-                self.calls = 0
-
-            def wait(self, _seconds):
-                self.calls += 1
-                return self.calls > 1
-
+    def test_call_after_role_change_sends_list_changed_once(self):
         client = FakeClient(actions=("read",))
         output = io.StringIO()
         server = MCPServer(client, output)
-        server._state_signature = server._signature(client.state)
+        server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        call = {"jsonrpc": "2.0", "method": "tools/call",
+                "params": {"name": "guide", "arguments": {}}}
+        server.handle({**call, "id": 2})
+        self.assertNotIn("list_changed", output.getvalue())
         client.state["actions"].append("assign")
-        server._stop = StopAfterOne()
-        server._poll()
-        self.assertIn("notifications/tools/list_changed", output.getvalue())
-        denied = MCPServer(client, io.StringIO())
-        denied._stop = StopAfterOne()
-        client.capabilities = lambda conv_id=None: (_ for _ in ()).throw(ApiError("Partyline HTTP 401"))
-        denied._poll()
-        self.assertTrue(denied._revoked)
-        self.assertIn("notifications/message", denied.output.getvalue())
+        server.handle({**call, "id": 3})
+        server.handle({**call, "id": 4})
+        self.assertEqual(output.getvalue().count("notifications/tools/list_changed"), 1)
 
     def test_demotion_and_promotion_change_catalog(self):
         client = FakeClient(actions=("read", "write"))

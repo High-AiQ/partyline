@@ -19,8 +19,8 @@ Route-level dispositions are in [`api-inventory.md`](api-inventory.md); per-clie
   has no MCP SDK dependency. It answers `initialize` (advertising `tools.listChanged`), `ping`,
   `tools/list`, and `tools/call`. It accepts `notifications/initialized` and ignores other
   notifications. It ends when stdin closes, or on the first input line longer than 1,000,000 bytes.
-- Two threads run: the request loop, and a capability poller that wakes every 5 s (`POLL_SECONDS`,
-  `partyline/mcp/server.py`). Every module in `partyline/mcp/` and `partyline/mcp_attach.py` is at or
+- One thread runs: the request loop. There are no timers or background threads, so an idle server
+  makes no requests. Every module in `partyline/mcp/` and `partyline/mcp_attach.py` is at or
   under 300 lines.
 - The server calls the existing HTTP API through `PartylineClient` (`partyline/mcp/client.py`) with
   the attachment's own machine credential. It never uses a human JWT.
@@ -114,10 +114,11 @@ are in its Decisions section (1 to 14):
 
 - `tools/list` is recomputed from `/api/capabilities` on every call. Each listing records a signature
   (kind, role, conversation, attachment, lead flag, sorted actions).
-- The poller reads capabilities every 5 s. It sends `notifications/tools/list_changed` only when a
-  listing has recorded a signature and the new signature differs. A transient poll error is logged
-  and the poll retries. A rejected credential (HTTP 401) sends a `notifications/message` error
-  ("Partyline attachment credential is no longer valid") and the poller stops.
+- Every `tools/call` already fetches capabilities. If the signature differs from the recorded one, the
+  server records the new signature and sends `notifications/tools/list_changed` once, then carries on
+  with the call. It sends nothing before a listing has recorded a signature. A rejected credential
+  (HTTP 401) refuses every later request with a `notifications/message` error ("Partyline attachment credential
+  is no longer valid").
 - **Correctness never depends on refresh.** `captain` and `guide` are in the first listing for every
   attachment. A worker promoted mid-session on a client that never re-lists can still act through
   `captain(op, args)`, and it gets a structured denial when it is not permitted.
@@ -274,9 +275,10 @@ does not close the separate-commit crash window described in section 6.
 - **The fixture does not log its outgoing notification.** Its log records incoming methods and tool
   calls. The send itself is shown by the fixture code (`_notify_changed`, two seconds after the first
   listing), and the re-list in the log is the observable effect.
-- **Polling, not push.** Machines have no chat push feed in this slice (inventory decision 9). MCP
-  does not push either: the poller checks capabilities every 5 s and sends `list_changed` on a change.
-  A client that does not re-list sees a change only on its next call. A cached named tool is refused
+- **Refresh on calls, not push or polling.** Machines have no chat push feed in this slice (inventory
+  decision 9), and an idle poll costs a request per process every few seconds. The server checks the
+  signature on each call and sends `list_changed` then. A client that does not call sees a change only
+  on its next call. A cached named tool is refused
   on that call, so reauthorization holds even without a re-list.
 - **A dead token stays on disk after detach.** The connection file keeps the token that the detach
   made unusable (section 7) until the next resume rewrites it or the record is removed. The token is
