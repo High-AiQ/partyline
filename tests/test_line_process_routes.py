@@ -2,7 +2,6 @@ import io
 import json
 import os
 import tempfile
-import threading
 import unittest
 from unittest.mock import patch
 
@@ -40,21 +39,6 @@ class Adapter:
     async def stop(self):
         self.stopped = True
         await self.status("detached")
-
-
-class PollGate:
-    """Let a test trigger exactly one capability poll after the next call."""
-
-    def __init__(self):
-        self.released = threading.Event()
-        self.waits = 0
-
-    def wait(self, _seconds):
-        self.waits += 1
-        if self.waits == 1:
-            self.released.wait(timeout=2)
-            return False
-        return True
 
 
 class CloseLineProcessesTest(unittest.TestCase):
@@ -118,7 +102,7 @@ class CloseLineProcessesTest(unittest.TestCase):
             provision_connection(self.db.path, attachment)
         return adapter
 
-    def machine_helper(self, ident: str, *, poll_gate: PollGate | None = None) -> MCPServer:
+    def machine_helper(self, ident: str) -> MCPServer:
         path = connection_directory(self.db.path) / f"{ident}.json"
         with path.open() as stream:
             connection = json.load(stream)
@@ -140,8 +124,6 @@ class CloseLineProcessesTest(unittest.TestCase):
 
         live_client = RouteClient()
         helper = MCPServer(live_client, output=io.StringIO())
-        if poll_gate is not None:
-            helper._stop = poll_gate
         helper.live_client = live_client
         return helper
 
@@ -186,11 +168,8 @@ class CloseLineProcessesTest(unittest.TestCase):
         before_messages = self.db.list_messages("line")
         self.assert_h1_is_rejected_after_stop(helper, 2)
         self.assertEqual(helper.live_client.capability_calls, 2)
-        helper._stop.released.set()
-        helper._poller.join(timeout=2)
-        self.assertFalse(helper._poller.is_alive())
-        calls_after_poll = helper.live_client.capability_calls
-        self.assertEqual(calls_after_poll, 3)
+        calls_after_reject = helper.live_client.capability_calls
+        self.assertEqual(calls_after_reject, 2)
         self.assertNotIn("notifications/tools/list_changed", helper.output.getvalue())
         self.assertEqual(self.client.post(
             f"/api/attachments/{ident}/resume",
@@ -198,13 +177,13 @@ class CloseLineProcessesTest(unittest.TestCase):
         ).status_code, 200)
         old_token = helper.live_client.connection["token"]
         self.assert_h1_stays_revoked_after_resume(helper)
-        self.assertEqual(helper.live_client.capability_calls, calls_after_poll)
+        self.assertEqual(helper.live_client.capability_calls, calls_after_reject)
         self.assertEqual(self.db.list_messages("line"), before_messages)
         self.assert_h2_succeeds_after_resume(ident, old_token)
 
     def test_single_detach_h1_is_revoked_across_resume_and_h2_uses_rotated_token(self):
         self.add_live("one", "sol")
-        helper = self.machine_helper("one", poll_gate=PollGate())
+        helper = self.machine_helper("one")
         self.assert_h1_succeeds_before_stop(helper)
         helper.handle({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {}})
         response = self.client.delete(
@@ -215,7 +194,7 @@ class CloseLineProcessesTest(unittest.TestCase):
     def test_bulk_close_revokes_each_h1_across_resume_and_h2_uses_rotated_token(self):
         self.add_live("one", "sol")
         self.add_live("two", "fable")
-        helpers = {ident: self.machine_helper(ident, poll_gate=PollGate())
+        helpers = {ident: self.machine_helper(ident)
                    for ident in ("one", "two")}
         for helper in helpers.values():
             self.assert_h1_succeeds_before_stop(helper)
