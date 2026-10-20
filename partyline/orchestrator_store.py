@@ -5,10 +5,17 @@ import json
 from fastapi import HTTPException
 
 
-def _parsed(row):
+def _handle(db, ident):
+    att = db.get_attachment(ident) if ident and hasattr(db, 'get_attachment') else None
+    return att['name'] if att else None
+
+
+def _parsed(row, db=None):
     if row is None:
         return None
     record = dict(row)
+    record['implementer_handle'] = _handle(db, record.get('implementer_id'))
+    record['reviewer_handle'] = _handle(db, record.get('reviewer_id'))
     try:
         record['repositories'] = json.loads(record.get('repositories') or '[]')
     except ValueError:
@@ -19,11 +26,11 @@ def _parsed(row):
 def task(db, conv_id):
     if not hasattr(db, '_exec'):
         return None
-    return _parsed(db._exec("SELECT * FROM task_reviews WHERE conv_id=?", (conv_id,)).fetchone())
+    return _parsed(db._exec("SELECT * FROM task_reviews WHERE conv_id=?", (conv_id,)).fetchone(), db)
 
 
 def tasks(db, root_id):
-    return [_parsed(row) for row in db._exec(
+    return [_parsed(row, db) for row in db._exec(
         "SELECT * FROM task_reviews WHERE root_id=? ORDER BY created_at,conv_id",
         (root_id,)).fetchall()]
 
@@ -113,4 +120,4 @@ def task_not_retirable_by(db, principal, conv_id, include_children=False):
 def attachment_task(db, ident):
     row = db._exec('SELECT * FROM task_reviews WHERE implementer_id=? OR reviewer_id=?',
                    (ident, ident)).fetchone()
-    return _parsed(row)
+    return _parsed(row, db)

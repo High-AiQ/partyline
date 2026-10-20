@@ -18,6 +18,7 @@ from .task_review_checkout import move_task_review_worktrees
 from .orchestrator_notices import handed_to, report, spawn_refused, tell
 from .orchestrator_revive import (
     brief_reviewer, reviewer_is_live, revive_reviewer, staffed_by_preset, task_lock)
+from .orchestrator_handles import pick_tag
 from .orchestrator_staff import ensure_reviewer, restart, spawn
 from .orchestrator_store import preset, require_root, require_task, task, validate_policy
 
@@ -40,14 +41,17 @@ async def create_task(runtime, actor, root_id, body):
         result = await create_child(runtime, actor, root_id, ChildIn(name=body.name, goal=body.goal))
         conv_id, ident = result.conversation.id, str(uuid.uuid4())
         db._exec(
-            'INSERT INTO task_reviews(conv_id,root_id,implementer_id,implementer_preset,policy,created_at) '
-            'VALUES(?,?,?,?,?,?)', (conv_id, root_id, ident, body.implementer, policy, time.time()))
+            'INSERT INTO task_reviews(conv_id,root_id,implementer_id,implementer_preset,policy,tag,'
+            'created_at) VALUES(?,?,?,?,?,?,?)',
+            (conv_id, root_id, ident, body.implementer, policy, pick_tag(db, conv_id), time.time()))
     try:
         existing = db.get_attachment(ident)
         if existing:
             await restart(runtime, existing)
         else:
-            await spawn(runtime, conv_id, body.implementer, ident)
+            tag = task(db, conv_id)['tag']
+            await spawn(runtime, conv_id, body.implementer, ident,
+                        handle=f'impl-{tag}' if tag else None)
     except (HTTPException, ValueError) as exc:
         await spawn_refused(runtime, task(db, conv_id), getattr(exc, 'detail', str(exc)), implementer=True)
         raise

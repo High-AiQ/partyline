@@ -73,10 +73,13 @@ def match_preset(attachment: dict, presets: list[dict]) -> dict | None:
 
     A numbered handle (``astra-2``, as ``unique_handle`` suffixes it) matches
     its base preset, so a preset's live instances are counted, not hidden.
+    A process spawned for a task carries a task-derived handle, so the preset
+    it was staffed from is recorded on the row and matched instead.
     Two hits — say presets named both ``astra`` and ``astra-2`` — are
     ambiguous and match nothing, exactly like any other collision.
     """
     name = attachment["name"].lower()
+    recorded = (attachment.get("preset") or "").lower()
     adapter = attachment["adapter"]
     command = list(attachment["command"])
     hits = []
@@ -85,7 +88,8 @@ def match_preset(attachment: dict, presets: list[dict]) -> dict | None:
         if argv is None:
             continue
         if (preset["adapter"] == adapter
-                and _numbered_handle(name, preset["name"].lower())
+                and (preset["name"].lower() == recorded if recorded
+                     else _numbered_handle(name, preset["name"].lower()))
                 and argv == command):
             hits.append(preset)
     return hits[0] if len(hits) == 1 else None

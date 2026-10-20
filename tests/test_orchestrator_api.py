@@ -200,7 +200,8 @@ class ApiTest(TaskFixture):
         line = self.db.get_conversation(self.conv_id)
         self.assertEqual(line['task_status'], 'implementing')
         self.assertEqual(line['task_root_name'], 'Root')
-        self.assertEqual(line['task_implementer_name'], 'builder')
+        self.assertEqual(line['task_implementer_name'], row['implementer_handle'])
+        self.assertEqual(line['task_implementer_name'], f"impl-{row['tag']}")
         await request_review(self.runtime, self.worker, self.conv_id,
                              ReviewRequestIn(what='feature', where='code'))
         row = self.row()
