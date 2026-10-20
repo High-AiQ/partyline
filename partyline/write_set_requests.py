@@ -1,4 +1,4 @@
-"""A line asks for extra write scope; a person approves it in a banner.
+"""A line asks for extra write scope; a person (or a captain above) decides it.
 
 The default write set is derived at spawn. When work needs a path outside it,
 a process on the line — or a captain above — files a request; every open tab
@@ -206,7 +206,7 @@ async def file_write_set_request(
 ) -> WriteSetGrantRequest:
     db = runtime.db
     if get_pending_request(db, conv_id) is not None:
-        raise HTTPException(409, "a write-set request is already waiting for a person")
+        raise HTTPException(409, "a write-set request is already waiting for a decision")
     if not machine_may_file(db, principal, conv_id):
         raise HTTPException(
             403, "only a person or a captain above this line may grant write scope")
@@ -230,8 +230,9 @@ async def file_write_set_request(
     warning = f" — {docker_workloads.BUDGET_WARNING}" if docker_relay.is_docker_socket(path) else ""
     await announce_fn(
         conv_id,
-        f"☏ @{principal.name} asks a person to grant write-set scope for `{path}`{warning} — "
-        "approve or decline from the banner",
+        f"☏ @{principal.name} asks to grant write-set scope for `{path}`{warning} — "
+        "a person, or a captain above this line when the path is inside its own grants "
+        "or writable checkout, may approve or decline",
         actor=principal,
     )
     await bubble_approval(

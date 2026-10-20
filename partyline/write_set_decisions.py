@@ -2,7 +2,8 @@
 
 Split from `write_set_requests.py` (filing and helpers live there) for the
 line budget. Deciding is a person's act — or, since 5.9, an ancestor
-captain deciding strictly inside a write grant its own line already holds.
+captain deciding strictly inside a write grant or writable checkout its own
+line already holds.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import docker_relay, docker_workloads
+from . import docker_relay, docker_workloads, fence_paths
 from .auth_guard import request_principal
 from .machine_scope import deny_unless, is_human
 from .mention_relay import post_private
@@ -45,8 +46,9 @@ def _machine_decision_error(db, principal, conv_id: str,
 
     The captain must be the live lead of a strict ancestor of the line, must
     not be the requester, and the requested path must resolve inside a write
-    grant the captain's own line already holds. Anything wider is a person's
-    call.
+    grant the captain's own line holds or a writable entry of its own fence
+    write set (checkout, Git carve-outs, `.review/`, `.scratch/`). Anything
+    wider is a person's call.
     """
     if docker_relay.is_docker_socket(request.path):
         return "docker access is root-equivalent; a person decides"
@@ -68,6 +70,10 @@ def _machine_decision_error(db, principal, conv_id: str,
     for row in rows:
         base = os.path.realpath(row["path"])
         if wanted == base or wanted.startswith(base + "/"):
+            return None
+    for src, _dst, read_only in fence_paths.write_set(lead, create=False):
+        base = os.path.realpath(src)
+        if not read_only and (wanted == base or wanted.startswith(base + "/")):
             return None
     return "outside your grants; a person decides"
 
