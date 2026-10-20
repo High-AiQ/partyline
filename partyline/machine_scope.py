@@ -106,7 +106,10 @@ def allows(db: Db, principal: Principal, conv_id: str, capability: Capability) -
     if capability in ("create_task", "tasks", "restart_reviewer"):
         return (conv_id == home and principal.is_lead and conv['parent_id'] is None
                 and conv.get('captain_mode', 'manager_tree') == 'orchestrator')
-    if task_row and capability in ("archive", "attach", "appoint_lead", "create_child", "report", "notify"):
+    if task_row and capability == "archive" and not (
+            principal.is_lead and home == task_row["root_id"] and conv_id != home):
+        return False
+    if task_row and capability in ("attach", "appoint_lead", "create_child", "report", "notify"):
         return False
     if capability == "archive":
         # A captain may retire a descendant line it accepted, never itself or
