@@ -33,6 +33,7 @@ from __future__ import annotations
 from .contracts import MessageEvent, MessageResponse
 from .hierarchy import ancestors, descendants, lead_attachment, tree_live_name_conflict
 from .line_depth import live_workers
+from .mentions import known_mention_names
 from .message_visibility import is_reaction_notice
 from .resume_backlog import WORKER_PACK_NOTICE_PREFIX
 
@@ -81,6 +82,13 @@ def speaker_attachment(db, conv_id: str, message: dict) -> dict | None:
     return None
 
 
+def task_root_captain(db, conv_id: str) -> dict | None:
+    """The live lead of the root line a task line belongs to, if this is one."""
+    row = db._exec("SELECT root_id FROM task_reviews WHERE conv_id=?", (conv_id,)).fetchone()
+    lead = lead_attachment(db, row["root_id"]) if row else None
+    return lead if lead and lead["status"] in LIVE else None
+
+
 def may_cross(message: dict, speaker: dict | None) -> bool:
     return message.get("sender_type") == "human" or bool(speaker and speaker.get("is_lead"))
 
@@ -89,6 +97,7 @@ def resolve_elsewhere(db, conv_id: str, names: set[str], *, crossing: bool):
     """Live rows on other lines a mention from ``conv_id`` may address, and the
     handles it names that live on lines it may not — for the notice."""
     below, above = set(descendants(db, conv_id)), set(ancestors(db, conv_id))
+    root = task_root_captain(db, conv_id)
     reached: list[dict] = []
     withheld: list[dict] = []
     for name in sorted(names - {"all"}):
@@ -97,6 +106,7 @@ def resolve_elsewhere(db, conv_id: str, names: set[str], *, crossing: bool):
             continue
         line = target["conv_id"]
         allowed = crossing and (line in below or (line in above and target.get("is_lead")))
+        allowed = allowed or bool(root and target["id"] == root["id"])
         (reached if allowed else withheld).append(target)
     return reached, withheld
 
@@ -107,7 +117,13 @@ def withheld_notice(db, conv_id: str, target: dict, crossing: bool) -> str:
     if crossing:
         return where + "a captain reaches every process below it and only the captains above it"
     manager = lead_attachment(db, conv_id)
-    whom = f"tell @{manager['name']}, your captain, instead" if manager else "this line has no captain"
+    root = task_root_captain(db, conv_id)
+    if manager:
+        whom = f"tell @{manager['name']}, your captain, instead"
+    elif root:
+        whom = f"tell @{root['name']}, the root captain, instead"
+    else:
+        whom = "this line has no captain"
     return where + f"only a line's captain talks to other lines; {whom}"
 
 
@@ -181,6 +197,25 @@ async def ring_workers(runtime, line_id: str, captain: dict) -> dict | None:
     )
     await runtime.route_mentions(line_id, msg, force=True)
     return msg
+
+
+async def hint_root_captain(runtime, conv_id: str, message: dict, unresolved: set[str]) -> None:
+    """Tell a task process whom to mention when its @name reached nobody."""
+    speaker = speaker_attachment(runtime.db, conv_id, message)
+    root = task_root_captain(runtime.db, conv_id)
+    if speaker is None or root is None or speaker["id"] == root["id"]:
+        return
+    unresolved = unresolved - {speaker["name"].lower()}
+    unresolved -= known_mention_names(runtime.db, conv_id, unresolved)
+    if not unresolved:
+        return
+    handles = ", ".join(f"@{name}" for name in sorted(unresolved))
+    await post_private(
+        runtime, conv_id, "system", "system",
+        f"⚠ {handles} reached nobody — line names are not mentionable; "
+        f"to reach the root captain, mention @{root['name']}",
+        audience=speaker["id"], route=False,
+    )
 
 
 async def relay_mentions(runtime, conv_id: str, message: dict, names: set[str]) -> set[str]:
