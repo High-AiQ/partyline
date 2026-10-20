@@ -7,6 +7,7 @@ from .contracts import ConversationEvent, ConversationResponse, ConversationsCha
 from .machine_scope import deny_unless
 from .orchestrator_contracts import BlockedIn, CaptainStyleIn, ReviewRequestIn, TaskIn, TaskReview, VerdictIn
 from .orchestrator_stall import blocked
+from .orchestrator_revive import restart_reviewer
 from .orchestrator_service import create_task, request_review, review_verdict
 from .orchestrator_store import require_root, task, tasks, validate_policy
 
@@ -55,6 +56,10 @@ def orchestrator_router(runtime):
     @router.post('/api/conversations/{conv_id}/request-review', response_model=TaskReview)
     async def review(request: Request, conv_id: str, body: ReviewRequestIn):
         return await request_review(runtime, request_principal(request), conv_id, body)
+
+    @router.post('/api/conversations/{conv_id}/task/reviewer', response_model=TaskReview)
+    async def reviewer(request: Request, conv_id: str):
+        return await restart_reviewer(runtime, request_principal(request), conv_id)
 
     @router.post('/api/conversations/{conv_id}/review-verdict', response_model=TaskReview)
     async def verdict(request: Request, conv_id: str, body: VerdictIn):
