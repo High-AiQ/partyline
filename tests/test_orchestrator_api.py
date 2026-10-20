@@ -112,6 +112,26 @@ class ApiTest(TaskFixture):
                 self.assertEqual(response.status_code, 403, response.text)
         self.assertIsNone(self.db.get_conversation(row['conv_id'])['archived_at'])
 
+    async def test_style_unlocks_once_every_child_is_archived(self):
+        row = await self.create()
+        route = '/api/conversations/root/captain-style'
+        body = {'captain_mode': 'manager_tree', 'default_review_policy': 'captain'}
+        self.actor = self.human
+        self.assertEqual(self.client.put(route, json=body).status_code, 409)
+        self.db._exec("UPDATE conversations SET archived_at=1 WHERE id=?", (row['conv_id'],))
+        response = self.client.put(route, json=body)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['captain_mode'], 'manager_tree')
+
+    async def test_orchestrator_pack_spreads_implementers_and_the_rider_lists_free_workers(self):
+        from partyline.pack_blocks import ORCHESTRATOR
+        from partyline.staffing import staffing_line
+        for phrase in ("free workers", "list_presets", "do not default to your own",
+                       "different model", "which preset took which task"):
+            self.assertIn(phrase, ORCHESTRATOR)
+        self.assertIn('free workers: ', staffing_line(self.db, 'root'))
+        self.assertIn('builder', staffing_line(self.db, 'root'))
+
     async def test_shared_branch_override_stays_refused_on_task_lines(self):
         row = await self.create()
         conv = row['conv_id']
