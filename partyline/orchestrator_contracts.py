@@ -88,6 +88,15 @@ class TaskReview(BaseModel):
     merged: bool
     created_at: float
     reviewer_restarts: int = 0
+    tag: str | None = None
+    implementer_handle: str | None = None
+    reviewer_handle: str | None = None
+
+
+class MessageTaskIn(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    text: str = Field(min_length=1, max_length=4000, pattern=r'\S')
+    to: Literal['implementer', 'reviewer'] = 'implementer'
 
 
 class AutoCleanIn(BaseModel):

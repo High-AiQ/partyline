@@ -352,6 +352,7 @@ These entries extend both inventory sets above. Registration handlers are in
 | POST | `/api/conversations/{conv_id}/request-review` | `review` | exact task implementer | yes | tool: `request_review`; `sha` or `repositories: [{repository, sha}]` (1–8, not both) |
 | POST | `/api/conversations/{conv_id}/review-verdict` | `verdict` | exact task reviewer or captain-policy root captain | yes | tool: `review_verdict` |
 | POST | `/api/conversations/{conv_id}/task/reopen` | `reopen` | H, or root captain | yes | tool: `reopen_task`; returns an approved/done task to implementing (409 otherwise) |
+| POST | `/api/conversations/{conv_id}/task/message` | `message` | H, or root captain | yes | tool: `message_task`; private wake-up message to the task's live implementer or reviewer (409 otherwise) |
 | POST | `/api/conversations/{conv_id}/task/reviewer` | `reviewer` | H, or root captain | yes | tool: `restart_reviewer`; revives a dead reviewer of a task in review |
 | GET | `/api/settings/auto_clean_task_history` | `get_auto_clean` | H only | no | excluded: global history-retention setting |
 | PUT | `/api/settings/auto_clean_task_history` | `put_auto_clean` | H only | no | excluded: human opt-in to task history cleanup |

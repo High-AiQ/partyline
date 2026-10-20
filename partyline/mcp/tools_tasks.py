@@ -2,17 +2,18 @@
 
 from urllib.parse import quote
 
-from ..orchestrator_contracts import BlockedIn, ReopenIn, ResumeIn, ReviewRequestIn, TaskIn, VerdictIn
+from ..orchestrator_contracts import (
+    BlockedIn, MessageTaskIn, ReopenIn, ResumeIn, ReviewRequestIn, TaskIn, VerdictIn)
 from .client import ApiError
 from .validation import validate_arguments
 
 _MODELS = {'blocked': BlockedIn, 'create_task': TaskIn, 'request_review': ReviewRequestIn,
            'review_verdict': VerdictIn,
-           'resume_work': ResumeIn, 'reopen_task': ReopenIn}
+           'resume_work': ResumeIn, 'reopen_task': ReopenIn, 'message_task': MessageTaskIn}
 _PATHS = {'blocked': ('POST', 'blocked'), 'create_task': ('POST', 'tasks'), 'tasks': ('GET', 'tasks'),
           'request_review': ('POST', 'request-review'), 'review_verdict': ('POST', 'review-verdict'),
           'restart_reviewer': ('POST', 'task/reviewer'), 'resume_work': ('POST', 'task/resume'),
-          'reopen_task': ('POST', 'task/reopen')}
+          'reopen_task': ('POST', 'task/reopen'), 'message_task': ('POST', 'task/message')}
 
 
 def tool_list(state):
@@ -25,7 +26,7 @@ def tool_list(state):
         if name == 'restart_reviewer':
             schema = {'type': 'object', 'properties': {'conv_id': {'type': 'string', 'minLength': 1}},
                       'required': ['conv_id'], 'additionalProperties': False}
-        if name == 'reopen_task':
+        if name in ('reopen_task', 'message_task'):
             schema['properties']['conv_id'] = {'type': 'string', 'minLength': 1}
             schema['required'] = [*schema.get('required', []), 'conv_id']
         if name == 'review_verdict' and state.get('is_lead'):
