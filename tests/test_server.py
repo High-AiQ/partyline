@@ -1316,16 +1316,20 @@ class ServerTest(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(attached["last_seen"], old[-1]["id"])
         join = server.runtime.db.list_messages("line")[-1]
+        self.assertEqual(attached["last_seen"], join["id"])
         mention = server.runtime.db.add_message("line", "greg", "human", "@luna hello")
         self.arun(server.runtime.route_mentions("line", mention))
 
         adapter = server.runtime.live[attached["id"]]
+        # What was said during the attach arrives with the join, history never does,
+        # and the later mention is a delivery of its own.
         self.assertEqual(
-            [message["id"] for message in adapter.deliveries[0]],
-            [during_attach["id"], join["id"], mention["id"]],
+            [[message["id"] for message in batch] for batch in adapter.deliveries],
+            [[during_attach["id"], join["id"]], [mention["id"]]],
         )
+        delivered = {message["id"] for batch in adapter.deliveries for message in batch}
+        self.assertFalse(delivered & {message["id"] for message in old})
 
     def test_update_true_without_a_command_is_400_before_a_row_exists(self):
         before = server.runtime.db.list_attachments("line")

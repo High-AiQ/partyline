@@ -20,6 +20,7 @@ from .review_worktrees import list_review_worktrees
 from .scratch_worktrees import list_scratch_worktrees
 from .role_delivery import bind_role_delivery
 from .write_set_routes import load_write_grants
+from .resume_backlog import addressed_backlog
 from .resource_budget import format_limit, settings
 
 logger = logging.getLogger(__name__)
@@ -92,6 +93,7 @@ async def start_attachment(att, *, runtime, presence, make_adapter, hook_url,
             *runtime.held_wake_hooks(conv_id, ident, att["name"]),
         )
         await announce_attachment(runtime, att, fresh=fresh)
+        await deliver_since_attach(runtime, ident)
         return attach_memory_usage(
             await attachment_response(runtime.db.get_attachment(ident)),
             runtime.memory_usage.get(ident),
@@ -113,6 +115,23 @@ async def start_attachment(att, *, runtime, presence, make_adapter, hook_url,
         # The 500 the caller sees is one line; the journal gets the trace.
         logger.exception("start of %s failed", ident)
         raise HTTPException(500, f"failed to spawn: {exc}") from exc
+
+
+async def deliver_since_attach(runtime, ident):
+    """Hand a new process what was said to it while it was starting.
+
+    The join announcement is a system notice and rings nobody, and a mention
+    posted before the process was running found no live adapter to wake. Both
+    left the process waiting on a message already on its line. The cursor
+    starts at the attach, so this is only what came after it, and delivery
+    advances it, so nothing arrives twice.
+    """
+    att = runtime.db.get_attachment(ident)
+    adapter = runtime.live.get(ident)
+    if att is None or adapter is None or att["status"] != "running":
+        return
+    if any(m["id"] > att["last_seen"] for m in addressed_backlog(runtime, att)):
+        await runtime.deliver_pending(att["conv_id"], att, adapter)
 
 
 async def announce_attachment(runtime, att, *, fresh):
