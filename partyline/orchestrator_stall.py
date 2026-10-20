@@ -5,7 +5,7 @@ import time
 from fastapi import HTTPException
 
 from .contracts import ConversationsChangedEvent, MessageEvent, MessageResponse
-from .orchestrator_notices import handed_to, peer, report
+from .orchestrator_notices import handed_to, notify_root, peer, report
 from .orchestrator_store import require_task, task
 
 
@@ -64,10 +64,43 @@ async def blocked(runtime, actor, conv_id, body):
     row = require_task(runtime.db, actor, conv_id)
     if row['status'] not in ('implementing', 'blocked'):
         raise HTTPException(409, 'only an implementing task can be blocked')
-    runtime.db._exec("UPDATE task_reviews SET status='blocked',findings=?,stall_stage=0,"
+    runtime.db._exec("UPDATE task_reviews SET status='blocked',findings=?,stall_stage=0,blocked_at=?,"
                      "report_id=CASE WHEN stall_stage=3 THEN NULL ELSE report_id END WHERE conv_id=?",
-                     (body.reason, conv_id))
+                     (body.reason, time.time(), conv_id))
     await report(runtime, task(runtime.db, conv_id))
     handed_to(runtime, row['implementer_id'], row['implementer_id'])
     await runtime.broadcast_all(ConversationsChangedEvent())
     return task(runtime.db, conv_id)
+
+
+async def resume_work(runtime, actor, conv_id, body):
+    """The implementer says it is working again; the root hears why, once."""
+    row = require_task(runtime.db, actor, conv_id)
+    if row['status'] != 'blocked':
+        raise HTTPException(409, 'only a blocked task can resume work')
+    await _unblock(runtime, row, body.note)
+    return task(runtime.db, conv_id)
+
+
+async def _unblock(runtime, row, note=None):
+    resume(runtime.db, row['conv_id'])
+    await runtime.broadcast_all(ConversationsChangedEvent())
+    if note:
+        await notify_root(runtime, row, f'unblocked: {note}')
+
+
+def _directed(db, row):
+    """A message from the root captain or a person, after the block, for this implementer."""
+    return db._exec(
+        'SELECT 1 FROM messages WHERE conv_id=? AND created_at>? '
+        'AND (sender_type=\'human\' OR source_conv_id=?) '
+        'AND (audience_attachment_id IS NULL OR audience_attachment_id=?) LIMIT 1',
+        (row['conv_id'], row['blocked_at'] or 0, row['root_id'], row['implementer_id'])).fetchone()
+
+
+async def began(runtime, att):
+    """A blocked implementer starting a turn after fresh word from above is working again."""
+    row = task(runtime.db, att['conv_id'])
+    if (row and row['implementer_id'] == att['id'] and row['status'] == 'blocked'
+            and _directed(runtime.db, row)):
+        await _unblock(runtime, row)

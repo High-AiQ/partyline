@@ -5,8 +5,9 @@ from fastapi import APIRouter, HTTPException, Request
 from .auth_guard import request_principal
 from .contracts import ConversationEvent, ConversationResponse, ConversationsChangedEvent
 from .machine_scope import deny_unless
-from .orchestrator_contracts import BlockedIn, CaptainStyleIn, ReviewRequestIn, TaskIn, TaskReview, VerdictIn
-from .orchestrator_stall import blocked
+from .orchestrator_contracts import (
+    BlockedIn, CaptainStyleIn, ResumeIn, ReviewRequestIn, TaskIn, TaskReview, VerdictIn)
+from .orchestrator_stall import blocked, resume_work
 from .orchestrator_revive import restart_reviewer
 from .orchestrator_service import create_task, request_review, review_verdict
 from .orchestrator_store import require_root, task, tasks, validate_policy
@@ -68,5 +69,9 @@ def orchestrator_router(runtime):
     @router.post('/api/conversations/{conv_id}/blocked', response_model=TaskReview)
     async def block(request: Request, conv_id: str, body: BlockedIn):
         return await blocked(runtime, request_principal(request), conv_id, body)
+
+    @router.post('/api/conversations/{conv_id}/task/resume', response_model=TaskReview)
+    async def resume(request: Request, conv_id: str, body: ResumeIn):
+        return await resume_work(runtime, request_principal(request), conv_id, body)
 
     return router
