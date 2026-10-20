@@ -49,8 +49,9 @@ def write_captain_style(db, actor, conv_id, captain_mode, policy):
     if conv['parent_id'] is not None:
         raise HTTPException(409, 'captain style can only be set on a root line')
     if conv['captain_mode'] != captain_mode and db._exec(
-            'SELECT 1 FROM conversations WHERE parent_id=? LIMIT 1', (conv_id,)).fetchone():
-        raise HTTPException(409, 'captain style cannot change while child lines exist')
+            'SELECT 1 FROM conversations WHERE parent_id=? AND archived_at IS NULL LIMIT 1',
+            (conv_id,)).fetchone():
+        raise HTTPException(409, 'captain style cannot change while active child lines exist')
     validate_policy(db, policy)
     db._exec('UPDATE conversations SET captain_mode=?,default_review_policy=? WHERE id=?',
              (captain_mode, policy, conv_id))
