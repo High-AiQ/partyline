@@ -132,7 +132,7 @@ class WriteSetRequestTest(unittest.TestCase):
         filed = self.file(self.worker)
         self.assertEqual(filed.status_code, 200, filed.text)
         notice = self.db.list_messages("line")[-1]
-        self.assertIn("asks a person to grant write-set scope", notice["body"])
+        self.assertIn("asks to grant write-set scope", notice["body"])
         self.assertEqual(self.file(self.worker).status_code, 409)
 
     def test_only_a_person_decides_and_approval_grants_and_resumes_the_line(self):
@@ -402,6 +402,49 @@ class WriteSetRequestTest(unittest.TestCase):
         self.assertEqual(approved.status_code, 200, approved.text)
         grants = [g["path"] for g in list_write_grants(self.db, "kid")]
         self.assertIn(os.path.realpath(inner), grants)
+
+    def _approve_on_kid(self, path, *, insert=False):
+        self.db._exec("UPDATE attachments SET status='running' WHERE id='kid-worker'")
+        if insert:  # a path outside every protected root cannot be filed
+            self.db._exec(
+                "INSERT INTO conversation_write_grant_requests"
+                "(conv_id,id,path,requester,requester_attachment_id,created_at) "
+                "VALUES('kid','r1',?,'digger','kid-worker',0)", (path,))
+        else:
+            self.file_on_kid(path)
+        request_id = self.db._exec(
+            "SELECT id FROM conversation_write_grant_requests").fetchone()["id"]
+        return self.client.post(
+            f"/api/conversations/kid/write-set/request/{request_id}/approve",
+            headers=self.captain)
+
+    def test_a_captain_approves_inside_its_own_checkout_without_a_grant_row(self):
+        self._seed_subtree()
+        approved = self._approve_on_kid(os.path.join(self.repo, "shared", "new.txt"))
+        self.assertEqual(approved.status_code, 200, approved.text)
+
+    def test_a_captain_approves_inside_its_review_and_scratch_directories(self):
+        self._seed_subtree()
+        for name in (".review", ".scratch"):
+            os.makedirs(os.path.join(self.repo, name), exist_ok=True)
+            approved = self._approve_on_kid(os.path.join(self.repo, name, "x" * 40))
+            self.assertEqual(approved.status_code, 200, approved.text)
+
+    def test_a_captain_still_gets_403_outside_its_grants_and_write_set(self):
+        self._seed_subtree()
+        outside = os.path.join(self.directory.name, "elsewhere")
+        os.makedirs(outside)
+        refused = self._approve_on_kid(os.path.join(outside, "file.txt"), insert=True)
+        self.assertEqual(refused.status_code, 403, refused.text)
+        self.assertIn("outside your grants", refused.json()["detail"])
+
+    def test_the_decision_check_creates_no_directories(self):
+        self._seed_subtree()
+        self.assertFalse(os.path.exists(os.path.join(self.repo, ".review")))
+        self.assertFalse(os.path.exists(os.path.join(self.repo, ".scratch")))
+        self._approve_on_kid(os.path.join(self.repo, "shared", "new.txt"))
+        self.assertFalse(os.path.exists(os.path.join(self.repo, ".review")))
+        self.assertFalse(os.path.exists(os.path.join(self.repo, ".scratch")))
 
     def test_docker_access_is_a_grant_only_a_person_approves(self):
         self._seed_subtree()
