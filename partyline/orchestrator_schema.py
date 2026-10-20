@@ -61,4 +61,8 @@ MIGRATIONS += [
     "ALTER TABLE task_reviews ADD COLUMN reviewer_restarts INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE task_reviews ADD COLUMN repositories TEXT NOT NULL DEFAULT '[]'",
     "ALTER TABLE task_reviews ADD COLUMN blocked_at REAL",
+    "ALTER TABLE task_reviews ADD COLUMN settled_at REAL",
+    "ALTER TABLE task_reviews ADD COLUMN reopen_noticed INTEGER NOT NULL DEFAULT 0",
+    "UPDATE task_reviews SET settled_at=CAST(strftime('%s','now') AS REAL) "
+    "WHERE status IN ('approved','done') AND settled_at IS NULL",
 ]
