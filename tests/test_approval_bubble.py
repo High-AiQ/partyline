@@ -165,7 +165,7 @@ class ApprovalBubbleTest(unittest.TestCase):
                                 json={"path": os.path.join(self.repo, "extra")}, headers=terra)
         self.assertEqual(made.status_code, 200, made.text)
         self.assertEqual(self.bubbles(), [])
-        self.assertIn("asks a person to grant write-set scope",
+        self.assertIn("asks to grant write-set scope",
                       " ".join(m["body"] for m in self.db.list_messages("root")))
 
     def test_without_a_root_captain_the_notice_still_posts_unaddressed(self):

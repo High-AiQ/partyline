@@ -122,8 +122,11 @@ def _checkout_git_binds(path: str, cwd: str, conv_id: str) -> list[tuple[str, st
 _review_git_binds = _checkout_git_binds
 
 
-def write_set(att: dict) -> list[tuple[str, str, bool]]:
-    """Ordered writable Git, cwd, review, and scratch carve-outs for bubblewrap."""
+def write_set(att: dict, *, create: bool = True) -> list[tuple[str, str, bool]]:
+    """Ordered writable Git, cwd, review, and scratch carve-outs for bubblewrap.
+
+    `create=False` is for read-only checks, which must not make directories.
+    """
     covered: set[str] = set()
     binds: list[tuple[str, str, bool]] = []
 
@@ -141,7 +144,7 @@ def write_set(att: dict) -> list[tuple[str, str, bool]]:
         if src not in covered:
             covered.add(src)
             binds.append((src, dst, read_only))
-    review_root = _review_directory(cwd, create=True)
+    review_root = _review_directory(cwd, create=create)
     if review_root:
         add(review_root)
     for path in _review_worktree_paths(att, review_root):
@@ -149,7 +152,7 @@ def write_set(att: dict) -> list[tuple[str, str, bool]]:
             if src not in covered:
                 covered.add(src)
                 binds.append((src, dst, read_only))
-    scratch_root = _scratch_directory(cwd, create=True)
+    scratch_root = _scratch_directory(cwd, create=create)
     if scratch_root:
         add(scratch_root)
     for path in _scratch_worktree_paths(att, scratch_root):
