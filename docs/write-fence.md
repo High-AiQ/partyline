@@ -586,7 +586,7 @@ the CLI's own sandbox stays.
 POST /api/conversations/<id>/write-set   {"path": "/abs/normalized/path"}
 GET  /api/conversations/<id>/write-set
 GET  /api/conversations/<id>/write-set/request
-POST /api/conversations/<id>/write-set/request/<id>/approve   (person only)
+POST /api/conversations/<id>/write-set/request/<id>/approve   (person, or ancestor captain inside its grants/checkout)
 POST /api/conversations/<id>/write-set/request/<id>/deny      {"reason": "…"}
 POST /api/conversations/<id>/write-set/request/<id>/withdraw  (the requester only)
 DELETE /api/conversations/<id>/write-set/request/<id>         (person only)

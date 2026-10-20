@@ -230,7 +230,8 @@ the approve/decline endpoints — and the root line's one-click approvals
 banner renders exactly that list with **Approve** and **Decline** buttons
 per row. A write-set row also carries `deny`, the machine-callable
 `POST …/deny {"reason"}`: a captain decides a child's write-set request itself
-when the path lies inside a grant its own line already holds, and declines with
+when the path lies inside a grant its own line already holds or inside its
+own writable checkout (including `.git` carve-outs, `.review/` and `.scratch/`), and declines with
 a reason as easily as it approves (see `docs/write-fence.md`, Scope expansion).
 
 Work goes down, not sideways. Once a line has a child, a machine may no longer
