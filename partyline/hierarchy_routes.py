@@ -9,9 +9,11 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from .auth_guard import request_principal
 from .contracts import (
+    ConversationEvent,
     ConversationResponse,
     ConversationsChangedEvent,
 )
+from .orchestrator_store import write_captain_style
 from .mention_relay import live_manager, post_private, ring_workers
 from .message_routing import post_identified
 from .hierarchy import (
@@ -89,11 +91,26 @@ def hierarchy_router(runtime) -> APIRouter:
         principal = request_principal(request)
         deny_unless(db, principal, conv_id, "appoint_lead")
         before = lead_attachment(db, conv_id)
-        if (before["id"] if before else None) == body.attachment_id:
+        prior = db.get_conversation(conv_id)
+        restyled = False
+        if body.captain_mode is not None:
+            # Before the captain is marked lead and briefed, so its first pack matches.
+            write_captain_style(db, principal, conv_id, body.captain_mode,
+                                body.default_review_policy or prior["default_review_policy"])
+            restyled = (body.captain_mode, body.default_review_policy or prior["default_review_policy"]) != (
+                prior["captain_mode"], prior["default_review_policy"])
+            if restyled:
+                updated = db.get_conversation(conv_id)
+                await runtime.broadcast(conv_id, ConversationEvent(conversation=updated))
+                await runtime.broadcast_all(ConversationsChangedEvent())
+        if not restyled and (before["id"] if before else None) == body.attachment_id:
             return LeadOut(attachment_id=body.attachment_id)  # already so: no second ring
         try:
             set_lead(db, conv_id, body.attachment_id)
         except HierarchyError as exc:
+            if restyled:
+                db._exec("UPDATE conversations SET captain_mode=?,default_review_policy=? WHERE id=?",
+                         (prior["captain_mode"], prior["default_review_policy"], conv_id))
             raise _http(exc) from exc
         att = db.get_attachment(body.attachment_id) if body.attachment_id else None
 

@@ -7,19 +7,24 @@
 
   interface Props {
     conversation: Conversation;
+    mode?: CaptainStyle["captain_mode"];
+    review?: string;
+    /** Appointing sends the selected style itself; a standalone save is only for a line
+     *  that already has a captain. */
+    showSave: boolean;
     onupdate: (updated: Conversation) => Promise<void>;
   }
-  let { conversation, onupdate }: Props = $props();
-  let mode = $state<CaptainStyle["captain_mode"]>("manager_tree");
-  let review = $state("captain");
+  let {
+    conversation,
+    mode = $bindable("manager_tree"),
+    review = $bindable("captain"),
+    showSave,
+    onupdate,
+  }: Props = $props();
   let presets = $state<Preset[]>([]);
   let saving = $state(false);
   let error = $state("");
   let saved = $state(false);
-  $effect(() => {
-    mode = conversation.captain_mode ?? "manager_tree";
-    review = conversation.default_review_policy ?? "captain";
-  });
   onMount(() => {
     void api
       .presets()
@@ -69,12 +74,14 @@
       {/each}
     </select>
   {/if}
-  <div class="line-status" class:error={Boolean(error)} aria-live="polite">
-    {error || (saved ? "captain style saved" : "")}
-  </div>
-  <div class="line-actions">
-    <button class="primary" type="button" disabled={saving} onclick={save}>
-      {saving ? "saving…" : "save captain style"}
-    </button>
-  </div>
+  {#if showSave}
+    <div class="line-status" class:error={Boolean(error)} aria-live="polite">
+      {error || (saved ? "captain style saved" : "")}
+    </div>
+    <div class="line-actions">
+      <button class="primary" type="button" disabled={saving} onclick={save}>
+        {saving ? "saving…" : "save captain style"}
+      </button>
+    </div>
+  {/if}
 </section>

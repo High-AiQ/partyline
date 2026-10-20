@@ -2,6 +2,7 @@
 import { z } from "zod";
 import { request } from "./http";
 import { ConversationSchema } from "./contracts";
+import type { CaptainStyle } from "./orchestrator-api";
 import { StaffingSchema, type Staffing } from "./preset-contracts";
 
 export const LeadSchema = z.object({ attachment_id: z.string().nullable() });
@@ -20,11 +21,11 @@ export const hierarchyApi = {
     request(`/api/conversations/${id}/lead`, { schema: LeadSchema, fallback: "could not load the captain" }),
   /** Appointing a captain rings it at once with the captain pack; the server refuses (403)
    *  anyone but a person or the current captain once a line has one. */
-  appoint: (id: string, attachmentId: string | null) =>
+  appoint: (id: string, attachmentId: string | null, style?: CaptainStyle) =>
     request(`/api/conversations/${id}/lead`, {
       schema: LeadSchema,
       method: "POST",
-      body: { attachment_id: attachmentId },
+      body: { attachment_id: attachmentId, ...style },
       fallback: "could not appoint the captain",
     }),
   staffing: (id: string): Promise<Staffing> =>
