@@ -134,4 +134,24 @@ describe("orchestrator controls", () => {
       }
     },
   );
+
+  it("offers restart reviewer only while a task is in review and posts the action", async () => {
+    const restart = vi.spyOn(orchestratorApi, "restartReviewer").mockResolvedValue({ conv_id: "task" });
+    const line = { ...root, id: "task", task_status: "in_review" as const, task_round: 2 };
+    room.conversation = line;
+    room.conversations = [line];
+    const header = mount(TaskLineHeader, { target: document.body });
+    try {
+      const button = document.querySelector("#restart-reviewer");
+      if (!(button instanceof HTMLButtonElement)) throw new Error("missing restart button");
+      button.click();
+      await tick();
+      expect(restart).toHaveBeenCalledWith("task");
+      room.conversations = [{ ...line, task_status: "approved" as const }];
+      await tick();
+      expect(document.querySelector("#restart-reviewer")).toBeNull();
+    } finally {
+      await unmount(header);
+    }
+  });
 });

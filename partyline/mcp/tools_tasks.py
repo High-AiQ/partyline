@@ -9,7 +9,8 @@ from .validation import validate_arguments
 _MODELS = {'blocked': BlockedIn, 'create_task': TaskIn, 'request_review': ReviewRequestIn,
            'review_verdict': VerdictIn}
 _PATHS = {'blocked': ('POST', 'blocked'), 'create_task': ('POST', 'tasks'), 'tasks': ('GET', 'tasks'),
-          'request_review': ('POST', 'request-review'), 'review_verdict': ('POST', 'review-verdict')}
+          'request_review': ('POST', 'request-review'), 'review_verdict': ('POST', 'review-verdict'),
+          'restart_reviewer': ('POST', 'task/reviewer')}
 
 
 def tool_list(state):
@@ -19,6 +20,9 @@ def tool_list(state):
             continue
         schema = _MODELS[name].model_json_schema() if name in _MODELS else {
             'type': 'object', 'properties': {}, 'additionalProperties': False}
+        if name == 'restart_reviewer':
+            schema = {'type': 'object', 'properties': {'conv_id': {'type': 'string', 'minLength': 1}},
+                      'required': ['conv_id'], 'additionalProperties': False}
         if name == 'review_verdict' and state.get('is_lead'):
             schema['properties']['conv_id'] = {'type': 'string', 'minLength': 1}
             schema['required'].append('conv_id')
