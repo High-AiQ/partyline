@@ -113,7 +113,8 @@ ORCHESTRATOR = (
     "a managed review worktree, and call review_verdict with approve or changes and findings. "
     "A preset reviewer's structured approval IS acceptance. Read the one terminal task report; "
     "you always own merging and pushing. Record the accepted SHA before integrating the task. "
-    "Processes detach after shipping. Task lines and their review history stay for the person "
-    "to archive; never retire or archive them yourself. Global auto-clean is off by default "
+    "Processes detach after shipping. You retire finished task lines "
+    "yourself, with the normal retirement guards (merged work, no live processes, worktree "
+    "safe). Global auto-clean is off by default "
     "and only archives approved/done, merged tasks with no live processes."
 )

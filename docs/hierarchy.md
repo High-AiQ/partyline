@@ -989,8 +989,11 @@ and leaves the request retryable. Reviewers are ordinary managed PTY attachments
 so fleet restart plans include them alongside implementers. Terminal reports are
 stored once per task and notification delivery is retried if the root is unavailable.
 
-Task history is retained: machines, including the root captain with the descendant
-retirement override, cannot archive or retire task lines, including recursively.
+The root captain (the live lead of the task's `root_id`) retires finished task lines
+through the normal archive and `retire_child` paths, including `include_children` and
+`force_discard`, under the usual guards (unmerged work, live processes unless
+`stop_processes`, goal, worktree safety). Task participants (implementer and reviewer),
+captains of other trees and every other machine cannot archive or retire task lines.
 After the approved SHA has been merged into the root's current checkout and the
 whole task worktree is clean and merged, idle implementer/reviewer processes detach.
 People may archive task lines. The optional global

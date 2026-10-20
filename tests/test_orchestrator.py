@@ -121,9 +121,11 @@ class WorkflowTest(TaskFixture):
                 require_task(self.db, actor, self.conv_id)
         with self.assertRaises(HTTPException):
             require_task(self.db, self.worker, 'missing')
-        for action in ('attach', 'archive', 'appoint_lead', 'create_child', 'notify', 'report'):
+        for action in ('attach', 'appoint_lead', 'create_child', 'notify', 'report'):
             self.assertFalse(allows(self.db, self.captain, self.conv_id, action), action)
             self.assertFalse(allows(self.db, self.worker, self.conv_id, action), action)
+        self.assertTrue(allows(self.db, self.captain, self.conv_id, 'archive'))
+        self.assertFalse(allows(self.db, self.worker, self.conv_id, 'archive'))
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.add_attachment('extra', self.conv_id, 'extra', 'fake', ['fake'], self.repo)
         with self.assertRaises(sqlite3.IntegrityError):
