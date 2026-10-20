@@ -106,8 +106,9 @@ async def request_review(runtime, actor, conv_id, body):
             except (HTTPException, ValueError) as exc:
                 await spawn_refused(runtime, row, getattr(exc, 'detail', str(exc)))
                 raise
-        db._exec('UPDATE task_reviews SET status=? WHERE conv_id=?',
-                 ('done' if row['policy'] == 'none' else 'in_review', conv_id))
+        settled = row['policy'] == 'none'
+        db._exec('UPDATE task_reviews SET status=?,settled_at=?,reopen_noticed=0 WHERE conv_id=?',
+                 ('done' if settled else 'in_review', time.time() if settled else None, conv_id))
         row = task(db, conv_id)
         if row['policy'] not in ('none', 'captain'):
             await brief_reviewer(runtime, row, reviewer)
@@ -122,9 +123,10 @@ async def review_verdict(runtime, actor, conv_id, body):
     row = require_task(db, actor, conv_id, reviewer=True)
     approved = body.verdict == 'approve'
     changed = db._exec(
-        'UPDATE task_reviews SET status=?,findings=?,round=round+?,reviewer_restarts=0 '
-        "WHERE conv_id=? AND status='in_review'",
-        ('approved' if approved else 'implementing', body.findings, int(not approved), conv_id))
+        'UPDATE task_reviews SET status=?,findings=?,round=round+?,reviewer_restarts=0,'
+        "settled_at=?,reopen_noticed=0 WHERE conv_id=? AND status='in_review'",
+        ('approved' if approved else 'implementing', body.findings, int(not approved),
+         time.time() if approved else None, conv_id))
     if changed.rowcount != 1:
         raise HTTPException(409, 'there is no open review for this task')
     row = task(db, conv_id)
