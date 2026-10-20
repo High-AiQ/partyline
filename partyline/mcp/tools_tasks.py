@@ -2,15 +2,16 @@
 
 from urllib.parse import quote
 
-from ..orchestrator_contracts import BlockedIn, ReviewRequestIn, TaskIn, VerdictIn
+from ..orchestrator_contracts import BlockedIn, ResumeIn, ReviewRequestIn, TaskIn, VerdictIn
 from .client import ApiError
 from .validation import validate_arguments
 
 _MODELS = {'blocked': BlockedIn, 'create_task': TaskIn, 'request_review': ReviewRequestIn,
-           'review_verdict': VerdictIn}
+           'review_verdict': VerdictIn,
+           'resume_work': ResumeIn}
 _PATHS = {'blocked': ('POST', 'blocked'), 'create_task': ('POST', 'tasks'), 'tasks': ('GET', 'tasks'),
           'request_review': ('POST', 'request-review'), 'review_verdict': ('POST', 'review-verdict'),
-          'restart_reviewer': ('POST', 'task/reviewer')}
+          'restart_reviewer': ('POST', 'task/reviewer'), 'resume_work': ('POST', 'task/resume')}
 
 
 def tool_list(state):

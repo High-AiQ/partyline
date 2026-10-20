@@ -40,6 +40,11 @@ async def report(runtime, row):
             wake = reports._claim_wake(db.conn, record['id'], time.time())
             db.conn.commit()
         record = reports.get(db, record['id'])
+    await wake_root(runtime, row, record, wake)
+
+
+async def wake_root(runtime, row, record, wake):
+    db = runtime.db
     if not wake:
         return
     claim = record['notifying_at']
@@ -53,6 +58,13 @@ async def report(runtime, row):
         reports.release_wake_claim(db, record['id'], claim)
         raise
     reports.mark_notified(db, record['id'], claim)
+
+
+async def notify_root(runtime, row, text):
+    """One notified report that is not the task's terminal one, so it holds no report_id."""
+    record, wake = reports.add(runtime.db, row['root_id'], row['conv_id'], 'task server',
+                               f"Task {row['conv_id']}: {text}"[:2000], notify=True)
+    await wake_root(runtime, row, record, wake)
 
 
 async def spawn_refused(runtime, row, detail, *, implementer=False):
