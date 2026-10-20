@@ -237,7 +237,7 @@ Machine credentials cannot change it.
 With retention enabled (the default), orchestrator task lines and review history
 stay visible after shipping. Idle task processes detach once the approved/done SHA
 is merged into the root checkout and the whole task worktree is clean and merged.
-Machines cannot archive task lines, including the root captain's retirement override.
+Only a person or the task's root captain may archive task lines.
 
 Enabling auto-clean lets the server archive approved/done, merged task lines after
 all processes are inactive, and remove their managed task, review and scratch
