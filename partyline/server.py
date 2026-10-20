@@ -111,6 +111,7 @@ from .process_signal import signal_router
 from .staffing_routes import staffing_router
 from .line_notes import notes_router
 from .settings_routes import settings_router
+from .storage_routes import storage_router
 from .orchestrator_routes import orchestrator_router
 from .orchestrator_cleanup import run as run_task_maintenance
 from . import docker_relay
@@ -238,6 +239,7 @@ app.include_router(presets_router(runtime, ADAPTERS))
 app.include_router(staffing_router(runtime))
 app.include_router(notes_router(runtime))
 app.include_router(settings_router(runtime))
+app.include_router(storage_router(runtime, lambda: media.root))
 app.include_router(orchestrator_router(runtime))
 app.include_router(restart_report_router(runtime, lambda r: require_loopback(r)))
 app.include_router(signal_router(runtime))
