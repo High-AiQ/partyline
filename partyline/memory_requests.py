@@ -51,7 +51,7 @@ def register_memory_request_routes(app: FastAPI, runtime, resume) -> None:
         if att is None:
             raise HTTPException(404)
         if actor.kind == "machine" and actor.attachment_id != att_id:
-            deny_unless(db, actor, att["conv_id"], "attach")
+            deny_unless(db, actor, att["conv_id"], "assign")
         amount = parse_size(body.requested_limit)
         reason = body.reason.strip()
         if not reason:
