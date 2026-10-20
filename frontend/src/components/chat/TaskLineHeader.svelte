@@ -28,6 +28,9 @@
   >
     task of «{line.task_root_name ?? "root"}» · implementer: {line.task_implementer_name ?? "pending"} · reviewer:
     {line.task_reviewer_name ?? "pending"}
+    {#if (line.task_repositories?.length ?? 0) > 1}
+      <div id="task-repositories">reviewing {line.task_repositories?.join(" · ")}</div>
+    {/if}
     {#if line.task_status === "in_review"}
       <button
         id="restart-reviewer"

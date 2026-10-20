@@ -71,6 +71,11 @@ class GateResult(BaseModel):
 
 
 
+class AcceptedRepository(BaseModel):
+    repository: str
+    sha: str
+
+
 class AcceptResponse(BaseModel):
     conv_id: str
     branch: str
@@ -84,6 +89,8 @@ class AcceptResponse(BaseModel):
     tree_sync: TreeSyncOut | None = None
     # Gate results when the accept was asked to run them (5.6).
     gates: list[GateResult] = Field(default_factory=list)
+    # Other repositories a task review covered: their reviewed commits, verified.
+    repositories: list[AcceptedRepository] = Field(default_factory=list)
 
 
 class PrereviewIn(BaseModel):

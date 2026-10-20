@@ -1,6 +1,7 @@
 """Structured task lifecycle; task policy is chosen only by the root captain."""
 
 import asyncio
+import json
 import time
 import uuid
 
@@ -13,7 +14,7 @@ from .line_worktree import line_cwd, rev
 from .git_fence import mirror_branch_ref
 from .worktree_paths import branch_name
 from .review_worktrees import ReviewError
-from .task_review_checkout import move_task_review_worktree
+from .task_review_checkout import move_task_review_worktrees
 from .orchestrator_notices import handed_to, report, spawn_refused, tell
 from .orchestrator_revive import (
     brief_reviewer, reviewer_is_live, revive_reviewer, staffed_by_preset, task_lock)
@@ -81,17 +82,23 @@ async def request_review(runtime, actor, conv_id, body):
         resume(db, conv_id)
         cwd = line_cwd(db, conv_id)
         tip = mirror_branch_ref(cwd or '', conv_id, branch_name(cwd or ''))
-        sha = body.sha or tip or rev(cwd or '', 'rev-parse', 'HEAD')
-        if not sha:
-            raise HTTPException(409, 'task has no commit to review')
+        entries = [(item.repository, item.sha) for item in body.repositories or []]
+        if not entries:
+            sha = body.sha or tip or rev(cwd or '', 'rev-parse', 'HEAD')
+            if not sha:
+                raise HTTPException(409, 'task has no commit to review')
+            entries = [('', sha)]
+        primary = (row['repositories'] or [{}])[0].get('repository')
         try:
-            checkout = await asyncio.to_thread(move_task_review_worktree, db, conv_id, sha)
+            checkouts = await asyncio.to_thread(
+                move_task_review_worktrees, db, conv_id, entries, primary)
         except ReviewError as exc:
             raise HTTPException(exc.status_code, exc.detail) from exc
         db._exec(
-            'UPDATE task_reviews SET sha=?,review_worktree=?,what=?,location=?, '
+            'UPDATE task_reviews SET sha=?,review_worktree=?,repositories=?,what=?,location=?, '
             'round=CASE WHEN round=0 THEN 1 ELSE round END,reviewer_restarts=0 WHERE conv_id=?',
-            (checkout['sha'], checkout['path'], body.what, body.where, conv_id))
+            (checkouts[0]['sha'], checkouts[0]['path'], json.dumps(checkouts),
+             body.what, body.where, conv_id))
         row = task(db, conv_id)
         if row['policy'] not in ('none', 'captain'):
             try:

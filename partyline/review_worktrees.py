@@ -66,14 +66,31 @@ def subtree_repository_line(db, conv_id: str, repository: str) -> tuple[str, str
         return _repo_of(db, conv_id), None
     wanted = os.path.realpath(str(repository).strip())
     for line_id in subtree_conversation_ids(db, conv_id):
-        root, _worktree = repo_and_worktree(line_cwd(db, line_id) or "")
-        if root and os.path.realpath(root) == wanted:
-            return root, line_id
+        for place in _places_of(db, line_id):
+            root, _worktree = repo_and_worktree(place)
+            if root and os.path.realpath(root) == wanted:
+                return root, line_id
     raise ReviewError(
         403,
         f"{repository} is not this line's repository and no line in its subtree works in "
         "it — review worktrees may only be created in a subtree repository",
     )
+
+
+def _places_of(db, line_id: str) -> list[str]:
+    """Where a line works: its checkout, its attachments' folders and its write grants.
+
+    A task line can sit in one repository while its implementer commits in a
+    sibling it holds a write grant for; that sibling is the line's own work.
+    """
+    from .write_set_routes import list_write_grants
+
+    places = [line_cwd(db, line_id) or ""]
+    places += [att["cwd"] or "" for att in db.list_attachments(line_id)]
+    for grant in list_write_grants(db, line_id):
+        path = grant["path"]
+        places.append(path if os.path.isdir(path) else os.path.dirname(path))
+    return places
 
 
 def _registered(root: str, path: str) -> bool:

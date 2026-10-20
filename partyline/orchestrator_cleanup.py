@@ -2,14 +2,16 @@
 
 import asyncio
 import logging
+import os
 
 from .contracts import ConversationsChangedEvent
 from .line_process_routes import detach_attachment
 from .line_subtree import archive_line
-from .line_worktree import _git, line_cwd, rev
+from .line_worktree import _git, line_cwd, repo_and_worktree, rev
 from .git_fence import mirror_branch_ref
 from .worktree_paths import branch_name
 from .orchestrator_notices import report
+from .orchestrator_store import task
 from .review_worktrees import prune_review_worktrees
 from .scratch_worktrees import prune_scratch_worktrees
 from .worktree_lifecycle import archive_worktree_if_safe, worktree_state
@@ -27,9 +29,15 @@ def shipped(db, row):
     task_cwd = line_cwd(db, row['conv_id']) or ''
     tip = mirror_branch_ref(task_cwd, row['conv_id'], branch_name(task_cwd)) or rev(
         task_cwd, 'rev-parse', 'HEAD')
+    own = os.path.realpath(repo_and_worktree(cwd)[0] or cwd)
+    # Each reviewed commit must be in its own repository's HEAD: the root's for
+    # the line's repository, the named repository's for the others.
+    checks = [(cwd if os.path.realpath(item['repository']) == own else item['repository'], item['sha'])
+              for item in row['repositories']] or [(cwd, row['sha'])]
     return bool(tip) and all(
-        _git('merge-base', '--is-ancestor', sha, 'HEAD', cwd=cwd).returncode == 0
-        for sha in {row['sha'], tip})
+        os.path.isdir(where)
+        and _git('merge-base', '--is-ancestor', sha, 'HEAD', cwd=where).returncode == 0
+        for where, sha in [(cwd, tip), *checks])
 
 
 async def tick(runtime):
@@ -38,7 +46,7 @@ async def tick(runtime):
                     'WHERE c.archived_at IS NULL').fetchall()
     changed = False
     for record in rows:
-        row = dict(record)
+        row = task(db, record['conv_id'])
         await report(runtime, row)
         if row['status'] not in ('approved', 'done'):
             continue
