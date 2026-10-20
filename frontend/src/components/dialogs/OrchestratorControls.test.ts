@@ -44,7 +44,13 @@ describe("orchestrator controls", () => {
     const onupdate = vi.fn().mockResolvedValue(undefined);
     const component = mount(CaptainStyleSection, {
       target: document.body,
-      props: { conversation: root, onupdate },
+      props: {
+        conversation: root,
+        mode: "manager_tree" as const,
+        review: "captain",
+        showSave: true,
+        onupdate,
+      },
     });
     try {
       await tick();

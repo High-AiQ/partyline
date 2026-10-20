@@ -10,7 +10,7 @@ from .orchestrator_contracts import (
 from .orchestrator_stall import blocked, resume_work
 from .orchestrator_revive import restart_reviewer
 from .orchestrator_service import create_task, request_review, review_verdict
-from .orchestrator_store import require_root, task, tasks, validate_policy
+from .orchestrator_store import require_root, task, tasks, write_captain_style
 
 
 def orchestrator_router(runtime):
@@ -21,18 +21,7 @@ def orchestrator_router(runtime):
     async def captain_style(request: Request, conv_id: str, body: CaptainStyleIn):
         actor = request_principal(request)
         deny_unless(db, actor, conv_id, 'read')
-        if actor.kind != 'user':
-            raise HTTPException(403, 'only a person changes captain style')
-        conv = db.get_conversation(conv_id)
-        if conv['parent_id'] is not None:
-            raise HTTPException(409, 'captain style can only be set on a root line')
-        if conv['captain_mode'] != body.captain_mode and db._exec(
-                'SELECT 1 FROM conversations WHERE parent_id=? LIMIT 1', (conv_id,)).fetchone():
-            raise HTTPException(409, 'captain style cannot change while child lines exist')
-        validate_policy(db, body.default_review_policy)
-        db._exec('UPDATE conversations SET captain_mode=?,default_review_policy=? WHERE id=?',
-                 (body.captain_mode, body.default_review_policy, conv_id))
-        conv = db.get_conversation(conv_id)
+        conv = write_captain_style(db, actor, conv_id, body.captain_mode, body.default_review_policy)
         await runtime.broadcast(conv_id, ConversationEvent(conversation=conv))
         await runtime.broadcast_all(ConversationsChangedEvent())
         return conv

@@ -65,7 +65,10 @@ describe("Board captain status", () => {
       select.dispatchEvent(new Event("change", { bubbles: true }));
       document.querySelector<HTMLButtonElement>("#appointCaptain")?.click();
       await vi.waitFor(() => {
-        expect(appoint).toHaveBeenCalledWith("line", attachment.id);
+        expect(appoint).toHaveBeenCalledWith("line", attachment.id, {
+          captain_mode: "manager_tree",
+          default_review_policy: "captain",
+        });
         expect(document.querySelector(".captain-badge")).not.toBeNull();
       });
     } finally {
