@@ -14,6 +14,18 @@ def _root_sentence(db, conv_id, root_id):
             f"mention @{captain['name']}; line names are not mentionable. ")
 
 
+def _handles(row, role):
+    tag = row.get('tag')
+    own = row['reviewer_handle'] if role == 'reviewer' else row['implementer_handle']
+    other_role = 'implementer' if role == 'reviewer' else 'reviewer'
+    other = row['implementer_handle'] if role == 'reviewer' else (
+        row['reviewer_handle'] or (f'review-{tag}' if tag else None))
+    text = f'Your handle is {own}. ' if own else ''
+    if other:
+        text += f'The {other_role} of this task is {other}. '
+    return text
+
+
 def task_pack(db, conv_id, role):
     if db is None or not hasattr(db, '_exec'):
         return ''
@@ -23,6 +35,7 @@ def task_pack(db, conv_id, role):
     return (
         '\n\n## Task line pack\n'
         f"You are the {role}. Task of {row['root_id']}, one implementer, policy {row['policy']}. "
+        f"{_handles(row, role)}"
         f"{_root_sentence(db, conv_id, row['root_id'])}"
         'The implementer follows the assigned goal and calls request_review(sha, what, where). '
         'If blocked, call blocked(reason); the server notifies the root. '

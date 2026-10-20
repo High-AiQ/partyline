@@ -1015,6 +1015,16 @@ message from the root captain or a person posted since the approval and the task
 reopened, the root captain gets one private notice per approval; nothing reopens on its
 own, so a "thanks" cannot reopen a task. Unrelated work goes through `create_task`.
 
+Task processes are named after their task, never their preset: the implementer is
+`impl-<tag>` and the reviewer `review-<tag>`, where `<tag>` is the first six hex characters
+of the task line's id (lengthened if a handle in the tree already uses it) and is stored
+on the task row. The preset lives on the attachment's `preset` column, so cards and
+staffing still show it. Tasks created before this keep their old handles. The root captain
+or a person messages a task's workers by id with `message_task(conv_id, text, to)` (`POST
+…/task/message`, 409 when that worker is not live) instead of @mentioning a handle, and a
+root-captain mention in a task line of a process on a different task line is held back with
+a private notice naming this line's handles.
+
 An implementer that cannot proceed calls `blocked(reason)`. This sets the task's
 status to `blocked` and sends a deduplicated notify report to its root. Calling
 `request_review` resumes implementation and clears the blocked state before the

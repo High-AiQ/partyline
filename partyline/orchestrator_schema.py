@@ -65,4 +65,8 @@ MIGRATIONS += [
     "ALTER TABLE task_reviews ADD COLUMN reopen_noticed INTEGER NOT NULL DEFAULT 0",
     "UPDATE task_reviews SET settled_at=CAST(strftime('%s','now') AS REAL) "
     "WHERE status IN ('approved','done') AND settled_at IS NULL",
+    # Task processes are named impl-<tag>/review-<tag>; the preset they run is recorded apart
+    # from the handle so cards and staffing still show it.
+    "ALTER TABLE task_reviews ADD COLUMN tag TEXT",
+    "ALTER TABLE attachments ADD COLUMN preset TEXT",
 ]

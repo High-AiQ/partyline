@@ -35,6 +35,7 @@ from .hierarchy import ancestors, descendants, lead_attachment, tree_live_name_c
 from .line_depth import live_workers
 from .mentions import known_mention_names
 from .message_visibility import is_reaction_notice
+from .task_mention_guard import notify_cross_task, split_cross_task
 from .resume_backlog import WORKER_PACK_NOTICE_PREFIX
 
 LIVE = ("starting", "running")
@@ -231,8 +232,11 @@ async def relay_mentions(runtime, conv_id: str, message: dict, names: set[str]) 
         names = names - {speaker["name"].lower()}
     crossing = may_cross(message, speaker)
     reached, withheld = resolve_elsewhere(runtime.db, conv_id, names, crossing=crossing)
+    crossed, withheld = split_cross_task(runtime.db, conv_id, speaker, withheld)
+    await notify_cross_task(runtime, conv_id, speaker, crossed)
+    withheld_all = withheld + crossed
     if is_foreign(message):
-        return {att["name"].lower() for att in reached + withheld}
+        return {att["name"].lower() for att in reached + withheld_all}
     for target in reached:
         if speaker is not None and target["id"] == speaker["id"]:
             continue
@@ -244,4 +248,4 @@ async def relay_mentions(runtime, conv_id: str, message: dict, names: set[str]) 
     for target in withheld:
         notice = withheld_notice(runtime.db, conv_id, target, crossing)
         await runtime.post_message(conv_id, "system", "system", notice)
-    return {att["name"].lower() for att in reached + withheld}
+    return {att["name"].lower() for att in reached + withheld_all}

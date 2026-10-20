@@ -28,7 +28,8 @@ Capability = Literal[
     "appoint_lead",
     "archive",
     "link_parent",
-    "create_task", "tasks", "restart_reviewer", "reopen_task", "request_review", "review_verdict", "blocked",
+    "create_task", "tasks", "restart_reviewer", "reopen_task", "message_task",
+    "request_review", "review_verdict", "blocked",
 ]
 
 ALL_CAPABILITIES: tuple[Capability, ...] = (
@@ -45,7 +46,8 @@ ALL_CAPABILITIES: tuple[Capability, ...] = (
     "appoint_lead",
     "archive",
     "link_parent",
-    "create_task", "tasks", "restart_reviewer", "reopen_task", "request_review", "review_verdict", "blocked",
+    "create_task", "tasks", "restart_reviewer", "reopen_task", "message_task",
+    "request_review", "review_verdict", "blocked",
 )
 
 
@@ -103,7 +105,7 @@ def allows(db: Db, principal: Principal, conv_id: str, capability: Capability) -
                 and conv.get('captain_mode', 'manager_tree') == 'orchestrator'):
             return True
         return capability in task_actions(db, principal, conv_id)
-    if capability in ("create_task", "tasks", "restart_reviewer", "reopen_task"):
+    if capability in ("create_task", "tasks", "restart_reviewer", "reopen_task", "message_task"):
         return (conv_id == home and principal.is_lead and conv['parent_id'] is None
                 and conv.get('captain_mode', 'manager_tree') == 'orchestrator')
     if task_row and capability == "archive" and not (
