@@ -12,8 +12,11 @@ from .hierarchy_contracts import ChildIn
 from .line_worktree import line_cwd, rev
 from .git_fence import mirror_branch_ref
 from .worktree_paths import branch_name
-from .review_worktrees import ReviewError, create_review_worktree
+from .review_worktrees import ReviewError
+from .task_review_checkout import move_task_review_worktree
 from .orchestrator_notices import handed_to, report, spawn_refused, tell
+from .orchestrator_revive import (
+    brief_reviewer, reviewer_is_live, revive_reviewer, staffed_by_preset, task_lock)
 from .orchestrator_staff import ensure_reviewer, restart, spawn
 from .orchestrator_store import preset, require_root, require_task, task, validate_policy
 
@@ -59,15 +62,20 @@ async def request_review(runtime, actor, conv_id, body):
     row = require_task(db, actor, conv_id)
     # A task lock spans worktree creation, admission and notification: duplicate
     # calls cannot spawn two reviewers or produce two terminal reports.
-    locks = getattr(runtime, 'task_review_locks', None)
-    if locks is None:
-        runtime.task_review_locks = locks = {}
-    async with locks.setdefault(conv_id, asyncio.Lock()):
+    async with task_lock(runtime, conv_id):
         row = require_task(db, actor, conv_id)
         if row['status'] in ('approved', 'done'):
             await report(runtime, row)
             return task(db, conv_id)
         if row['status'] == 'in_review':
+            # Asking again revives a reviewer that died after admission.
+            if staffed_by_preset(row) and not reviewer_is_live(db, row):
+                db._exec('UPDATE task_reviews SET reviewer_restarts=0 WHERE conv_id=?', (conv_id,))
+                try:
+                    await revive_reviewer(runtime, row)
+                except (HTTPException, ValueError) as exc:
+                    await spawn_refused(runtime, row, getattr(exc, 'detail', str(exc)))
+                    raise
             return task(db, conv_id)
         from .orchestrator_stall import resume
         resume(db, conv_id)
@@ -77,12 +85,12 @@ async def request_review(runtime, actor, conv_id, body):
         if not sha:
             raise HTTPException(409, 'task has no commit to review')
         try:
-            checkout = await asyncio.to_thread(create_review_worktree, db, conv_id, sha)
+            checkout = await asyncio.to_thread(move_task_review_worktree, db, conv_id, sha)
         except ReviewError as exc:
             raise HTTPException(exc.status_code, exc.detail) from exc
         db._exec(
             'UPDATE task_reviews SET sha=?,review_worktree=?,what=?,location=?, '
-            'round=CASE WHEN round=0 THEN 1 ELSE round END WHERE conv_id=?',
+            'round=CASE WHEN round=0 THEN 1 ELSE round END,reviewer_restarts=0 WHERE conv_id=?',
             (checkout['sha'], checkout['path'], body.what, body.where, conv_id))
         row = task(db, conv_id)
         if row['policy'] not in ('none', 'captain'):
@@ -95,12 +103,7 @@ async def request_review(runtime, actor, conv_id, body):
                  ('done' if row['policy'] == 'none' else 'in_review', conv_id))
         row = task(db, conv_id)
         if row['policy'] not in ('none', 'captain'):
-            await tell(runtime, reviewer['id'],
-                       f"Review round {row['round']} at exact SHA {row['sha']} in "
-                       f"{row['review_worktree']}. {row['what']} — {row['location']}. "
-                       'Call review_verdict(approve|changes, findings). Never push or implement. '
-                       'Your approval is acceptance; the root captain merges.',
-                       source=(row['implementer_id'], conv_id))
+            await brief_reviewer(runtime, row, reviewer)
             handed_to(runtime, row['implementer_id'], reviewer['id'])
         await report(runtime, row)
         await runtime.broadcast_all(ConversationsChangedEvent())
@@ -112,7 +115,7 @@ async def review_verdict(runtime, actor, conv_id, body):
     row = require_task(db, actor, conv_id, reviewer=True)
     approved = body.verdict == 'approve'
     changed = db._exec(
-        'UPDATE task_reviews SET status=?,findings=?,round=round+? '
+        'UPDATE task_reviews SET status=?,findings=?,round=round+?,reviewer_restarts=0 '
         "WHERE conv_id=? AND status='in_review'",
         ('approved' if approved else 'implementing', body.findings, int(not approved), conv_id))
     if changed.rowcount != 1:

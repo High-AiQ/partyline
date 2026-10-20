@@ -58,4 +58,5 @@ MIGRATIONS += [
     "INSERT OR IGNORE INTO orchestrator_state_migrations VALUES('blocked-status')",
     "ALTER TABLE task_reviews ADD COLUMN stall_stage INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE task_reviews ADD COLUMN stall_notice_id INTEGER",
+    "ALTER TABLE task_reviews ADD COLUMN reviewer_restarts INTEGER NOT NULL DEFAULT 0",
 ]

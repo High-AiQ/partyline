@@ -54,6 +54,7 @@ class TaskReview(BaseModel):
     report_id: int | None = None
     merged: bool
     created_at: float
+    reviewer_restarts: int = 0
 
 
 class AutoCleanIn(BaseModel):
