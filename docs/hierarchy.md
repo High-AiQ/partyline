@@ -956,8 +956,9 @@ uses the task's current fenced tip. Policies determine the next action:
 - `none`: mark the task done and notify the root once.
 - `captain`: create an exact-SHA managed review checkout and notify the root once.
   The root reviews and calls `review_verdict` with the task's `conv_id`.
-- A reviewer preset: the server reserves a different reviewer attachment, creates
-  the exact-SHA review checkout, and starts the reviewer there. The implementer
+- A reviewer preset: the server reserves a different reviewer attachment, moves the
+  task's one review checkout (`.review/task-<line id>`, reset and cleaned) to the
+  exact SHA, and starts the reviewer there. The implementer
   cannot select, attach or replace the reviewer. The same attachment and CLI
   session are resumed across rounds; launch failures without a session retry a
   fresh PTY under the same attachment identity. Reviewers never implement or push.
@@ -986,6 +987,11 @@ People may archive task lines. The optional global
 [`auto_clean_task_history` setting](resource-budget.md#task-history-retention)
 archives merged, approved/done task lines once no process is live and removes their
 managed worktrees. It is disabled by default.
+
+A reviewer that dies while its task is in review is revived by asking again
+(`request_review`), by a person or the root captain (`POST …/task/reviewer`, the
+`restart_reviewer` tool, or the button on the task line header), and once
+automatically on its exit; a second exit reports to the root instead of looping.
 
 An implementer that cannot proceed calls `blocked(reason)`. This sets the task's
 status to `blocked` and sends a deduplicated notify report to its root. Calling

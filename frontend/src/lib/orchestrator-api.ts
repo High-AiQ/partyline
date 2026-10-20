@@ -11,7 +11,15 @@ export type CaptainStyle = z.infer<typeof CaptainStyleSchema>;
 export const TaskHistorySettingSchema = z.object({ enabled: z.boolean() });
 export type TaskHistorySetting = z.infer<typeof TaskHistorySettingSchema>;
 
+export const RestartedTaskSchema = z.looseObject({ conv_id: z.string() });
+
 export const orchestratorApi = {
+  restartReviewer: (taskId: string) =>
+    request(`/api/conversations/${taskId}/task/reviewer`, {
+      method: "POST",
+      schema: RestartedTaskSchema,
+      fallback: "could not restart the reviewer",
+    }),
   setStyle: (id: string, style: CaptainStyle) =>
     request(`/api/conversations/${id}/captain-style`, {
       method: "PUT",

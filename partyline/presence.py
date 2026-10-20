@@ -5,9 +5,8 @@ writes reaches the line until its turn ends. For an evening's worst
 failures — a lead reassigning work mid-build, two agents writing the same
 files — the room could not tell thinking from dead.
 
-A process cannot post its own liveness: that signal would be forgeable
-(`docs/lessons.md`). Speech never ends a turn; only the harness or process
-exit does.
+A process cannot post its own liveness: that would be forgeable (`docs/lessons.md`).
+Speech never ends a turn; only the harness or process exit does.
 
 Those receipts come in pairs: ``began`` when the CLI starts a turn, ``ended``
 when it finishes. Pairing makes them robust to a CLI that folds two digests
@@ -18,8 +17,7 @@ stuck "working…" a silent paste produces. A harness with no such receipt
 still arms on the pasted wake and never self-clears; a guess about when a
 turn ended is a new way to be wrong.
 
-The turn boundary is also where the return path (`turn_return.py`) decides
-whether a finished turn answered whoever asked for it.
+The turn boundary is also where the return path (`turn_return.py`) decides whether it answered.
 """
 
 from __future__ import annotations
@@ -36,6 +34,7 @@ from .presence_delivery import credit_at_turn_end
 from .speech_echo import is_api_echo
 from .turn_return import ReturnPath
 from .goal_stall import GoalStallGuard
+from .orchestrator_revive import on_status as reviewer_gone
 
 WORKING = "working"
 SPEAKING = "speaking"
@@ -296,5 +295,6 @@ class Presence:
             if value in ("exited", "detached"):
                 await self.finished(conv_id, att_id)
                 await self.queue.discard_on_exit(att_id, name, value)
+                reviewer_gone(self.runtime, att_id, value)
 
         return status
