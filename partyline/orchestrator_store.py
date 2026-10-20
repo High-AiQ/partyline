@@ -72,7 +72,7 @@ def task_actions(db, actor, conv_id):
         return set()
     actions = set()
     if actor.attachment_id == row['implementer_id']:
-        actions.update(('request_review', 'blocked'))
+        actions.update(('request_review', 'blocked', 'resume_work'))
     if actor.attachment_id == row['reviewer_id']:
         actions.add('review_verdict')
     if row['policy'] == 'captain' and actor.is_lead and actor.conv_id == row['root_id']:

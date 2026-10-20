@@ -86,6 +86,9 @@ async def handle_hook(runtime, presence, att_id: str, token: str, request: Reque
 
         bump_turn(runtime.db, att_id, token)
         await presence.began(att["conv_id"], att_id, owner=token)
+        from .orchestrator_stall import began as task_began
+
+        await task_began(runtime, att)
         adapter = getattr(runtime, "live", {}).get(att_id)
         mark_began = getattr(adapter, "mark_startup_prompt_began", None)
         if mark_began is not None:
