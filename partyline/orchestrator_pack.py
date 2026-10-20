@@ -32,6 +32,8 @@ def task_pack(db, conv_id, role):
         'The server selects and reuses the reviewer; workers cannot attach one. '
         'A reviewer works only in the managed review checkout at the exact requested SHA, '
         'does not implement or push, and calls review_verdict(approve|changes, findings). '
+        'New work on an approved or done task arrives only through the root captain\'s '
+        'reopen_task, which returns it to implementing with a new goal. '
         'Approval is acceptance. Changes ring the implementer and increase the round count; '
         'there is no round cap. Use structured tools for state, never chat verdicts. '
         'While reviewing, hand off only between the implementer and reviewer. '
