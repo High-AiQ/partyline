@@ -26,6 +26,8 @@ def task_pack(db, conv_id, role):
         f"{_root_sentence(db, conv_id, row['root_id'])}"
         'The implementer follows the assigned goal and calls request_review(sha, what, where). '
         'If blocked, call blocked(reason); the server notifies the root. '
+        'If you were blocked and resume work, call resume_work(note) — your task state must '
+        'always reflect what you are doing. '
         'Without a structured call or peer, one reminder precedes a stalled report. '
         'The server selects and reuses the reviewer; workers cannot attach one. '
         'A reviewer works only in the managed review checkout at the exact requested SHA, '

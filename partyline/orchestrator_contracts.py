@@ -53,6 +53,11 @@ class BlockedIn(BaseModel):
     reason: str = Field(min_length=1, max_length=1500, pattern=r'\S')
 
 
+class ResumeIn(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    note: str | None = Field(default=None, min_length=1, max_length=1500, pattern=r'\S')
+
+
 class VerdictIn(BaseModel):
     model_config = ConfigDict(extra='forbid')
     verdict: Literal['approve', 'changes']
