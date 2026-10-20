@@ -2,7 +2,9 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+import json
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class SkippedPurge(BaseModel):
@@ -35,6 +37,16 @@ class ConversationResponse(BaseModel):
     task_root_name: str | None = None
     task_implementer_name: str | None = None
     task_reviewer_name: str | None = None
+    task_repositories: list[str] = Field(default_factory=list)
+
+    @field_validator('task_repositories', mode='before')
+    @classmethod
+    def _reviewed(cls, value):
+        """The task row stores JSON; the rail and header show ``repository@sha``."""
+        if isinstance(value, str):
+            value = json.loads(value or '[]')
+        return [f"{item['repository']}@{item['sha'][:12]}" if isinstance(item, dict) else item
+                for item in value or []]
     id: str
     name: str
     created_at: float

@@ -1,17 +1,29 @@
 """Task identities, policies and access decisions; never infer state from prose."""
 
+import json
+
 from fastapi import HTTPException
+
+
+def _parsed(row):
+    if row is None:
+        return None
+    record = dict(row)
+    try:
+        record['repositories'] = json.loads(record.get('repositories') or '[]')
+    except ValueError:
+        record['repositories'] = []
+    return record
 
 
 def task(db, conv_id):
     if not hasattr(db, '_exec'):
         return None
-    row = db._exec("SELECT * FROM task_reviews WHERE conv_id=?", (conv_id,)).fetchone()
-    return dict(row) if row else None
+    return _parsed(db._exec("SELECT * FROM task_reviews WHERE conv_id=?", (conv_id,)).fetchone())
 
 
 def tasks(db, root_id):
-    return [dict(row) for row in db._exec(
+    return [_parsed(row) for row in db._exec(
         "SELECT * FROM task_reviews WHERE root_id=? ORDER BY created_at,conv_id",
         (root_id,)).fetchall()]
 
@@ -82,4 +94,4 @@ def retained_task(db, conv_id, include_children=False):
 def attachment_task(db, ident):
     row = db._exec('SELECT * FROM task_reviews WHERE implementer_id=? OR reviewer_id=?',
                    (ident, ident)).fetchone()
-    return dict(row) if row else None
+    return _parsed(row)

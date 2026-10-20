@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class CaptainStyleIn(BaseModel):
@@ -19,11 +19,33 @@ class TaskIn(BaseModel):
     review: str | None = Field(default=None, min_length=1, max_length=120)
 
 
+class RepositoryShaIn(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    repository: str = Field(min_length=1, max_length=4096)
+    sha: str = Field(pattern=r'^[0-9a-f]{4,64}$')
+
+
+class ReviewedRepository(BaseModel):
+    repository: str
+    sha: str
+    path: str
+
+
 class ReviewRequestIn(BaseModel):
     model_config = ConfigDict(extra='forbid')
     sha: str | None = Field(default=None, pattern=r'^[0-9a-f]{4,64}$')
+    repositories: list[RepositoryShaIn] | None = Field(default=None, min_length=1, max_length=8)
     what: str = Field(min_length=1, max_length=1000)
     where: str = Field(min_length=1, max_length=500)
+
+    @model_validator(mode='after')
+    def one_way_to_name_commits(self):
+        if self.sha and self.repositories:
+            raise ValueError('pass sha or repositories, not both')
+        names = [item.repository for item in self.repositories or []]
+        if len(set(names)) != len(names):
+            raise ValueError('each repository may appear once')
+        return self
 
 
 class BlockedIn(BaseModel):
@@ -48,6 +70,7 @@ class TaskReview(BaseModel):
     round: int
     sha: str | None = None
     review_worktree: str | None = None
+    repositories: list[ReviewedRepository] = Field(default_factory=list)
     what: str
     location: str
     findings: str

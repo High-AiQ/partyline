@@ -20,6 +20,7 @@ export const ConversationSchema = z.object({
   task_root_name: z.string().nullable().optional(),
   task_implementer_name: z.string().nullable().optional(),
   task_reviewer_name: z.string().nullable().optional(),
+  task_repositories: z.array(z.string()).optional(),
   id: z.string(),
   parent_id: z.string().nullable().optional(),
   name: z.string(),

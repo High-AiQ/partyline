@@ -19,6 +19,7 @@ import re
 from fastapi import HTTPException, Request
 
 from .auth_guard import request_principal
+from . import task_accept
 from .accept_history import record_accept
 from .git_fence import mirror_branch_ref
 from .review_worktrees import prune_accepted_review
@@ -26,6 +27,7 @@ from .system_notice import post_system_notice
 from .hierarchy import ancestors, descendants, parent_id_of
 from .hierarchy_contracts import (
     AcceptIn,
+    AcceptedRepository,
     AcceptResponse,
     GateResult,
     TreeSyncOut,
@@ -246,6 +248,7 @@ def register_accept_route(app, runtime) -> None:
         if task_row and (task_row['status'] not in ('approved', 'done') or body.allow_descendant
                          or len(body.sha) != 40 or task_row['sha'] != body.sha):
             raise HTTPException(409, 'accept only the approved task SHA, without allow_descendant')
+        own_sha, others = task_accept.plan(db, conv_id, task_row, body.sha)
         gate_results = None
         if body.run_gates:
             from .line_gates import get_gates, run_line_gates
@@ -255,15 +258,17 @@ def register_accept_route(app, runtime) -> None:
                 raise HTTPException(
                     409, "run_gates asked, but no gates are declared on this line "
                          "(PUT /api/conversations/<id>/gates)")
-            gate_results = await run_line_gates(runtime, conv_id, body.sha, spec)
+            gate_results = await run_line_gates(runtime, conv_id, own_sha or body.sha, spec)
             if any(result["exit"] != 0 for result in gate_results):
                 raise HTTPException(409, {"gates": gate_results})
         try:
-            done = accept_sha(db, conv_id, body.sha, body.allow_descendant)
+            done = (accept_sha(db, conv_id, own_sha, body.allow_descendant) if own_sha
+                    else task_accept.settle_unmoved(db, conv_id, body.sha))
         except AcceptError as exc:
             raise HTTPException(exc.status_code, exc.detail) from exc
         _refresh_children_views_quietly(db, conv_id, done["branch"])
         record_accept(db, conv_id, done["sha"], principal.name, body.findings)
+        task_accept.record_others(db, conv_id, others, principal.name)
         state = "already at" if not done["moved"] else "moved to"
         tail = " — the hand-off is the SHA on the line's branch"
         if done["reviewed_sha"]:
@@ -273,6 +278,7 @@ def register_accept_route(app, runtime) -> None:
             tail += f" ({len(body.findings)} findings)"
         if gate_results is not None:
             tail += " (gates passed)"
+        tail += task_accept.tail(others)
         sync = done["tree_sync"]
         if not sync["ok"]:
             tail += f" ⚠ tree not in sync: {sync['detail']}"
@@ -287,6 +293,7 @@ def register_accept_route(app, runtime) -> None:
             conv_id=conv_id, branch=done["branch"], sha=done["sha"], moved=done["moved"],
             reviewed_sha=done["reviewed_sha"], tree_sync=TreeSyncOut(**sync),
             gates=[GateResult(**result) for result in (gate_results or [])],
+            repositories=[AcceptedRepository(**item) for item in others],
         )
 
 
