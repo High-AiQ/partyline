@@ -15,6 +15,9 @@ MAX_MESSAGE_BODY = 8000
 
 class LeadIn(BaseModel):
     attachment_id: str | None = None
+    # The style chosen in the same dialog, applied before the captain is briefed.
+    captain_mode: Literal["manager_tree", "orchestrator"] | None = None
+    default_review_policy: str | None = Field(default=None, min_length=1, max_length=120)
 
 
 class ChildIn(BaseModel):

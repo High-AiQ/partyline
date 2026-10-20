@@ -2,6 +2,7 @@ import { mount, unmount } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ManagementDialog from "./ManagementDialog.svelte";
 import { api } from "../../lib/api";
+import { orchestratorApi } from "../../lib/orchestrator-api";
 import { hierarchyApi } from "../../lib/hierarchy-api";
 import { ConversationDetailSchema } from "../../lib/contracts";
 import { room } from "../../state/room.svelte";
@@ -58,8 +59,64 @@ describe("management dialog captain control", () => {
       if (!button) throw new Error("no appoint button");
       button.click();
       await vi.waitFor(() => {
-        expect(appoint).toHaveBeenCalledWith("child", "att-1");
+        expect(appoint).toHaveBeenCalledWith("child", "att-1", {
+          captain_mode: "manager_tree",
+          default_review_policy: "captain",
+        });
       });
+    } finally {
+      await unmount(dialog);
+    }
+  });
+
+  it("sends the unsaved captain style with the appointment", async () => {
+    vi.spyOn(api, "conversation").mockResolvedValue(detailWith(null));
+    vi.spyOn(api, "presets").mockResolvedValue([]);
+    vi.spyOn(hierarchyApi, "lead").mockResolvedValue({ attachment_id: null });
+    const appoint = vi.spyOn(hierarchyApi, "appoint").mockResolvedValue({ attachment_id: "att-1" });
+    const save = vi.spyOn(orchestratorApi, "setStyle");
+    room.attachments = [
+      {
+        id: "att-1",
+        conv_id: "child",
+        name: "sol",
+        adapter: "codex",
+        command: [],
+        cwd: "/",
+        status: "running",
+        last_seen: 0,
+        created_at: 1,
+        cli_session: null,
+        cwd_git: null,
+      },
+    ];
+    const dialog = mount(ManagementDialog, {
+      target: document.body,
+      props: { conversation: detailWith(null).conversation, close: vi.fn() },
+    });
+    try {
+      await vi.waitFor(() => {
+        expect(document.querySelector("#captainStyle")).not.toBeNull();
+      });
+      expect(document.body.textContent).not.toContain("save captain style");
+      const choices: [string, string][] = [
+        ["#captainStyle", "orchestrator"],
+        ["#captain", "att-1"],
+      ];
+      for (const [id, value] of choices) {
+        const field = document.querySelector(id);
+        if (!(field instanceof HTMLSelectElement)) throw new Error(`missing ${id}`);
+        field.value = value;
+        field.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      document.querySelector<HTMLButtonElement>("#appointCaptain")?.click();
+      await vi.waitFor(() => {
+        expect(appoint).toHaveBeenCalledWith("child", "att-1", {
+          captain_mode: "orchestrator",
+          default_review_policy: "captain",
+        });
+      });
+      expect(save).not.toHaveBeenCalled();
     } finally {
       await unmount(dialog);
     }
