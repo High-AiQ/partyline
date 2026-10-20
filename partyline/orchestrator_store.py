@@ -85,10 +85,12 @@ def refuse_task_attach(db, conv_id):
         raise HTTPException(409, 'task staffing is server-owned: exactly one implementer')
 
 
-def retained_task(db, conv_id, include_children=False):
+def task_not_retirable_by(db, principal, conv_id, include_children=False):
+    """A task line in scope that `principal` is not the live root captain of."""
     from .hierarchy import descendants
     ids = [conv_id, *descendants(db, conv_id)] if include_children else [conv_id]
-    return any(task(db, line_id) for line_id in ids)
+    rows = [row for row in (task(db, line_id) for line_id in ids) if row]
+    return any(not (principal.is_lead and principal.conv_id == row['root_id']) for row in rows)
 
 
 def attachment_task(db, ident):

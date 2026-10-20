@@ -3,14 +3,16 @@
 import sqlite3
 from unittest.mock import AsyncMock, patch
 
+from partyline.auth_guard import Principal
 from partyline.attachment_lifecycle import FreshAttachmentRequest, create_fresh_record
 from partyline.conversation_routes import register_conversation_routes
 from partyline.hierarchy_routes import hierarchy_router
 from partyline.media import MediaStore
-from partyline.orchestrator_contracts import TaskIn
-from partyline.orchestrator_service import create_task
+from partyline.orchestrator_cleanup import tick
+from partyline.orchestrator_contracts import ReviewRequestIn, TaskIn
+from partyline.orchestrator_service import create_task, request_review
 from partyline.settings_routes import settings_router
-from tests.orchestrator_fixture import TaskFixture
+from tests.orchestrator_fixture import TaskFixture, git
 
 
 class ApiTest(TaskFixture):
@@ -70,12 +72,50 @@ class ApiTest(TaskFixture):
         self.actor = self.principal(response.json()['reviewer_id'])
         self.assertEqual(self.client.post(verdict, json=data).json()['status'], 'approved')
 
-    async def test_retention_overrides_root_force_discard_and_shared_branch_override(self):
+    async def shipped(self):
+        row = await self.create('none')
+        sha = self.commit()
+        await request_review(self.runtime, self.worker, self.conv_id,
+                             ReviewRequestIn(sha=sha, what='done', where='code'))
+        return row
+
+    async def test_root_captain_archives_an_approved_merged_task_line(self):
+        row = await self.shipped()
+        git(self.repo, 'merge', '--ff-only', self.row()['sha'])
+        await tick(self.runtime)
+        self.actor = self.captain
+        response = self.client.delete(f'/api/conversations/{row["conv_id"]}?clear_goal=true')
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIsNotNone(self.db.get_conversation(row['conv_id'])['archived_at'])
+
+    async def test_root_captain_still_meets_the_normal_blockers(self):
+        row = await self.shipped()
+        self.actor = self.captain
+        response = self.client.delete(f'/api/conversations/{row["conv_id"]}')
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn('unmerged_commits', [b['code'] for b in response.json()['blockers']])
+        self.assertIsNone(self.db.get_conversation(row['conv_id'])['archived_at'])
+
+    async def test_participants_and_foreign_captains_cannot_retire_a_task_line(self):
+        row = await self.shipped()
+        git(self.repo, 'merge', '--ff-only', self.row()['sha'])
+        self.db.create_conversation('other', 'Other')
+        self.db._exec("UPDATE conversations SET captain_mode='orchestrator' WHERE id='other'")
+        self.db.add_attachment('rival', 'other', 'rival', 'fake', ['fake'], self.repo, 'owner')
+        self.db._exec("UPDATE attachments SET is_lead=1,status='running' WHERE id='rival'")
+        rival = Principal(kind='machine', name='rival', conv_id='other',
+                          attachment_id='rival', is_lead=True)
+        for actor in (self.worker, rival):
+            self.actor = actor
+            for query in ('', '?force_discard=true&stop_processes=true'):
+                response = self.client.delete(f'/api/conversations/{row["conv_id"]}{query}')
+                self.assertEqual(response.status_code, 403, response.text)
+        self.assertIsNone(self.db.get_conversation(row['conv_id'])['archived_at'])
+
+    async def test_shared_branch_override_stays_refused_on_task_lines(self):
         row = await self.create()
         conv = row['conv_id']
         self.actor = self.captain
-        response = self.client.delete(f'/api/conversations/{conv}?force_discard=true&stop_processes=true')
-        self.assertEqual(response.status_code, 403, response.text)
         response = self.client.post(f'/api/conversations/{conv}/attachments', json={
             'name': 'extra', 'adapter': 'fake', 'command': 'fake', 'allow_shared_branch': True})
         self.assertEqual(response.status_code, 403)
