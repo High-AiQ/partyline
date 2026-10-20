@@ -21,10 +21,10 @@ from fastapi import HTTPException, Request
 
 from .auth_guard import request_principal
 from .system_notice import post_system_notice
-from .hierarchy import subtree_conversation_ids
 from .hierarchy_contracts import ReviewWorktreeIn, ReviewWorktreeOut
 from .line_worktree import REVIEW_DIR, _exclude, _git, line_cwd, repo_and_worktree, rev
 from .machine_scope import deny_unless
+from .review_scope import ReviewError, resolve_repository  # noqa: F401  (re-exported)
 
 logger = logging.getLogger(__name__)
 
@@ -32,14 +32,7 @@ _SHA = re.compile(r"[0-9a-f]{4,64}")
 _SHA_DIR = re.compile(r"[0-9a-f]{40}")
 
 
-class ReviewError(Exception):
-    def __init__(self, status_code: int, detail: str):
-        super().__init__(detail)
-        self.status_code = status_code
-        self.detail = detail
-
-
-def _repo_of(db, conv_id: str) -> str:
+def repo_of(db, conv_id: str) -> str:
     root, _worktree = repo_and_worktree(line_cwd(db, conv_id) or "")
     if root is None:
         raise ReviewError(409, "this line does not work inside a git repository")
@@ -62,35 +55,7 @@ def subtree_repository_line(db, conv_id: str, repository: str) -> tuple[str, str
     matching line comes back so follow-up work (ignore rules, worktree
     state) probes that line's own checkout, not the caller's.
     """
-    if not repository or not str(repository).strip():
-        return _repo_of(db, conv_id), None
-    wanted = os.path.realpath(str(repository).strip())
-    for line_id in subtree_conversation_ids(db, conv_id):
-        for place in _places_of(db, line_id):
-            root, _worktree = repo_and_worktree(place)
-            if root and os.path.realpath(root) == wanted:
-                return root, line_id
-    raise ReviewError(
-        403,
-        f"{repository} is not this line's repository and no line in its subtree works in "
-        "it — review worktrees may only be created in a subtree repository",
-    )
-
-
-def _places_of(db, line_id: str) -> list[str]:
-    """Where a line works: its checkout, its attachments' folders and its write grants.
-
-    A task line can sit in one repository while its implementer commits in a
-    sibling it holds a write grant for; that sibling is the line's own work.
-    """
-    from .write_set_routes import list_write_grants
-
-    places = [line_cwd(db, line_id) or ""]
-    places += [att["cwd"] or "" for att in db.list_attachments(line_id)]
-    for grant in list_write_grants(db, line_id):
-        path = grant["path"]
-        places.append(path if os.path.isdir(path) else os.path.dirname(path))
-    return places
+    return resolve_repository(db, conv_id, repository)
 
 
 def _registered(root: str, path: str) -> bool:
