@@ -40,6 +40,7 @@ class FirstHelloTest(unittest.TestCase):
         mark_pending(self.runtime, att_id)
 
     def hello(self, att_id="w1", body="waiting for your @mention"):
+        self.db.add_message("line", "worker", "agent", body)
         return asyncio.run(deliver_pending_first_hello(
             self.runtime, att_id, "worker", body))
 
@@ -51,6 +52,8 @@ class FirstHelloTest(unittest.TestCase):
         self.assertTrue(self.hello())
         self.assertEqual(len(self.delivered_bodies()), 1)
         self.assertIn("waiting for your @mention", self.delivered_bodies()[0])
+        rows = [m for m in self.db.message_page("line", limit=50)[0] if m["sender"] == "worker"]
+        self.assertEqual(len(rows), 1)  # woken on its cursor, not shown a second copy
         # the second bare message routes normally: no second copy
         self.assertFalse(self.hello("still standing by"))
         self.assertEqual(len(self.delivered_bodies()), 1)

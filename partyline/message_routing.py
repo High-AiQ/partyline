@@ -219,6 +219,10 @@ async def route_message(
             queued.add(attachment["name"].lower())
             continue
         if adapter is None:
+            if attachment["status"] == "starting" and attachment["id"] in runtime.live:
+                # Its join announcement delivers everything since the attach.
+                queued.add(attachment["name"].lower())
+                continue
             if attachment["id"] in runtime.reattaching:
                 queued.add(attachment["name"].lower())
                 continue
