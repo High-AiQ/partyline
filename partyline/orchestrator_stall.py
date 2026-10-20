@@ -6,6 +6,7 @@ from fastapi import HTTPException
 
 from .contracts import ConversationsChangedEvent, MessageEvent, MessageResponse
 from .orchestrator_notices import handed_to, notify_root, peer, report
+from .orchestrator_reopen import unreopened
 from .orchestrator_store import require_task, task
 
 
@@ -89,18 +90,19 @@ async def _unblock(runtime, row, note=None):
         await notify_root(runtime, row, f'unblocked: {note}')
 
 
-def _directed(db, row):
-    """A message from the root captain or a person, after the block, for this implementer."""
+def directed(db, row, since):
+    """A message from the root captain or a person, after `since`, for this implementer."""
     return db._exec(
         'SELECT 1 FROM messages WHERE conv_id=? AND created_at>? '
         'AND (sender_type=\'human\' OR source_conv_id=?) '
         'AND (audience_attachment_id IS NULL OR audience_attachment_id=?) LIMIT 1',
-        (row['conv_id'], row['blocked_at'] or 0, row['root_id'], row['implementer_id'])).fetchone()
+        (row['conv_id'], since or 0, row['root_id'], row['implementer_id'])).fetchone()
 
 
 async def began(runtime, att):
     """A blocked implementer starting a turn after fresh word from above is working again."""
     row = task(runtime.db, att['conv_id'])
     if (row and row['implementer_id'] == att['id'] and row['status'] == 'blocked'
-            and _directed(runtime.db, row)):
+            and directed(runtime.db, row, row['blocked_at'])):
         await _unblock(runtime, row)
+    await unreopened(runtime, att)
