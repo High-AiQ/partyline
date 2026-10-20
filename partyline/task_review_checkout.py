@@ -13,7 +13,7 @@ import shutil
 import time
 
 from .line_worktree import REVIEW_DIR, _exclude, _git, rev
-from .review_worktrees import _SHA, ReviewError, _registered, _repo_of
+from .review_worktrees import _SHA, ReviewError, _registered, subtree_repository
 
 
 def task_review_path(root: str, conv_id: str) -> str:
@@ -28,15 +28,19 @@ def _run(path: str, *args: str) -> None:
                                f"{detail[-1] if detail else 'git failed'}")
 
 
-def move_task_review_worktree(db, conv_id: str, sha: str) -> dict:
-    """Check the exact SHA out in the task's one review checkout and record it."""
-    root = _repo_of(db, conv_id)
+def resolve_commit(db, conv_id: str, repository: str, sha: str) -> tuple[str, str]:
+    """``(repository root, full sha)`` for one entry, or a ReviewError."""
+    root = subtree_repository(db, conv_id, repository)
     name = (sha or "").strip().lower()
     if not _SHA.fullmatch(name):
         raise ReviewError(400, "pass the commit SHA (hex) to review")
     full = rev(root, "rev-parse", "--verify", "--quiet", f"{name}^{{commit}}")
     if full is None:
-        raise ReviewError(400, f"no commit {name} in this repository")
+        raise ReviewError(400, f"no commit {name} in {root}")
+    return root, full
+
+
+def _move(db, conv_id: str, root: str, full: str) -> dict:
     path = task_review_path(root, conv_id)
     if os.path.isdir(path) and not _registered(root, path):
         shutil.rmtree(path, ignore_errors=True)  # not git's worktree: partyline's to replace
@@ -48,11 +52,32 @@ def move_task_review_worktree(db, conv_id: str, sha: str) -> dict:
         _exclude(root, REVIEW_DIR)
         _git("worktree", "prune", cwd=root)
         _run(root, "worktree", "add", "--detach", path, full)
-    created_at = time.time()
     db._exec(
         "INSERT INTO review_worktrees(conv_id,sha,path,created_at) VALUES(?,?,?,?) "
         "ON CONFLICT(path) DO UPDATE SET conv_id=excluded.conv_id, sha=excluded.sha, "
         "created_at=excluded.created_at",
-        (conv_id, full, path, created_at),
+        (conv_id, full, path, time.time()),
     )
-    return {"conv_id": conv_id, "sha": full, "path": path, "created_at": created_at}
+    return {"repository": root, "sha": full, "path": path}
+
+
+def move_task_review_worktrees(db, conv_id: str, entries: list[tuple[str, str]],
+                               primary: str | None = None) -> list[dict]:
+    """Move the task's checkout in each ``(repository, sha)`` entry to its SHA.
+
+    Everything is resolved before anything moves. The first result is the
+    primary entry, whose checkout is the reviewer's folder; a task that
+    already has a primary repository keeps it first, so that folder never
+    changes between rounds.
+    """
+    found = [resolve_commit(db, conv_id, repository, sha) for repository, sha in entries]
+    roots = [os.path.realpath(root) for root, _full in found]
+    if len(set(roots)) != len(roots):
+        raise ReviewError(422, "each repository may appear once in a review")
+    if primary:
+        if os.path.realpath(primary) not in roots:
+            raise ReviewError(
+                409, f"a review must keep the task's primary repository {primary}; "
+                     "pass repositories again, including it")
+        found.sort(key=lambda item: os.path.realpath(item[0]) != os.path.realpath(primary))
+    return [_move(db, conv_id, root, full) for root, full in found]

@@ -37,11 +37,18 @@ def reviewer_is_live(db, row):
 
 
 async def brief_reviewer(runtime, row, reviewer):
+    repos = row.get('repositories') or []
+    if len(repos) > 1:
+        listing = ''.join(f"\n- {item['repository']}: {item['sha']} in {item['path']}" for item in repos)
+        where = (f"Review round {row['round']} covers these repositories at exact SHAs "
+                 f"(your working folder is the first checkout):{listing}\n")
+    else:
+        where = (f"Review round {row['round']} at exact SHA {row['sha']} in "
+                 f"{row['review_worktree']}. ")
     note = (f" Your session may be new; round {row['round']} follows changes requested earlier: "
             f"{row['findings']}" if row['round'] > 1 and row['findings'] else '')
     await tell(runtime, reviewer['id'],
-               f"Review round {row['round']} at exact SHA {row['sha']} in "
-               f"{row['review_worktree']}. {row['what']} — {row['location']}. "
+               where + f"{row['what']} — {row['location']}. "
                'Call review_verdict(approve|changes, findings). Never push or implement. '
                'Your approval is acceptance; the root captain merges.' + note,
                source=(row['implementer_id'], row['conv_id']))

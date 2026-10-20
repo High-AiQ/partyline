@@ -23,8 +23,11 @@ async def report(runtime, row):
         return
     if row['report_id'] is None:
         status = 'stalled' if row['stall_stage'] == 3 else row['status']
+        repos = row['repositories']
+        where = (' ' + '; '.join(f"{item['repository']} {item['sha']}" for item in repos)
+                 if len(repos) > 1 else '')
         text = (f"Task {row['conv_id']}: {status}; round {row['round']}; "
-                f"SHA {row['sha']}; review {row['review_worktree']}; "
+                f"SHA {row['sha']}{where}; review {row['review_worktree']}; "
                 f"{row['what']} — {row['location']}\n{row['findings']}")[:2000]
         record, wake = reports.add(db, row['root_id'], row['conv_id'], 'task server', text, notify=True)
         db._exec('UPDATE task_reviews SET report_id=? WHERE conv_id=?', (record['id'], row['conv_id']))

@@ -950,7 +950,17 @@ assigned attachment IDs, SHA, checkout path and merge state without reading chat
 GET `/api/conversations/<task>/task` reads one task; task participants retain their
 role, current review SHA and request after compaction.
 
-The implementer calls `request_review(sha?, what, where)`. Without a SHA the server
+The implementer calls `request_review(sha?, what, where)`, or
+`request_review(repositories=[{repository, sha}, …], what, where)` when the work spans
+repositories (one to eight, each once; `sha` and `repositories` are exclusive). A
+repository is admitted when this line or its subtree works in it: its checkout, an
+attachment's folder or a write grant inside it. The task stores every `{repository,
+sha, path}`; `sha` and `review_worktree` hold the first (primary) entry, whose checkout
+is the reviewer's folder and stays first in later rounds. Each repository gets its own
+stable `.review/task-<line id>` checkout, moved in place each round, and the round brief
+lists every repository with its full SHA and path. `accept` fast-forwards the line's own
+repository as before, verifies and records every other repository's reviewed commit, and
+names them in the notice and the response's `repositories`. Without a SHA the server
 uses the task's current fenced tip. Policies determine the next action:
 
 - `none`: mark the task done and notify the root once.
