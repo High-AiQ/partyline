@@ -154,4 +154,26 @@ describe("orchestrator controls", () => {
       await unmount(header);
     }
   });
+
+  it("lists the reviewed repositories only when a review covers several", async () => {
+    const line = {
+      ...root,
+      id: "task",
+      task_status: "in_review" as const,
+      task_repositories: ["/repos/platform@aaaaaaaaaaaa", "/repos/backend@bbbbbbbbbbbb"],
+    };
+    room.conversation = line;
+    room.conversations = [line];
+    const header = mount(TaskLineHeader, { target: document.body });
+    try {
+      expect(document.querySelector("#task-repositories")?.textContent).toContain(
+        "/repos/backend@bbbbbbbbbbbb",
+      );
+      room.conversations = [{ ...line, task_repositories: ["/repos/platform@aaaaaaaaaaaa"] }];
+      await tick();
+      expect(document.querySelector("#task-repositories")).toBeNull();
+    } finally {
+      await unmount(header);
+    }
+  });
 });

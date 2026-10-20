@@ -38,6 +38,7 @@ class ContractTest(unittest.TestCase):
                 "task_root_name": None,
                 "task_implementer_name": None,
                 "task_reviewer_name": None,
+                "task_repositories": [],
                 "id": "line",
                 "name": "Line",
                 "created_at": 12.5,
