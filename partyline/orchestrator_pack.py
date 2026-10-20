@@ -1,6 +1,17 @@
 """Task participants are briefed without the manager-tree worker wait rule."""
 
+from .mention_relay import task_root_captain
 from .orchestrator_store import task
+
+
+def _root_sentence(db, conv_id, root_id):
+    root = db.get_conversation(root_id) or {}
+    captain = task_root_captain(db, conv_id)
+    line = f"Root line «{root.get('name', root_id)}»"
+    if captain is None:
+        return f'{line} has no live captain right now. '
+    return (f"{line}, root captain @{captain['name']}. To reach the root captain, "
+            f"mention @{captain['name']}; line names are not mentionable. ")
 
 
 def task_pack(db, conv_id, role):
@@ -12,6 +23,7 @@ def task_pack(db, conv_id, role):
     return (
         '\n\n## Task line pack\n'
         f"You are the {role}. Task of {row['root_id']}, one implementer, policy {row['policy']}. "
+        f"{_root_sentence(db, conv_id, row['root_id'])}"
         'The implementer follows the assigned goal and calls request_review(sha, what, where). '
         'If blocked, call blocked(reason); the server notifies the root. '
         'Without a structured call or peer, one reminder precedes a stalled report. '
