@@ -13,7 +13,10 @@ import shutil
 import time
 
 from .line_worktree import REVIEW_DIR, _exclude, _git, rev
-from .review_worktrees import _SHA, ReviewError, _registered, subtree_repository
+from .review_scope import (
+    ReviewError, accepted_repositories, branch_candidates, describe, on_line_branch,
+    resolve_repository)
+from .review_worktrees import _SHA, _registered
 
 
 def task_review_path(root: str, conv_id: str) -> str:
@@ -28,16 +31,44 @@ def _run(path: str, *args: str) -> None:
                                f"{detail[-1] if detail else 'git failed'}")
 
 
+def _commit_in(root: str, name: str) -> str | None:
+    return rev(root, "rev-parse", "--verify", "--quiet", f"{name}^{{commit}}")
+
+
 def resolve_commit(db, conv_id: str, repository: str, sha: str) -> tuple[str, str]:
-    """``(repository root, full sha)`` for one entry, or a ReviewError."""
-    root = subtree_repository(db, conv_id, repository)
+    """``(repository root, full sha)`` for one entry, or a ReviewError.
+
+    A SHA with no repository is looked up in the line's own repository first,
+    then in every other repository accepted for the line: an implementer that
+    committed in a sibling still gets its commit reviewed, and an ambiguous
+    SHA is refused rather than guessed.
+    """
     name = (sha or "").strip().lower()
     if not _SHA.fullmatch(name):
         raise ReviewError(400, "pass the commit SHA (hex) to review")
-    full = rev(root, "rev-parse", "--verify", "--quiet", f"{name}^{{commit}}")
-    if full is None:
-        raise ReviewError(400, f"no commit {name} in {root}")
-    return root, full
+    root = resolve_repository(db, conv_id, repository, name)[0]
+    full = _commit_in(root, name)
+    if full is not None:
+        return root, full
+    if repository and repository.strip():
+        raise ReviewError(400, f"no commit {name} in {root}; repositories accepted for this "
+                               f"line: {describe(accepted_repositories(db, conv_id))}")
+    accepted = accepted_repositories(db, conv_id)
+    searched = [*accepted, *[item for item in branch_candidates(db, conv_id, accepted)
+                             if on_line_branch(db, conv_id, item[0], name)]]
+    hits = [(other, found) for other, _line in searched
+            if os.path.realpath(other) != os.path.realpath(root)
+            and (found := _commit_in(other, name)) is not None]
+    if len(hits) == 1:
+        return hits[0]
+    if hits:
+        where = ', '.join(found for found, _full in hits)
+        raise ReviewError(409, f"commit {name} exists in several repositories ({where}); "
+                               "pass repositories=[{repository, sha}] to say which")
+    raise ReviewError(400, f"no commit {name} in the line's repository {root} nor in any other "
+                           f"repository accepted for this line ({describe(accepted)}); commit on this "
+                           "line's branch, or ask for a write grant on the repository you committed in "
+                           "and pass repositories=[{repository, sha}]")
 
 
 def _move(db, conv_id: str, root: str, full: str) -> dict:
