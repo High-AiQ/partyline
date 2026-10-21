@@ -106,7 +106,7 @@ describe("orchestrator controls", () => {
     }
   });
 
-  it.each(["implementing", "in_review", "approved", "done", "blocked"] as const)(
+  it.each(["implementing", "idle", "in_review", "approved", "done", "blocked"] as const)(
     "renders %s and live task participants",
     async (status) => {
       const line = {

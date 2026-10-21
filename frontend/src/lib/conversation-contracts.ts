@@ -15,7 +15,10 @@ export type PurgeAllResponse = z.infer<typeof PurgeAllResponseSchema>;
 export const ConversationSchema = z.object({
   captain_mode: z.enum(["manager_tree", "orchestrator"]).optional(),
   default_review_policy: z.string().optional(),
-  task_status: z.enum(["implementing", "in_review", "approved", "done", "blocked"]).nullable().optional(),
+  task_status: z
+    .enum(["implementing", "idle", "in_review", "approved", "done", "blocked"])
+    .nullable()
+    .optional(),
   task_round: z.number().int().nonnegative().nullable().optional(),
   task_root_name: z.string().nullable().optional(),
   task_implementer_name: z.string().nullable().optional(),
