@@ -65,7 +65,14 @@ def archive_blockers(
                 "must merge first",
             ))
         waives_dirty = discard and state["merged"]
-        if strict and not state["clean"] and not waives_dirty:
+        if strict and state["nested"] and not discard:
+            blockers.append(_blocker(
+                "nested_repositories",
+                f"nested repositories: the worktree contains {', '.join(state['nested'])}, separate "
+                "git repositories partyline never deletes; move or delete them by hand. With "
+                "discard=true the line is archived and the worktree is kept",
+            ))
+        elif strict and not state["clean"] and not waives_dirty:
             blockers.append(_blocker(
                 "uncommitted_changes",
                 "uncommitted changes: the worktree is dirty; commit them, or pass discard=true "

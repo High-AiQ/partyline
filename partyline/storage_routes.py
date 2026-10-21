@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from . import attachment_tmp, storage_survey as survey
 from .auth_guard import request_principal
 from .line_worktree import _git
+from .nested_repositories import keep_reason
 from .review_worktrees import remove_review_path
 from .scratch_worktrees import remove_scratch_path
 from .system_notice import post_system_notice
@@ -64,7 +65,7 @@ def _remove(db, key: str, path: str) -> int | None:
     """Remove one candidate; the bytes freed, or None when it could not be removed."""
     if key == "tmp":
         return attachment_tmp.reap_tmp_dir(os.path.basename(path))
-    if os.path.islink(path) or not os.path.isdir(path):
+    if os.path.islink(path) or not os.path.isdir(path) or keep_reason(path):
         return None
     size = survey.Budget().size(path)
     if key == "sessions":

@@ -20,6 +20,7 @@ import time
 from fastapi import HTTPException, Request
 
 from .auth_guard import request_principal
+from .nested_repositories import keep_reason
 from .system_notice import post_system_notice
 from .hierarchy_contracts import ReviewWorktreeIn, ReviewWorktreeOut
 from .line_worktree import REVIEW_DIR, _exclude, _git, line_cwd, repo_and_worktree, rev
@@ -103,6 +104,8 @@ def create_review_worktree(db, conv_id: str, sha: str, repository: str = "") -> 
         # a crashed or hand-made tree, and adopting it would seat a reviewer
         # somewhere the exact SHA is not checked out. Under .review it is
         # partyline's: replace it, never adopt it.
+        if (kept := keep_reason(path)):
+            raise ReviewError(409, kept)
         shutil.rmtree(path, ignore_errors=True)
     elif os.path.isdir(path) and not _pinned_at(root, path, full):
         if not remove_review_path(path):
@@ -144,6 +147,8 @@ def remove_review_path(path: str) -> bool:
     """
     if not os.path.isdir(path):
         return True  # already gone by hand; only the record is stale
+    if keep_reason(path):
+        return False
     marker = f"/{REVIEW_DIR}/"
     root = path.split(marker, 1)[0] if marker in path else None
     if root and os.path.isdir(root):

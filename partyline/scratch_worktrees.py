@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 from .auth_guard import request_principal
 from .line_worktree import _exclude, _git, rev
 from .machine_scope import deny_unless
+from .nested_repositories import keep_reason
 from .review_worktrees import (
     ReviewError,
     _SHA_DIR,
@@ -117,9 +118,9 @@ def create_scratch_worktree(db, conv_id: str, sha: str, repository: str = "",
     os.makedirs(os.path.join(root, SCRATCH_DIR), exist_ok=True)
     _exclude(root, SCRATCH_DIR)
     if os.path.isdir(path) and not _registered(root, path):
-        # A directory git does not know is not a checkout — replace it, never
-        # adopt it; under .scratch it is partyline's.
-        shutil.rmtree(path, ignore_errors=True)
+        # Not a checkout git knows: replace it, never adopt it (unless it holds repositories).
+        if not remove_scratch_path(path):
+            raise ReviewError(409, f"cannot replace {path}: it holds repositories or is in use")
     elif os.path.isdir(path) and not _pinned_at(root, path, full):
         if not remove_scratch_path(path):
             raise ReviewError(
@@ -171,14 +172,11 @@ def list_scratch_worktrees(db, conv_id: str) -> list[dict]:
 
 
 def remove_scratch_path(path: str) -> bool:
-    """Delete one scratch checkout directory; False only if rmtree also failed.
-
-    A scratch checkout holds build output, nothing owed to anyone, so removal
-    never gives up: git first, then the directory itself — a hand-made or
-    half-created tree under ``.scratch`` is still partyline's to delete.
-    """
+    """Delete one scratch checkout, git first; False if it failed or holds a repository."""
     if not os.path.isdir(path):
         return True  # already gone by hand; only the record is stale
+    if keep_reason(path):
+        return False
     marker = f"/{SCRATCH_DIR}/"
     root = path.split(marker, 1)[0] if marker in path else None
     if root and os.path.isdir(root):
