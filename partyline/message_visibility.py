@@ -12,7 +12,9 @@ frontend needs no knowledge of it. Line-bridge traffic (rows carrying
 ``bridge_id``) is hidden the same way and more thoroughly: from every
 transcript read and every fan-out, and from every process's digest except the
 copy's addressee (``BRIDGE_DIGEST_CLAUSE``); a person reads it only through
-the bridge's audit log. Other private copies (cross-line relays,
+the bridge's audit log. A task process's mention of its root captain is hidden from people on the root
+line the same way (``task_private``), while the captain's digest still carries it.
+Other private copies (cross-line relays,
 return-path notices, captain-pack riders) stay human-visible: they carry
 operational context, not an acknowledgement the human already sees, so this
 rule does not claim them.
@@ -46,7 +48,7 @@ def is_bridge_row(message: dict) -> bool:
 def hide_reaction_notices_clause(alias: str = "m") -> str:
     """SQL fragment excluding reaction notices and bridge rows from transcript reads."""
     return (
-        f"AND {alias}.bridge_id IS NULL"
+        f"AND {alias}.bridge_id IS NULL AND {alias}.task_private=0"
         f" AND NOT ({alias}.sender_type='system'"
         f" AND {alias}.audience_attachment_id IS NOT NULL"
         f" AND {alias}.body LIKE ?)"
