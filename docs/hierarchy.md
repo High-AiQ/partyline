@@ -119,6 +119,12 @@ Commits live in the process's private refs mirror until accept, so each `request
 and idle hook writes `refs/partyline/tasks/<slug>` in the real clone, where git's gc can see
 it. `request_review()` with no arguments reviews every workspace whose branch moved; a SHA
 in any recorded clone is admitted.
+Accept records every reviewed commit and fast-forwards only the task's own `line/<slug>` in
+each clone; the person's checked-out branch never moves. Retiring a task first copies each
+mirror tip onto its `line/<slug>`, then removes each nested worktree through its clone with
+no `--force` (a dirty one stays and is named), then the task folder; the branches stay. A
+clean worktree registered to another clone is not a "nested repository" to the P0 guard; an
+independent clone (a `.git` directory) still keeps the folder.
 
 A parent line whose directory is not a repository gets one initialized (one empty root
 commit) before its first child is placed, so a project started in a blank directory still
