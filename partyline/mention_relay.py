@@ -35,6 +35,7 @@ from .hierarchy import ancestors, descendants, lead_attachment, tree_live_name_c
 from .line_depth import live_workers
 from .mentions import known_mention_names
 from .message_visibility import is_reaction_notice
+from .task_ack_limit import RULE, withheld_ack
 from .task_mention_guard import notify_cross_task, split_cross_task
 from .resume_backlog import WORKER_PACK_NOTICE_PREFIX
 
@@ -246,6 +247,10 @@ async def relay_mentions(runtime, conv_id: str, message: dict, names: set[str]) 
         return {att["name"].lower() for att in reached + withheld_all}
     for target in reached:
         if speaker is not None and target["id"] == speaker["id"]:
+            continue
+        if speaker is not None and withheld_ack(runtime.db, conv_id, target["conv_id"], message):
+            await post_private(runtime, conv_id, "system", "system",
+                               f"⚠ @{target['name']}: {RULE}", audience=speaker["id"], route=False)
             continue
         await post_private(
             runtime, target["conv_id"], message["sender"], message["sender_type"],
