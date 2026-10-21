@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 
-from . import git_fence
+from . import fence_workspaces, git_fence
 from .line_worktree import REVIEW_DIR, repo_root
 from .scratch_worktrees import SCRATCH_DIR
 
@@ -144,6 +144,11 @@ def write_set(att: dict, *, create: bool = True) -> list[tuple[str, str, bool]]:
         if src not in covered:
             covered.add(src)
             binds.append((src, dst, read_only))
+    for path in fence_workspaces.checkouts(att):
+        for src, dst, read_only in git_fence.git_binds(path, conv_id):
+            if src not in covered:
+                covered.add(src)
+                binds.append((src, dst, read_only))
     review_root = _review_directory(cwd, create=create)
     if review_root:
         add(review_root)
@@ -180,6 +185,9 @@ def darwin_write_set(att: dict) -> list[str]:
     add(cwd)
     for path in git_fence.darwin_write_paths(cwd):
         add(path)
+    for path in fence_workspaces.checkouts(att):
+        for git_path in git_fence.darwin_write_paths(path):
+            add(git_path)
     review_root = _review_directory(cwd, create=True)
     if review_root:
         add(review_root)

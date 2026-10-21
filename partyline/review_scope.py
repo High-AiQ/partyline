@@ -11,6 +11,7 @@ import os
 
 from .hierarchy import subtree_conversation_ids
 from .line_worktree import _git, line_cwd, repo_and_worktree, repo_root
+from .task_workspaces import workspaces
 from .worktree_paths import branch_name
 
 
@@ -41,6 +42,9 @@ def accepted_repositories(db, conv_id: str) -> list[tuple[str, str]]:
     """``(repository root, the subtree line that works in it)``, own checkout first."""
     found: list[tuple[str, str]] = []
     seen: set[str] = set()
+    for item in workspaces(db, conv_id):
+        seen.add(os.path.realpath(item["repository"]))
+        found.append((item["repository"], conv_id))
     for line_id in subtree_conversation_ids(db, conv_id):
         for place in places_of(db, line_id):
             root, _worktree = repo_and_worktree(place)

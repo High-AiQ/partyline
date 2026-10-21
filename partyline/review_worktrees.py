@@ -25,6 +25,7 @@ from .system_notice import post_system_notice
 from .hierarchy_contracts import ReviewWorktreeIn, ReviewWorktreeOut
 from .line_worktree import REVIEW_DIR, _exclude, _git, line_cwd, repo_and_worktree, rev
 from .machine_scope import deny_unless
+from .task_workspaces import workspaces
 from .review_scope import ReviewError, resolve_repository  # noqa: F401  (re-exported)
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,8 @@ _SHA_DIR = re.compile(r"[0-9a-f]{40}")
 
 
 def repo_of(db, conv_id: str) -> str:
+    if (spaces := workspaces(db, conv_id)):
+        return spaces[0]["repository"]  # a plain task folder is no repository
     root, _worktree = repo_and_worktree(line_cwd(db, conv_id) or "")
     if root is None:
         raise ReviewError(409, "this line does not work inside a git repository")
