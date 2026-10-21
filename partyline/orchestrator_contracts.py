@@ -76,7 +76,7 @@ class TaskReview(BaseModel):
     implementer_preset: str
     policy: str
     reviewer_id: str | None = None
-    status: Literal['implementing', 'in_review', 'approved', 'done', 'blocked']
+    status: Literal['implementing', 'idle', 'in_review', 'approved', 'done', 'blocked']
     round: int
     sha: str | None = None
     review_worktree: str | None = None
