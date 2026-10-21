@@ -69,4 +69,7 @@ MIGRATIONS += [
     # from the handle so cards and staffing still show it.
     "ALTER TABLE task_reviews ADD COLUMN tag TEXT",
     "ALTER TABLE attachments ADD COLUMN preset TEXT",
+    # A task process's mention to its root captain: the root's digest carries it, people read
+    # the exchange on the task line only.
+    "ALTER TABLE messages ADD COLUMN task_private INTEGER NOT NULL DEFAULT 0",
 ]
