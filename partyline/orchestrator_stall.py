@@ -1,5 +1,6 @@
 """Durable, one-shot recovery when a task has no structured hand-off or peer."""
 
+import asyncio
 import time
 
 from fastapi import HTTPException
@@ -8,6 +9,7 @@ from .contracts import ConversationsChangedEvent, MessageEvent, MessageResponse
 from .orchestrator_notices import handed_to, notify_root, peer, report
 from .orchestrator_reopen import unreopened
 from .orchestrator_store import require_task, task
+from .task_workspaces import anchor
 
 
 def candidate(db, att):
@@ -106,6 +108,8 @@ async def ended(runtime, att):
     if (row and row['implementer_id'] == att['id'] and row['status'] == 'implementing'
             and not db.queued_delivery_ids(att['id'])):
         await _set_status(runtime, att['conv_id'], 'idle', 'implementing')
+    if row and row['implementer_id'] == att['id']:
+        await asyncio.to_thread(anchor, db, att['conv_id'])
 
 
 async def _set_status(runtime, conv_id, new, old):

@@ -14,8 +14,9 @@ from .fence import FenceUnavailable
 from .process_memory import MemoryScopeUnavailable
 from .process_incidents import exit_callback
 from .preset_traits import auto_compact_tokens_for
-from .fence_protect import database_paths, protected_repo_roots
+from .fence_protect import database_paths
 from .hook_routes import surface_attention
+from . import fence_workspaces
 from .review_worktrees import list_review_worktrees
 from .scratch_worktrees import list_scratch_worktrees
 from .role_delivery import bind_role_delivery
@@ -38,7 +39,7 @@ def prepare_attachment(att, runtime, hook_url, checkpoint):
     load_write_grants(runtime.db, att)
     att["review_worktrees"] = list_review_worktrees(runtime.db, att["conv_id"])
     att["scratch_worktrees"] = list_scratch_worktrees(runtime.db, att["conv_id"])
-    att["protected_roots"] = protected_repo_roots(runtime.db)
+    fence_workspaces.load(runtime.db, att)
     att["db_paths"] = database_paths(runtime.db)
     provision_connection(runtime.db.path, att)
     att["digest_rider"] = lambda: ""  # role delivery layers the goal and staffing on top

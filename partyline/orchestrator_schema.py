@@ -79,4 +79,8 @@ MIGRATIONS += [
     # A task process's mention to its root captain: the root's digest carries it, people read
     # the exchange on the task line only.
     "ALTER TABLE messages ADD COLUMN task_private INTEGER NOT NULL DEFAULT 0",
+    # One row per repository a task has a worktree in (task_workspaces.py).
+    "CREATE TABLE IF NOT EXISTS task_workspaces(conv_id TEXT NOT NULL, repository TEXT NOT NULL, "
+    "path TEXT NOT NULL, branch TEXT NOT NULL, base_sha TEXT NOT NULL, "
+    "PRIMARY KEY(conv_id, repository))",
 ]

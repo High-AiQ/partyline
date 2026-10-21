@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import time
 import uuid
 
@@ -12,6 +13,7 @@ from .contracts import ConversationsChangedEvent
 from .hierarchy_contracts import ChildIn
 from .line_worktree import line_cwd, rev
 from .git_fence import mirror_branch_ref
+from .task_workspaces import anchor, moved, tip, workspaces
 from .worktree_paths import branch_name
 from .review_worktrees import ReviewError
 from .task_review_checkout import move_task_review_worktrees
@@ -38,7 +40,8 @@ async def create_task(runtime, actor, root_id, body):
     if pending:
         conv_id, ident = pending['conv_id'], pending['implementer_id']
     else:
-        result = await create_child(runtime, actor, root_id, ChildIn(name=body.name, goal=body.goal))
+        result = await create_child(runtime, actor, root_id, ChildIn(name=body.name, goal=body.goal),
+                                    workspace=True)
         conv_id, ident = result.conversation.id, str(uuid.uuid4())
         db._exec(
             'INSERT INTO task_reviews(conv_id,root_id,implementer_id,implementer_preset,policy,tag,'
@@ -56,7 +59,8 @@ async def create_task(runtime, actor, root_id, body):
         await spawn_refused(runtime, task(db, conv_id), getattr(exc, 'detail', str(exc)), implementer=True)
         raise
     await tell(runtime, ident,
-               f"Implement this task: {body.goal}. Commit on this line's branch; never push. "
+               f"Implement this task: {body.goal}. Commit on this line's branch (in each repository folder "
+               'you change); never push. '
                'Call request_review(sha, what, where) when ready. The server owns review staffing.')
     await runtime.broadcast_all(ConversationsChangedEvent())
     return task(db, conv_id)
@@ -85,19 +89,28 @@ async def request_review(runtime, actor, conv_id, body):
         from .orchestrator_stall import resume
         resume(db, conv_id)
         cwd = line_cwd(db, conv_id)
-        tip = mirror_branch_ref(cwd or '', conv_id, branch_name(cwd or ''))
         entries = [(item.repository, item.sha) for item in body.repositories or []]
+        primary = (row['repositories'] or [{}])[0].get('repository')
+        if not entries and not body.sha and workspaces(db, conv_id):
+            # Every repository whose task branch moved, and the one reviewed before.
+            entries = [(repo, head) for repo, head in moved(db, conv_id)]
+            real = {os.path.realpath(repo) for repo, _head in entries}
+            for space in workspaces(db, conv_id) if entries else ():
+                if primary and os.path.realpath(space['repository']) == os.path.realpath(primary) \
+                        and os.path.realpath(primary) not in real:
+                    entries.append((primary, tip(space, conv_id)))
         if not entries:
-            sha = body.sha or tip or rev(cwd or '', 'rev-parse', 'HEAD')
+            single = mirror_branch_ref(cwd or "", conv_id, branch_name(cwd or ""))
+            sha = body.sha or single or rev(cwd or '', 'rev-parse', 'HEAD')
             if not sha:
                 raise HTTPException(409, 'task has no commit to review')
             entries = [('', sha)]
-        primary = (row['repositories'] or [{}])[0].get('repository')
         try:
             checkouts = await asyncio.to_thread(
                 move_task_review_worktrees, db, conv_id, entries, primary)
         except ReviewError as exc:
             raise HTTPException(exc.status_code, exc.detail) from exc
+        await asyncio.to_thread(anchor, db, conv_id)
         db._exec(
             'UPDATE task_reviews SET sha=?,review_worktree=?,repositories=?,what=?,location=?, '
             'round=CASE WHEN round=0 THEN 1 ELSE round END,reviewer_restarts=0 WHERE conv_id=?',

@@ -2,6 +2,7 @@
 
 from .mention_relay import task_root_captain
 from .orchestrator_store import task
+from .task_workspaces import workspaces
 
 
 def _root_sentence(db, conv_id, root_id):
@@ -26,6 +27,17 @@ def _handles(row, role):
     return text
 
 
+def _workspace_sentence(db, conv_id, role):
+    spaces = workspaces(db, conv_id)
+    if not spaces:
+        return ''
+    if role == 'reviewer':
+        return 'The task changed one or more repositories; review each checkout you are given. '
+    return (f"Your folder holds a git worktree of each repository ({len(spaces)}), every one on branch "
+            f"{spaces[0]['branch']}. Commit in the repository folder you changed, never push. "
+            'request_review() with no arguments reviews every repository whose branch moved. ')
+
+
 def task_pack(db, conv_id, role):
     if db is None or not hasattr(db, '_exec'):
         return ''
@@ -37,6 +49,7 @@ def task_pack(db, conv_id, role):
         f"You are the {role}. Task of {row['root_id']}, one implementer, policy {row['policy']}. "
         f"{_handles(row, role)}"
         f"{_root_sentence(db, conv_id, row['root_id'])}"
+        f"{_workspace_sentence(db, conv_id, role)}"
         'The implementer follows the assigned goal and calls request_review(sha, what, where). '
         'If blocked, call blocked(reason); the server notifies the root. '
         'If you were blocked and resume work, call resume_work(note) — your task state must '
