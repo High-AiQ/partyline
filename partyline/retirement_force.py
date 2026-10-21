@@ -20,6 +20,7 @@ from .line_process_routes import detach_attachment, live_attachments
 from .line_subtree import archive_line
 from .nested_repositories import keep_reason
 from .retirement_git import git, snapshot
+from .task_teardown import teardown
 from .retirement_preview import force_authorized, identity, plan, token
 from .retirement_auxiliary import auxiliary_heads, cleanup_auxiliary, recover_auxiliary
 from .system_notice import post_system_notice
@@ -76,6 +77,7 @@ def _checked_remove(db, principal, target, line, presence, audit_id):
         raise HTTPException(409, "retirement changed after process stop; refresh preview")
     if current["children"] or live_attachments(db, line["id"], False):
         raise HTTPException(409, "retirement gained a child or live process")
+    teardown(db, line["id"], (db.get_conversation(line["id"]) or {}).get("cwd") or "")
     return _remove(current["git"])
 
 

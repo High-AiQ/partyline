@@ -71,8 +71,8 @@ def file_evidence(cwd, paths, *, ignored=False):
 def inspect_git(db, conv):
     cwd = conv.get("cwd") or ""
     root = managed_root(cwd)
-    if not root or not os.path.isdir(cwd):
-        return None
+    if not root or not os.path.isdir(cwd) or not os.path.lexists(os.path.join(cwd, ".git")):
+        return None  # a task folder holding only worktrees has no repository of its own
     if os.path.realpath(cwd) != cwd or os.path.realpath(root) != root:
         raise HTTPException(409, "retirement requires canonical managed worktree paths")
     branch = branch_name(cwd)

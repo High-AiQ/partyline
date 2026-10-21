@@ -14,6 +14,7 @@ from .orchestrator_notices import report
 from .orchestrator_store import task
 from .review_worktrees import prune_review_worktrees
 from .scratch_worktrees import prune_scratch_worktrees
+from .task_workspaces import tip as workspace_tip, workspaces
 from .worktree_lifecycle import archive_worktree_if_safe, worktree_state
 
 logger = logging.getLogger(__name__)
@@ -34,10 +35,14 @@ def shipped(db, row):
     # the line's repository, the named repository's for the others.
     checks = [(cwd if os.path.realpath(item['repository']) == own else item['repository'], item['sha'])
               for item in row['repositories']] or [(cwd, row['sha'])]
-    return bool(tip) and all(
+    spaces = workspaces(db, row['conv_id'])
+    # Work newer than the approved SHA, in any clone, is not shipped.
+    pairs = [*([(cwd, tip)] if tip else []), *checks,
+             *[(w['repository'], t) for w in spaces if (t := workspace_tip(w, row['conv_id']))]]
+    return (bool(tip) or bool(spaces)) and all(
         os.path.isdir(where)
         and _git('merge-base', '--is-ancestor', sha, 'HEAD', cwd=where).returncode == 0
-        for where, sha in [(cwd, tip), *checks])
+        for where, sha in pairs)
 
 
 async def tick(runtime):
