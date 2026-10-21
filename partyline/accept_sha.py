@@ -269,6 +269,7 @@ def register_accept_route(app, runtime) -> None:
         _refresh_children_views_quietly(db, conv_id, done["branch"])
         record_accept(db, conv_id, done["sha"], principal.name, body.findings)
         task_accept.record_others(db, conv_id, others, principal.name)
+        await task_accept.settle_task(runtime, conv_id, task_row)
         state = "already at" if not done["moved"] else "moved to"
         tail = " — the hand-off is the SHA on the line's branch"
         if done["reviewed_sha"]:
