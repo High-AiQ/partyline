@@ -69,6 +69,13 @@ MIGRATIONS += [
     # from the handle so cards and staffing still show it.
     "ALTER TABLE task_reviews ADD COLUMN tag TEXT",
     "ALTER TABLE attachments ADD COLUMN preset TEXT",
+    # The same widening again for `idle`: an implementer between turns with nothing pending.
+    "ALTER TABLE task_reviews RENAME COLUMN status TO status_pre_idle",
+    "ALTER TABLE task_reviews ADD COLUMN status TEXT NOT NULL DEFAULT 'implementing' "
+    "CHECK(status IN ('implementing','idle','in_review','approved','done','blocked'))",
+    "UPDATE task_reviews SET status=status_pre_idle WHERE NOT EXISTS "
+    "(SELECT 1 FROM orchestrator_state_migrations WHERE name='idle-status')",
+    "INSERT OR IGNORE INTO orchestrator_state_migrations VALUES('idle-status')",
     # A task process's mention to its root captain: the root's digest carries it, people read
     # the exchange on the task line only.
     "ALTER TABLE messages ADD COLUMN task_private INTEGER NOT NULL DEFAULT 0",
