@@ -4,6 +4,7 @@ import os
 
 from fastapi import HTTPException
 
+from .nested_repositories import nested_repositories
 from .retirement_git import DISPLAY, git
 from .review_worktrees import remove_review_path
 from .scratch_worktrees import remove_scratch_path
@@ -20,7 +21,8 @@ def inspect_auxiliary(db, conv_id, recovery_prefix=None):
         preserved[table], pruned[table], history[table] = [], [], []
         for row in rows:
             path = row["path"]
-            dirty = os.path.isdir(path) and bool(git(path, "status", "--porcelain").strip())
+            dirty = os.path.isdir(path) and (
+                bool(git(path, "status", "--porcelain").strip()) or bool(nested_repositories(path)))
             (preserved if dirty else pruned)[table].append(path)
             head = git(path, "rev-parse", "HEAD").strip() if os.path.isdir(path) else None
             refs = (git(path, "for-each-ref", "--format=%(refname)", "--contains", head).splitlines()

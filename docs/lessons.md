@@ -1334,3 +1334,24 @@ Do not treat a live PTY or a written claim as proof that the transcript watcher
 is still running or that a queued message was delivered.
 
 The Grok `[partyline-paste:]` marker has never appeared in a real transcript record; on the first live Grok wake after deploy, run `grep -F '[partyline-paste:' ~/.grok/sessions/<cwd>/<session>/chat_history.jsonl` and check service logs for `wake receipt: … matched=wake#N` rather than `unmatched`.
+
+## 2026-10-21 — Cleaning up a task line deleted two clones and every approved commit
+
+A task line's managed worktree held two separate git clones (`argon-backend`,
+`argon-frontend`), ignored by the project repository. The implementer committed in
+them. When the line was cleaned up, `git status --porcelain` reported the worktree
+clean — it cannot see an ignored nested repository — and `git worktree remove
+--force` deleted the folder, clones and unpushed commits included. Their review
+checkouts lived inside the clones, so nothing survived. `clean -ffdx`, with its
+double `-f`, would have done the same: that flag is what lets git delete nested
+repositories.
+
+The rule is now one helper, `nested_repositories`, and every place that removes a
+worktree or checkout asks it first: line removal, discard, the orphan sweep, forced
+retirement, review, scratch and task-review checkouts, retirement's auxiliary
+cleanup and the storage clear. A directory holding a nested repository is kept,
+reads as not clean, and is named in the result ("kept <path>: contains
+repositories …"); `discard=true` does not waive it, and a person moves or deletes
+those clones by hand. Task review checkouts use `clean -fdx`, so git itself leaves
+nested repositories alone. Do not decide a directory is disposable from `git status`
+alone, and never add a second `-f` to a clean.

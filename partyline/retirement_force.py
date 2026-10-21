@@ -18,6 +18,7 @@ from .goal import set_goal
 from .hierarchy import descendants
 from .line_process_routes import detach_attachment, live_attachments
 from .line_subtree import archive_line
+from .nested_repositories import keep_reason
 from .retirement_git import git, snapshot
 from .retirement_preview import force_authorized, identity, plan, token
 from .retirement_auxiliary import auxiliary_heads, cleanup_auxiliary, recover_auxiliary
@@ -51,6 +52,8 @@ def _remove(state):
     """Remove only the managed worktree and its owned, unchanged host ref."""
     if not state:
         return False
+    if keep_reason(state["cwd"]):
+        return False  # a nested repository: kept with its branch, named in the result
     git(state["root"], "worktree", "remove", "--force", state["cwd"])
     if os.path.exists(state["cwd"]):
         raise HTTPException(409, "worktree removal did not complete")
@@ -99,7 +102,7 @@ async def retire(runtime, principal, target, *, include_children, stop_processes
                     and not stop_processes:
                 raise HTTPException(409, "stop_processes=true is required for live processes")
         audit_id = uuid.uuid4().hex
-        recovery, completed, stopped, preserved_paths = {}, [], [], []
+        recovery, completed, stopped, preserved_paths, kept = {}, [], [], [], []
         decision = {"force_discard": True, "include_children": include_children,
                     "clear_goal": clear_goal, "stop_processes": stop_processes,
                     "preview_token": preview_token, "plan": evidence}
@@ -128,6 +131,8 @@ async def retire(runtime, principal, target, *, include_children, stop_processes
                 conv = db.get_conversation(line_id)
                 removed = await asyncio.to_thread(
                     _checked_remove, db, principal, target, line, presence, audit_id)
+                if not removed and (reason := keep_reason(conv.get("cwd") or "")):
+                    kept.append(reason)
                 preserved_paths.extend(await asyncio.to_thread(cleanup_auxiliary, db, line, audit_id))
                 await asyncio.to_thread(reap_line_tmp, db, line_id)
                 if clear_goal and conv.get("goal"):
@@ -158,6 +163,6 @@ async def retire(runtime, principal, target, *, include_children, stop_processes
             "clean auxiliary worktrees and temporary directories removed", actor=principal)
         await runtime.broadcast_all(ConversationsChangedEvent())
         return {"ok": True, "archived": True, "stopped": stopped, "archived_ids": completed,
-                "worktree_removed": removed, "worktree_kept_reason": None,
+                "worktree_removed": removed, "worktree_kept_reason": "; ".join(kept) or None,
                 "audit_id": audit_id, "recovery_refs": recovery, "preserved_paths": preserved_paths,
                 "conversation": db.get_conversation(target)}

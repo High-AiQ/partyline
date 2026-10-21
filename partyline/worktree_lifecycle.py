@@ -20,6 +20,7 @@ import subprocess
 from .hierarchy import parent_id_of
 from .line_worktree import WORKTREES_DIR, _git, line_cwd, repo_root
 from .worktree_paths import managed_root
+from .nested_repositories import keep_reason, nested_repositories
 from .review_worktrees import sweep_review_worktrees
 from .scratch_worktrees import sweep_scratch_worktrees
 
@@ -38,7 +39,7 @@ def remove_for_line(conv: dict | None) -> None:
     """Drop the worktree a purged line was placed in; its branch stays."""
     cwd = (conv or {}).get("cwd") or ""
     root = _worktree_root(cwd)
-    if root is None:
+    if root is None or keep_reason(cwd):
         return
     try:
         _git("worktree", "remove", "--force", cwd, cwd=root)
@@ -87,6 +88,9 @@ def _default_branch(root: str) -> str | None:
 
 
 def _is_clean(cwd: str) -> bool:
+    """Clean to git, and holding no repository of its own that git cannot see."""
+    if nested_repositories(cwd):
+        return False
     try:
         done = _git("status", "--porcelain", cwd=cwd)
     except (OSError, subprocess.SubprocessError):
@@ -129,7 +133,7 @@ def worktree_state(db, conv: dict | None) -> dict | None:
     bases = [b for b in (_base_ref(parent_cwd), _default_branch(root)) if b]
     tips = [tip for tip in dict.fromkeys((branch, "HEAD")) if tip]
     merged = bool(bases) and bool(tips) and all(_in_history(cwd, t, bases) for t in tips)
-    return {"clean": _is_clean(cwd), "merged": merged}
+    return {"clean": _is_clean(cwd), "merged": merged, "nested": nested_repositories(cwd)}
 
 
 def worktree_removal_reason(db, conv: dict | None) -> str | None:
@@ -141,6 +145,9 @@ def worktree_removal_reason(db, conv: dict | None) -> str | None:
     state = worktree_state(db, conv)
     if state is None:
         return None
+    conv_cwd = (conv or {}).get("cwd") or ""
+    if (reason := keep_reason(conv_cwd)):
+        return reason
     if not state["clean"]:
         return "uncommitted changes"
     if not state["merged"]:
@@ -221,7 +228,7 @@ def _sweep_repo(root: str, known_cwds: set[str]) -> None:
                 _git("worktree", "remove", "--force", path, cwd=root)
                 logger.info("worktree sweep: removed orphaned worktree %s", path)
             else:
-                logger.info("worktree sweep: kept dirty orphaned worktree %s", path)
+                logger.info("worktree sweep: kept dirty or repository-holding orphaned worktree %s", path)
     try:
         _git("worktree", "prune", cwd=root)
     except (OSError, subprocess.SubprocessError):
