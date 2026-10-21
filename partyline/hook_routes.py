@@ -95,6 +95,10 @@ async def handle_hook(runtime, presence, att_id: str, token: str, request: Reque
             mark_began()
     elif boundary == "ended":
         await presence.ended(att["conv_id"], att_id, owner=token)
+        if not presence.is_working(att_id):
+            from .orchestrator_stall import ended as task_ended
+
+            await task_ended(runtime, att)
     if payload.event == "precompact":
         # Compaction is an adapter capability: only a harness whose metadata
         # declares compaction_hooks is counted, so a stray hook from another
