@@ -19,6 +19,7 @@ from .delivery_reservation import reserve_delivery
 from .message_routing import post_human_message, route_message
 from .reattach import ReattachCoordinator
 from .runtime_delivery_credit import DeliveryCreditMixin
+from .task_privacy import hidden_from_people
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
 RESERVED_NAMES = {"all", "system"}  # @all rings everyone; system is the notice sender
@@ -89,8 +90,8 @@ class ChatRuntime(DeliveryCreditMixin):
                 pass
 
     async def broadcast(self, conv_id: str, event: Event):
-        if getattr(getattr(event, "message", None), "bridge_id", None):
-            return  # bridge traffic is never shown to people (message_visibility)
+        if hidden_from_people(self.db, conv_id, event):
+            return  # bridge traffic and a task exchange's root side (message_visibility)
         payload = event.model_dump(exclude_none=True)
         for ws in list(self.sockets.get(conv_id, ())):
             try:
@@ -110,7 +111,6 @@ class ChatRuntime(DeliveryCreditMixin):
         await self.broadcast(conv_id, MessageEvent(message=MessageResponse.model_validate(msg)))
         await self.route_mentions(conv_id, msg)
         return msg
-
 
     async def broadcast_attachment(self, conv_id: str, att_id: str) -> None:
         """Broadcast live attachment presentation without blocking the event loop."""
