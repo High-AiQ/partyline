@@ -10,7 +10,7 @@ from partyline.mcp.tools_tasks import tool_list
 from partyline.orchestrator_contracts import BlockedIn, ReviewRequestIn
 from partyline.orchestrator_notices import report
 from partyline.orchestrator_service import request_review
-from partyline.orchestrator_stall import blocked
+from partyline.orchestrator_stall import began, blocked, ended
 from partyline.return_path import ReturnPath
 from tests.orchestrator_fixture import TaskFixture
 
@@ -112,6 +112,7 @@ class StallTest(TaskFixture):
         self.db._exec('DELETE FROM orchestrator_state_migrations')
         self.db._exec("UPDATE task_reviews SET initial_status='in_review' WHERE conv_id=?", (self.conv_id,))
         self.db._exec('ALTER TABLE task_reviews DROP COLUMN status')
+        self.db._exec('ALTER TABLE task_reviews DROP COLUMN status_pre_idle')
         self.db._exec('ALTER TABLE task_reviews RENAME COLUMN initial_status TO status')
         reopened = Db(self.db.path)
         try:
@@ -119,6 +120,34 @@ class StallTest(TaskFixture):
             self.assertEqual(row['status'], 'in_review')
         finally:
             reopened.close()
+
+    async def test_implementer_is_idle_between_turns_and_implementing_again_on_began(self):
+        await self.create('captain')
+        att = self.db.get_attachment(self.worker.attachment_id)
+        await ended(self.runtime, att)
+        self.assertEqual(self.row()['status'], 'idle')
+        await began(self.runtime, att)
+        self.assertEqual(self.row()['status'], 'implementing')
+        # Queued mail means the turn is not over; settled and blocked tasks never turn idle.
+        self.db._exec("INSERT INTO queued_delivery_messages(attachment_id,message_id) VALUES(?,1)",
+                      (att['id'],))
+        await ended(self.runtime, att)
+        self.assertEqual(self.row()['status'], 'implementing')
+        self.db._exec('DELETE FROM queued_delivery_messages')
+        self.db._exec("UPDATE task_reviews SET status='blocked' WHERE conv_id=?", (self.conv_id,))
+        await ended(self.runtime, att)
+        self.assertEqual(self.row()['status'], 'blocked')
+
+    async def test_idle_implementer_is_still_reminded_and_can_ask_for_review(self):
+        await self.create('captain')
+        returns = self.runtime.returns = ReturnPath(self.runtime)
+        returns.grace = 0
+        await ended(self.runtime, self.db.get_attachment(self.worker.attachment_id))
+        await self.end(returns)
+        self.assertEqual(self.row()['stall_stage'], 1)
+        await request_review(self.runtime, self.worker, self.conv_id,
+                             ReviewRequestIn(sha=self.commit(), what='built', where='code'))
+        self.assertEqual(self.row()['status'], 'in_review')
 
     async def test_two_root_leads_do_not_multiply_live_count(self):
         await self.create('captain')
