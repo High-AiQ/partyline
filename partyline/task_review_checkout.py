@@ -16,6 +16,7 @@ from .line_worktree import REVIEW_DIR, _exclude, _git, rev
 from .review_scope import (
     ReviewError, accepted_repositories, branch_candidates, describe, on_line_branch,
     resolve_repository)
+from .nested_repositories import keep_reason
 from .review_worktrees import _SHA, _registered
 
 
@@ -74,10 +75,12 @@ def resolve_commit(db, conv_id: str, repository: str, sha: str) -> tuple[str, st
 def _move(db, conv_id: str, root: str, full: str) -> dict:
     path = task_review_path(root, conv_id)
     if os.path.isdir(path) and not _registered(root, path):
+        if (kept := keep_reason(path)):
+            raise ReviewError(409, kept)
         shutil.rmtree(path, ignore_errors=True)  # not git's worktree: partyline's to replace
     if os.path.isdir(path):
         _run(path, "checkout", "--force", "--detach", full)
-        _run(path, "clean", "-ffdx")
+        _run(path, "clean", "-fdx")  # one -f: git itself then spares nested repositories
     else:
         os.makedirs(os.path.join(root, REVIEW_DIR), exist_ok=True)
         _exclude(root, REVIEW_DIR)
