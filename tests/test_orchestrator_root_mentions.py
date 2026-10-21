@@ -4,7 +4,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from partyline.auth_store import create_user
-from partyline.orchestrator_contracts import ReviewRequestIn
+from partyline.orchestrator_contracts import MessageTaskIn, ReviewRequestIn
+from partyline.orchestrator_handles import message_task
 from partyline.orchestrator_service import request_review
 from partyline.orchestrator_pack import task_pack
 from tests.orchestrator_fixture import TaskFixture
@@ -28,9 +29,32 @@ class RootMentionTest(TaskFixture):
         self.runtime.live['captain'].deliver = AsyncMock(return_value=True)
         await self.say('done @captain')
         self.runtime.live['captain'].deliver.assert_awaited()
-        relayed = [m for m in self.posts('root') if m.get('audience_attachment_id') == 'captain']
+        relayed = [m for m in self.db.messages_after('root', 0)
+                   if m.get('audience_attachment_id') == 'captain']
         self.assertTrue(relayed)
         self.assertEqual(relayed[-1]['source_conv_id'], self.conv_id)
+
+    async def test_task_to_root_exchange_is_hidden_from_people_on_the_root_line(self):
+        await self.setUp_task()
+        self.runtime.live['captain'].deliver = AsyncMock(return_value=True)
+        await self.say('done @captain')
+        # The root captain's digest still carries it; people read it on the task line only.
+        digest = [m['body'] for m in self.db.messages_after('root', 0)]
+        self.assertIn('done @captain', digest)
+        self.assertNotIn('done @captain', [m['body'] for m in self.posts('root')])
+        copy = [m for m in self.db.messages_after('root', 0) if m['body'] == 'done @captain'][0]
+        self.assertIsNone(self.db.message_by_id('root', copy['id']))
+        self.assertIn('done @captain', [m['body'] for m in self.posts(self.conv_id)])
+        shown = [call.args[1].message.body for call in self.runtime.broadcast.await_args_list
+                 if call.args[0] == 'root' and hasattr(call.args[1], 'message')]
+        self.assertNotIn('done @captain', shown)
+
+    async def test_root_message_to_a_task_is_not_echoed_on_the_root_line(self):
+        await self.create()
+        await message_task(self.runtime, self.captain, self.conv_id,
+                           MessageTaskIn(text='carry on', to='implementer'))
+        self.assertFalse([m for m in self.posts('root') if 'carry on' in m['body']])
+        self.assertTrue([m for m in self.posts(self.conv_id) if 'carry on' in m['body']])
 
     async def test_other_line_process_is_still_held_back(self):
         await self.setUp_task()
