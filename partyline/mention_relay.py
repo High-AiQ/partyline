@@ -90,6 +90,12 @@ def task_root_captain(db, conv_id: str) -> dict | None:
     return lead if lead and lead["status"] in LIVE else None
 
 
+def is_task_to_root(db, from_conv: str, to_conv: str) -> bool:
+    """A task line's mention reaching its own root line: people read it on the task line."""
+    return db._exec("SELECT 1 FROM task_reviews WHERE conv_id=? AND root_id=?",
+                    (from_conv, to_conv)).fetchone() is not None
+
+
 def may_cross(message: dict, speaker: dict | None) -> bool:
     return message.get("sender_type") == "human" or bool(speaker and speaker.get("is_lead"))
 
@@ -144,7 +150,8 @@ def reaches_a_process(db, speaker: dict, names: set[str]) -> bool:
 
 
 async def post_private(
-    runtime, line_id, sender, sender_type, body, *, audience, source=None, actor=None, route=True
+    runtime, line_id, sender, sender_type, body, *, audience, source=None, actor=None, route=True,
+    private=False,
 ):
     """Post a message one process on ``line_id`` is shown, then route it there.
 
@@ -157,8 +164,8 @@ async def post_private(
         speaker_id, origin_id = actor.attachment_id, actor.conv_id
     runtime.db._exec(
         "UPDATE messages SET source_attachment_id=?, source_conv_id=?,"
-        " audience_attachment_id=? WHERE id=?",
-        (speaker_id, origin_id, audience, copy["id"]),
+        " audience_attachment_id=?, task_private=? WHERE id=?",
+        (speaker_id, origin_id, audience, int(private), copy["id"]),
     )
     origin = runtime.db.get_conversation(origin_id) if origin_id else None
     copy.update(
@@ -171,7 +178,7 @@ async def post_private(
     # raises something new. Browsers already see the reaction itself on the
     # message, so the fan-out skips the copy while forced routing still wakes
     # the addressed process.
-    if not is_reaction_notice(copy):
+    if not (private or is_reaction_notice(copy)):
         await runtime.broadcast(line_id, MessageEvent(message=MessageResponse.model_validate(copy)))
     if route:
         await runtime.route_mentions(line_id, copy, force=True)
@@ -244,6 +251,7 @@ async def relay_mentions(runtime, conv_id: str, message: dict, names: set[str]) 
             runtime, target["conv_id"], message["sender"], message["sender_type"],
             message["body"], audience=target["id"],
             source=(speaker["id"] if speaker else None, conv_id),
+            private=is_task_to_root(runtime.db, conv_id, target["conv_id"]),
         )
     for target in withheld:
         notice = withheld_notice(runtime.db, conv_id, target, crossing)
