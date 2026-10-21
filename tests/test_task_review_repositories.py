@@ -74,6 +74,8 @@ class SiblingRepositoryReviewTest(LayoutFixture):
         done = self.client.post(f'/api/conversations/{self.conv_id}/accept', json={'sha': sha})
         self.assertEqual(done.status_code, 200, done.text)
         self.assertEqual(self.db.get_conversation(self.conv_id)['accepted_sha'], sha)
+        self.assertEqual(self.row()['status'], 'done')
+        self.assertIsNotNone(self.row()['settled_at'])
 
     async def test_sha_only_review_in_a_granted_sibling_under_a_plain_parent_folder(self):
         await self.review_sibling_by_sha_and_accept('parent')

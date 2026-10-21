@@ -8,9 +8,11 @@ its branch is not the line's to move.
 from __future__ import annotations
 
 import os
+import time
 
 from fastapi import HTTPException
 
+from .contracts import ConversationsChangedEvent
 from .accept_history import record_accept
 from .line_worktree import line_cwd, repo_and_worktree, rev
 from .review_worktrees import prune_accepted_review
@@ -57,3 +59,13 @@ def record_others(db, conv_id: str, others: list[dict], who: str) -> None:
 
 def tail(others: list[dict]) -> str:
     return ''.join(f"; {item['repository']} {item['sha'][:12]}" for item in others)
+
+
+async def settle_task(runtime, conv_id: str, task_row: dict | None) -> None:
+    """An accepted task is finished: done, settled now, no block or stall left."""
+    if not task_row:
+        return
+    runtime.db._exec(
+        "UPDATE task_reviews SET status='done',settled_at=COALESCE(settled_at,?),blocked_at=NULL,"
+        'stall_stage=0,stall_notice_id=NULL WHERE conv_id=?', (time.time(), conv_id))
+    await runtime.broadcast_all(ConversationsChangedEvent())
