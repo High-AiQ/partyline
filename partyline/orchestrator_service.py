@@ -32,7 +32,7 @@ async def create_task(runtime, actor, root_id, body):
         'SELECT t.* FROM task_reviews t JOIN conversations c ON c.id=t.conv_id '
         'LEFT JOIN attachments a ON a.id=t.implementer_id '
         "WHERE t.root_id=? AND c.name=? AND c.goal=? AND t.implementer_preset=? AND t.policy=? "
-        "AND t.status='implementing' AND c.archived_at IS NULL "
+        "AND t.status IN ('implementing','idle') AND c.archived_at IS NULL "
         "AND (a.id IS NULL OR (a.status='exited' AND a.cli_session IS NULL)) LIMIT 1",
         (root_id, body.name.strip(), body.goal.strip(), body.implementer, policy)).fetchone()
     if pending:
