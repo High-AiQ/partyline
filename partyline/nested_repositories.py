@@ -17,7 +17,7 @@ SKIP = frozenset({"node_modules"})
 MAX_DEPTH = 8
 
 
-def nested_repositories(path: str, max_depth: int = MAX_DEPTH) -> list[str]:
+def nested_repositories(path: str, max_depth: int = MAX_DEPTH, skip: frozenset = SKIP) -> list[str]:
     """Every directory under ``path`` holding a ``.git`` (directory or file), relative.
 
     The path's own ``.git`` is not nested. Ignored files count; ``node_modules`` is skipped,
@@ -34,7 +34,7 @@ def nested_repositories(path: str, max_depth: int = MAX_DEPTH) -> list[str]:
         except OSError:
             return
         for entry in entries:
-            if (depth < max_depth and entry.name not in SKIP and entry.name != ".git"
+            if (depth < max_depth and entry.name not in skip and entry.name != ".git"
                     and entry.is_dir(follow_symlinks=False)):
                 walk(entry.path, depth + 1)
 

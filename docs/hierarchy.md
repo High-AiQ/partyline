@@ -108,6 +108,18 @@ inherits the parent's directory. A machine attaching a process to a line
 cannot choose another directory: the process works where the line works. A
 person may. Purging a line drops its worktree; the branch stays.
 
+**A task's workspace (`partyline/task_workspaces.py`).** An orchestrator task is born into
+`<root folder>/.partyline-worktrees/<slug>`: a worktree of the root folder when that is a
+repository, a plain folder otherwise (its top-level `AGENTS.md` and `CLAUDE.md` are symlinked
+in, never written through), plus a worktree of every clone under the root folder (depth 3;
+`.git`, `node_modules`, `.partyline-worktrees`, `.review`, `.scratch` skipped) at the same
+relative path, each on `line/<slug>` in its own real clone and recorded in `task_workspaces`.
+The fence binds each worktree's git like a single-worktree line and protects its real clone.
+Commits live in the process's private refs mirror until accept, so each `request_review`
+and idle hook writes `refs/partyline/tasks/<slug>` in the real clone, where git's gc can see
+it. `request_review()` with no arguments reviews every workspace whose branch moved; a SHA
+in any recorded clone is admitted.
+
 A parent line whose directory is not a repository gets one initialized (one empty root
 commit) before its first child is placed, so a project started in a blank directory still
 gives every child its own worktree. A file attached to a message that is relayed to a

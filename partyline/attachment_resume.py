@@ -22,11 +22,12 @@ from .activation_diagnostics import activation_context, line_name
 from .auth_store import rotate_api_token
 from .agent_connection import provision_connection, bind_connection_hint
 from .fence import FenceUnavailable
-from .fence_protect import database_paths, protected_repo_roots
+from .fence_protect import database_paths
 from .hook_routes import surface_attention
 from .process_incidents import exit_callback
 from .hierarchy import tree_live_name_conflict
 from .role_delivery import bind_role_delivery
+from . import fence_workspaces
 from .review_worktrees import list_review_worktrees
 from .reattach import ResumedAttachment, adapter_can_resume, resume_needs_session
 from .transcript_delivery import TranscriptDeliveryRecord
@@ -221,7 +222,7 @@ async def _resume_adapter_locked(
     att["hook_url"] = hook_url(att_id, runtime_owner)
     att["review_worktrees"] = list_review_worktrees(runtime.db, att["conv_id"])
     load_write_grants(runtime.db, att)
-    att["protected_roots"] = protected_repo_roots(runtime.db)
+    fence_workspaces.load(runtime.db, att)
     att["global_prose"] = runtime.db.get_setting("global_prose")
     att["db_paths"] = database_paths(runtime.db)
     provision_connection(runtime.db.path, att)
