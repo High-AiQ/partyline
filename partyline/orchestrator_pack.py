@@ -41,6 +41,8 @@ def task_pack(db, conv_id, role):
         'If blocked, call blocked(reason); the server notifies the root. '
         'If you were blocked and resume work, call resume_work(note) — your task state must '
         'always reflect what you are doing. '
+        'Never send acknowledgment-only replies to the root captain or anyone else: reply only '
+        'with results, questions or a status change, or react instead. '
         'Without a structured call or peer, one reminder precedes a stalled report. '
         'The server selects and reuses the reviewer; workers cannot attach one. '
         'A reviewer works only in the managed review checkout at the exact requested SHA, '
