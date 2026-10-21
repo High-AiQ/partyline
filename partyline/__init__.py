@@ -1,3 +1,3 @@
 """partyline — people and interactive processes on one wire."""
 
-__version__ = "2.46.3"
+__version__ = "2.47.0"

@@ -50,6 +50,7 @@ import os
 import sys
 
 from . import docker_bridge_client, docker_relay, features, fence_darwin, fence_protect, git_fence
+from . import fence_workspaces
 from .fence_paths import darwin_write_set, write_set
 
 logger = logging.getLogger(__name__)
@@ -191,9 +192,11 @@ def _darwin_scope(att: dict) -> tuple[list[str], list[str], list[str], list[str]
     """
     cwd = att.get("cwd") or ""
     deny = _protected_roots(att) + existing(att.get("db_paths") or [])
+    nested = fence_workspaces.checkouts(att)
     deny_git = git_fence.darwin_protected_git_paths(cwd)
+    deny_git += [p for path in nested for p in git_fence.darwin_protected_git_paths(path)]
     allow = darwin_write_set(att) + _grant_paths(att)
-    allow_git = existing([git_fence._worktree_gitdir(cwd) or ""])
+    allow_git = existing([git_fence._worktree_gitdir(path) or "" for path in [cwd, *nested]])
     return deny, allow, deny_git, allow_git
 
 

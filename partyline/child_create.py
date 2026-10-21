@@ -11,10 +11,11 @@ from .hierarchy import HierarchyError, create_child_conversation
 from .hierarchy_contracts import ChildCreatedResponse
 from .line_worktree import describe, line_cwd, place_child, placement_root
 from .machine_scope import deny_staffed_split, deny_unless, is_human
+from .task_workspaces import describe as task_describe, place_task
 from .system_notice import post_system_notice
 
 
-async def create_child(runtime, principal, conv_id, body):
+async def create_child(runtime, principal, conv_id, body, workspace=False):
     db = runtime.db
     from .orchestrator_store import task
     if task(db, conv_id):
@@ -38,7 +39,8 @@ async def create_child(runtime, principal, conv_id, body):
         conv = create_child_conversation(db, conv_id, str(uuid.uuid4()), name)
     except HierarchyError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc
-    placed = place_child(db, conv_id, conv["id"], base=base_ref, root=target)
+    placed = await asyncio.to_thread(place_task, db, conv_id, conv["id"]) if workspace else None
+    placed = placed or place_child(db, conv_id, conv["id"], base=base_ref, root=target)
     if (base_ref or target) and not placed.get("branch"):
         # A failed placement must not silently inherit the parent checkout — not
         # for an explicit upstream base, not for an explicit repository — so the
@@ -46,7 +48,7 @@ async def create_child(runtime, principal, conv_id, body):
         db.delete_conversation(conv["id"])
         raise HTTPException(
             409, f"the child worktree could not be created on {base_ref or target}")
-    if where := describe(placed):
+    if where := (task_describe(placed) if placed.get("workspaces") else describe(placed)):
         await post_system_notice(runtime, conv["id"], where, actor=principal)
     if placed.get("branch"):
         # The base notice describes the checkout the child actually starts from.

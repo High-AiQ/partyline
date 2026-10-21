@@ -173,7 +173,11 @@ class LineBranchSiblingTest(LayoutFixture):
 
     async def test_a_direct_child_of_the_root_folder_counts_as_a_candidate(self):
         await self.placed('parent', policy='none')
-        sha = self.commit_in(self.repos['argon-backend'], branch=self.line_branch())
+        # The task folder holds a worktree of the clone, on the line's branch.
+        cwd = self.db.get_conversation(self.conv_id)['cwd']
+        worktree = os.path.join(cwd, 'argon-backend')
+        git(worktree, 'commit', '-q', '--allow-empty', '-m', 'work')
+        sha = git(worktree, 'rev-parse', 'HEAD')
         self.assertEqual(await self.attempt(sha=sha), 'done')
 
 
