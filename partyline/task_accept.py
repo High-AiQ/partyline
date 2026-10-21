@@ -14,7 +14,8 @@ from fastapi import HTTPException
 
 from .contracts import ConversationsChangedEvent
 from .accept_history import record_accept
-from .line_worktree import line_cwd, repo_and_worktree, rev
+from .line_worktree import _git, line_cwd, repo_and_worktree, rev
+from .task_workspaces import tip, workspaces
 from .review_worktrees import prune_accepted_review
 from .worktree_paths import branch_name
 
@@ -25,6 +26,10 @@ def plan(db, conv_id: str, task_row: dict, sha: str):
     A reviewed commit that is no longer in its repository refuses the accept (409).
     """
     entries = (task_row or {}).get('repositories') or []
+    if task_row and workspaces(db, conv_id):
+        # Each reviewed commit is verified and recorded; settle_unmoved moves the task's branches.
+        return None, [{'repository': item['repository'], 'sha': item['sha']}
+                      for item in entries if item['sha'] != sha and _exists(item)]
     if not entries:
         return sha, []
     own_root = repo_and_worktree(line_cwd(db, conv_id) or '')[0]
@@ -42,11 +47,41 @@ def plan(db, conv_id: str, task_row: dict, sha: str):
     return mine, others
 
 
-def settle_unmoved(db, conv_id: str, sha: str) -> dict:
+def _exists(item: dict) -> bool:
+    if rev(item['repository'], 'rev-parse', '--verify', '--quiet', f"{item['sha']}^{{commit}}") is None:
+        raise HTTPException(409, f"reviewed commit {item['sha'][:12]} is not in {item['repository']}")
+    return True
+
+
+def _ahead(repo: str, old: str, new: str) -> bool:
+    return _git('merge-base', '--is-ancestor', old, new, cwd=repo).returncode == 0
+
+
+def move_branches(db, conv_id: str, entries: list[dict]) -> bool:
+    """Fast-forward the task's own `line/<slug>` in each clone to its reviewed commit, where that
+    is a plain fast-forward onto a commit the task made. The person's checkout never moves."""
+    moved = False
+    for item in entries:
+        for space in workspaces(db, conv_id):
+            repo = space['repository']
+            if os.path.realpath(repo) != os.path.realpath(item['repository']):
+                continue
+            ref = f"refs/heads/{space['branch']}"
+            real = rev(repo, 'rev-parse', '--verify', '--quiet', ref)
+            head = tip(space, conv_id)
+            if (real and head and real != item['sha'] and _ahead(repo, real, item['sha'])
+                    and _ahead(repo, item['sha'], head)):
+                moved |= _git('update-ref', ref, item['sha'], real, cwd=repo).returncode == 0
+    return moved
+
+
+def settle_unmoved(db, conv_id: str, sha: str, task_row: dict | None = None) -> dict:
     """The accept result when the line's own repository was not part of the review."""
     db._exec("UPDATE conversations SET accepted_sha=? WHERE id=?", (sha, conv_id))
+    moved = move_branches(db, conv_id, (task_row or {}).get('repositories') or [])
+    prune_accepted_review(db, conv_id, sha)
     cwd = line_cwd(db, conv_id) or ''
-    return {'branch': branch_name(cwd), 'sha': sha, 'moved': False, 'pruned_reviews': 0,
+    return {'branch': branch_name(cwd), 'sha': sha, 'moved': moved, 'pruned_reviews': 0,
             'reviewed_sha': None, 'past_review': None,
             'tree_sync': {'ok': True, 'worktree': None, 'detail': ''}}
 

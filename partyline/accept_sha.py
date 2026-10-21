@@ -263,7 +263,7 @@ def register_accept_route(app, runtime) -> None:
                 raise HTTPException(409, {"gates": gate_results})
         try:
             done = (accept_sha(db, conv_id, own_sha, body.allow_descendant) if own_sha
-                    else task_accept.settle_unmoved(db, conv_id, body.sha))
+                    else task_accept.settle_unmoved(db, conv_id, body.sha, task_row))
         except AcceptError as exc:
             raise HTTPException(exc.status_code, exc.detail) from exc
         _refresh_children_views_quietly(db, conv_id, done["branch"])
