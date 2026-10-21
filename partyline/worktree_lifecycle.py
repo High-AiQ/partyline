@@ -22,6 +22,8 @@ from .line_worktree import WORKTREES_DIR, _git, line_cwd, repo_root
 from .worktree_paths import managed_root
 from .nested_repositories import keep_reason, nested_repositories
 from .review_worktrees import sweep_review_worktrees
+from .task_teardown import teardown
+from .task_workspaces import tip, workspaces
 from .scratch_worktrees import sweep_scratch_worktrees
 
 logger = logging.getLogger(__name__)
@@ -35,11 +37,13 @@ def _worktree_root(cwd: str) -> str | None:
     return managed_root(cwd)
 
 
-def remove_for_line(conv: dict | None) -> None:
+def remove_for_line(conv: dict | None, db=None) -> None:
     """Drop the worktree a purged line was placed in; its branch stays."""
     cwd = (conv or {}).get("cwd") or ""
     root = _worktree_root(cwd)
-    if root is None or keep_reason(cwd):
+    if db is not None and root is not None:
+        teardown(db, conv["id"], cwd)  # a task's commits and nested worktrees first
+    if root is None or not os.path.lexists(os.path.join(cwd, ".git")) or keep_reason(cwd):
         return
     try:
         _git("worktree", "remove", "--force", cwd, cwd=root)
@@ -89,8 +93,10 @@ def _default_branch(root: str) -> str | None:
 
 def _is_clean(cwd: str) -> bool:
     """Clean to git, and holding no repository of its own that git cannot see."""
-    if nested_repositories(cwd):
+    if nested_repositories(cwd, lenient=True):
         return False
+    if not os.path.lexists(os.path.join(cwd, ".git")):
+        return True  # a task folder of worktrees only: each was checked as nested
     try:
         done = _git("status", "--porcelain", cwd=cwd)
     except (OSError, subprocess.SubprocessError):
@@ -112,6 +118,14 @@ def _in_history(cwd: str, tip: str, bases: list[str]) -> bool:
     return done.returncode == 0 and not done.stdout.strip()
 
 
+def _workspace_merged(db, conv_id: str, item: dict) -> bool:
+    """Every commit on a task's branch in one clone is in that clone's own checkout or default."""
+    repo = item["repository"]
+    bases = [b for b in (_base_ref(repo), _default_branch(repo)) if b]
+    tips = [t for t in (tip(item, conv_id), _base_ref(item["path"])) if t]
+    return bool(bases) and bool(tips) and all(_in_history(item["path"], t, bases) for t in tips)
+
+
 def worktree_state(db, conv: dict | None) -> dict | None:
     """The line's own worktree as ``{"clean": bool, "merged": bool}``.
 
@@ -128,6 +142,9 @@ def worktree_state(db, conv: dict | None) -> dict | None:
     root = _worktree_root(cwd)
     if root is None:
         return None
+    if (spaces := workspaces(db, conv.get("id") or "")):
+        return {"clean": _is_clean(cwd), "nested": nested_repositories(cwd, lenient=True),
+                "merged": all(_workspace_merged(db, conv["id"], item) for item in spaces)}
     branch = _current_branch(cwd)
     parent_cwd = line_cwd(db, parent_id_of(conv)) if parent_id_of(conv) else None
     bases = [b for b in (_base_ref(parent_cwd), _default_branch(root)) if b]
@@ -146,7 +163,7 @@ def worktree_removal_reason(db, conv: dict | None) -> str | None:
     if state is None:
         return None
     conv_cwd = (conv or {}).get("cwd") or ""
-    if (reason := keep_reason(conv_cwd)):
+    if (reason := keep_reason(conv_cwd, lenient=True)):
         return reason
     if not state["clean"]:
         return "uncommitted changes"
@@ -166,7 +183,7 @@ def discard_worktree(db, conv_id: str) -> bool:
     state = worktree_state(db, conv)
     if state is None or not state["merged"]:
         return False
-    remove_for_line(conv)
+    remove_for_line(conv, db)
     return not os.path.isdir(conv.get("cwd") or "")
 
 
@@ -185,7 +202,7 @@ def archive_worktree_if_safe(db, conv_id: str) -> tuple[bool, str | None]:
     reason = worktree_removal_reason(db, conv)
     if reason is not None:
         return False, reason
-    remove_for_line(conv)
+    remove_for_line(conv, db)
     return True, None
 
 

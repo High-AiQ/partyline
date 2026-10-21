@@ -179,3 +179,152 @@ class FenceTest(WorkspaceFixture):
         att['task_workspaces'].append({'conv_id': att['conv_id'], 'path': self.clones['argon-backend'],
                                        'repository': self.clones['argon-backend']})
         self.assertEqual(len(fence_workspaces.checkouts(att)), 2)
+
+
+class AcceptAndRetireFixture(WorkspaceFixture):
+    async def finished(self, repository=False, policy='captain'):
+        """A task with a commit in each clone, approved and accepted."""
+        from partyline.accept_sha import register_accept_route
+        from partyline.orchestrator_contracts import VerdictIn
+        from partyline.orchestrator_service import review_verdict
+
+        self.umbrella(repository)
+        await self.create(policy)
+        self.shas = {name: self.work(name) for name in CLONES}
+        await self.review()
+        await review_verdict(self.runtime, self.captain, self.conv_id,
+                             VerdictIn(verdict='approve', findings='fine'))
+        register_accept_route(self.app, self.runtime)
+        self.actor = self.captain
+        return self.client.post(f'/api/conversations/{self.conv_id}/accept',
+                                json={'sha': self.row()['sha']})
+
+    def merge_all(self):
+        for name in CLONES:
+            git(self.clones[name], 'merge', '-q', '--ff-only', 'line/slice')
+        if os.path.isdir(os.path.join(self.top, '.git')):
+            git(self.top, 'merge', '-q', '--ff-only', 'line/slice')
+
+
+class AcceptTest(AcceptAndRetireFixture):
+    async def test_accept_records_every_repository_and_never_moves_the_persons_branch(self):
+        from partyline.accept_history import accept_history
+
+        done = await self.finished()
+        self.assertEqual(done.status_code, 200, done.text)
+        self.assertEqual(self.row()['status'], 'done')
+        self.assertEqual(sorted(item['sha'] for item in accept_history(self.db, self.conv_id)),
+                         sorted(self.shas.values()))
+        for name in CLONES:
+            self.assertEqual(git(self.clones[name], 'rev-parse', 'line/slice'), self.shas[name])
+            self.assertNotEqual(git(self.clones[name], 'rev-parse', 'main'), self.shas[name])
+
+    async def test_accept_moves_the_task_branch_up_to_the_reviewed_commit_from_the_mirror(self):
+        from unittest.mock import patch
+
+        from partyline import git_fence
+
+        with patch.object(git_fence, 'FENCE_ROOT', os.path.join(self.directory.name, 'fence')):
+            self.umbrella(False)
+            await self.create('captain')
+            for name in CLONES:  # the fence keeps the tip in the mirror; the real ref stays at base
+                path = os.path.join(self.db.get_conversation(self.conv_id)['cwd'], name)
+                base = git(path, 'rev-parse', 'HEAD')
+                gitdir = git_fence._worktree_gitdir(path)
+                mirror = git_fence.refresh_mirror(git_fence.common_gitdir(gitdir), gitdir, self.conv_id)
+                tip = self.work(name)
+                git_fence._write_mirror_text(mirror, 'refs/heads/line/slice', tip + '\n')
+                git(self.clones[name], 'update-ref', 'refs/heads/line/slice', base)
+            self.assertEqual((await self.review())['status'], 'in_review')
+            from partyline.task_accept import move_branches
+
+            self.assertTrue(move_branches(self.db, self.conv_id, self.row()['repositories']))
+            for item in self.row()['repositories']:
+                self.assertEqual(git(item['repository'], 'rev-parse', 'line/slice'), item['sha'])
+
+
+class RetirementTest(AcceptAndRetireFixture):
+    async def retire(self):
+        from partyline.worktree_lifecycle import archive_worktree_if_safe
+
+        return archive_worktree_if_safe(self.db, self.conv_id)
+
+    async def test_a_merged_plain_task_folder_is_removed_and_the_commits_stay_on_the_branches(self):
+        await self.finished()
+        folder = self.db.get_conversation(self.conv_id)['cwd']
+        self.merge_all()
+        self.assertEqual(await self.retire(), (True, None))
+        self.assertFalse(os.path.exists(folder))
+        for name in CLONES:
+            self.assertEqual(git(self.clones[name], 'rev-parse', 'line/slice'), self.shas[name])
+            self.assertEqual(git(self.clones[name], 'worktree', 'list').count('\n'), 0)
+
+    async def test_a_merged_repository_folder_task_is_removed_with_its_nested_worktrees(self):
+        await self.finished(repository=True)
+        folder = self.db.get_conversation(self.conv_id)['cwd']
+        self.merge_all()
+        self.assertEqual(await self.retire(), (True, None))
+        self.assertFalse(os.path.exists(folder))
+        self.assertEqual(git(self.clones['argon-backend'], 'rev-parse', 'line/slice'),
+                         self.shas['argon-backend'])
+
+    async def test_a_dirty_worktree_keeps_the_whole_task_folder(self):
+        await self.finished()
+        folder = self.db.get_conversation(self.conv_id)['cwd']
+        self.merge_all()
+        with open(os.path.join(folder, 'argon-frontend', 'notes.txt'), 'w') as fh:
+            fh.write('not committed')
+        removed, reason = await self.retire()
+        self.assertFalse(removed)
+        self.assertIsNotNone(reason)
+        self.assertTrue(os.path.exists(os.path.join(folder, 'argon-frontend', 'notes.txt')))
+
+    async def test_unmerged_work_is_kept(self):
+        await self.finished()
+        removed, reason = await self.retire()
+        self.assertEqual((removed, reason), (False, 'unmerged commits'))
+
+    async def test_an_independent_clone_inside_the_folder_still_keeps_it(self):
+        await self.finished()
+        folder = self.db.get_conversation(self.conv_id)['cwd']
+        self.merge_all()
+        loose = os.path.join(folder, 'scratch-clone')
+        os.makedirs(loose)
+        git(loose, 'init', '-q')
+        removed, reason = await self.retire()
+        self.assertFalse(removed)
+        self.assertIn('scratch-clone', reason)
+        self.assertTrue(os.path.isdir(loose))
+
+    async def test_teardown_copies_a_mirror_only_tip_onto_the_task_branch_first(self):
+        from unittest.mock import patch
+
+        from partyline import git_fence
+        from partyline.worktree_lifecycle import remove_for_line
+
+        with patch.object(git_fence, 'FENCE_ROOT', os.path.join(self.directory.name, 'fence')):
+            self.umbrella(False)
+            await self.create('captain')
+            path = os.path.join(self.db.get_conversation(self.conv_id)['cwd'], 'argon-backend')
+            gitdir = git_fence._worktree_gitdir(path)
+            mirror = git_fence.refresh_mirror(git_fence.common_gitdir(gitdir), gitdir, self.conv_id)
+            base = git(path, 'rev-parse', 'HEAD')
+            tip = self.work('argon-backend')
+            git_fence._write_mirror_text(mirror, 'refs/heads/line/slice', tip + '\n')
+            git(self.clones['argon-backend'], 'update-ref', 'refs/heads/line/slice', base)
+            remove_for_line(self.db.get_conversation(self.conv_id), self.db)
+            self.assertEqual(git(self.clones['argon-backend'], 'rev-parse', 'line/slice'), tip)
+            backend = self.clones['argon-backend']
+            self.assertEqual(git(backend, 'rev-parse', 'refs/partyline/tasks/slice'), tip)
+
+
+class ShippedTest(AcceptAndRetireFixture):
+    async def test_a_plain_task_is_shipped_once_every_clone_holds_its_commits(self):
+        from partyline.orchestrator_cleanup import shipped
+
+        await self.finished()
+        self.assertFalse(shipped(self.db, self.row()))
+        self.merge_all()
+        self.assertTrue(shipped(self.db, self.row()))
+        self.work('argon-frontend', 'newer')
+        self.assertFalse(shipped(self.db, self.row()))
