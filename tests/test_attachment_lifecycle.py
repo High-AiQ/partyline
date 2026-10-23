@@ -17,7 +17,7 @@ from partyline.attachment_lifecycle_routes import register_attachment_lifecycle_
 from partyline.attachment_start import start_attachment
 from partyline.attachment_broadcast import broadcast_attachment_state
 from partyline.attachment_contracts import AttachmentResponse
-from partyline import auth_store, auth_tokens, server
+from partyline import auth_store, auth_tokens
 from partyline.auth_guard import install_auth_guard
 from partyline.auth_store import attachment_by_api_token, ensure_api_token
 from partyline.db import Db
@@ -39,7 +39,6 @@ class LifecycleTest(unittest.TestCase):
         self.concurrent_removal = False
         self.adapters = []
         self.validation = Mock()
-        self.loopback = Mock()
         self.presence = SimpleNamespace(
             posting=lambda conv, ident, callback: callback,
             statusing=lambda conv, ident, callback, name: callback,
@@ -49,8 +48,7 @@ class LifecycleTest(unittest.TestCase):
         app = FastAPI()
         install_auth_guard(app, self.db)
         register_attachment_lifecycle_routes(
-            app, self.runtime, start=self.start, require_loopback=self.loopback,
-            validate=self.validation,
+            app, self.runtime, start=self.start, validate=self.validation,
         )
         self.client = TestClient(app)
         user = auth_store.create_user(
@@ -271,21 +269,12 @@ class LifecycleTest(unittest.TestCase):
         self.assertEqual(self.client.delete("/api/attachments/old/record").status_code, 200)
         self.assertIsNone(self.db.get_restart_plan())
 
-    def test_local_control_gates_spawning_but_not_forgetting_a_stopped_card(self):
-        """Starting a process is host-local; deleting a dead card is not.
+    def test_fresh_does_not_depend_on_caller_location(self):
+        """A person on a LAN browser (TestClient host "testclient") can start fresh."""
+        response = self.fresh({})
 
-        Greg hit the old conflation from the LAN browser: removing a detached
-        `glm` answered "process control may only be requested from this
-        machine" about a row whose process had already exited, leaving it
-        unremovable from the only interface that shows it.
-        """
-        self.loopback.side_effect = HTTPException(403, "local control only")
-
-        self.assertEqual(self.fresh({}).status_code, 403)
-        self.assertEqual(len(self.db.list_attachments("line")), 1)
-
-        self.assertEqual(self.client.delete("/api/attachments/old/record").status_code, 200)
-        self.assertEqual(self.db.list_attachments("line"), [])
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.client.delete("/api/attachments/old/record").status_code, 404)
 
     def test_concurrent_old_card_removal_does_not_fail_a_successful_spawn(self):
         self.concurrent_removal = True
@@ -374,12 +363,10 @@ class LifecycleTest(unittest.TestCase):
 
 
 class RemoteRecordRemovalTest(unittest.TestCase):
-    """The real loopback guard against a caller that is not on this machine.
+    """A caller that is not on this machine (a LAN browser) is a full operator.
 
-    `LifecycleTest` injects a stub for `require_loopback`, so it can say which
-    routes consult the gate but never what the gate decides for a LAN browser.
-    That gap is why the conflation shipped: every removal test passed while the
-    only client that mattered — an operator on another host — got a 403.
+    Process-lifecycle routes are gated by the `attach`/`close` capability, never
+    by the caller's address. The TestClient reports host "testclient".
     """
 
     def setUp(self):
@@ -393,7 +380,7 @@ class RemoteRecordRemovalTest(unittest.TestCase):
         install_auth_guard(app, self.db)
         register_attachment_lifecycle_routes(
             app, self.runtime, start=AsyncMock(),
-            require_loopback=server.require_loopback, validate=Mock(),
+            validate=Mock(),
         )
         # TestClient reports a client host of "testclient", which is exactly
         # what the guard has to treat as "not this machine".
@@ -421,13 +408,6 @@ class RemoteRecordRemovalTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(self.db.list_attachments("line"), [])
-
-    def test_the_same_remote_caller_still_cannot_start_a_process(self):
-        response = self.client.post("/api/attachments/glm/fresh")
-
-        self.assertEqual(response.status_code, 403)
-        self.assertIn("from this machine", response.text)
-        self.assertEqual(len(self.db.list_attachments("line")), 1)
 
     def test_a_live_or_running_record_is_refused_remotely_too(self):
         self.runtime.live["glm"] = object()
@@ -458,4 +438,25 @@ class RemoteRecordRemovalTest(unittest.TestCase):
         self.client.headers.pop("Authorization")
 
         self.assertEqual(self.client.delete("/api/attachments/glm/record").status_code, 401)
+        self.assertEqual(len(self.db.list_attachments("line")), 1)
+
+    def test_fresh_keeps_its_capability_gate_for_remote_callers(self):
+        spawn = self.client.post  # a human on the LAN may start fresh: the gate is `attach`
+        self.db.add_attachment(
+            "nosy", "other", "nosy", "raw", ["sh"], self.directory.name, "owner"
+        )
+        human = self.client.headers["Authorization"]
+
+        self.client.headers["Authorization"] = f"Bearer {ensure_api_token(self.db, 'nosy')}"
+        other_line = spawn("/api/attachments/glm/fresh")
+        self.client.headers.pop("Authorization")
+        anonymous = spawn("/api/attachments/glm/fresh")
+        self.client.headers["Authorization"] = human
+        self.runtime.live["glm"] = object()
+        live = spawn("/api/attachments/glm/fresh")
+
+        self.assertEqual(other_line.status_code, 403)
+        self.assertIn("cannot act on that line", other_line.text)
+        self.assertEqual(anonymous.status_code, 401)
+        self.assertEqual(live.status_code, 409)
         self.assertEqual(len(self.db.list_attachments("line")), 1)

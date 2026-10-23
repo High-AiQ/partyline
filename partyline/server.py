@@ -454,7 +454,6 @@ rename_conversation = _conversation_routes.rename_conversation
 conversation_detail = _conversation_routes.conversation_detail
 register_attachment_lifecycle_routes(
     app, runtime, start=lambda att, **kwargs: _start_attachment(att, **kwargs),
-    require_loopback=require_loopback,
     validate=lambda att: validated_attachment_command(
         att["adapter"], shlex.join(att["command"]), ADAPTERS, ADAPTER_METADATA
     ),
@@ -500,7 +499,6 @@ async def edit_attachment(
     if not att:
         raise HTTPException(404)
     deny_unless_attachment(runtime.db, request_principal(request), att_id, "attach")
-    require_loopback(request)
     if att_id in runtime.live or att["status"] not in ("exited", "detached"):
         raise HTTPException(409, f"'{att['name']}' must be stopped before editing its command")
     try:

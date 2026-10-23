@@ -7,7 +7,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from types import SimpleNamespace
 
@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from partyline import resume_continuation, auth_store, auth_tokens, bind, frontend_build, server
 from partyline.auth_guard import Principal, install_auth_guard
 from partyline.attachment_resume import TranscriptDeliveryRecord, delivered_history
+from partyline.attachment_lifecycle_routes import register_attachment_lifecycle_routes
 from partyline.db import Db
 from partyline.hook_routes import handle_hook
 from partyline.preset_routes import presets_router
@@ -550,6 +551,33 @@ class ServerTest(unittest.TestCase):
             server._resume_adapter = original
 
         self.assertNotIn("one", server.runtime.reattaching)
+
+    def test_a_remote_browser_can_restart_a_stopped_raw_process_through_resume(self):
+        """The restart button posts here; neither route cares where the caller is."""
+        server.ADAPTERS["raw"] = FakeAdapter
+        server.ADAPTER_METADATA["raw"] = {
+            "command": ["sh"], "requires": [],
+            "capabilities": {"listens": False, "resume": False},
+        }
+        server.runtime.db.add_attachment(
+            "raw1", "line", "idle-check", "raw", ["sh"], self.directory.name, None)
+        server.runtime.db.set_attachment_status("raw1", "exited", None)
+        headers = {"Authorization": f"Bearer {self.user_token()}"}
+        app = FastAPI()
+        install_auth_guard(app, server.runtime.db)
+        register_attachment_lifecycle_routes(
+            app, server.runtime, start=AsyncMock(),
+            validate=Mock())
+        app.post("/api/attachments/{att_id}/resume")(server.resume_attachment)
+        client = TestClient(app)  # host "testclient": not this machine
+        self.addCleanup(client.close)
+
+        response = client.post("/api/attachments/raw1/resume", headers=headers)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["status"], "running")
+        self.assertTrue(any(
+            "restarted fresh" in m["body"] for m in server.runtime.db.list_messages("line")))
 
     def test_a_resume_rings_a_process_that_was_cut_off_mid_turn(self):
         # The real resume path runs (make_adapter is FakeAdapter). The row says
@@ -1405,13 +1433,12 @@ class ServerTest(unittest.TestCase):
         response = TestClient(contract_app).patch("/attachment", json={})
         self.assertEqual(response.status_code, 422)
 
-    def test_edit_attachment_command_is_local_and_inactive_only(self):
+    def test_edit_attachment_command_works_from_the_lan_but_only_when_stopped(self):
         self.add_attachment("old", status="detached")
         body = server.AttachmentPatchRequest(command="fake --changed")
 
-        self.assert_http(
-            403, server.edit_attachment(FakeRequest("10.0.0.7"), "old", body)
-        )
+        edited = self.arun(server.edit_attachment(FakeRequest("10.0.0.7"), "old", body))
+        self.assertEqual(edited["command"], ["fake", "--changed"])
         server.runtime.live["old"] = FakeAdapter()
         self.assert_http(
             409, server.edit_attachment(FakeRequest("127.0.0.1"), "old", body)
@@ -1424,6 +1451,16 @@ class ServerTest(unittest.TestCase):
         self.assert_http(
             404, server.edit_attachment(FakeRequest("127.0.0.1"), "missing", body)
         )
+
+    def test_edit_attachment_command_refuses_a_machine_from_another_line(self):
+        self.add_attachment("old", status="detached")
+        request = FakeRequest("10.0.0.7")
+        request.state.principal = Principal(
+            kind="machine", name="nosy", conv_id="other", attachment_id="nosy")
+
+        self.assert_http(403, server.edit_attachment(
+            request, "old", server.AttachmentPatchRequest(command="fake --changed")))
+        self.assertEqual(server.runtime.db.get_attachment("old")["command"], ["fake"])
 
     def test_edit_attachment_command_shares_attach_validation(self):
         self.add_attachment("old", status="exited")
