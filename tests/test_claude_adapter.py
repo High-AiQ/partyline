@@ -913,6 +913,21 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
         with self.searching():
             self.assertEqual(adapter._find_transcript(), pinned)
 
+    def test_the_found_transcript_is_reported_as_the_cli_session(self):
+        """`cli_session` is what the task server resumes by. Unrecorded, a
+        reviewer's round-2 restart relaunched fresh with `--session-id` naming
+        the session it had just written, and the CLI refused it (2026-10-23)."""
+        reported: list[str] = []
+        adapter = self.make_adapter()
+        adapter.on_cli_session = reported.append
+        pinned = self.write_session("attachment-1", pasted=adapter.briefing())
+
+        with self.searching(), patch(
+            "partyline.adapters.bundled.claude.adapter.asyncio.sleep", AsyncMock()
+        ):
+            self.assertEqual(asyncio.run(adapter._await_transcript()), pinned)
+        self.assertEqual(reported, ["attachment-1"])
+
     def test_a_fresh_attachment_does_not_inherit_a_leftover_pinned_file(self):
         """The pinned name is only ours if this activation wrote it.
 
