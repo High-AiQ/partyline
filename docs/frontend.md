@@ -160,4 +160,6 @@ hide the manual process attachment panel because their staffing is server-owned.
 Jack cards use the adapter's `listens` capability (default true). Live listeners
 show peek; stopped listeners keep resume, start fresh and edit command. Non-listeners
 hide peek and offer restart alongside edit command when stopped. Restart reruns
-the stored command with an empty fresh request and no checkpoint dialog.
+the stored command through `POST /api/attachments/<id>/resume` (the server reruns a
+non-listener fresh, and the route is not loopback-gated) with no checkpoint dialog. A
+failed resume or restart shows as a toast and as inline text on the card.

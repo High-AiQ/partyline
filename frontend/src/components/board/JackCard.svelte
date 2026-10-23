@@ -33,6 +33,7 @@
   let { attachment, resumable, overridesBundled, captain = false, onmention }: Props = $props();
 
   let resuming = $state(false);
+  let actionError = $state("");
 
   const live = $derived(isLive(attachment));
   const listens = $derived(adapterListens(session.adapters, attachment.adapter));
@@ -69,8 +70,9 @@
 
   async function activate(restart: boolean): Promise<void> {
     resuming = true;
+    actionError = "";
     try {
-      await activateJack(attachment.id, restart);
+      actionError = (await activateJack(attachment.id, restart)) ?? "";
     } finally {
       resuming = false;
     }
@@ -228,6 +230,7 @@
       ✦ start fresh
     </button>
   {/if}
+  {#if actionError}<p class="action-error mt-1.5 text-[10px] text-red" role="alert">{actionError}</p>{/if}
   {#if !live}
     <button
       class="resume edit-btn mt-1.5 ml-[5px] px-[9px] py-0.5 text-[10px] text-copper border-copper/40 hover:border-copper hover:bg-copper hover:text-ink"

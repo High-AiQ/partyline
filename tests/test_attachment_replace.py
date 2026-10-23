@@ -38,12 +38,10 @@ class ReplaceAttachmentTest(unittest.TestCase):
         self.runtime.broadcast = AsyncMock()
         self.spawned = []
         self.validation = Mock()
-        self.loopback = Mock()
         app = FastAPI()
         install_auth_guard(app, self.db)
         register_attachment_lifecycle_routes(
-            app, self.runtime, start=self.start, require_loopback=self.loopback,
-            validate=self.validation,
+            app, self.runtime, start=self.start, validate=self.validation,
         )
         self.client = TestClient(app)
         self.addCleanup(self.client.close)

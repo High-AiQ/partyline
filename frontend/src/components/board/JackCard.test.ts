@@ -1,3 +1,5 @@
+import { ApiError, api } from "../../lib/api";
+import { room } from "../../state/room.svelte.js";
 import { attachmentLifecycleApi } from "../../lib/attachment-lifecycle-api";
 import { session } from "../../state/session.svelte.js";
 import { mount, tick, unmount } from "svelte";
@@ -248,7 +250,7 @@ describe("JackCard lifecycle actions", () => {
     });
   }
 
-  it("hides peek for raw and restarts stopped raw with an empty body", async () => {
+  it("hides peek for raw and restarts stopped raw through resume", async () => {
     session.adapters = [
       {
         id: "raw",
@@ -267,9 +269,8 @@ describe("JackCard lifecycle actions", () => {
     expect(document.querySelector(".peek-btn")).toBeNull();
     expect(document.querySelector(".restart-btn")).toBeNull();
     await unmount(liveCard);
-    const fresh = vi
-      .spyOn(attachmentLifecycleApi, "fresh")
-      .mockResolvedValue({ ...attachment, id: "new", adapter: "raw" });
+    const fresh = vi.spyOn(attachmentLifecycleApi, "fresh");
+    const resume = vi.spyOn(api, "resume").mockResolvedValue({ ...attachment, adapter: "raw" });
     const card = mountCard({ adapter: "raw", status: "exited" });
     try {
       expect(document.querySelector(".fresh-btn")).toBeNull();
@@ -278,9 +279,39 @@ describe("JackCard lifecycle actions", () => {
       expect(restart?.textContent).toContain("↻ restart");
       restart?.click();
       await tick();
-      expect(fresh).toHaveBeenCalledWith(attachment.id, {});
+      expect(resume).toHaveBeenCalledWith(attachment.id);
+      expect(fresh).not.toHaveBeenCalled();
     } finally {
       await unmount(card);
+    }
+  });
+
+  it("keeps a failed restart visible on the card and in the notice", async () => {
+    session.adapters = [
+      {
+        id: "raw",
+        name: "Raw",
+        description: "",
+        command: ["sh"],
+        requires: [],
+        capabilities: { listens: false },
+        source: "bundled",
+        overrides_bundled: false,
+        update_command: null,
+        compact_paste: null,
+      },
+    ];
+    vi.spyOn(api, "resume").mockRejectedValue(new ApiError("process control refused", 403));
+    const card = mountCard({ adapter: "raw", status: "exited" });
+    try {
+      document.querySelector<HTMLButtonElement>(".restart-btn")?.click();
+      await vi.waitFor(() => {
+        expect(document.querySelector(".action-error")?.textContent).toContain("process control refused");
+      });
+      expect(room.notice).toEqual({ message: "process control refused", kind: "error" });
+    } finally {
+      await unmount(card);
+      room.notice = null;
     }
   });
 
