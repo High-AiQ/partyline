@@ -25,7 +25,7 @@ from .hierarchy import ancestors
 from .line_process_routes import detach_attachment, live_attachments
 from .line_worktree import REVIEW_DIR, rev
 from .resume_continuation import resume_with_backlog
-from .reattach import adapter_can_resume
+from .restart_capabilities import adapter_can_resume
 from .review_worktrees import ReviewError, subtree_repository
 
 logger = logging.getLogger(__name__)

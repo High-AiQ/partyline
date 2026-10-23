@@ -16,7 +16,7 @@ from .memory_contracts import MemoryRequestEvent
 from .resume_continuation import resume_with_backlog
 from .mention_relay import post_private
 from .process_memory import parse_size
-from .reattach import adapter_can_resume
+from .restart_capabilities import adapter_can_resume
 from .resource_budget import cap_bytes, memory_ceiling, settings
 from .system_notice import post_system_notice
 

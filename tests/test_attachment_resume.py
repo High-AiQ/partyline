@@ -175,6 +175,37 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
     @patch("partyline.attachment_resume.bind_role_delivery")
     @patch("partyline.attachment_resume.bind_connection_hint")
     @patch("partyline.attachment_resume.provision_connection")
+    async def test_non_listener_restarts_fresh_in_automatic_plan(self, *_mocks):
+        from partyline.reattach import ReattachCoordinator, create_restart_plan
+        from partyline.contracts import RestartPlanRequest
+        metadata = {"raw": {"capabilities": {"listens": False, "resume": False}}}
+        self.db._exec("UPDATE attachments SET adapter='raw', status='running' WHERE id='one'")
+        self.runtime.live["one"] = object()
+        plan = create_restart_plan(self.runtime, metadata,
+                                   RestartPlanRequest(conversation_id="line", mode="automatic"))
+        self.assertEqual([att.id for att in plan.attachments], ["one"])
+        self.runtime.live.clear()
+        self.db._exec("UPDATE attachments SET status='exited' WHERE id='one'")
+        self.db.add_message("line", "greg", "human", "@luna input from before restart")
+        arguments = self.resume_arguments()
+        arguments["adapter_metadata"] = metadata
+        async def restart(ident, pending):
+            self.assertEqual(pending, [])
+            result = await resume_adapter(ident, pending, **arguments)
+            result.adapter.wait_ready = AsyncMock(side_effect=AssertionError("raw has no session"))
+            return result
+        result = await ReattachCoordinator(self.runtime, restart).run_automatic()
+        self.assertEqual(result.ready, ("luna",))
+        att = self.captured["att"]
+        self.assertFalse(att["resume"])
+        self.assertIsNone(att["cli_session"])
+        self.assertEqual(att["command"], ["fake"])
+        self.assertEqual(att["cwd"], self.directory.name)
+        self.assertEqual(att["name"], "luna")
+
+    @patch("partyline.attachment_resume.bind_role_delivery")
+    @patch("partyline.attachment_resume.bind_connection_hint")
+    @patch("partyline.attachment_resume.provision_connection")
     async def test_resume_adapter_loads_write_grants(self, *_mocks):
         await resume_adapter("one", None, **self.resume_arguments())
         self.assertEqual([row["path"] for row in self.captured["write_grants"]], [self.grant])

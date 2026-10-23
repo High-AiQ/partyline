@@ -156,3 +156,8 @@ not describe the attachment's available memory.
 
 Task rows also show `blocked` when the implementer reports a blocker. Task lines
 hide the manual process attachment panel because their staffing is server-owned.
+
+Jack cards use the adapter's `listens` capability (default true). Live listeners
+show peek; stopped listeners keep resume, start fresh and edit command. Non-listeners
+hide peek and offer restart alongside edit command when stopped. Restart reruns
+the stored command with an empty fresh request and no checkpoint dialog.
