@@ -193,6 +193,13 @@ class WorkflowTest(TaskFixture):
         self.assertEqual(result['implementer_id'], pending['implementer_id'])
         self.assertEqual(len(tasks(self.db, 'root')), 1)
 
+    async def test_root_monitors_are_not_implementers_so_create_task_still_splits(self):
+        """A person's reminder script on the root used to make every create_task a 403."""
+        self.db.add_attachment('monitor', 'root', 'idle-check', 'fake', ['fake'], self.repo, 'own2')
+        self.db._exec("UPDATE attachments SET status='running' WHERE id='monitor'")
+        row = await self.create()
+        self.assertEqual(row['root_id'], 'root')
+
     async def test_stopped_reviewer_resumes_same_cli_session_and_guard_refuses_self_review(self):
         from partyline.orchestrator_staff import ensure_reviewer, restart
         await self.create()

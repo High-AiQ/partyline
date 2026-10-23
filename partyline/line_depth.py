@@ -47,7 +47,15 @@ def has_captain(db, conv_id: str) -> bool:
 
 
 def staffed_split_reason(db, conv_id: str) -> str | None:
-    """Why a machine may not create a child of this line, or None."""
+    """Why a machine may not create a child of this line, or None.
+
+    An orchestrator root is exempt: its children are tasks the server staffs
+    itself, so a live non-captain process on the root (a reminder script, a
+    monitor) is never one of its implementers. Counting them refused every
+    create_task once a person attached one (2026-10-23).
+    """
+    if (db.get_conversation(conv_id) or {}).get("captain_mode") == "orchestrator":
+        return None
     workers = live_workers(db, conv_id)
     if workers:
         names = ", ".join("@" + att["name"] for att in workers)
