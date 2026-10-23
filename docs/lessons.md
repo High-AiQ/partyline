@@ -1,5 +1,14 @@
 # Lessons: the false-assumptions ledger
 
+## A resumed transcript can bypass fresh-session bookkeeping
+
+Reporting Claude session identity only while awaiting a new transcript assumed every
+activation passed that polling loop. Resumed processes can immediately find their
+pinned transcript, leaving `cli_session` empty despite an existing session. Report
+identity on both discovery paths with an idempotent helper, and let task restart ask
+the adapter whether a durable session exists on disk. The resumed `_run` regression
+and the restart-without-`cli_session` regression both fail when their fixes are removed.
+
 ## Capability-specific actions must preserve shared controls
 
 Changing stopped raw cards to restart directly also hid edit command because both

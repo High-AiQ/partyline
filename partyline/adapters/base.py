@@ -50,6 +50,11 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
     kind = "process"
     answers_terminal_queries = False
 
+    @classmethod
+    def session_exists(cls, att: dict) -> bool:
+        """Whether a stopped attachment has a durable CLI session to resume."""
+        return bool(att.get("cli_session"))
+
     def __init__(self, att: dict, post: Post, on_status: Status, on_cli_session=None):
         self.att = att
         self.resume = bool(att.get("resume"))
@@ -273,18 +278,13 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
     def stage_startup_delivery(self, messages: list[dict]) -> bool:
         """Stage a wake in the process command, if this adapter supports it.
 
-        The default interactive-process contract has no safe way to do that:
-        callers must wait for ``wait_ready()`` before writing to its pty. An
-        adapter whose CLI accepts an initial prompt can override this hook and
-        make delivery part of process creation instead. Returning ``True``
-        declares that ``start()`` will include the digest; the adapter must
-        separately mark its structured receipt before the cursor advances.
+        By default callers must wait for ``wait_ready()`` before pty writes.
+        Override for CLIs accepting initial prompts: ``True`` means ``start()``
+        includes the digest; a structured receipt must still credit delivery.
         """
         return False
 
-    # The digest's shape lives in briefing.py; cwd git and the task rider are
-    # live delivery-time state, never staged. A transcript adapter's digest
-    # carries its claim token until the tailed session records one.
+    # Digest cwd/rider are live state; carry the token until its transcript receipt.
     def format_digest(self, messages: list[dict]) -> str:
         return self._with_claim(format_digest(messages, safe_rider(self.att),
                                               str(self.att.get("cwd", "")),

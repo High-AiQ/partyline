@@ -100,6 +100,12 @@ join briefing (`briefing()`), screen rendering for peek, `_tail_jsonl(path, hand
 a `_run()` that finds this process's transcript and posts assistant text with
 `self.post(self.att["name"], "agent", body)`.
 
+Task staffing also calls the classmethod `session_exists(att)` before restarting a
+stopped attachment. The default checks `cli_session`; adapters with a known session
+path can override it with a read-only disk check. Claude checks the transcript pinned
+to the attachment id under `CLAUDE_CONFIG_DIR` (or `~/.claude`). Finding that file
+permits a resume; it does not prove the new activation owns the transcript for speech.
+
 Rules that hold for every adapter:
 
 - Start the real interactive executable in the supplied pty. Never substitute a headless mode or
