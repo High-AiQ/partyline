@@ -1,7 +1,7 @@
 """Capability-filtered captain tools and the fixed-operation dispatcher."""
 
 from .captain_schemas import OPERATIONS, schema, validate
-from . import captain_ops
+from . import captain_ops, tools_tasks
 
 _ACTION = {
     "staffing": "assign", "attach_worker": "attach", "detach_worker": "close",
@@ -33,7 +33,7 @@ def guide(state):
                             for name in permitted(state)],
             "fallback": {"name": "captain", "inputSchema": {
                 "type": "object", "properties": {
-                    "op": {"type": "string", "enum": list(OPERATIONS)},
+                    "op": {"type": "string", "enum": [*OPERATIONS, *tools_tasks.OPERATIONS]},
                     "args": {"type": "object"}}, "required": ["op", "args"],
                 "additionalProperties": False}}}
 
@@ -61,10 +61,15 @@ def call(client, name: str, args: dict, state: dict):
         if set(args) != {"op", "args"}:
             raise ValueError("captain requires exactly op and args")
         op, operation_args = args.get("op"), args.get("args")
-        if not isinstance(op, str) or op not in OPERATIONS:
+        if not isinstance(op, str) or op not in (*OPERATIONS, *tools_tasks.OPERATIONS):
             raise ValueError("unknown captain operation")
         if not isinstance(operation_args, dict):
             raise ValueError("captain args must be an object")
+        if op in tools_tasks.OPERATIONS:
+            # Task operations ride the always-listed dispatcher too: a Codex
+            # root appointed after its first tools/list never re-lists, and
+            # read source to find create_task (2026-10-23).
+            return tools_tasks.call(client, op, operation_args, state)
     else:
         op, operation_args = name, args
         if op not in OPERATIONS:
