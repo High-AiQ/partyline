@@ -710,6 +710,10 @@ class RenderAndServerTests(unittest.TestCase):
         self.assertEqual(result["error"]["code"], -32700)
         self.assertIn("nesting", result["error"]["message"])
 
+    def test_nesting_depth_ignores_brackets_inside_strings(self):
+        self.assertEqual(server_module.nesting_depth('{"a": "[[[\\"]]]", "b": [1]}'), 2)
+        self.assertEqual(server_module.nesting_depth("[" * 3 + "]" * 3), 3)
+
     def test_module_entrypoint_exits_with_server_status(self):
         import runpy
 
