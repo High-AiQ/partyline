@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from . import turn_marker
-from .adapters import Adapter
+from .adapters import Adapter, ADAPTER_METADATA
+from .restart_capabilities import adapter_can_restart, adapter_listens
 from .contracts import (
     Event, ReattachCandidateResponse, ReattachCommand, ReattachDecisionEvent,
     ReattachOfferEvent, RestartPlanRequest, RestartPlanResponse,
@@ -71,20 +72,6 @@ class RestartPlanError(Exception):
     detail: str
 
 
-def adapter_can_resume(metadata: Mapping[str, object]) -> bool:
-    capabilities = metadata.get("capabilities") or {}
-    return (
-        bool(capabilities.get("resume", False))
-        if isinstance(capabilities, dict)
-        else "resume" in capabilities
-    )
-
-
-def resume_needs_session(metadata: Mapping[str, object]) -> bool:
-    capabilities = metadata.get("capabilities")
-    return isinstance(capabilities, dict) and bool(capabilities.get("resume_needs_session"))
-
-
 def restart_plan_response(db: Db, plan: RestartPlan) -> RestartPlanResponse:
     attachments = []
     for attachment_id in plan["attachment_ids"]:
@@ -121,7 +108,7 @@ def create_restart_plan(
     attachment_ids = select_attachment_ids(
         runtime.db,
         runtime.live,
-        lambda adapter: adapter_can_resume(adapter_metadata.get(adapter, {})),
+        lambda adapter: adapter_can_restart(adapter_metadata.get(adapter, {})),
         planned_conversation_ids(runtime.db, body.conversation_id, body.scope),
     )
     if not attachment_ids:
@@ -288,6 +275,8 @@ class ReattachCoordinator:
                         plan["debrief"].strip() and line == conv_id
                     ) else ()
                     pending = addressed_backlog(self.runtime, attachment, include_message_ids=notice_ids)
+                    if not adapter_listens(ADAPTER_METADATA.get(attachment["adapter"], {})):
+                        pending = []
                     resumed = await self.resume_attachment(attachment_id, pending)
                     adapter = resumed.adapter
                     expected_owners[attachment_id] = adapter.att.get("runtime_owner")
@@ -314,9 +303,11 @@ class ReattachCoordinator:
                                 "attachment ownership changed before cursor advancement"
                             )
                         continuation_confirmed = True
-                    is_ready = await asyncio.wait_for(
-                        adapter.wait_ready(), timeout=self.ready_timeout
-                    )
+                    is_ready = not adapter_listens(ADAPTER_METADATA.get(attachment["adapter"], {}))
+                    if not is_ready:
+                        is_ready = await asyncio.wait_for(
+                            adapter.wait_ready(), timeout=self.ready_timeout
+                        )
                     if not is_ready:
                         raise RuntimeError("the process exited before claiming its session")
 

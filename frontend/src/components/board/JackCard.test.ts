@@ -1,3 +1,5 @@
+import { attachmentLifecycleApi } from "../../lib/attachment-lifecycle-api";
+import { session } from "../../state/session.svelte.js";
 import { mount, tick, unmount } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import JackCard from "./JackCard.svelte";
@@ -20,6 +22,8 @@ const attachment: Attachment = {
 
 afterEach(() => {
   presence.clear();
+  session.adapters = [];
+  vi.restoreAllMocks();
 });
 
 describe("JackCard working receipt", () => {
@@ -243,6 +247,42 @@ describe("JackCard lifecycle actions", () => {
       },
     });
   }
+
+  it("hides peek for raw and restarts stopped raw with an empty body", async () => {
+    session.adapters = [
+      {
+        id: "raw",
+        name: "Raw",
+        description: "",
+        command: ["sh"],
+        requires: [],
+        capabilities: { listens: false },
+        source: "bundled",
+        overrides_bundled: false,
+        update_command: null,
+        compact_paste: null,
+      },
+    ];
+    const liveCard = mountCard({ adapter: "raw" });
+    expect(document.querySelector(".peek-btn")).toBeNull();
+    expect(document.querySelector(".restart-btn")).toBeNull();
+    await unmount(liveCard);
+    const fresh = vi
+      .spyOn(attachmentLifecycleApi, "fresh")
+      .mockResolvedValue({ ...attachment, id: "new", adapter: "raw" });
+    const card = mountCard({ adapter: "raw", status: "exited" });
+    try {
+      expect(document.querySelector(".fresh-btn")).toBeNull();
+      expect(document.querySelector(".edit-btn")?.textContent).toContain("edit command");
+      const restart = document.querySelector<HTMLButtonElement>(".restart-btn");
+      expect(restart?.textContent).toContain("↻ restart");
+      restart?.click();
+      await tick();
+      expect(fresh).toHaveBeenCalledWith(attachment.id, {});
+    } finally {
+      await unmount(card);
+    }
+  });
 
   it("offers only detach while the process is live", async () => {
     const card = mountCard();

@@ -71,10 +71,17 @@ class FeatureFlagResponse(BaseModel):
     summary: str
 
 
+class AdapterCapabilitiesResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    listens: bool = True
+
+
 class AdapterMetadataResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     id: str
+    capabilities: AdapterCapabilitiesResponse = Field(default_factory=AdapterCapabilitiesResponse)
     source: str = "bundled"
     overrides_bundled: bool = False
     update_command: list[str] | None = None

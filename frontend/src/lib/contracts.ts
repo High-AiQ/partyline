@@ -80,6 +80,7 @@ export const PresenceCompletionSchema = z.enum(["receipt", "none"]);
 export type PresenceCompletion = z.infer<typeof PresenceCompletionSchema>;
 
 export const AdapterCapabilitiesSchema = z.object({
+  listens: z.boolean().optional(),
   resume: z.boolean().optional(),
   interrupt: z.boolean().optional(),
 });

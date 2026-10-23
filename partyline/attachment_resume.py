@@ -29,7 +29,8 @@ from .hierarchy import tree_live_name_conflict
 from .role_delivery import bind_role_delivery
 from . import fence_workspaces
 from .review_worktrees import list_review_worktrees
-from .reattach import ResumedAttachment, adapter_can_resume, resume_needs_session
+from .reattach import ResumedAttachment
+from .restart_capabilities import adapter_can_restart, adapter_can_resume, resume_needs_session
 from .transcript_delivery import TranscriptDeliveryRecord
 from .write_set_routes import load_write_grants
 from .resource_budget import cap_bytes, claim_resume, format_limit, settings
@@ -201,7 +202,7 @@ async def _resume_adapter_locked(
     if att["status"] in ("starting", "running") or att_id in runtime.live:
         raise HTTPException(409, already_live_detail(runtime, att))
     capabilities = adapter_metadata.get(att["adapter"], {})
-    if not adapter_can_resume(capabilities):
+    if not adapter_can_restart(capabilities):
         raise HTTPException(400, f"the {att['adapter']} adapter has no session to resume")
     conflict = tree_live_name_conflict(runtime.db, att["conv_id"], att["name"])
     if conflict is not None:
@@ -210,14 +211,13 @@ async def _resume_adapter_locked(
     if conv["archived_at"]:
         raise HTTPException(409, "restore the line before resuming its processes")
     att["conv_name"] = conv["name"]
-    att["resume"] = True
-    # The activation is minted before the hook URL because the URL carries it
-    # as a capability: a resumed process must get this generation's token, not
-    # the one the previous activation's harness was configured with.
+    att["resume"] = adapter_can_resume(capabilities)
+    if not att["resume"]:
+        att["cli_session"] = None
+        startup_messages = []
+    # Mint the activation before provisioning its hooks and credentials.
     runtime_owner = str(uuid.uuid4())
     att["runtime_owner"] = runtime_owner
-    # Each process activation gets a distinct credential. This prevents a
-    # token disclosed to a detached process from becoming valid again.
     att["api_token"] = rotate_api_token(runtime.db, att_id)
     att["hook_url"] = hook_url(att_id, runtime_owner)
     att["review_worktrees"] = list_review_worktrees(runtime.db, att["conv_id"])
@@ -269,7 +269,7 @@ async def _resume_adapter_locked(
     # ReattachCoordinator fills this set from the stored plan before calling
     # the resume path; API callers cannot supply a grandfathering flag.
     grandfathered = att_id in runtime.reattaching
-    if resume_needs_session(capabilities) and not str(att.get("cli_session") or "").strip():
+    if att["resume"] and resume_needs_session(capabilities) and not str(att.get("cli_session") or "").strip():
         raise HTTPException(409, f"@{att['name']} never claimed a CLI session (it exited during "
                             "startup) — replace it with a fresh process instead of resuming")
     if not await claim_resume(
@@ -294,7 +294,7 @@ async def _resume_adapter_locked(
         att["conv_id"],
         "system",
         "system",
-        f"@{att['name']} resumed with full context · "
+        f"@{att['name']} {'resumed with full context' if att['resume'] else 'restarted fresh'} · "
         f"session {att.get('cli_session') or att_id}",
     )
     return ResumedAttachment(adapter, startup_staged)

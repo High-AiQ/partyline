@@ -13,5 +13,6 @@ delivery_proof_reason = "Raw has no transcript user record; a completed quiet-pe
 delivery_proof_test = "tests/test_raw_delivery_boundary.py::test_quiescence_flush_reports_the_weaker_delivery_boundary"
 
 [adapter.capabilities]
+listens = false
 # A bare process has no session of its own to reopen.
 resume = false

@@ -1,8 +1,14 @@
 <script lang="ts">
-  /** One process on the line; a process stopped on a dialog rings until someone peeks. */
   import { hue } from "../../lib/markdown";
   import { tooltip } from "../../lib/tooltip";
-  import { isLive, overrideExplanation } from "../../lib/attachments";
+  import {
+    isLive,
+    canPeekJack,
+    canRestartJack,
+    adapterListens,
+    overrideExplanation,
+  } from "../../lib/attachments";
+  import { activateJack } from "../../state/jack-lifecycle";
   import { bridgeLabel } from "../../lib/bridge-api";
   import { ApiError, api } from "../../lib/api";
   import type { Attachment } from "../../lib/contracts";
@@ -29,6 +35,7 @@
   let resuming = $state(false);
 
   const live = $derived(isLive(attachment));
+  const listens = $derived(adapterListens(session.adapters, attachment.adapter));
   const needsYou = $derived(live && room.attention.has(attachment.id));
   const entry = $derived(live ? presence.entries.get(attachment.id) : undefined);
   const compactable = $derived(
@@ -60,14 +67,10 @@
     dialogs.open(RemoveJackDialog, { attachment });
   }
 
-  async function resume(): Promise<void> {
+  async function activate(restart: boolean): Promise<void> {
     resuming = true;
     try {
-      // Same reasoning as attach: keyed by id, so recording the REST answer is
-      // free, and it is the only news we get if the socket is mid-reconnect.
-      room.upsertAttachment(await api.resume(attachment.id));
-    } catch (error) {
-      room.showNotice(error instanceof ApiError ? error.message : "could not resume", "error");
+      await activateJack(attachment.id, restart);
     } finally {
       resuming = false;
     }
@@ -183,7 +186,7 @@
     </div>
   {/if}
 
-  {#if live}
+  {#if canPeekJack(session.adapters, attachment)}
     <button
       class="resume peek-btn mt-1.5 px-[9px] py-0.5 text-[10px] {needsYou
         ? 'text-ink bg-copper border-copper-hot origin-[50%_80%]'
@@ -195,18 +198,27 @@
       {needsYou ? "⏸ answer" : "⌗ peek"}
     </button>
   {/if}
-  {#if resumable}
+  {#if resumable && listens}
     <button
       class="resume mt-1.5 px-[9px] py-0.5 text-[10px] text-green border-green/40 hover:border-green hover:bg-green hover:text-ink"
       type="button"
       use:tooltip={{ label: "respawn with full session context" }}
       disabled={resuming}
-      onclick={resume}
+      onclick={() => activate(false)}
     >
       {resuming ? "resuming…" : "↻ resume"}
     </button>
   {/if}
-  {#if !live}
+  {#if canRestartJack(session.adapters, attachment)}
+    <button
+      class="resume restart-btn mt-1.5 px-[9px] py-0.5 text-[10px] text-green border-green/40 hover:border-green hover:bg-green hover:text-ink"
+      type="button"
+      use:tooltip={{ label: "rerun the same command" }}
+      disabled={resuming}
+      onclick={() => activate(true)}>{resuming ? "restarting…" : "↻ restart"}</button
+    >
+  {/if}
+  {#if !live && listens}
     <button
       class="resume fresh-btn mt-1.5 ml-[5px] px-[9px] py-0.5 text-[10px] text-green border-green/40 hover:border-green hover:bg-green hover:text-ink"
       type="button"
@@ -215,6 +227,8 @@
     >
       ✦ start fresh
     </button>
+  {/if}
+  {#if !live}
     <button
       class="resume edit-btn mt-1.5 ml-[5px] px-[9px] py-0.5 text-[10px] text-copper border-copper/40 hover:border-copper hover:bg-copper hover:text-ink"
       type="button"
