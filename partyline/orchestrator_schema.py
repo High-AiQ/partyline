@@ -83,4 +83,6 @@ MIGRATIONS += [
     "CREATE TABLE IF NOT EXISTS task_workspaces(conv_id TEXT NOT NULL, repository TEXT NOT NULL, "
     "path TEXT NOT NULL, branch TEXT NOT NULL, base_sha TEXT NOT NULL, "
     "PRIMARY KEY(conv_id, repository))",
+    # The verdict a new round replaces: `findings` is the current verdict only.
+    "ALTER TABLE task_reviews ADD COLUMN previous_findings TEXT NOT NULL DEFAULT ''",
 ]

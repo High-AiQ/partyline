@@ -61,7 +61,7 @@ The server lists tools for the caller's live state only. Names are short and uni
 | `get_media` | `read` | media download | writes a new local file, mode 0600 |
 | `notes` | `read`; set needs `assign` for line or tree | notes | attachment notes are own line only; 4,000 characters |
 | `goal` | `read`; set needs `assign` | line detail; goal set | 3,000 characters |
-| `reports` | listed for `read_reports`, `report`, or `notify`; non-leads use the core tool and live leads use the fixed captain dispatcher; list needs `read_reports`; post needs `report` (or `notify` when `notify` is set) | reports | body required, at most 2,000 characters; both schemas and handlers enforce the route limit |
+| `reports` | listed for `read_reports`, `report`, or `notify`; non-leads use the core tool and live leads use the fixed captain dispatcher; list (`limit`, `before_id`) and get (`report_id`) need `read_reports`; post needs `report` (or `notify` when `notify` is set) | reports | body required, at most 2,000 characters; both schemas and handlers enforce the route limit |
 
 **Argument validation (core tools).** `MCPServer._call` checks a core tool's arguments against the
 `inputSchema` the server advertises, using `partyline/mcp/validation.py`, before the handler or any
