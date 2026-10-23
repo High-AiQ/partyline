@@ -1125,7 +1125,8 @@ host that owns it. It was also applied to `DELETE /api/attachments/<id>/record`,
 which deletes a row whose process has already exited. From the LAN browser —
 the only interface that shows the card — removing a detached process answered
 `process control may only be requested from this machine`, about something that
-controls no process. The record could not be removed at all.
+controls no process. The record could not be removed at all. The same guard on `fresh` and edit-command later
+refused the restart button from the LAN browser; both are now gated by `attach` only.
 
 Every removal test passed, because they injected a stub for the gate. A stub
 records which routes *consult* a guard; it cannot say what the guard decides

@@ -24,8 +24,9 @@ subtree, and cannot grant access to an unrelated project.
 Participants may inspect their own line, including its terminal screens, and
 write messages and files. Sending terminal keys,
 attaching or stopping processes, and overriding another participant's claim
-require manager authority. Preset and adapter configuration changes are human-only. The shutdown API is human-only and loopback-only, as is starting a fresh session; removing a
-stopped attachment record is not, since it controls no process.
+require manager authority. Preset and adapter configuration changes are human-only. The shutdown API is human-only and loopback-only; starting a fresh session, resuming,
+editing a stopped command and removing a stopped record are gated by the `attach`/`close`
+capability, not by where the caller is.
 Fleet restart planning never silently narrows the requested instance scope:
 a machine must manage every selected line, or planning is refused.
 
