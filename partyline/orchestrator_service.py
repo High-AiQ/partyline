@@ -113,6 +113,7 @@ async def request_review(runtime, actor, conv_id, body):
         await asyncio.to_thread(anchor, db, conv_id)
         db._exec(
             'UPDATE task_reviews SET sha=?,review_worktree=?,repositories=?,what=?,location=?, '
+            "findings='', "
             'round=CASE WHEN round=0 THEN 1 ELSE round END,reviewer_restarts=0 WHERE conv_id=?',
             (checkouts[0]['sha'], checkouts[0]['path'], json.dumps(checkouts),
              body.what, body.where, conv_id))
@@ -140,10 +141,11 @@ async def review_verdict(runtime, actor, conv_id, body):
     row = require_task(db, actor, conv_id, reviewer=True)
     approved = body.verdict == 'approve'
     changed = db._exec(
-        'UPDATE task_reviews SET status=?,findings=?,round=round+?,reviewer_restarts=0,'
+        'UPDATE task_reviews SET status=?,findings=?,previous_findings=CASE WHEN ? THEN previous_findings '
+        'ELSE ? END,round=round+?,reviewer_restarts=0,'
         "settled_at=?,reopen_noticed=0 WHERE conv_id=? AND status='in_review'",
-        ('approved' if approved else 'implementing', body.findings, int(not approved),
-         time.time() if approved else None, conv_id))
+        ('approved' if approved else 'implementing', body.findings, approved, body.findings,
+         int(not approved), time.time() if approved else None, conv_id))
     if changed.rowcount != 1:
         raise HTTPException(409, 'there is no open review for this task')
     row = task(db, conv_id)

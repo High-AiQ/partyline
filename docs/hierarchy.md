@@ -587,6 +587,13 @@ A child manager reaches its parent line's manager by `@mention` — the mention
 crosses lines for managers (below) and is the only channel that wakes anyone.
 The parent's inbox (`POST .../reports`) is for routine status a manager may
 read later; a deposit never starts a turn. Do not do both for the same event.
+`GET .../reports` returns at most `limit` reports (default 50, max 200), newest
+first; `before_id` pages to older ones and `after_id` pages forward oldest first
+(the two are exclusive). `GET .../reports/<report-id>` returns one report, 404 for
+a report under another parent. The MCP `reports` tool and the `captain` op take
+`operation` `list` (with `limit`, `before_id`), `get` (with `report_id`) or `post`.
+Captain argument errors name the op, the unknown and missing fields, and the
+accepted fields.
 The old `notify` flag still exists on the API but is no longer taught: with the
 relay it was a second wake for the same news.
 

@@ -117,6 +117,35 @@ class CaptainToolTests(unittest.TestCase):
             tools_captain.call(client, "captain", {"op": "reports", "args": {
                 "operation": "post", "body": "status", "notify": True}}, denied)
 
+    def test_reports_get_and_paged_list_reach_fixed_routes(self):
+        client = Client()
+        tools_captain.call(client, "captain", {"op": "reports", "args": {
+            "operation": "list", "limit": 5, "before_id": 9}}, client.state)
+        tools_captain.call(client, "reports", {"operation": "get", "report_id": 7}, client.state)
+        self.assertEqual(client.calls[-2:], [
+            ("GET", "/api/conversations/home/reports?limit=5&before_id=9", None),
+            ("GET", "/api/conversations/home/reports/7", None),
+        ])
+        with self.assertRaisesRegex(ValueError, "report_id is required"):
+            tools_captain.call(client, "reports", {"operation": "get"}, client.state)
+
+    def test_validation_errors_name_the_operation_and_fields(self):
+        client = Client()
+        with self.assertRaisesRegex(
+                ValueError, r"captain op 'accept': unknown field\(s\) findings_text; "
+                r"missing required field\(s\) sha; accepted fields: conv_id, sha, allow_descendant, "
+                "findings, run_gates"):
+            tools_captain.call(client, "captain", {"op": "accept", "args": {
+                "conv_id": "c", "findings_text": "x"}}, client.state)
+        with self.assertRaisesRegex(ValueError, r"captain op 'accept': missing required field\(s\) sha;"):
+            tools_captain.call(client, "captain", {"op": "accept", "args": {"conv_id": "c"}}, client.state)
+        with self.assertRaisesRegex(ValueError, r"captain op 'accept': unknown field\(s\) extra;"):
+            tools_captain.call(client, "captain", {"op": "accept", "args": {
+                "conv_id": "c", "sha": "abcd", "extra": 1}}, client.state)
+        with self.assertRaisesRegex(ValueError, "captain op 'accept': sha exceeds"):
+            tools_captain.call(client, "captain", {"op": "accept", "args": {
+                "conv_id": "c", "sha": "x" * 65}}, client.state)
+
     def test_reports_fallback_is_denied_after_demotion_and_revocation(self):
         client = Client()
         output = io.StringIO()

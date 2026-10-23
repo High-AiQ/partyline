@@ -44,7 +44,7 @@ def execute(client, op, args, state):
             path += "/" + quote(topic, safe="")
         return client.request("GET", path)
     if op == "reports":
-        return _reports(client, state, args)
+        return reports(client, state, args)
     if op == "detach_worker":
         conv = args.get("conv_id")
         target = _target(client, state, conv, ("close",))
@@ -173,15 +173,22 @@ def _decide_write_set(client, state, args):
     raise ValueError("decision must be approve, deny, or withdraw; decline is person-only")
 
 
-def _reports(client, state, args):
+def reports(client, state, args):
     operation = args["operation"]
     actions = set(state.get("actions", []))
-    if operation == "list":
+    if operation in ("list", "get"):
         if "read_reports" not in actions:
             raise ApiError("current attachment cannot read child reports")
-        return client.request("GET", _path(client.home, "reports"))
+        if operation == "get":
+            report_id = args.get("report_id")
+            if not isinstance(report_id, int) or isinstance(report_id, bool) or report_id < 1:
+                raise ValueError("report_id is required for get")
+            return client.request("GET", _path(client.home, f"reports/{report_id}"))
+        query = {key: args[key] for key in ("limit", "before_id") if args.get(key) is not None}
+        return client.request("GET", _path(client.home, "reports")
+                              + ("?" + urlencode(query) if query else ""))
     if operation != "post":
-        raise ValueError("reports operation must be list or post")
+        raise ValueError("reports operation must be list, get or post")
     notify = bool(args.get("notify", False))
     required = "notify" if notify else "report"
     if required not in actions:

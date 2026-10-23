@@ -75,6 +75,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 47 | POST | `/api/conversations/{conv_id}/children` | partyline/hierarchy_routes.py:create_child (registration line 142) | L with `create_child` | yes | see Set 2 |
 | 48 | GET | `/api/conversations/{conv_id}/children` | partyline/hierarchy_routes.py:list_children (registration line 203) | M with `read` | yes | see Set 2 |
 | 49 | GET | `/api/conversations/{conv_id}/reports` | partyline/hierarchy_routes.py:list_reports (registration line 211) | L with `read_reports` | yes | see Set 2 |
+| 49a | GET | `/api/conversations/{conv_id}/reports/{report_id}` | partyline/hierarchy_routes.py:read_report | L with `read_reports` | yes | see Set 2 |
 | 50 | POST | `/api/conversations/{conv_id}/reports` | partyline/hierarchy_routes.py:post_report (registration line 216) | L with `report` (or `notify`) | yes | see Set 2 |
 | 51 | POST | `/api/conversations/{conv_id}/reports/{report_id}/ack` | partyline/hierarchy_routes.py:ack_report (registration line 270) | L with `read_reports` | yes | see Set 2 |
 | 52 | POST | `/api/hooks/{att_id}/{token}` | partyline/hook_routes.py:hook_event (registration line 115) | attachment token in path | yes | see Set 2 |
@@ -204,7 +205,8 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 45 | POST | `/api/conversations/{conv_id}/lead` | H, or M with `appoint_lead` | **op**: captain op `appoint_lead` | lead appointment is a captain op; an empty `attachment_id` clears the lead |
 | 47 | POST | `/api/conversations/{conv_id}/children` | L with `create_child` | **op**: captain op `create_child` | refused with live workers and at the depth cap |
 | 48 | GET | `/api/conversations/{conv_id}/children` | M with `read` | **tool**: `whoami` | child summaries are fetched by the `whoami` handler |
-| 49 | GET | `/api/conversations/{conv_id}/reports` | L with `read_reports` | **tool**: `reports` (list) | reports received from child lines |
+| 49 | GET | `/api/conversations/{conv_id}/reports` | L with `read_reports` | **tool**: `reports` (list) | reports received from child lines; `limit` (default 50, max 200), `before_id`, `after_id`; newest first unless `after_id` |
+| 49a | GET | `/api/conversations/{conv_id}/reports/{report_id}` | L with `read_reports` | **tool**: `reports` (get) | one report; 404 for another parent's report |
 | 50 | POST | `/api/conversations/{conv_id}/reports` | L with `report` (or `notify`) | **tool**: `reports` (post; `notify` flag) | captain reports to its parent |
 | 51 | POST | `/api/conversations/{conv_id}/reports/{report_id}/ack` | L with `read_reports` | **op**: captain op `ack_report` | acknowledges a child report |
 | 52 | POST | `/api/hooks/{att_id}/{token}` | attachment token in path | **excluded** | adapter hook transport |
@@ -285,7 +287,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | `upload_file` | core tool | 63 |
 | `upload_files` | core tool | 63 |
 | `get_media` | core tool | 62 |
-| `reports` | core tool; captain fallback operation | 49, 50 |
+| `reports` | core tool; captain fallback operation | 49, 49a, 50 |
 | `react` | core tool | 89, 90 |
 | `staffing` | captain op | 127 |
 | `list_presets` | captain op | 83 |

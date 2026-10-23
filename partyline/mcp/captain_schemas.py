@@ -50,7 +50,10 @@ def schema(name):
         "process_overview": obj({**line}, ["conv_id"]),
         "ack_report": obj({**line, "report_id": {"type": "integer", "minimum": 1},
             "revision": {"type": "integer", "minimum": 1}}, ["conv_id", "report_id", "revision"]),
-        "reports": obj({"operation": {"type": "string", "enum": ["list", "post"]},
+        "reports": obj({"operation": {"type": "string", "enum": ["list", "get", "post"]},
+            "report_id": {"type": "integer", "minimum": 1},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+            "before_id": {"type": "integer", "minimum": 1},
             "body": text("Report body for post; at most 2000 characters.", 2000, 1),
             "notify": {"type": "boolean"}}, ["operation"]),
         "set_goal": obj({**line, "goal": text("Goal text; empty clears it.", 3000)},
@@ -76,7 +79,13 @@ def validate(name, args):
     unknown = set(args) - set(props)
     missing = set(spec["required"]) - set(args)
     if unknown or missing:
-        raise ValueError("invalid arguments for captain operation")
+        parts = []
+        if unknown:
+            parts.append("unknown field(s) " + ", ".join(sorted(unknown)))
+        if missing:
+            parts.append("missing required field(s) " + ", ".join(sorted(missing)))
+        parts.append("accepted fields: " + ", ".join(props))
+        raise ValueError(f"captain op '{name}': " + "; ".join(parts))
     for key, value in args.items():
         rule = props[key]
         kind = rule["type"]
@@ -85,20 +94,20 @@ def validate(name, args):
                  isinstance(value, int) and not isinstance(value, bool) if kind == "integer" else
                  isinstance(value, list) if kind == "array" else False)
         if not valid:
-            raise ValueError(f"{key} has the wrong type")
+            raise ValueError(f"captain op '{name}': {key} has the wrong type")
         if kind == "string" and (len(value) > rule.get("maxLength", 100000)
                                   or len(value) < rule.get("minLength", 0)):
-            raise ValueError(f"{key} exceeds its allowed length")
+            raise ValueError(f"captain op '{name}': {key} exceeds its allowed length")
         if "enum" in rule and value not in rule["enum"]:
-            raise ValueError(f"{key} has an unsupported value")
+            raise ValueError(f"captain op '{name}': {key} has an unsupported value")
         if kind == "integer" and (value < rule.get("minimum", value)
                                    or value > rule.get("maximum", value)):
-            raise ValueError(f"{key} is outside its allowed range")
+            raise ValueError(f"captain op '{name}': {key} is outside its allowed range")
         if kind == "array":
             item_rule = rule.get("items", {})
             if (len(value) > rule.get("maxItems", 100000)
                     or any(not isinstance(item, str)
                            or len(item) > item_rule.get("maxLength", 100000)
                            for item in value)):
-                raise ValueError(f"{key} has invalid items")
+                raise ValueError(f"captain op '{name}': {key} has invalid items")
     return args

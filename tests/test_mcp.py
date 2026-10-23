@@ -409,7 +409,7 @@ class CoreToolTests(unittest.TestCase):
             tools_core.call(client, "reports", {"operation": "list"}, state)
         with self.assertRaisesRegex(ValueError, "get or set"):
             tools_core.call(client, "goal", {"operation": "unset"}, client.state)
-        with self.assertRaisesRegex(ValueError, "list or post"):
+        with self.assertRaisesRegex(ValueError, "list, get or post"):
             tools_core.call(client, "reports", {"operation": "delete"}, client.state)
         with self.assertRaisesRegex(ValueError, "body is required"):
             tools_core.call(client, "reports", {"operation": "post"}, client.state)
