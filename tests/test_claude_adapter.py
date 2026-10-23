@@ -913,6 +913,59 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
         with self.searching():
             self.assertEqual(adapter._find_transcript(), pinned)
 
+    def test_session_exists_checks_only_the_pinned_transcript_in_configured_home(self):
+        from partyline.adapters.base import Adapter
+
+        att = {"id": "attachment-1"}
+        self.assertFalse(Adapter.session_exists(att))
+        self.assertTrue(Adapter.session_exists({**att, "cli_session": "known"}))
+        for configured in (False, True):
+            with self.subTest(configured=configured), patch.dict(os.environ, {}, clear=True):
+                if configured:
+                    os.environ['CLAUDE_CONFIG_DIR'] = str(self.root / "custom")
+                else:
+                    os.environ['HOME'] = str(self.root)
+                    os.environ['USERPROFILE'] = str(self.root)
+                home = self.root / ("custom" if configured else ".claude")
+                project = home / "projects" / "project"
+                project.mkdir(parents=True)
+                (project / "unrelated.jsonl").write_text("")
+                self.assertFalse(PartylineAdapter.session_exists(att))
+                pinned = project / "attachment-1.jsonl"
+                pinned.mkdir()
+                self.assertFalse(PartylineAdapter.session_exists(att))
+                pinned.rmdir()
+                pinned.write_text("")
+                self.assertTrue(PartylineAdapter.session_exists(att))
+
+    def test_cli_session_reporting_is_idempotent_per_path(self):
+        adapter = self.make_adapter()
+        reported = []
+        adapter.on_cli_session = reported.append
+        adapter._report_cli_session("/project/first.jsonl")
+        adapter._report_cli_session("/project/first.jsonl")
+        adapter._report_cli_session("/project/second.jsonl")
+        self.assertEqual(reported, ["first", "second"])
+
+    async def test_resumed_pinned_transcript_reports_the_cli_session(self):
+        adapter = self.make_adapter()
+        adapter.resume = True
+        reported = []
+        adapter.on_cli_session = reported.append
+        pinned = self.write_session("attachment-1")
+        os.utime(pinned, (adapter.spawned_at + 2, adapter.spawned_at + 2))
+        with (
+            self.searching(),
+            patch("partyline.adapters.bundled.claude.adapter.asyncio.sleep", AsyncMock()),
+            patch.object(adapter, "release_startup_delivery", AsyncMock(return_value=True)),
+            patch.object(adapter, "_await_transcript", AsyncMock()) as waiting,
+            patch.object(adapter, "_tail_jsonl", AsyncMock()) as tail,
+        ):
+            await adapter._run()
+        waiting.assert_not_awaited()
+        self.assertEqual(tail.await_args.args[0], pinned)
+        self.assertEqual(reported, ["attachment-1"])
+
     def test_the_found_transcript_is_reported_as_the_cli_session(self):
         """`cli_session` is what the task server resumes by. Unrecorded, a
         reviewer's round-2 restart relaunched fresh with `--session-id` naming

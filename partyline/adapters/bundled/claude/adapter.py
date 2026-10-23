@@ -8,6 +8,7 @@ import shlex
 import sys
 
 from partyline.adapters.base import Adapter as BaseAdapter
+from partyline.adapters.bundled.claude.session import ClaudeSession
 from partyline.adapters.compaction import compaction_hooks_declared, is_compaction_record
 from partyline.adapters.session_seed import seed_claude_home
 from partyline.mcp_attach import claude_command
@@ -18,7 +19,7 @@ from partyline.mcp_attach import claude_command
 SCAN_BYTES = 512 * 1024
 
 
-class PartylineAdapter(BaseAdapter):
+class PartylineAdapter(ClaudeSession, BaseAdapter):
     kind = "claude"
     jsonl_paste_receipts = True
 
@@ -98,10 +99,6 @@ class PartylineAdapter(BaseAdapter):
             hooks["SessionStart"] = [
                 {"matcher": "compact", "hooks": [{"type": "command", "command": rebrief}]}]
         return {"hooks": hooks}
-
-    def transcript_glob(self) -> str:
-        home = os.path.expanduser(os.environ.get('CLAUDE_CONFIG_DIR', '~/.claude'))
-        return os.path.join(home, 'projects', '*', f"{self.att['id']}.jsonl")
 
     def _written_since_spawn(self, path: str) -> bool:
         """Whether anything has written this file since this process started.
@@ -220,8 +217,7 @@ class PartylineAdapter(BaseAdapter):
             await asyncio.sleep(1.0)
             waited += 1.0
             if path := self._find_transcript():
-                if self.on_cli_session:  # durable: the task server resumes by cli_session
-                    self.on_cli_session(os.path.splitext(os.path.basename(path))[0])
+                self._report_cli_session(path)
                 if warned:
                     await self.post(
                         "system", "system",
@@ -270,6 +266,7 @@ class PartylineAdapter(BaseAdapter):
         if path is None:
             return
 
+        self._report_cli_session(path)
         seen: set[str] = set()
 
         async def handle(obj):
