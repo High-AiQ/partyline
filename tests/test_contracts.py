@@ -56,7 +56,9 @@ class ContractTest(unittest.TestCase):
             {"id": "raw", "name": "raw", "capabilities": {"resume": False}}
         )
 
-        self.assertEqual(adapter.model_dump()["capabilities"], {"resume": False})
+        self.assertEqual(adapter.model_dump()["capabilities"], {"resume": False, "listens": True})
+        raw = AdapterMetadataResponse(id="raw", capabilities={"listens": False})
+        self.assertFalse(raw.model_dump()["capabilities"]["listens"])
 
     def test_adapter_metadata_has_explicit_source_override_fields(self):
         bundled = AdapterMetadataResponse(id="raw")

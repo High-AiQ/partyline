@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   adapterLabel,
+  canPeekJack,
+  canRestartJack,
   canResume,
   canResumeJack,
   formatCommand,
@@ -157,5 +159,19 @@ describe("formatCommand", () => {
 
   it("losslessly quotes spaces, apostrophes, and empty arguments", () => {
     expect(formatCommand(["tool", "two words", "it's", ""])).toBe(`tool 'two words' 'it'"'"'s' ''`);
+  });
+});
+
+describe("listening jack actions", () => {
+  it("defaults to listening and hides peek for non-listeners", () => {
+    const adapters = [{ id: "raw", capabilities: { listens: false } }];
+    const live = jack("script", "running", 1);
+    expect(canPeekJack([], live)).toBe(true);
+    expect(canPeekJack(adapters, live)).toBe(false);
+    expect(canRestartJack(adapters, live)).toBe(false);
+    const stopped = { ...live, status: "exited" };
+    expect(canPeekJack(adapters, stopped)).toBe(false);
+    expect(canRestartJack(adapters, stopped)).toBe(true);
+    expect(canRestartJack([], stopped)).toBe(false);
   });
 });

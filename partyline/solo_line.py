@@ -1,4 +1,4 @@
-"""On a line with one live process, a person's plain message is for that process.
+"""On a line with one live listener, a person's plain message is for that process.
 
 The @mention is how a room with several processes says who acts next; on a
 line with exactly one, there is nobody else it could be for, and typing the
@@ -13,16 +13,19 @@ the shortcut; a known handle or ``@all`` does.
 
 from __future__ import annotations
 
+from .adapters import ADAPTER_METADATA
+from .restart_capabilities import adapter_listens
 from .mentions import addresses, known_mention_names, line_addressed, mentioned_names
 
 _LIVE = ("starting", "running")
 
 
 def solo_process(db, conv_id: str, *, include_attachment_id: str | None = None) -> dict | None:
-    """The line's one live process, or None when there are none or several."""
+    """The line's one live listener, or None when there are none or several."""
     live = [
         att for att in db.list_attachments(conv_id)
-        if att["status"] in _LIVE or att["id"] == include_attachment_id
+        if (att["status"] in _LIVE or att["id"] == include_attachment_id)
+        and adapter_listens(ADAPTER_METADATA.get(att["adapter"], {}))
     ]
     return live[0] if len(live) == 1 else None
 

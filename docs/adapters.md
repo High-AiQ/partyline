@@ -65,6 +65,12 @@ update_command = ["example-process", "update"]
 | `delivery_proof_test` | Required unittest reference (`tests/test_*.py::test_name`); bundled conformance resolves and runs the named test |
 | `delivery_proof_fixture` | `none-local` only for the audited adapters with no local capture; new transcript adapters need real redacted fixtures under `tests/fixtures/transcripts/<adapter>/` |
 
+`capabilities.listens` defaults to `true`. Set it to `false` for output-producing
+programs such as raw scripts: they do not count toward the solo-listener shortcut
+and their cards hide peek. Explicit mentions still reach them. Stopped non-listeners
+restart with the same command, cwd and handle without a checkpoint dialog; restart
+recovery reruns them fresh when they cannot resume a session.
+
 Never put secrets or machine-specific paths in a manifest.
 
 ## Entrypoint

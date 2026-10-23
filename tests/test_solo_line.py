@@ -66,6 +66,26 @@ class SoloLineTest(unittest.IsolatedAsyncioTestCase):
                          ["please read the checkpoint and tell me the ledger"])
         self.assertEqual(solo_process(self.db, "line")["name"], "fable")
 
+    async def test_raw_helpers_do_not_block_solo_listener_or_explicit_mentions(self):
+        for ident in ("reminder", "idle"):
+            self.db.add_attachment(ident, "line", ident, "raw", ["sh"], self.tmp.name)
+            self.db.set_attachment_status(ident, "running" if ident == "reminder" else "starting", None)
+            self.runtime.live[ident] = Recorder(self.db.get_attachment(ident))
+        await self.say("plain instruction")
+        self.assertEqual(solo_process(self.db, "line")["id"], "fable-att")
+        self.assertEqual(self.fable.delivered[-1]["body"], "plain instruction")
+        await self.say("@reminder explicit input")
+        self.assertEqual(self.runtime.live["reminder"].delivered[-1]["body"],
+                         "@reminder explicit input")
+        self.attach("second", "second")
+        self.assertIsNone(solo_process(self.db, "line"))
+        self.db.set_attachment_status("fable-att", "exited", "owner")
+        self.db.set_attachment_status("second", "exited", "owner")
+        self.assertIsNone(solo_process(self.db, "line"))
+        self.assertIsNone(solo_process(self.db, "line", include_attachment_id="reminder"))
+        self.assertEqual(solo_process(self.db, "line", include_attachment_id="fable-att")["id"],
+                         "fable-att")
+
     async def test_literal_14852_body_wakes_the_solo_process(self):
         body = ('yes please do the follow-up so a child captain\'s @mention '
                 'hand-off stops the extra "goal still open" wake')

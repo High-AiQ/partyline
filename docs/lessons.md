@@ -1,5 +1,14 @@
 # Lessons: the false-assumptions ledger
 
+## Capability-specific actions must preserve shared controls
+
+Changing stopped raw cards to restart directly also hid edit command because both
+buttons shared a listening-only condition. Gate the session-specific action separately
+from controls shared by every stopped process. The card regression now requires edit
+beside raw restart. Recovery filtering also needs an addressed backlog in its fixture:
+an empty backlog passes even when the filter is removed. The strengthened recovery
+test fails when that filter is disabled.
+
 ## Frontend workers share the attachment's memory budget
 
 Running frontend verification alone was assumed to fit an attachment's 4 GB
