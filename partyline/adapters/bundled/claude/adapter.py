@@ -220,6 +220,8 @@ class PartylineAdapter(BaseAdapter):
             await asyncio.sleep(1.0)
             waited += 1.0
             if path := self._find_transcript():
+                if self.on_cli_session:  # durable: the task server resumes by cli_session
+                    self.on_cli_session(os.path.splitext(os.path.basename(path))[0])
                 if warned:
                     await self.post(
                         "system", "system",
