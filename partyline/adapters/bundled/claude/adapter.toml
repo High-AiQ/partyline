@@ -1,6 +1,6 @@
 [adapter]
 name = "Claude Code"
-version = "1.0.0"
+version = "1.0.1"
 description = "Interactive Claude Code terminal with JSONL transcript tailing."
 entrypoint = "adapter.py"
 class = "PartylineAdapter"
