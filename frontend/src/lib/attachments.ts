@@ -56,6 +56,16 @@ export function canResume(adapters: readonly AdapterResumeInfo[], adapterId: str
 export const canResumeJack = (adapters: readonly AdapterResumeInfo[], attachment: Jack): boolean =>
   !isLive(attachment) && canResume(adapters, attachment.adapter);
 
+/** Missing capabilities preserve listening behavior for existing adapters. */
+export const adapterListens = (adapters: readonly AdapterResumeInfo[], adapterId: string): boolean =>
+  adapters.find((adapter) => adapter.id === adapterId)?.capabilities?.listens !== false;
+
+export const canPeekJack = (adapters: readonly AdapterResumeInfo[], attachment: Jack): boolean =>
+  isLive(attachment) && adapterListens(adapters, attachment.adapter);
+
+export const canRestartJack = (adapters: readonly AdapterResumeInfo[], attachment: Jack): boolean =>
+  !isLive(attachment) && !adapterListens(adapters, attachment.adapter);
+
 const SAFE_SHELL_ARG = /^[A-Za-z0-9_@%+=:,./-]+$/;
 
 /** Render argv so Python's shlex can recover every argument unchanged. */

@@ -211,6 +211,15 @@ class ManifestValidationTest(unittest.TestCase):
             loader.load_adapter(write_package(Path(directory) / "probe"))
             self.assertIsNone(registry.ADAPTER_METADATA["probe"]["compact_paste"])
 
+    def test_listens_defaults_true_and_rejects_non_boolean_values(self):
+        with tempfile.TemporaryDirectory() as directory, isolated_registry():
+            path = write_package(Path(directory) / "probe")
+            loader.load_adapter(path)
+            self.assertTrue(registry.ADAPTER_METADATA["probe"]["capabilities"]["listens"])
+        self.assertIn("listens capability must be a boolean",
+                      self._load_expecting_failure(capabilities={"listens": 1}))
+        self.assertFalse(loader._manifest(loader.BUNDLED_ROOT / "raw")["capabilities"]["listens"])
+
     def test_capabilities_must_be_a_table(self):
         with tempfile.TemporaryDirectory() as directory, isolated_registry():
             path = Path(directory) / "probe"

@@ -55,6 +55,9 @@ def _manifest(path: Path) -> dict:
         raise ValueError("adapter command must be an argv array")
     if not isinstance(manifest["capabilities"], dict):
         raise ValueError("adapter capabilities must be a table, e.g. capabilities = { resume = true }")
+    manifest["capabilities"].setdefault("listens", True)
+    if not isinstance(manifest["capabilities"]["listens"], bool):
+        raise ValueError("adapter listens capability must be a boolean")
     prompts = manifest["startup_prompts"]
     if not isinstance(prompts, dict) or any(
         not isinstance(name, str) or not isinstance(phrases, list)
