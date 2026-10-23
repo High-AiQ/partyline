@@ -43,6 +43,9 @@ from .reports import (
     ReportError,
     acknowledge,
     add as add_report,
+    DEFAULT_LIMIT,
+    MAX_LIMIT,
+    get_for_parent,
     list_for_parent,
     mark_notified,
     release_wake_claim,
@@ -182,9 +185,26 @@ def hierarchy_router(runtime) -> APIRouter:
         return [db.get_conversation(cid) for cid in child_ids(db, conv_id)]
 
     @router.get("/api/conversations/{conv_id}/reports", response_model=list[Report])
-    def list_reports(request: Request, conv_id: str):
+    def list_reports(
+        request: Request,
+        conv_id: str,
+        limit: int = Query(DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
+        after_id: int | None = Query(None, ge=0),
+        before_id: int | None = Query(None, ge=0),
+    ):
         deny_unless(db, request_principal(request), conv_id, "read_reports")
-        return [_report_model(row) for row in list_for_parent(db, conv_id)]
+        if after_id is not None and before_id is not None:
+            raise HTTPException(400, "after_id and before_id are exclusive")
+        rows = list_for_parent(db, conv_id, limit, after_id, before_id)
+        return [_report_model(row) for row in rows]
+
+    @router.get("/api/conversations/{conv_id}/reports/{report_id}", response_model=Report)
+    def read_report(request: Request, conv_id: str, report_id: int):
+        deny_unless(db, request_principal(request), conv_id, "read_reports")
+        try:
+            return _report_model(get_for_parent(db, conv_id, report_id))
+        except ReportError as exc:
+            raise _http(exc) from exc
 
     @router.post(
         "/api/conversations/{conv_id}/reports",

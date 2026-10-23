@@ -383,6 +383,26 @@ class HierarchyApiTest(unittest.TestCase):
         self.assertEqual(listed.json()[0]["child_conv_id"], child["id"])
         self.assertEqual(listed.json()[0]["author_attachment_id"], "child-lead")
 
+    def test_reports_list_pages_newest_first_and_get_one(self):
+        from partyline import reports
+
+        ids = [reports.add(self.db, "parent", "kid", "kid", f"r{n}")[0]["id"] for n in range(5)]
+        foreign = reports.add(self.db, "other-parent", "kid", "kid", "elsewhere")[0]["id"]
+        url = "/api/conversations/parent/reports"
+        newest = self.client.get(url, params={"limit": 2}, headers=self.lead).json()
+        self.assertEqual([r["id"] for r in newest], [ids[4], ids[3]])
+        older = self.client.get(url, params={"limit": 2, "before_id": ids[3]}, headers=self.lead).json()
+        self.assertEqual([r["id"] for r in older], [ids[2], ids[1]])
+        forward = self.client.get(url, params={"limit": 2, "after_id": ids[1]}, headers=self.lead).json()
+        self.assertEqual([r["id"] for r in forward], [ids[2], ids[3]])
+        self.assertEqual(len(self.client.get(url, headers=self.lead).json()), 5)
+        for bad in ({"limit": 0}, {"limit": 201}, {"after_id": 1, "before_id": 9}):
+            self.assertIn(self.client.get(url, params=bad, headers=self.lead).status_code, (400, 422))
+        one = self.client.get(f"{url}/{ids[2]}", headers=self.lead)
+        self.assertEqual((one.status_code, one.json()["body"]), (200, "r2"))
+        self.assertEqual(self.client.get(f"{url}/{foreign}", headers=self.lead).status_code, 404)
+        self.assertEqual(self.client.get(f"{url}/9999", headers=self.lead).status_code, 404)
+
     def test_same_line_machine_message_posts_as_agent(self):
         worker = self.activate_impl()
         posted = self.client.post(

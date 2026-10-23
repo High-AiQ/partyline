@@ -45,8 +45,9 @@ async def brief_reviewer(runtime, row, reviewer):
     else:
         where = (f"Review round {row['round']} at exact SHA {row['sha']} in "
                  f"{row['review_worktree']}. ")
-    note = (f" Your session may be new; round {row['round']} follows changes requested earlier: "
-            f"{row['findings']}" if row['round'] > 1 and row['findings'] else '')
+    note = (f" Your session may be new; round {row['round']} follows changes requested earlier; "
+            f"previous round findings: {row['previous_findings']}"
+            if row['round'] > 1 and row['previous_findings'] else '')
     await tell(runtime, reviewer['id'],
                where + f"{row['what']} — {row['location']}. "
                'Call review_verdict(approve|changes, findings). Never push or implement. '

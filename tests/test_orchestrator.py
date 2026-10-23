@@ -13,6 +13,8 @@ from partyline.hierarchy import create_child_conversation
 from partyline.machine_scope import allows, capability_state
 from partyline.orchestrator_contracts import ReviewRequestIn, TaskIn, VerdictIn
 from partyline.orchestrator_notices import report, peer
+from partyline.orchestrator_contracts import BlockedIn
+from partyline.orchestrator_stall import blocked
 from partyline.orchestrator_service import create_task, request_review, review_verdict
 from partyline.orchestrator_store import require_root, require_task, tasks, validate_policy
 from partyline.restart_scope import select_attachment_ids
@@ -65,6 +67,20 @@ class WorkflowTest(TaskFixture):
             await review_verdict(self.runtime, reviewer, self.conv_id,
                                  VerdictIn(verdict='changes', findings='stale verdict'))
         self.assertIsNone(peer(self.db, self.db.get_attachment(self.worker.attachment_id)))
+
+    async def test_new_review_round_clears_findings_and_keeps_them_as_previous(self):
+        await self.create()
+        row = await self.request(self.commit())
+        reviewer = self.principal(row['reviewer_id'])
+        row = await review_verdict(self.runtime, reviewer, self.conv_id,
+                                   VerdictIn(verdict='changes', findings='Fix the edge case'))
+        self.assertEqual(row['findings'], 'Fix the edge case')
+        await blocked(self.runtime, self.worker, self.conv_id, BlockedIn(reason='need creds'))
+        self.assertEqual(self.row()['findings'], 'need creds')
+        row = await self.request(self.commit())
+        self.assertEqual(row['findings'], '')
+        self.assertEqual(row['previous_findings'], 'Fix the edge case')
+        self.assertEqual(row['round'], 2)
 
     async def test_none_and_captain_policies_report_once_without_reviewer_spawn(self):
         for policy in ('none', 'captain'):

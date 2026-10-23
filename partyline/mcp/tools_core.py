@@ -115,7 +115,11 @@ def tool_list(state):
             "name": "reports",
             "description": "Read reports or post a report where authorized.",
             "inputSchema": _schema({
-                "operation": _prop("string", "list or post.", enum=["list", "post"]),
+                "operation": _prop("string", "list, get or post.", enum=["list", "get", "post"]),
+                "report_id": _prop("integer", "Report id for get.", minimum=1),
+                "limit": _prop("integer", "Reports per list page, newest first; default 50.",
+                               minimum=1, maximum=200),
+                "before_id": _prop("integer", "List reports older than this id.", minimum=1),
                 "body": _prop("string", "Report body for post; at most 2000 characters.", maxLength=2000),
                 "notify": _prop("boolean", "Wake the parent lead when posting."),
             }, ["operation"]),
@@ -276,20 +280,4 @@ def _goal(client, state, args):
 
 
 def _reports(client, state, args):
-    operation = args["operation"]
-    if operation not in {"list", "post"}:
-        raise ValueError("reports operation must be list or post")
-    if operation == "list":
-        if "read_reports" not in set(state.get("actions", [])):
-            raise ApiError("current attachment cannot read child reports")
-        return client.request("GET", f"/api/conversations/{quote(client.home, safe='')}/reports")
-    actions = set(state.get("actions", []))
-    notify = bool(args.get("notify", False))
-    required = "notify" if notify else "report"
-    if required not in actions:
-        raise ApiError("current attachment cannot post that report")
-    body = args.get("body")
-    if not isinstance(body, str) or not body.strip():
-        raise ValueError("report body is required")
-    return client.request("POST", f"/api/conversations/{quote(client.home, safe='')}/reports",
-                          {"body": body, "notify": notify})
+    return tools_captain.captain_ops.reports(client, state, args)
