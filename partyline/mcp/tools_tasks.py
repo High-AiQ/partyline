@@ -14,6 +14,7 @@ _PATHS = {'blocked': ('POST', 'blocked'), 'create_task': ('POST', 'tasks'), 'tas
           'request_review': ('POST', 'request-review'), 'review_verdict': ('POST', 'review-verdict'),
           'restart_reviewer': ('POST', 'task/reviewer'), 'resume_work': ('POST', 'task/resume'),
           'reopen_task': ('POST', 'task/reopen'), 'message_task': ('POST', 'task/message')}
+OPERATIONS = tuple(_PATHS)
 
 
 def tool_list(state):

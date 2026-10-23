@@ -15,6 +15,9 @@ from .validation import validate_arguments
 
 logger = logging.getLogger(__name__)
 MAX_LINE = 1_000_000
+# Python 3.14's json parser no longer recurses, so RecursionError stopped
+# being the nesting guard; the bound is enforced here, on any interpreter.
+MAX_NESTING = 1_000
 
 
 class MCPServer:
@@ -142,9 +145,13 @@ class MCPServer:
             if len(line) > MAX_LINE:
                 self.response(None, error={"code": -32700, "message": "request exceeds MCP input limit"})
                 break
+            if nesting_depth(line) > MAX_NESTING:
+                self.response(None, error={
+                    "code": -32700, "message": "request nesting exceeds parser limit"})
+                continue
             try:
                 message = json.loads(line)
-            except RecursionError:
+            except RecursionError:  # pragma: no cover - older parsers, kept as a backstop
                 self.response(None, error={
                     "code": -32700, "message": "request nesting exceeds parser limit"})
                 continue
@@ -152,6 +159,28 @@ class MCPServer:
                 self.response(None, error={"code": -32700, "message": "parse error"})
                 continue
             self.handle(message)
+
+
+def nesting_depth(text: str) -> int:
+    """Deepest bracket nesting outside string literals; cheap and parser-independent."""
+    depth = deepest = 0
+    in_string = escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char in "[{":
+            depth += 1
+            deepest = max(deepest, depth)
+        elif char in "]}":
+            depth -= 1
+    return deepest
 
 
 def main():

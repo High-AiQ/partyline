@@ -46,6 +46,18 @@ class CaptainToolTests(unittest.TestCase):
                 "path": "/api/conversations/home"}}, client.state)
         self.assertEqual(client.calls, [])
 
+    def test_dispatcher_reaches_task_operations_a_client_that_never_relists_cannot_see(self):
+        client = Client()
+        root = {**client.state, "actions": [*client.state["actions"], "create_task", "tasks"]}
+        fallback = tools_captain.guide(root)["fallback"]["inputSchema"]
+        self.assertIn("create_task", fallback["properties"]["op"]["enum"])
+        tools_captain.call(client, "captain", {"op": "create_task", "args": {
+            "name": "slice", "goal": "build it", "implementer": "builder"}}, root)
+        self.assertEqual(client.calls[-1][:2], ("POST", "/api/conversations/home/tasks"))
+        with self.assertRaisesRegex(ApiError, "not currently available"):
+            tools_captain.call(client, "captain", {"op": "create_task", "args": {
+                "name": "slice", "goal": "build it", "implementer": "builder"}}, client.state)
+
     def test_dispatcher_denies_non_lead_and_target_line_authorization(self):
         client = Client()
         worker = {**client.state, "role": "implementer", "is_lead": False}
