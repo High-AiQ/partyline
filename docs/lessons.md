@@ -1,5 +1,20 @@
 # Lessons: the false-assumptions ledger
 
+## A detached reviewer still shares the line's refs mirror
+
+Protecting only the launching worktree's HEAD branch assumed every attachment
+launched on the line branch. A separate reviewer resumes at a detached SHA but
+shares the same conversation mirror: refreshing it silently reset the worker's
+branch to the real repository's stale tip, rewrote its reflog, and discarded its
+packed entry. The working files and objects survived, hiding the lost ancestry.
+Derive the protected line branch from the line's primary managed worktree, pass
+it through fence setup, and preserve it alongside the triggering HEAD branch in
+all three stores. Use only the conversation's recorded cwd, never an inherited
+parent or attachment cwd, and load this context for write-set decisions as well
+as process launches. The detached loose/packed/log and packed-only regressions in
+`tests/test_mirror_reset.py` fail against the old refresh; the reviewer write-set
+regression catches missing branch propagation. All reproductions use scratch repos.
+
 ## A resumed transcript can bypass fresh-session bookkeeping
 
 Reporting Claude session identity only while awaiting a new transcript assumed every

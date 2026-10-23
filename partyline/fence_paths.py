@@ -102,7 +102,8 @@ def _scratch_worktree_paths(att: dict, scratch_root: str | None = None) -> list[
                                sha_pattern=_SCRATCH_KEY)
 
 
-def _checkout_git_binds(path: str, cwd: str, conv_id: str) -> list[tuple[str, str, bool]]:
+def _checkout_git_binds(path: str, cwd: str, conv_id: str, *,
+                        protected: str | None = None) -> list[tuple[str, str, bool]]:
     """Avoid shadowing refs when a checkout shares the root checkout's own Git dir."""
     gitdir = git_fence._worktree_gitdir(path)
     if gitdir is not None:
@@ -115,7 +116,7 @@ def _checkout_git_binds(path: str, cwd: str, conv_id: str) -> list[tuple[str, st
         cwd_real = os.path.realpath(cwd or "")
         if common == cwd_real or common.startswith(cwd_real + os.sep):
             return []
-    return git_fence.git_binds(path, conv_id)
+    return git_fence.git_binds(path, conv_id, protected=protected)
 
 
 # Kept for the fence tests that name it directly.
@@ -140,12 +141,12 @@ def write_set(att: dict, *, create: bool = True) -> list[tuple[str, str, bool]]:
     cwd = att.get("cwd") or ""
     conv_id = att.get("conv_id") or ""
     add(cwd)
-    for src, dst, read_only in git_fence.git_binds(cwd, conv_id):
+    for src, dst, read_only in git_fence.git_binds(cwd, conv_id, protected=att.get("line_branch")):
         if src not in covered:
             covered.add(src)
             binds.append((src, dst, read_only))
     for path in fence_workspaces.checkouts(att):
-        for src, dst, read_only in git_fence.git_binds(path, conv_id):
+        for src, dst, read_only in git_fence.git_binds(path, conv_id, protected=att.get("line_branch")):
             if src not in covered:
                 covered.add(src)
                 binds.append((src, dst, read_only))
@@ -153,7 +154,8 @@ def write_set(att: dict, *, create: bool = True) -> list[tuple[str, str, bool]]:
     if review_root:
         add(review_root)
     for path in _review_worktree_paths(att, review_root):
-        for src, dst, read_only in _checkout_git_binds(path, cwd, conv_id):
+        for src, dst, read_only in _checkout_git_binds(path, cwd, conv_id,
+                                                        protected=att.get("line_branch")):
             if src not in covered:
                 covered.add(src)
                 binds.append((src, dst, read_only))
@@ -161,7 +163,8 @@ def write_set(att: dict, *, create: bool = True) -> list[tuple[str, str, bool]]:
     if scratch_root:
         add(scratch_root)
     for path in _scratch_worktree_paths(att, scratch_root):
-        for src, dst, read_only in _checkout_git_binds(path, cwd, conv_id):
+        for src, dst, read_only in _checkout_git_binds(path, cwd, conv_id,
+                                                        protected=att.get("line_branch")):
             if src not in covered:
                 covered.add(src)
                 binds.append((src, dst, read_only))
