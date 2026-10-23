@@ -20,10 +20,10 @@ or its hooks — so the fence shares only what commits genuinely need:
 - everything else (``config``, ``hooks``, ``description``) — never bound,
   so the ``/`` read-only bind keeps them immutable.
 
-The mirror is refreshed on every launch: real refs are copied in, except
-the line's own branch and any ref the line created, which the mirror
-keeps. A commit therefore survives the process restart that a resume
-needs, while sibling refs stay current enough for ordinary work.
+The mirror is shared by all attachments on a line and refreshed on every
+launch. Loose refs, packed refs and reflogs preserve the line branch and
+the launching worktree's HEAD branch, including on detached reviewer
+launches. Mirror-only loose refs stay intact; sibling refs stay current.
 """
 
 from __future__ import annotations
@@ -34,6 +34,7 @@ import shutil
 import tempfile
 
 from .git_fence_root import refresh as refresh_root_mirror
+from .git_fence_packed import merged_packed_refs
 
 # Mirror state lives beside the other per-attachment session state.
 FENCE_ROOT = os.path.expanduser("~/.partyline/sessions/fence")
@@ -133,18 +134,20 @@ def _write_mirror_text(root: str, rel: str, value: str) -> None:
     _replace_mirror_file(root, rel, write)
 
 
-def refresh_mirror(common: str, gitdir: str, conv_id: str) -> str:
+def refresh_mirror(common: str, gitdir: str, conv_id: str, *,
+                   protected: str | None = None) -> str:
     """Create or refresh the line's refs mirror; returns the mirror directory.
 
-    Real refs and reflogs are copied in, except the worktree's own branch
-    (and reflog), which the mirror keeps once it exists. Refs that exist
-    only in the mirror — branches the line created — are kept as well.
-    ``packed-refs`` is copied with the own-branch entry removed so the
-    mirror's loose ref always wins.
+    Keep the line and triggering HEAD branch refs, packed entries and logs.
+    Seed missing protected refs from the real repository only when absent
+    from both mirror ref stores.
     """
     mirror = _mirror_dir(common, conv_id)
     _ensure_mirror_directory(mirror)
-    own = _head_branch(gitdir)
+    if os.path.islink(os.path.join(mirror, "packed-refs")):
+        os.unlink(os.path.join(mirror, "packed-refs"))
+    keep_refs = {ref for ref in (_head_branch(gitdir),
+                                f"refs/heads/{protected}" if protected else None) if ref}
     for name in ("refs", "logs"):
         real_dir = os.path.join(common, name)
         mirror_dir = os.path.join(mirror, name)
@@ -153,38 +156,29 @@ def refresh_mirror(common: str, gitdir: str, conv_id: str) -> str:
             continue
         for rel in _walk_files(real_dir):
             mirror_file = os.path.join(mirror_dir, rel)
-            if os.path.lexists(mirror_file):
+            ref = f"refs/{rel}" if name == "refs" else rel
+            if os.path.lexists(mirror_file) or (
+                    name == "refs" and ref in keep_refs and _read_ref(mirror, ref)):
                 continue  # the mirror keeps what a previous launch wrote
             _copy_to_mirror(os.path.join(real_dir, rel), mirror_dir, rel)
-        # Re-copy live sibling refs on every launch. The own branch and its
-        # reflog are excluded: their mirror value is the line's committed
-        # state, and the real copies never see the line's commits.
-        keep = {own.removeprefix("refs/") if name == "refs" else own} if own else set()
+        # Refresh siblings; protected refs and logs hold unpublished commits.
+        keep = {ref.removeprefix("refs/") if name == "refs" else ref for ref in keep_refs}
         for rel in _walk_files(mirror_dir):
             if rel in keep:
                 continue
             real_file = os.path.join(real_dir, rel)
             if os.path.isfile(real_file):
                 _copy_to_mirror(real_file, mirror_dir, rel)
-    # The own branch must exist loose in the mirror, or a real packed-refs
-    # entry filtered below leaves the branch unresolvable.
-    own_path = os.path.join(mirror, own) if own else None
-    if own and (os.path.islink(own_path) or not os.path.isfile(own_path)):
-        value = _read_ref(common, own)
-        if value:
-            _write_mirror_text(mirror, own, value + "\n")
-    packed = os.path.join(common, "packed-refs")
-    if os.path.isfile(packed):
-        lines = []
-        with open(packed, encoding="utf-8") as file:
-            lines = file.readlines()
-        if own:
-            lines = [line for line in lines if not line.endswith(f" {own}\n")]
-        _write_mirror_text(mirror, "packed-refs", "".join(lines))
-    else:
-        mirror_packed = os.path.join(mirror, "packed-refs")
-        if os.path.islink(mirror_packed):
-            os.unlink(mirror_packed)
+    for ref in keep_refs:
+        if os.path.islink(os.path.join(mirror, ref)):
+            os.unlink(os.path.join(mirror, ref))
+        if not _read_ref(mirror, ref):
+            value = _read_ref(common, ref)
+            if value:
+                _write_mirror_text(mirror, ref, value + "\n")
+    packed = merged_packed_refs(common, mirror, keep_refs)
+    if packed is not None:
+        _write_mirror_text(mirror, "packed-refs", packed)
     return mirror
 
 
@@ -198,7 +192,7 @@ def _read_ref(root: str, ref: str) -> str | None:
     try:
         with open(os.path.join(root, "packed-refs"), encoding="utf-8") as file:
             for line in file:
-                if line.endswith(f" {ref}\n"):
+                if line.strip().endswith(f" {ref}"):
                     return line.split(" ", 1)[0].strip()
     except OSError:
         return None
@@ -255,7 +249,7 @@ def darwin_protected_git_paths(cwd: str) -> list[str]:
     return [path for path in candidates if os.path.lexists(path)]
 
 
-def git_binds(cwd: str, conv_id: str) -> list[tuple[str, str, bool]]:
+def git_binds(cwd: str, conv_id: str, *, protected: str | None = None) -> list[tuple[str, str, bool]]:
     """The git ``(host, guest, read_only)`` binds a fenced worktree line needs.
 
     Order is load-bearing: the private root mirror covers transient
@@ -272,7 +266,7 @@ def git_binds(cwd: str, conv_id: str) -> list[tuple[str, str, bool]]:
     if gitdir is None:
         return []
     common = common_gitdir(gitdir)
-    mirror = refresh_mirror(common, gitdir, conv_id)
+    mirror = refresh_mirror(common, gitdir, conv_id, protected=protected)
     refresh_root_mirror(common, mirror)
     binds = [
         (mirror, common, False),
