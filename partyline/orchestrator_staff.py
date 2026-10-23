@@ -50,7 +50,8 @@ async def ensure_reviewer(runtime, row):
 
 async def restart(runtime, att):
     from . import server
-    if att.get('cli_session'):
+    adapter = server.ADAPTERS[att['adapter']]
+    if att.get('cli_session') or adapter.session_exists(att):
         return await server._resume_adapter(att['id'])
     # A refused/failed first launch has no CLI session to resume. Keep the
     # assigned identity, rotate ownership, and retry a fresh real PTY start.
