@@ -145,7 +145,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 117 | POST | `/api/adapters/reload` | partyline/server.py:reload_adapter_definitions (registration line 403) | H only | no | adapter reload is human-only instance configuration |
 | 118 | DELETE | `/api/adapters/{adapter_name}` | partyline/server.py:remove_adapter (registration line 412) | H only | no | adapter removal is human-only instance configuration |
 | 119 | POST | `/api/attachments/{att_id}/resume` | partyline/server.py:resume_attachment (registration line 458) | M with `attach`, or H | yes | see Set 2 |
-| 120 | PATCH | `/api/attachments/{att_id}` | partyline/server.py:edit_attachment (registration line 489) | M with `attach`, loopback, stopped attachment | yes | see Set 2 |
+| 120 | PATCH | `/api/attachments/{att_id}` | partyline/server.py:edit_attachment (registration line 489) | M with `attach`, stopped attachment | yes | see Set 2 |
 | 121 | DELETE | `/api/attachments/{att_id}` | partyline/server.py:detach (registration line 514) | M with `close`, or H | yes | see Set 2 |
 | 122 | GET | `/api/attachments/{att_id}/screen` | partyline/server.py:attachment_screen (registration line 524) | M with `read` | yes | see Set 2 |
 | 123 | POST | `/api/attachments/{att_id}/keys` | partyline/server.py:attachment_key (registration line 543) | M with `attach` | yes | see Set 2 |
@@ -169,7 +169,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | --- | --- | --- | --- | --- | --- |
 | 1 | GET | `/api/conversations/{conv_id}/accepts` | M with `read` | **excluded** | accept history is not needed by the tool set; captains record accepts through `accept` (row 2) |
 | 2 | POST | `/api/conversations/{conv_id}/accept` | L with `accept` | **op**: captain op `accept` | parent captain records a child SHA; `run_gates` runs gates server-side; reviewer identity comes from the credential |
-| 4 | POST | `/api/attachments/{att_id}/fresh` | LB with `attach` (human or lead) | **excluded** | loopback-only process lifecycle; the restart flow, not a routine captain tool |
+| 4 | POST | `/api/attachments/{att_id}/fresh` | M with `attach` (human or lead) | **excluded** | process lifecycle; the restart flow, not a routine captain tool |
 | 5 | POST | `/api/attachments/{att_id}/replace` | H, or M with `assign` | **excluded** | process swaps are rare; captains use `attach_worker` then `detach_worker` |
 | 6 | DELETE | `/api/attachments/{att_id}/record` | M with `close` | **excluded** | destructive record delete; no captain need |
 | 7 | POST | `/api/auth/register` | anyone (exempt) | **excluded** | human sign-up |
@@ -258,7 +258,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 114 | GET | `/api/fence/status` | any authenticated caller | **excluded** | fence diagnosis; EROFS denials are answered by the write-set path (row 136) |
 | 115 | GET | `/api/adapters` | any authenticated caller | **excluded** | instance configuration |
 | 119 | POST | `/api/attachments/{att_id}/resume` | M with `attach`, or H | **excluded** | resume belongs to the restart and resume flow |
-| 120 | PATCH | `/api/attachments/{att_id}` | M with `attach`, loopback, stopped attachment | **excluded** | changes a stopped process's command; loopback only |
+| 120 | PATCH | `/api/attachments/{att_id}` | M with `attach`, stopped attachment | **excluded** | changes a stopped process's command |
 | 121 | DELETE | `/api/attachments/{att_id}` | M with `close`, or H | **op**: captain op `detach_worker` | stops one worker on the target line; server stop rules apply; the worker's token stops resolving (design.md section 7), and the caller's own token is unaffected |
 | 122 | GET | `/api/attachments/{att_id}/screen` | M with `read` | **excluded** | screen text is never speech (AGENTS.md); debugging only |
 | 123 | POST | `/api/attachments/{att_id}/keys` | M with `attach` | **excluded** | raw keystrokes into another process's PTY |
@@ -308,7 +308,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 
 ## Decisions
 
-1. **Loopback lifecycle (rows 4, 111, 120).** Excluded from MCP. An on-host lead passes the loopback check, so these routes stay agent-reachable, but process lifecycle is not a captain tool.
+1. **Process lifecycle (rows 4, 111, 120).** Excluded from MCP. Row 111 is loopback-only; rows 4 and 120 are gated by `attach`. Process lifecycle is not a captain tool.
 2. **Child retirement and purge (rows 20, 26, 28).** Retirement is captain op `retire_child`: a direct child only, archive only, `stop_processes` optional. Purge is excluded; hard delete is never reachable through MCP.
 3. **Lead appointment (row 45).** Captain op `appoint_lead`; an empty `attachment_id` clears the lead.
 4. **Bridges (rows 12-15).** Person-only. Machines get no bridge tool and no bridge read.

@@ -24,7 +24,7 @@ from .system_notice import post_system_notice
 from .mention_relay import post_private
 
 
-def register_attachment_lifecycle_routes(app, runtime, *, start, require_loopback, validate):
+def register_attachment_lifecycle_routes(app, runtime, *, start, validate):
     async def _start_replacement(att, body):
         """Reserve the handle, restore the captain role, and start the fresh session.
 
@@ -70,7 +70,6 @@ def register_attachment_lifecycle_routes(app, runtime, *, start, require_loopbac
     async def fresh_attachment(
         request: Request, att_id: str, body: FreshAttachmentRequest | None = None
     ):
-        require_loopback(request)
         deny_unless_attachment(runtime.db, request_principal(request), att_id, "attach")
         body = body or FreshAttachmentRequest()
         att = require_stopped(runtime.db, att_id)
@@ -155,15 +154,8 @@ def register_attachment_lifecycle_routes(app, runtime, *, start, require_loopbac
 
     @app.delete("/api/attachments/{att_id}/record", response_model=OkResponse)
     async def remove_attachment_record(request: Request, att_id: str):
-        # Deliberately not loopback. `require_loopback` exists so that starting
-        # and stopping a pty stays with the host that owns it; removing a
-        # stopped card controls no process — it deletes a row whose process is
-        # already gone. Requiring host locality here refused an operator's own
-        # LAN browser with a process-control message about something that
-        # controls nothing, and left a detached record unremovable from the
-        # only interface that shows it.
-        #
-        # What actually protects this route is unchanged: the `close`
+        # Not loopback: like attach, resume, fresh and edit-command, a person
+        # on the LAN may use it. What protects this route is: the `close`
         # capability below, and two live-process refusals — the tracked-process
         # check here, and `remove_stopped_record`, which re-reads the status
         # under the lock, so a process that starts between them is still
