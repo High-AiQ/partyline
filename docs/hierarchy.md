@@ -115,7 +115,13 @@ in, never written through), plus a worktree of every clone under the root folder
 `.git`, `node_modules`, `.partyline-worktrees`, `.review`, `.scratch` skipped) at the same
 relative path, each on `line/<slug>` in its own real clone and recorded in `task_workspaces`.
 The fence binds each worktree's git like a single-worktree line and protects its real clone.
-Commits live in the process's private refs mirror until accept, so each `request_review`
+
+All attachments on a line share its Git refs mirror. Every launch refreshes sibling
+refs while preserving the line branch and the launching worktree's HEAD branch in
+loose refs, packed refs, and reflogs. A detached reviewer launch must preserve the
+line branch too, including when its unpublished tip exists only in packed refs.
+
+Commits live in the line's private refs mirror until accept, so each `request_review`
 and idle hook writes `refs/partyline/tasks/<slug>` in the real clone, where git's gc can see
 it. `request_review()` with no arguments reviews every workspace whose branch moved; a SHA
 in any recorded clone is admitted.
