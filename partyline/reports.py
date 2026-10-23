@@ -223,11 +223,49 @@ def get(db: Db, report_id: int) -> dict:
         return _row(db.conn, report_id)
 
 
-def list_for_parent(db: Db, parent_conv_id: str) -> list[dict]:
-    rows = db._exec(
-        "SELECT * FROM line_reports WHERE parent_conv_id=? ORDER BY id",
-        (parent_conv_id,),
-    ).fetchall()
+DEFAULT_LIMIT = 50
+MAX_LIMIT = 200
+
+
+def get_for_parent(db: Db, parent_conv_id: str, report_id: int) -> dict:
+    """One report, 404 when it belongs to another parent."""
+    row = get(db, report_id)
+    if row["parent_conv_id"] != parent_conv_id:
+        raise ReportError(404, f"no report #{report_id}")
+    return row
+
+
+def list_for_parent(
+    db: Db,
+    parent_conv_id: str,
+    limit: int | None = None,
+    after_id: int | None = None,
+    before_id: int | None = None,
+) -> list[dict]:
+    """Newest first, or oldest first from ``after_id`` so a reader can page forward.
+
+    Without a limit every report is returned oldest first, as internal callers
+    expect; the HTTP route always passes one.
+    """
+    if limit is None:
+        rows = db._exec(
+            "SELECT * FROM line_reports WHERE parent_conv_id=? ORDER BY id",
+            (parent_conv_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    limit = max(1, min(limit, MAX_LIMIT))
+    if after_id is not None:
+        rows = db._exec(
+            "SELECT * FROM line_reports WHERE parent_conv_id=? AND id>?"
+            " ORDER BY id LIMIT ?",
+            (parent_conv_id, after_id, limit),
+        ).fetchall()
+    else:
+        rows = db._exec(
+            "SELECT * FROM line_reports WHERE parent_conv_id=? AND id<?"
+            " ORDER BY id DESC LIMIT ?",
+            (parent_conv_id, before_id if before_id is not None else 2**62, limit),
+        ).fetchall()
     return [dict(row) for row in rows]
 
 

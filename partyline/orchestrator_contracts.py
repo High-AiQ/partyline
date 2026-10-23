@@ -84,6 +84,7 @@ class TaskReview(BaseModel):
     what: str
     location: str
     findings: str
+    previous_findings: str = ''
     report_id: int | None = None
     merged: bool
     created_at: float
