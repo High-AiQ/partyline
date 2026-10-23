@@ -36,6 +36,11 @@ def load(db, att: dict) -> None:
     reach a clone only through their worktree."""
     from .fence_protect import protected_repo_roots
     from .task_workspaces import workspaces
+    from .worktree_paths import branch_name, managed_root
+
+    # Only this line's recorded placement owns a branch; cwd fallbacks do not.
+    cwd = (db.get_conversation(att["conv_id"]) or {}).get("cwd")
+    att["line_branch"] = branch_name(cwd) if cwd and managed_root(cwd) else None
 
     att["task_workspaces"] = [dict(row, conv_id=att["conv_id"]) for row in workspaces(db, att["conv_id"])]
     att["protected_roots"] = sorted({*protected_repo_roots(db),

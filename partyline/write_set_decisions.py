@@ -14,7 +14,7 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import docker_relay, docker_workloads, fence_paths
+from . import docker_relay, docker_workloads, fence_paths, fence_workspaces
 from .auth_guard import request_principal
 from .machine_scope import deny_unless, is_human
 from .mention_relay import post_private
@@ -71,6 +71,7 @@ def _machine_decision_error(db, principal, conv_id: str,
         base = os.path.realpath(row["path"])
         if wanted == base or wanted.startswith(base + "/"):
             return None
+    fence_workspaces.load(db, lead)
     for src, _dst, read_only in fence_paths.write_set(lead, create=False):
         base = os.path.realpath(src)
         if not read_only and (wanted == base or wanted.startswith(base + "/")):
