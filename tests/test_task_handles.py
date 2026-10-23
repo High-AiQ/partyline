@@ -78,7 +78,12 @@ class TaskHandleTest(TaskFixture):
             sent = [m for m in self.messages(self.conv_id) if f'hello {to}' in m['body']]
             self.assertEqual(sent[-1]['audience_attachment_id'], ident)
             self.assertIn(self.db.get_attachment(ident)['name'], sent[-1]['body'])
+            # The captain speaks in its own name; a person could not tell "system" from astra.
+            self.assertEqual((sent[-1]['sender'], sent[-1]['sender_type']), ('captain', 'agent'))
+            self.assertNotIn('Message from', sent[-1]['body'])
         await message_task(self.runtime, self.human, self.conv_id, MessageTaskIn(text='from a person'))
+        spoken = [m for m in self.messages(self.conv_id) if 'from a person' in m['body']][-1]
+        self.assertEqual((spoken['sender'], spoken['sender_type']), ('human', 'human'))
 
     async def test_message_task_409_without_a_live_process_and_403_for_others(self):
         await self.create('captain')

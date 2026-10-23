@@ -7,8 +7,7 @@ from fastapi import HTTPException
 
 from .auth_store import handle_taken
 from .hierarchy import tree_live_name_conflict
-from .mention_relay import LIVE
-from .orchestrator_notices import tell
+from .mention_relay import LIVE, post_private
 from .orchestrator_store import require_root, task
 
 MAX_TAG = 25  # `review-` plus the tag must fit a 32-character handle
@@ -40,6 +39,10 @@ async def message_task(runtime, actor, conv_id, body):
     att = db.get_attachment(ident) if ident else None
     if att is None or att['status'] not in LIVE:
         raise HTTPException(409, f'this task has no live {body.to} to message')
-    sender = actor.attachment_id and (actor.attachment_id, actor.conv_id) or None
-    await tell(runtime, ident, f'Message from {actor.name}: {body.text}', source=sender)
+    source = actor.attachment_id and (actor.attachment_id, actor.conv_id) or None
+    # Spoken in the captain's own name, so the task line and its process read
+    # "[astra via «root»]: @impl … text", not a system notice quoting it.
+    sender_type = 'human' if actor.kind != 'machine' else 'agent'
+    await post_private(runtime, att['conv_id'], actor.name, sender_type,
+                       f"@{att['name']} {body.text}", audience=ident, source=source)
     return task(db, conv_id)
