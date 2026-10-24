@@ -11,8 +11,8 @@ import logging
 from fastapi import HTTPException
 
 from . import reports
-from .orchestrator_notices import tell
-from .orchestrator_staff import ensure_reviewer
+from .orchestrator_notices import handed_to, tell
+from .orchestrator_staff import ensure_reviewer, restart
 from .orchestrator_store import attachment_task, require_root, task
 
 logger = logging.getLogger(__name__)
@@ -77,6 +77,32 @@ async def restart_reviewer(runtime, actor, conv_id):
             raise HTTPException(409, 'the reviewer is already running')
         db._exec('UPDATE task_reviews SET reviewer_restarts=0 WHERE conv_id=?', (conv_id,))
         await revive_reviewer(runtime, row)
+    return task(db, conv_id)
+
+
+async def restart_implementer(runtime, actor, conv_id):
+    """The person or root-captain action: relaunch a detached implementer, resuming its session."""
+    db = runtime.db
+    row = task(db, conv_id)
+    if row is None:
+        raise HTTPException(404, 'task not found')
+    require_root(db, actor, row['root_id'])
+    async with task_lock(runtime, conv_id):
+        row = task(db, conv_id)
+        if row['status'] not in ('implementing', 'idle', 'blocked'):
+            raise HTTPException(
+                409, 'only an implementing, idle or blocked task has an implementer to restart')
+        att = db.get_attachment(row['implementer_id']) if row['implementer_id'] else None
+        if att is None:
+            raise HTTPException(409, 'this task has no implementer attachment to restart')
+        if att['status'] in LIVE_STATUSES:
+            raise HTTPException(409, 'the implementer is already running')
+        await restart(runtime, att)
+    await tell(runtime, att['id'],
+               f"resumed by {actor.name}; continue the task: {row['what']} — {row['location']}",
+               source=(actor.attachment_id, actor.conv_id) if actor.attachment_id else None)
+    if actor.attachment_id:
+        handed_to(runtime, actor.attachment_id, att['id'])
     return task(db, conv_id)
 
 

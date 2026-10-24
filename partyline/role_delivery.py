@@ -195,5 +195,7 @@ async def announce_restored(runtime, att: dict, *, restart: bool = True) -> None
     await post_private(
         runtime, att["conv_id"], "system", "system",
         f"⇄ bridge restored{after}: you are still this line's ambassador to "
-        f"@{peer['name']} on «{peer['conv_name']}»; the bridge pack is in your briefing",
+        f"@{peer['name']} on «{peer['conv_name']}»; the bridge pack is in your briefing; "
+        f"address it by writing @[bridge]{peer['name']} in a normal chat message — "
+        "there is no bridge tool",
         audience=att["id"], source=(None, att["conv_id"]), route=False)

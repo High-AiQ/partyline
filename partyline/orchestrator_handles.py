@@ -38,7 +38,8 @@ async def message_task(runtime, actor, conv_id, body):
     ident = row['reviewer_id'] if body.to == 'reviewer' else row['implementer_id']
     att = db.get_attachment(ident) if ident else None
     if att is None or att['status'] not in LIVE:
-        raise HTTPException(409, f'this task has no live {body.to} to message')
+        raise HTTPException(
+            409, f'this task has no live {body.to} to message; call restart_{body.to}')
     source = actor.attachment_id and (actor.attachment_id, actor.conv_id) or None
     # Spoken in the captain's own name, so the task line and its process read
     # "[astra via «root»]: @impl … text", not a system notice quoting it.

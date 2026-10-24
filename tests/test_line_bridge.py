@@ -101,7 +101,8 @@ class LineBridgeTest(unittest.TestCase):
         self.assertIn("@[bridge]fable", packs[0])
         notices = [r["body"] for r in self.rows("y") if r["sender_type"] == "system"
                    and not r["audience_attachment_id"]]
-        self.assertTrue(any("bridge opened by greg" in n for n in notices))
+        self.assertTrue(any("bridge opened by greg" in n and "@[bridge]" in n
+                            and "there is no bridge tool" in n for n in notices))
         got = self.client.get("/api/bridges?conv_id=x", headers=self.machine("x-other"))
         self.assertEqual(got.json()["id"], bridge["id"])
         self.assertIsNone(self.client.get("/api/bridges?conv_id=kid", headers=self.person).json())
@@ -319,6 +320,7 @@ class LineBridgeTest(unittest.TestCase):
             self.runtime.deliver_pending("x", self.db.get_attachment("x-amb"), revived)))
         bodies = [m["body"] for m in revived.delivered]
         self.assertTrue(any("bridge restored after the restart" in b and "@fable" in b
+                            and "@[bridge]fable in a normal chat message" in b
                             for b in bodies), bodies)
         self.assertTrue(any("are you back?" in b for b in bodies), bodies)
 
