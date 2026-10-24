@@ -18,6 +18,19 @@ _PATHS = {'blocked': ('POST', 'blocked'), 'create_task': ('POST', 'tasks'), 'tas
 OPERATIONS = tuple(_PATHS)
 
 
+_WHO = {'resume_work': "the task's implementer and the root captain",
+        'blocked': "the task's implementer", 'request_review': "the task's implementer",
+        'review_verdict': "the task's reviewer (or the root captain under captain review)"}
+
+
+def _refusal(name):
+    if name in _WHO:
+        return f'{name} is available to {_WHO[name]}'
+    if name in _PATHS:
+        return f'{name} is available to the root captain'
+    return 'task operation is not currently available'
+
+
 def tool_list(state):
     result = []
     for name in _PATHS:
@@ -31,6 +44,9 @@ def tool_list(state):
         if name in ('reopen_task', 'message_task'):
             schema['properties']['conv_id'] = {'type': 'string', 'minLength': 1}
             schema['required'] = [*schema.get('required', []), 'conv_id']
+        if name == 'resume_work' and state.get('is_lead'):
+            schema['properties']['conv_id'] = {'type': 'string', 'minLength': 1}
+            schema['required'] = [*schema.get('required', []), 'conv_id', 'note']
         if name == 'review_verdict' and state.get('is_lead'):
             schema['properties']['conv_id'] = {'type': 'string', 'minLength': 1}
             schema['required'].append('conv_id')
@@ -42,7 +58,7 @@ def tool_list(state):
 def call(client, name, args, state):
     available = {item['name']: item for item in tool_list(state)}
     if name not in available:
-        raise ApiError('task operation is not currently available')
+        raise ApiError(_refusal(name))
     validate_arguments(available[name]['inputSchema'], args)
     body = dict(args)
     conv = body.pop('conv_id', client.home)
