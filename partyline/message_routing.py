@@ -15,6 +15,7 @@ from .idempotent_posts import (
     remember_key,
 )
 from .interrupts import interrupt_for
+from .mention_fallbacks import route_fallbacks
 from .mention_relay import hint_root_captain, relay_mentions
 from .mentions import (
     addressees,
@@ -247,6 +248,7 @@ async def route_message(
 
     # A handle live on a related line is reached there, not reported missing.
     elsewhere = await relay_mentions(runtime, conv_id, message, names - delivered - queued)
+    elsewhere |= await route_fallbacks(runtime, conv_id, message, names - delivered - queued - elsewhere)
     if message["sender_type"] == "agent":
         await hint_root_captain(runtime, conv_id, message, names - delivered - queued - elsewhere)
     unavailable = [

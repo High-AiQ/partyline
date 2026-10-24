@@ -377,7 +377,7 @@ class AgentClientKeyTest(unittest.TestCase):
         fresh = json.dumps({"id": 8, "replayed": False}).encode()
         error, out = io.StringIO(), io.StringIO()
         stdin = io.StringIO('{"body": "wake"}')
-        with patch("partyline.agent_client.api_request", return_value=replayed), \
+        with patch("partyline.agent_client.api_request", return_value=(replayed, "application/json")), \
                 patch("sys.stdin", stdin), \
                 patch("partyline.agent_client.load_connection", return_value={
                     "api": "http://x", "token": "t", "conversation_id": "c",
@@ -391,7 +391,7 @@ class AgentClientKeyTest(unittest.TestCase):
 
         error, out = io.StringIO(), io.StringIO()
         stdin = io.StringIO('{"body": "wake"}')
-        with patch("partyline.agent_client.api_request", return_value=fresh), \
+        with patch("partyline.agent_client.api_request", return_value=(fresh, "application/json")), \
                 patch("sys.stdin", stdin), \
                 patch("partyline.agent_client.load_connection", return_value={
                     "api": "http://x", "token": "t", "conversation_id": "c",

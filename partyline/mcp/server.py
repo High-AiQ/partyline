@@ -11,6 +11,7 @@ from .. import __version__
 from .client import ApiError, PartylineClient
 from .render import render
 from . import tools_captain, tools_core, tools_tasks
+from .captain_schemas import ACK_HINT
 from .validation import validate_arguments
 
 logger = logging.getLogger(__name__)
@@ -115,7 +116,7 @@ class MCPServer:
             elif name in core_names:
                 schema = next(tool["inputSchema"] for tool in tools_core.tool_list(state)
                               if tool["name"] == name)
-                validate_arguments(schema, args)
+                validate_arguments(schema, args, ACK_HINT if name == "reports" else "")
                 value = tools_core.call(self.client, name, args, state)
             elif name in captain_names:
                 value = tools_captain.call(self.client, name, args, state)
