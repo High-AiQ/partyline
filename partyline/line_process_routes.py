@@ -49,7 +49,21 @@ def mid_turn_blocker(live: list[dict], presence) -> dict | None:
     }
 
 
-async def detach_attachment(runtime, att_id: str, *, survivors: bool = True) -> dict:
+def _revive_hint(db, att_id: str) -> str:
+    """A task line's implementer or reviewer is staffed by the server; say how to bring it back."""
+    from .orchestrator_store import attachment_task
+    from .orchestrator_revive import staffed_by_preset
+    row = attachment_task(db, att_id)
+    if not row:
+        return ""
+    if row['implementer_id'] == att_id:
+        return ("; revive it with restart_implementer"
+                if row['status'] in ('implementing', 'idle', 'blocked') else "")
+    return ("; revive it with restart_reviewer"
+            if row['status'] == 'in_review' and staffed_by_preset(row) else "")
+
+
+async def detach_attachment(runtime, att_id: str, *, survivors: bool = True, hint: bool = False) -> dict:
     """Run the one-jack detach transaction used by both REST commands."""
     lock = runtime.resume_locks.setdefault(att_id, asyncio.Lock())
     try:
@@ -107,10 +121,11 @@ async def detach_attachment(runtime, att_id: str, *, survivors: bool = True) -> 
                 raise HTTPException(
                     503, "attachment status update is busy; retry detach"
                 ) from exc
+        revive = _revive_hint(runtime.db, att_id) if hint else ""
         try:
             message = await asyncio.wait_for(
                 runtime.db.detach_attachment_with_message_async(
-                    att_id, runtime_owner, f"@{att['name']} detached"
+                    att_id, runtime_owner, f"@{att['name']} detached{revive}"
                 ),
                 timeout=DETACH_DB_TIMEOUT,
             )
@@ -158,7 +173,7 @@ async def close_attachment(runtime, att_id: str) -> dict:
     goes through ``detach_attachment`` and keeps the directory: the same id
     resumes into the same path, and no CLI keeps durable state in ``TMPDIR``.
     """
-    response = await detach_attachment(runtime, att_id)
+    response = await detach_attachment(runtime, att_id, hint=True)
     reap_tmp_dir(att_id)
     return response
 
@@ -247,5 +262,5 @@ def register_line_process_routes(app: FastAPI, runtime) -> None:
             raise HTTPException(409, "restore the line before closing its processes")
         live = live_attachments(runtime.db, conv_id, include_children)
         for attachment in live:
-            await detach_attachment(runtime, attachment["id"])
+            await detach_attachment(runtime, attachment["id"], hint=True)
         return {"ok": True, "stopped": [attachment["name"] for attachment in live]}
