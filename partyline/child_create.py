@@ -11,7 +11,7 @@ from .hierarchy import HierarchyError, create_child_conversation
 from .hierarchy_contracts import ChildCreatedResponse
 from .line_worktree import describe, line_cwd, place_child, placement_root
 from .machine_scope import deny_staffed_split, deny_unless, is_human
-from .task_workspaces import describe as task_describe, place_task
+from .task_workspaces import UpstreamUnavailable, describe as task_describe, place_task
 from .system_notice import post_system_notice
 
 
@@ -29,7 +29,9 @@ async def create_child(runtime, principal, conv_id, body, workspace=False):
     # The stale-base guard reads the parent's checkout, or the target's when placed there.
     base_health = await asyncio.to_thread(
         checkout_health.inspect, cwd if target is None else target)
-    base_ref, base_error = await asyncio.to_thread(
+    # A task workspace resolves its upstream per repository inside place_task.
+    cut_workspace = workspace and body.base == "upstream"
+    base_ref, base_error = (None, None) if cut_workspace else await asyncio.to_thread(
         checkout_health.child_base_ref, target or cwd, body.base == "upstream",
         is_human(principal), base_health)
     if base_error:
@@ -39,7 +41,16 @@ async def create_child(runtime, principal, conv_id, body, workspace=False):
         conv = create_child_conversation(db, conv_id, str(uuid.uuid4()), name)
     except HierarchyError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc
-    placed = await asyncio.to_thread(place_task, db, conv_id, conv["id"]) if workspace else None
+    placed = None
+    if workspace:
+        try:
+            placed = await asyncio.to_thread(place_task, db, conv_id, conv["id"], body.base)
+        except UpstreamUnavailable as exc:
+            db.delete_conversation(conv["id"])
+            raise HTTPException(409, str(exc)) from exc
+        if cut_workspace and placed is None:
+            db.delete_conversation(conv["id"])
+            raise HTTPException(409, "no repository to cut the task from upstream")
     placed = placed or place_child(db, conv_id, conv["id"], base=base_ref, root=target)
     if (base_ref or target) and not placed.get("branch"):
         # A failed placement must not silently inherit the parent checkout — not

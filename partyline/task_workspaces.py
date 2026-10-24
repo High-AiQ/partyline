@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import shutil
 
+from .checkout_health import fetch_upstream
 from .git_fence import mirror_branch_ref
 from .line_worktree import WORKTREES_DIR, _exclude, _git, line_cwd, repo_root, rev, slug
 from .nested_repositories import SKIP, nested_repositories
@@ -46,12 +47,32 @@ def _free(repos: list[str], folder: str, name: str) -> bool:
              cwd=repo).returncode == 0 for repo in repos)
 
 
-def _add(repo: str, path: str, branch: str) -> bool:
-    return _git("worktree", "add", "-b", branch, path, cwd=repo).returncode == 0
+def _add(repo: str, path: str, branch: str, start: str) -> bool:
+    return _git("worktree", "add", "-b", branch, path, start, cwd=repo).returncode == 0
 
 
-def place_task(db, root_id: str, conv_id: str) -> dict | None:
-    """Create the task's workspace, or None when the root folder holds no repository."""
+class UpstreamUnavailable(Exception):
+    """A repository has no fetched upstream to cut the task from."""
+
+
+def _upstream_starts(repos: list[str]) -> dict[str, str]:
+    """Each repository's fetched default upstream commit, before anything is created."""
+    starts = {}
+    for repo in repos:
+        ref, error = fetch_upstream(repo)
+        start = rev(repo, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}") if ref else None
+        if not start:
+            raise UpstreamUnavailable(f"{error or f'no upstream to cut from: {ref} has no commit'} ({repo})")
+        starts[repo] = start
+    return starts
+
+
+def place_task(db, root_id: str, conv_id: str, base: str = "checkout") -> dict | None:
+    """Create the task's workspace, or None when the root folder holds no repository.
+
+    ``base="upstream"`` cuts every repository from its fetched default upstream
+    instead of its own HEAD; a repository without one raises ``UpstreamUnavailable``.
+    """
     folder = line_cwd(db, root_id)
     top = repo_root(folder) if folder else None
     folder = top or folder
@@ -60,11 +81,12 @@ def place_task(db, root_id: str, conv_id: str) -> dict | None:
     repos = repositories_under(folder)
     if not repos:
         return None
-    base = slug((db.get_conversation(conv_id) or {}).get("name") or conv_id)
-    name, n = base, 1
+    starts = _upstream_starts(repos) if base == "upstream" else {}
+    stem = slug((db.get_conversation(conv_id) or {}).get("name") or conv_id)
+    name, n = stem, 1
     while not _free(repos, folder, name):
         n += 1
-        name = f"{base}-{n}"
+        name = f"{stem}-{n}"
     task_dir = os.path.join(folder, WORKTREES_DIR, name)
     branch = branch_name(task_dir)
     os.makedirs(os.path.dirname(task_dir), exist_ok=True)
@@ -80,8 +102,8 @@ def place_task(db, root_id: str, conv_id: str) -> dict | None:
         where = os.path.join(task_dir, os.path.relpath(repo, folder)) if nested else task_dir
         if nested and not plain:
             _exclude(folder, os.path.relpath(repo, folder))
-        head = rev(repo, "rev-parse", "HEAD")
-        if not (head and _add(repo, where, branch)):
+        head = starts.get(repo) or rev(repo, "rev-parse", "HEAD")
+        if not (head and _add(repo, where, branch, head)):
             for done, path, _head in reversed(made):
                 _git("worktree", "remove", "--force", path, cwd=done)
                 _git("branch", "-D", branch, cwd=done)
