@@ -90,6 +90,19 @@ def require_task(db, actor, conv_id, *, reviewer=False):
     return row
 
 
+def require_task_or_root(db, actor, conv_id):
+    """The task row and whether the root captain (or a person) is the caller; else its implementer."""
+    row = task(db, conv_id)
+    if row is None:
+        raise HTTPException(404, 'task not found')
+    if actor.kind == 'machine' and actor.attachment_id == row['implementer_id']:
+        return row, False
+    if actor.kind == 'machine' and not (actor.is_lead and actor.conv_id == row['root_id']):
+        raise HTTPException(403, "only the task's implementer or the root captain may perform this operation")
+    require_root(db, actor, row['root_id'])
+    return row, True
+
+
 def task_actions(db, actor, conv_id):
     row = task(db, conv_id)
     if not row:

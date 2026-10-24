@@ -54,7 +54,7 @@ class CaptainToolTests(unittest.TestCase):
         tools_captain.call(client, "captain", {"op": "create_task", "args": {
             "name": "slice", "goal": "build it", "implementer": "builder"}}, root)
         self.assertEqual(client.calls[-1][:2], ("POST", "/api/conversations/home/tasks"))
-        with self.assertRaisesRegex(ApiError, "not currently available"):
+        with self.assertRaisesRegex(ApiError, "available to the root captain"):
             tools_captain.call(client, "captain", {"op": "create_task", "args": {
                 "name": "slice", "goal": "build it", "implementer": "builder"}}, client.state)
 

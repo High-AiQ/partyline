@@ -1057,6 +1057,14 @@ message from the root captain or a person posted since the approval and the task
 reopened, the root captain gets one private notice per approval; nothing reopens on its
 own, so a "thanks" cannot reopen a task. Unrelated work goes through `create_task`.
 
+A `blocked` or `implementing` task takes new direction without a reopen: the root captain
+or a person calls `resume_work(conv_id, note)` (`POST …/task/resume`). On a blocked task it
+returns the task to `implementing`, posts `note` to the implementer as a private message in
+the caller's name (the same path as `message_task`), and hands the return path from the root
+to the implementer; the root gets no `unblocked:` notice for its own act. The implementer
+still calls `resume_work(note)` itself when it is working again; `blocked` stays
+implementer-only. A refusal names who may call the operation.
+
 Task processes are named after their task, never their preset: the implementer is
 `impl-<tag>` and the reviewer `review-<tag>`, where `<tag>` is the first six hex characters
 of the task line's id (lengthened if a handle in the tree already uses it) and is stored
