@@ -8,7 +8,9 @@ from fastapi import HTTPException
 from .contracts import ConversationsChangedEvent, MessageEvent, MessageResponse
 from .orchestrator_notices import handed_to, notify_root, peer, report
 from .orchestrator_reopen import unreopened
-from .orchestrator_store import require_task, task
+from .orchestrator_handles import message_task
+from .orchestrator_contracts import MessageTaskIn
+from .orchestrator_store import require_task, require_task_or_root, task
 from .task_workspaces import anchor
 
 
@@ -77,11 +79,20 @@ async def blocked(runtime, actor, conv_id, body):
 
 
 async def resume_work(runtime, actor, conv_id, body):
-    """The implementer says it is working again; the root hears why, once."""
-    row = require_task(runtime.db, actor, conv_id)
+    """The implementer says it is working again and the root hears why, once; or the root
+    captain (or a person) gives a blocked implementer new direction, which clears the block."""
+    row, by_root = require_task_or_root(runtime.db, actor, conv_id)
     if row['status'] != 'blocked':
         raise HTTPException(409, 'only a blocked task can resume work')
-    await _unblock(runtime, row, body.note)
+    if not by_root:
+        await _unblock(runtime, row, body.note)
+        return task(runtime.db, conv_id)
+    if not body.note:
+        raise HTTPException(422, 'resume_work from the root captain needs a note: the new direction')
+    await message_task(runtime, actor, conv_id, MessageTaskIn(text=body.note))
+    await _unblock(runtime, row)
+    if actor.attachment_id:
+        handed_to(runtime, actor.attachment_id, row['implementer_id'])
     return task(runtime.db, conv_id)
 
 

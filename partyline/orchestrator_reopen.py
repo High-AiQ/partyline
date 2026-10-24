@@ -29,7 +29,9 @@ async def reopen_task(runtime, actor, conv_id, body):
             'stall_stage=0,stall_notice_id=NULL,blocked_at=NULL,settled_at=NULL,reopen_noticed=0 '
             "WHERE conv_id=? AND status IN ('approved','done')", (conv_id,))
         if changed.rowcount != 1:
-            raise HTTPException(409, 'only an approved or done task can be reopened')
+            raise HTTPException(
+                409, 'only an approved or done task can be reopened; a blocked or implementing task '
+                'takes new direction through resume_work(conv_id, note) or message_task')
         set_goal(db, conv_id, goal)
         att = db.get_attachment(row['implementer_id'])
         if att and att['status'] not in LIVE:

@@ -29,7 +29,7 @@ Capability = Literal[
     "archive",
     "link_parent",
     "create_task", "tasks", "restart_reviewer", "restart_implementer", "reopen_task", "message_task",
-    "request_review", "review_verdict", "blocked",
+    "resume_work", "request_review", "review_verdict", "blocked",
 ]
 
 ALL_CAPABILITIES: tuple[Capability, ...] = (
@@ -47,7 +47,7 @@ ALL_CAPABILITIES: tuple[Capability, ...] = (
     "archive",
     "link_parent",
     "create_task", "tasks", "restart_reviewer", "restart_implementer", "reopen_task", "message_task",
-    "request_review", "review_verdict", "blocked",
+    "resume_work", "request_review", "review_verdict", "blocked",
 )
 
 
@@ -62,10 +62,7 @@ def visible_conversation_ids(db: Db, principal: Principal) -> set[str] | None:
     home = principal.conv_id
     if not home:
         return set()
-    allowed = {home}
-    if principal.is_lead:
-        allowed.update(descendants(db, home))
-    return allowed
+    return {home, *(descendants(db, home) if principal.is_lead else ())}
 
 
 def _home_lead_tree(db: Db, principal: Principal, conv_id: str) -> bool:
@@ -105,8 +102,10 @@ def allows(db: Db, principal: Principal, conv_id: str, capability: Capability) -
                 and conv.get('captain_mode', 'manager_tree') == 'orchestrator'):
             return True
         return capability in task_actions(db, principal, conv_id)
+    if capability == "resume_work" and capability in task_actions(db, principal, conv_id):
+        return True
     if capability in ("create_task", "tasks", "restart_reviewer", "restart_implementer", "reopen_task",
-                      "message_task"):
+                      "message_task", "resume_work"):
         return (conv_id == home and principal.is_lead and conv['parent_id'] is None
                 and conv.get('captain_mode', 'manager_tree') == 'orchestrator')
     if task_row and capability == "archive" and not (
