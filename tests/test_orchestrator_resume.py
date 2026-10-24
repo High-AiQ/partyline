@@ -5,8 +5,9 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi import HTTPException
 
+from partyline.auth_guard import Principal
 from partyline.hook_routes import handle_hook
-from partyline.mcp.tools_tasks import call
+from partyline.mcp.tools_tasks import call, tool_list
 from partyline.orchestrator_contracts import BlockedIn, ResumeIn
 from partyline.orchestrator_pack import task_pack
 from partyline.orchestrator_stall import blocked, resume_work
@@ -59,13 +60,14 @@ class ResumeTest(TaskFixture):
         await resume_work(self.runtime, self.worker, self.conv_id, ResumeIn())
         self.assertEqual(len(self.db.message_page('root', limit=100)[0]), before)
 
-    async def test_http_resume_is_implementer_only_and_needs_blocked(self):
+    async def test_http_resume_is_implementer_or_root_and_needs_blocked(self):
         await self.create()
         url = f'/api/conversations/{self.conv_id}/task/resume'
         self.actor = self.worker
         self.assertEqual(self.client.post(url, json={}).status_code, 409)
         await blocked(self.runtime, self.worker, self.conv_id, BlockedIn(reason='dependency'))
-        for actor in (self.captain, self.human):
+        stranger = Principal(kind='machine', name='r', conv_id=self.conv_id, attachment_id='r')
+        for actor in (stranger, Principal(kind='machine', name='other', conv_id='root', attachment_id='o')):
             self.actor = actor
             self.assertEqual(self.client.post(url, json={}).status_code, 403)
         self.actor = self.worker
@@ -108,3 +110,61 @@ class ResumeTest(TaskFixture):
         await resume_work(self.runtime, self.worker, self.conv_id, ResumeIn())
         await self.begin()  # not blocked: nothing happens
         self.assertEqual(self.row()['status'], 'implementing')
+
+    def spoken(self, text):
+        return [m for m in self.db.message_page(self.conv_id, limit=100)[0] if text in m['body']]
+
+    async def test_root_captain_unblocks_with_new_direction(self):
+        await self.block()
+        self.actor = self.captain
+        before = len(self.db.message_page('root', limit=100)[0])
+        response = self.client.post(f'/api/conversations/{self.conv_id}/task/resume',
+                                    json={'note': 'use the cached copy'})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['status'], 'implementing')
+        sent = self.spoken('use the cached copy')[-1]
+        self.assertEqual((sent['sender'], sent['sender_type']), ('captain', 'agent'))
+        self.assertEqual(sent['audience_attachment_id'], self.worker.attachment_id)
+        root = self.db.message_page('root', limit=100)[0]
+        self.assertFalse([m for m in root if 'unblocked:' in m['body']])
+        self.assertEqual(len(root), before)
+        self.assertEqual(self.client.post(f'/api/conversations/{self.conv_id}/task/resume',
+                                          json={'note': 'again'}).status_code, 409)
+
+    async def test_person_unblocks_and_root_needs_a_note(self):
+        await self.block()
+        url = f'/api/conversations/{self.conv_id}/task/resume'
+        self.actor = self.captain
+        self.assertEqual(self.client.post(url, json={}).status_code, 422)
+        self.assertEqual(self.row()['status'], 'blocked')
+        self.actor = self.human
+        self.assertEqual(self.client.post(url, json={'note': 'go'}).status_code, 200)
+        sent = self.spoken('go')[-1]
+        self.assertEqual((sent['sender'], sent['sender_type']), ('human', 'human'))
+
+    async def test_resume_work_listing_and_refusals(self):
+        schema = tool_list({'actions': ['resume_work'], 'is_lead': True})[0]['inputSchema']
+        self.assertEqual(set(schema['required']), {'conv_id', 'note'})
+        self.assertNotIn('conv_id', tool_list({'actions': ['resume_work']})[0]['inputSchema']['properties'])
+        with self.assertRaises(Exception) as caught:
+            call(Mock(home='x'), 'resume_work', {}, {'actions': []})
+        self.assertIn("task's implementer and the root captain", str(caught.exception))
+        with self.assertRaises(Exception) as caught:
+            call(Mock(home='x'), 'blocked', {}, {'actions': []})
+        self.assertIn("task's implementer", str(caught.exception))
+        with self.assertRaises(Exception) as caught:
+            call(Mock(home='x'), 'reopen_task', {}, {'actions': []})
+        self.assertIn('root captain', str(caught.exception))
+        with self.assertRaises(Exception) as caught:
+            call(Mock(home='x'), 'nope', {}, {'actions': []})
+        self.assertIn('not currently available', str(caught.exception))
+
+    async def test_capabilities_and_reopen_refusal(self):
+        from partyline.machine_scope import capability_state
+        await self.block()
+        self.assertIn('resume_work', capability_state(self.db, self.captain)['actions'])
+        self.assertIn('resume_work', capability_state(self.db, self.worker)['actions'])
+        self.actor = self.captain
+        response = self.client.post(f'/api/conversations/{self.conv_id}/task/reopen', json={'goal': 'more'})
+        self.assertEqual(response.status_code, 409)
+        self.assertIn('resume_work(conv_id, note) or message_task', response.json()['detail'])
