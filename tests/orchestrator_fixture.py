@@ -73,7 +73,7 @@ class TaskFixture(unittest.IsolatedAsyncioTestCase):
         self.db.set_attachment_status(att['id'], 'running', att['runtime_owner'])
         async def stop():
             self.db.set_attachment_status(att['id'], 'exited', att['runtime_owner'])
-        adapter = SimpleNamespace(att=att, stop=stop, proc=None)
+        adapter = SimpleNamespace(att=att, stop=stop, proc=None, deliver=AsyncMock(return_value=True))
         self.runtime.live[att['id']] = adapter
         return self.db.get_attachment(att['id'])
 

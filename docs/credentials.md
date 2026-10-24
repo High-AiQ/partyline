@@ -65,6 +65,9 @@ request POST /api/conversations/<conversation-id>/messages --json-file message.j
 `context` displays identity and coordinates without the credential. JSON bodies can
 also arrive on stdin using `--json-file -`. The helper sends credentials only in
 an Authorization header, accepts only local `/api/` paths, and refuses redirects.
+A binary response (a media `thumb` or `slim`, say) is saved to
+`media-<id>-<variant>.<ext>` in the current directory and the path is printed;
+`--output FILE` picks the file instead.
 Do not print, upload, or copy connection-file contents. A stopped or detached
 attachment's credential is rejected immediately. Resume rotates it before launch
 and rewrites the connection file and per-invocation MCP config at the same paths;
