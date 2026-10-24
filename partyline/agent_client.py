@@ -1,9 +1,16 @@
-"""Standalone authenticated API helper; credentials never enter shell arguments."""
+"""Standalone authenticated API helper; credentials never enter shell arguments.
+
+A binary response (an image from `/api/media/<id>/thumb`, say) is saved to
+`media-<id>-<variant>.<ext>` in the current directory and the path is printed;
+`--output FILE` chooses the file instead. Redirects are never followed.
+"""
 
 import argparse
 import hashlib
 import json
+import mimetypes
 import os
+import re
 from pathlib import Path
 import stat
 import sys
@@ -103,7 +110,9 @@ def note_replay(output: bytes) -> None:
         )
 
 
-def api_request(connection: Connection, method: str, path: str, body: bytes | None = None) -> bytes:
+def api_request(connection: Connection, method: str, path: str,
+                body: bytes | None = None) -> tuple[bytes, str]:
+    """The response body and its Content-Type (empty when the server sent none)."""
     parsed = urlsplit(path)
     if not path.startswith("/api/") or parsed.scheme or parsed.netloc or parsed.fragment:
         raise ValueError("request path must be a local /api/ path")
@@ -111,7 +120,33 @@ def api_request(connection: Connection, method: str, path: str, body: bytes | No
                       headers={"Authorization": "Bearer " + connection["token"],
                                "Content-Type": "application/json"})
     with build_opener(NoRedirect()).open(request, timeout=30) as response:
-        return response.read()
+        kind = response.headers.get_content_type() if response.headers.get("Content-Type") else ""
+        return response.read(), kind
+
+
+TEXT_TYPES = ("application/json",)
+
+
+def is_text(content_type: str, output: bytes) -> bool:
+    """JSON and text/* print; anything else, or bytes that are not UTF-8, is binary."""
+    if content_type and not (content_type.startswith("text/") or content_type in TEXT_TYPES):
+        return False
+    try:
+        output.decode()
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
+def default_output_name(path: str, content_type: str) -> Path:
+    """`media-<id>-<variant>.<ext>` for a media path, else a name from the path, in the cwd."""
+    parts = [part for part in urlsplit(path).path.split("/") if part]
+    if parts[:2] == ["api", "media"] and len(parts) >= 3:
+        stem = "-".join(["media", *parts[2:4]])
+    else:
+        stem = "-".join(re.sub(r"[^A-Za-z0-9_.]", "_", part) for part in parts[1:]) or "response"
+    ext = mimetypes.guess_extension(content_type) if content_type else None
+    return Path(f"{stem}{ext or '.bin'}")
 
 
 def main(argv=None) -> int:
@@ -123,7 +158,7 @@ def main(argv=None) -> int:
     request.add_argument("method", choices=("GET", "POST", "PUT", "PATCH", "DELETE"))
     request.add_argument("path")
     request.add_argument("--json-file", help="JSON body file, or - for stdin")
-    request.add_argument("--output", help="write response bytes to this file")
+    request.add_argument("--output", help="write bytes here (binary default: media-<id>-<variant>.<ext>)")
     args = parser.parse_args(argv)
     try:
         connection = load_connection(args.connection)
@@ -134,11 +169,15 @@ def main(argv=None) -> int:
         if args.json_file:
             raw = sys.stdin.read() if args.json_file == "-" else Path(args.json_file).read_text()
             body = with_client_key(args.method, args.path, json.dumps(json.loads(raw)).encode())
-        output = api_request(connection, args.method, args.path, body)
+        output, content_type = api_request(connection, args.method, args.path, body)
         if args.output:
             Path(args.output).write_bytes(output)
-        else:
+        elif is_text(content_type, output):
             sys.stdout.write(output.decode() + "\n")
+        else:
+            saved = default_output_name(args.path, content_type)
+            saved.write_bytes(output)
+            print(saved)
         note_replay(output)
         return 0
     except HTTPError as exc:

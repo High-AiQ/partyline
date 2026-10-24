@@ -73,6 +73,9 @@ OPERATIONS = tuple(schema_name for schema_name in (
     "set_gates", "docs_read", "reports"))
 
 
+ACK_HINT = "acknowledging a report is the captain op ack_report(conv_id, report_id, revision)"
+
+
 def validate(name, args):
     spec = schema(name)
     props = spec["properties"]
@@ -99,7 +102,9 @@ def validate(name, args):
                                   or len(value) < rule.get("minLength", 0)):
             raise ValueError(f"captain op '{name}': {key} exceeds its allowed length")
         if "enum" in rule and value not in rule["enum"]:
-            raise ValueError(f"captain op '{name}': {key} has an unsupported value")
+            allowed = ", ".join(rule["enum"])
+            hint = (f"; {ACK_HINT}" if name == "reports" and key == "operation" else "")
+            raise ValueError(f"captain op '{name}': {key} must be one of {allowed}{hint}")
         if kind == "integer" and (value < rule.get("minimum", value)
                                    or value > rule.get("maximum", value)):
             raise ValueError(f"captain op '{name}': {key} is outside its allowed range")

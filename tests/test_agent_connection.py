@@ -78,7 +78,8 @@ class AgentConnectionTests(unittest.TestCase):
         body = self.path.with_name("body.json")
         body.write_text('{"body":"hello"}')
         output = io.StringIO()
-        with patch("partyline.agent_client.api_request", return_value=b'{"ok":true}') as call:
+        reply = (b'{"ok":true}', "application/json")
+        with patch("partyline.agent_client.api_request", return_value=reply) as call:
             with contextlib.redirect_stdout(output):
                 self.assertEqual(main(["--connection", str(self.path), "request", "POST",
                                        "/api/tasks", "--json-file", str(body)]), 0)
@@ -95,8 +96,13 @@ class AgentConnectionTests(unittest.TestCase):
     def test_request_uses_header(self):
         connection = load_connection(str(self.path))
         with patch("partyline.agent_client.build_opener") as opener:
-            opener.return_value.open.return_value.__enter__.return_value.read.return_value = b"{}"
-            self.assertEqual(api_request(connection, "GET", "/api/tasks"), b"{}")
+            response = opener.return_value.open.return_value.__enter__.return_value
+            response.read.return_value = b"{}"
+            response.headers.get.return_value = None
+            self.assertEqual(api_request(connection, "GET", "/api/tasks"), (b"{}", ""))
+            response.headers.get.return_value = "image/png"
+            response.headers.get_content_type.return_value = "image/png"
+            self.assertEqual(api_request(connection, "GET", "/api/tasks"), (b"{}", "image/png"))
             request = opener.return_value.open.call_args.args[0]
             self.assertEqual(request.get_header("Authorization"), "Bearer private-test-token")
             self.assertNotIn("private-test-token", request.full_url)
@@ -107,7 +113,7 @@ class AgentConnectionTests(unittest.TestCase):
             self.assertEqual(main(["--connection", str(self.path) + ".missing", "context"]), 1)
         self.assertNotIn(self.att["api_token"], error.getvalue())
         output = self.path.with_name("image.png")
-        with patch("partyline.agent_client.api_request", return_value=b"\x89PNG"):
+        with patch("partyline.agent_client.api_request", return_value=(b"\x89PNG", "image/png")):
             self.assertEqual(main(["--connection", str(self.path), "request", "GET",
                                    "/api/media/image/original", "--output", str(output)]), 0)
         self.assertEqual(output.read_bytes(), b"\x89PNG")
@@ -118,6 +124,38 @@ class AgentConnectionTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_connection(str(self.path))
             provision_connection(self.db, self.att)
+
+    def test_binary_without_output_is_saved_under_a_media_name(self):
+        saved = os.getcwd()
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        os.chdir(directory.name)
+        self.addCleanup(os.chdir, saved)
+        out = io.StringIO()
+        with patch("partyline.agent_client.api_request", return_value=(b"\x89PNG", "image/png")):
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(main(["--connection", str(self.path), "request", "GET",
+                                       "/api/media/abc123/thumb"]), 0)
+        self.assertEqual(out.getvalue().strip(), "media-abc123-thumb.png")
+        self.assertEqual(Path("media-abc123-thumb.png").read_bytes(), b"\x89PNG")
+        out = io.StringIO()
+        with patch("partyline.agent_client.api_request", return_value=(b"\xff\xfe", "")):
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(main(["--connection", str(self.path), "request", "GET",
+                                       "/api/other/file?x=1"]), 0)
+        self.assertEqual(out.getvalue().strip(), "other-file.bin")
+        with patch("partyline.agent_client.api_request", return_value=(b"x", "application/pdf")):
+            with contextlib.redirect_stdout(io.StringIO()):
+                main(["--connection", str(self.path), "request", "GET", "/api/"])
+        self.assertTrue(Path("response.pdf").exists())
+
+    def test_text_responses_still_print(self):
+        for kind in ("text/plain", "application/json", ""):
+            out = io.StringIO()
+            with patch("partyline.agent_client.api_request", return_value=(b"hi", kind)):
+                with contextlib.redirect_stdout(out):
+                    main(["--connection", str(self.path), "request", "GET", "/api/x"])
+            self.assertEqual(out.getvalue(), "hi\n")
 
     def test_resume_hint_and_failed_publish_cleanup(self):
         self.assertIn(self.att["agent_command"], connection_hint(self.att))
@@ -130,7 +168,8 @@ class AgentConnectionTests(unittest.TestCase):
 
     def test_stdin_and_invalid_json_shape(self):
         with patch("sys.stdin", io.StringIO('{"body":"from stdin"}')):
-            with patch("partyline.agent_client.api_request", return_value=b"{}") as call:
+            reply = (b"{}", "application/json")
+            with patch("partyline.agent_client.api_request", return_value=reply) as call:
                 with contextlib.redirect_stdout(io.StringIO()):
                     self.assertEqual(main(["--connection", str(self.path), "request", "POST",
                                            "/api/tasks", "--json-file", "-"]), 0)
