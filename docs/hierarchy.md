@@ -1042,6 +1042,12 @@ A reviewer that dies while its task is in review is revived by asking again
 `restart_reviewer` tool, or the button on the task line header), and once
 automatically on its exit; a second exit reports to the root instead of looping.
 
+A detached implementer (idle sweep, crash) is brought back the same way: a person or the
+root captain calls `POST …/task/implementer` (the `restart_implementer` tool) on an
+implementing, idle or blocked task. It resumes the implementer's own session where the
+adapter supports it, tells it `resumed by <actor>; continue the task: …`, and hands the
+return path from the root to it; `409` if it is still running.
+
 New work on an approved or done task is a reopen, never a chat hand-off: the root
 captain or a person calls `reopen_task(conv_id, goal)` (`POST …/task/reopen`). The task
 returns to `implementing` with the new goal, round 0 and cleared review, stall and
