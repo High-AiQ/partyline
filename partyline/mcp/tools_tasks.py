@@ -12,7 +12,8 @@ _MODELS = {'blocked': BlockedIn, 'create_task': TaskIn, 'request_review': Review
            'resume_work': ResumeIn, 'reopen_task': ReopenIn, 'message_task': MessageTaskIn}
 _PATHS = {'blocked': ('POST', 'blocked'), 'create_task': ('POST', 'tasks'), 'tasks': ('GET', 'tasks'),
           'request_review': ('POST', 'request-review'), 'review_verdict': ('POST', 'review-verdict'),
-          'restart_reviewer': ('POST', 'task/reviewer'), 'resume_work': ('POST', 'task/resume'),
+          'restart_reviewer': ('POST', 'task/reviewer'),
+          'restart_implementer': ('POST', 'task/implementer'), 'resume_work': ('POST', 'task/resume'),
           'reopen_task': ('POST', 'task/reopen'), 'message_task': ('POST', 'task/message')}
 OPERATIONS = tuple(_PATHS)
 
@@ -24,7 +25,7 @@ def tool_list(state):
             continue
         schema = _MODELS[name].model_json_schema() if name in _MODELS else {
             'type': 'object', 'properties': {}, 'additionalProperties': False}
-        if name == 'restart_reviewer':
+        if name in ('restart_reviewer', 'restart_implementer'):
             schema = {'type': 'object', 'properties': {'conv_id': {'type': 'string', 'minLength': 1}},
                       'required': ['conv_id'], 'additionalProperties': False}
         if name in ('reopen_task', 'message_task'):

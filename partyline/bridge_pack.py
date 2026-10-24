@@ -37,7 +37,8 @@ def close_notice(peer: str, peer_line: str, by: str) -> str:
 
 
 def open_line_notice(me: str, peer: str, peer_line: str, by: str) -> str:
-    return f"⇄ bridge opened by {by}: {me} is this line's ambassador to {peer} on «{peer_line}»"
+    return (f"⇄ bridge opened by {by}: {me} is this line's ambassador to {peer} on «{peer_line}»; "
+            f"address it by writing @[bridge]{peer} in a normal chat message — there is no bridge tool")
 
 
 def close_line_notice(me: str, peer: str, peer_line: str, by: str) -> str:
