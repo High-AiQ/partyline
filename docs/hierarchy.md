@@ -310,7 +310,12 @@ itself can be made safe: `POST /api/conversations/<id>/children` takes
 default (`origin/HEAD`, else the current branch's upstream), fetches it, and
 branches the child from that ref — the child starts at what the upstream
 already has, never in the past, and the birth notice names the ref it was cut
-from. The default stays `base:"checkout"`: the child branches from the parent
+from. `POST /api/conversations/<root>/tasks` (and the `create_task` tool) takes
+`"base":"upstream"` too (default `"head"`), which is how a machine root captain
+starts a task from a checkout that is behind: each repository under the root's
+folder is cut from its own fetched default upstream, `base_sha` is that commit,
+and a repository with no upstream fails the whole placement with a 409.
+For a child line the default stays `base:"checkout"`: the child branches from the parent
 checkout's HEAD, exactly as before. The stale-checkout refusal for machines
 applies only to the default; a person may cut from either base. Inside the
 fence a line's view of the parent branch is launch-time fresh: `GET
