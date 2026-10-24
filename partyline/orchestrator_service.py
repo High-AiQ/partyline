@@ -40,7 +40,9 @@ async def create_task(runtime, actor, root_id, body):
     if pending:
         conv_id, ident = pending['conv_id'], pending['implementer_id']
     else:
-        result = await create_child(runtime, actor, root_id, ChildIn(name=body.name, goal=body.goal),
+        base = 'upstream' if body.base == 'upstream' else 'checkout'
+        result = await create_child(runtime, actor, root_id,
+                                    ChildIn(name=body.name, goal=body.goal, base=base),
                                     workspace=True)
         conv_id, ident = result.conversation.id, str(uuid.uuid4())
         db._exec(

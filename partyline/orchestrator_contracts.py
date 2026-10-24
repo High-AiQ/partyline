@@ -17,6 +17,7 @@ class TaskIn(BaseModel):
     goal: str = Field(min_length=1, max_length=3000)
     implementer: str = Field(min_length=1, max_length=120)
     review: str | None = Field(default=None, min_length=1, max_length=120)
+    base: Literal['head', 'upstream'] = 'head'
 
 
 class RepositoryShaIn(BaseModel):
