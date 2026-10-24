@@ -131,7 +131,7 @@ def stale_base_reason(health: CheckoutHealth | None) -> str | None:
         return None
     return (f"this checkout is {_plural(health.behind, 'commit')} behind {health.upstream}; a "
             "child line cut from it would start in the past — ask the person to bring "
-            f"{health.branch} up to date, or create the child with base:\"upstream\"")
+            f"{health.branch} up to date, or create the child or task with base:\"upstream\"")
 
 
 def default_upstream(path: str | None) -> str | None:
@@ -164,6 +164,11 @@ def child_base_ref(
         if not human and (reason := stale_base_reason(health)):
             return None, reason
         return None, None
+    return fetch_upstream(path)
+
+
+def fetch_upstream(path: str | None) -> tuple[str | None, str | None]:
+    """Fetch the repository's default upstream; ``(ref, None)`` or ``(None, why not)``."""
     ref = default_upstream(path)
     if ref is None:
         return None, ("no upstream to cut from: the repository has neither an origin/HEAD "
