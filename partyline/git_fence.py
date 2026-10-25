@@ -215,6 +215,12 @@ def mirror_branch_ref(cwd: str, conv_id: str, branch: str) -> str | None:
     return _read_ref(mirror, f"refs/heads/{branch}")
 
 
+def mirror_store(repo: str, conv_id: str) -> str | None:
+    """The line's fence mirror of a repository's Git directory, when one exists on disk."""
+    mirror = _mirror_dir(os.path.join(repo, ".git"), conv_id)
+    return mirror if os.path.isdir(mirror) else None
+
+
 def darwin_write_paths(cwd: str) -> list[str]:
     """The writable git paths for one checkout on Darwin.
 

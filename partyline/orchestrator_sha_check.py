@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 
+from .git_fence import mirror_store
 from .hierarchy import lead_attachment
 from .line_worktree import rev
 from .mention_relay import live_manager, post_private
@@ -22,14 +23,42 @@ from .task_workspaces import workspaces
 # 7-40 hex characters, not letter-prefixed: git hashes are bare hex, and a
 # style token like B007 must not be read as a claimed commit.
 TOKEN = re.compile(r"(?<![0-9A-Za-z])[0-9a-f]{7,40}(?![0-9A-Za-z])")
+# Words that name another kind of hash or version when they come just before a
+# token: a model revision, a weights checksum, a file digest.
+OTHER_KIND = re.compile(
+    r"\b(?:revision|rev|HF|hugging face|weights|model|checkpoint|sha256|md5|"
+    r"checksum|digest|hash of a file|blob|etag|tag)\b", re.IGNORECASE)
+SENTENCE_END = re.compile(r"[.!?;\n]")
+WINDOW = 30  # characters before a token that may name its kind
+
+
+def _named_other(text: str, start: int) -> bool:
+    """Whether the words just before the token, in its sentence, name another hash."""
+    before = text[max(0, start - WINDOW):start]
+    return OTHER_KIND.search(SENTENCE_END.split(before)[-1]) is not None
+
+
+def _in_url_or_path(text: str, start: int, end: int) -> bool:
+    """Whether the whitespace-delimited word around the token has a slash in it."""
+    word = re.search(r"\S*$", text[:start]).group() + re.match(r"\S*", text[end:]).group()
+    return "/" in word
 
 
 def suspected(text: str) -> list[str]:
-    """Bare hex tokens long enough to be a commit hash, in order, unique."""
+    """Bare hex tokens that may be a commit hash, in order, unique.
+
+    A token is skipped when another kind of hash is named just before it, or
+    when it sits inside a URL or path.
+    """
+    text = text or ""
     found = []
-    for token in TOKEN.findall(text or ""):
-        if token not in found:
-            found.append(token)
+    for match in TOKEN.finditer(text):
+        token = match.group()
+        if token in found or _named_other(text, match.start()):
+            continue
+        if _in_url_or_path(text, match.start(), match.end()):
+            continue
+        found.append(token)
     return found
 
 
@@ -40,15 +69,25 @@ def places(db, conv_id: str) -> list[str]:
                               + [item["repository"] for item in spaces]))
 
 
-def _commit(name: str, found: list[str]) -> bool:
-    return any(rev(where, "cat-file", "-e", f"{name}^{{commit}}") for where in found)
+def stores(db, conv_id: str) -> list[str]:
+    """The line's fence mirror of each task repository's Git directory, where one exists."""
+    repos = dict.fromkeys(item["repository"] for item in workspaces(db, conv_id))
+    return [mirror for repo in repos if (mirror := mirror_store(repo, conv_id))]
+
+
+def _commit(name: str, found: list[str], mirrors: list[str]) -> bool:
+    # `cat-file -t` prints the type on success; `-e` prints nothing, which rev() reads as failure.
+    return (any(rev(where, "cat-file", "-t", name) == "commit" for where in found)
+            or any(rev(mirror, f"--git-dir={mirror}", "cat-file", "-t", name) == "commit"
+                   for mirror in mirrors))
 
 
 def quoted(db, conv_id: str, *texts: str) -> list[str]:
-    """The commits actually missing from the task's worktrees and their clones."""
+    """The commits actually missing from the task's worktrees, clones and mirrors."""
     names = suspected(" ".join(text for text in texts if text))
     found = places(db, conv_id)
-    return [name for name in names if found and not _commit(name, found)]
+    mirrors = stores(db, conv_id)
+    return [name for name in names if found and not _commit(name, found, mirrors)]
 
 
 def flagged(db, row) -> list[str]:
