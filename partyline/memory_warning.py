@@ -20,14 +20,19 @@ def suggested_limit(cap: int) -> str | None:
     return suggested_memory_limit(cap, memory_ceiling())
 
 
+def _group_label(entry: dict) -> str:
+    return entry["command"] if entry["count"] == 1 else f"{entry['count']}× {entry['command']}"
+
+
 def format_top(top: list[dict]) -> str:
-    """The largest descendants, one clause; an empty list renders nothing."""
+    """The largest command groups, one clause; an empty list renders nothing."""
     if not top:
         return ""
     named = "; ".join(
-        f"pid {entry['pid']} ({format_memory_bytes(entry['rss'])}) {entry['cmdline']}"
+        f"{_group_label(entry)} {format_memory_bytes(entry['rss'])} "
+        f"(largest pid {entry['pid']}: {entry['cmdline']})"
         for entry in top)
-    return (f" Its largest processes: {named}. Stop these by pid "
+    return (f" Its largest processes by command: {named}. Stop what is growing by pid "
             "(kill <pid>, or POST /api/attachments/<id>/signal); never `pkill -f`/`killall`.")
 
 

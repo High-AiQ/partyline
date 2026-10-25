@@ -19,7 +19,7 @@ from .cgroup_sample import cgroup_usage, reclaim_scope
 from .process_memory import backstop_bytes, process_snapshot
 from .resource_push import ResourcePusher
 from .memory_warning import tmpfs_note_for, warning_text  # noqa: F401  re-exported for the sampler's tests
-from .top_processes import top_descendants
+from .top_processes import process_breakdown
 
 INTERVAL = 5.0
 CHUNK = 8
@@ -90,7 +90,7 @@ async def _warn(runtime, row: dict, usage: int, cap: int, shmem: int = 0) -> Non
     tmp_note = await tmpfs_note_for(str(attachment_tmp_dir(row["id"])), shmem) or ""
     adapter = runtime.live.get(row["id"])
     pid = getattr(getattr(adapter, "proc", None), "pid", None)
-    top = top_descendants(pid) if isinstance(pid, int) else []
+    top = process_breakdown(pid) if isinstance(pid, int) else []
     # The copy to the process itself must not name it as the speaker: routing
     # never rings a process with its own words.
     await post_private(runtime, row["conv_id"], "system", "system",

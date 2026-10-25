@@ -35,6 +35,11 @@ def tasks(db, root_id):
         (root_id,)).fetchall()]
 
 
+def all_tasks(db):
+    return [_parsed(row, db) for row in db._exec(
+        "SELECT * FROM task_reviews ORDER BY created_at,conv_id").fetchall()]
+
+
 def preset(db, name):
     matches = [row for row in db.list_presets() if row['name'] == name]
     if len(matches) != 1:

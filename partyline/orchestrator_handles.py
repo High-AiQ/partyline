@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from .auth_store import handle_taken
 from .hierarchy import tree_live_name_conflict
 from .mention_relay import LIVE, post_private
-from .orchestrator_store import require_root, task
+from .orchestrator_store import all_tasks, require_root, task, tasks
 
 MAX_TAG = 25  # `review-` plus the tag must fit a 32-character handle
 
@@ -26,6 +26,23 @@ def pick_tag(db, conv_id):
                             for name in names)):
             return tag
     raise HTTPException(409, 'no free task handle; retry')
+
+
+def task_line(db, actor, ref):
+    """The task line a path names: its id, or a task's tag, handle or line name.
+
+    A root captain's name is looked up among its own tasks; anyone else among every task.
+    An unknown name comes back unchanged, so the caller's 404 stays exact.
+    """
+    if not isinstance(ref, str) or task(db, ref) is not None:
+        return ref
+    rows = tasks(db, actor.conv_id) if actor.kind == 'machine' else all_tasks(db)
+    matches = [row['conv_id'] for row in rows if ref in (
+        row['tag'], row['implementer_handle'], row['reviewer_handle'],
+        (db.get_conversation(row['conv_id']) or {}).get('name'))]
+    if len(matches) > 1:
+        raise HTTPException(409, f'task name {ref} matches {len(matches)} tasks; use a line id')
+    return matches[0] if matches else ref
 
 
 async def message_task(runtime, actor, conv_id, body):
