@@ -17,7 +17,7 @@ def model_upload_tool():
     return {
         "name": "upload_3d_model",
         "description": (
-            "Upload one self-contained glTF/GLB 3D model (.gltf or .glb), at most 20 MiB. "
+            "Upload one self-contained glTF/GLB 3D model (.gltf or .glb), at most 64 MiB. "
             "It appears as an inline click-to-load 3D card with download; original bytes "
             "are preserved. Extension matching is case-insensitive."
         ),

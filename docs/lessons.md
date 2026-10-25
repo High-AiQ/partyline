@@ -1,5 +1,26 @@
 # Lessons: the false-assumptions ledger
 
+
+## Upload-only permissions must gate captions at both boundaries
+
+Granting task-to-root uploads assumed media authorization alone would preserve
+the refusal of general line writes. Upload captions also become message prose
+and reach mention routing. Refuse non-blank captions whenever the target allows
+uploads but lacks `write`, in both MCP and the shared files/images handler.
+`test_task_upload_destinations_and_other_operations` checks 403 responses,
+no persisted message and no mention routing, while captionless root uploads
+and existing own-line behavior still work.
+
+
+## Upload defaults must resolve the active limit at call time
+
+Adding a model-specific upload limit assumed a default argument referencing
+`MAX_UPLOAD` would preserve the ordinary uploader's active limit. Python captures
+that value when defining the function, so patching the constant no longer bounded
+the upload before connecting. Use a `None` default and resolve the constant inside
+the call. The existing `test_upload_rejects_oversize_before_connecting` regression
+fails with the captured default; the dedicated model boundary test covers the override.
+
 ## A detached reviewer still shares the line's refs mirror
 
 Protecting only the launching worktree's HEAD branch assumed every attachment
