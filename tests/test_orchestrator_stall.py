@@ -1,5 +1,6 @@
 """A missing structured task result recovers once, then reports the stall."""
 
+import time
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
@@ -7,10 +8,11 @@ from fastapi import HTTPException
 from partyline.db import Db
 from partyline.machine_scope import allows
 from partyline.mcp.tools_tasks import tool_list
-from partyline.orchestrator_contracts import BlockedIn, ReviewRequestIn
+from partyline.orchestrator_contracts import BlockedIn, ReviewRequestIn, WaitingIn
 from partyline.orchestrator_notices import report
 from partyline.orchestrator_service import request_review
 from partyline.orchestrator_stall import began, blocked, ended
+from partyline.orchestrator_wait import expired, live, resume_expired, waiting as declare_wait
 from partyline.return_path import ReturnPath
 from tests.orchestrator_fixture import TaskFixture
 
@@ -209,3 +211,122 @@ class StallTest(TaskFixture):
         self.assertEqual(self.row()['stall_stage'], 2)
         await self.end(returns)
         self.assertEqual(self.row()['stall_stage'], 3)
+
+    async def wait(self, reason='pytest ./scripts/capped-test', seconds=600):
+        return await declare_wait(self.runtime, self.worker, self.conv_id,
+                                  WaitingIn(reason=reason, seconds=seconds))
+
+    async def test_a_declared_wait_is_not_a_stall_and_the_line_says_why(self):
+        await self.create('captain')
+        returns = self.runtime.returns = ReturnPath(self.runtime)
+        returns.grace = 0
+        await self.wait()
+        notes = [m for m in self.messages(self.conv_id) if 'waiting, not stalled' in m['body']]
+        self.assertEqual(len(notes), 1)
+        self.assertIn('pytest', notes[0]['body'])
+        # A turn that ends with no hand-off is a wait, not a missing hand-off:
+        # no reminder, no stall report, however often the turn ends.
+        for _ in range(3):
+            await self.end(returns)
+            self.assertEqual(self.row()['stall_stage'], 0)
+            self.assertIsNone(self.row()['report_id'])
+        self.assertEqual([m for m in self.messages(self.conv_id)
+                          if 'no hand-off' in m['body']], [])
+
+    async def test_a_wait_that_runs_out_returns_the_task_to_the_stall_check(self):
+        await self.create('captain')
+        returns = self.runtime.returns = ReturnPath(self.runtime)
+        returns.grace = 0
+        await self.wait(seconds=60)
+        self.db._exec('UPDATE task_reviews SET wait_until=? WHERE conv_id=?',
+                      (time.time() - 1, self.conv_id))
+        await resume_expired(self.runtime, self.row())
+        self.assertEqual(self.row()['stall_stage'], 1)
+        notices = [m for m in self.messages(self.conv_id) if 'no hand-off' in m['body']]
+        self.assertEqual(len(notices), 1)
+        # And silence after the wait is a genuine stall: the report goes out once.
+        returns.note_delivered(self.worker.attachment_id, notices)
+        await self.end(returns)
+        row = self.row()
+        self.assertEqual(row['stall_stage'], 3)
+        from partyline.reports import get
+        self.assertIn('stalled', get(self.db, row['report_id'])['body'])
+
+    async def test_a_worked_implementer_is_not_stalled_while_its_tool_call_runs(self):
+        await self.create('captain')
+        returns = self.runtime.returns = ReturnPath(self.runtime)
+        returns.grace = 0
+
+        class Presence:
+            def is_working(self, att_id):
+                return True
+
+        self.runtime.presence = Presence()
+        await self.end(returns)
+        self.assertEqual(self.row()['stall_stage'], 0)
+        self.assertIsNone(self.row()['report_id'])
+
+    async def test_only_the_implementer_declares_a_wait(self):
+        await self.create('captain')
+        self.assertTrue(allows(self.db, self.worker, self.conv_id, 'waiting'))
+        self.assertFalse(allows(self.db, self.captain, self.conv_id, 'waiting'))
+        self.assertIn('waiting', [tool['name'] for tool in tool_list({'actions': ['waiting']})])
+        url = f'/api/conversations/{self.conv_id}/waiting'
+        self.actor = self.captain
+        self.assertEqual(self.client.post(url, json={'reason': 'pytest'}).status_code, 403)
+        self.actor = self.human
+        self.assertEqual(self.client.post(url, json={'reason': 'pytest'}).status_code, 403)
+        self.actor = self.worker
+        self.assertEqual(self.client.post(url, json={'reason': ''}).status_code, 422)
+        response = self.client.post(url, json={'reason': 'pytest', 'seconds': 60})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['wait_reason'], 'pytest')
+        self.assertTrue(response.json()['wait_until'])
+
+    async def test_a_wait_is_only_for_an_implementing_task_and_only_until_it_runs_out(self):
+        await self.create('captain')
+        self.assertIsNone(live(None))
+        self.assertIsNone(live(self.row()))
+        self.assertIsNone(expired(self.row()))
+        await self.wait(seconds=60)
+        self.assertIsNotNone(live(self.row()))
+        self.assertIsNone(expired(self.row()))
+        # A wait that ran out is neither live nor pending.
+        self.db._exec('UPDATE task_reviews SET wait_until=? WHERE conv_id=?',
+                      (time.time() - 1, self.conv_id))
+        self.assertIsNone(live(self.row()))
+        self.assertIsNotNone(expired(self.row()))
+        # A task that is not implementing cannot take a wait.
+        self.db._exec("UPDATE task_reviews SET status='in_review' WHERE conv_id=?", (self.conv_id,))
+        with self.assertRaises(HTTPException):
+            await self.wait()
+        # An expired wait of a busy implementer waits for its turn to end.
+        self.db._exec("UPDATE task_reviews SET status='implementing' WHERE conv_id=?", (self.conv_id,))
+
+        class Presence:
+            def is_working(self, att_id):
+                return True
+
+        self.runtime.presence = Presence()
+        await resume_expired(self.runtime, self.row())
+        self.assertEqual(self.row()['stall_stage'], 0)
+        self.assertTrue(self.row()['wait_until'])
+        # A wait that has not run out is left alone, and a task that is not
+        # implementing owes no hand-off at all.
+        self.runtime.presence = None
+        self.db._exec('UPDATE task_reviews SET wait_until=? WHERE conv_id=?',
+                      (time.time() + 60, self.conv_id))
+        await resume_expired(self.runtime, self.row())
+        self.assertEqual(self.row()['stall_stage'], 0)
+        self.assertTrue(self.row()['wait_until'])
+        self.db._exec("UPDATE task_reviews SET status='in_review' WHERE conv_id=?", (self.conv_id,))
+        self.db._exec('UPDATE task_reviews SET wait_until=? WHERE conv_id=?',
+                      (time.time() - 1, self.conv_id))
+        await resume_expired(self.runtime, self.row())
+        self.assertEqual(self.row()['stall_stage'], 0)
+        self.assertTrue(self.row()['wait_until'])
+        # An implementer that is gone leaves nobody to remind.
+        self.db._exec("UPDATE task_reviews SET status='implementing' WHERE conv_id=?", (self.conv_id,))
+        self.db._exec('DELETE FROM attachments WHERE id=?', (self.worker.attachment_id,))
+        await resume_expired(self.runtime, self.row())
+        self.assertIsNone(self.row()['wait_until'])

@@ -85,4 +85,8 @@ MIGRATIONS += [
     "PRIMARY KEY(conv_id, repository))",
     # The verdict a new round replaces: `findings` is the current verdict only.
     "ALTER TABLE task_reviews ADD COLUMN previous_findings TEXT NOT NULL DEFAULT ''",
+    # A declared wait: what the implementer is waiting for, and until when. The
+    # stall heuristic honours it instead of calling a waiting implementer stuck.
+    "ALTER TABLE task_reviews ADD COLUMN wait_reason TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE task_reviews ADD COLUMN wait_until REAL",
 ]
