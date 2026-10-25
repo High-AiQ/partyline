@@ -4,7 +4,7 @@ from urllib.parse import quote
 
 from .client import ApiError, MAX_UPLOAD
 from .uploads import validate_uploads
-from .tools_media import multi_upload_tool
+from .tools_media import model_upload_tool, multi_upload_tool, validate_model_path
 from . import tools_captain
 
 
@@ -82,7 +82,8 @@ def tool_list(state):
     if "write" in actions:
         tools.append({
             "name": "upload_file",
-            "description": "Upload one caller-readable local file with bounded streaming.",
+            "description": ("Upload one caller-readable local file with bounded streaming. "
+                            "Self-contained .glb/.gltf files appear as click-to-load 3D cards."),
             "inputSchema": _schema({
                 "conv_id": _prop("string", "Target visible line; defaults to your line."),
                 "path": _prop("string", "Readable local file path."),
@@ -94,7 +95,7 @@ def tool_list(state):
             }, ["path", "client_key"]),
         })
     if "write" in actions:
-        tools.append(multi_upload_tool())
+        tools.extend([model_upload_tool(), multi_upload_tool()])
     if "read" in actions:
         tools.extend([
             {
@@ -211,6 +212,11 @@ def call(client, name: str, args: dict, home_state: dict):
                              "your terminal reply is the chat message; omit body or pass "
                              "another conv_id")
         return client.upload_files(conv, args["paths"], client_key=args["client_key"], **metadata)
+    if name == "upload_3d_model":
+        validate_model_path(args["path"])
+        conv, _ = _target(client, home_state, args.get("conv_id"), ("write",))
+        return client.upload(conv, args["path"], title=args.get("title", ""),
+                             client_key=args["client_key"])
     if name == "upload_file":
         conv, _ = _target(client, home_state, args.get("conv_id"), ("write",))
         body = args.get("body", "")

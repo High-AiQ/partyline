@@ -468,6 +468,21 @@ class FileRoutesTest(unittest.TestCase):
         self.assertTrue(line.startswith("🎬 clip.mp4 · "), line)
         self.assertIn(f"/api/media/{ref['id']}/original", line)
 
+    def test_a_glb_is_a_model_with_an_original_and_digest(self):
+        data = b"glTF\x02\x00\x00\x00model-fixture"
+        payload = self.post(files=[(
+            "file", ("scene.GLB", data, "application/octet-stream")
+        )]).json()
+        ref = payload["files"][0]
+        self.assertEqual((ref["kind"], ref["mime"]), ("model", "model/gltf-binary"))
+        served = self.client.get(ref["urls"]["original"])
+        self.assertEqual(served.status_code, 200)
+        self.assertEqual(served.content, data)
+        self.assertTrue(served.headers["content-type"].startswith("model/gltf-binary"))
+        line = self.db.list_messages("line")[-1]["body"]
+        self.assertTrue(line.startswith("🧊 scene.GLB · model/gltf-binary · "), line)
+        self.assertIn(f"/api/media/{ref['id']}/original", line)
+
     def test_a_txt_is_kind_file(self):
         ref = self.post(files=[("file", ("notes.txt", txt(), "text/plain"))]).json()["files"][0]
         self.assertEqual(ref["kind"], "file")

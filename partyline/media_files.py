@@ -12,6 +12,10 @@ from .media_images import Derived, MediaError, prepared_image, sniffed_format
 
 MAX_FILES_PER_POST = 6
 MAX_FILE_BYTES = 100 * 1024 * 1024
+MODEL_MIMES = {
+    ".glb": "model/gltf-binary",
+    ".gltf": "model/gltf+json",
+}
 
 
 @dataclass(frozen=True)
@@ -51,6 +55,9 @@ def _declared_mime(content_type: str | None) -> str | None:
 
 def resolved_mime(filename: str | None, content_type: str | None) -> str:
     """Resolve a MIME type with the sanitised filename taking precedence."""
+    model_mime = MODEL_MIMES.get(Path(filename or "").suffix.lower())
+    if model_mime:
+        return model_mime
     guessed, _ = mimetypes.guess_type(filename or "")
     return guessed or _declared_mime(content_type) or "application/octet-stream"
 
@@ -81,6 +88,8 @@ def _non_image(
         kind: FileKind = "audio"
     elif mime.startswith("video/"):
         kind = "video"
+    elif mime in MODEL_MIMES.values():
+        kind = "model"
     else:
         kind = "file"
     return PreparedFile(data, kind, filename, mime, _extension(filename, mime))
