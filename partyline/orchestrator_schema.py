@@ -89,4 +89,13 @@ MIGRATIONS += [
     # stall heuristic honours it instead of calling a waiting implementer stuck.
     "ALTER TABLE task_reviews ADD COLUMN wait_reason TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE task_reviews ADD COLUMN wait_until REAL",
+    # One row per ghost-mention incident already reported to the root captain;
+    # the (task, sender, handle) key keeps repeats of one incident quiet.
+    """CREATE TABLE IF NOT EXISTS task_ghost_mentions(
+        conv_id TEXT NOT NULL,
+        sender_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        created_at REAL NOT NULL,
+        PRIMARY KEY(conv_id, sender_id, name)
+    )""",
 ]

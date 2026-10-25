@@ -209,7 +209,8 @@ async def ring_workers(runtime, line_id: str, captain: dict) -> dict | None:
 
 
 async def hint_root_captain(runtime, conv_id: str, message: dict, unresolved: set[str]) -> None:
-    """Tell a task process whom to mention when its @name reached nobody."""
+    """Tell a task process whom to mention when its @name reached nobody, and
+    file the same once-per-handle incident notice the API refusal sends."""
     speaker = speaker_attachment(runtime.db, conv_id, message)
     root = task_root_captain(runtime.db, conv_id)
     if speaker is None or root is None or speaker["id"] == root["id"]:
@@ -225,6 +226,8 @@ async def hint_root_captain(runtime, conv_id: str, message: dict, unresolved: se
         f"to reach the root captain, mention @{root['name']}",
         audience=speaker["id"], route=False,
     )
+    from .task_ghost_mentions import report_ghost_incidents  # it imports this module
+    await report_ghost_incidents(runtime, conv_id, speaker, unresolved)
 
 
 async def relay_mentions(runtime, conv_id: str, message: dict, names: set[str]) -> set[str]:
