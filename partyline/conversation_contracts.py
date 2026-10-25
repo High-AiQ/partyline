@@ -27,6 +27,7 @@ class BlockedArchiveResponse(BaseModel):
 
     detail: str
     blockers: list[RetirementBlocker] = Field(default_factory=list)
+    required_flags: list[str] = Field(default_factory=list)
 
 
 class ConversationResponse(BaseModel):

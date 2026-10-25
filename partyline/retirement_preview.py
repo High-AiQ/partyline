@@ -78,6 +78,22 @@ def plan(db, principal, target, include_children, presence=None, recovery_prefix
             "include_children": include_children, "lines": lines}
 
 
+def required_flags(evidence):
+    """Every flag a forced retirement of this plan needs, named in the preview.
+
+    A captain reads them once here instead of learning one per refused call.
+    """
+    flags = {"force_discard"}
+    for line in evidence["lines"]:
+        if line["goal"]:
+            flags.add("clear_goal")
+        if line["children"]:
+            flags.add("include_children")
+        if any(att["status"] in ("starting", "running") for att in line["attachments"]):
+            flags.add("stop_processes")
+    return sorted(flags)
+
+
 def token(db, evidence):
     raw = json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()
     return hmac.new(signing_secret(db).encode(), raw, hashlib.sha256).hexdigest()
@@ -103,6 +119,7 @@ def preview(db, principal, target, include_children, presence=None):
         lines.append(row)
     return {"target": target, "include_children": include_children,
             "force_allowed": allowed, "preview_token": token(db, evidence), "lines": lines,
+            "required_flags": required_flags(evidence),
             "implications": "force_discard captures both the index and tracked/untracked working files "
             "in separate recovery refs and anchors each clean auxiliary HEAD before removal; "
             "ignored files are lost. Uploads/messages and dirty auxiliary worktrees are retained; "
