@@ -977,7 +977,8 @@ remains the default. A child cannot be an orchestrator, and style cannot change
 while children exist. The root's `default_review_policy` defaults to `captain`;
 it may also be `none` or an exact reviewer preset name.
 
-An orchestrator creates tasks through `create_task(name, goal, implementer, review)`.
+An orchestrator creates tasks through `create_task(name, goal, implementer, review)`. The goal is capped at 3000 characters, so a detailed brief is a
+committed file that the goal names: see `docs/task-briefs.md`.
 The server creates each task line in a managed worktree, attaches exactly one
 implementer from the named preset and briefs it. Direct attach, including the
 shared-branch override, cannot add an implementer. Task lines have no subcaptain
@@ -1070,8 +1071,12 @@ Task processes are named after their task, never their preset: the implementer i
 of the task line's id (lengthened if a handle in the tree already uses it) and is stored
 on the task row. The preset lives on the attachment's `preset` column, so cards and
 staffing still show it. Tasks created before this keep their old handles. The root captain
-or a person messages a task's workers by id with `message_task(conv_id, text, to)` (`POST
-…/task/message`, 409 when that worker is not live) instead of @mentioning a handle, and a
+or a person messages a task's workers with `message_task(conv_id, text, to)` (`POST
+…/task/message`, 409 when that worker is not live) instead of @mentioning a handle. The
+`conv_id` may also be the task's tag, its `impl-`/`review-` handle, or its line name; a name
+matching two tasks is refused with 409. The same names resolve for `resume_work`, `reopen_task`
+and the restart routes, and `detach_worker` and `appoint_lead` accept a process handle such
+as `impl-48da9d` on the target line in place of an attachment id. A
 root-captain mention in a task line of a process on a different task line is held back with
 a private notice naming this line's handles.
 

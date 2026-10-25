@@ -47,16 +47,13 @@ def execute(client, op, args, state):
         return reports(client, state, args)
     if op == "detach_worker":
         conv = args.get("conv_id")
-        target = _target(client, state, conv, ("close",))
-        _check_lead(state)
-        if not target:
-            raise ApiError("captain is not authorized for that target line")
-        att = args.get("attachment_id")
-        if not isinstance(att, str) or not att:
+        _target(client, state, conv, ("close",))
+        ref = args.get("attachment_id")
+        if not isinstance(ref, str) or not ref:
             raise ValueError("attachment_id is required")
-        detail = client.request("GET", f"/api/conversations/{quote(conv, safe='')}")
-        rows = detail.get("attachments", []) if isinstance(detail, dict) else []
-        if not any(isinstance(row, dict) and row.get("id") == att for row in rows):
+        rows = _attachment_rows(client, conv)
+        att = _resolve_handle(rows, ref)
+        if not any(row.get("id") == att for row in rows):
             raise ApiError("attachment is not on the authorized target line")
         return client.request("DELETE", f"/api/attachments/{quote(att, safe='')}")
     if op == "retirement_preview":
@@ -127,8 +124,36 @@ def execute(client, op, args, state):
         return _decide_write_set(client, state, args)
     action, method, tail = paths[op]
     _target(client, state, conv, (action,))
+    if op == "appoint_lead" and args.get("attachment_id"):
+        args = {**args, "attachment_id": _resolve_handle(_attachment_rows(client, conv),
+                                                          args["attachment_id"])}
     body = _body(op, args)
     return client.request(method, _path(conv, tail), body)
+
+
+_HANDLE_STATUSES = ("starting", "running", "idle")
+
+
+def _attachment_rows(client, conv):
+    """The attachments on one target line, as the server lists them."""
+    detail = client.request("GET", f"/api/conversations/{quote(conv, safe='')}")
+    rows = detail.get("attachments", []) if isinstance(detail, dict) else []
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def _resolve_handle(rows, ref):
+    """An attachment id, or a process handle such as ``impl-48da9d`` naming a live row.
+
+    An id, or a handle no live row carries, comes back unchanged for the caller to judge.
+    """
+    if any(row.get("id") == ref for row in rows):
+        return ref
+    named = [row["id"] for row in rows
+             if row.get("name") == ref and row.get("status") in _HANDLE_STATUSES]
+    if len(named) > 1:
+        raise ApiError(f"handle {ref} names {len(named)} live attachments on that line; "
+                       "pass an attachment id")
+    return named[0] if named else ref
 
 
 def _body(op, args):

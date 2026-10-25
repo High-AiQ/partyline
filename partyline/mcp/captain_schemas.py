@@ -21,14 +21,16 @@ def schema(name):
             "adapter": text("Exact adapter id.", 80, 1), "command": text("Optional command.", 2000),
             "preset_name": text("Optional exact preset name; read-only match.", 32),
             "allow_shared_branch": {"type": "boolean"}}, ["conv_id", "name", "adapter"]),
-        "detach_worker": obj({**line, "attachment_id": text("Attachment id.", 80)},
-                              ["conv_id", "attachment_id"]),
+        "detach_worker": obj({**line, "attachment_id": text(
+            "Attachment id, or a process handle on that line such as impl-48da9d.", 80)},
+            ["conv_id", "attachment_id"]),
         "create_child": obj({**line, "name": text("Child line name.", 120),
             "goal": text("Child goal.", 3000), "topic": text("Child context.", 20000),
             "base": {"type": "string", "enum": ["checkout", "upstream"]},
             "repository": text("Optional repository path.", 4096)}, ["conv_id", "name"]),
-        "appoint_lead": obj({**line, "attachment_id": text("Lead attachment id; empty clears lead.", 80)},
-                              ["conv_id", "attachment_id"]),
+        "appoint_lead": obj({**line, "attachment_id": text(
+            "Lead attachment id or handle on that line; empty clears lead.", 80)},
+            ["conv_id", "attachment_id"]),
         "retirement_preview": obj({**line, "include_children": {"type": "boolean"}}, ["conv_id"]),
         "retire_child": obj({"conv_id": text("Child id; root captains may target any strict descendant.", 80),
             **{key: {"type": "boolean"} for key in

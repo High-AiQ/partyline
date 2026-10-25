@@ -42,7 +42,8 @@ def tool_list(state):
             schema = {'type': 'object', 'properties': {'conv_id': {'type': 'string', 'minLength': 1}},
                       'required': ['conv_id'], 'additionalProperties': False}
         if name in ('reopen_task', 'message_task'):
-            schema['properties']['conv_id'] = {'type': 'string', 'minLength': 1}
+            schema['properties']['conv_id'] = {'type': 'string', 'minLength': 1, 'description': (
+                'Task line id, or the task tag, impl-/review- handle, or line name.')}
             schema['required'] = [*schema.get('required', []), 'conv_id']
         if name == 'resume_work' and state.get('is_lead'):
             schema['properties']['conv_id'] = {'type': 'string', 'minLength': 1}
