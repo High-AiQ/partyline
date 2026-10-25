@@ -18,6 +18,7 @@ from .worktree_paths import branch_name
 from .review_worktrees import ReviewError
 from .task_review_checkout import move_task_review_worktrees
 from .orchestrator_notices import handed_to, report, spawn_refused, tell
+from .orchestrator_sha_check import flag
 from .orchestrator_revive import (
     brief_reviewer, reviewer_is_live, revive_reviewer, staffed_by_preset, task_lock)
 from .orchestrator_handles import pick_tag
@@ -65,7 +66,14 @@ async def create_task(runtime, actor, root_id, body):
                'you change); never push. '
                'Call request_review(sha, what, where) when ready. The server owns review staffing.')
     await runtime.broadcast_all(ConversationsChangedEvent())
-    return task(db, conv_id)
+    row = task(db, conv_id)
+    # The task folder already holds a worktree of every repository under the
+    # captain's folder; the review entry waits for one, so say so now.
+    if not row['repositories']:
+        row['repositories'] = [
+            {'repository': item['repository'], 'sha': item['base_sha'], 'path': item['path']}
+            for item in workspaces(db, conv_id)]
+    return row
 
 
 async def request_review(runtime, actor, conv_id, body):
@@ -135,6 +143,7 @@ async def request_review(runtime, actor, conv_id, body):
             handed_to(runtime, row['implementer_id'], reviewer['id'])
         await report(runtime, row)
         await runtime.broadcast_all(ConversationsChangedEvent())
+        await flag(runtime, row, f"{body.what} {body.where}")
         return task(db, conv_id)
 
 
@@ -159,5 +168,6 @@ async def review_verdict(runtime, actor, conv_id, body):
                    'Address these findings, then call request_review again.',
                    source=(actor.attachment_id, actor.conv_id))
         handed_to(runtime, actor.attachment_id, row['implementer_id'])
+        await flag(runtime, row, body.findings)
     await runtime.broadcast_all(ConversationsChangedEvent())
     return task(db, conv_id)
