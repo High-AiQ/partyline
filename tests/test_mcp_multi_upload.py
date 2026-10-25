@@ -132,7 +132,7 @@ class MCPMultiUploadTests(roundtrip.MCPUploadRoundtripTests):
         args = {"paths": paths, "client_key": "auth"}
         with self.assertRaisesRegex(ApiError, "not authorized"):
             tools_core.call(client, "upload_files", args, {"actions": ["read"]})
-        with self.assertRaisesRegex(ValueError, "cannot post free prose"):
+        with self.assertRaisesRegex(ValueError, "omit body or pass another conv_id"):
             tools_core.call(client, "upload_files", {**args, "body": "caption"},
                             {"actions": ["write"]})
         with self.assertRaisesRegex(ApiError, "HTTP 403"):
