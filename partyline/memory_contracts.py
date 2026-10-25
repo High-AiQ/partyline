@@ -42,14 +42,19 @@ class MemoryUsageEvent(BaseModel):
     """Best-effort memory reading for one live attachment.
 
     ``usage_bytes`` is the advisory working set — ``memory.current`` minus
-    reclaimable file cache — and ``raw_bytes`` keeps the raw
-    ``memory.current`` beside it, so nothing hides behind the working set.
+    file pages other than ``shmem``, clamped to at least ``anon`` — and
+    ``raw_bytes`` keeps the raw ``memory.current`` beside it. ``anon_bytes``,
+    ``kernel_bytes``, and ``file_bytes`` expose the raw-total breakdown when
+    available.
     """
     type: Literal["memory_usage"] = "memory_usage"
     attachment_id: str
     usage_bytes: int
     cap_bytes: int
     raw_bytes: int | None = None
+    anon_bytes: int | None = Field(default=None, ge=0)
+    file_bytes: int | None = Field(default=None, ge=0)
+    kernel_bytes: int | None = Field(default=None, ge=0)
     percent: int
 
 

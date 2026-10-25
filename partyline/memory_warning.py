@@ -89,8 +89,19 @@ async def tmpfs_note_for(tmp_dir: str, shmem: int) -> str | None:
     return tmpfs_note(shmem, tmp_dir, largest, on)
 
 
+def format_usage_breakdown(sample: dict | None) -> str:
+    """Show the raw total and its stat split without charging cache to the budget."""
+    keys = ("current", "anon", "file", "kernel_total")
+    if sample is None or not all(isinstance(sample.get(key), int) for key in keys):
+        return ""
+    current, anonymous, cache, kernel = (format_memory_bytes(sample[key]) for key in keys)
+    return (f" The scope has {current} in use ({anonymous} anonymous + {kernel} kernel, "
+            f"{cache} file cache, reclaimable).")
+
+
 def warning_text(row: dict, usage: int, cap: int, *, own: bool = False,
-                 top: list[dict] | None = None, tmp_note: str = "") -> str:
+                 top: list[dict] | None = None, tmp_note: str = "",
+                 sample: dict | None = None) -> str:
     """Build the warning; ``own`` words it for the process that is near its cap.
 
     ``top`` names the largest descendants (see ``top_processes``); both
@@ -110,14 +121,17 @@ def warning_text(row: dict, usage: int, cap: int, *, own: bool = False,
     tmp = f" {tmp_note}" if tmp_note else ""
     used = (f"{format_memory_bytes(usage)} of {'your' if own else 'its'} {format_memory_bytes(cap)} "
             f"per-process memory budget ({percent}%)")
+    breakdown = format_usage_breakdown(sample)
     if own:
         fate = cap_enforcement(sys.platform, cap)
-        return (f"⚠ {row['name']}, you are using {used}.{guilty}{tmp} {fate} Commit or save your work "
-                "now, then find and stop what is growing (a build, test run, or cache). If "
+        return (f"⚠ {row['name']}, you are using {used}.{breakdown}{guilty}{tmp} {fate} "
+                "Commit or save your work now, then find and stop what is growing "
+                "(a build, test run, or cache). If "
                 "the work genuinely needs more, file a request with a reason for a person to "
                 f"approve: {request_hint}")
     clamp = (cap_enforcement(sys.platform, cap) + " "
              if sys.platform.startswith("linux") and backstop_bytes(cap) <= cap else "")
-    return (f"⚠ {row['name']} is using {used}.{guilty}{tmp} {clamp}It has been told to save its work. "
-            "As its captain, decide now: have it cut what is growing, or file a justified higher "
+    return (f"⚠ {row['name']} is using {used}.{breakdown}{guilty}{tmp} {clamp}"
+            "It has been told to save its work. As its captain, decide now: have it cut "
+            "what is growing, or file a justified higher "
             f"budget for a person to approve, and tell the person which you chose. {request_hint}")

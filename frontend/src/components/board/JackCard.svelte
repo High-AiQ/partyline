@@ -1,5 +1,6 @@
 <script lang="ts">
   import { hue } from "../../lib/markdown";
+  import { memoryLabel } from "../../lib/memory";
   import { tooltip } from "../../lib/tooltip";
   import {
     isLive,
@@ -173,12 +174,7 @@
       aria-valuemin="0"
       aria-valuemax="100"
       aria-valuenow={attachment.memory_percent}
-      use:tooltip={{
-        label:
-          attachment.memory_raw_bytes != null
-            ? `${String(Math.round(attachment.memory_usage_bytes / 1024 ** 2))} MiB working set of ${String(Math.round(attachment.memory_cap_bytes / 1024 ** 2))} MiB (raw ${String(Math.round(attachment.memory_raw_bytes / 1024 ** 2))} MiB)`
-            : `${String(Math.round(attachment.memory_usage_bytes / 1024 ** 2))} MiB of ${String(Math.round(attachment.memory_cap_bytes / 1024 ** 2))} MiB`,
-      }}
+      use:tooltip={{ label: memoryLabel(attachment) }}
     >
       <div
         class="h-full rounded-full bg-green"

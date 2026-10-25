@@ -89,6 +89,9 @@ def attach_memory_usage(
         payload.update({
             "memory_usage_bytes": memory_usage.get("usage_bytes"),
             "memory_raw_bytes": memory_usage.get("raw_bytes"),
+            "memory_anon_bytes": memory_usage.get("anon_bytes"),
+            "memory_file_bytes": memory_usage.get("file_bytes"),
+            "memory_kernel_bytes": memory_usage.get("kernel_bytes"),
             "memory_cap_bytes": memory_usage.get("cap_bytes"),
             "memory_percent": memory_usage.get("percent"),
         })
