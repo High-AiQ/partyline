@@ -49,6 +49,22 @@ class FilePreparationTest(unittest.TestCase):
                 prepared = files.prepared_file(upload)
                 self.assertEqual((prepared.kind, prepared.mime), (kind, mime))
 
+    def test_model_extensions_have_canonical_os_independent_kind_and_mime(self):
+        cases = (
+            ("scene.glb", "model/gltf-binary", "glb"),
+            ("scene.GLB", "model/gltf-binary", "glb"),
+            ("scene.gltf", "model/gltf+json", "gltf"),
+            ("scene.GLTF", "model/gltf+json", "gltf"),
+        )
+        with mock.patch.object(
+            files.mimetypes, "guess_type", return_value=("application/x-wrong", None)
+        ):
+            for filename, mime, ext in cases:
+                with self.subTest(filename=filename):
+                    prepared = files.prepared_file((b"model", filename, "text/plain"))
+                    self.assertEqual((prepared.kind, prepared.mime, prepared.ext),
+                                     ("model", mime, ext))
+
     def test_declared_image_mime_does_not_make_opaque_bytes_an_image(self):
         prepared = files.prepared_file((b"not png", "fake.png", "image/png"))
         self.assertEqual(prepared.kind, "file")

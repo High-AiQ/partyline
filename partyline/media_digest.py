@@ -1,8 +1,8 @@
 """Durable digest lines for files posted on a line.
 
 Agents read these as the message body; humans see them stripped in the feed.
-The image line is the historical three-tier form. Audio, video, and generic
-files carry kind, mime, size, and the original URL. Every image URL is
+The image line is the historical three-tier form. Audio, video, models, and
+generic files carry kind, mime, size, and the original URL. Every image URL is
 labelled with the format actually served, so a process knows what it can
 decode before it spends a fetch.
 """
@@ -16,6 +16,7 @@ _PREFIX: dict[FileKind, str] = {
     "image": "📷",
     "audio": "🎵",
     "video": "🎬",
+    "model": "🧊",
     "file": "📎",
 }
 

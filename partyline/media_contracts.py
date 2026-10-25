@@ -10,7 +10,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-FileKind = Literal["image", "audio", "video", "file"]
+FileKind = Literal["image", "audio", "video", "model", "file"]
 
 
 class ImageVariant(BaseModel):

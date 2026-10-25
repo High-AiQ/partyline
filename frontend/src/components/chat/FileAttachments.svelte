@@ -9,6 +9,8 @@
   import { authenticatedResourceUrl } from "../../lib/socket-auth";
   import type { FileRef } from "../../lib/contracts";
   import { tooltip } from "../../lib/tooltip";
+  import { isModelFile } from "../../lib/model-files";
+  import ModelAttachment from "./ModelAttachment.svelte";
 
   interface Props {
     files: FileRef[];
@@ -60,6 +62,8 @@
           >{fileLabel(file, index)} · {file.mime} · {humanSize(file.bytes)}</span
         >
       </div>
+    {:else if isModelFile(file)}
+      <ModelAttachment {file} {index} />
     {:else}
       <div
         class="card grid items-center gap-2.5 overflow-hidden rounded-md border border-line bg-ink-2 px-2.5 py-2 [grid-template-columns:24px_minmax(0,1fr)_auto_auto]"
