@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from partyline.db import Db
+from partyline.cgroup_sample import read_cgroup_sample
 from partyline.attachment_tmp import attachment_tmp_dir
 from partyline.legacy_tmp import reap_pytest_under
 from partyline.memory_sampler import (
@@ -87,15 +88,24 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
                         self.assertNotIn('nothing stops you there', text)
 
     async def test_cache_heavy_usage_reclaims_then_stays_silent(self):
-        """File cache over the threshold with a healthy working set: the
-        sampler reclaims the difference and posts no "decide now" notice."""
+        """Mostly active file cache must not warn: the old inactive-only
+        working set would be 800 MiB, over the 80% threshold."""
         import tempfile as tempfile_module
 
         scope = Path(tempfile_module.mkdtemp())
-        sample_one = {"root": str(scope), "current": 900 * 1024**2,
-                      "peak": None, "working_set": 100 * 1024**2}
-        sample_two = {"root": str(scope), "current": 850 * 1024**2,
-                      "peak": None, "working_set": 90 * 1024**2}
+        mib = 1024**2
+        (scope / "memory.current").write_text(f"{900 * mib}\n")
+        (scope / "memory.stat").write_text(
+            f"anon {100 * mib}\nfile {800 * mib}\n"
+            f"active_file {700 * mib}\ninactive_file {100 * mib}\n",
+        )
+        sample_one = read_cgroup_sample(str(scope))
+        (scope / "memory.current").write_text(f"{850 * mib}\n")
+        (scope / "memory.stat").write_text(
+            f"anon {90 * mib}\nfile {760 * mib}\n"
+            f"active_file {680 * mib}\ninactive_file {80 * mib}\n",
+        )
+        sample_two = read_cgroup_sample(str(scope))
         runtime = ChatRuntime(self.db)
         runtime.live["worker"] = SimpleNamespace(proc=SimpleNamespace(pid=123))
         runtime.deliver_pending = AsyncMock(return_value=True)
@@ -119,6 +129,9 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([], self.db.list_messages("line"))
         self.assertEqual(runtime.memory_usage["worker"]["raw_bytes"],
                          850 * 1024**2)
+        self.assertEqual(runtime.memory_usage["worker"]["usage_bytes"], 90 * 1024**2)
+        self.assertEqual(runtime.memory_usage["worker"]["anon_bytes"], 90 * 1024**2)
+        self.assertEqual(runtime.memory_usage["worker"]["file_bytes"], 760 * 1024**2)
 
     async def test_anon_heavy_usage_warns_on_the_working_set(self):
         gib = 1024**3
@@ -126,9 +139,15 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
         runtime.live["worker"] = SimpleNamespace(
             att=self.db.get_attachment("worker"), proc=SimpleNamespace(pid=123))
         runtime.deliver_pending = AsyncMock(return_value=True)
-        sample = {"root": str(Path(self.temp.name, "scope")),
-                  "current": 980 * 1024**2, "peak": None,
-                  "working_set": 960 * 1024**2}  # all anonymous: reclaim is futile
+        scope = Path(self.temp.name, "scope")
+        scope.mkdir()
+        mib = 1024**2
+        (scope / "memory.current").write_text(f"{980 * mib}\n")
+        (scope / "memory.stat").write_text(
+            f"anon {950 * mib}\nfile {20 * mib}\n"
+            f"active_file 0\ninactive_file {20 * mib}\nkernel {10 * mib}\n",
+        )
+        sample = read_cgroup_sample(str(scope))  # mostly anonymous: reclaim is futile
 
         class StopSampling(Exception):
             pass
@@ -147,8 +166,13 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
         runtime.deliver_pending.assert_awaited_once()
         text = self.db.list_messages("line")[-1]["body"]
         self.assertIn("memory budget (93%)", text)
+        self.assertIn("980 MiB in use (950 MiB anonymous + 10 MiB kernel, "
+                      "20 MiB file cache, reclaimable)", text)
         self.assertEqual(runtime.memory_usage["worker"]["raw_bytes"],
                          980 * 1024**2)
+        self.assertEqual(runtime.memory_usage["worker"]["anon_bytes"], 950 * 1024**2)
+        self.assertEqual(runtime.memory_usage["worker"]["file_bytes"], 20 * 1024**2)
+        self.assertEqual(runtime.memory_usage["worker"]["kernel_bytes"], 10 * 1024**2)
 
     async def test_a_failed_reclaim_falls_back_to_the_working_set_decision(self):
         gib = 1024**3

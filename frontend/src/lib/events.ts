@@ -177,6 +177,9 @@ export const MemoryUsageEventSchema = z.object({
   usage_bytes: z.number().int().nonnegative(),
   cap_bytes: z.number().int().positive(),
   raw_bytes: z.number().int().nonnegative().nullable().optional(),
+  anon_bytes: z.number().int().nonnegative().nullable().optional(),
+  file_bytes: z.number().int().nonnegative().nullable().optional(),
+  kernel_bytes: z.number().int().nonnegative().nullable().optional(),
   percent: z.number().int().min(0).max(100),
 });
 export const ResourcesEventSchema = z.object({

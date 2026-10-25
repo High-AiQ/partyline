@@ -81,13 +81,23 @@ describe("JackCard badge treatments", () => {
   it("shows a thin advisory memory meter for a sampled live process", async () => {
     const card = mountCard({
       memory_usage_bytes: 3 * 1024 ** 3,
+      memory_raw_bytes: 4 * 1024 ** 3,
+      memory_anon_bytes: 2 * 1024 ** 3,
+      memory_file_bytes: 1024 ** 3,
+      memory_kernel_bytes: 1024 ** 3,
       memory_cap_bytes: 4 * 1024 ** 3,
       memory_percent: 75,
     });
+    await tick();
     try {
       const meter = document.querySelector('[role="meter"][aria-label="memory usage"]');
       expect(meter?.getAttribute("aria-valuenow")).toBe("75");
       expect(meter?.firstElementChild?.getAttribute("style")).toContain("75%");
+      const describedBy = meter?.getAttribute("aria-describedby");
+      const label = describedBy ? document.getElementById(describedBy)?.textContent : "";
+      expect(label).toContain("4096 MiB in use");
+      expect(label).toContain("2048 MiB anonymous + 1024 MiB kernel");
+      expect(label).toContain("1024 MiB file cache, reclaimable");
     } finally {
       await unmount(card);
     }
