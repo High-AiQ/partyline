@@ -16,6 +16,7 @@ from __future__ import annotations
 from fastapi import HTTPException, Request
 
 from .auth_guard import request_principal
+from .contracts import ApprovalsChangedEvent
 from .machine_scope import is_human
 from .hierarchy import ancestors, lead_attachment, subtree_conversation_ids
 from .system_notice import post_system_notice
@@ -126,6 +127,12 @@ def pending_approval_rows(db, conv_id: str, runtime=None) -> list[dict]:
         item["line"] = conv["name"] if conv else item["conv_id"]
         found.append(item)
     return found
+
+
+async def broadcast_approval_change(runtime, conv_id: str) -> None:
+    """Invalidate the pending-approval list on the origin and every ancestor."""
+    for line_id in (conv_id, *ancestors(runtime.db, conv_id)):
+        await runtime.broadcast(line_id, ApprovalsChangedEvent())
 
 
 def register_approval_routes(app, runtime) -> None:
