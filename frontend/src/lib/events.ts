@@ -141,6 +141,11 @@ export const ConversationsChangedEventSchema = z.object({
   type: z.literal("conversations_changed"),
 });
 
+export const ApprovalsChangedEventSchema = z.object({
+  type: z.literal("approvals_changed"),
+});
+export type ApprovalsChangedEvent = z.infer<typeof ApprovalsChangedEventSchema>;
+
 export const RestartRequestEventSchema = z.object({
   type: z.literal("restart_request"),
   request: z
@@ -199,6 +204,7 @@ const CurrentWireEventSchema = z.discriminatedUnion("type", [
   ShutdownEventSchema,
   ReattachOfferEventSchema,
   ReattachDecisionEventSchema,
+  ApprovalsChangedEventSchema,
   RestartRequestEventSchema,
   WriteSetGrantRequestEventSchema,
   MemoryRequestEventSchema,

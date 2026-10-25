@@ -11,7 +11,7 @@ import os
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -210,6 +210,37 @@ class ApprovalBubbleTest(unittest.TestCase):
         self.assertIn("/api/conversations/grand/write-set/request/", approve_paths[0])
         self.assertTrue(approve_paths[1].startswith("/api/memory-requests/"))
         self.assertTrue(all(row["decline"] for row in rows))
+
+    def test_approvals_endpoint_lists_descendants_on_every_ancestor(self):
+        self.file_memory()
+        for conv_id in ("root", "kid"):
+            seen = self.client.get(f"/api/conversations/{conv_id}/approvals", headers=self.human)
+            self.assertEqual(seen.status_code, 200, seen.text)
+            rows = seen.json()["approvals"]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["kind"], "memory")
+            self.assertEqual(rows[0]["line"], "Grand")
+            self.assertEqual(rows[0]["request_id"], self.memory_request_id)
+            self.assertEqual(rows[0]["approve"], f"/api/memory-requests/{self.memory_request_id}/approve")
+
+    def test_approval_changes_notify_the_origin_and_every_ancestor(self):
+        broadcast = AsyncMock(wraps=self.runtime.broadcast)
+        with patch.object(self.runtime, "broadcast", broadcast):
+            self.file_write_set()
+            self.file_memory()
+            self.file_restart()
+            changed = [call for call in broadcast.call_args_list
+                       if call.args[1].type == "approvals_changed"]
+            self.assertEqual(len(changed), 9)  # three request kinds × three lines
+            self.assertEqual({call.args[0] for call in changed}, {"grand", "kid", "root"})
+
+            broadcast.reset_mock()
+            denied = self.client.delete(
+                f"/api/memory-requests/{self.memory_request_id}", headers=self.human)
+            self.assertEqual(denied.status_code, 200, denied.text)
+            changed = [call for call in broadcast.call_args_list
+                       if call.args[1].type == "approvals_changed"]
+            self.assertEqual([call.args[0] for call in changed], ["grand", "kid", "root"])
 
     def test_approvals_endpoint_is_people_only_and_covers_the_whole_subtree(self):
         # a request on the grandchild is visible from the root; decided ones drop out
