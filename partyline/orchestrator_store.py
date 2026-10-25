@@ -4,6 +4,8 @@ import json
 
 from fastapi import HTTPException
 
+from .task_workspaces import workspaces
+
 
 def _handle(db, ident):
     att = db.get_attachment(ident) if ident and hasattr(db, 'get_attachment') else None
@@ -30,9 +32,17 @@ def task(db, conv_id):
 
 
 def tasks(db, root_id):
-    return [_parsed(row, db) for row in db._exec(
+    rows = [_parsed(row, db) for row in db._exec(
         "SELECT * FROM task_reviews WHERE root_id=? ORDER BY created_at,conv_id",
         (root_id,)).fetchall()]
+    for record in rows:
+        # A new task's workspaces are its repositories (create_task says so);
+        # a reviewed task keeps the SHAs it was reviewed with.
+        if not record['repositories']:
+            record['repositories'] = [
+                {'repository': item['repository'], 'sha': item['base_sha'], 'path': item['path']}
+                for item in workspaces(db, record['conv_id'])]
+    return rows
 
 
 def all_tasks(db):

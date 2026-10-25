@@ -93,6 +93,19 @@ class PlainFolderTest(WorkspaceFixture):
         await self.review(sha=sha)
         self.assertEqual(self.row()['repositories'][0]['repository'], self.clones['argon-frontend'])
 
+    async def test_create_task_lists_the_workspaces_before_any_review(self):
+        self.umbrella(True)
+        row = await self.create('captain')
+        found = {item['repository']: item for item in row['repositories']}
+        self.assertEqual(sorted(found), sorted([self.top] + [self.clones[name] for name in CLONES]))
+
+    async def test_a_plain_folder_task_lists_its_clones_before_any_review(self):
+        self.umbrella(False)
+        row = await self.create('captain')
+        self.assertEqual(sorted(item['repository'] for item in row['repositories']),
+                         sorted(self.clones[name] for name in CLONES))
+        self.assertTrue(all(os.path.isdir(item['path']) for item in row['repositories']))
+
     async def test_the_tips_are_anchored_in_the_real_clones(self):
         self.umbrella(False)
         await self.create('captain')

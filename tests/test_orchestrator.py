@@ -43,6 +43,8 @@ class WorkflowTest(TaskFixture):
         self.assertFalse(allows(self.db, self.worker, self.conv_id, 'review_verdict'))
         selected = select_attachment_ids(self.db, self.runtime.live, lambda _: True, ['root', self.conv_id])
         self.assertIn(reviewer.attachment_id, selected)
+        listed = tasks(self.db, 'root')[0]['repositories']
+        self.assertEqual([item['sha'] for item in listed], [sha])
         duplicate = await self.request(sha)
         self.assertEqual(duplicate, row)
         changed = await review_verdict(self.runtime, reviewer, self.conv_id,
