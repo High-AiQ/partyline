@@ -183,6 +183,15 @@ guarded DELETE and merged-only `discard=true` behavior remain the default.
 First read `GET /api/conversations/<id>/retirement-preview?include_children=true` (omit the
 query for one line). It reports tracked/untracked/ignored paths and counts, unmerged SHAs
 and subjects, host and fenced tips, live processes, goals, descendants, uploads and assets.
+Its `required_flags` names every flag this plan needs — `force_discard` always, plus
+`include_children`, `stop_processes` and `clear_goal` when the plan holds child lines, live
+processes or an uncleared goal — so one response answers what to pass. A guarded refusal
+returns the same list beside its `blockers`, and a forced refusal names every missing flag
+in one `detail`; a caller never learns one flag per round trip.
+A tracked path that Git stores as a blob is the line's own content: a committed symlink such
+as `CLAUDE.md -> AGENTS.md` is accepted, even where the checkout holds a directory in its
+place. Untracked directories (including embedded repositories), submodule gitlinks and
+untracked special files are still refused as unsupported.
 Paths and history are displayed at most 100 entries each, with truncation markers. A plan
 is limited to 50 lines, 2,000 tracked/untracked dirty files and 256 MiB of those files across
 the tree. Ignored files have a separate metadata-only scan capped at 100,000 files and 4 GiB,
@@ -211,6 +220,12 @@ with a request to resolve or commit it first. Inspect either recovery tree with
 
 Retirement checks the whole selected subtree, then removes owned worktrees and host branch
 refs deepest first. Recovery refs remain; private fence mirror refs are also retained.
+A refused retirement has no side effects: every flag and every Git inspection runs before any
+process is stopped or worktree removed, so a 409 leaves the worktree, its files and its
+processes exactly as they were. A host branch a task's own preservation has already advanced
+to the line's accepted tip is no longer the unchanged ref inspection found: retirement keeps
+it beside the recovery refs instead of deleting it, rather than failing after the worktree is
+already gone.
 Explicit stopping may interrupt mid-turn work, but an unconfirmed stop refuses deletion.
 State is checked after snapshots and process stops. During execution this server refuses new
 Partyline writes, staffing, acceptance and child creation on selected lines. These guards

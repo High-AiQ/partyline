@@ -23,7 +23,7 @@ from .hierarchy import descendants
 from .line_process_routes import detach_attachment, live_attachments, mid_turn_blocker
 from .line_subtree import archive_line, archive_subtree
 from .machine_scope import deny_unless, is_human
-from .retirement import archive_blockers
+from .retirement import archive_blockers, required_flags
 from .review_worktrees import prune_review_worktrees
 from .scratch_worktrees import prune_scratch_worktrees
 from .attachment_tmp import reap_line_tmp
@@ -110,7 +110,9 @@ def register_archive_route(app: FastAPI, presence):
         if blockers:
             summary = "; ".join(blocker["message"] for blocker in blockers)
             return JSONResponse(
-                status_code=409, content={"detail": summary, "blockers": blockers}
+                status_code=409,
+                content={"detail": summary, "blockers": blockers,
+                         "required_flags": required_flags(blockers)},
             )
         clear_ids = ([conv_id, *descendants(db, conv_id, include_archived=False)]
                      if include_children else [conv_id])

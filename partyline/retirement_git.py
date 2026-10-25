@@ -21,6 +21,7 @@ MAX_IGNORED_BYTES = 4 * 1024 * 1024 * 1024
 HASH_BYTES = 1024 * 1024
 MAX_HASH_BYTES = 16 * 1024 * 1024
 DISPLAY = 100
+BLOB_MODES = ("100644", "100755", "120000")
 
 
 def git(cwd, *args):
@@ -37,8 +38,35 @@ def _paths(cwd, *args):
     return [p for p in git(cwd, *args).split('\0') if p]
 
 
-def file_evidence(cwd, paths, *, ignored=False):
-    """Hash small dirty files; large files use lstat identity and timestamps."""
+def tracked_modes(cwd):
+    """``path -> index mode``; a checkout may hold something else at a tracked path."""
+    modes = {}
+    for entry in git(cwd, "ls-files", "-s", "-z").split('\0'):
+        if entry:
+            meta, _, path = entry.partition('\t')
+            modes[path] = meta.split(' ', 1)[0]
+    return modes
+
+
+def _tracked_blob(path, modes):
+    """The mode when Git itself tracks ``path`` as a blob (a file or a symlink).
+
+    Git reports a directory as ``dir/`` and a checkout can hold a directory where
+    a tracked symlink used to be, so both spellings resolve to the tracked path.
+    """
+    mode = (modes or {}).get(path) or (modes or {}).get(path.rstrip('/'))
+    return mode if mode in BLOB_MODES else None
+
+
+def file_evidence(cwd, paths, *, ignored=False, tracked=None):
+    """Hash small dirty files; large files use lstat identity and timestamps.
+
+    A path Git tracks as a blob is accepted whatever the checkout holds at it: a
+    committed symlink replaced by a directory (or Git's ``dir/`` spelling of an
+    ignored directory) is the line's own tracked content, not an unsafe file.
+    Genuinely unsafe working-tree entries stay refused: an untracked directory,
+    FIFO, socket, device or submodule carries bytes no bounded evidence covers.
+    """
     evidence, total, hashed = [], 0, 0
     file_limit = MAX_IGNORED_FILES if ignored else MAX_FILES
     byte_limit = MAX_IGNORED_BYTES if ignored else MAX_BYTES
@@ -62,6 +90,8 @@ def file_evidence(cwd, paths, *, ignored=False):
                 with open(full, 'rb') as stream:
                     row.append(hashlib.sha256(stream.read(HASH_BYTES + 1)).hexdigest())
                 hashed += info.st_size
+        elif (mode := _tracked_blob(path, tracked)):
+            row.extend(["tracked", mode])
         else:
             raise HTTPException(409, "retirement contains unsupported file type")
         evidence.append(row)
@@ -92,8 +122,9 @@ def inspect_git(db, conv):
     tracked.update(_paths(cwd, "diff", "--cached", "--name-only", "-z"))
     untracked = _paths(cwd, "ls-files", "--others", "--exclude-standard", "-z")
     ignored = _paths(cwd, "ls-files", "--others", "--ignored", "--exclude-standard", "-z")
-    files, size = file_evidence(cwd, tracked | set(untracked))
-    ignored_files, ignored_size = file_evidence(cwd, set(ignored), ignored=True)
+    modes = tracked_modes(cwd)
+    files, size = file_evidence(cwd, tracked | set(untracked), tracked=modes)
+    ignored_files, ignored_size = file_evidence(cwd, set(ignored), ignored=True, tracked=modes)
     index_path = git(cwd, "rev-parse", "--path-format=absolute", "--git-path", "index").strip()
     index, _ = file_evidence(os.path.dirname(index_path), [os.path.basename(index_path)])
     return {"cwd": cwd, "root": root, "branch": branch, "head": head,
