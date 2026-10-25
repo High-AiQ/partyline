@@ -20,6 +20,7 @@ from .mention_relay import (
     task_root_captain,
 )
 from .orchestrator_store import task
+from .task_ghost_mentions import report_detached
 
 logger = logging.getLogger(__name__)
 GONE = ("detached", "exited")
@@ -31,13 +32,13 @@ async def route_fallbacks(runtime, conv_id: str, message: dict, names: set[str])
     row = task(runtime.db, conv_id)
     if row is None or message.get("sender_type") == "system" or not names:
         return set()
-    handled = await _own_staff(runtime, conv_id, row, names)
+    handled = await _own_staff(runtime, conv_id, row, message, names)
     if message.get("sender_type") == "agent" and not is_foreign(message):
         handled |= await _former_captain(runtime, conv_id, row, message, names - handled)
     return handled
 
 
-async def _own_staff(runtime, conv_id: str, row: dict, names: set[str]) -> set[str]:
+async def _own_staff(runtime, conv_id: str, row: dict, message: dict, names: set[str]) -> set[str]:
     handled: set[str] = set()
     for role in ("reviewer", "implementer"):
         att = runtime.db.get_attachment(row[f"{role}_id"]) if row[f"{role}_id"] else None
@@ -52,6 +53,7 @@ async def _own_staff(runtime, conv_id: str, row: dict, names: set[str]) -> set[s
                 f"it will read this when revived — the root captain revives it with {RESTART[role]}")
         await runtime.post_message(
             conv_id, "system", "system", f"⚠ @{att['name']} is {att['status']}; {tail}")
+        await report_detached(runtime, conv_id, message, att["name"])
     return handled
 
 

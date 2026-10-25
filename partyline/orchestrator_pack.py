@@ -51,6 +51,9 @@ def task_pack(db, conv_id, role):
         f"{_root_sentence(db, conv_id, row['root_id'])}"
         f"{_workspace_sentence(db, conv_id, role)}"
         'The implementer follows the assigned goal and calls request_review(sha, what, where). '
+        'request_review is the hand-off: the server staffs the reviewer and notifies it — '
+        'never @mention review-<tag>/impl-<tag> handles, your task, or its line name, '
+        'because a handle with no live process reaches nobody. '
         'If blocked, call blocked(reason); the server notifies the root. '
         'While a long command runs, call waiting(reason, seconds); the server will not call you '
         'stalled while that wait is live. '
