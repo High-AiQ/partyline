@@ -20,6 +20,7 @@ DETACH_STOP_TIMEOUT = 2.5
 DETACH_LOCK_TIMEOUT = 0.5
 DETACH_DB_TIMEOUT = 0.5
 DETACH_BROADCAST_TIMEOUT = 0.5
+DETACH_CONFIRM_TIMEOUT = 3.0
 logger = logging.getLogger(__name__)
 
 
@@ -63,6 +64,27 @@ def _revive_hint(db, att_id: str) -> str:
             if row['status'] == 'in_review' and staffed_by_preset(row) else "")
 
 
+async def _await_confirmation(probe) -> bool:
+    """Poll with doubling backoff: a stop can land after its stop call ends."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + DETACH_CONFIRM_TIMEOUT
+    delay = 0.05
+    while not probe():
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            return False
+        await asyncio.sleep(min(delay, remaining))
+        delay *= 2
+    return True
+
+
+async def _stop_confirmed(adapter, stop_error) -> bool:
+    """A failed stop still counts once the signalled group is observed dead."""
+    return stop_error is None or await _await_confirmation(
+        lambda: _process_group_stopped(adapter)
+    )
+
+
 async def detach_attachment(runtime, att_id: str, *, survivors: bool = True, hint: bool = False) -> dict:
     """Run the one-jack detach transaction used by both REST commands."""
     lock = runtime.resume_locks.setdefault(att_id, asyncio.Lock())
@@ -75,6 +97,14 @@ async def detach_attachment(runtime, att_id: str, *, survivors: bool = True, hin
         if not att:
             raise HTTPException(404)
         adapter = runtime.live.get(att_id)
+        if adapter is None and att["status"] in LIVE:
+            # A stop that popped its adapter may not have written the row yet.
+            def settled():
+                row = runtime.db.get_attachment(att_id)
+                return row is None or row["status"] not in LIVE
+            if await _await_confirmation(settled):
+                att = runtime.db.get_attachment(att_id) or att
+                adapter = runtime.live.get(att_id)
         runtime_owner = adapter.att.get("runtime_owner") if adapter else att.get("runtime_owner")
         if adapter is None and att["status"] in LIVE:
             body = (
@@ -99,7 +129,7 @@ async def detach_attachment(runtime, att_id: str, *, survivors: bool = True, hin
                 await asyncio.wait_for(adapter.stop(), timeout=DETACH_STOP_TIMEOUT)
             except (Exception, asyncio.CancelledError) as exc:
                 stop_error = exc
-        if stop_error is not None and not _process_group_stopped(adapter):
+        if stop_error is not None and not await _stop_confirmed(adapter, stop_error):
             await _report_stop_failure(
                 runtime, att, adapter, "process stop was not confirmed",
                 stop_confirmed=False,
@@ -131,7 +161,7 @@ async def detach_attachment(runtime, att_id: str, *, survivors: bool = True, hin
             )
         except TimeoutError as exc:
             if adapter:
-                stop_confirmed = stop_error is None or _process_group_stopped(adapter)
+                stop_confirmed = await _stop_confirmed(adapter, stop_error)
                 detail = (
                     "process stopped but detach transaction was busy"
                     if stop_confirmed
@@ -243,6 +273,9 @@ def _process_group_stopped(adapter) -> bool:
     proc = getattr(adapter, "proc", None)
     if proc is None:
         return False
+    poll = getattr(proc, "poll", None)
+    if poll is not None:  # reap an exited leader: its zombie is not a live group
+        poll()
     return not process_group_alive(proc.pid)
 
 
