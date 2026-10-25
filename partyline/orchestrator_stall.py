@@ -7,6 +7,7 @@ from fastapi import HTTPException
 
 from .contracts import ConversationsChangedEvent, MessageEvent, MessageResponse
 from .orchestrator_notices import handed_to, notify_root, peer, report
+from .orchestrator_sha_check import flag
 from .orchestrator_reopen import unreopened
 from .orchestrator_handles import message_task
 from .orchestrator_contracts import MessageTaskIn
@@ -70,7 +71,9 @@ async def settle(runtime, att):
         db._exec("UPDATE task_reviews SET stall_stage=3,findings=? WHERE conv_id=?",
                  ('stalled: implementer returned again without request_review or blocked(reason)',
                   att['conv_id']))
-        await report(runtime, task(db, att['conv_id']))
+        row = task(db, att['conv_id'])
+        await report(runtime, row)
+        await flag(runtime, row, row['findings'])
 
 
 def resume(db, conv_id):
@@ -89,7 +92,9 @@ async def blocked(runtime, actor, conv_id, body):
                      "wait_until=NULL,"
                      "report_id=CASE WHEN stall_stage=3 THEN NULL ELSE report_id END WHERE conv_id=?",
                      (body.reason, time.time(), conv_id))
-    await report(runtime, task(runtime.db, conv_id))
+    row = task(runtime.db, conv_id)
+    await report(runtime, row)
+    await flag(runtime, row, body.reason)
     handed_to(runtime, row['implementer_id'], row['implementer_id'])
     await runtime.broadcast_all(ConversationsChangedEvent())
     return task(runtime.db, conv_id)

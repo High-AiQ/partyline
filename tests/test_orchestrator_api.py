@@ -57,7 +57,12 @@ class ApiTest(TaskFixture):
         conv = row['conv_id']
         self.conv_id = conv
         worker = self.principal(row['implementer_id'])
-        self.assertEqual(self.client.get(f'/api/conversations/{conv}/task').json(), row)
+        # create_task's repositories are a creation-time view of the workspaces
+        # (not persisted, so request_review's primary guard still sees none yet).
+        self.assertTrue(row['repositories'])
+        detail = self.client.get(f'/api/conversations/{conv}/task').json()
+        self.assertEqual({key: value for key, value in detail.items() if key != 'repositories'},
+                         {key: value for key, value in row.items() if key != 'repositories'})
         self.assertEqual(self.client.get('/api/conversations/root/task').status_code, 404)
         request = f'/api/conversations/{conv}/request-review'
         data = {'what': 'feature', 'where': 'code'}
