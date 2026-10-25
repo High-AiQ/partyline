@@ -1,14 +1,18 @@
 """A SHA quoted in a report must be a commit in the task's worktrees, or be flagged."""
 
+import os
+import subprocess
 from unittest.mock import AsyncMock, patch
 
+from partyline.git_fence import _mirror_dir
 from partyline.orchestrator_contracts import BlockedIn, ReviewRequestIn, VerdictIn
 from partyline.orchestrator_service import request_review, review_verdict
-from partyline.orchestrator_sha_check import flagged, suspected
+from partyline.orchestrator_sha_check import flagged, quoted, suspected
 from partyline.orchestrator_stall import blocked
 from partyline.reports import get
 from partyline.return_path import ReturnPath
-from tests.orchestrator_fixture import TaskFixture
+from partyline.task_workspaces import workspaces
+from tests.orchestrator_fixture import TaskFixture, git
 
 FAKE = '568b2db'
 
@@ -47,6 +51,86 @@ class ShaCheckTest(TaskFixture):
                          ['568b2db', 'deadbeef123'])
         self.assertEqual(suspected('no hash in this sentence'), [])
         self.assertEqual(suspected(''), [])
+
+    def test_a_hash_named_as_another_kind_is_not_suspected(self):
+        revision = '337337621b'
+        for phrasing in (f'HF revision {revision}', f'Hugging Face model revision {revision}',
+                         f'the weights at rev {revision}', f'checkpoint tag {revision}',
+                         f'sha256 {revision}', f'file digest: {revision}',
+                         f'the blob {revision}'):
+            with self.subTest(phrasing=phrasing):
+                self.assertEqual(suspected(phrasing), [])
+
+    def test_a_qualifier_in_an_earlier_sentence_does_not_excuse_a_commit(self):
+        self.assertEqual(suspected(f'the model was retrained. commit {FAKE} landed'), [FAKE])
+        self.assertEqual(suspected(f'checksum noted; SHA {FAKE}'), [FAKE])
+
+    def test_a_hash_inside_a_url_or_path_is_not_suspected(self):
+        self.assertEqual(suspected(f'see https://huggingface.co/org/m/resolve/{FAKE}/config.json'),
+                         [])
+        self.assertEqual(suspected(f'open tests/fixtures/{FAKE}.txt'), [])
+
+    def test_a_fabricated_commit_next_to_commit_or_sha_is_still_suspected(self):
+        self.assertEqual(suspected(f'commit {FAKE}'), [FAKE])
+        self.assertEqual(suspected(f'SHA {FAKE} is the fix'), [FAKE])
+        self.assertEqual(suspected(f'reviewed at {FAKE}'), [FAKE])
+
+    async def test_a_commit_that_exists_in_the_worktree_is_not_flagged(self):
+        await self.create('none')
+        sha = self.commit()
+        self.assertEqual(quoted(self.db, self.conv_id, f'commit {sha}'), [])
+
+    def mirror_only(self) -> str:
+        """Put a commit in the line's mirror store only, not the worktree or repository."""
+        elsewhere = os.path.join(self.directory.name, 'elsewhere')
+        os.makedirs(elsewhere)
+        git(elsewhere, 'init', '-q', '-b', 'main')
+        git(elsewhere, 'commit', '-q', '--allow-empty', '-m', 'mirrored')
+        landed = git(elsewhere, 'rev-parse', 'HEAD')
+        patcher = patch('partyline.git_fence.FENCE_ROOT', os.path.join(self.directory.name, 'fence'))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        repo = workspaces(self.db, self.conv_id)[0]['repository']
+        mirror = _mirror_dir(os.path.join(repo, '.git'), self.conv_id)
+        git(self.directory.name, 'init', '-q', '--bare', mirror)
+        git(mirror, 'fetch', '-q', elsewhere, 'HEAD')
+        with self.assertRaises(subprocess.CalledProcessError):
+            git(repo, 'cat-file', '-e', f'{landed}^{{commit}}')
+        return landed
+
+    async def test_a_commit_only_in_the_line_mirror_store_is_not_flagged(self):
+        await self.create('none')
+        landed = self.mirror_only()
+        self.assertEqual(quoted(self.db, self.conv_id, f'commit {landed}'), [])
+        self.assertEqual(quoted(self.db, self.conv_id, f'commit {FAKE}'), [FAKE])
+
+    async def test_a_worker_commit_held_only_by_its_mirror_is_not_flagged_in_request_review(self):
+        await self.create('none')
+        landed = self.mirror_only()
+        row = await request_review(self.runtime, self.worker, self.conv_id,
+                                   ReviewRequestIn(sha=self.commit(), what=f'landed {landed}',
+                                                   where='code'))
+        self.assertEqual(flagged(self.db, row), [])
+        self.assertNotIn('unverified SHAs', get(self.db, row['report_id'])['body'])
+
+    async def test_a_report_quoting_the_base_sha_of_an_unmoved_task_is_not_flagged(self):
+        await self.create('none')
+        base = workspaces(self.db, self.conv_id)[0]['base_sha']
+        self.assertEqual(quoted(self.db, self.conv_id, f'based on {base}'), [])
+        row = await blocked(self.runtime, self.worker, self.conv_id,
+                            BlockedIn(reason=f'based on {base}'))
+        self.assertEqual(flagged(self.db, row), [])
+
+    def test_colour_and_short_tokens_behave_as_before(self):
+        self.assertEqual(suspected('colour #ff8800, B007 and abc123'), [])
+        self.assertEqual(suspected('colour #deadbee'), ['deadbee'])
+
+    async def test_a_blocked_reason_naming_a_hf_revision_is_not_flagged(self):
+        await self.create('none')
+        row = await blocked(self.runtime, self.worker, self.conv_id,
+                            BlockedIn(reason='HF revision 337337621b is pinned'))
+        self.assertEqual(flagged(self.db, row), [])
+        self.assertNotIn('unverified SHAs', get(self.db, row['report_id'])['body'])
 
     async def test_a_blocked_reason_claiming_a_missing_commit_is_flagged_to_the_captain(self):
         await self.create('none')
