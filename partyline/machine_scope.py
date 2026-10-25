@@ -15,8 +15,7 @@ from .line_depth import (
 )
 
 Capability = Literal[
-    "read",
-    "write",
+    "read", "write", "upload",
     "assign",
     "attach",
     "close",
@@ -33,8 +32,7 @@ Capability = Literal[
 ]
 
 ALL_CAPABILITIES: tuple[Capability, ...] = (
-    "read",
-    "write",
+    "read", "write", "upload",
     "assign",
     "attach",
     "close",
@@ -91,6 +89,9 @@ def allows(db: Db, principal: Principal, conv_id: str, capability: Capability) -
         return True
     if principal.kind != "machine" or not principal.conv_id:
         return False
+    if capability == "upload":
+        from .upload_scope import task_root_upload
+        return allows(db, principal, conv_id, "write") or task_root_upload(db, principal, conv_id)
     home = principal.conv_id
     conv = db.get_conversation(conv_id)
     if conv is None:
@@ -211,7 +212,7 @@ def deny_unless(
         raise HTTPException(403, "this credential cannot act on that line")
     if (conv_id in getattr(db, "retiring_lines", set())
             and capability in ("attach", "create_child", "accept", "assign", "write", "appoint_lead",
-                               "link_parent")):
+                               "link_parent", "upload")):
         raise HTTPException(409, "retirement is in progress; this line cannot change")
 
 

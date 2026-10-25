@@ -56,9 +56,9 @@ The server lists tools for the caller's live state only. Names are short and uni
 | `read_messages` | `read` | messages, messages around an id | limit clamped to 1 to 50 |
 | `post_message` | listed for `write` or `assign` | message post | refuses the caller's own line; `client_key` required; no action check in MCP, the message route decides |
 | `react` | listed for `write` | reactions, by message id | POST toggles the reaction; `remove: true` uses DELETE; the route decides line authorization |
-| `upload_file` | `write` on the target line | files | one regular file of at most 20 MiB; `client_key` required |
-| `upload_3d_model` | `write` on the target line | files | one self-contained `.glb` or `.gltf` model of at most 20 MiB; case-insensitive extension preflight, optional title, required `client_key`; inline click-to-load 3D card |
-| `upload_files` | `write` on the target line | files | 1–6 regular files, 20 MiB each and 60 MiB total; one message and retry key |
+| `upload_file` | `upload` on the target line (own line or task root for workers) | files | one regular file of at most 20 MiB; `client_key` required |
+| `upload_3d_model` | `upload` on the target line (own line or task root for workers) | files | one self-contained `.glb` or `.gltf` model of at most 64 MiB; case-insensitive extension preflight, optional title, required `client_key`; inline click-to-load 3D card |
+| `upload_files` | `upload` on the target line (own line or task root for workers) | files | 1–6 regular files, 20 MiB each and 60 MiB total; one message and retry key |
 | `get_media` | `read` | media download | writes a new local file, mode 0600 |
 | `notes` | `read`; set needs `assign` for line or tree | notes | attachment notes are own line only; 4,000 characters |
 | `goal` | `read`; set needs `assign` | line detail; goal set | 3,000 characters |
@@ -148,15 +148,15 @@ are in its Decisions section (1 to 14):
 | API response | 2 MiB, checked by `Content-Length` and while streaming | `client.MAX_RESPONSE` |
 | Tool result text | 20,000 characters, then cut with a marker | `render.MAX_TEXT` |
 | `upload_file` | one regular file of at most 20 MiB, streamed; size and identity re-checked during the stream | `client.MAX_UPLOAD` |
-| `upload_3d_model` | one self-contained glTF/GLB model of at most 20 MiB; `.glb`/`.gltf` suffix checked case-insensitively before the same streamed upload as `upload_file` | `tools_media.py`, `client.MAX_UPLOAD` |
+| `upload_3d_model` | one self-contained glTF/GLB model of at most 64 MiB; `.glb`/`.gltf` suffix checked case-insensitively before the same streamed upload as `upload_file` | `tools_media.py`, `client.MAX_MODEL_UPLOAD` |
 | `upload_files` | 1–6 regular files, streamed in one request; 20 MiB each, 60 MiB aggregate to bound server preparation memory; paths/stat sizes checked before connection | `uploads.py`, `client.MAX_UPLOAD` |
 | `get_media` | at most 20 MiB, streamed; a partial oversize file is removed | `client.MAX_DOWNLOAD` |
 | Text fields | notes 4,000; goal 3,000; report body 2,000; upload title 200, description 2,000, caption 3,000; captain free text per schema. The core limits are checked by `validation.py` before the handler; captain limits by `captain_schemas.validate` | `tools_core.py`, `validation.py`, `client.py`, `captain_schemas.py`, and the report route's `ReportIn` |
 | `set_gates` | up to 20 commands; timeout 1 to 14,400 s | `captain_schemas.py` |
 | `client_key` | 1 to 64 characters, required on `post_message`, `upload_file`, `upload_3d_model`, and `upload_files` | `tools_core.py`, `client.py` |
 
-**Follow-up limit gap.** The MCP upload helper caps files at 20 MiB while the server accepts up to
-100 MiB. Its 64 KiB chunks still travel in one HTTP request, so they do not bypass reverse-proxy
+**Follow-up limit gap.** The MCP upload helpers cap regular files at 20 MiB and dedicated
+models at 64 MiB while the server accepts up to 100 MiB. Its 64 KiB chunks still travel in one HTTP request, so they do not bypass reverse-proxy
 request-size caps. Limit alignment or resumable uploads are separate work.
 
 **Idempotency.** `post_message`, `upload_file`, `upload_3d_model`, and `upload_files` require a caller key. The server remembers each key
