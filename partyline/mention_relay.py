@@ -243,8 +243,15 @@ async def relay_mentions(runtime, conv_id: str, message: dict, names: set[str]) 
         names = names - {speaker["name"].lower()}
     crossing = may_cross(message, speaker)
     reached, withheld = resolve_elsewhere(runtime.db, conv_id, names, crossing=crossing)
-    crossed, withheld = split_cross_task(runtime.db, conv_id, speaker, withheld)
-    await notify_cross_task(runtime, conv_id, speaker, crossed)
+    crossed: list[dict] = []
+    if not message.get("audience_attachment_id"):
+        # The guard is for speech on this line. A copy addressed to one process
+        # — a relay or a message_task — is mail, not speech: re-guarding it rang
+        # the speaker once per copy per other named handle, so one root-line
+        # reply mentioning three workers cost six held-back notices, every one
+        # false, for copies that had just been delivered.
+        crossed, withheld = split_cross_task(runtime.db, conv_id, speaker, withheld)
+        await notify_cross_task(runtime, conv_id, speaker, crossed)
     withheld_all = withheld + crossed
     if is_foreign(message):
         return {att["name"].lower() for att in reached + withheld_all}
