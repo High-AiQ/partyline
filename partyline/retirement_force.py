@@ -19,7 +19,8 @@ from .hierarchy import descendants
 from .line_process_routes import detach_attachment, live_attachments
 from .line_subtree import archive_line
 from .line_worktree import rev
-from .nested_repositories import keep_reason
+from .nested_repositories import keep_reason, nested_repositories
+from .retirement_nested import linked_owner
 from .retirement_git import git, snapshot
 from .task_teardown import teardown
 from .retirement_preview import force_authorized, identity, plan, token
@@ -69,12 +70,19 @@ def _remove(state):
     """Remove only the managed worktree and its owned, unchanged host ref."""
     if not state:
         return False
-    if keep_reason(state["cwd"]):
+    nested = [row[0].rstrip("/") for key in ("files", "ignored_files")
+              for row in state.get(key, []) if row[1] == "nested-worktree"]
+    # Task teardown may already have removed and pruned a registered workspace.
+    owners = {linked_owner(os.path.join(state["cwd"], path)) for path in nested
+              if os.path.lexists(os.path.join(state["cwd"], path))}
+    if None in owners or set(nested_repositories(state["cwd"])) - set(nested):
         return False  # a nested repository: kept with its branch, named in the result
     owned = _owned_ref(state)  # a guard, decided before the worktree goes
     git(state["root"], "worktree", "remove", "--force", state["cwd"])
     if os.path.exists(state["cwd"]):
         raise HTTPException(409, "worktree removal did not complete")
+    for owner in sorted(owners):
+        git(owner, "worktree", "prune")
     if owned:
         git(state["root"], "update-ref", "-d", f"refs/heads/{state['branch']}", owned)
     return True
