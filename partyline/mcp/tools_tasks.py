@@ -3,24 +3,27 @@
 from urllib.parse import quote
 
 from ..orchestrator_contracts import (
-    BlockedIn, MessageTaskIn, ReopenIn, ResumeIn, ReviewRequestIn, TaskIn, VerdictIn)
+    BlockedIn, MessageTaskIn, ReopenIn, ResumeIn, ReviewRequestIn, TaskIn, VerdictIn, WaitingIn)
 from .client import ApiError
 from .validation import validate_arguments
 
 _MODELS = {'blocked': BlockedIn, 'create_task': TaskIn, 'request_review': ReviewRequestIn,
            'review_verdict': VerdictIn,
-           'resume_work': ResumeIn, 'reopen_task': ReopenIn, 'message_task': MessageTaskIn}
+           'resume_work': ResumeIn, 'reopen_task': ReopenIn, 'message_task': MessageTaskIn,
+           'waiting': WaitingIn}
 _PATHS = {'blocked': ('POST', 'blocked'), 'create_task': ('POST', 'tasks'), 'tasks': ('GET', 'tasks'),
           'request_review': ('POST', 'request-review'), 'review_verdict': ('POST', 'review-verdict'),
           'restart_reviewer': ('POST', 'task/reviewer'),
           'restart_implementer': ('POST', 'task/implementer'), 'resume_work': ('POST', 'task/resume'),
-          'reopen_task': ('POST', 'task/reopen'), 'message_task': ('POST', 'task/message')}
+          'reopen_task': ('POST', 'task/reopen'), 'message_task': ('POST', 'task/message'),
+          'waiting': ('POST', 'waiting')}
 OPERATIONS = tuple(_PATHS)
 
 
 _WHO = {'resume_work': "the task's implementer and the root captain",
         'blocked': "the task's implementer", 'request_review': "the task's implementer",
-        'review_verdict': "the task's reviewer (or the root captain under captain review)"}
+        'review_verdict': "the task's reviewer (or the root captain under captain review)",
+        'waiting': "the task's implementer"}
 
 
 def _refusal(name):

@@ -52,6 +52,8 @@ def task_pack(db, conv_id, role):
         f"{_workspace_sentence(db, conv_id, role)}"
         'The implementer follows the assigned goal and calls request_review(sha, what, where). '
         'If blocked, call blocked(reason); the server notifies the root. '
+        'While a long command runs, call waiting(reason, seconds); the server will not call you '
+        'stalled while that wait is live. '
         'If you were blocked and resume work, call resume_work(note) — your task state must '
         'always reflect what you are doing. '
         'Never send acknowledgment-only replies to the root captain or anyone else: reply only '

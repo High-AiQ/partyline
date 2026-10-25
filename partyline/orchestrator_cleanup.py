@@ -12,6 +12,7 @@ from .git_fence import mirror_branch_ref
 from .worktree_paths import branch_name
 from .orchestrator_notices import report
 from .orchestrator_store import task
+from .orchestrator_wait import resume_expired
 from .review_worktrees import prune_review_worktrees
 from .scratch_worktrees import prune_scratch_worktrees
 from .task_workspaces import tip as workspace_tip, workspaces
@@ -53,6 +54,7 @@ async def tick(runtime):
     for record in rows:
         row = task(db, record['conv_id'])
         await report(runtime, row)
+        await resume_expired(runtime, row)
         if row['status'] not in ('approved', 'done'):
             continue
         if not await asyncio.to_thread(shipped, db, row):

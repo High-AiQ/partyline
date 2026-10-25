@@ -7,9 +7,10 @@ from .contracts import ConversationEvent, ConversationResponse, ConversationsCha
 from .machine_scope import deny_unless
 from .orchestrator_contracts import (
     BlockedIn, CaptainStyleIn, MessageTaskIn, ReopenIn, ResumeIn, ReviewRequestIn, TaskIn,
-    TaskReview, VerdictIn)
+    TaskReview, VerdictIn, WaitingIn)
 from .orchestrator_handles import message_task, task_line
 from .orchestrator_stall import blocked, resume_work
+from .orchestrator_wait import waiting as declare_wait
 from .orchestrator_reopen import reopen_task
 from .orchestrator_revive import restart_implementer, restart_reviewer
 from .orchestrator_service import create_task, request_review, review_verdict
@@ -77,6 +78,10 @@ def orchestrator_router(runtime):
     @router.post('/api/conversations/{conv_id}/blocked', response_model=TaskReview)
     async def block(request: Request, conv_id: str, body: BlockedIn):
         return await blocked(runtime, request_principal(request), conv_id, body)
+
+    @router.post('/api/conversations/{conv_id}/waiting', response_model=TaskReview)
+    async def waiting(request: Request, conv_id: str, body: WaitingIn):
+        return await declare_wait(runtime, request_principal(request), conv_id, body)
 
     @router.post('/api/conversations/{conv_id}/task/resume', response_model=TaskReview)
     async def resume(request: Request, conv_id: str, body: ResumeIn):

@@ -11,6 +11,7 @@ from .orchestrator_reopen import unreopened
 from .orchestrator_handles import message_task
 from .orchestrator_contracts import MessageTaskIn
 from .orchestrator_store import require_task, require_task_or_root, task
+from .orchestrator_wait import live as live_wait
 from .task_workspaces import anchor
 
 
@@ -29,11 +30,25 @@ def delivered(db, att, messages):
                      (att['conv_id'],))
 
 
+def working(runtime, att_id):
+    """Whether the attachment's harness turn is open: work in flight, not silence."""
+    presence = getattr(runtime, 'presence', None)
+    return bool(presence is not None and presence.is_working(att_id))
+
+
 async def settle(runtime, att):
     if not candidate(runtime.db, att):
         return
     db = runtime.db
     row = task(db, att['conv_id'])
+    if live_wait(row):
+        # A declared wait: the implementer is working, not stuck. No reminder,
+        # no escalation — the line already says that it is waiting.
+        return
+    if working(runtime, att['id']):
+        # A tool call in flight keeps the harness turn open, so the implementer
+        # is busy and a hand-off is not due yet.
+        return
     if row['stall_stage'] == 0:
         # Persist both the reminder and its identity before any delivery await.
         # Routing can deliver synchronously; restarts must retain the same mail.
@@ -61,6 +76,7 @@ async def settle(runtime, att):
 def resume(db, conv_id):
     """A structured attempt starts a new progress episode, even if admission fails."""
     db._exec("UPDATE task_reviews SET status='implementing',stall_stage=0,stall_notice_id=NULL,"
+             "wait_until=NULL,"
              "report_id=CASE WHEN status='blocked' OR stall_stage=3 THEN NULL ELSE report_id END "
              'WHERE conv_id=?', (conv_id,))
 
@@ -70,6 +86,7 @@ async def blocked(runtime, actor, conv_id, body):
     if row['status'] not in ('implementing', 'idle', 'blocked'):
         raise HTTPException(409, 'only an implementing task can be blocked')
     runtime.db._exec("UPDATE task_reviews SET status='blocked',findings=?,stall_stage=0,blocked_at=?,"
+                     "wait_until=NULL,"
                      "report_id=CASE WHEN stall_stage=3 THEN NULL ELSE report_id END WHERE conv_id=?",
                      (body.reason, time.time(), conv_id))
     await report(runtime, task(runtime.db, conv_id))
