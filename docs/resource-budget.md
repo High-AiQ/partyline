@@ -137,7 +137,7 @@ sampler's latest reading per live process), `partyline_used_bytes`,
 | Real available memory minus reserve against the new process's reservation | Enforced by Partyline admission where the host reports available memory (Linux, Windows); the refusal names the real numbers |
 | Per-process memory cap | Linux cgroup scope and Windows Job Object are kernel enforced; macOS `RLIMIT_AS` is best-effort address-space limiting and does not guarantee resident-memory use |
 | Process overview RSS | Advisory visibility only; best effort across supported platforms |
-| Early memory warning | Advisory; one server sampler checks live process trees every five seconds and warns at the people-configured threshold (default 80%), re-arming below 65% and rate-limiting each process to one notice per ten minutes |
+| Early memory warning | Advisory; one server sampler checks live process trees every five seconds and warns at the people-configured threshold (default 80%), re-arming below 65% and rate-limiting each process to one notice per ten minutes; the notice names the five largest command groups under the process (for example `12× chrome`, with its summed RSS and the largest member's pid), so browser children are visible as one line |
 | Resource snapshots and captain briefing | Advisory visibility; they describe current reservations and do not reserve a slot |
 
 Linux warning samples prefer the process scope's cgroup-v2 `memory.current` and
