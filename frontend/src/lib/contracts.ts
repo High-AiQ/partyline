@@ -34,7 +34,7 @@ export const ImageUrlsSchema = z.object({
 });
 export type ImageUrls = z.infer<typeof ImageUrlsSchema>;
 
-export const FileKindSchema = z.enum(["image", "audio", "video", "file"]);
+export const FileKindSchema = z.enum(["image", "audio", "video", "model", "file"]);
 export type FileKind = z.infer<typeof FileKindSchema>;
 
 export const FileRefSchema = z.object({

@@ -220,7 +220,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 60 | PUT | `/api/conversations/{conv_id}/notes` | M, by scope | **tool**: `notes` (set) | attachment notes are own only; line and tree need captain `assign`; 4000-character cap |
 | 61 | POST | `/api/conversations/{conv_id}/attachments/close` | M with `close` | **excluded** | bulk stop; captains detach one worker at a time (`detach_worker`) |
 | 62 | GET | `/api/media/{file_id}/{variant}` | H; M with `read`; handed-to process | **tool**: `get_media` | downloads to a new local path with a size bound |
-| 63 | POST | `/api/conversations/{conv_id}/files` | M with `write` | **tools**: `upload_file`, `upload_files` | sends one file or an ordered batch of 1–6 files through the `/files` route |
+| 63 | POST | `/api/conversations/{conv_id}/files` | M with `write` | **tools**: `upload_file`, `upload_3d_model`, `upload_files` | sends one file, one glTF/GLB model, or an ordered batch of 1–6 files through the `/files` route |
 | 64 | POST | `/api/conversations/{conv_id}/images` | M with `write` | **excluded** | no separate tool; `upload_file` posts to `/files` (row 63), so images travel as files |
 | 65 | GET | `/api/conversations/{conv_id}/files` | M with `read` | **excluded** | file listing is not needed; file references arrive in messages and `get_media` fetches by id (row 62) |
 | 66 | GET | `/api/conversations/{conv_id}/images` | M with `read` | **excluded** | image listing is not needed; same as row 65 |
@@ -285,6 +285,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | `goal` | core tool | 23, 36 |
 | `post_message` | core tool | 76 |
 | `upload_file` | core tool | 63 |
+| `upload_3d_model` | core tool | 63 |
 | `upload_files` | core tool | 63 |
 | `get_media` | core tool | 62 |
 | `reports` | core tool; captain fallback operation | 49, 49a, 50 |

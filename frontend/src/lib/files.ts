@@ -15,7 +15,7 @@ export interface FileIntake {
 }
 
 /** The durable digest lines an agent reads, one per file, by kind prefix. */
-const DIGEST_PREFIXES = ["📷 ", "🎵 ", "🎬 ", "📎 "];
+const DIGEST_PREFIXES = ["📷 ", "🎵 ", "🎬 ", "🧊 ", "📎 "];
 
 /** Agent-facing file metadata rides in the durable body but not the human UI.
  *  The server appends exactly one digest line per file, so the strip is

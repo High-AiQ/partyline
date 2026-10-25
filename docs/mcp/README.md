@@ -39,8 +39,17 @@ It detects size changes while streaming and preserves all original bytes.
 Retries with the same caller, destination, and key replay the original message
 and complete ordered file list. Images are detected by content and receive
 thumb/slim/readable/original variants; gallery thumbnails open the full-size
-viewer with download. Other files are generic downloadable attachments.
+viewer with download. Self-contained glTF/GLB models appear as inline
+click-to-load 3D cards; other files are generic downloadable attachments.
 `upload_file` remains compatible for single-file uploads.
+
+`upload_3d_model` is the dedicated single-model tool. It accepts `path`, optional
+`title` and `conv_id`, and a required stable `client_key`; it has no caption or
+description fields. The `.glb` and `.gltf` extensions are validated
+case-insensitively before upload. Models must be self-contained, are capped at
+20 MiB, and render as inline click-to-load 3D cards with download. Target-line
+write authorization and the streaming `/files` upload are the same as for
+`upload_file`.
 
 ## Evidence index
 
