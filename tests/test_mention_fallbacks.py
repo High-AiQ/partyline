@@ -25,6 +25,7 @@ class MentionFallbackTest(TaskFixture):
 
     async def in_review(self):
         await self.setUp_task()
+        self.runtime.live['captain'].deliver = AsyncMock(return_value=True)
         await request_review(self.runtime, self.worker, self.conv_id,
                              ReviewRequestIn(sha=self.commit(), what='feature', where='code'))
         return self.db.get_attachment(self.row()['reviewer_id'])

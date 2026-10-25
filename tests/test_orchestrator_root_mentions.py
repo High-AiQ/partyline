@@ -100,5 +100,6 @@ class RootMentionTest(TaskFixture):
         reviewer = self.db.get_attachment(self.row()['reviewer_id'])
         self.db._exec("UPDATE attachments SET status='exited' WHERE id=?", (reviewer['id'],))
         self.runtime.route_mentions = type(self.runtime).route_mentions.__get__(self.runtime)
+        self.runtime.live['captain'].deliver = AsyncMock(return_value=True)
         await self.say(f"done @{reviewer['name']} @greg @all")
         self.assertFalse([m for m in self.posts(self.conv_id) if 'reached nobody' in m['body']])
