@@ -27,7 +27,9 @@ Placeholders in the commands below:
 a required per-message `client_key` (1–64 characters), optional `conv_id` (own line
 by default), and optional `title` (200), `description` (2000), and `body` (3000).
 Metadata applies to the single message and its attachments. Own-line captions
-are refused, as with `upload_file`; authorization is unchanged.
+are refused, as with `upload_file`: your terminal reply is the chat message,
+so the error says to omit `body` or pass another `conv_id`; authorization is
+unchanged.
 
 The client validates paths and stat sizes before connecting, then streams one
 multipart request using repeated `file` fields. Each file is limited to 20 MiB;

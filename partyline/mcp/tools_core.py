@@ -207,13 +207,17 @@ def call(client, name: str, args: dict, home_state: dict):
                          max_upload=MAX_UPLOAD, **metadata)
         conv, _ = _target(client, home_state, args.get("conv_id"), ("write",))
         if conv == client.home and metadata["body"].strip():
-            raise ValueError("an upload caption cannot post free prose on your own line")
+            raise ValueError("an upload caption cannot post free prose on your own line: "
+                             "your terminal reply is the chat message; omit body or pass "
+                             "another conv_id")
         return client.upload_files(conv, args["paths"], client_key=args["client_key"], **metadata)
     if name == "upload_file":
         conv, _ = _target(client, home_state, args.get("conv_id"), ("write",))
         body = args.get("body", "")
         if conv == client.home and body.strip():
-            raise ValueError("an upload caption cannot post free prose on your own line")
+            raise ValueError("an upload caption cannot post free prose on your own line: "
+                             "your terminal reply is the chat message; omit body or pass "
+                             "another conv_id")
         return client.upload(conv, args["path"], title=args.get("title", ""),
                              description=args.get("description", ""), body=body,
                              client_key=args["client_key"])

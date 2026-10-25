@@ -76,6 +76,12 @@ def execute(client, op, args, state):
         query = "?" + urlencode(params) if params else ""
         return client.request("DELETE", f"/api/conversations/{quote(conv, safe='')}{query}")
     conv = args.get("conv_id")
+    if op == "ack_report" and conv != client.home:
+        # Reports a captain reads and acks live on its own line — read_reports
+        # is granted only there — so a child line's id is only ever an alias
+        # for it: prove the caller captains that child, then resolve to home.
+        _target(client, state, conv, ("close",))
+        conv = client.home
     if op == "staffing":
         _target(client, state, conv, ("assign",))
         return client.request("GET", _path(conv, "staffing"))

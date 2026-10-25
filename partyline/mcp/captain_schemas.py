@@ -50,7 +50,9 @@ def schema(name):
         "request_restart": obj({**line, "reason": text("Reason for a person to review.", 2000, 1),
             "confirm_no_deploy": {"type": "boolean"}}, ["conv_id", "reason"]),
         "process_overview": obj({**line}, ["conv_id"]),
-        "ack_report": obj({**line, "report_id": {"type": "integer", "minimum": 1},
+        "ack_report": obj({**line, "conv_id": text(
+                "Your line, or a child line you captain; its reports ack on yours.", 80),
+            "report_id": {"type": "integer", "minimum": 1},
             "revision": {"type": "integer", "minimum": 1}}, ["conv_id", "report_id", "revision"]),
         "reports": obj({"operation": {"type": "string", "enum": ["list", "get", "post"]},
             "report_id": {"type": "integer", "minimum": 1},

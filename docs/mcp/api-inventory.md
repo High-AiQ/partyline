@@ -208,7 +208,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 49 | GET | `/api/conversations/{conv_id}/reports` | L with `read_reports` | **tool**: `reports` (list) | reports received from child lines; `limit` (default 50, max 200), `before_id`, `after_id`; newest first unless `after_id` |
 | 49a | GET | `/api/conversations/{conv_id}/reports/{report_id}` | L with `read_reports` | **tool**: `reports` (get) | one report; 404 for another parent's report |
 | 50 | POST | `/api/conversations/{conv_id}/reports` | L with `report` (or `notify`) | **tool**: `reports` (post; `notify` flag) | captain reports to its parent |
-| 51 | POST | `/api/conversations/{conv_id}/reports/{report_id}/ack` | L with `read_reports` | **op**: captain op `ack_report` | acknowledges a child report |
+| 51 | POST | `/api/conversations/{conv_id}/reports/{report_id}/ack` | L with `read_reports` | **op**: captain op `ack_report` | acknowledges a child report; the op also accepts a captained child line's conv_id and resolves it to the owning (caller's) line |
 | 52 | POST | `/api/hooks/{att_id}/{token}` | attachment token in path | **excluded** | adapter hook transport |
 | 53 | GET | `/api/hooks/{att_id}/{token}/rebrief` | attachment token in path | **excluded** | adapter hook transport |
 | 54 | GET | `/api/conversations/{conv_id}/base` | M with `read` | **excluded** | git base read; not needed by the tool set |
