@@ -339,6 +339,44 @@ class CoreToolTests(unittest.TestCase):
         empty = {item["name"] for item in tools_core.tool_list({"actions": []})}
         self.assertEqual(empty, {"whoami", "guide"})
 
+    def test_upload_3d_model_listing_is_write_gated_and_describes_the_card(self):
+        writer = tools_core.tool_list({"actions": ["read", "write"]})
+        reader = tools_core.tool_list({"actions": ["read"]})
+        self.assertNotIn("upload_3d_model", {tool["name"] for tool in reader})
+        model = next(tool for tool in writer if tool["name"] == "upload_3d_model")
+        self.assertEqual(set(model["inputSchema"]["properties"]),
+                         {"conv_id", "path", "title", "client_key"})
+        self.assertEqual(set(model["inputSchema"]["required"]), {"path", "client_key"})
+        for text in ("self-contained glTF/GLB", "inline click-to-load", "20 MiB"):
+            self.assertIn(text, model["description"])
+        batch = next(tool for tool in writer if tool["name"] == "upload_files")
+        self.assertIn("click-to-load 3D cards", batch["description"])
+
+    def test_upload_3d_model_forwards_target_title_and_key(self):
+        client = FakeClient()
+        tools_core.call(client, "upload_3d_model", {
+            "conv_id": "child", "path": "scene.GLB", "title": "Scene",
+            "client_key": "model-key",
+        }, client.state)
+        self.assertIn(("CAP", "child"), client.requests)
+        self.assertEqual(client.requests[-1], ("UPLOAD", "child", "scene.GLB", {
+            "title": "Scene", "client_key": "model-key",
+        }))
+        client.target_state = {**client.target_state, "actions": ["read"]}
+        with self.assertRaisesRegex(ApiError, "not authorized"):
+            tools_core.call(client, "upload_3d_model", {
+                "conv_id": "child", "path": "scene.gltf", "client_key": "denied",
+            }, client.state)
+        self.assertEqual(client.requests[-1], ("CAP", "child"))
+
+    def test_upload_3d_model_rejects_other_extensions_before_upload(self):
+        client = FakeClient()
+        with self.assertRaisesRegex(ValueError, r"\.glb or \.gltf"):
+            tools_core.call(client, "upload_3d_model", {
+                "path": "scene.obj", "client_key": "model-key",
+            }, client.state)
+        self.assertEqual(client.requests, [])
+
     def test_post_message_refuses_home_and_rechecks_target_then_uses_key(self):
         client = FakeClient()
         with self.assertRaisesRegex(ValueError, "other than your own"):

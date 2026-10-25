@@ -61,15 +61,23 @@ describe("file message presentation", () => {
   it("strips trailing digest lines of every kind", () => {
     const audio: FileRef = { ...pdf, id: "audio-1", kind: "audio", filename: "take.mp3", mime: "audio/mpeg" };
     const video: FileRef = { ...pdf, id: "video-1", kind: "video", filename: "demo.mp4", mime: "video/mp4" };
+    const model: FileRef = {
+      ...pdf,
+      id: "model-1",
+      kind: "model",
+      filename: "cube.glb",
+      mime: "model/gltf-binary",
+    };
     const body = [
       "Read these",
       "📷 Signal map · 1200×800 · thumb: http://localhost/thumb",
       "🎵 take.mp3 · audio/mpeg · 3.4 MB · original: http://localhost/original",
       "🎬 demo.mp4 · video/mp4 · 9.8 MB · original: http://localhost/original",
+      "🧊 cube.glb · model/gltf-binary · 1.5 KB · original: http://localhost/original",
       "📎 design notes.pdf · application/pdf · 1.2 MB · original: http://localhost/original",
     ].join("\n");
 
-    expect(visibleMessageBody(message(body, [image, audio, video, pdf]))).toBe("Read these");
+    expect(visibleMessageBody(message(body, [image, audio, video, model, pdf]))).toBe("Read these");
   });
 
   it("keeps a real trailing line that happens to start with a prefix", () => {
