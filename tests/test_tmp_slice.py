@@ -271,11 +271,15 @@ class CgroupSampleTest(Scratch):
         root = self.scope(
             memory_current="1000\n",
             memory_peak="1200\n",
-            memory_stat="anon 5\ninactive_file 300\nshmem 70\nfile 9\n",
+            memory_stat=("anon 5\ninactive_file 300\nactive_file 9\nshmem 70\n"
+                         "file 309\nkernel 40\nslab 25\n"),
         )
         self.assertEqual(
             read_cgroup_sample(root),
-            {"root": root, "current": 1000, "peak": 1200, "shmem": 70, "working_set": 700},
+            {"root": root, "current": 1000, "peak": 1200, "anon": 5,
+             "file": 309, "inactive_file": 300, "active_file": 9,
+             "kernel": 40, "slab": 25, "shmem": 70, "kernel_total": 686,
+             "working_set": 761},
         )
 
     def test_missing_or_broken_files_degrade_without_raising(self):
@@ -286,6 +290,26 @@ class CgroupSampleTest(Scratch):
         self.assertIsNone(read_cgroup_sample(str(self.root / "absent")))
         bare = read_cgroup_sample(self.scope("bare", memory_current="7\n", memory_peak="bad\n"))
         self.assertEqual((bare["peak"], bare["working_set"]), (None, 7))
+        self.assertIsNone(bare["anon"])
+        self.assertIsNone(bare["file"])
+
+    def test_at_risk_usage_is_never_below_anonymous_memory(self):
+        root = self.scope(
+            memory_current="500\n",
+            memory_stat="anon 600\nfile 100\nshmem 0\n",
+        )
+        self.assertEqual(read_cgroup_sample(root)["working_set"], 600)
+
+    def test_old_stat_falls_back_to_inactive_file_working_set(self):
+        root = self.scope(
+            memory_current="1000\n",
+            memory_stat="inactive_file 300\nactive_file 500\nshmem 70\n",
+        )
+        sample = read_cgroup_sample(root)
+        self.assertEqual(sample["working_set"], 700)
+        self.assertIsNone(sample["anon"])
+        self.assertIsNone(sample["file"])
+        self.assertIsNone(sample["kernel_total"])
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "reads /proc/<pid>/cgroup")
     def test_the_scope_of_a_process_is_found_through_its_cgroup_file(self):

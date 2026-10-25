@@ -76,6 +76,28 @@ ceiling is `min(8 GiB, 3/4 of host RAM)`. A process or captain asks for more wit
 `POST /api/attachments/{id}/memory-requests`; approval restarts the process with
 the new cap.
 
+### Can the Linux backstop kill for page cache?
+
+Partyline's Linux backstop is systemd `MemoryMax`, which becomes the scope's
+cgroup-v2 `memory.max`; there is no separate Partyline supervisor that kills a
+process when its sampled usage crosses a number. `OOMPolicy=stop` only decides
+what systemd does after the kernel reports a cgroup OOM. Server and process scopes
+also set `MemorySwapMax=0`.
+
+`memory.max` charges file cache to the scope, but reaching it first makes the
+kernel reclaim memory. Clean, unmapped file pages are normally dropped and
+streaming a large file therefore should not cause an OOM kill merely because its
+bytes passed through the page cache. The kernel OOM-kills only when reclaim cannot
+keep usage below the limit. That can happen because anonymous memory, kernel
+memory, or tmpfs/shared memory is genuinely too large, because dirty, mapped,
+locked, or otherwise unreclaimable pages cannot be discarded quickly enough, or
+because rapid allocation outpaces reclaim. With swap disabled, anonymous and
+tmpfs pages cannot be swapped out either. An OOM kill while a process streamed
+multi-GB weights is therefore not evidence that reclaimable cache alone caused
+the kill; inspect the scope's `memory.stat`, `memory.events`, recorded peak, and
+process RSS to identify the non-reclaimable residue and any reclaim failure. This
+investigation does not change enforcement.
+
 Admission counts `starting` as live. The check and row reservation share the
 runtime ownership lock, so parallel starts cannot both take the same last slot.
 The gate covers new attaches, fresh starts, and explicit resumes. Automatic
@@ -140,11 +162,28 @@ sampler's latest reading per live process), `partyline_used_bytes`,
 | Early memory warning | Advisory; one server sampler checks live process trees every five seconds and warns at the people-configured threshold (default 80%), re-arming below 65% and rate-limiting each process to one notice per ten minutes; the notice names the five largest command groups under the process (for example `12× chrome`, with its summed RSS and the largest member's pid), so browser children are visible as one line |
 | Resource snapshots and captain briefing | Advisory visibility; they describe current reservations and do not reserve a slot |
 
-Linux warning samples prefer the process scope's cgroup-v2 `memory.current` and
-`memory.peak`. On macOS and Windows, Partyline sums RSS across the observed process
-tree from a process listing. These readings are estimates: child creation and exit
-can race a sample, RSS may count shared pages more than once, and inaccessible or
-short-lived children may be missed. Warnings never stop a process or change its cap.
+Linux warning samples prefer the process scope's cgroup-v2 `memory.current`,
+`memory.peak`, and `memory.stat`. When `anon` and `file` are available, the
+warning threshold, re-arming, cap comparison, and displayed percentage use the
+at-risk working set: `max(anon, memory.current - (file - shmem))`. Since `file`
+includes both active and inactive cache and includes `shmem`, this subtracts all
+file-backed pages the kernel can drop while retaining anonymous, kernel, slab,
+and shared memory. Recently read weights on `active_file` therefore do not cause
+a warning merely by passing through page cache. Older kernels whose `memory.stat`
+lacks `anon` or `file` retain the previous fallback, `memory.current -
+inactive_file`.
+
+The raw total remains visible as `raw_bytes`; additive `anon_bytes`,
+`kernel_bytes`, and `file_bytes` fields carry the raw breakdown, with total file
+cache (active plus inactive) rather than only its inactive portion. A warning
+reports the raw total as anonymous plus kernel and file cache, and still names
+the largest descendant command groups so a captain can distinguish real process
+growth from cache.
+
+On macOS and Windows, Partyline sums RSS across the observed process tree from a
+process listing. These readings are estimates: child creation and exit can race a
+sample, RSS may count shared pages more than once, and inaccessible or short-lived
+children may be missed. Warnings never stop a process or change its cap.
 
 The global accounting is portable and follows declared reservations. In particular,
 macOS admission is still enforced even though its per-process kernel limit is

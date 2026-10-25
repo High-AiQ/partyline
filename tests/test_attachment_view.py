@@ -10,10 +10,24 @@ from pathlib import Path
 from unittest.mock import patch
 
 from partyline.attachment_view import (
+    attach_memory_usage,
     attachment_response,
     cwd_git_digest,
     cwd_git_state,
 )
+
+
+class MemoryUsageViewTest(unittest.TestCase):
+    def test_working_set_raw_total_and_stat_split_keep_their_api_names(self):
+        payload = attach_memory_usage({}, {
+            "usage_bytes": 700, "raw_bytes": 1000, "anon_bytes": 500,
+            "file_bytes": 300, "kernel_bytes": 200, "cap_bytes": 2000, "percent": 35,
+        })
+        self.assertEqual(payload, {
+            "memory_usage_bytes": 700, "memory_raw_bytes": 1000,
+            "memory_anon_bytes": 500, "memory_file_bytes": 300,
+            "memory_kernel_bytes": 200, "memory_cap_bytes": 2000, "memory_percent": 35,
+        })
 
 
 class CwdGitStateTest(unittest.TestCase):

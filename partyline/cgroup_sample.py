@@ -1,9 +1,10 @@
 """Read and reclaim cgroup-v2 memory for one process scope (2.20, 5.15).
 
 ``read_cgroup_sample`` returns the raw ``memory.current``, the advisory
-``working_set`` (current minus ``inactive_file``), the ``shmem`` figure
-(tmpfs pages, finding 5.15) and the scope's ``root`` — so a caller can
-write ``memory.reclaim`` there and re-read.
+``working_set`` (current minus reclaimable file pages), anonymous and
+file-cache figures from ``memory.stat``, the ``shmem`` figure (tmpfs pages,
+finding 5.15) and the scope's ``root`` — so a caller can write
+``memory.reclaim`` there and re-read.
 """
 
 from __future__ import annotations
@@ -12,11 +13,11 @@ from __future__ import annotations
 def read_cgroup_sample(root: str) -> dict | None:
     """Read ``memory.current``, ``memory.peak`` and ``memory.stat`` in a scope.
 
-    ``working_set`` is ``current`` minus ``inactive_file``, floored at 0 —
-    the figure kubelet and cAdvisor use, so file cache the kernel can
-    reclaim never reads as real pressure. ``shmem`` (tmpfs pages) is kept
-    separately: the kernel cannot reclaim it, and deleting the files is the
-    only way it goes down.
+    With ``anon`` and ``file`` available, ``working_set`` is ``current`` minus
+    file pages other than ``shmem``, clamped to at least ``anon``. Both active
+    and inactive file cache can be dropped; tmpfs cannot. Older kernels missing
+    either key fall back to ``current - inactive_file``. ``shmem`` is kept
+    separately: deleting its files is the only way that memory goes down.
     """
     try:
         with open(f"{root}/memory.current", encoding="ascii") as stream:
@@ -28,20 +29,30 @@ def read_cgroup_sample(root: str) -> dict | None:
             peak = int(stream.read().strip())
     except (OSError, ValueError):
         peak = None
-    inactive, shmem = 0, 0
+    stat = dict.fromkeys(
+        ("anon", "file", "inactive_file", "active_file", "kernel", "slab", "shmem"), 0,
+    )
+    seen = set()
     try:
         with open(f"{root}/memory.stat", encoding="ascii") as stream:
             for line in stream:
-                if line.startswith("inactive_file "):
-                    inactive = int(line.split()[1])
-                elif line.startswith("shmem "):
-                    shmem = int(line.split()[1])
-                if inactive and shmem:
-                    break
+                key, value = line.split(maxsplit=1)
+                if key in stat:
+                    stat[key] = int(value)
+                    seen.add(key)
+            available = {"anon", "file"}.issubset(seen)
     except (OSError, ValueError):
-        pass
-    return {"root": root, "current": current, "peak": peak, "shmem": shmem,
-            "working_set": max(0, current - inactive)}
+        available = False
+    inactive = stat["inactive_file"]
+    working_set = max(0, current - inactive)
+    kernel_total = None
+    if available:
+        working_set = max(stat["anon"], current - (stat["file"] - stat["shmem"]))
+        kernel_total = max(0, current - stat["anon"] - stat["file"])
+    else:
+        stat.update(dict.fromkeys(("anon", "file", "active_file", "kernel", "slab")))
+    return {"root": root, "current": current, "peak": peak, **stat,
+            "kernel_total": kernel_total, "working_set": working_set}
 
 
 def cgroup_usage(pid: int, base: str = "/sys/fs/cgroup") -> dict | None:
