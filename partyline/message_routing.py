@@ -26,6 +26,7 @@ from .mentions import (
 )
 from .solo_line import implied_addressee
 from .speech_echo import capture_echo
+from .task_ghost_mentions import ghost_mention_refusal
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,8 @@ async def post_identified(runtime, conv_id, principal, body: str, client_key: st
     """
     if (reason := self_mention_reason(runtime.db, principal, conv_id, body)) is not None:
         raise HTTPException(422, reason)
+    if (ghost := await ghost_mention_refusal(runtime, conv_id, principal, body)) is not None:
+        raise HTTPException(422, ghost)
     caller_id = principal_identity(principal)
     if client_key and caller_id:
         async with claim_key(runtime.db, caller_id, conv_id, client_key):
