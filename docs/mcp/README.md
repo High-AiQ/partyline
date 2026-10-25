@@ -29,8 +29,11 @@ a required per-message `client_key` (1–64 characters), optional `conv_id` (own
 by default), and optional `title` (200), `description` (2000), and `body` (3000).
 Metadata applies to the single message and its attachments. Own-line captions
 are refused, as with `upload_file`: your terminal reply is the chat message,
-so the error says to omit `body` or pass another `conv_id`; authorization is
-unchanged.
+so the error says to omit `body` or pass another `conv_id`. Task workers may
+upload to their own task line or its `root_id` only; sibling tasks and unrelated lines remain forbidden. This
+upload-only grant does not change any other line operation. Uploads to the task
+root must omit captions: non-blank `body` is refused by MCP and both media routes
+with `upload-only access to this line cannot carry a caption`.
 
 The client validates paths and stat sizes before connecting, then streams one
 multipart request using repeated `file` fields. Each file is limited to 20 MiB;
@@ -47,9 +50,12 @@ click-to-load 3D cards; other files are generic downloadable attachments.
 `title` and `conv_id`, and a required stable `client_key`; it has no caption or
 description fields. The `.glb` and `.gltf` extensions are validated
 case-insensitively before upload. Models must be self-contained, are capped at
-20 MiB, and render as inline click-to-load 3D cards with download. Target-line
-write authorization and the streaming `/files` upload are the same as for
-`upload_file`.
+64 MiB, and render as inline click-to-load 3D cards with download. Target-line
+upload authorization and the streaming `/files` upload are the same as for
+`upload_file`, with a separate 64 MiB client cap. The server accepts 100 MiB
+per file and has no smaller request-body cap on this path; the browser adds
+no upload size limit. Reverse proxies must permit the multipart request plus
+its metadata overhead.
 
 ## Evidence index
 

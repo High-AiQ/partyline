@@ -2,7 +2,8 @@
 
 from urllib.parse import quote
 
-from .client import ApiError, MAX_UPLOAD
+from ..upload_scope import UPLOAD_ONLY_CAPTION_REFUSAL
+from .client import ApiError, MAX_UPLOAD, MAX_MODEL_UPLOAD
 from .uploads import validate_uploads
 from .tools_media import model_upload_tool, multi_upload_tool, validate_model_path
 from . import tools_captain
@@ -206,7 +207,9 @@ def call(client, name: str, args: dict, home_state: dict):
         metadata = {key: args.get(key, "") for key in ("title", "description", "body")}
         validate_uploads(args["paths"], client_key=args["client_key"],
                          max_upload=MAX_UPLOAD, **metadata)
-        conv, _ = _target(client, home_state, args.get("conv_id"), ("write",))
+        conv, target = _target(client, home_state, args.get("conv_id"), ("upload", "write"))
+        if metadata["body"].strip() and "write" not in target.get("actions", []):
+            raise ApiError(UPLOAD_ONLY_CAPTION_REFUSAL)
         if conv == client.home and metadata["body"].strip():
             raise ValueError("an upload caption cannot post free prose on your own line: "
                              "your terminal reply is the chat message; omit body or pass "
@@ -214,12 +217,14 @@ def call(client, name: str, args: dict, home_state: dict):
         return client.upload_files(conv, args["paths"], client_key=args["client_key"], **metadata)
     if name == "upload_3d_model":
         validate_model_path(args["path"])
-        conv, _ = _target(client, home_state, args.get("conv_id"), ("write",))
+        conv, _ = _target(client, home_state, args.get("conv_id"), ("upload", "write"))
         return client.upload(conv, args["path"], title=args.get("title", ""),
-                             client_key=args["client_key"])
+                             client_key=args["client_key"], max_upload=MAX_MODEL_UPLOAD)
     if name == "upload_file":
-        conv, _ = _target(client, home_state, args.get("conv_id"), ("write",))
+        conv, target = _target(client, home_state, args.get("conv_id"), ("upload", "write"))
         body = args.get("body", "")
+        if body.strip() and "write" not in target.get("actions", []):
+            raise ApiError(UPLOAD_ONLY_CAPTION_REFUSAL)
         if conv == client.home and body.strip():
             raise ValueError("an upload caption cannot post free prose on your own line: "
                              "your terminal reply is the chat message; omit body or pass "

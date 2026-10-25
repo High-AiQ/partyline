@@ -20,7 +20,8 @@ from .idempotent_posts import (
 from .media import MediaError, MediaStore, prepared_files, validated_metadata
 from .media_digest import digest_body
 from .media_rows import VARIANTS
-from .machine_scope import deny_unless, is_human
+from .machine_scope import allows, deny_unless, is_human
+from .upload_scope import UPLOAD_ONLY_CAPTION_REFUSAL
 
 
 def handed_to(db, principal, file_id: str) -> bool:
@@ -91,7 +92,9 @@ def media_router(runtime, store: MediaStore) -> APIRouter:
     ):
         require_line(conv_id, writing=True)
         principal = request_principal(request)
-        deny_unless(runtime.db, principal, conv_id, "write")
+        deny_unless(runtime.db, principal, conv_id, "upload")
+        if body and body.strip() and not allows(runtime.db, principal, conv_id, "write"):
+            raise HTTPException(403, UPLOAD_ONLY_CAPTION_REFUSAL)
         if body and body.strip() and is_human(principal) and not any(
             attachment["status"] in ("starting", "running")
             for attachment in runtime.db.list_attachments(conv_id)
