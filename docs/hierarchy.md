@@ -218,6 +218,15 @@ files; `index` preserves the independently staged files. A conflicted index refu
 with a request to resolve or commit it first. Inspect either recovery tree with
 `git show <recovery-ref>:<path>` or create a recovery branch from it.
 
+Ignored nested linked Git worktrees may be removed only when `git status --porcelain`
+is empty, HEAD is attached to a branch, and that branch preserves HEAD in the owning
+repository outside the retiring folder. Their commits remain in that repository’s shared
+object store, reachable through the retained branch. Evidence records the path,
+`nested-worktree`, HEAD SHA and branch; after removing the folder retirement runs
+`git worktree prune` in the owning repository. Dirty, detached or missing-branch
+worktrees are refused with the path and reason. Unsupported directories, FIFOs, sockets
+and devices are refused with the path and kind; independent nested clones remain protected.
+
 Retirement checks the whole selected subtree, then removes owned worktrees and host branch
 refs deepest first. Recovery refs remain; private fence mirror refs are also retained.
 A refused retirement has no side effects: every flag and every Git inspection runs before any
