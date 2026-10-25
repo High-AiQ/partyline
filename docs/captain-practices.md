@@ -75,7 +75,9 @@ main is. An accept on a line refreshes its children's views automatically.
 After durable preservation and handoff, retire finished children through the API or native
 `retire_child`. A root captain can inspect `retirement_preview`, assess dirty files and
 superseded commits, and explicitly use `force_discard` with its `preview_token`; add
-`stop_processes`, `clear_goal` and `include_children` only when intended. The root makes this
+`stop_processes`, `clear_goal` and `include_children` only when intended. The preview's
+`required_flags` already names every flag the plan needs, and a refusal repeats them all at
+once — read it before calling, and a refused call changes nothing. The root makes this
 decision without requesting human UI cleanup. Recovery snapshots retain tracked/untracked
 files; ignored files are lost. Non-root captains retain guarded retirement. See
 [root retirement decisions](hierarchy.md#root-decisions-about-obsolete-descendants).

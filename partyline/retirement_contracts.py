@@ -15,6 +15,7 @@ class RetirementPreview(BaseModel):
     force_allowed: bool
     preview_token: str
     lines: list[dict]
+    required_flags: list[str] = Field(default_factory=list)
     implications: str
 
 

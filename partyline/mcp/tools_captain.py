@@ -46,7 +46,8 @@ def tool_list(state: dict) -> list[dict]:
     for op in permitted(state):
         descriptions = {
             "retirement_preview": "Inspect bounded retirement evidence and obtain a principal-bound token. "
-                "Lists dirty/untracked/ignored files, history, processes, goals, children and assets.",
+                "Lists dirty/untracked/ignored files, history, processes, goals, children and assets, "
+                "and required_flags names every flag the retirement needs.",
             "retire_child": "Retire a child (root: any strict descendant). Defaults stay guarded. "
                 "Root force_discard requires preview_token; captures recovery refs before discarding "
                 "tracked/untracked files. Ignored files are lost. Explicit stop/clear/recursive flags apply.",

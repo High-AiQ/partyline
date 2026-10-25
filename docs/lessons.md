@@ -1389,3 +1389,24 @@ repositories …"); `discard=true` does not waive it, and a person moves or dele
 those clones by hand. Task review checkouts use `clean -fdx`, so git itself leaves
 nested repositories alone. Do not decide a directory is disposable from `git status`
 alone, and never add a second `-f` to a clean.
+
+## 2026-10-25 — A forced retirement deleted its worktree and then reported 409
+
+A task line whose host branch still sat at the base commit was accepted from its fence
+mirror, so `preserve` fast-forwarded the real `line/<slug>` ref to that accepted tip while
+the removal still held the inspected tip. `_remove` deleted the worktree first and then ran
+`update-ref -d <branch> <inspected-tip>`; git refused the stale compare-and-delete, and the
+generic "cannot inspect retirement Git state" 409 arrived after the worktree was gone and
+both processes were detached. A follow-up preview then read `git: null` (there was nothing
+left to inspect) and succeeded without `force_discard`.
+
+Ownership of a host ref is decided before the worktree goes: delete it only while it still
+holds the inspected tip, keep it once preservation has advanced it, and never fail after a
+destructive step. Git inspection and every missing flag are checked before any process is
+stopped, and one refusal names all missing flags at once — `retirement_preview` publishes
+`required_flags` so the caller reads them before calling. `tests/test_retirement_safety.py`
+holds the exact mirror-tip case, a refusal with a live process and an uncleared goal, and a
+Git inspection that fails on the recheck: each asserts the worktree, files and processes are
+untouched. The same suite keeps a committed symlink (`CLAUDE.md -> AGENTS.md`) retirable —
+tracked paths are judged by Git's mode, so a tracked blob is the line's own content, while
+untracked directories, embedded repositories and special files stay refused.
