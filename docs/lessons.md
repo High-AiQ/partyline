@@ -1,6 +1,19 @@
 # Lessons: the false-assumptions ledger
 
 
+## Retirement errors must identify the actual filesystem entry
+
+A retirement refusal was blamed on a tracked guide symlink, but the rejected entry
+was an ignored nested linked worktree reported by Git as a directory. Inspect the
+actual rejected path and kind before changing symlink handling. Retirement evidence
+now names unsupported entries and accepts nested linked worktrees only when clean,
+attached and backed by a branch in their surviving owning repository. Prune the
+owner's worktree registration after removal. Real temporary repository regressions
+in `tests/test_retirement_nested.py` cover successful removal and branch survival,
+registration cleanup, dirty/detached/missing-branch refusals, and directory/FIFO/socket
+diagnostics; the tracked-symlink regressions remain in `tests/test_retirement_safety.py`.
+
+
 ## Upload-only permissions must gate captions at both boundaries
 
 Granting task-to-root uploads assumed media authorization alone would preserve
