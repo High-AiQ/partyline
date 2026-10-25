@@ -54,6 +54,14 @@ class BlockedIn(BaseModel):
     reason: str = Field(min_length=1, max_length=1500, pattern=r'\S')
 
 
+class WaitingIn(BaseModel):
+    """A long wait the implementer declares: what it waits for, and for how long."""
+
+    model_config = ConfigDict(extra='forbid')
+    reason: str = Field(min_length=1, max_length=1500, pattern=r'\S')
+    seconds: int = Field(default=900, ge=60, le=3600)
+
+
 class ResumeIn(BaseModel):
     model_config = ConfigDict(extra='forbid')
     note: str | None = Field(default=None, min_length=1, max_length=1500, pattern=r'\S')
@@ -86,6 +94,8 @@ class TaskReview(BaseModel):
     location: str
     findings: str
     previous_findings: str = ''
+    wait_reason: str = ''
+    wait_until: float | None = None
     report_id: int | None = None
     merged: bool
     created_at: float

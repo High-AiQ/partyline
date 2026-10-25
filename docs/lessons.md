@@ -182,6 +182,25 @@ open-goal notices until pty output has been quiet for 10 seconds, with a
 20-minute cap so an animated wedge is still reported. The working badge stays
 receipt-based; this quiet gate controls notices only and cannot generate speech.
 
+## A silent task implementer is not always a stuck one
+
+The task server read every silent turn as a missing hand-off: one reminder,
+then a `stalled` report to the root captain. An implementer waiting on a
+ten-minute test run looks exactly like that from the outside — the process is
+alive, its CLI sits at the prompt, and nothing is posted because nothing has
+finished yet. The report was false, and it interrupted a captain to say so.
+
+Silence is not a verdict, and the server cannot read a process's mind: only the
+implementer knows what it waits for. So it says so, in a structured call
+(`waiting(reason, seconds)`) that the stall heuristic honours until it runs
+out, and the line gets one gentle `waiting, not stalled` note instead of a
+stall report. An implementer whose harness turn is still open — a tool call in
+flight — is never stalled either. A wait only defers the check: when it runs
+out the task owes a hand-off again and gets the same one reminder. The
+waiting and the genuinely stalled regressions in `tests/test_orchestrator_stall.py`
+both fail against the old behaviour; a chat message saying "still waiting"
+waits for nothing.
+
 ## A scope launcher exit code does not identify an OOM
 
 An OpenCode worker twice appeared to exit with SIGTERM while running tests. Its

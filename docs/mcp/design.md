@@ -334,6 +334,7 @@ from `/api/capabilities`. Every HTTP handler independently authorizes the caller
 | `create_task(name, goal, implementer, review?)` | Orchestrator root captain | POST `/api/conversations/{root}/tasks` |
 | `tasks()` | Orchestrator root captain | GET `/api/conversations/{root}/tasks` |
 | `blocked(reason)` | Exact assigned implementer attachment | POST `/api/conversations/{task}/blocked` |
+| `waiting(reason, seconds?)` | Exact assigned implementer attachment | POST `/api/conversations/{task}/waiting` |
 | `request_review(sha?, what, where)` | Exact assigned implementer attachment | POST `/api/conversations/{task}/request-review` |
 | `review_verdict(verdict, findings)` | Exact assigned reviewer, or root captain for captain policy | POST `/api/conversations/{task}/review-verdict` |
 
@@ -350,3 +351,11 @@ See [the task lifecycle](../hierarchy.md#orchestrator-captains-and-task-lines).
 blocked rail status. A new review attempt resumes implementation. A task without
 a peer gets one structured-tool reminder on an unstructured return; returning
 again after consuming it sends a deduplicated stalled report to the root.
+
+`waiting(reason, seconds)` (60–3600, default 900) is the implementer's own
+statement that a long command is running. The server records it on the task row
+and posts one gentle `waiting, not stalled` note on the line; while the wait is
+live neither the reminder nor the stalled report fires, and an implementer whose
+harness turn is still open — a tool call in flight — is never stalled either.
+When the wait runs out, the task owes a hand-off again and gets the same one
+reminder, never a skipped straight to a stall report.

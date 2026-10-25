@@ -1106,3 +1106,14 @@ and restarts do not repeat the reminder or escalation. The rail shows blocked
 tasks, and task lines hide manual staffing controls because staffing is owned by
 the server. Notify reports follow the existing inbox coalescing and acknowledgement
 rules: a new task state updates an outstanding report rather than ringing again.
+
+An implementer waiting on a long command — a test run, a build, a monitor — calls
+`waiting(reason, seconds)` (60–3600, default 900) instead. The server records the
+wait on the task row and posts one `waiting, not stalled` note on the line: a
+hand-off is not due yet, and the root is not paged. While the wait is live the
+implementer is not reminded and never reported as stalled, and an implementer
+whose harness turn is still open — a tool call in flight — is never stalled
+either. The wait only defers the check: when it runs out the task owes a hand-off
+again and gets the same single reminder, never a skipped straight to a stall
+report. A wait is a structured statement, never prose: a chat message saying
+"still waiting" waits for nothing.

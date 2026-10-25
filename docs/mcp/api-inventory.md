@@ -351,6 +351,7 @@ These entries extend both inventory sets above. Registration handlers are in
 | GET | `/api/conversations/{conv_id}/tasks` | `listing` | H or orchestrator root captain | yes | tool: `tasks` |
 | GET | `/api/conversations/{conv_id}/task` | `detail` | M with `read` | yes | guide: current structured task state, including after compaction |
 | POST | `/api/conversations/{conv_id}/blocked` | `block` | exact task implementer | yes | tool: `blocked` |
+| POST | `/api/conversations/{conv_id}/waiting` | `waiting` | exact task implementer | yes | tool: `waiting`; declares a long wait (`reason`, `seconds` 60–3600) that defers the stall reminder and the stall report |
 | POST | `/api/conversations/{conv_id}/request-review` | `review` | exact task implementer | yes | tool: `request_review`; `sha` or `repositories: [{repository, sha}]` (1–8, not both) |
 | POST | `/api/conversations/{conv_id}/review-verdict` | `verdict` | exact task reviewer or captain-policy root captain | yes | tool: `review_verdict` |
 | POST | `/api/conversations/{conv_id}/task/reopen` | `reopen` | H, or root captain | yes | tool: `reopen_task`; returns an approved/done task to implementing (409 otherwise) |
