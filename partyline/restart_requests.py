@@ -24,7 +24,7 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .auth_guard import request_principal
-from .approval_bubble import bubble_approval
+from .approval_bubble import broadcast_approval_change, bubble_approval
 from .contracts import RestartPlanRequest, RestartRequestEvent, ShutdownEvent
 from . import deployment, operator_restart
 from .machine_scope import deny_unless, is_human
@@ -97,6 +97,7 @@ def register_restart_request_routes(app: FastAPI, runtime, adapter_metadata, req
     async def announce(conv_id: str, text: str, *, actor=None) -> None:
         await post_system_notice(runtime, conv_id, text, actor=actor)
         await runtime.broadcast_all(RestartRequestEvent(request=runtime.restart_request))
+        await broadcast_approval_change(runtime, conv_id)
 
     async def ring_requester(request: RestartRequest, text: str, *, actor) -> None:
         """Privately ring the process that asked, so it hears the outcome now.

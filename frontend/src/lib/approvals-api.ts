@@ -1,4 +1,4 @@
-/** One-click approvals: every pending person-decision in a subtree, listed on the root line. */
+/** One-click approvals: every pending person-decision in the open line's subtree. */
 import { z } from "zod";
 import { request } from "./http";
 

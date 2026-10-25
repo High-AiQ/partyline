@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .adapters import ADAPTER_METADATA
-from .approval_bubble import bubble_approval
+from .approval_bubble import broadcast_approval_change, bubble_approval
 from .auth_guard import request_principal
 from .machine_scope import deny_unless, is_human
 from .memory_contracts import MemoryRequestEvent
@@ -38,6 +38,7 @@ def register_memory_request_routes(app: FastAPI, runtime, resume) -> None:
     async def announce(conv_id: str, message: str) -> None:
         await post_system_notice(runtime, conv_id, message)
         await runtime.broadcast(conv_id, MemoryRequestEvent(request=_pending(db, conv_id)))
+        await broadcast_approval_change(runtime, conv_id)
 
     @app.get("/api/conversations/{conv_id}/memory-request")
     async def pending(request: Request, conv_id: str):

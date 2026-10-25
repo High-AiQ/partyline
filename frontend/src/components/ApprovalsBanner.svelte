@@ -1,6 +1,6 @@
 <script lang="ts">
-  /** The root line's one-click approvals banner: every pending person-decision
-   * in the subtree, listed with Approve and Decline. Fed by the approvals
+  /** Every line's one-click approvals banner: every pending person-decision
+   * in its subtree, listed with Approve and Decline. Fed by the approvals
    * store; the wire's request events refresh it. */
   import { approvals } from "../state/approvals.svelte.js";
 

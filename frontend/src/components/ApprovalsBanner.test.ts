@@ -3,6 +3,7 @@ import ApprovalsBanner from "./ApprovalsBanner.svelte";
 import { approvals } from "../state/approvals.svelte";
 import { approvalsApi } from "../lib/approvals-api";
 import type { ApprovalsList } from "../lib/approvals-api";
+import { applyPendingWireEvent } from "../state/room-pending-sync";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mount, unmount } from "svelte";
 
@@ -85,6 +86,35 @@ describe("approvals banner", () => {
     await flush();
     expect(decide).toHaveBeenCalledWith(list.approvals[0], true);
     expect(document.querySelectorAll("[data-approval-row]").length).toBe(0);
+    void unmount(component);
+  });
+
+  it("shows a descendant memory request when its change event arrives", async () => {
+    const pending: ApprovalsList = {
+      approvals: [
+        {
+          ...row(0),
+          kind: "memory",
+          line: "Grand",
+          detail: "8G memory cap for @worker: large test bundle",
+          approve: "/api/memory-requests/req-0/approve",
+          decline: "/api/memory-requests/req-0",
+        },
+      ],
+    };
+    vi.spyOn(approvalsApi, "list").mockResolvedValueOnce({ approvals: [] }).mockResolvedValue(pending);
+    const component = mount(ApprovalsBanner, { target: document.body });
+    await approvals.load("root");
+    await flush();
+    expect(document.querySelector("#approvalsPending")).toBeNull();
+
+    applyPendingWireEvent({ type: "approvals_changed" });
+    await flush();
+
+    const banner = document.querySelector("#approvalsPending");
+    expect(banner?.textContent).toContain("memory on «Grand»");
+    expect(banner?.textContent).toContain("8G memory cap");
+    expect(banner?.querySelectorAll("button").length).toBe(2);
     void unmount(component);
   });
 
