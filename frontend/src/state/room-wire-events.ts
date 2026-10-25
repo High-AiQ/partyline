@@ -95,6 +95,7 @@ export function onRoomWireEvent(room: RoomWireSink, event: WireEvent, context: W
       void room.loadConversations().catch(ignoreBackgroundFailure);
       room.refreshArchiveIfOpen();
       break;
+    case "approvals_changed":
     case "restart_request":
     case "write_set_grant_request":
     case "memory_request":

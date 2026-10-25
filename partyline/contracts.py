@@ -1,9 +1,12 @@
 """Named HTTP and WebSocket contracts shared by the server and runtime."""
-from typing import Any, Literal
+from typing import Literal
 
 from .conversation_contracts import ConversationResponse  # noqa: F401 (public re-export)
 
 from pydantic import BaseModel, ConfigDict, Field
+from .approval_contracts import (
+    ApprovalsChangedEvent, RestartRequestEvent, WriteSetGrantRequestEvent,
+)
 from .memory_contracts import MemoryEvent
 from .attachment_contracts import AttachmentResponse
 from .media_contracts import FileRef
@@ -257,18 +260,6 @@ class ConversationsChangedEvent(BaseModel):
     type: Literal["conversations_changed"] = "conversations_changed"
 
 
-class RestartRequestEvent(BaseModel):
-    """The pending restart request changed: filed, approved, or declined."""
-    type: Literal["restart_request"] = "restart_request"
-    request: Any = None
-
-
-class WriteSetGrantRequestEvent(BaseModel):
-    """The pending write-set grant request on a line changed."""
-    type: Literal["write_set_grant_request"] = "write_set_grant_request"
-    request: Any = None
-
-
 class ReattachCommand(BaseModel):
     type: Literal["reattach"]
     token: str
@@ -285,7 +276,7 @@ Event = (
     | ConversationEvent
     | ConversationArchivedEvent
     | ConversationDeletedEvent
-    | ConversationsChangedEvent
+    | ConversationsChangedEvent | ApprovalsChangedEvent
     | ErrorEvent | HelloEvent
     | ReattachOfferEvent | ReattachDecisionEvent
     | RestartRequestEvent | WriteSetGrantRequestEvent | MemoryEvent | ReactionEvent | PinsChangedEvent

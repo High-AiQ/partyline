@@ -259,7 +259,8 @@ Requests that need a person bubble to the root. A write-set, memory-cap or resta
 filed on a child line posts its ordinary notice there plus one `⚑ approval pending` line on the
 tree's root, naming the line, the requester and the approve and decline calls, and @mentions the root's
 captain so that process wakes and can explain the request in context — the person talks to the
-root captain and never reads sublines. A request filed on the root itself does not bubble, and
+root captain and never reads sublines. The one-click banner on the filing line and every
+ancestor updates live when a request is filed or decided. A request filed on the root itself does not bubble, and
 the staffing wake line counts what is still waiting anywhere below:
 `approvals pending: N («line» write-set, «line2» memory)`, falling as each
 request is decided. On the root line the person doesn't even need the

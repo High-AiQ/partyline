@@ -1,5 +1,10 @@
 /** Pending person-approval banners that must survive reconnect. */
-import type { MemoryRequestEvent, RestartRequestEvent, WriteSetGrantRequestEvent } from "../lib/events";
+import type {
+  ApprovalsChangedEvent,
+  MemoryRequestEvent,
+  RestartRequestEvent,
+  WriteSetGrantRequestEvent,
+} from "../lib/events";
 import { restart } from "./restart.svelte.js";
 import { writeSet } from "./write-set.svelte.js";
 import { approvals } from "./approvals.svelte";
@@ -10,9 +15,11 @@ export function ignoreBackgroundFailure(): void {
 }
 
 export function applyPendingWireEvent(
-  event: RestartRequestEvent | WriteSetGrantRequestEvent | MemoryRequestEvent,
+  event: ApprovalsChangedEvent | RestartRequestEvent | WriteSetGrantRequestEvent | MemoryRequestEvent,
 ): void {
-  if (event.type === "restart_request") restart.apply(event.request);
+  if (event.type === "approvals_changed") {
+    void approvals.refresh().catch(ignoreBackgroundFailure);
+  } else if (event.type === "restart_request") restart.apply(event.request);
   else if (event.type === "write_set_grant_request") writeSet.apply(event.request);
   else memoryRequest.apply(event.request);
 }

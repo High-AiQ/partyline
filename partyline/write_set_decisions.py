@@ -15,6 +15,7 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from . import docker_relay, docker_workloads, fence_paths, fence_workspaces
+from .approval_bubble import broadcast_approval_change
 from .auth_guard import request_principal
 from .machine_scope import deny_unless, is_human
 from .mention_relay import post_private
@@ -84,6 +85,7 @@ def make_announcer(runtime):
         await post_system_notice(runtime, conv_id, text, actor=actor)
         await runtime.broadcast(
             conv_id, WriteSetGrantRequestEvent(request=pending_model(runtime.db, conv_id).request))
+        await broadcast_approval_change(runtime, conv_id)
     return announce
 
 
