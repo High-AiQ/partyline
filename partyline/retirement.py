@@ -14,10 +14,26 @@ from .hierarchy import child_ids, descendants
 from .worktree_lifecycle import worktree_state
 
 LIVE = ("starting", "running")
+# The one flag a caller passes to clear each guard. A refusal names every flag
+# its blockers need at once, so a captain fixes a whole retirement in one pass.
+FLAG_FOR = {
+    "live_processes": "stop_processes",
+    "goal_not_cleared": "clear_goal",
+    "child_lines": "include_children",
+    "unmerged_commits": "force_discard",
+    "uncommitted_changes": "discard",
+    "nested_repositories": "force_discard",
+}
 
 
 def _blocker(code: str, message: str) -> dict:
     return {"code": code, "message": message}
+
+
+def required_flags(blockers: list[dict]) -> list[str]:
+    """Every flag this refusal would accept, from every blocker, in one answer."""
+    return sorted({FLAG_FOR[blocker["code"]] for blocker in blockers
+                   if blocker["code"] in FLAG_FOR})
 
 
 def archive_blockers(
@@ -42,12 +58,14 @@ def archive_blockers(
         blockers.append(_blocker(
             "live_processes",
             f"live processes: this line still has live processes ({names}); stop them first "
-            f"with POST /api/conversations/{{id}}/attachments/close",
+            f"with POST /api/conversations/{{id}}/attachments/close, or pass "
+            f"stop_processes=true to stop them as part of this retirement",
         ))
     if strict and conv.get("goal"):
         blockers.append(_blocker(
             "goal_not_cleared",
-            "goal not cleared: this line's goal is not cleared; clear it before retiring the line",
+            "goal not cleared: this line's goal is not cleared; clear it before retiring the "
+            "line, or pass clear_goal=true to clear it as part of this retirement",
         ))
     if not include_children and child_ids(db, conv_id, include_archived=False):
         blockers.append(_blocker(
@@ -62,7 +80,8 @@ def archive_blockers(
                 "unmerged commits: this line's branch or worktree HEAD has commits not "
                 "reachable from the parent branch or the repository default; merge it, and "
                 "never discard it. A person may retire from the UI, while a machine captain "
-                "must merge first",
+                "must merge first — or the tree's root captain passes force_discard=true with "
+                "a retirement preview_token",
             ))
         waives_dirty = discard and state["merged"]
         if strict and state["nested"] and not discard:
@@ -70,13 +89,15 @@ def archive_blockers(
                 "nested_repositories",
                 f"nested repositories: the worktree contains {', '.join(state['nested'])}, separate "
                 "git repositories partyline never deletes; move or delete them by hand. With "
-                "discard=true the line is archived and the worktree is kept",
+                "discard=true the line is archived and the worktree is kept; a root captain's "
+                "force_discard=true keeps it too",
             ))
         elif strict and not state["clean"] and not waives_dirty:
             blockers.append(_blocker(
                 "uncommitted_changes",
                 "uncommitted changes: the worktree is dirty; commit them, or pass discard=true "
-                "(allowed only for an already-merged branch)",
+                "(allowed only for an already-merged branch); a root captain may instead pass "
+                "force_discard=true with a retirement preview_token",
             ))
     if include_children:
         for line_id in descendants(db, conv_id, include_archived=False):

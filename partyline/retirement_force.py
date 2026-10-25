@@ -18,6 +18,7 @@ from .goal import set_goal
 from .hierarchy import descendants
 from .line_process_routes import detach_attachment, live_attachments
 from .line_subtree import archive_line
+from .line_worktree import rev
 from .nested_repositories import keep_reason
 from .retirement_git import git, snapshot
 from .task_teardown import teardown
@@ -49,21 +50,43 @@ def _audit(db, audit_id, principal, target, decision, evidence, recovery, error=
     )
 
 
+def _owned_ref(state):
+    """The host branch this removal owns, or None once it is not the inspected tip.
+
+    A task's own preservation can fast-forward the real branch to the line's tip
+    before the worktree goes. That ref is no longer the unchanged one inspection
+    found, so it stays — and the decision is made *before* anything is removed,
+    because a compare-and-delete after the worktree is gone turns a finished
+    removal into a 409 with the worktree already deleted.
+    """
+    if not state["branch_tip"]:
+        return None
+    tip = rev(state["root"], "rev-parse", "--verify", "--quiet", f"refs/heads/{state['branch']}")
+    return state["branch_tip"] if tip == state["branch_tip"] else None
+
+
 def _remove(state):
     """Remove only the managed worktree and its owned, unchanged host ref."""
     if not state:
         return False
     if keep_reason(state["cwd"]):
         return False  # a nested repository: kept with its branch, named in the result
+    owned = _owned_ref(state)  # a guard, decided before the worktree goes
     git(state["root"], "worktree", "remove", "--force", state["cwd"])
     if os.path.exists(state["cwd"]):
         raise HTTPException(409, "worktree removal did not complete")
-    if state["branch_tip"]:
-        git(state["root"], "update-ref", "-d", f"refs/heads/{state['branch']}", state["branch_tip"])
+    if owned:
+        git(state["root"], "update-ref", "-d", f"refs/heads/{state['branch']}", owned)
     return True
 
 
-def _checked_remove(db, principal, target, line, presence, audit_id):
+def _recheck(db, principal, target, line, presence, audit_id, when="before its stop"):
+    """Re-read one planned line and refuse every drift Git can see.
+
+    Called once before any process is stopped — so a Git inspection that fails
+    here leaves the worktree and every process exactly as they were — and again
+    after the stop, before the worktree goes.
+    """
     force_authorized(db, principal, target)
     current = plan(db, principal, line["id"], False, presence,
                    f"refs/partyline/discarded/{audit_id}/")["lines"][0]
@@ -74,10 +97,17 @@ def _checked_remove(db, principal, target, line, presence, audit_id):
         raise HTTPException(409, "auxiliary worktree state changed; refresh retirement preview")
     if current["git"] != line["git"] or current["goal"] != line["goal"] \
             or current["parent_id"] != line["parent_id"]:
-        raise HTTPException(409, "retirement changed after process stop; refresh preview")
-    if current["children"] or live_attachments(db, line["id"], False):
+        raise HTTPException(409, f"retirement changed {when}; refresh preview")
+    if current["children"]:
         raise HTTPException(409, "retirement gained a child or live process")
-    teardown(db, line["id"], (db.get_conversation(line["id"]) or {}).get("cwd") or "")
+    return current
+
+
+def _remove_line(db, line_id, current):
+    """Destructive half: a line already re-checked with nothing left to refuse."""
+    if live_attachments(db, line_id, False):
+        raise HTTPException(409, "retirement gained a child or live process")
+    teardown(db, line_id, (db.get_conversation(line_id) or {}).get("cwd") or "")
     return _remove(current["git"])
 
 
@@ -95,14 +125,20 @@ async def retire(runtime, principal, target, *, include_children, stop_processes
         evidence = await asyncio.to_thread(plan, db, principal, target, include_children, presence)
         if not hmac.compare_digest(preview_token, token(db, evidence)):
             raise HTTPException(409, "retirement preview is stale or belongs to another principal")
+        # Every missing flag in one refusal, before anything is snapshotted,
+        # stopped or removed: one round trip, and a refused call leaves no trace.
+        missing = set()
         for line in evidence["lines"]:
             if line["goal"] and not clear_goal:
-                raise HTTPException(409, "clear_goal=true is required for an uncleared goal")
+                missing.add("clear_goal")
             if line["children"] and not include_children:
-                raise HTTPException(409, "include_children=true is required for child lines")
+                missing.add("include_children")
             if any(att["status"] in ("starting", "running") for att in line["attachments"]) \
                     and not stop_processes:
-                raise HTTPException(409, "stop_processes=true is required for live processes")
+                missing.add("stop_processes")
+        if missing:
+            raise HTTPException(409, "force retirement requires " + ", ".join(
+                f"{flag}=true" for flag in sorted(missing)) + " together for this plan")
         audit_id = uuid.uuid4().hex
         recovery, completed, stopped, preserved_paths, kept = {}, [], [], [], []
         decision = {"force_discard": True, "include_children": include_children,
@@ -126,13 +162,20 @@ async def retire(runtime, principal, target, *, include_children, stop_processes
             force_authorized(db, principal, target)
             for line in evidence["lines"]:
                 line_id = line["id"]
+                # Git inspection and drift checks come first: a refusal here
+                # finds the worktree and every process exactly as it was.
+                current = await asyncio.to_thread(
+                    _recheck, db, principal, target, line, presence, audit_id)
+                force_authorized(db, principal, target)
                 for att in live_attachments(db, line_id, False):
                     await detach_attachment(runtime, att["id"])
                     stopped.append(att["name"])
                 force_authorized(db, principal, target)
+                current = await asyncio.to_thread(
+                    _recheck, db, principal, target, line, presence, audit_id,
+                    "after process stop")
                 conv = db.get_conversation(line_id)
-                removed = await asyncio.to_thread(
-                    _checked_remove, db, principal, target, line, presence, audit_id)
+                removed = await asyncio.to_thread(_remove_line, db, line_id, current)
                 if not removed and (reason := keep_reason(conv.get("cwd") or "")):
                     kept.append(reason)
                 preserved_paths.extend(await asyncio.to_thread(cleanup_auxiliary, db, line, audit_id))
