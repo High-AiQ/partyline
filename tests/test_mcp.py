@@ -448,7 +448,8 @@ class CoreToolTests(unittest.TestCase):
             "path": "in.txt", "client_key": "own-file-key"}, client.state)
         self.assertEqual(client.requests[-1][0], "UPLOAD")
         request_count = len(client.requests)
-        with self.assertRaisesRegex(ValueError, "cannot post free prose"):
+        with self.assertRaisesRegex(ValueError, "your terminal reply is the chat message; "
+                                                "omit body or pass another conv_id"):
             tools_core.call(client, "upload_file", {
                 "path": "in.txt", "body": "caption", "client_key": "own-caption"},
                 client.state)

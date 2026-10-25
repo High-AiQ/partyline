@@ -129,6 +129,23 @@ class CaptainToolTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "report_id is required"):
             tools_captain.call(client, "reports", {"operation": "get"}, client.state)
 
+    def test_ack_report_accepts_own_and_captained_child_conv_ids(self):
+        client = Client()
+        tools_captain.call(client, "captain", {"op": "ack_report", "args": {
+            "conv_id": "home", "report_id": 4, "revision": 2}}, client.state)
+        tools_captain.call(client, "ack_report", {
+            "conv_id": "child", "report_id": 4, "revision": 2}, client.state)
+        self.assertEqual(client.calls, [
+            ("POST", "/api/conversations/home/reports/4/ack", {"revision": 2}),
+            ("POST", "/api/conversations/home/reports/4/ack", {"revision": 2}),
+        ])
+        client.target = {**client.target, "actions": ["read", "write"]}
+        client.calls.clear()
+        with self.assertRaisesRegex(ApiError, "not authorized for that target line"):
+            tools_captain.call(client, "ack_report", {
+                "conv_id": "child", "report_id": 4, "revision": 2}, client.state)
+        self.assertEqual(client.calls, [])
+
     def test_validation_errors_name_the_operation_and_fields(self):
         client = Client()
         with self.assertRaisesRegex(
