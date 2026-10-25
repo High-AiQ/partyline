@@ -14,6 +14,7 @@ from ..agent_client import load_connection
 
 MAX_RESPONSE = 2 * 1024 * 1024
 MAX_UPLOAD = 20 * 1024 * 1024
+MAX_MODEL_UPLOAD = 64 * 1024 * 1024
 MAX_DOWNLOAD = 20 * 1024 * 1024
 CHUNK = 64 * 1024
 
@@ -96,15 +97,16 @@ class PartylineClient:
 
     def upload(self, conv_id: str, file_path: str, *, client_key: str,
                title: str = "",
-               description: str = "", body: str = "") -> dict:
+               description: str = "", body: str = "", max_upload: int | None = None) -> dict:
+        max_upload = MAX_UPLOAD if max_upload is None else max_upload
         if not client_key or len(client_key) > 64:
             raise ValueError("upload requires a stable client_key of 1 to 64 characters")
         if len(title) > 200 or len(description) > 2000 or len(body) > 3000:
             raise ValueError("upload metadata exceeds Partyline's field limits")
         path = Path(file_path)
         stat = path.stat()
-        if not path.is_file() or stat.st_size > MAX_UPLOAD:
-            raise ValueError(f"upload must be a regular file no larger than {MAX_UPLOAD} bytes")
+        if not path.is_file() or stat.st_size > max_upload:
+            raise ValueError(f"upload must be a regular file no larger than {max_upload} bytes")
         boundary = "partyline-" + secrets.token_hex(16)
         filename = path.name.replace('"', "_").replace("\r", "_").replace("\n", "_")
         mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
@@ -132,7 +134,7 @@ class PartylineClient:
             with path.open("rb") as stream:
                 while chunk := stream.read(CHUNK):
                     sent += len(chunk)
-                    if sent > MAX_UPLOAD or sent > stat.st_size:
+                    if sent > max_upload or sent > stat.st_size:
                         raise ValueError("file changed while it was being uploaded")
                     conn.send(chunk)
             if sent != stat.st_size:

@@ -347,7 +347,7 @@ class CoreToolTests(unittest.TestCase):
         self.assertEqual(set(model["inputSchema"]["properties"]),
                          {"conv_id", "path", "title", "client_key"})
         self.assertEqual(set(model["inputSchema"]["required"]), {"path", "client_key"})
-        for text in ("self-contained glTF/GLB", "inline click-to-load", "20 MiB"):
+        for text in ("self-contained glTF/GLB", "inline click-to-load", "64 MiB"):
             self.assertIn(text, model["description"])
         batch = next(tool for tool in writer if tool["name"] == "upload_files")
         self.assertIn("click-to-load 3D cards", batch["description"])
@@ -360,7 +360,7 @@ class CoreToolTests(unittest.TestCase):
         }, client.state)
         self.assertIn(("CAP", "child"), client.requests)
         self.assertEqual(client.requests[-1], ("UPLOAD", "child", "scene.GLB", {
-            "title": "Scene", "client_key": "model-key",
+            "title": "Scene", "client_key": "model-key", "max_upload": 64 * 1024 * 1024,
         }))
         client.target_state = {**client.target_state, "actions": ["read"]}
         with self.assertRaisesRegex(ApiError, "not authorized"):
