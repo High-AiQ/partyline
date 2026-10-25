@@ -977,7 +977,9 @@ class ServerTest(unittest.TestCase):
     def test_delete_orphaned_running_row_invalidates_owner_and_fails_loudly(self):
         self.add_attachment("old", owner="lost-generation")
 
-        with self.assertRaisesRegex(HTTPException, "no local adapter owns"):
+        with patch("partyline.line_process_routes.DETACH_CONFIRM_TIMEOUT", 0.01), self.assertRaisesRegex(
+            HTTPException, "no local adapter owns"
+        ):
             self.arun(server.detach(self.principal_request(), "old"))
 
         attachment = server.runtime.db.get_attachment("old")
@@ -988,6 +990,55 @@ class ServerTest(unittest.TestCase):
             server.runtime.db.list_messages("line")[-1]["body"],
             "@terra detach failed: no local adapter owns the running record; "
             "process stop is unconfirmed",
+        )
+
+    def test_detach_confirms_a_stop_that_lands_after_its_stop_call_failed(self):
+        self.add_attachment("old")
+        adapter = FakeAdapter(att={"runtime_owner": None})
+        adapter.proc = SimpleNamespace(pid=12345, poll=lambda: None)
+
+        async def group_outlives_the_stop_call():
+            raise TimeoutError("attachment process group survived SIGKILL")
+
+        adapter.stop = group_outlives_the_stop_call
+        server.runtime.live["old"] = adapter
+
+        # The group is mid-teardown at the first check and dies moments later,
+        # inside detach's bounded confirmation window — not as a 500.
+        alive = iter([True, True, False])
+        with patch("partyline.line_process_routes.process_group_alive",
+                   side_effect=lambda pgid: next(alive, False)):
+            response = self.arun(server.detach(self.principal_request(), "old"))
+
+        self.assertEqual(response, {"ok": True})
+        self.assertEqual(server.runtime.db.get_attachment("old")["status"], "detached")
+        self.assertNotIn("old", server.runtime.live)
+        self.assertEqual(
+            server.runtime.db.list_messages("line")[-1]["body"], "@terra detached"
+        )
+
+    def test_detach_waits_out_a_stop_that_already_popped_the_adapter(self):
+        self.add_attachment("old")
+
+        async def detach_while_an_archive_stop_lands():
+            async def landing_stop():
+                # stop_attachments pops the adapter before its status write.
+                await asyncio.sleep(0.02)
+                self.assertTrue(server.runtime.db.set_attachment_status(
+                    "old", "detached", None))
+
+            stop = asyncio.create_task(landing_stop())
+            response = await server.detach(self.principal_request(), "old")
+            await stop
+            return response
+
+        response = self.arun(detach_while_an_archive_stop_lands())
+
+        self.assertEqual(response, {"ok": True})
+        self.assertEqual(server.runtime.db.get_attachment("old")["status"], "detached")
+        self.assertNotIn("old", server.runtime.live)
+        self.assertEqual(
+            server.runtime.db.list_messages("line")[-1]["body"], "@terra detached"
         )
 
     def test_detach_timeout_does_not_make_a_live_process_resumable(self):
@@ -1001,7 +1052,9 @@ class ServerTest(unittest.TestCase):
         adapter.stop = hangs_forever
         server.runtime.live["old"] = adapter
 
-        with patch("partyline.line_process_routes.process_group_alive", return_value=True):
+        with patch("partyline.line_process_routes.DETACH_CONFIRM_TIMEOUT", 0.01), patch(
+            "partyline.line_process_routes.process_group_alive", return_value=True
+        ):
             with self.assertRaisesRegex(HTTPException, "attachment remains live"):
                 self.arun(server.detach(self.principal_request(), "old"))
 
@@ -1022,8 +1075,9 @@ class ServerTest(unittest.TestCase):
         adapter.stop = hangs_forever
         server.runtime.live["old"] = adapter
 
-        with self.assertRaisesRegex(HTTPException, "attachment remains live"):
-            self.arun(server.detach(self.principal_request(), "old"))
+        with patch("partyline.line_process_routes.DETACH_CONFIRM_TIMEOUT", 0.01):
+            with self.assertRaisesRegex(HTTPException, "attachment remains live"):
+                self.arun(server.detach(self.principal_request(), "old"))
 
         self.assertEqual(server.runtime.db.get_attachment("old")["status"], "running")
         self.assertIs(server.runtime.live["old"], adapter)
