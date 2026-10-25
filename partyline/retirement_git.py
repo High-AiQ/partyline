@@ -11,6 +11,7 @@ from fastapi import HTTPException
 
 from .git_fence import mirror_branch_ref
 from .line_worktree import _git
+from .retirement_nested import file_kind, nested_evidence
 from .worktree_lifecycle import _base_ref, _default_branch
 from .worktree_paths import branch_name, managed_root
 
@@ -66,12 +67,18 @@ def file_evidence(cwd, paths, *, ignored=False, tracked=None):
     ignored directory) is the line's own tracked content, not an unsafe file.
     Genuinely unsafe working-tree entries stay refused: an untracked directory,
     FIFO, socket, device or submodule carries bytes no bounded evidence covers.
+    Clean nested linked worktrees require a branch in a surviving owning repo.
     """
     evidence, total, hashed = [], 0, 0
     file_limit = MAX_IGNORED_FILES if ignored else MAX_FILES
     byte_limit = MAX_IGNORED_BYTES if ignored else MAX_BYTES
     if len(paths) > file_limit:
-        raise HTTPException(409, f"retirement exceeds {file_limit} file limit")
+        path = sorted(paths)[file_limit]
+        try:
+            kind = file_kind(os.lstat(os.path.join(cwd, path)).st_mode)
+        except FileNotFoundError:
+            kind = "deleted"
+        raise HTTPException(409, f"retirement exceeds {file_limit} file limit at {path} ({kind})")
     for path in sorted(paths):
         full = os.path.join(cwd, path)
         try:
@@ -81,7 +88,8 @@ def file_evidence(cwd, paths, *, ignored=False, tracked=None):
             continue
         total += info.st_size
         if total > byte_limit:
-            raise HTTPException(409, f"retirement exceeds {byte_limit} byte limit")
+            raise HTTPException(409, f"retirement exceeds {byte_limit} byte limit at {path} "
+                                f"({file_kind(info.st_mode)})")
         row = [path, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_ino]
         if stat.S_ISLNK(info.st_mode):
             row.append(os.readlink(full))
@@ -90,10 +98,13 @@ def file_evidence(cwd, paths, *, ignored=False, tracked=None):
                 with open(full, 'rb') as stream:
                     row.append(hashlib.sha256(stream.read(HASH_BYTES + 1)).hexdigest())
                 hashed += info.st_size
+        elif stat.S_ISDIR(info.st_mode) and (nested := nested_evidence(cwd, path)):
+            row = nested
         elif (mode := _tracked_blob(path, tracked)):
             row.extend(["tracked", mode])
         else:
-            raise HTTPException(409, "retirement contains unsupported file type")
+            raise HTTPException(409, f"retirement contains unsupported file type: {path} "
+                                f"({file_kind(info.st_mode)})")
         evidence.append(row)
     return evidence, total
 
