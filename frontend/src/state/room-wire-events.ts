@@ -52,6 +52,9 @@ export function onRoomWireEvent(room: RoomWireSink, event: WireEvent, context: W
           ...attachment,
           memory_usage_bytes: event.usage_bytes,
           memory_raw_bytes: event.raw_bytes ?? null,
+          memory_anon_bytes: event.anon_bytes ?? null,
+          memory_file_bytes: event.file_bytes ?? null,
+          memory_kernel_bytes: event.kernel_bytes ?? null,
           memory_cap_bytes: event.cap_bytes,
           memory_percent: event.percent,
         });

@@ -79,7 +79,8 @@ def warning_limit(budget: int) -> int:
     return min(budget, backstop_bytes(budget)) if sys.platform.startswith("linux") else budget
 
 
-async def _warn(runtime, row: dict, usage: int, cap: int, shmem: int = 0) -> None:
+async def _warn(runtime, row: dict, usage: int, cap: int, shmem: int = 0,
+                sample: dict | None = None) -> None:
     """Tell the process itself, then the nearest captain above it, privately.
 
     Private copies still reach people on each line. A process near its cap is
@@ -95,10 +96,10 @@ async def _warn(runtime, row: dict, usage: int, cap: int, shmem: int = 0) -> Non
     # never rings a process with its own words.
     await post_private(runtime, row["conv_id"], "system", "system",
                        warning_text(row, usage, cap, own=True, top=top,
-                                    tmp_note=tmp_note),
+                                    tmp_note=tmp_note, sample=sample),
                        audience=row["id"], source=(None, row["conv_id"]))
     source = (row["id"], row["conv_id"])
-    detail = warning_text(row, usage, cap, top=top, tmp_note=tmp_note)
+    detail = warning_text(row, usage, cap, top=top, tmp_note=tmp_note, sample=sample)
     for line in [row["conv_id"], *ancestors(runtime.db, row["conv_id"])]:
         captain = live_manager(runtime, line)
         if captain is not None and captain["id"] != row["id"]:
@@ -218,7 +219,11 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
                             if fresh is not None:
                                 usage = fresh["working_set"]
                                 raw = fresh["current"]
+                                sample_dict = fresh
                         shmem = (sample_dict or {}).get("shmem", 0)
+                        anonymous = (sample_dict or {}).get("anon")
+                        file_cache = (sample_dict or {}).get("file")
+                        kernel = (sample_dict or {}).get("kernel_total")
                         if usage < effective * REARM_RATIO:
                             armed[row["id"]] = True
                             over[row["id"]] = False
@@ -226,23 +231,25 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
                             over[row["id"]] = True
                             armed[row["id"]] = False
                             notified[row["id"]] = clock()
-                            await _warn(runtime, row, usage, cap, shmem=shmem)
+                            await _warn(runtime, row, usage, cap, shmem=shmem, sample=sample_dict)
                         elif crosses_warning(usage, effective, config["memory_warn_percent"]):
                             now = clock()
                             inside_window = now - notified.get(row["id"], -NOTICE_WINDOW) < NOTICE_WINDOW
                             if armed.get(row["id"], True) and not inside_window:
                                 armed[row["id"]] = False
                                 notified[row["id"]] = now
-                                await _warn(runtime, row, usage, cap, shmem=shmem)
+                                await _warn(runtime, row, usage, cap, shmem=shmem, sample=sample_dict)
                         runtime.memory_usage[row["id"]] = {
                             "usage_bytes": usage, "cap_bytes": cap,
-                            "raw_bytes": raw,
+                            "raw_bytes": raw, "anon_bytes": anonymous,
+                            "file_bytes": file_cache, "kernel_bytes": kernel,
                             "percent": min(100, usage * 100 // max(cap, 1)),
                             "source": sample[2], "sampled_at": time.time(),
                         }
                         await runtime.broadcast(row["conv_id"], MemoryUsageEvent(
                             attachment_id=row["id"], usage_bytes=usage, cap_bytes=cap,
-                            raw_bytes=raw,
+                            raw_bytes=raw, anon_bytes=anonymous, file_bytes=file_cache,
+                            kernel_bytes=kernel,
                             percent=min(100, usage * 100 // max(cap, 1)),
                         ))
                 inventory.kick(runtime)
