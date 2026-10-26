@@ -4,7 +4,7 @@ import time
 
 from . import reports
 from .mention_relay import LIVE, live_manager, post_private
-from .orchestrator_sha_check import report_text
+from .orchestrator_sha_check import clip, report_text
 from .orchestrator_store import task
 
 
@@ -57,8 +57,9 @@ async def wake_root(runtime, row, record, wake):
 
 async def notify_root(runtime, row, text):
     """One notified report that is not the task's terminal one, so it holds no report_id."""
+    body = clip(f"Task {row['conv_id']}: {text}", reports.MAX_BODY)
     record, wake = reports.add(runtime.db, row['root_id'], row['conv_id'], 'task server',
-                               f"Task {row['conv_id']}: {text}"[:2000], notify=True)
+                               body, notify=True)
     await wake_root(runtime, row, record, wake)
 
 
