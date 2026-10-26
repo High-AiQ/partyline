@@ -66,7 +66,7 @@ async def create_task(runtime, actor, root_id, body):
                'you change); never push. '
                'Call request_review(sha, what, where) when ready. The server owns review staffing.')
     await runtime.broadcast_all(ConversationsChangedEvent())
-    row = task(db, conv_id)
+    row = task(db, conv_id, visibility=True)
     # The task folder already holds a worktree of every repository under the
     # captain's folder; the review entry waits for one, so say so now.
     if not row['repositories']:
@@ -85,7 +85,7 @@ async def request_review(runtime, actor, conv_id, body):
         row = require_task(db, actor, conv_id)
         if row['status'] in ('approved', 'done'):
             await report(runtime, row)
-            return task(db, conv_id)
+            return task(db, conv_id, visibility=True)
         if row['status'] == 'in_review':
             # Asking again revives a reviewer that died after admission.
             if staffed_by_preset(row) and not reviewer_is_live(db, row):
@@ -95,7 +95,7 @@ async def request_review(runtime, actor, conv_id, body):
                 except (HTTPException, ValueError) as exc:
                     await spawn_refused(runtime, row, getattr(exc, 'detail', str(exc)))
                     raise
-            return task(db, conv_id)
+            return task(db, conv_id, visibility=True)
         from .orchestrator_stall import resume
         resume(db, conv_id)
         cwd = line_cwd(db, conv_id)
@@ -144,7 +144,7 @@ async def request_review(runtime, actor, conv_id, body):
         await report(runtime, row)
         await runtime.broadcast_all(ConversationsChangedEvent())
         await flag(runtime, row, f"{body.what} {body.where}")
-        return task(db, conv_id)
+        return task(db, conv_id, visibility=True)
 
 
 async def review_verdict(runtime, actor, conv_id, body):

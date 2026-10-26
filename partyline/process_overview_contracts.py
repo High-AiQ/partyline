@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from .orchestrator_contracts import WorkspaceVisibility
+
 
 class ProcessOverviewAttachment(BaseModel):
     """One live attachment on a line, as the reclaim caller sees it."""
@@ -26,6 +28,7 @@ class ProcessOverviewLine(BaseModel):
     name: str
     goal_set: bool = False
     accepted_sha: str | None = None
+    workspaces: list[WorkspaceVisibility] = Field(default_factory=list)
     attachments: list[ProcessOverviewAttachment] = Field(default_factory=list)
 
 

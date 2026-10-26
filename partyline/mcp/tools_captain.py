@@ -45,6 +45,8 @@ def tool_list(state: dict) -> list[dict]:
                   "fallback"]["inputSchema"]}]
     for op in permitted(state):
         descriptions = {
+            "process_overview": "Inspect lines and live processes, including every task workspace's real and "
+                "mirror tips. The mirror tip is where the worker's commits live until accept.",
             "retirement_preview": "Inspect bounded retirement evidence and obtain a principal-bound token. "
                 "Lists dirty/untracked/ignored files, history, processes, goals, children and assets, "
                 "and required_flags names every flag the retirement needs.",

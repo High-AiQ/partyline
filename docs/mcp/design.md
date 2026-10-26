@@ -334,11 +334,17 @@ from `/api/capabilities`. Every HTTP handler independently authorizes the caller
 | Tool | Caller | HTTP operation |
 | --- | --- | --- |
 | `create_task(name, goal, implementer, review?)` | Orchestrator root captain | POST `/api/conversations/{root}/tasks` |
-| `tasks()` | Orchestrator root captain | GET `/api/conversations/{root}/tasks` |
+| `tasks()` | Orchestrator root captain | GET `/api/conversations/{root}/tasks`; each task includes bounded per-workspace branch visibility |
 | `blocked(reason)` | Exact assigned implementer attachment | POST `/api/conversations/{task}/blocked` |
 | `waiting(reason, seconds?)` | Exact assigned implementer attachment | POST `/api/conversations/{task}/waiting` |
 | `request_review(sha?, what, where)` | Exact assigned implementer attachment | POST `/api/conversations/{task}/request-review` |
 | `review_verdict(verdict, findings)` | Exact assigned reviewer, or root captain for captain policy | POST `/api/conversations/{task}/review-verdict` |
+
+For each task workspace, `tasks` reports the repository, worktree path, branch, mirror and
+host tips, accepted SHA when present, and at most five truncated subjects with the full count
+of commits not yet on the host branch. The mirror tip is where the worker's commits live until
+accept. `process_overview` exposes the same bounded `workspaces` list on each task line; the
+existing `repositories` review field is unchanged.
 
 The root captain supplies `conv_id` to `review_verdict`; assigned reviewers use
 their home task line. Policies are `none`, `captain` (default), or an exact reviewer
