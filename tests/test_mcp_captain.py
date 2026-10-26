@@ -58,6 +58,27 @@ class CaptainToolTests(unittest.TestCase):
             tools_captain.call(client, "captain", {"op": "create_task", "args": {
                 "name": "slice", "goal": "build it", "implementer": "builder"}}, client.state)
 
+    def test_share_ref_schema_authorization_and_fixed_route(self):
+        client = Client()
+        root = {**client.state, "actions": [*client.state["actions"], "message_task"]}
+        self.assertIn("share_ref", {tool["name"] for tool in tools_captain.tool_list(root)})
+        self.assertNotIn("share_ref", {tool["name"] for tool in tools_captain.tool_list(client.state)})
+        tools_captain.call(client, "share_ref", {
+            "conv_id": "task id", "ref_or_sha": "captain-saved", "name": "rescued",
+            "repository": "/work/backend", "replace": True}, root)
+        self.assertEqual(client.calls[-1], (
+            "POST", "/api/conversations/task%20id/task/share-ref",
+            {"ref_or_sha": "captain-saved", "name": "rescued",
+             "repository": "/work/backend", "replace": True}))
+        client.target = {**client.target, "actions": ["read"]}
+        with self.assertRaisesRegex(ApiError, "not authorized"):
+            tools_captain.call(client, "share_ref", {
+                "conv_id": "child", "ref_or_sha": "HEAD", "name": "saved"}, root)
+        with self.assertRaisesRegex(ValueError, "missing required field.*name"):
+            tools_captain.call(client, "share_ref", {
+                "conv_id": "child", "ref_or_sha": "HEAD"}, root)
+        self.assertEqual(len(client.calls), 1)
+
     def test_dispatcher_denies_non_lead_and_target_line_authorization(self):
         client = Client()
         worker = {**client.state, "role": "implementer", "is_lead": False}
