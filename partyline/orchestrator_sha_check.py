@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 
+from . import reports
 from .git_fence import mirror_store
 from .hierarchy import lead_attachment
 from .line_worktree import rev
@@ -96,20 +97,67 @@ def flagged(db, row) -> list[str]:
     return quoted(db, row["conv_id"], *(text for text in texts if text))
 
 
+ELLIPSIS = ' …'
+TRUNCATED = ' …[truncated; full text via tasks]'
+
+
+def clip(text: str, budget: int, mark: str = ELLIPSIS) -> str:
+    """The longest prefix of *text* within *budget*, cut at a word boundary.
+
+    A cut is never silent — the visible *mark* says so — and never lands
+    inside a word: the whole word the cut opened is given up, which is what
+    kept a report from ending like ``…before shippin``.
+    """
+    text = text or ''
+    if len(text) <= budget:
+        return text
+    if budget <= len(mark):
+        return mark[:max(0, budget)]
+    cut = text[:budget - len(mark)]
+    if re.search(r'\S$', cut) and re.match(r'\S', text[len(cut)]):
+        cut = re.sub(r'\S*$', '', cut)
+    return cut.rstrip() + mark
+
+
 def report_text(db, row) -> str:
-    """The captain's report body, with unverified SHAs named after the findings."""
+    """The captain's report body, within reports.MAX_BODY without a blind cut.
+
+    The header and any unverified-SHA warning are kept whole, and the warning
+    sits before the findings so it is never the part lost. ``what`` and then
+    ``location`` are shortened first, visibly, to make room; findings that
+    still cannot fit are cut at a word boundary behind an explicit marker.
+    If the fixed parts alone overflow the cap — many repositories in the
+    header, many unverified SHAs in the warning — the whole body is clipped
+    behind that marker rather than stored over the cap and refused.
+    """
     status = "stalled" if row["stall_stage"] == 3 else row["status"]
     repos = row["repositories"]
     where = (' ' + '; '.join(f"{item['repository']} {item['sha']}" for item in repos)
              if len(repos) > 1 else '')
-    text = (f"Task {row['conv_id']}: {status}; round {row['round']}; "
-            f"SHA {row['sha']}{where}; review {row['review_worktree']}; "
-            f"{row['what']} — {row['location']}\n{row['findings']}")
+    head = (f"Task {row['conv_id']}: {status}; round {row['round']}; "
+            f"SHA {row['sha']}{where}; review {row['review_worktree']}; ")
     missing = flagged(db, row)
-    if missing:
-        text += ("\n⚠ unverified SHAs (not a commit in this task's worktrees or their clones): "
-                 + ", ".join(missing))
-    return text[:2000]
+    warning = ('⚠ unverified SHAs (not a commit in this task\'s worktrees or their clones): '
+               + ', '.join(missing)) if missing else ''
+    what, location, findings = row['what'] or '', row['location'] or '', row['findings'] or ''
+    # Everything except the three flexible fields: the head, the ' — ', and
+    # the newlines that separate the parts, one of them only when warned.
+    room = reports.MAX_BODY - len(head) - len(warning) - 4 - (1 if warning else 0)
+    if len(what) + len(location) + len(findings) > room:
+        # The findings matter most: give up `what` first, then `location`.
+        what = clip(what, room - len(location) - len(findings))
+        location = clip(location, room - len(what) - len(findings))
+        findings = clip(findings, room - len(what) - len(location), TRUNCATED)
+    parts = [f"{head}{what} — {location}"]
+    if warning:
+        parts.append(warning)
+    parts.append(findings)
+    result = '\n'.join(parts)
+    if len(result) > reports.MAX_BODY:
+        # The fixed parts alone overflowed and the flexible fields are spent:
+        # the whole body still gives way, visibly, rather than being refused.
+        return clip(result, reports.MAX_BODY, TRUNCATED)
+    return result
 
 
 async def flag(runtime, row, text) -> None:

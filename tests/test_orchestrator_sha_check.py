@@ -6,10 +6,11 @@ from unittest.mock import AsyncMock, patch
 
 from partyline.git_fence import _mirror_dir
 from partyline.orchestrator_contracts import BlockedIn, ReviewRequestIn, VerdictIn
+from partyline.orchestrator_notices import notify_root
 from partyline.orchestrator_service import request_review, review_verdict
-from partyline.orchestrator_sha_check import flagged, quoted, suspected
+from partyline.orchestrator_sha_check import clip, flagged, quoted, report_text, suspected
 from partyline.orchestrator_stall import blocked
-from partyline.reports import get
+from partyline.reports import MAX_BODY, get, list_for_parent
 from partyline.return_path import ReturnPath
 from partyline.task_workspaces import workspaces
 from tests.orchestrator_fixture import TaskFixture, git
@@ -172,3 +173,72 @@ class ShaCheckTest(TaskFixture):
                              VerdictIn(verdict='changes', findings=f'revert {FAKE}'))
         self.assertIn(FAKE, flagged(self.db, self.row()))
         self.assertEqual(len(self.flagged_notices()), 1)
+
+    def test_clip_cuts_at_word_boundaries_and_marks_the_cut(self):
+        self.assertEqual(clip('short', 10), 'short')
+        self.assertEqual(clip('alpha beta gamma', 200), 'alpha beta gamma')
+        self.assertEqual(clip('alpha beta gamma', 9), 'alpha …')
+        self.assertEqual(clip('abcdefghij', 5), ' …')
+        self.assertEqual(clip('x', 0), '')
+
+    async def test_a_short_report_is_byte_for_byte_what_it_was(self):
+        await self.create('none')
+        row = await request_review(self.runtime, self.worker, self.conv_id,
+                                   ReviewRequestIn(sha=self.commit(), what='landed it',
+                                                   where='code'))
+        expected = (f"Task {row['conv_id']}: {row['status']}; round {row['round']}; "
+                    f"SHA {row['sha']}; review {row['review_worktree']}; "
+                    f"{row['what']} — {row['location']}\n{row['findings']}")
+        self.assertEqual(report_text(self.db, row), expected)
+
+    async def test_long_what_and_location_give_way_so_the_findings_survive(self):
+        await self.create('none')
+        findings = 'word ' * 299 + 'omega'
+        self.assertEqual(len(findings), 1500)
+        self.db._exec(
+            "UPDATE task_reviews SET what=?, location=?, findings=? WHERE conv_id=?",
+            ('lorem ipsum ' * 50, 'src/dir ' * 60, findings, self.conv_id))
+        body = report_text(self.db, self.row())
+        self.assertLessEqual(len(body), MAX_BODY)
+        self.assertTrue(body.endswith(findings))
+        self.assertNotIn('lorem', body)  # `what` was given up first
+        self.assertIn(' …', body)  # and the shortening is visible
+
+    def test_findings_that_alone_exceed_the_room_are_cut_whole_word_with_a_marker(self):
+        row = {'conv_id': 't', 'stall_stage': 0, 'status': 'in_review', 'round': 0,
+               'sha': None, 'repositories': [], 'review_worktree': None,
+               'what': 'w', 'location': 'l', 'findings': 'gamma ' * 500}
+        body = report_text(self.db, row)
+        self.assertLessEqual(len(body), MAX_BODY)
+        self.assertTrue(body.endswith('gamma …[truncated; full text via tasks]'))
+
+    def test_fixed_parts_that_alone_overflow_the_cap_are_clipped_with_the_marker(self):
+        row = {'conv_id': 't', 'stall_stage': 0, 'status': 'in_review', 'round': 0,
+               'sha': 'b' * 40, 'review_worktree': '/wt', 'what': 'w', 'location': 'l',
+               'findings': 'f',
+               'repositories': [{'repository': f'/repo/{i}', 'sha': 'c' * 40}
+                                for i in range(40)]}
+        flags = [f'{i:040x}' for i in range(30)]
+        with patch('partyline.orchestrator_sha_check.flagged', return_value=flags):
+            body = report_text(self.db, row)
+        self.assertLessEqual(len(body), MAX_BODY)
+        self.assertTrue(body.endswith(' …[truncated; full text via tasks]'))
+
+    async def test_the_unverified_sha_warning_sits_before_whole_findings(self):
+        await self.create('none')
+        await request_review(self.runtime, self.worker, self.conv_id,
+                             ReviewRequestIn(sha=self.commit(), what=f'landed {FAKE}',
+                                             where='code'))
+        self.db._exec("UPDATE task_reviews SET findings=? WHERE conv_id=?",
+                      ('the work that matters', self.conv_id))
+        body = report_text(self.db, self.row())
+        self.assertIn(f'landed {FAKE}', body)
+        self.assertLess(body.index('⚠ unverified SHAs'), body.index('the work that matters'))
+
+    async def test_notify_root_clips_a_long_note_at_a_word_boundary(self):
+        await self.create('none')
+        await notify_root(self.runtime, self.row(), 'unblocked: ' + 'gamma ' * 500)
+        body = list_for_parent(self.db, 'root')[0]['body']
+        self.assertLessEqual(len(body), MAX_BODY)
+        self.assertTrue(body.startswith(f'Task {self.conv_id}: unblocked: gamma'))
+        self.assertTrue(body.endswith('gamma …'))
