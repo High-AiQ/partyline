@@ -5,6 +5,7 @@ import json
 from fastapi import HTTPException
 
 from .task_workspaces import workspaces
+from .workspace_visibility import workspace_visibility
 
 
 def _handle(db, ident):
@@ -12,7 +13,7 @@ def _handle(db, ident):
     return att['name'] if att else None
 
 
-def _parsed(row, db=None):
+def _parsed(row, db=None, visibility=False):
     if row is None:
         return None
     record = dict(row)
@@ -22,17 +23,20 @@ def _parsed(row, db=None):
         record['repositories'] = json.loads(record.get('repositories') or '[]')
     except ValueError:
         record['repositories'] = []
+    if visibility:
+        record['workspaces'] = workspace_visibility(db, record)
     return record
 
 
-def task(db, conv_id):
+def task(db, conv_id, visibility=False):
     if not hasattr(db, '_exec'):
         return None
-    return _parsed(db._exec("SELECT * FROM task_reviews WHERE conv_id=?", (conv_id,)).fetchone(), db)
+    return _parsed(db._exec("SELECT * FROM task_reviews WHERE conv_id=?", (conv_id,)).fetchone(),
+                   db, visibility)
 
 
-def tasks(db, root_id):
-    rows = [_parsed(row, db) for row in db._exec(
+def tasks(db, root_id, visibility=False):
+    rows = [_parsed(row, db, visibility=visibility) for row in db._exec(
         "SELECT * FROM task_reviews WHERE root_id=? ORDER BY created_at,conv_id",
         (root_id,)).fetchall()]
     for record in rows:

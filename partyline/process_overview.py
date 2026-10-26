@@ -16,7 +16,9 @@ from fastapi import FastAPI, Request
 from .auth_guard import request_principal
 from .hierarchy import descendants
 from .machine_scope import deny_unless
+from .orchestrator_store import task
 from .presence import IDLE
+from .workspace_visibility import workspace_visibility
 from .process_overview_contracts import (
     ProcessOverviewAttachment,
     ProcessOverviewLine,
@@ -71,6 +73,7 @@ def _attachment(runtime, att: dict) -> ProcessOverviewAttachment:
 
 def _line(runtime, conv_id: str) -> ProcessOverviewLine:
     conv = runtime.db.get_conversation(conv_id) or {}
+    task_row = task(runtime.db, conv_id)
     attachments = [
         _attachment(runtime, att)
         for att in runtime.db.list_attachments(conv_id)
@@ -81,6 +84,7 @@ def _line(runtime, conv_id: str) -> ProcessOverviewLine:
         name=conv.get("name", ""),
         goal_set=bool((conv.get("goal") or "").strip()),
         accepted_sha=conv.get("accepted_sha") or None,
+        workspaces=workspace_visibility(runtime.db, task_row) if task_row else [],
         attachments=attachments,
     )
 

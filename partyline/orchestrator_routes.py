@@ -37,12 +37,12 @@ def orchestrator_router(runtime):
     @router.get('/api/conversations/{conv_id}/tasks', response_model=list[TaskReview])
     def listing(request: Request, conv_id: str):
         require_root(db, request_principal(request), conv_id)
-        return tasks(db, conv_id)
+        return tasks(db, conv_id, visibility=True)
 
     @router.get('/api/conversations/{conv_id}/task', response_model=TaskReview)
     def detail(request: Request, conv_id: str):
         deny_unless(db, request_principal(request), conv_id, 'read')
-        row = task(db, conv_id)
+        row = task(db, conv_id, visibility=True)
         if row is None:
             raise HTTPException(404, 'task not found')
         return row

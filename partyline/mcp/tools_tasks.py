@@ -54,8 +54,11 @@ def tool_list(state):
         if name == 'review_verdict' and state.get('is_lead'):
             schema['properties']['conv_id'] = {'type': 'string', 'minLength': 1}
             schema['required'].append('conv_id')
-        result.append({'name': name, 'description': f'Server-authorized task operation: {name}.',
-                       'inputSchema': schema})
+        description = f'Server-authorized task operation: {name}.'
+        if name == 'tasks':
+            description += (" Workspaces show real and mirror tips; the mirror tip is where the worker's "
+                            "commits live until accept.")
+        result.append({'name': name, 'description': description, 'inputSchema': schema})
     return result
 
 
