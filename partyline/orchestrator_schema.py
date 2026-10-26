@@ -98,4 +98,9 @@ MIGRATIONS += [
         created_at REAL NOT NULL,
         PRIMARY KEY(conv_id, sender_id, name)
     )""",
+    # The captain handle that recorded the current verdict by override, superseding
+    # the reviewer of record for that round. NULL for an ordinary reviewer verdict;
+    # cleared wherever `findings` is rewritten, so it always describes the verdict
+    # actually stored.
+    "ALTER TABLE task_reviews ADD COLUMN overridden_by TEXT",
 ]

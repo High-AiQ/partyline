@@ -109,6 +109,30 @@ def require_task(db, actor, conv_id, *, reviewer=False):
     return row
 
 
+def require_override(db, actor, conv_id):
+    """The task row and its root captain, for an explicit override verdict.
+
+    The reviewer-of-record rule stays: an ordinary verdict call remains the
+    reviewer's alone. An override is the captain's explicit, auditable act, so
+    it needs the live lead of the task's root line and a review that belongs to
+    a staffed reviewer preset. Returns ``(row, captain)`` so the caller records
+    the same captain it authorized.
+    """
+    row = task(db, conv_id)
+    if row is None:
+        raise HTTPException(404, 'task not found')
+    from .hierarchy import lead_attachment
+    captain = lead_attachment(db, row['root_id'])
+    if (actor.kind != 'machine' or captain is None or actor.conv_id != row['root_id']
+            or actor.attachment_id != captain['id']):
+        raise HTTPException(403, 'only the root captain of this task may override its review')
+    if row['policy'] in ('none', 'captain'):
+        raise HTTPException(
+            409, 'override applies only to a review that belongs to a separate reviewer; '
+            "for a captain-policy task record the verdict with review_verdict directly")
+    return row, captain
+
+
 def require_task_or_root(db, actor, conv_id):
     """The task row and whether the root captain (or a person) is the caller; else its implementer."""
     row = task(db, conv_id)

@@ -22,7 +22,8 @@ OPERATIONS = tuple(_PATHS)
 
 _WHO = {'resume_work': "the task's implementer and the root captain",
         'blocked': "the task's implementer", 'request_review': "the task's implementer",
-        'review_verdict': "the task's reviewer (or the root captain under captain review)",
+        'review_verdict': "the task's reviewer, or the root captain under captain review "
+                          'or with an explicit override',
         'waiting': "the task's implementer"}
 
 

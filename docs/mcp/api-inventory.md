@@ -354,7 +354,7 @@ These entries extend both inventory sets above. Registration handlers are in
 | POST | `/api/conversations/{conv_id}/blocked` | `block` | exact task implementer | yes | tool: `blocked` |
 | POST | `/api/conversations/{conv_id}/waiting` | `waiting` | exact task implementer | yes | tool: `waiting`; declares a long wait (`reason`, `seconds` 60–3600) that defers the stall reminder and the stall report |
 | POST | `/api/conversations/{conv_id}/request-review` | `review` | exact task implementer | yes | tool: `request_review`; `sha` or `repositories: [{repository, sha}]` (1–8, not both) |
-| POST | `/api/conversations/{conv_id}/review-verdict` | `verdict` | exact task reviewer or captain-policy root captain | yes | tool: `review_verdict` |
+| POST | `/api/conversations/{conv_id}/review-verdict` | `verdict` | exact task reviewer, or root captain with `override=true` (staffed reviews) or under captain policy | yes | tool: `review_verdict`; override supersedes the reviewer (told once), records `overridden_by`, refused with 409 when no review is open or the task is settled |
 | POST | `/api/conversations/{conv_id}/task/reopen` | `reopen` | H, or root captain | yes | tool: `reopen_task`; returns an approved/done task to implementing (409 otherwise) |
 | POST | `/api/conversations/{conv_id}/task/message` | `message` | H, or root captain | yes | tool: `message_task`; private wake-up message to the task's live implementer or reviewer (409 otherwise) |
 | POST | `/api/conversations/{conv_id}/task/share-ref` | `share_ref` | H, or root captain | yes | captain op: `share_ref`; publish `refs/partyline/shared/<name>` in a live task's mirror, then privately notify its implementer |

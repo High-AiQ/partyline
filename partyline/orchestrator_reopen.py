@@ -26,7 +26,8 @@ async def reopen_task(runtime, actor, conv_id, body):
         changed = db._exec(
             "UPDATE task_reviews SET status='implementing',round=0,sha=NULL,review_worktree=NULL,"
             "repositories='[]',what='',location='',findings='',previous_findings='',report_id=NULL,reviewer_restarts=0,"
-            'stall_stage=0,stall_notice_id=NULL,blocked_at=NULL,settled_at=NULL,reopen_noticed=0 '
+            'stall_stage=0,stall_notice_id=NULL,blocked_at=NULL,settled_at=NULL,reopen_noticed=0,'
+            'overridden_by=NULL '
             "WHERE conv_id=? AND status IN ('approved','done')", (conv_id,))
         if changed.rowcount != 1:
             raise HTTPException(
