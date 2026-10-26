@@ -59,7 +59,7 @@ def _tracked_blob(path, modes):
     return mode if mode in BLOB_MODES else None
 
 
-def file_evidence(cwd, paths, *, ignored=False, tracked=None):
+def file_evidence(cwd, paths, *, ignored=False, tracked=None, conv_id=None):
     """Hash small dirty files; large files use lstat identity and timestamps.
 
     A path Git tracks as a blob is accepted whatever the checkout holds at it: a
@@ -98,7 +98,7 @@ def file_evidence(cwd, paths, *, ignored=False, tracked=None):
                 with open(full, 'rb') as stream:
                     row.append(hashlib.sha256(stream.read(HASH_BYTES + 1)).hexdigest())
                 hashed += info.st_size
-        elif stat.S_ISDIR(info.st_mode) and (nested := nested_evidence(cwd, path)):
+        elif stat.S_ISDIR(info.st_mode) and (nested := nested_evidence(cwd, path, conv_id)):
             row = nested
         elif (mode := _tracked_blob(path, tracked)):
             row.extend(["tracked", mode])
@@ -134,8 +134,9 @@ def inspect_git(db, conv):
     untracked = _paths(cwd, "ls-files", "--others", "--exclude-standard", "-z")
     ignored = _paths(cwd, "ls-files", "--others", "--ignored", "--exclude-standard", "-z")
     modes = tracked_modes(cwd)
-    files, size = file_evidence(cwd, tracked | set(untracked), tracked=modes)
-    ignored_files, ignored_size = file_evidence(cwd, set(ignored), ignored=True, tracked=modes)
+    files, size = file_evidence(cwd, tracked | set(untracked), tracked=modes, conv_id=conv["id"])
+    ignored_files, ignored_size = file_evidence(
+        cwd, set(ignored), ignored=True, tracked=modes, conv_id=conv["id"])
     index_path = git(cwd, "rev-parse", "--path-format=absolute", "--git-path", "index").strip()
     index, _ = file_evidence(os.path.dirname(index_path), [os.path.basename(index_path)])
     return {"cwd": cwd, "root": root, "branch": branch, "head": head,
