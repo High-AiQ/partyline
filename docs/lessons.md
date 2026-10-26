@@ -1489,3 +1489,29 @@ Git inspection that fails on the recheck: each asserts the worktree, files and p
 untouched. The same suite keeps a committed symlink (`CLAUDE.md -> AGENTS.md`) retirable —
 tracked paths are judged by Git's mode, so a tracked blob is the line's own content, while
 untracked directories, embedded repositories and special files stay refused.
+
+## 2026-10-26 — A generic stall reminder told the implementer nothing about its own work
+
+A weaker implementer (a haiku worker, twice in one day) ended its turn with edits uncommitted
+and neither `request_review` nor `blocked(reason)` called. The recovery was already in place —
+one reminder per stage, then a `stalled` report — but its body was the fixed line "This task has
+no hand-off. Call request_review or blocked(reason)." That sentence is true of every stalled
+task and useful to none of them: it never says that the work is sitting there uncommitted, so a
+captain ended up relaying the next steps by hand anyway.
+
+The reminder is now built from the line's own workspace state, still exactly one message per
+stage with the waiting and open-turn exemptions untouched: a commit past the base means
+`request_review` with that full SHA (plus any further edits to commit first), uncommitted
+changes mean run the gates and commit, then `request_review`, and nothing changed means
+`blocked(reason)`, or `waiting(reason, seconds)` for a long command. The commit check runs
+first and reads the line's fence mirror, because a worker's commits live in that private
+mirror until accept: the first cut read `git status` first and would have told a worker that
+had already committed to go and commit again — the exact loop it exists to break. The dirty
+read is read-only (`git --no-optional-locks status --porcelain`), bounded (a capped prefix of
+the output plus a timeout) and off the event loop, and any workspace that cannot be read —
+missing, unfenced, not a repository — falls back to the old generic line rather than guessing
+at work it never saw. `tests/test_orchestrator_stall.py` holds all three texts under 600
+characters, a commit that exists only in the mirror while the worktree reads dirty from
+outside, the declared-wait and open-turn exemptions, one reminder per stage, and both
+fallbacks. Do not assume a recovery message is followed because it is correct: it has to name
+the work the process can see, from a vantage point that can actually see it.

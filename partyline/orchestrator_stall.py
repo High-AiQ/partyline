@@ -1,6 +1,17 @@
-"""Durable, one-shot recovery when a task has no structured hand-off or peer."""
+"""Durable, one-shot recovery when a task has no structured hand-off or peer.
+
+The reminder is one line, but it is not one line of everything: a weaker
+implementer told only "call request_review or blocked(reason)" repeats the
+same uncommitted work next turn, because the generic text never mentions the
+work. `reminder` reads the line's own workspaces — the fence mirror first, then a
+read-only, bounded, cheap dirty check — and names the exact call the state owes.
+Any workspace it cannot read falls back to the generic line rather than guessing
+at work it never saw.
+"""
 
 import asyncio
+import os
+import subprocess
 import time
 
 from fastapi import HTTPException
@@ -13,7 +24,7 @@ from .orchestrator_handles import message_task
 from .orchestrator_contracts import MessageTaskIn
 from .orchestrator_store import require_task, require_task_or_root, task
 from .orchestrator_wait import live as live_wait
-from .task_workspaces import anchor
+from .task_workspaces import anchor, moved, workspaces
 
 
 def candidate(db, att):
@@ -37,6 +48,61 @@ def working(runtime, att_id):
     return bool(presence is not None and presence.is_working(att_id))
 
 
+GENERIC = 'This task has no hand-off. Call request_review or blocked(reason).'
+STATUS_BOUND = 4096   # bytes of `git status --porcelain` we ever look at
+STATUS_TIMEOUT = 10   # seconds one workspace status read may take
+
+
+def _dirty(path):
+    """True when the workspace has changes, False when it is clean, None when unreadable."""
+    try:
+        done = subprocess.run(['git', '--no-optional-locks', 'status', '--porcelain'],
+                              cwd=path, capture_output=True, text=True, timeout=STATUS_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if done.stdout[:STATUS_BOUND].strip():
+        return True
+    return False if done.returncode == 0 else None
+
+
+def _named(path):
+    """A repository by the name the implementer uses for it: `/x/y/frontend` -> `frontend`."""
+    return os.path.basename(os.path.normpath(path)) or path
+
+
+def reminder(db, att):
+    """What this line's state owes next, or GENERIC when no workspace state could be read."""
+    conv_id = att['conv_id']
+    try:
+        spaces = workspaces(db, conv_id)
+        if spaces:
+            # The commit check first: a fenced worker commits to its private mirror
+            # until accept, so from outside its worktree still reads as modified.
+            # Reading the dirty state first told a worker that had already
+            # committed to go and commit again — the loop this reminder exists
+            # to break.
+            committed = moved(db, conv_id)
+            if committed:
+                repo, sha = _named(committed[0][0]), committed[0][1]
+                return (f'This task has no hand-off: {repo} already has a commit beyond the base '
+                        f'{sha}: run the gates and call request_review with {sha}; if you have '
+                        'further uncommitted edits, commit them first and request review with '
+                        'the newer SHA.')
+            states = [_dirty(item['path']) for item in spaces]
+            if None not in states:
+                if True in states:
+                    repo = _named(spaces[states.index(True)]['repository'])
+                    return (f'This task has no hand-off. You have uncommitted changes in {repo}: '
+                            'run the gates, commit with a one-line Conventional Commit and no '
+                            'body, then call request_review with the full 40-char SHA.')
+                return ('This task has no hand-off and nothing changed in the workspaces: if you '
+                        'are blocked call blocked(reason), otherwise continue; if you are waiting '
+                        'on a long command call waiting(reason, seconds).')
+    except Exception:
+        return GENERIC  # an unreadable workspace says nothing about the work
+    return GENERIC
+
+
 async def settle(runtime, att):
     if not candidate(runtime.db, att):
         return
@@ -51,6 +117,9 @@ async def settle(runtime, att):
         # is busy and a hand-off is not due yet.
         return
     if row['stall_stage'] == 0:
+        # What the line owes is read from its workspaces first, off the event loop:
+        # git runs are bounded and read-only, and a failed read falls back to GENERIC.
+        text = await asyncio.to_thread(reminder, db, att)
         # Persist both the reminder and its identity before any delivery await.
         # Routing can deliver synchronously; restarts must retain the same mail.
         with db.lock, db.conn:
@@ -58,7 +127,7 @@ async def settle(runtime, att):
                                       (att['conv_id'],)).fetchone()
             if current['status'] not in ('implementing', 'idle') or current['stall_stage'] != 0:
                 return
-            body = f"@{att['name']} This task has no hand-off. Call request_review or blocked(reason)."
+            body = f"@{att['name']} {text}"
             cursor = db.conn.execute(
                 'INSERT INTO messages(conv_id,sender,sender_type,body,created_at,audience_attachment_id) '
                 "VALUES(?,'system','system',?,?,?)", (att['conv_id'], body, time.time(), att['id']))
