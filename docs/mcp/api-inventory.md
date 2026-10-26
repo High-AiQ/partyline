@@ -237,7 +237,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 78 | GET | `/api/conversations/{conv_id}/pins` | M with `read` | **excluded** | pins are person-curated; reading them is not needed by the tool set |
 | 82 | POST | `/api/conversations/{conv_id}/prereview` | M with `read` | **excluded** | pre-review is not a captain op; `accept` takes `run_gates` for the gate step (row 2) |
 | 83 | GET | `/api/presets` | any authenticated caller | **op**: captain op `list_presets` (read-only) | presets are read-only for captains; writes are person-only (rows 84-86) |
-| 87 | GET | `/api/conversations/{conv_id}/process-overview` | M with `read` | **op**: captain op `process_overview` | live phase and RSS for the line's attachments |
+| 87 | GET | `/api/conversations/{conv_id}/process-overview` | M with `read` | **op**: captain op `process_overview` | live phase and RSS for the line's attachments; bounded real/mirror branch visibility for every task workspace |
 | 88 | POST | `/api/attachments/{att_id}/signal` | owning process or line captain | **excluded** | destructive pid signal; pids do not resolve through the host namespace from inside the fence |
 | 89 | POST | `/api/messages/{message_id}/reactions` | H, or machine on the message's line | **tool**: `react` (POST toggles the reaction) | own line only; the reactor's line must be the message's line |
 | 90 | DELETE | `/api/messages/{message_id}/reactions/{emoji}` | H, or machine on the message's line | **tool**: `react` (DELETE removes the reaction) | own line only; same rule as row 89 |
@@ -349,7 +349,7 @@ These entries extend both inventory sets above. Registration handlers are in
 | --- | --- | --- | --- | --- | --- |
 | PUT | `/api/conversations/{conv_id}/captain-style` | `captain_style` | H, root line only | no | excluded: human chooses captain style and default review policy |
 | POST | `/api/conversations/{conv_id}/tasks` | `create` | H or orchestrator root captain | yes | tool: `create_task` |
-| GET | `/api/conversations/{conv_id}/tasks` | `listing` | H or orchestrator root captain | yes | tool: `tasks` |
+| GET | `/api/conversations/{conv_id}/tasks` | `listing` | H or orchestrator root captain | yes | tool: `tasks`; includes bounded per-workspace real/mirror tips and unaccepted commits |
 | GET | `/api/conversations/{conv_id}/task` | `detail` | M with `read` | yes | guide: current structured task state, including after compaction |
 | POST | `/api/conversations/{conv_id}/blocked` | `block` | exact task implementer | yes | tool: `blocked` |
 | POST | `/api/conversations/{conv_id}/waiting` | `waiting` | exact task implementer | yes | tool: `waiting`; declares a long wait (`reason`, `seconds` 60–3600) that defers the stall reminder and the stall report |

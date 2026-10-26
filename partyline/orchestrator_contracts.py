@@ -78,6 +78,17 @@ class VerdictIn(BaseModel):
     findings: str = Field(min_length=1, max_length=1500)
 
 
+class WorkspaceVisibility(BaseModel):
+    repository: str
+    path: str
+    branch: str
+    mirror_tip: str | None = None
+    host_tip: str | None = None
+    accepted_sha: str | None = None
+    unaccepted_count: int = Field(default=0, ge=0)
+    unaccepted_subjects: list[str] = Field(default_factory=list, max_length=5)
+
+
 class TaskReview(BaseModel):
     conv_id: str
     root_id: str
@@ -90,6 +101,7 @@ class TaskReview(BaseModel):
     sha: str | None = None
     review_worktree: str | None = None
     repositories: list[ReviewedRepository] = Field(default_factory=list)
+    workspaces: list[WorkspaceVisibility] = Field(default_factory=list)
     what: str
     location: str
     findings: str

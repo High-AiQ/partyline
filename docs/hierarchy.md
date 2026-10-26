@@ -123,8 +123,11 @@ line branch too, including when its unpublished tip exists only in packed refs.
 
 Commits live in the line's private refs mirror until accept, so each `request_review`
 and idle hook writes `refs/partyline/tasks/<slug>` in the real clone, where git's gc can see
-it. `request_review()` with no arguments reviews every workspace whose branch moved; a SHA
-in any recorded clone is admitted.
+it. The mirror tip is where the worker's commits live until accept. The `tasks` and
+`process_overview` captain reads, and the task GET endpoint, show every workspace's real and
+mirror tips plus a bounded sample of unaccepted commit subjects; do not infer task progress
+from the nested checkout's host branch alone. `request_review()` with no arguments reviews
+every workspace whose branch moved; a SHA in any recorded clone is admitted.
 Accept records every reviewed commit and fast-forwards only the task's own `line/<slug>` in
 each clone; the person's checked-out branch never moves. Retiring a task first copies each
 mirror tip onto its `line/<slug>`, then removes each nested worktree through its clone with
