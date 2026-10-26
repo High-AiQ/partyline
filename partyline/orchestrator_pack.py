@@ -50,6 +50,8 @@ def task_pack(db, conv_id, role):
         f"{_handles(row, role)}"
         f"{_root_sentence(db, conv_id, row['root_id'])}"
         f"{_workspace_sentence(db, conv_id, role)}"
+        'Before starting a job needing a captain-declared resource, call acquire_resource(name, note). '
+        'If queued, wait for the private grant; release_resource(name) when done. Leases are advisory. '
         'The implementer follows the assigned goal and calls request_review(sha, what, where). '
         'request_review is the hand-off: the server staffs the reviewer and notifies it — '
         'never @mention review-<tag>/impl-<tag> handles, your task, or its line name, '

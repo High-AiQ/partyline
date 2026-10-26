@@ -82,6 +82,10 @@ def execute(client, op, args, state):
         # for it: prove the caller captains that child, then resolve to home.
         _target(client, state, conv, ("close",))
         conv = client.home
+    if op == "resources":
+        _target(client, state, conv, ("assign",))
+        return client.request("POST", _path(conv, "resources"),
+                              {key: args[key] for key in ("operation", "name") if key in args})
     if op == "staffing":
         _target(client, state, conv, ("assign",))
         return client.request("GET", _path(conv, "staffing"))
