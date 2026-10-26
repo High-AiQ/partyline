@@ -1,6 +1,19 @@
 # Lessons: the false-assumptions ledger
 
 
+## Report caps must cut with a budget, not from the end
+
+Slicing a report to `reports.MAX_BODY` from the right assumed the interesting
+part survived the cut; a long header, `what` and `location` pushed the
+reviewer's findings past it and reports to the captain ended mid-word
+(`…before shippin`). `report_text` now builds to the cap with a budget:
+the header and the unverified-SHA warning (which now sits before the findings)
+stay whole, `what` and then `location` are shortened with a visible ellipsis,
+and findings that still cannot fit are cut at a word boundary behind an
+explicit `…[truncated; full text via tasks]` marker. `notify_root` trims its
+note with the same `clip` helper instead of a blind slice.
+
+
 ## A fenced worktree's host HEAD does not describe its committed files
 
 Retirement assumed an outside `git status` could prove a nested linked worktree
