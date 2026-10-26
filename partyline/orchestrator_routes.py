@@ -6,14 +6,15 @@ from .auth_guard import request_principal
 from .contracts import ConversationEvent, ConversationResponse, ConversationsChangedEvent
 from .machine_scope import deny_unless
 from .orchestrator_contracts import (
-    BlockedIn, CaptainStyleIn, MessageTaskIn, ReopenIn, ResumeIn, ReviewRequestIn, TaskIn,
-    TaskReview, VerdictIn, WaitingIn)
+    BlockedIn, CaptainStyleIn, MessageTaskIn, ReopenIn, ResumeIn, ReviewRequestIn, ShareRefIn,
+    ShareRefOut, TaskIn, TaskReview, VerdictIn, WaitingIn)
 from .orchestrator_handles import message_task, task_line
 from .orchestrator_stall import blocked, resume_work
 from .orchestrator_wait import waiting as declare_wait
 from .orchestrator_reopen import reopen_task
 from .orchestrator_revive import restart_implementer, restart_reviewer
 from .orchestrator_service import create_task, request_review, review_verdict
+from .orchestrator_share_ref import share_ref as publish_shared_ref
 from .orchestrator_store import require_root, task, tasks, write_captain_style
 
 
@@ -70,6 +71,11 @@ def orchestrator_router(runtime):
     async def message(request: Request, conv_id: str, body: MessageTaskIn):
         actor = request_principal(request)
         return await message_task(runtime, actor, task_line(db, actor, conv_id), body)
+
+    @router.post('/api/conversations/{conv_id}/task/share-ref', response_model=ShareRefOut)
+    async def share_ref(request: Request, conv_id: str, body: ShareRefIn):
+        actor = request_principal(request)
+        return await publish_shared_ref(runtime, actor, task_line(db, actor, conv_id), body)
 
     @router.post('/api/conversations/{conv_id}/review-verdict', response_model=TaskReview)
     async def verdict(request: Request, conv_id: str, body: VerdictIn):

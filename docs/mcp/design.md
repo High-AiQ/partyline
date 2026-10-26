@@ -88,8 +88,8 @@ Both `validation.py` and `captain_schemas.validate` are hand-written subsets of 
 - Each operation the caller may use is also a named tool with the same name. Named tools appear only
   for a live lead.
 - The operations are a fixed allowlist: `staffing`, `list_presets`, `attach_worker`, `detach_worker`,
-  `create_child`, `appoint_lead`, `retire_child`, `accept`, `review_worktree`, `request_write_set`,
-  `decide_write_set`, `request_restart`, `process_overview`, `ack_report`, `set_goal`, `set_gates`,
+  `create_child`, `appoint_lead`, `retire_child`, `accept`, `review_worktree`, `share_ref`,
+  `request_write_set`, `decide_write_set`, `request_restart`, `process_overview`, `ack_report`, `set_goal`, `set_gates`,
   `docs_read`, `write_set_requests`, and `reports`. Each has a fixed argument schema with length, enum, and range
   checks. No caller supplies a route or method.
 - `list_presets` is read-only. Presets are never mutated through MCP.
@@ -345,6 +345,13 @@ host tips, accepted SHA when present, and at most five truncated subjects with t
 of commits not yet on the host branch. The mirror tip is where the worker's commits live until
 accept. `process_overview` exposes the same bounded `workspaces` list on each task line; the
 existing `repositories` review field is unchanged.
+
+The root captain also has the fixed captain op `share_ref(conv_id, ref_or_sha, name,
+repository?, replace?)`, backed by POST `/api/conversations/{task}/task/share-ref`.
+It resolves a commit in one of the task's recorded workspace repositories, writes only its
+mirror's `refs/partyline/shared/<name>`, and privately notifies the live implementer. Existing
+names need the same SHA or explicit replacement; invalid names, non-commits and non-captains
+are refused. See [task workspaces and shared refs](../hierarchy.md#depth-worktrees-and-where-work-goes).
 
 The root captain supplies `conv_id` to `review_verdict`; assigned reviewers use
 their home task line. Policies are `none`, `captain` (default), or an exact reviewer

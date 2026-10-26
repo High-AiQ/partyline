@@ -119,6 +119,7 @@ def execute(client, op, args, state):
         "appoint_lead": ("appoint_lead", "POST", "lead"),
         "accept": ("accept", "POST", "accept"),
         "review_worktree": ("write", "POST", "review-worktrees"),
+        "share_ref": ("assign", "POST", "task/share-ref"),
         "request_write_set": ("write", "POST", "write-set"),
         "request_restart": ("assign", "POST", "restart-request"),
         "process_overview": ("read", "GET", "process-overview"),
@@ -173,6 +174,9 @@ def _body(op, args):
                 if key in args}
     if op == "review_worktree":
         return {key: args[key] for key in ("sha", "repository") if key in args}
+    if op == "share_ref":
+        return {key: args[key] for key in ("ref_or_sha", "name", "repository", "replace")
+                if key in args}
     if op == "request_write_set":
         return {"path": args["path"]}
     if op == "request_restart":

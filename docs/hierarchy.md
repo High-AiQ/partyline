@@ -128,6 +128,20 @@ it. The mirror tip is where the worker's commits live until accept. The `tasks` 
 mirror tips plus a bounded sample of unaccepted commit subjects; do not infer task progress
 from the nested checkout's host branch alone. `request_review()` with no arguments reviews
 every workspace whose branch moved; a SHA in any recorded clone is admitted.
+
+A root captain can give a live task a commit or branch created after its launch with
+`share_ref(conv_id, ref_or_sha, name, repository?, replace?)`. The default repository is the
+task's primary `task_workspaces` row; `repository` selects another recorded workspace. The
+server resolves and verifies a commit in that real clone, then writes only
+`refs/partyline/shared/<name>` in the task's refs mirror. Names contain at most 64 letters,
+digits, dots, underscores or dashes, cannot start with a dot or contain `..`. An existing name
+is idempotent at the same commit and otherwise moves only with `replace=true`. The operation
+never changes the task branch, HEAD, packed refs or reflogs. The result includes the full SHA,
+the ref and `git merge refs/partyline/shared/<name>`; one private message tells the live
+implementer the ref. The fence mounts the real clone's object store into the task Git directory,
+so no object copy or alternates file is needed. Launch/resume preparation preserves shared refs
+instead of treating them as sibling refs to refresh.
+
 Accept records every reviewed commit and fast-forwards only the task's own `line/<slug>` in
 each clone; the person's checked-out branch never moves. Retiring a task first copies each
 mirror tip onto its `line/<slug>`, then removes each nested worktree through its clone with
