@@ -1,25 +1,38 @@
 """A missing structured task result recovers once, then reports the stall."""
 
+import os
+import re
 import time
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 
 from partyline.db import Db
+from partyline.git_fence import _mirror_dir, _worktree_gitdir, common_gitdir
 from partyline.machine_scope import allows
 from partyline.mcp.tools_tasks import tool_list
 from partyline.orchestrator_contracts import BlockedIn, ReviewRequestIn, WaitingIn
 from partyline.orchestrator_notices import report
 from partyline.orchestrator_service import request_review
-from partyline.orchestrator_stall import began, blocked, ended
+from partyline.orchestrator_stall import GENERIC, began, blocked, ended
 from partyline.orchestrator_wait import expired, live, resume_expired, waiting as declare_wait
 from partyline.return_path import ReturnPath
-from tests.orchestrator_fixture import TaskFixture
+from partyline.task_workspaces import moved, workspaces
+from tests.orchestrator_fixture import TaskFixture, git
 
 
 class StallTest(TaskFixture):
     def messages(self, conv):
         return self.db.message_page(conv, limit=100)[0]
+
+    def reminders(self):
+        """Every reminder the stall heuristic has sent on this task's line."""
+        return [m for m in self.messages(self.conv_id) if 'no hand-off' in m['body']]
+
+    def rewind(self):
+        """Arm stage one again: one reminder per stage, not one per task."""
+        self.db._exec('UPDATE task_reviews SET stall_stage=0,stall_notice_id=NULL WHERE conv_id=?',
+                      (self.conv_id,))
 
     async def end(self, returns):
         with patch('partyline.return_path.wait_until_quiet', AsyncMock(return_value=True)):
@@ -58,6 +71,109 @@ class StallTest(TaskFixture):
                                       if 'no hand-off' in m['body']]), 1)
                 root = [m for m in self.messages('root') if f'report {report_id}' in m['body']]
                 self.assertEqual(len(root), 1)
+
+    async def test_the_reminder_names_the_call_this_state_owes(self):
+        await self.create('captain')
+        returns = self.runtime.returns = ReturnPath(self.runtime)
+        returns.grace = 0
+        # Nothing changed: there is no review to ask for, so name the calls that fit.
+        await self.end(returns)
+        unchanged = self.reminders()[-1]['body']
+        self.assertIn(f'@{self.worker.name} This task has no hand-off', unchanged)
+        self.assertIn('blocked(reason)', unchanged)
+        self.assertIn('waiting(reason, seconds)', unchanged)
+        self.assertNotIn('request_review', unchanged)
+        self.assertLessEqual(len(unchanged), 600)
+        cwd = self.db.get_conversation(self.conv_id)['cwd']
+        # Uncommitted work: commit it first, then hand the SHA over.
+        with open(os.path.join(cwd, 'feature.py'), 'w', encoding='utf-8') as feature:
+            feature.write('x = 1\n')
+        self.rewind()
+        await self.end(returns)
+        dirty = self.reminders()[-1]['body']
+        self.assertIn(f'You have uncommitted changes in {os.path.basename(self.repo)}:', dirty)
+        self.assertIn('commit with a one-line Conventional Commit and no body', dirty)
+        self.assertIn('then call request_review with the full 40-char SHA', dirty)
+        # Committed past the base and still no hand-off: name the exact SHA to request.
+        git(cwd, 'add', 'feature.py')
+        sha = self.commit()
+        self.rewind()
+        await self.end(returns)
+        committed = self.reminders()[-1]['body']
+        self.assertIn(f'already has a commit beyond the base {sha}', committed)
+        self.assertIn(f'call request_review with {sha}', committed)
+        self.assertIn('if you have further uncommitted edits, commit them first and request '
+                      'review with the newer SHA', committed)
+        self.assertIsNotNone(re.search(r'\b[0-9a-f]{40}\b', committed))
+        self.assertLessEqual(len(committed), 600)
+        self.assertEqual(len(self.reminders()), 3)
+        self.assertEqual(self.row()['stall_stage'], 1)
+
+    async def test_a_workspace_that_cannot_be_read_falls_back_to_the_generic_line(self):
+        await self.create('captain')
+        returns = self.runtime.returns = ReturnPath(self.runtime)
+        returns.grace = 0
+        self.assertTrue(self.db._exec('SELECT 1 FROM task_workspaces WHERE conv_id=?',
+                                      (self.conv_id,)).fetchone())
+        for path in ('/nowhere/stall-reprompt', self.directory.name):  # missing, then not a repository
+            with self.subTest(path=path):
+                self.db._exec('UPDATE task_workspaces SET path=? WHERE conv_id=?', (path, self.conv_id))
+                self.rewind()
+                await self.end(returns)
+                self.assertEqual(self.reminders()[-1]['body'], f'@{self.worker.name} {GENERIC}')
+        # No workspace at all: there is nothing to read, so the generic line again.
+        self.db._exec('DELETE FROM task_workspaces WHERE conv_id=?', (self.conv_id,))
+        self.rewind()
+        await self.end(returns)
+        self.assertEqual(self.reminders()[-1]['body'], f'@{self.worker.name} {GENERIC}')
+        self.assertEqual(len(self.reminders()), 3)
+
+    async def test_a_state_read_that_raises_falls_back_to_the_generic_line(self):
+        await self.create('captain')
+        returns = self.runtime.returns = ReturnPath(self.runtime)
+        returns.grace = 0
+        with patch('partyline.orchestrator_stall.moved', side_effect=OSError('unfenced workspace')):
+            await self.end(returns)
+        self.assertEqual(self.reminders()[-1]['body'], f'@{self.worker.name} {GENERIC}')
+
+    def mirror_commit(self, cwd):
+        """A commit the line's private mirror holds and the real repository does not."""
+        elsewhere = os.path.join(self.directory.name, 'elsewhere')
+        os.makedirs(elsewhere, exist_ok=True)
+        git(elsewhere, 'init', '-q', '-b', 'main')
+        git(elsewhere, 'commit', '-q', '--allow-empty', '-m', 'mirrored')
+        landed = git(elsewhere, 'rev-parse', 'HEAD')
+        patcher = patch('partyline.git_fence.FENCE_ROOT', os.path.join(self.directory.name, 'fence'))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        mirror = _mirror_dir(common_gitdir(_worktree_gitdir(cwd)), self.conv_id)
+        git(self.directory.name, 'init', '-q', '--bare', mirror)
+        git(mirror, 'fetch', '-q', elsewhere, 'HEAD')
+        branch = workspaces(self.db, self.conv_id)[0]['branch']
+        ref = os.path.join(mirror, 'refs', 'heads', *branch.split('/'))
+        os.makedirs(os.path.dirname(ref), exist_ok=True)
+        with open(ref, 'w', encoding='utf-8') as handle:
+            handle.write(f'{landed}\n')
+        return landed
+
+    async def test_a_mirror_only_commit_is_never_read_as_uncommitted_work(self):
+        """The flaw the reviewer caught: outside the fence a committed worktree still reads dirty."""
+        await self.create('captain')
+        returns = self.runtime.returns = ReturnPath(self.runtime)
+        returns.grace = 0
+        cwd = self.db.get_conversation(self.conv_id)['cwd']
+        with open(os.path.join(cwd, 'feature.py'), 'w', encoding='utf-8') as feature:
+            feature.write('x = 1\n')
+        sha = self.mirror_commit(cwd)
+        space = workspaces(self.db, self.conv_id)[0]
+        self.assertEqual(git(cwd, 'rev-parse', 'HEAD'), space['base_sha'])  # nothing landed here
+        self.assertEqual(moved(self.db, self.conv_id)[0][1], sha)  # only the mirror moved
+        await self.end(returns)
+        body = self.reminders()[-1]['body']
+        self.assertIn(f'call request_review with {sha}', body)
+        self.assertIn('if you have further uncommitted edits, commit them first', body)
+        self.assertNotIn('uncommitted changes', body)
+        self.assertLessEqual(len(body), 600)
 
     async def test_blocked_is_authorized_deduped_and_can_resume(self):
         await self.create('none')
@@ -230,8 +346,7 @@ class StallTest(TaskFixture):
             await self.end(returns)
             self.assertEqual(self.row()['stall_stage'], 0)
             self.assertIsNone(self.row()['report_id'])
-        self.assertEqual([m for m in self.messages(self.conv_id)
-                          if 'no hand-off' in m['body']], [])
+        self.assertEqual(self.reminders(), [])
 
     async def test_a_wait_that_runs_out_returns_the_task_to_the_stall_check(self):
         await self.create('captain')
@@ -265,6 +380,7 @@ class StallTest(TaskFixture):
         await self.end(returns)
         self.assertEqual(self.row()['stall_stage'], 0)
         self.assertIsNone(self.row()['report_id'])
+        self.assertEqual(self.reminders(), [])
 
     async def test_only_the_implementer_declares_a_wait(self):
         await self.create('captain')

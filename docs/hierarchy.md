@@ -1115,12 +1115,20 @@ status to `blocked` and sends a deduplicated notify report to its root. Calling
 `request_review` resumes implementation and clears the blocked state before the
 review attempt. When an implementer returns without a structured result and has
 no reviewer peer, the server rings it once to call `request_review` or
-`blocked(reason)`. If the turn consuming that reminder also returns without
-either, the server sends one `stalled` report to the root. Duplicate turn receipts
-and restarts do not repeat the reminder or escalation. The rail shows blocked
-tasks, and task lines hide manual staffing controls because staffing is owned by
-the server. Notify reports follow the existing inbox coalescing and acknowledgement
-rules: a new task state updates an outstanding report rather than ringing again.
+`blocked(reason)`. That one reminder is built from the line's own workspace
+state instead of a fixed line, and it reads the line's fence mirror first: a
+worker commits there until accept, so from outside its own worktree still reads
+as modified. A commit past the base names the full SHA to request review with
+(plus any further edits to commit first), uncommitted changes say to run the
+gates and commit, and an unchanged workspace names `blocked(reason)` and
+`waiting(reason, seconds)`. It stays one message per stage, and a workspace that
+cannot be read falls back to the generic text. If the turn consuming that
+reminder also returns without either, the server sends one `stalled` report to
+the root. Duplicate turn receipts and restarts do not repeat the reminder or
+escalation. The rail shows blocked tasks, and task lines hide manual staffing
+controls because staffing is owned by the server. Notify reports follow the
+existing inbox coalescing and acknowledgement rules: a new task state updates
+an outstanding report rather than ringing again.
 
 An implementer waiting on a long command — a test run, a build, a monitor — calls
 `waiting(reason, seconds)` (60–3600, default 900) instead. The server records the
