@@ -338,7 +338,7 @@ from `/api/capabilities`. Every HTTP handler independently authorizes the caller
 | `blocked(reason)` | Exact assigned implementer attachment | POST `/api/conversations/{task}/blocked` |
 | `waiting(reason, seconds?)` | Exact assigned implementer attachment | POST `/api/conversations/{task}/waiting` |
 | `request_review(sha?, what, where)` | Exact assigned implementer attachment | POST `/api/conversations/{task}/request-review` |
-| `review_verdict(verdict, findings)` | Exact assigned reviewer, or root captain for captain policy | POST `/api/conversations/{task}/review-verdict` |
+| `review_verdict(verdict, findings, override?)` | Exact assigned reviewer; root captain with `override=true` or for captain policy | POST `/api/conversations/{task}/review-verdict` |
 
 For each task workspace, `tasks` reports the repository, worktree path, branch, mirror and
 host tips, accepted SHA when present, and at most five truncated subjects with the full count
@@ -354,7 +354,11 @@ names need the same SHA or explicit replacement; invalid names, non-commits and 
 are refused. See [task workspaces and shared refs](../hierarchy.md#depth-worktrees-and-where-work-goes).
 
 The root captain supplies `conv_id` to `review_verdict`; assigned reviewers use
-their home task line. Policies are `none`, `captain` (default), or an exact reviewer
+their home task line. An ordinary call stays the reviewer's alone: the captain
+records a verdict on a staffed review only with the explicit `override=true`
+flag, which supersedes the reviewer (told once, privately), records
+`overridden_by` on the task row and behaves as a normal verdict otherwise.
+Policies are `none`, `captain` (default), or an exact reviewer
 preset name. Worker tools grant no staffing rights. Reviewer assignment is stored
 and reused across unlimited rounds; reviewer approval is acceptance. Task state
 is structured database state, never parsed from transcript prose. Reports notify
