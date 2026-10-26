@@ -4,7 +4,7 @@ from .captain_schemas import OPERATIONS, schema, validate
 from . import captain_ops, tools_tasks
 
 _ACTION = {
-    "staffing": "assign", "attach_worker": "attach", "detach_worker": "close",
+    "resources": "assign", "staffing": "assign", "attach_worker": "attach", "detach_worker": "close",
     "create_child": "create_child", "appoint_lead": "appoint_lead", "retire_child": "assign",
     "accept": "accept", "review_worktree": "write", "share_ref": "message_task",
     "request_write_set": "write",

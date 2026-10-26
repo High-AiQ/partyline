@@ -584,6 +584,39 @@ inside the same 4k cap — and the re-briefing ends with the nudge to update
 them. A worker whose notes go stale (16 turns without a write, on adapters
 that report turns) hears a one-line reminder on its wake every 8 turns.
 
+## Captain-declared exclusive resources
+
+Captains use the MCP `resources(conv_id, operation, name?)` operation to `list`,
+`declare` or `remove` named resources on a line. Declaration is idempotent; every
+resource has exactly one slot. A name is 1–64 letters, digits, dots or dashes,
+starting with a letter or digit. Names describe any scarce resource, for example
+`gpu` or `port-8000`; Partyline has no device-specific behavior. A child task resolves
+its own line first and then the nearest ancestor declaration. Separate roots do not
+share names. Remove refuses while a holder or waiter exists.
+
+Task implementers and reviewers call `acquire_resource(name, note?)` before starting
+a job that needs the resource. It returns `status: held` immediately if free, or
+`status: queued`, a one-based `position`, and the current `holder`. A queued caller
+must wait for its private “you now hold <name>; start your job” notice. Release with
+`release_resource(name)` when done; this also cancels the caller's queued request.
+Repeated acquire preserves the original note and FIFO position, and reacquiring a
+held lease is a no-op. Notes are capped at 500 characters and each resource accepts
+at most 64 waiters. These leases are advisory: they do not sandbox or stop a job.
+
+The server grants the oldest surviving waiter on release. Detach, process exit,
+replacement, archive and retirement remove an attachment's claims. Every grant checks
+for missing or stopped attachments; a five-second sweep also repairs stale holders
+and promotes waiters. Grant and its single private message are committed together.
+Captain `resources` list and `process_overview` show each declaration, holder identity,
+`granted_at`, note and FIFO queue, including free resources. Task callers can only
+acquire/release for their authenticated attachment; they cannot declare resources or
+release another process's lease.
+
+The REST equivalents are `POST /api/conversations/<line>/resources` with
+`{"operation":"list|declare|remove","name":"…"}` (captain/person),
+`POST /api/task/resources/<name>/acquire` with `{"note":"…"}` and
+`POST /api/task/resources/<name>/release` (task participants only).
+
 ## Shared-resource leases
 
 Anything on the host that needs exclusivity — a GPU render, a timing run —

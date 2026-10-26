@@ -367,3 +367,17 @@ These entries extend both inventory sets above. Registration handlers are in
 Existing archive/retire operations refuse machine requests for task lines, including
 root-captain `force_discard` and recursive retirement containing task descendants.
 Task attachment creation is server-owned; shared-branch overrides do not bypass it.
+
+## Captain-declared exclusive resources (addendum)
+
+These routes extend the fixed inventory above; they are separate from `/api/leases`.
+
+| Method | Path | Caller | MCP disposition |
+| --- | --- | --- | --- |
+| POST | `/api/conversations/{conv_id}/resources` | Captain with `assign`, or person | captain op `resources`: `list`, `declare`, `remove`; optional `name` |
+| POST | `/api/task/resources/{name}/acquire` | Current live task implementer or reviewer, self only | tool `acquire_resource(name, note?)`; nonblocking held/queued result |
+| POST | `/api/task/resources/{name}/release` | Current live task implementer or reviewer, self only | tool `release_resource(name)`; releases held lease or cancels wait |
+
+`process_overview` also includes each line's declared resources with holder,
+grant timestamp, note and FIFO queue. See the
+[contract](../hierarchy.md#captain-declared-exclusive-resources) for bounds and cleanup.

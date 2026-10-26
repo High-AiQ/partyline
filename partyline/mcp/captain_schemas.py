@@ -14,6 +14,9 @@ def schema(name):
     """A short, operation-specific argument schema; no route/method fields exist."""
     line = {"conv_id": text("Authorized target line id.", 80)}
     specs = {
+        "resources": obj({**line, "operation": {"type": "string",
+            "enum": ["list", "declare", "remove"]}, "name": text("Resource name.", 64, 1)},
+            ["conv_id", "operation"]),
         "staffing": obj(line, ["conv_id"]),
         "write_set_requests": obj(line, ["conv_id"]),
         "list_presets": obj(),
@@ -76,9 +79,9 @@ def schema(name):
 
 
 OPERATIONS = tuple(schema_name for schema_name in (
-    "staffing", "write_set_requests", "list_presets", "attach_worker", "detach_worker", "create_child",
-    "appoint_lead", "retire_child", "retirement_preview", "accept", "review_worktree", "share_ref",
-    "request_write_set",
+    "resources", "staffing", "write_set_requests", "list_presets", "attach_worker", "detach_worker",
+    "create_child", "appoint_lead", "retire_child", "retirement_preview", "accept", "review_worktree",
+    "share_ref", "request_write_set",
     "decide_write_set", "request_restart", "process_overview", "ack_report", "set_goal",
     "set_gates", "docs_read", "reports"))
 

@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from .orchestrator_contracts import WorkspaceVisibility
+from .line_resource_contracts import LineResource
 
 
 class ProcessOverviewAttachment(BaseModel):
@@ -29,6 +30,7 @@ class ProcessOverviewLine(BaseModel):
     goal_set: bool = False
     accepted_sha: str | None = None
     workspaces: list[WorkspaceVisibility] = Field(default_factory=list)
+    resources: list[LineResource] = Field(default_factory=list)
     attachments: list[ProcessOverviewAttachment] = Field(default_factory=list)
 
 
