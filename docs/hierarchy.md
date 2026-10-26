@@ -218,14 +218,19 @@ files; `index` preserves the independently staged files. A conflicted index refu
 with a request to resolve or commit it first. Inspect either recovery tree with
 `git show <recovery-ref>:<path>` or create a recovery branch from it.
 
-Ignored nested linked Git worktrees may be removed only when `git status --porcelain`
-is empty, HEAD is attached to a branch, and that branch preserves HEAD in the owning
-repository outside the retiring folder. Their commits remain in that repository’s shared
-object store, reachable through the retained branch. Evidence records the path,
-`nested-worktree`, HEAD SHA and branch; after removing the folder retirement runs
-`git worktree prune` in the owning repository. Dirty, detached or missing-branch
-worktrees are refused with the path and reason. Unsupported directories, FIFOs, sockets
-and devices are refused with the path and kind; independent nested clones remain protected.
+Ignored nested linked Git worktrees may be removed only when HEAD is attached to a
+branch and both working files and index match the line's private mirror tip (or host
+HEAD when no mirror exists). The mirror tip must be equal to, or an ancestor of, a
+local branch in the owning repository outside the retiring folder; a captain's direct
+merge therefore counts even without task acceptance. Without a mirror, the owning
+branch must still preserve HEAD. Their commits remain reachable in that surviving
+repository. Evidence records the path, `nested-worktree`, host HEAD SHA and branch,
+plus the mirror tip SHA when present; a changed mirror tip invalidates the preview.
+After removing the folder retirement runs `git worktree prune` in the owning repository.
+Detached worktrees, owners inside the retiring folder, mirror tips absent from owning
+branches, and uncommitted edits beyond the mirror tip are refused with the path and
+specific reason. Unsupported directories, FIFOs, sockets and devices are refused with
+the path and kind; independent nested clones remain protected.
 
 Retirement checks the whole selected subtree, then removes owned worktrees and host branch
 refs deepest first. Recovery refs remain; private fence mirror refs are also retained.
