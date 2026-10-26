@@ -123,5 +123,20 @@ class MessageTaskIn(BaseModel):
     to: Literal['implementer', 'reviewer'] = 'implementer'
 
 
+class ShareRefIn(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    ref_or_sha: str = Field(max_length=2000)
+    name: str = Field(min_length=1, max_length=64)
+    repository: str | None = Field(default=None, min_length=1, max_length=4096)
+    replace: bool = False
+
+
+class ShareRefOut(BaseModel):
+    sha: str
+    ref: str
+    example: str
+    repository: str
+
+
 class AutoCleanIn(BaseModel):
     enabled: bool = False
