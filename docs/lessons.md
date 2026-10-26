@@ -1,6 +1,19 @@
 # Lessons: the false-assumptions ledger
 
 
+## A fenced worktree's host HEAD does not describe its committed files
+
+Retirement assumed an outside `git status` could prove a nested linked worktree
+clean. Private line refs leave host HEAD at the start commit while the index and
+working files already match the mirror tip, so a captain's direct merge still
+looked dirty. Compare both index and working files against the line's mirror tip
+with its refs and objects available, then independently prove that tip reachable
+from a branch in the surviving owning repository. Include the mirror SHA in preview
+evidence. Real temporary repositories in `tests/test_retirement_nested.py` cover
+stale staged views after a direct merge, ancestor reachability, unmerged tips,
+extra untracked/working/index edits, and a changed tip with an unchanged tree.
+
+
 ## Retirement errors must identify the actual filesystem entry
 
 A retirement refusal was blamed on a tracked guide symlink, but the rejected entry
