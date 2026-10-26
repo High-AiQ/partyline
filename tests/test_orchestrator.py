@@ -36,7 +36,7 @@ class WorkflowTest(TaskFixture):
         self.assertEqual(row['round'], 1)
         self.assertEqual(git(row['review_worktree'], 'rev-parse', 'HEAD'), sha)
         self.assertEqual(self.db.get_attachment(reviewer.attachment_id)['cwd'], row['review_worktree'])
-        self.assertEqual(tasks(self.db, 'root'), [row])
+        self.assertEqual(tasks(self.db, 'root', visibility=True), [row])
         self.assertEqual(reports.list_for_parent(self.db, 'root'), [])
         self.assertEqual(capability_state(self.db, reviewer)['role'], 'reviewer')
         self.assertTrue(allows(self.db, reviewer, self.conv_id, 'review_verdict'))
