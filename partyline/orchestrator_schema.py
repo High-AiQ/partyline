@@ -1,5 +1,7 @@
 """Append-only orchestrator mode and durable task review state."""
 
+from .line_resource_schema import MIGRATIONS as LINE_RESOURCES
+
 MIGRATIONS = [
     "ALTER TABLE conversations ADD COLUMN captain_mode TEXT NOT NULL DEFAULT 'manager_tree'",
     "ALTER TABLE conversations ADD COLUMN default_review_policy TEXT NOT NULL DEFAULT 'captain'",
@@ -104,3 +106,5 @@ MIGRATIONS += [
     # actually stored.
     "ALTER TABLE task_reviews ADD COLUMN overridden_by TEXT",
 ]
+
+MIGRATIONS += LINE_RESOURCES

@@ -1549,3 +1549,15 @@ characters, a commit that exists only in the mirror while the worktree reads dir
 outside, the declared-wait and open-turn exemptions, one reminder per stage, and both
 fallbacks. Do not assume a recovery message is followed because it is correct: it has to name
 the work the process can see, from a vantage point that can actually see it.
+
+## Scarce resources need an explicit slot before work starts
+
+Two tasks started jobs on the same 24 GB device and one exhausted its memory. The
+false assumption was that separate task lines and per-process memory budgets also
+serialized use of a shared external resource. They do not. Captains can now declare
+an exclusive named resource; tasks acquire before starting and release when done.
+FIFO queues, identity-bound ownership, lifecycle cleanup and periodic stale-holder
+repair replace scheduling slots by hand. `tests/test_line_resources.py` covers grants,
+queue order, duplicate calls, bounded input, authorization and lifecycle cleanup on a
+scratch database. The mechanism stays client-agnostic and advisory; a name may identify
+a device, a port or any other shared capability.

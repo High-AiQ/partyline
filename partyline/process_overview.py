@@ -17,6 +17,7 @@ from .auth_guard import request_principal
 from .hierarchy import descendants
 from .machine_scope import deny_unless
 from .orchestrator_store import task
+from .line_resources import report
 from .presence import IDLE
 from .workspace_visibility import workspace_visibility
 from .process_overview_contracts import (
@@ -80,6 +81,7 @@ def _line(runtime, conv_id: str) -> ProcessOverviewLine:
         if att["status"] in LIVE and att["id"] in runtime.live
     ]
     return ProcessOverviewLine(
+        resources=report(runtime.db, conv_id)['resources'],
         id=conv.get("id", conv_id),
         name=conv.get("name", ""),
         goal_set=bool((conv.get("goal") or "").strip()),

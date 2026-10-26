@@ -86,6 +86,7 @@ from .bridge_routes import bridge_router
 from .bridge_service import reconcile_after_restart
 from .accept_sha import register_accept_route
 from .accept_history import register_accept_history_route
+from .line_resource_routes import register_line_resource_routes, run as run_resource_leases
 from .resource_leases import register_lease_routes
 from .review_worktrees import register_review_routes
 from .approval_bubble import register_approval_routes
@@ -183,7 +184,8 @@ async def lifespan(app):
     # Behind the `heartbeat` flag (off by default since 1.23.0): a switched-off
     # server neither ticks nor answers the routes.
     tasks = [automatic_task, asyncio.create_task(run_memory_sampler(runtime)),
-             asyncio.create_task(run_task_maintenance(runtime))]
+             asyncio.create_task(run_task_maintenance(runtime)),
+             asyncio.create_task(run_resource_leases(runtime))]
     if features.enabled("heartbeat"):
         tasks.append(asyncio.create_task(heartbeat_scheduler.run(runtime)))
     try:
@@ -208,6 +210,7 @@ register_review_routes(app, runtime)
 register_scratch_routes(app, runtime)
 register_approval_routes(app, runtime)
 register_lease_routes(app, runtime)
+register_line_resource_routes(app, runtime)
 register_gates_routes(app, runtime)
 register_prereview_route(app, runtime)
 register_docs_route(app, runtime)

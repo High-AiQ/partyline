@@ -195,3 +195,17 @@ config that holds a credential.
    the exact SHA and gate results in the handoff; do not point tests at a real database.
 5. For a client behavior claim, use `compat-matrix.md` and distinguish retained fixture logs from the
    associated run report. The logs record protocol methods and calls, not attachment IDs or CLI versions.
+
+## Exclusive line resources
+
+Captains declare/list/remove with `resources(conv_id, operation, name?)`. Names have
+one slot; declarations are idempotent and inherited by child tasks, nearest line first.
+Task implementers and reviewers use `acquire_resource(name, note?)` before starting
+a job and `release_resource(name)` when done. Acquisition returns immediately with
+`held` or `queued`, queue position and holder. A queued process waits for the private
+grant message before starting. Release only affects the caller's own claim (held or
+queued). Notes are limited to 500 characters and queues to 64 waiters per resource.
+These are advisory coordination leases, separate from fleet memory admission and the
+legacy `/api/leases` TTL API. Lifecycle cleanup and a five-second stale-holder sweep
+prevent abandoned attachments from wedging a resource. See
+[the resource contract](../hierarchy.md#captain-declared-exclusive-resources).
