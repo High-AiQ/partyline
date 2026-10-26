@@ -36,10 +36,20 @@ class TaskToolsTest(unittest.TestCase):
             'conv_id': 'task id', 'verdict': 'approve', 'findings': 'reviewed'}, self.root)
         self.client.request.assert_called_with('POST', '/api/conversations/task%20id/review-verdict',
                                                {'verdict': 'approve', 'findings': 'reviewed'})
+        tools_tasks.call(self.client, 'review_verdict', {
+            'conv_id': 'task id', 'verdict': 'changes', 'findings': 'rework', 'override': True},
+            self.root)
+        self.client.request.assert_called_with('POST', '/api/conversations/task%20id/review-verdict',
+                                               {'verdict': 'changes', 'findings': 'rework',
+                                                'override': True})
+        schema = {t['name']: t['inputSchema'] for t in tools_tasks.tool_list(reviewer)}
+        self.assertEqual(schema['review_verdict']['properties']['override']['type'], 'boolean')
         with self.assertRaises(ApiError):
             tools_tasks.call(self.client, 'create_task', {}, worker)
         for bad in ({}, {'verdict': 'magic', 'findings': 'bad', 'conv_id': 'task'},
-                    {'verdict': 'approve', 'findings': 'ok', 'conv_id': 'task', 'path': '/api'}):
+                    {'verdict': 'approve', 'findings': 'ok', 'conv_id': 'task', 'path': '/api'},
+                    {'verdict': 'approve', 'findings': 'ok', 'conv_id': 'task',
+                     'override': 'yes'}):
             with self.assertRaises(ValueError):
                 tools_tasks.call(self.client, 'review_verdict', bad, self.root)
 

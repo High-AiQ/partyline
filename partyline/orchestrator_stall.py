@@ -137,7 +137,7 @@ async def settle(runtime, att):
         await runtime.broadcast(att['conv_id'], MessageEvent(message=MessageResponse.model_validate(notice)))
         await runtime.route_mentions(att['conv_id'], notice, force=True)
     else:
-        db._exec("UPDATE task_reviews SET stall_stage=3,findings=? WHERE conv_id=?",
+        db._exec("UPDATE task_reviews SET stall_stage=3,findings=?,overridden_by=NULL WHERE conv_id=?",
                  ('stalled: implementer returned again without request_review or blocked(reason)',
                   att['conv_id']))
         row = task(db, att['conv_id'])
@@ -158,7 +158,7 @@ async def blocked(runtime, actor, conv_id, body):
     if row['status'] not in ('implementing', 'idle', 'blocked'):
         raise HTTPException(409, 'only an implementing task can be blocked')
     runtime.db._exec("UPDATE task_reviews SET status='blocked',findings=?,stall_stage=0,blocked_at=?,"
-                     "wait_until=NULL,"
+                     "wait_until=NULL,overridden_by=NULL,"
                      "report_id=CASE WHEN stall_stage=3 THEN NULL ELSE report_id END WHERE conv_id=?",
                      (body.reason, time.time(), conv_id))
     row = task(runtime.db, conv_id)

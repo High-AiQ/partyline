@@ -1065,6 +1065,26 @@ a deliberate exception to the manager-tree rule that acceptance cannot be delega
 The root reviews only captain-policy tasks and always owns merging and pushing.
 `accept` records only the approved task SHA and refuses `allow_descendant` for tasks.
 
+**Captain override of a staffed review.** The verdict belongs to the reviewer of
+record, and an ordinary `review_verdict` call from anyone else — including the root
+captain — is refused with 403. When the captain has already judged a result and
+cannot wait on the reviewer, it records an **override** verdict:
+`review_verdict(verdict, findings, override=true)` with the task's `conv_id`. The
+flag is required, so nothing silently takes a review over; an ordinary call keeps
+the reviewer-of-record refusal. Authorization is the live lead of the task's root
+line and nobody else, and the call is refused when there is no open review, when
+the task is already approved or done, or when the review never belonged to a
+separate reviewer (a captain-policy task needs no override — the plain call already
+works there). The override is auditable: the task row and `tasks()` record
+`overridden_by` with the captain's handle for exactly as long as those findings are
+the stored verdict — a new round, a later reviewer verdict, a blocked report, a
+stall report or a reopen clears it with the findings they replace. The superseded
+reviewer is told once, privately, that the captain overrode the review, with the
+findings; a verdict it then tries to record can no longer land, because the review
+it answered is closed. Rounds, status transitions, `previous_findings` and the
+report text behave exactly as for a reviewer's verdict: `changes` returns the task
+to implementing and wakes the implementer; `approve` approves it and reports once.
+
 While review work proceeds, implicit return notices stay between implementer and
 reviewer. A return notice does not create another return debt. The general idle-goal
 guard does not wake orchestrators or task lines; structured terminal reports own

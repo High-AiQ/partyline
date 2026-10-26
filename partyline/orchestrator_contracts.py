@@ -76,6 +76,12 @@ class VerdictIn(BaseModel):
     model_config = ConfigDict(extra='forbid')
     verdict: Literal['approve', 'changes']
     findings: str = Field(min_length=1, max_length=1500)
+    # Explicit captain override of a staffed review; an ordinary call keeps the
+    # reviewer-of-record authorization unchanged.
+    override: bool = Field(
+        default=False,
+        description='Root captain only: explicitly override the staffed review, supersede the '
+                    'reviewer and record this verdict as the captain.')
 
 
 class WorkspaceVisibility(BaseModel):
@@ -115,6 +121,7 @@ class TaskReview(BaseModel):
     tag: str | None = None
     implementer_handle: str | None = None
     reviewer_handle: str | None = None
+    overridden_by: str | None = None
 
 
 class MessageTaskIn(BaseModel):
