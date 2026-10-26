@@ -7,6 +7,7 @@ from .contracts import MessageEvent, MessageResponse
 from .hierarchy import ancestors
 from .mention_relay import live_manager, post_private
 from .process_exit import exit_notice
+from .line_resource_routes import maintain
 from .process_memory import format_memory_bytes, suggested_memory_limit
 from .resource_budget import cap_bytes, memory_ceiling, settings
 
@@ -28,6 +29,8 @@ async def record_exit(runtime, att, evidence):
             from .resource_leases import release_attachment_leases
 
             release_attachment_leases(db, ident)
+            db._exec("DELETE FROM line_resource_claims WHERE attachment_id=?", (ident,))
+            await maintain(runtime)
         await runtime.post_callback(ident, att["conv_id"], owner)(
             "system", "system", exit_notice(att["name"], evidence))
         return
@@ -39,6 +42,7 @@ async def record_exit(runtime, att, evidence):
         from .resource_leases import release_attachment_leases
 
         release_attachment_leases(db, ident)
+        db._exec("DELETE FROM line_resource_claims WHERE attachment_id=?", (ident,))
         saved = db._exec(
             "INSERT OR IGNORE INTO process_incidents "
             "(attachment_id,runtime_owner,evidence,created_at) VALUES(?,?,?,?)",
@@ -66,6 +70,7 @@ async def record_exit(runtime, att, evidence):
                       if evidence.startup else
                       "Review the failed workload before resuming; the process remains stopped."))
         message = db.add_owned_message(ident, owner, att["conv_id"], "system", "system", detail)
+    await maintain(runtime)
     if message is None:
         return
     await runtime.broadcast(att["conv_id"], MessageEvent(message=MessageResponse.model_validate(message)))
