@@ -1,6 +1,27 @@
 # Lessons: the false-assumptions ledger
 
 
+## A captain waiting to record a verdict is a routing failure, not a review
+
+A captain that had already judged a staffed review's result could not record
+that judgment: `review_verdict` answers 403 to everyone but the reviewer of
+record, so the only path was to message the reviewer and wait for a process to
+repeat a decision already made. The 403 is correct — the verdict is the
+reviewer's statement, and a captain silently taking over a staffed review would
+make "reviewer approval is acceptance" meaningless. The false assumption was
+that protecting the reviewer's verdict required the captain to be voiceless.
+
+The guard keeps both properties: an override verdict requires the explicit
+`override=true` flag (an ordinary call keeps the 403), authorizes only the live
+lead of the task's root line, refuses when no review is open or the task is
+settled, records `overridden_by` on the task row for exactly the life of the
+verdict it stored, and tells the superseded reviewer once, privately. The
+regressions in `tests/test_orchestrator_override.py` cover both verdicts, the
+plain-call refusal, authorization, the state-machine refusals and the audit
+field's lifecycle; the review it closes leaves the superseded reviewer's own
+verdict a 409, never a silent overwrite.
+
+
 ## Report caps must cut with a budget, not from the end
 
 Slicing a report to `reports.MAX_BODY` from the right assumed the interesting
