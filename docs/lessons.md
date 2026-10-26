@@ -27,6 +27,19 @@ stale staged views after a direct merge, ancestor reachability, unmerged tips,
 extra untracked/working/index edits, and a changed tip with an unchanged tree.
 
 
+## Captain-shared refs are not sibling state to refresh
+
+A launch-time refs mirror made every later host branch look like a sibling value that could be
+refreshed, but a captain deliberately publishing a commit to a running task needs that value to
+survive the next launch or resume. Keep `refs/partyline/shared/` mirror-owned: resolve the commit
+in the real workspace clone, write no branch, HEAD, packed entry or reflog, and skip shared refs
+during sibling and packed-ref refreshes. The real object store is already bound into the fenced
+Git directory, so no alternates workaround is needed. Treat the source name as data too: reject
+leading dashes, whitespace and NUL before Git, and pass `--end-of-options` to `rev-parse`.
+`tests/test_orchestrator_share_ref.py` covers immediate visibility through the mirror plus real object binding, launch/resume
+preservation (including packed entries), invalid inputs, replacement and authorization.
+
+
 ## Retirement errors must identify the actual filesystem entry
 
 A retirement refusal was blamed on a tracked guide symlink, but the rejected entry

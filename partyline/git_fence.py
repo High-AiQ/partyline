@@ -38,6 +38,7 @@ from .git_fence_packed import merged_packed_refs
 
 # Mirror state lives beside the other per-attachment session state.
 FENCE_ROOT = os.path.expanduser("~/.partyline/sessions/fence")
+SHARED_PREFIX = "refs/partyline/shared/"
 
 
 def _worktree_gitdir(cwd: str) -> str | None:
@@ -164,8 +165,8 @@ def refresh_mirror(common: str, gitdir: str, conv_id: str, *,
         # Refresh siblings; protected refs and logs hold unpublished commits.
         keep = {ref.removeprefix("refs/") if name == "refs" else ref for ref in keep_refs}
         for rel in _walk_files(mirror_dir):
-            if rel in keep:
-                continue
+            if rel in keep or (name == "refs" and f"refs/{rel}".startswith(SHARED_PREFIX)):
+                continue  # captain-shared refs are not sibling state to refresh
             real_file = os.path.join(real_dir, rel)
             if os.path.isfile(real_file):
                 _copy_to_mirror(real_file, mirror_dir, rel)

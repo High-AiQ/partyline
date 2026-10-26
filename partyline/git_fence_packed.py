@@ -43,4 +43,7 @@ def merged_packed_refs(common: str, mirror: str, protected: set[str]) -> str | N
         entries.pop(ref, None)
         if ref in private_entries:
             entries[ref] = private_entries[ref]
+    for ref, entry in private_entries.items():
+        if ref.startswith("refs/partyline/shared/"):
+            entries[ref] = entry
     return ''.join(headers + [entries[ref] for ref in sorted(entries)])

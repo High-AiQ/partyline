@@ -42,6 +42,11 @@ def schema(name):
             "run_gates": {"type": "boolean"}}, ["conv_id", "sha"]),
         "review_worktree": obj({**line, "sha": text("Commit SHA.", 64, 4),
             "repository": text("Optional subtree repository.", 4096)}, ["conv_id", "sha"]),
+        "share_ref": obj({**line,
+            "ref_or_sha": text("Commit or branch to share with a running task.", 2000),
+            "name": text("Shared ref name: letters, digits, dot, underscore or dash.", 64, 1),
+            "repository": text("Optional task workspace repository.", 4096),
+            "replace": {"type": "boolean"}}, ["conv_id", "ref_or_sha", "name"]),
         "request_write_set": obj({**line, "path": text("Requested writable path.", 4096)},
                                   ["conv_id", "path"]),
         "decide_write_set": obj({**line, "request_id": text("Pending request id.", 80),
@@ -72,7 +77,8 @@ def schema(name):
 
 OPERATIONS = tuple(schema_name for schema_name in (
     "staffing", "write_set_requests", "list_presets", "attach_worker", "detach_worker", "create_child",
-    "appoint_lead", "retire_child", "retirement_preview", "accept", "review_worktree", "request_write_set",
+    "appoint_lead", "retire_child", "retirement_preview", "accept", "review_worktree", "share_ref",
+    "request_write_set",
     "decide_write_set", "request_restart", "process_overview", "ack_report", "set_goal",
     "set_gates", "docs_read", "reports"))
 
