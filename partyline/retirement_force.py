@@ -22,6 +22,7 @@ from .line_worktree import rev
 from .nested_repositories import keep_reason, nested_repositories
 from .retirement_nested import linked_owner
 from .retirement_git import git, snapshot
+from .retirement_worktree import remove_directory
 from .task_teardown import teardown
 from .retirement_preview import force_authorized, identity, plan, token
 from .retirement_auxiliary import auxiliary_heads, cleanup_auxiliary, recover_auxiliary
@@ -66,8 +67,8 @@ def _owned_ref(state):
     return state["branch_tip"] if tip == state["branch_tip"] else None
 
 
-def _remove(state):
-    """Remove only the managed worktree and its owned, unchanged host ref."""
+def _removable(state):
+    """Check nested repository guards before task teardown changes anything."""
     if not state:
         return False
     nested = [row[0].rstrip("/") for key in ("files", "ignored_files")
@@ -75,14 +76,29 @@ def _remove(state):
     # Task teardown may already have removed and pruned a registered workspace.
     owners = {linked_owner(os.path.join(state["cwd"], path)) for path in nested
               if os.path.lexists(os.path.join(state["cwd"], path))}
-    if None in owners or set(nested_repositories(state["cwd"])) - set(nested):
+    return None not in owners and not (set(nested_repositories(state["cwd"])) - set(nested))
+
+
+def _remove(state):
+    """Remove only the managed worktree and its owned, unchanged host ref."""
+    if not _removable(state):
         return False  # a nested repository: kept with its branch, named in the result
+    nested = [row[0].rstrip("/") for key in ("files", "ignored_files")
+              for row in state.get(key, []) if row[1] == "nested-worktree"]
     owned = _owned_ref(state)  # a guard, decided before the worktree goes
-    git(state["root"], "worktree", "remove", "--force", state["cwd"])
-    if os.path.exists(state["cwd"]):
-        raise HTTPException(409, "worktree removal did not complete")
-    for owner in sorted(owners):
-        git(owner, "worktree", "prune")
+    try:
+        for path in sorted(nested, key=len, reverse=True):
+            full = os.path.join(state["cwd"], path)
+            if os.path.lexists(full):
+                owner = linked_owner(full)
+                if not owner:
+                    raise OSError("nested worktree registration changed")
+                remove_directory(full, owner)
+                git(owner, "worktree", "prune")
+        remove_directory(state["cwd"], state["root"])
+    except OSError as exc:
+        raise HTTPException(409, "worktree removal did not complete; registration retained") from exc
+    git(state["root"], "worktree", "prune")
     if owned:
         git(state["root"], "update-ref", "-d", f"refs/heads/{state['branch']}", owned)
     return True
@@ -115,6 +131,8 @@ def _remove_line(db, line_id, current):
     """Destructive half: a line already re-checked with nothing left to refuse."""
     if live_attachments(db, line_id, False):
         raise HTTPException(409, "retirement gained a child or live process")
+    if current["git"] and not _removable(current["git"]):
+        return False
     teardown(db, line_id, (db.get_conversation(line_id) or {}).get("cwd") or "")
     return _remove(current["git"])
 

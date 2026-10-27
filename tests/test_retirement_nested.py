@@ -180,3 +180,89 @@ class NestedWorktreeTest(SafetyFixture, unittest.TestCase):
             with self.assertRaises(HTTPException) as caught:
                 file_evidence(child["cwd"], ["socket"])
         self.assertIn("socket (socket)", caught.exception.detail)
+
+
+class NestedRetirementGuardTest(SafetyFixture, unittest.TestCase):
+    def test_nested_refusal_preserves_registration_then_retry_succeeds(self):
+        child = self.child()
+        nested = Path(child["cwd"], "nested")
+        _git("worktree", "add", "-qb", "line/nested-test", str(nested), cwd=self.repo)
+        response = self.retire(child["id"])
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn(str(nested), _git("worktree", "list", "--porcelain", cwd=self.repo).stdout)
+        _git("worktree", "remove", str(nested), cwd=self.repo)
+        response = self.retire(child["id"])
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse(Path(child["cwd"]).exists())
+
+    def test_pruned_registration_refuses_with_manual_recovery_steps(self):
+        child = self.child()
+        gitdir = _git("rev-parse", "--absolute-git-dir", cwd=child["cwd"]).stdout.strip()
+        shutil.rmtree(gitdir)
+        response = self.retire(child["id"])
+        self.assertEqual(response.status_code, 409, response.text)
+        for part in (child["cwd"], "ancestor of main", "git worktree prune", "git branch -d line/mid"):
+            self.assertIn(part, response.text)
+        self.assertTrue(Path(child["cwd"]).exists())
+        self.assertEqual(self.preview(child).status_code, 409)
+
+    def test_interrupted_removal_keeps_registration_and_retry_succeeds(self):
+        child = self.child()
+        Path(child["cwd"], "ignored").mkdir()
+        with patch("partyline.retirement_worktree.shutil.rmtree", side_effect=OSError("interrupted")):
+            response = self.force(child)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn(child["cwd"], _git("worktree", "list", "--porcelain", cwd=self.repo).stdout)
+        self.assertTrue(Path(child["cwd"], ".git").exists())
+        response = self.force(child)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse(Path(child["cwd"]).exists())
+
+    def test_missing_git_link_and_branch_still_refuses(self):
+        child = self.child()
+        gitdir = _git("rev-parse", "--absolute-git-dir", cwd=child["cwd"]).stdout.strip()
+        shutil.rmtree(gitdir)
+        Path(child["cwd"], ".git").unlink()
+        _git("branch", "-D", "line/mid", cwd=self.repo)
+        response = self.retire(child["id"])
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("orphaned worktree", response.text)
+        self.assertTrue(Path(child["cwd"]).exists())
+
+    def test_interrupted_nested_removal_keeps_both_registrations_for_retry(self):
+        from partyline.retirement_worktree import remove_directory
+
+        child, owner, nested = NestedWorktreeTest.nested(self)
+
+        def interrupted(path, root):
+            if path == str(nested):
+                raise OSError("interrupted")
+            return remove_directory(path, root)
+
+        with patch("partyline.retirement_force.remove_directory", side_effect=interrupted):
+            response = self.force(child)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn(str(nested), _git("worktree", "list", "--porcelain", cwd=owner).stdout)
+        self.assertIn(child["cwd"], _git("worktree", "list", "--porcelain", cwd=self.repo).stdout)
+        response = self.force(child)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse(Path(child["cwd"]).exists())
+        self.assertNotIn(str(nested), _git("worktree", "list", "--porcelain", cwd=owner).stdout)
+
+    def test_new_nested_repository_is_guarded_before_task_teardown(self):
+        from partyline.retirement_force import _remove_line
+
+        child = self.child()
+        state = inspect_git(self.db, child)
+        nested = Path(child["cwd"], "new-repository")
+        nested.mkdir()
+        _git("init", "-q", "-b", "main", cwd=nested)
+        with patch("partyline.retirement_force.teardown") as teardown:
+            self.assertFalse(_remove_line(self.db, child["id"], {"git": state}))
+        teardown.assert_not_called()
+        self.assertTrue(nested.exists())
+        self.assertIn(child["cwd"], _git("worktree", "list", "--porcelain", cwd=self.repo).stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()
