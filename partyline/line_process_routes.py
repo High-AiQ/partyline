@@ -9,10 +9,13 @@ from .adapters.process_shutdown import process_group_alive
 from .contracts import MessageEvent, MessageResponse
 from .auth_guard import request_principal
 from .attachment_lifecycle import expire_unowned_attachment
+from .docker_workloads import announce_survivors
 from .hierarchy import descendants
+from .memory_requests import expire_memory_requests
 from .line_process_contracts import CloseProcessesResponse
 from .machine_scope import deny_unless
 from .mcp_attach import remove_config
+from .resource_leases import release_attachment_leases
 from .attachment_tmp import reap_tmp_dir
 
 LIVE = ("starting", "running")
@@ -85,7 +88,8 @@ async def _stop_confirmed(adapter, stop_error) -> bool:
     )
 
 
-async def detach_attachment(runtime, att_id: str, *, survivors: bool = True, hint: bool = False) -> dict:
+async def detach_attachment(runtime, att_id: str, *, survivors: bool = True,
+                            hint: bool = False, expire: bool = True) -> dict:
     """Run the one-jack detach transaction used by both REST commands."""
     lock = runtime.resume_locks.setdefault(att_id, asyncio.Lock())
     try:
@@ -179,16 +183,13 @@ async def detach_attachment(runtime, att_id: str, *, survivors: bool = True, hin
         await _bounded_broadcast(runtime.broadcast(
             att["conv_id"], MessageEvent(message=MessageResponse.model_validate(message))
         ))
-        from .resource_leases import release_attachment_leases
-
         release_attachment_leases(runtime.db, att_id)
+        await expire_memory_requests(runtime, att_id) if expire else None
         remove_config(runtime.db.path, att_id)
         if adapter is not None and runtime.live.get(att_id) is adapter:
             runtime.live.pop(att_id, None)
         runtime.memory_usage.pop(att_id, None)
         if survivors:
-            from .docker_workloads import announce_survivors
-
             await announce_survivors(runtime, att["conv_id"])
         return {"ok": True}
     finally:
