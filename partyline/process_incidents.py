@@ -59,9 +59,11 @@ async def record_exit(runtime, att, evidence):
             backstop = format_memory_bytes(evidence.limit_bytes)
             budget = format_memory_bytes(budget_bytes)
             hint = (
-                f'File a request for a person to approve: POST '
+                f'File a memory request: POST '
                 f'/api/attachments/{ident}/memory-requests with '
-                f'{{"requested_limit":"{requested}","reason":"…"}}.'
+                f'{{"requested_limit":"{requested}","reason":"…"}}. The root captain can approve '
+                'within the captain ceiling via POST /api/memory-requests/<request_id>/approve; '
+                'above it a person decides.'
                 if requested else "No larger budget fits under the host ceiling."
             )
             detail += (f" Incident {saved.lastrowid}; recorded peak {peak} at the {backstop} "
@@ -88,9 +90,11 @@ async def record_exit(runtime, att, evidence):
                  if evidence.reason == "oom" else
                  "The exit cause is unconfirmed. Inspect the terminal and structured transcript; ")
         increase = (
-            "Reduce its memory use, or file a memory request with a reason for a person "
-            f'to approve: POST /api/attachments/{ident}/memory-requests with '
-            f'{{"requested_limit":"{requested}","reason":"…"}}; approval resumes it. '
+            "Reduce its memory use, or file a memory request with a reason: "
+            f'POST /api/attachments/{ident}/memory-requests with '
+            f'{{"requested_limit":"{requested}","reason":"…"}}; the root captain can approve within '
+            "the captain ceiling via POST /api/memory-requests/<request_id>/approve; "
+            "above it a person decides. Approval resumes it. "
             if requested else
             "No larger budget fits under the host ceiling. Reduce the workload's memory use "
             "before using the normal resume endpoint. "
