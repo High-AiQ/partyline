@@ -16,6 +16,10 @@ from tests.orchestrator_fixture import TaskFixture
 
 class LineResourcesTest(TaskFixture):
     async def asyncSetUp(self):
+        import os
+        environment = patch.dict(os.environ, {'PARTYLINE_RESOURCE_PROBES': '{"gpu":null}'})
+        environment.start()
+        self.addCleanup(environment.stop)
         register_line_resource_routes(self.app, self.runtime)
         await self.create()
         self.first = self.worker
@@ -276,3 +280,52 @@ class LineResourcesTest(TaskFixture):
         tools_captain.call(client, 'captain', {'op': 'resources', 'args': {
             'conv_id': 'root', 'operation': 'list'}}, state)
         client.request.assert_called_with('POST', '/api/conversations/root/resources', {'operation': 'list'})
+
+
+class ResourceProbeTest(LineResourcesTest):
+    async def test_probes_run_without_database_lock_or_transaction(self):
+        checked = []
+
+        def check(name):
+            self.assertFalse(self.db.lock.locked())
+            self.assertFalse(self.db.conn.in_transaction)
+            checked.append(name)
+
+        with patch('partyline.line_resources.probe', side_effect=check):
+            self.acquire()
+            self.acquire(self.second)
+            await maintain(self.runtime)
+            self.release()
+        self.assertGreaterEqual(checked.count('gpu'), 4)
+        self.assertEqual(self.claims()['holder']['attachment_id'], 'inspect')
+
+    async def test_probe_commands_refuse_without_queueing(self):
+        import json
+        import os
+        import sys
+
+        def setting(code):
+            return {"PARTYLINE_RESOURCE_PROBES": json.dumps({"gpu": [sys.executable, '-c', code]})}
+
+        with patch.dict(os.environ, setting("print('healthy')")):
+            self.assertEqual(self.acquire().json()['status'], 'held')
+        for code in ("raise SystemExit(1)", "print('  ')", "import time; time.sleep(5)"):
+            with self.subTest(code=code), patch.dict(os.environ, setting(code)):
+                response = self.acquire(self.second)
+                self.assertEqual(response.status_code, 503)
+                self.assertIn('retry', response.json()['detail'])
+                self.assertEqual(self.claims()['queue'], [])
+        with patch.dict(os.environ, {"PARTYLINE_RESOURCE_PROBES": '{"gpu":["missing-probe-xyz"]}'}):
+            self.assertEqual(self.acquire(self.second).json()['status'], 'queued')
+
+    async def test_waiter_is_not_granted_until_probe_recovers(self):
+        import os
+        self.acquire()
+        self.acquire(self.second)
+        with patch.dict(os.environ, {"PARTYLINE_RESOURCE_PROBES": '{"gpu":["false"]}'}):
+            self.release()
+            self.assertIsNone(self.claims()['holder'])
+            self.assertEqual(len(self.claims()['queue']), 1)
+        with patch.dict(os.environ, {"PARTYLINE_RESOURCE_PROBES": '{"gpu":["missing-probe-xyz"]}'}):
+            await maintain(self.runtime)
+            self.assertEqual(self.claims()['holder']['attachment_id'], 'inspect')
