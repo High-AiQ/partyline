@@ -11,14 +11,16 @@ from . import turn_marker
 from .adapters import Adapter, ADAPTER_METADATA
 from .restart_capabilities import adapter_can_restart, adapter_listens
 from .contracts import (
-    Event, ReattachCandidateResponse, ReattachCommand, ReattachDecisionEvent,
+    Event, ReattachCommand, ReattachDecisionEvent,
     ReattachOfferEvent, RestartPlanRequest, RestartPlanResponse,
 )
 from .db import Db, RestartPlan
 from .continuation_delivery import deliver_continuation
 from .restart_lease import run_automatic_restart_plan
 from .restart_summary import format_summary
-from .reattach_liveness import mark_unlive_exited, report_live, report_reattach_failure
+from .restart_response import restart_plan_response
+from .reattach_liveness import (mark_unlive_exited, report_live, report_reattach_failure,
+                                report_timeout_exit)
 from .restart_scope import (covered_conversation_ids, planned_conversation_ids,
                             select_attachment_ids, skip_reason)
 from .resume_backlog import addressed_backlog
@@ -73,26 +75,6 @@ class RestartPlanError(Exception):
     status_code: int
     detail: str
 
-
-def restart_plan_response(db: Db, plan: RestartPlan) -> RestartPlanResponse:
-    attachments = []
-    for attachment_id in plan["attachment_ids"]:
-        attachment = db.get_attachment(attachment_id)
-        if attachment is not None:
-            attachments.append(
-                ReattachCandidateResponse(
-                    id=attachment["id"],
-                    name=attachment["name"],
-                    adapter=attachment["adapter"],
-                    conversation_id=attachment["conv_id"],
-                )
-            )
-    return RestartPlanResponse(
-        conversation_id=plan["conversation_id"],
-        token=plan["token"],
-        attachments=attachments,
-        debrief=plan["debrief"],
-    )
 
 
 def create_restart_plan(
@@ -328,6 +310,10 @@ class ReattachCoordinator:
                         continuation_confirmed = True
                     self.runtime.reattaching.discard(attachment_id)
                 except TimeoutError:
+                    if detail := await report_timeout_exit(self.runtime, adapter, attachment_id, line, name):
+                        failed.append(name)
+                        failure_details.append(detail)
+                        continue
                     # Slow is not failed, and killing it is the only real harm.
                     #
                     # Readiness means "the adapter has opened its claimed

@@ -974,6 +974,58 @@ class FleetPlanTest(unittest.IsolatedAsyncioTestCase):
     def resumable_metadata(self):
         return {"fake": {"capabilities": {"resume": True}}}
 
+    async def test_starting_implementer_survives_snapshot_and_failure_is_named(self):
+        self.db._exec(
+            "INSERT INTO task_reviews(conv_id,root_id,implementer_id,implementer_preset,"
+            "policy,tag,status,created_at) "
+            "VALUES('other','owner','two','fake','captain','task','implementing',0)"
+        )
+        self.db.set_attachment_status("two", "starting", None)
+        self.runtime.live.pop("two")
+        response = create_restart_plan(
+            self.runtime, self.resumable_metadata(),
+            RestartPlanRequest(conversation_id="owner", mode="automatic", scope="all"),
+        )
+        self.assertIn("two", [item.id for item in response.attachments])
+        self.db.set_attachment_status("two", "exited", None)
+        await self.runtime.shutdown()
+        plan = self.db.get_restart_plan()
+        self.assertIn("two", plan["attachment_ids"])
+        self.db.mark_stale_attachments()
+        self.runtime.live.clear()
+
+        async def resume(ident, pending):
+            if ident == "two":
+                raise HTTPException(409, "never claimed a CLI session")
+            adapter = ReadyAdapter(self.order, "sol")
+            self.runtime.live[ident] = adapter
+            return ResumedAttachment(adapter, False)
+
+        result = await ReattachCoordinator(self.runtime, resume).run(plan, None)
+        self.assertEqual(result.failed, ("terra",))
+        summary = self.db.list_messages("owner")[-1]["body"]
+        self.assertIn("terra: never claimed a CLI session", summary)
+        self.assertNotIn("stopped", summary)
+
+    async def test_dead_process_during_continuation_timeout_is_failure(self):
+        self.db.save_restart_plan("owner", ["one"], "continue")
+        self.db.mark_stale_attachments()
+        self.runtime.live.clear()
+
+        async def resume(ident, pending):
+            adapter = ReadyAdapter(self.order, "sol")
+            adapter.alive = lambda: False
+            adapter.wait_ready = lambda: asyncio.sleep(30)
+            self.runtime.live[ident] = adapter
+            return ResumedAttachment(adapter, False)
+
+        result = await ReattachCoordinator(self.runtime, resume, 0.01).run(
+            self.db.get_restart_plan(), None
+        )
+        self.assertEqual(result.failed, ("sol",))
+        self.assertEqual(result.unconfirmed, ())
+        self.assertIn("sol: the process exited", self.db.list_messages("owner")[-1]["body"])
+
     def test_a_line_scoped_plan_still_covers_only_its_own_processes(self):
         response = create_restart_plan(
             self.runtime,
