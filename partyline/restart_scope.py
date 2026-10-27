@@ -42,6 +42,14 @@ def resumable(
     )
 
 
+def active_implementer(db: ScopeDb, attachment: Mapping[str, object]) -> bool:
+    from .orchestrator_store import task
+
+    row = task(db, attachment["conv_id"])
+    return bool(row and row["implementer_id"] == attachment["id"]
+                and row["status"] in ("implementing", "idle"))
+
+
 def planned_conversation_ids(
     db: ScopeDb, conversation_id: str, scope: str
 ) -> list[str]:
@@ -82,8 +90,12 @@ def select_attachment_ids(
     selected: list[str] = []
     for conv_id in conversation_ids:
         for attachment in db.list_attachments(conv_id):
+            starting_worker = (attachment["status"] == "starting"
+                               and active_implementer(db, attachment)
+                               and resumable_adapter(attachment["adapter"]))
             if (not skip_reason(db, attachment)
-                    and resumable(attachment, live, resumable_adapter(attachment["adapter"]))):
+                    and (starting_worker or resumable(
+                        attachment, live, resumable_adapter(attachment["adapter"])))):
                 selected.append(attachment["id"])
     return selected
 
@@ -117,7 +129,8 @@ def snapshot_shutdown_plan(db, live: Mapping[str, object]) -> set[str]:
         reason = skip_reason(db, att)
         adapter = live.get(ident)
         alive = adapter is not None and (not hasattr(adapter, "alive") or adapter.alive())
-        if not reason and (not alive or att["status"] not in ("starting", "running")):
+        recover_worker = (att["status"] != "detached" and active_implementer(db, att))
+        if not reason and not recover_worker and (not alive or att["status"] not in ("starting", "running")):
             reason = "detached" if att["status"] == "detached" else "stopped"
         if reason:
             skipped.append(reason)

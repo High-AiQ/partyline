@@ -10,6 +10,7 @@ def is_live(runtime, attachment_id: str) -> bool:
         attachment is None
         or adapter is None
         or attachment["status"] not in ("starting", "running")
+        or (hasattr(adapter, "alive") and not adapter.alive())
     ):
         return False
     matches = getattr(runtime, "activation_matches", None)
@@ -47,6 +48,14 @@ async def report_reattach_failure(runtime, exc, attachment_id: str, line: str, n
     await abandon(runtime, attachment_id)
     await runtime.post_message(line, "system", "system", f"⚠ @{name} could not reattach safely: {exc}")
     return "failed"
+
+
+async def report_timeout_exit(runtime, adapter, attachment_id, line, name):
+    if not hasattr(adapter, "alive") or adapter.alive():
+        return None
+    reason = "the process exited before confirming its continuation"
+    await report_reattach_failure(runtime, RuntimeError(reason), attachment_id, line, name)
+    return f"{name}: {reason}"
 
 
 async def abandon(runtime, attachment_id: str) -> None:

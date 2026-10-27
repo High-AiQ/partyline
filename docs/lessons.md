@@ -1,5 +1,14 @@
 # Lessons: the false-assumptions ledger
 
+## A starting task worker is still a restart target
+
+An approved plan can contain an implementer that has not yet claimed a session,
+and its adapter may exit or still be starting at shutdown. Treating it as an
+ordinary stopped process silently strands the task. Keep active task workers in
+the shutdown plan unless explicitly detached; if a session cannot be resumed,
+report the worker and the reason. A continuation timeout also needs an actual
+live process before it can be called unconfirmed rather than failed.
+
 ## A restart plan is not a shutdown snapshot
 
 A process listed at approval may detach or finish before shutdown. Counting every
