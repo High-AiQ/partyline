@@ -116,6 +116,10 @@ class StartupStateTest(unittest.TestCase):
         write_orderly_marker(str(self.db_path), boot_id_path=self.boot)
         self.assertFalse(self._post(runtime))
 
+        db._exec("INSERT INTO line_resources VALUES('line','gpu')")
+        db._exec("INSERT INTO line_resource_claims "
+                 "(conv_id,name,attachment_id,note,created_at,granted_at,notified) "
+                 "VALUES('line','gpu','one','training job',1,1,1)")
         # A crash leaves no marker: the next start says unplanned.
         self.assertTrue(self._post(runtime))
         bodies = " ".join(
@@ -124,6 +128,8 @@ class StartupStateTest(unittest.TestCase):
         self.assertIn("unplanned", bodies)
         self.assertIn("@sol", bodies)
         self.assertNotIn("the host rebooted", bodies)
+        self.assertIn("gpu by @sol on «Line»", bodies)
+        self.assertIn("training job", bodies)
 
     def _post(self, runtime) -> bool:
         import asyncio

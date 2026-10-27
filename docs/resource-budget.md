@@ -286,3 +286,21 @@ Unmerged, dirty, still-running or unverifiable work is retained. Archiving prese
 the transcript and structured task review record; permanent purge remains human-only.
 
 Raw adapter attachments do not consume process slots or admission reservations by default. Set `counts_toward_total: true` when attaching a raw process through the API or MCP to include it; the flag cannot be changed on an existing attachment and has no UI control; other adapters always count and cannot set this option. Actual memory usage still includes every live process. The process overview lists all live processes and reports whether each counts.
+
+## Resource lease probes
+
+Before acquiring a named line resource, Partyline runs its configured probe off
+the event loop, with a two-second timeout. Set `PARTYLINE_RESOURCE_PROBES` on
+the server to a JSON object mapping resource names to command argument arrays,
+for example `{"gpu":["nvidia-smi","-L"],"accelerator":["check-accelerator"]}`.
+The default for `gpu` is `["nvidia-smi", "-L"]`; other names have no probe.
+Set a name to `null` to disable its probe. Commands run directly without a shell.
+A missing executable skips the probe. A nonzero exit, timeout, or empty stdout
+refuses the acquisition with an instruction to check the resource and retry;
+no new claim is queued. Queued claims are checked again before promotion and
+remain queued until a later successful check. A probe is a point-in-time check,
+not a guarantee that hardware remains healthy during a job.
+
+After an unplanned stop, notices include persisted lease holders, resource names,
+lines, and task notes before stale attachments are cleared. Queued claims are
+not reported as held leases.
