@@ -1577,3 +1577,14 @@ repair replace scheduling slots by hand. `tests/test_line_resources.py` covers g
 queue order, duplicate calls, bounded input, authorization and lifecycle cleanup on a
 scratch database. The mechanism stays client-agnostic and advisory; a name may identify
 a device, a port or any other shared capability.
+
+## 2026-10-27 — A pruned worktree can leave an uninspectable directory
+
+Retirement assumed a failed removal would leave Git's registration intact. A nested
+worktree guard could instead follow a prune, leaving a directory with no usable HEAD or
+index. A merged branch and a clean-looking directory cannot recover staged-only changes
+or prove the missing HEAD, so retirement must not guess that this orphan is disposable.
+Preflight the nested guards before teardown, keep the Git link and registration while
+removing files, and prune only after the directory is gone. Refuse a legacy orphan with
+manual recovery steps. `tests/test_retirement_nested.py` covers the refusal and retry,
+an interrupted removal, and the orphan diagnostic.
