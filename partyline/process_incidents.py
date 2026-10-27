@@ -59,7 +59,8 @@ async def record_exit(runtime, att, evidence):
             backstop = format_memory_bytes(evidence.limit_bytes)
             budget = format_memory_bytes(budget_bytes)
             hint = (
-                f'POST /api/attachments/{ident}/memory-requests with '
+                f'File a request for a person to approve: POST '
+                f'/api/attachments/{ident}/memory-requests with '
                 f'{{"requested_limit":"{requested}","reason":"…"}}.'
                 if requested else "No larger budget fits under the host ceiling."
             )
@@ -87,9 +88,9 @@ async def record_exit(runtime, att, evidence):
                  if evidence.reason == "oom" else
                  "The exit cause is unconfirmed. Inspect the terminal and structured transcript; ")
         increase = (
-            "Reduce its memory use or explicitly grant a larger budget if justified. "
-            f'PUT the memory endpoint with {{"limit":"{requested}"}} '
-            "(or null for the default), then use the normal resume endpoint. "
+            "Reduce its memory use, or file a memory request with a reason for a person "
+            f'to approve: POST /api/attachments/{ident}/memory-requests with '
+            f'{{"requested_limit":"{requested}","reason":"…"}}; approval resumes it. '
             if requested else
             "No larger budget fits under the host ceiling. Reduce the workload's memory use "
             "before using the normal resume endpoint. "

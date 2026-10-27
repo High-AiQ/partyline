@@ -49,3 +49,25 @@ class TaskLineMemoryRequestTest(TaskFixture):
     async def test_process_files_for_itself(self):
         response = self.file(self.worker.attachment_id, self.worker)
         self.assertEqual(response.status_code, 200, response.text)
+
+    async def test_detach_expires_the_request_and_approve_says_worker_gone(self):
+        from partyline.line_process_routes import detach_attachment
+
+        filed = self.file(self.worker.attachment_id, self.captain)
+        rid = filed.json()["id"]
+        await detach_attachment(self.runtime, self.worker.attachment_id)
+        self.assertIsNone(self.client.get(f"/api/conversations/{self.conv_id}/memory-request").json()["request"])
+        self.actor = self.human
+        gone = self.client.post(f"/api/memory-requests/{rid}/approve")
+        self.assertEqual(gone.status_code, 410)
+        self.assertIn("worker gone", gone.text)
+        # A new request replaces the expired one; decline clears an expired one.
+        self.assertEqual(self.file(self.worker.attachment_id, self.captain).status_code, 200)
+
+    async def test_restart_detach_keeps_the_request_pending(self):
+        from partyline.line_process_routes import detach_attachment
+
+        self.file(self.worker.attachment_id, self.captain)
+        await detach_attachment(self.runtime, self.worker.attachment_id, survivors=False, expire=False)
+        found = self.client.get(f"/api/conversations/{self.conv_id}/memory-request").json()["request"]
+        self.assertIsNotNone(found)

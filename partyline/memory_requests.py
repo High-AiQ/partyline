@@ -27,9 +27,22 @@ class MemoryRequestIn(BaseModel):
 
 
 def _pending(db, conv_id: str) -> dict | None:
-    row = db._exec("SELECT * FROM memory_limit_requests WHERE conv_id=? ORDER BY created_at LIMIT 1",
+    row = db._exec("SELECT * FROM memory_limit_requests WHERE conv_id=? AND expired_at IS NULL "
+                   "ORDER BY created_at LIMIT 1",
                    (conv_id,)).fetchone()
     return dict(row) if row else None
+
+
+async def expire_memory_requests(runtime, att_id: str) -> None:
+    """A detached worker cannot be resumed with a bigger cap: stop offering Approve."""
+    db = runtime.db
+    with db.lock, db.conn:
+        rows = db.conn.execute(
+            "UPDATE memory_limit_requests SET expired_at=? WHERE attachment_id=? "
+            "AND expired_at IS NULL RETURNING conv_id", (time.time(), att_id)).fetchall()
+    for conv_id in {row["conv_id"] for row in rows}:
+        await runtime.broadcast(conv_id, MemoryRequestEvent(request=_pending(db, conv_id)))
+        await broadcast_approval_change(runtime, conv_id)
 
 
 def register_memory_request_routes(app: FastAPI, runtime, resume) -> None:
@@ -66,6 +79,9 @@ def register_memory_request_routes(app: FastAPI, runtime, resume) -> None:
             raise HTTPException(422, "requested limit must be positive")
         if _pending(db, att["conv_id"]):
             raise HTTPException(409, "a memory request is already pending on this line")
+        with db.lock, db.conn:
+            db.conn.execute("DELETE FROM memory_limit_requests WHERE conv_id=? "
+                            "AND expired_at IS NOT NULL", (att["conv_id"],))
         ident = uuid.uuid4().hex[:12]
         record = {"id": ident, "attachment_id": att_id, "conv_id": att["conv_id"],
                   "requester": actor.name, "requester_attachment_id": actor.attachment_id,
@@ -73,7 +89,9 @@ def register_memory_request_routes(app: FastAPI, runtime, resume) -> None:
                   "reason": reason, "created_at": time.time()}
         with db.lock, db.conn:
             db.conn.execute(
-                "INSERT INTO memory_limit_requests VALUES(?,?,?,?,?,?,?,?)",
+                "INSERT INTO memory_limit_requests(id,attachment_id,conv_id,requester,"
+                "requester_attachment_id,requested_limit,reason,created_at) "
+                "VALUES(?,?,?,?,?,?,?,?)",
                 (ident, att_id, att["conv_id"], actor.name, actor.attachment_id,
                  body.requested_limit, record["reason"], record["created_at"]))
         await announce(att["conv_id"],
@@ -94,6 +112,10 @@ def register_memory_request_routes(app: FastAPI, runtime, resume) -> None:
         if row is None:
             raise HTTPException(404, "memory request is no longer pending")
         current = dict(row)
+        if approving and current["expired_at"] is not None:
+            raise HTTPException(
+                410, "worker gone: its process was detached or its line retired, so this "
+                     "request expired; decline it to clear it and file a new one if needed")
         if actor.kind == "machine" and actor.attachment_id == current["requester_attachment_id"]:
             raise HTTPException(403, "a process cannot approve its own memory request")
         if (approving and actor.kind == "machine"
@@ -114,12 +136,12 @@ def register_memory_request_routes(app: FastAPI, runtime, resume) -> None:
         current, actor = take(request, request_id, approving=True)
         att = db.get_attachment(current["attachment_id"])
         if att is None:
-            raise HTTPException(404, "attachment was removed")
+            raise HTTPException(410, "worker gone: its attachment was removed")
         if not adapter_can_resume(ADAPTER_METADATA.get(att["adapter"], {})):
             raise HTTPException(409, f"@{att['name']} uses an adapter that cannot resume")
         from .line_process_routes import detach_attachment
         if att["id"] in runtime.live:
-            await detach_attachment(runtime, att["id"], survivors=False)
+            await detach_attachment(runtime, att["id"], survivors=False, expire=False)
         with db.lock, db.conn:
             db.conn.execute("UPDATE attachments SET memory_limit=? WHERE id=?",
                             (current["requested_limit"], att["id"]))
