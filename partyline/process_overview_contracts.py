@@ -14,6 +14,7 @@ class ProcessOverviewAttachment(BaseModel):
     id: str
     handle: str
     adapter: str
+    counts_toward_total: bool = True
     pid: int | None = None
     phase: Literal["working", "speaking", "idle"] = "idle"
     # Best-effort Linux VmRSS; None when unknown (dead pid, no /proc, non-Linux).

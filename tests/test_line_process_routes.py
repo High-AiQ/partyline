@@ -89,7 +89,8 @@ class CloseLineProcessesTest(unittest.TestCase):
     def add_live(self, ident: str, name: str, conv_id: str = "line") -> Adapter:
         owner = f"owner-{ident}"
         self.db.add_attachment(
-            ident, conv_id, name, "raw", ["sh"], self.directory.name, owner
+            ident, conv_id, name, "raw", ["sh"], self.directory.name, owner,
+            counts_toward_total=True
         )
         self.db.set_attachment_status(ident, "running", owner)
         adapter = Adapter(

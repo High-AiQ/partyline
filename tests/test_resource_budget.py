@@ -40,9 +40,55 @@ class ResourceBudgetTest(unittest.IsolatedAsyncioTestCase):
         self.tmp.cleanup()
 
     def attach(self, ident, line="root", memory="256M", status="running"):
-        att = self.db.add_attachment(ident, line, ident, "raw", ["cat"], self.tmp.name, ident)
+        att = self.db.add_attachment(ident, line, ident, "raw", ["cat"], self.tmp.name, ident,
+                                     counts_toward_total=True)
         self.db._exec("UPDATE attachments SET status=?,memory_limit=? WHERE id=?", (status, memory, ident))
         return att
+
+    def test_rail_live_count_includes_only_counted_processes(self):
+        self.db.add_attachment("helper", "root", "helper", "raw", ["cat"], self.tmp.name)
+        self.assertEqual(self.db.get_conversation("root")["live_count"], 0)
+        self.db.add_attachment("counted", "root", "counted", "raw", ["cat"], self.tmp.name,
+                               counts_toward_total=True)
+        self.assertEqual(self.db.get_conversation("root")["live_count"], 1)
+        self.db.add_attachment("agent", "root", "agent", "codex", ["codex"], self.tmp.name)
+        self.assertEqual(self.db.get_conversation("root")["live_count"], 2)
+        self.assertEqual(next(c for c in self.db.list_conversations() if c["id"] == "root")
+                         ["live_count"], 2)
+
+    async def test_raw_count_policy_and_admission(self):
+        self.db.set_setting("max_live_processes", "4")
+        for ident in ("one", "two", "three", "four"):
+            self.attach(ident)
+        raw = await reserve_new_attachment(
+            self.db, att_id="raw", conv_id="root", name="raw", adapter="raw",
+            command=["cat"], cwd=self.tmp.name, runtime_owner="raw")
+        self.assertFalse(raw["counts_toward_total"])
+        runtime = SimpleNamespace(memory_usage={"raw": {"usage_bytes": 12345}})
+        view = snapshot(self.db, self.host, runtime)
+        self.assertEqual(view["live_processes"], 4)
+        self.assertEqual(view["partyline_processes_bytes"], 12345)
+        self.assertEqual(self.db.get_conversation("root")["live_count"], 4)
+        with self.assertRaises(HTTPException):
+            await reserve_new_attachment(
+                self.db, att_id="opt", conv_id="root", name="opt", adapter="raw",
+                command=["cat"], cwd=self.tmp.name, runtime_owner="opt",
+                counts_toward_total=True)
+        self.db._exec("UPDATE attachments SET status='exited' WHERE id='one'")
+        await reserve_new_attachment(
+            self.db, att_id="opt", conv_id="root", name="opt", adapter="raw",
+            command=["cat"], cwd=self.tmp.name, runtime_owner="opt", counts_toward_total=True)
+        self.assertEqual(snapshot(self.db, self.host)["live_processes"], 4)
+        self.db._exec("UPDATE attachments SET status='exited' WHERE id='raw'")
+        self.assertTrue(await claim_resume(self.db, "raw", "new-owner", GIB))
+        self.db._exec("UPDATE attachments SET status='exited' WHERE id='opt'")
+        self.db._exec("UPDATE attachments SET status='running' WHERE id='one'")
+        with self.assertRaises(HTTPException):
+            await claim_resume(self.db, "opt", "new-owner", GIB)
+        with self.assertRaises(HTTPException):
+            await reserve_new_attachment(
+                self.db, att_id="agent", conv_id="root", name="agent", adapter="codex",
+                command=["codex"], cwd=self.tmp.name, runtime_owner="agent")
 
     def test_runtime_defaults_follow_injected_host_resources(self):
         values = defaults(self.host)
@@ -121,6 +167,7 @@ class ResourceBudgetTest(unittest.IsolatedAsyncioTestCase):
             return await reserve_new_attachment(
                 self.db, att_id=ident, conv_id="root", name=ident, adapter="raw",
                 command=["cat"], cwd=self.tmp.name, runtime_owner=ident,
+                counts_toward_total=True,
             )
 
         outcomes = await asyncio.gather(admit("four"), admit("five"), return_exceptions=True)

@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .db import MessageRow, _att_row
 from .hierarchy import tree_live_name_conflict
 from .message_queries import as_message
+from .process_counts import counts
 from .resource_budget import format_limit, lease_bytes, reject_if_full, settings
 
 
@@ -116,7 +117,8 @@ async def create_fresh_record(db, expected, body):
             )
     async with db._runtime_serialized_async():
         config = settings(db)
-        reject_if_full(db, lease_bytes(expected, config))
+        if counts(expected):
+            reject_if_full(db, lease_bytes(expected, config))
         with db.lock, db.conn:
             row = db.conn.execute("SELECT * FROM attachments WHERE id=?", (expected["id"],)).fetchone()
             att = _require_stopped(_att_row(row) if row else None)
@@ -153,10 +155,11 @@ async def create_fresh_record(db, expected, body):
             )
             db.conn.execute(
                 "INSERT INTO attachments(id,conv_id,name,adapter,command,cwd,status,"
-                "runtime_owner,last_seen,created_at,runtime_started_at,memory_limit) "
-                "VALUES(?,?,?,?,?,?,'starting',?,?,?,?,?)",
+                "runtime_owner,last_seen,created_at,runtime_started_at,memory_limit,counts_toward_total) "
+                "VALUES(?,?,?,?,?,?,'starting',?,?,?,?,?,?)",
                 (ident, att["conv_id"], att["name"], att["adapter"], json.dumps(att["command"]),
-                 att["cwd"], owner, cursor, started_at, started_at, memory_limit),
+                 att["cwd"], owner, cursor, started_at, started_at, memory_limit,
+                 att["counts_toward_total"]),
             )
         return db.get_attachment(ident)
 
