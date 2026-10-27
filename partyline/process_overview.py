@@ -19,6 +19,7 @@ from .machine_scope import deny_unless
 from .orchestrator_store import task
 from .line_resources import report
 from .presence import IDLE
+from .process_counts import counts
 from .workspace_visibility import workspace_visibility
 from .process_overview_contracts import (
     ProcessOverviewAttachment,
@@ -62,6 +63,7 @@ def _attachment(runtime, att: dict) -> ProcessOverviewAttachment:
         id=att["id"],
         handle=att["name"],
         adapter=att["adapter"],
+        counts_toward_total=counts(att),
         pid=pid,
         phase=_phase(runtime, att["id"]),
         rss_bytes=read_rss_bytes(pid),

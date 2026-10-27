@@ -176,7 +176,8 @@ class CaptainInstancesTest(unittest.TestCase):
                             can_manage=False, implements=True)
 
     def seat(self, conv_id, att_id, handle):
-        self.db.add_attachment(att_id, conv_id, handle, "raw", ["raw", "--x"], "/tmp")
+        self.db.add_attachment(att_id, conv_id, handle, "raw", ["raw", "--x"], "/tmp",
+                               counts_toward_total=True)
         self.db._exec("UPDATE attachments SET status='running' WHERE id=?", (att_id,))
 
     def staffing(self):
@@ -186,6 +187,14 @@ class CaptainInstancesTest(unittest.TestCase):
 
     def captains(self, line):
         return line.split("free captains: ", 1)[1].split(".")[0]
+
+    def test_uncounted_raw_does_not_occupy_preset(self):
+        self.db.add_attachment("helper", "a", "astra", "raw", ["raw", "--x"], "/tmp")
+        self.assertIn("in use: nobody", self.staffing())
+        self.assertEqual(self.captains(self.staffing()), "astra (3 more)")
+        self.db._exec("UPDATE attachments SET counts_toward_total=1 WHERE id='helper'")
+        self.assertIn("in use: astra «Alpha»", self.staffing())
+        self.assertEqual(self.captains(self.staffing()), "astra (2 more)")
 
     def test_two_lines_appoint_instances_of_the_same_captain_preset(self):
         from partyline.hierarchy import set_lead

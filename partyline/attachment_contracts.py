@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class CwdGitState(BaseModel):
@@ -27,6 +27,7 @@ class AttachmentResponse(BaseModel):
     conv_id: str
     name: str
     adapter: str
+    counts_toward_total: bool = False
     command: list[str]
     cwd: str
     status: Literal["starting", "running", "exited", "detached"]
@@ -42,3 +43,9 @@ class AttachmentResponse(BaseModel):
     memory_cap_bytes: int | None = Field(default=None, gt=0)
     memory_percent: int | None = Field(default=None, ge=0, le=100)
     bridge: BridgeRef | None = None
+
+    @model_validator(mode="after")
+    def count_non_raw(self):
+        if self.adapter != "raw":
+            self.counts_toward_total = True
+        return self

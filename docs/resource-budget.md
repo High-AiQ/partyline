@@ -283,3 +283,5 @@ all processes are inactive, and remove their managed task, review and scratch
 worktrees. The maintenance loop retries every 30 seconds and resumes after restart.
 Unmerged, dirty, still-running or unverifiable work is retained. Archiving preserves
 the transcript and structured task review record; permanent purge remains human-only.
+
+Raw adapter attachments do not consume process slots or admission reservations by default. Set `counts_toward_total: true` when attaching a raw process through the API or MCP to include it; the flag cannot be changed on an existing attachment and has no UI control; other adapters always count and cannot set this option. Actual memory usage still includes every live process. The process overview lists all live processes and reports whether each counts.

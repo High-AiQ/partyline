@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from fastapi import HTTPException
 
+from .process_counts import counts
 from .process_memory import DEFAULT_PROCESS_MEMORY_LIMIT, parse_size, process_memory_limit
 from .resource_usage import gib_text, host_available_bytes, usage_section
 from .server_memory import host_memory_bytes
@@ -154,9 +155,10 @@ def snapshot(db, host: Host | None = None, runtime=None) -> dict:
     config = settings(db, host)
     rows = live_rows(db)
     budget = max(0, host.ram_bytes - config["memory_reserve_bytes"])
-    busiest = busiest_family(db, rows)
-    reserved = sum(lease_bytes(row, config) for row in rows)
-    capped = sum(cap_bytes(row, config) for row in rows)
+    counted = [row for row in rows if counts(row)]
+    busiest = busiest_family(db, counted)
+    reserved = sum(lease_bytes(row, config) for row in counted)
+    capped = sum(cap_bytes(row, config) for row in counted)
     from .attachment_tmp import tmp_summary
     from .docker_workloads import inventory
 
@@ -164,10 +166,10 @@ def snapshot(db, host: Host | None = None, runtime=None) -> dict:
         **config,
         "host_ram_bytes": host.ram_bytes,
         "memory_budget_bytes": budget,
-        "live_processes": len(rows),
+        "live_processes": len(counted),
         "memory_reserved_bytes": reserved,
         "memory_cap_bytes": capped,
-        "remaining_processes": max(0, config["max_live_processes"] - len(rows)),
+        "remaining_processes": max(0, config["max_live_processes"] - len(counted)),
         "remaining_memory_bytes": max(0, budget - reserved),
         "busiest_line": busiest,
         **tmp_summary(),
@@ -182,7 +184,7 @@ def refusal(db, requested_lease: int, *, exclude_id: str | None = None,
     view = snapshot(db, host)
     rows = live_rows(db)
     if exclude_id:
-        rows = [row for row in rows if row["id"] != exclude_id]
+        rows = [row for row in rows if row["id"] != exclude_id and counts(row)]
         view["live_processes"] = len(rows)
         view["memory_reserved_bytes"] = sum(lease_bytes(row, view) for row in rows)
         view["memory_cap_bytes"] = sum(cap_bytes(row, view) for row in rows)
@@ -215,14 +217,16 @@ def reject_if_full(db, requested_lease: int, *, exclude_id: str | None = None) -
 
 
 async def reserve_new_attachment(db, *, att_id, conv_id, name, adapter, command,
-                                cwd, runtime_owner, start_after_history=False):
+                                cwd, runtime_owner, start_after_history=False, counts_toward_total=False):
     """Atomically admit and persist a starting row before any spawn work."""
     async with db._runtime_serialized_async():
         lease = settings(db)["default_process_memory_bytes"]
-        reject_if_full(db, lease)
+        if adapter != "raw" or counts_toward_total:
+            reject_if_full(db, lease)
         return db.add_attachment(
             att_id, conv_id, name, adapter, command, cwd, runtime_owner,
             start_after_history=start_after_history, memory_limit=format_limit(lease),
+            counts_toward_total=counts_toward_total,
         )
 
 
@@ -245,7 +249,7 @@ async def claim_resume(db, att_id: str, owner: str, requested_lease: int,
             ).fetchone()
         if claimable is None:
             return False
-        if not grandfathered:
+        if not grandfathered and counts(db.get_attachment(att_id)):
             reject_if_full(db, requested_lease)
         claimed = db._claim_attachment(att_id, owner)
         if claimed:
