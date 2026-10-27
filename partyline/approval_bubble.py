@@ -97,7 +97,7 @@ def pending_approval_rows(db, conv_id: str, runtime=None) -> list[dict]:
         })
     for row in db._exec(
             "SELECT conv_id, id, attachment_id, requester, requested_limit, reason, "
-            "created_at FROM memory_limit_requests").fetchall():
+            "created_at FROM memory_limit_requests WHERE expired_at IS NULL").fetchall():
         att = db.get_attachment(row["attachment_id"]) if row["attachment_id"] else None
         target = f"@{att['name']}" if att else row["attachment_id"]
         items.append({
@@ -161,7 +161,8 @@ def pending_approvals(db, conv_id: str, *, runtime=None) -> list[tuple[str, str]
                 "SELECT conv_id, created_at FROM conversation_write_grant_requests").fetchall():
             rows.append((row["created_at"], row["conv_id"], "write-set"))
         for row in db._exec(
-                "SELECT conv_id, created_at FROM memory_limit_requests").fetchall():
+                "SELECT conv_id, created_at FROM memory_limit_requests "
+                "WHERE expired_at IS NULL").fetchall():
             rows.append((row["created_at"], row["conv_id"], "memory"))
         request = getattr(runtime, "restart_request", None) if runtime is not None else None
         if request is not None:

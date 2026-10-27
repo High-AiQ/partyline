@@ -159,7 +159,7 @@ async def resume_line_attachments(runtime, conv_id: str, resume) -> tuple[list[s
     failed: list[str] = []
     for att_id in att_ids:
         try:
-            await detach_attachment(runtime, att_id, survivors=False)
+            await detach_attachment(runtime, att_id, survivors=False, expire=False)
         except Exception:
             logger.exception("write-set approval could not detach %s on %s", att_id, conv_id)
             failed.append(names[att_id])

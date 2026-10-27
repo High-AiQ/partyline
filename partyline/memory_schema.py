@@ -9,4 +9,7 @@ MIGRATIONS = [
     )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_limit_one_request_per_line "
     "ON memory_limit_requests(conv_id)",
+    # Set when the worker is detached or its line retired: the row is kept so
+    # Approve can say the worker is gone, but it no longer counts as pending.
+    "ALTER TABLE memory_limit_requests ADD COLUMN expired_at REAL",
 ]
