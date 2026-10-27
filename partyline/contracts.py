@@ -30,6 +30,7 @@ class AttachIn(BaseModel):
     command: str = ""
     cwd: str = ""
     update: bool = False
+    counts_toward_total: bool | None = None
     # 2.14: a captain may deliberately put a second implementer on one branch.
     allow_shared_branch: bool = False
 

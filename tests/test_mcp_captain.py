@@ -39,6 +39,17 @@ class CaptainToolTests(unittest.TestCase):
         worker = {**client.state, "role": "implementer", "is_lead": False}
         self.assertEqual([tool["name"] for tool in tools_captain.tool_list(worker)], ["captain"])
 
+    def test_attach_worker_forwards_raw_count_flag(self):
+        client = Client()
+        for value in (True, False):
+            tools_captain.call(client, "attach_worker", {
+                "conv_id": "child", "name": "helper", "adapter": "raw",
+                "command": "cat", "counts_toward_total": value}, client.state)
+            self.assertEqual(client.calls[-1], (
+                "POST", "/api/conversations/child/attachments",
+                {"name": "helper", "adapter": "raw", "command": "cat",
+                 "counts_toward_total": value}))
+
     def test_unknown_dispatch_is_rejected_without_api_call(self):
         client = Client()
         with self.assertRaisesRegex(ValueError, "unknown captain"):
