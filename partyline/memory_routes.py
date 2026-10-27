@@ -36,9 +36,17 @@ def register_memory_routes(app, runtime):
     @app.put("/api/attachments/{att_id}/memory", response_model=MemorySettings)
     async def set_memory(request: Request, att_id: str, body: MemoryLimitRequest):
         actor = request_principal(request)
-        deny_unless_attachment(runtime.db, actor, att_id, "attach")
+        hint = (f"file a memory request: POST /api/attachments/{att_id}/memory-requests; "
+                "the root captain can approve within the captain ceiling via POST "
+                "/api/memory-requests/<request_id>/approve; above it a person decides")
+        try:
+            deny_unless_attachment(runtime.db, actor, att_id, "attach")
+        except HTTPException as exc:
+            if actor.kind == "machine" and exc.status_code == 403:
+                raise HTTPException(403, hint) from exc
+            raise
         if actor.kind == "machine" and actor.attachment_id == att_id:
-            raise HTTPException(403, "a process cannot grant itself a memory budget")
+            raise HTTPException(403, f"a process cannot grant itself a memory budget; {hint}")
         if body.limit is not None and parse_size(body.limit) > maximum_bytes():
             raise HTTPException(400, f"memory limit exceeds the host ceiling of {maximum_bytes()} bytes")
         async with runtime.db._runtime_serialized_async():

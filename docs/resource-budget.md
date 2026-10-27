@@ -257,7 +257,8 @@ touch the real temp directories.
 A process, its captain, or a person can file `POST /api/attachments/{id}/memory-requests`
 with `requested_limit` and a reason. A captain can approve within the configurable
 captain ceiling (default twice the process cap, bounded by the host ceiling); a
-person decides above it. Approval stores the new cap and replaces the activation
+person decides above it. Approve with `POST /api/memory-requests/{request_id}/approve`.
+Approval stores the new cap and replaces the activation
 through the normal resume path. The old admission lease is released first and the
 replacement is grandfathered through admission. A process cannot approve the
 request for its own cap. Only one memory request can be pending on a line at a

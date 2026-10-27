@@ -57,6 +57,9 @@ class IncidentTest(unittest.IsolatedAsyncioTestCase):
         detail = self.db.list_messages('child')[-1]['body']
         self.assertIn(f"Incident {incident['id']}", detail)
         self.assertIn('/api/attachments/worker/memory-requests', detail)
+        self.assertIn('root captain can approve within the captain ceiling via POST '
+                      '/api/memory-requests/<request_id>/approve', detail)
+        self.assertIn('above it a person decides', detail)
         self.assertIn('recorded peak 9.0 GiB at the 9.0 GiB emergency backstop (budget 6.0 GiB)', detail)
         self.assertIn('"requested_limit":"8G"', detail)
         self.assertEqual(incident['code'], -15)
@@ -182,7 +185,11 @@ class MemoryRoutesTest(unittest.TestCase):
     def test_only_authorized_captain_can_adjust_another_process(self):
         self.actor = Principal(kind='machine', name='worker', conv_id='line', attachment_id='worker')
         self.assertEqual(self.client.get(self.path).status_code, 200)
-        self.assertEqual(self.client.put(self.path, json={'limit': '6G'}).status_code, 403)
+        denied = self.client.put(self.path, json={'limit': '6G'})
+        self.assertEqual(denied.status_code, 403)
+        self.assertIn('POST /api/attachments/worker/memory-requests', denied.json()['detail'])
+        self.assertIn('POST /api/memory-requests/<request_id>/approve', denied.json()['detail'])
+        self.assertIn('above it a person decides', denied.json()['detail'])
         self.actor = Principal(kind='machine', name='captain', conv_id='line',
                                attachment_id='captain', is_lead=True)
         self.assertEqual(self.client.put(self.path, json={'limit': '6G'}).status_code, 200)
