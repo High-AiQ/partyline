@@ -376,3 +376,14 @@
     transform: none;
   }
 }
+
+/* iOS Safari zooms any focused field under 16px; touch devices only, so
+   desktop sizing is unchanged. Unlayered + !important beats component sizes
+   and Tailwind text-* utilities. */
+@media (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
