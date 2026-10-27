@@ -244,6 +244,11 @@ branch must still preserve HEAD. Their commits remain reachable in that survivin
 repository. Evidence records the path, `nested-worktree`, host HEAD SHA and branch,
 plus the mirror tip SHA when present; a changed mirror tip invalidates the preview.
 After removing the folder retirement runs `git worktree prune` in the owning repository.
+Removal keeps each linked checkout registered until its directory is gone; an interrupted
+removal can leave files missing but preserves Git's HEAD and index for inspection and retry.
+A legacy orphan with a missing registration is refused: preserve any unfinished work, verify
+the assigned branch is an ancestor of main, then remove the directory manually and run
+`git worktree prune` and `git branch -d <branch>` in its owning repository.
 Detached worktrees, owners inside the retiring folder, mirror tips absent from owning
 branches, and uncommitted edits beyond the mirror tip are refused with the path and
 specific reason. Unsupported directories, FIFOs, sockets and devices are refused with
@@ -251,9 +256,10 @@ the path and kind; independent nested clones remain protected.
 
 Retirement checks the whole selected subtree, then removes owned worktrees and host branch
 refs deepest first. Recovery refs remain; private fence mirror refs are also retained.
-A refused retirement has no side effects: every flag and every Git inspection runs before any
-process is stopped or worktree removed, so a 409 leaves the worktree, its files and its
-processes exactly as they were. A host branch a task's own preservation has already advanced
+A guard refusal has no side effects: every flag and every Git inspection runs before any
+process is stopped or worktree removed. An operational failure during removal can leave a
+partially removed directory, but its registration remains until the directory is gone.
+A host branch a task's own preservation has already advanced
 to the line's accepted tip is no longer the unchanged ref inspection found: retirement keeps
 it beside the recovery refs instead of deleting it, rather than failing after the worktree is
 already gone.

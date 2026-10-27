@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from .hierarchy import child_ids, descendants
 from .worktree_lifecycle import worktree_state
+from .retirement_worktree import check_line
 
 LIVE = ("starting", "running")
 # The one flag a caller passes to clear each guard. A refusal names every flag
@@ -51,6 +52,7 @@ def archive_blockers(
     and will stop them atomically after every other blocker clears.
     """
     conv = db.get_conversation(conv_id) or {}
+    check_line(db, conv)
     blockers: list[dict] = []
     live = [att for att in db.list_attachments(conv_id) if att["status"] in LIVE]
     if strict and live and not ignore_live_processes:
