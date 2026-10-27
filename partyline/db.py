@@ -46,6 +46,7 @@ class RestartPlan(TypedDict):
     attempt_count: int
     attachment_ids: list[str]
     debrief: str
+    skipped: list[str]
     created_at: float
 
 
@@ -58,12 +59,11 @@ def _restart_plan_row(row) -> RestartPlan:
         conversation_id=row["conversation_id"],
         token=row["token"],
         report_token=row["report_token"],
-        mode=row["mode"],
-        claim_owner=row["claim_owner"],
+        mode=row["mode"], claim_owner=row["claim_owner"],
         claim_until=row["claim_until"],
         attempt_count=row["attempt_count"],
         attachment_ids=json.loads(row["attachment_ids"]),
-        debrief=row["debrief"],
+        debrief=row["debrief"], skipped=json.loads(row["skipped"]),
         created_at=row["created_at"],
     )
 
@@ -511,7 +511,7 @@ class Db:
             " mode=excluded.mode,"
             " claim_owner=NULL,"
             " claim_until=NULL,"
-            " attempt_count=0,"
+            " attempt_count=0, skipped='[]',"
             " attachment_ids=excluded.attachment_ids,"
             " debrief=excluded.debrief,"
             " created_at=excluded.created_at",

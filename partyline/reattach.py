@@ -17,8 +17,10 @@ from .contracts import (
 from .db import Db, RestartPlan
 from .continuation_delivery import deliver_continuation
 from .restart_lease import run_automatic_restart_plan
+from .restart_summary import format_summary
 from .reattach_liveness import mark_unlive_exited, report_live, report_reattach_failure
-from .restart_scope import covered_conversation_ids, planned_conversation_ids, select_attachment_ids
+from .restart_scope import (covered_conversation_ids, planned_conversation_ids,
+                            select_attachment_ids, skip_reason)
 from .resume_backlog import addressed_backlog
 from .role_delivery import announce_restored
 from .resource_budget import clear_stale_restart_rows
@@ -251,6 +253,8 @@ class ReattachCoordinator:
         unconfirmed: list[str] = []
         unconfirmed_ids: set[str] = set()
         expected_owners: dict[str, str | None] = {}
+        skipped = list(plan.get("skipped", []))
+        failure_details: list[str] = []
         try:
             await clear_stale_restart_rows(self.runtime, attachment_ids)
             for attachment_id in attachment_ids:
@@ -259,6 +263,12 @@ class ReattachCoordinator:
                 attachment = self.runtime.db.get_attachment(attachment_id)
                 if attachment is None:
                     failed.append(attachment_id)
+                    failure_details.append(f"{attachment_id}: attachment missing")
+                    self.runtime.reattaching.discard(attachment_id)
+                    continue
+                reason = skip_reason(self.runtime.db, attachment)
+                if reason:
+                    skipped.append(reason)
                     self.runtime.reattaching.discard(attachment_id)
                     continue
                 expected_owners[attachment_id] = attachment["runtime_owner"]
@@ -352,6 +362,8 @@ class ReattachCoordinator:
                         ready.append(name)
                         continue
                     failed.append(name)
+                    detail = getattr(exc, "detail", None) or str(exc) or type(exc).__name__
+                    failure_details.append(f"{name}: {detail}")
                     continue
 
                 ready.append(name)
@@ -370,14 +382,9 @@ class ReattachCoordinator:
                 if attachment_id not in unconfirmed_ids
             )
 
-        await mark_unlive_exited(self.runtime, attachment_ids, expected_owners)
+        await mark_unlive_exited(self.runtime, list(expected_owners), expected_owners)
 
-        summary = f"{len(ready)} ready"
-        summary += f", {len(slow)} still settling" if slow else ""
-        if failed:
-            summary += f", {len(failed)} failed"
-        if unconfirmed:
-            summary += f", {len(unconfirmed)} continuation unconfirmed"
+        summary = format_summary(ready, failed, slow, unconfirmed, skipped, failure_details)
         for line in covered:
             await self.runtime.post_message(
                 line,
