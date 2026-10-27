@@ -20,6 +20,7 @@ import subprocess
 from .hierarchy import parent_id_of
 from .line_worktree import WORKTREES_DIR, _git, line_cwd, repo_root
 from .worktree_paths import managed_root
+from .retirement_worktree import remove_directory
 from .nested_repositories import keep_reason, nested_repositories
 from .review_worktrees import sweep_review_worktrees
 from .task_teardown import teardown
@@ -41,12 +42,15 @@ def remove_for_line(conv: dict | None, db=None) -> None:
     """Drop the worktree a purged line was placed in; its branch stays."""
     cwd = (conv or {}).get("cwd") or ""
     root = _worktree_root(cwd)
+    if root is not None and keep_reason(cwd, lenient=True):
+        return
     if db is not None and root is not None:
         teardown(db, conv["id"], cwd)  # a task's commits and nested worktrees first
     if root is None or not os.path.lexists(os.path.join(cwd, ".git")) or keep_reason(cwd):
         return
     try:
-        _git("worktree", "remove", "--force", cwd, cwd=root)
+        remove_directory(cwd, root)
+        _git("worktree", "prune", cwd=root)
     except (OSError, subprocess.SubprocessError):
         pass
 
@@ -203,7 +207,7 @@ def archive_worktree_if_safe(db, conv_id: str) -> tuple[bool, str | None]:
     if reason is not None:
         return False, reason
     remove_for_line(conv, db)
-    return True, None
+    return not os.path.isdir(cwd), None
 
 
 def sweep_orphaned_worktrees(db) -> None:

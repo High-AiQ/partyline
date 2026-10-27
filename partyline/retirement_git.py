@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from .git_fence import mirror_branch_ref
 from .line_worktree import _git
 from .retirement_nested import file_kind, nested_evidence
+from .retirement_worktree import check_line
 from .worktree_lifecycle import _base_ref, _default_branch
 from .worktree_paths import branch_name, managed_root
 
@@ -110,6 +111,7 @@ def file_evidence(cwd, paths, *, ignored=False, tracked=None, conv_id=None):
 
 
 def inspect_git(db, conv):
+    check_line(db, conv)
     cwd = conv.get("cwd") or ""
     root = managed_root(cwd)
     if not root or not os.path.isdir(cwd) or not os.path.lexists(os.path.join(cwd, ".git")):

@@ -13,6 +13,8 @@ import os
 import subprocess
 
 from .line_worktree import WORKTREES_DIR, _git, rev
+from .nested_repositories import nested_repositories
+from .retirement_worktree import remove_directory
 from .task_workspaces import GUIDES, anchor, tip, workspaces
 
 
@@ -39,11 +41,16 @@ def remove_nested(db, conv_id: str, cwd: str) -> list[str]:
         if os.path.realpath(path) == os.path.realpath(cwd) or not os.path.isdir(path):
             continue
         try:
-            done = _git("worktree", "remove", path, cwd=item["repository"])
+            done = _git("status", "--porcelain", cwd=path)
+            if done.returncode or done.stdout.strip() or nested_repositories(path):
+                kept.append(path)
+                continue
+            remove_directory(path, item["repository"])
+            _git("worktree", "prune", cwd=item["repository"])
         except (OSError, subprocess.SubprocessError):
             kept.append(path)
             continue
-        if done.returncode != 0 or os.path.exists(path):
+        if os.path.exists(path):
             kept.append(path)
     return kept
 
@@ -69,8 +76,6 @@ def teardown(db, conv_id: str, cwd: str) -> list[str]:
         return []
     preserve(db, conv_id)
     kept = remove_nested(db, conv_id, cwd)
-    for item in workspaces(db, conv_id):
-        _git("worktree", "prune", cwd=item["repository"])
     if not kept:
         remove_plain_folder(db, conv_id, cwd)
     return kept
