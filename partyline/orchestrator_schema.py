@@ -1,6 +1,7 @@
 """Append-only orchestrator mode and durable task review state."""
 
 from .line_resource_schema import MIGRATIONS as LINE_RESOURCES
+from .restart_schema import MIGRATIONS as RESTART
 
 MIGRATIONS = [
     "ALTER TABLE conversations ADD COLUMN captain_mode TEXT NOT NULL DEFAULT 'manager_tree'",
@@ -108,3 +109,5 @@ MIGRATIONS += [
 ]
 
 MIGRATIONS += LINE_RESOURCES
+
+MIGRATIONS += RESTART

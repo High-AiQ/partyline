@@ -12,6 +12,7 @@ rather than assuming the owner's.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping, Sequence
 from typing import Protocol
 
@@ -24,6 +25,8 @@ class ScopeDb(Protocol):
     def list_attachments(self, conv_id: str) -> list[dict]: ...
 
     def get_attachment(self, att_id: str) -> dict | None: ...
+
+    def get_conversation(self, conv_id: str) -> dict | None: ...
 
 
 def resumable(
@@ -57,6 +60,18 @@ def planned_conversation_ids(
     return [conversation_id, *others]
 
 
+def skip_reason(db: ScopeDb, attachment: Mapping[str, object]) -> str | None:
+    line = db.get_conversation(attachment["conv_id"])
+    if line is None or line["archived_at"]:
+        return "retired line"
+    from .orchestrator_store import task
+
+    row = task(db, attachment["conv_id"])
+    if row and row["status"] == "done":
+        return "finished task"
+    return None
+
+
 def select_attachment_ids(
     db: ScopeDb,
     live: Mapping[str, object],
@@ -67,7 +82,8 @@ def select_attachment_ids(
     selected: list[str] = []
     for conv_id in conversation_ids:
         for attachment in db.list_attachments(conv_id):
-            if resumable(attachment, live, resumable_adapter(attachment["adapter"])):
+            if (not skip_reason(db, attachment)
+                    and resumable(attachment, live, resumable_adapter(attachment["adapter"]))):
                 selected.append(attachment["id"])
     return selected
 
@@ -85,3 +101,39 @@ def covered_conversation_ids(db: ScopeDb, attachment_ids: Sequence[str]) -> list
         if attachment is not None and attachment["conv_id"] not in covered:
             covered.append(attachment["conv_id"])
     return covered
+
+
+def snapshot_shutdown_plan(db, live: Mapping[str, object]) -> set[str]:
+    """Freeze which planned processes actually survived until shutdown."""
+    plan = db.get_restart_plan()
+    if plan is None:
+        return set()
+    expected, skipped = [], list(plan.get("skipped", []))
+    for ident in plan["attachment_ids"]:
+        att = db.get_attachment(ident)
+        if att is None:
+            skipped.append("removed")
+            continue
+        reason = skip_reason(db, att)
+        adapter = live.get(ident)
+        alive = adapter is not None and (not hasattr(adapter, "alive") or adapter.alive())
+        if not reason and (not alive or att["status"] not in ("starting", "running")):
+            reason = "detached" if att["status"] == "detached" else "stopped"
+        if reason:
+            skipped.append(reason)
+        else:
+            expected.append(ident)
+    db._exec("UPDATE restart_plan SET attachment_ids=?,skipped=? WHERE token=?",
+             (json.dumps(expected), json.dumps(skipped), plan["token"]))
+    return set(expected)
+
+
+async def shutdown_runtime(runtime) -> None:
+    """Snapshot recovery targets before stopping this generation's processes."""
+    runtime.stopping = True
+    runtime._shutdown_resume = snapshot_shutdown_plan(runtime.db, runtime.live)
+    for adapter in list(runtime.live.values()):
+        try:
+            await adapter.stop()
+        except Exception:
+            pass
