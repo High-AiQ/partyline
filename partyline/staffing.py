@@ -5,6 +5,7 @@ from __future__ import annotations
 from .approval_bubble import pending_approvals
 from .compaction_events import compaction_counts
 from .hierarchy import descendants, subtree_conversation_ids
+from .process_counts import counts
 from .preset_traits import coerce_preset, coerce_traits, match_preset
 from .resource_leases import describe_leases
 
@@ -37,7 +38,7 @@ def staffing_report(db, conv_id: str) -> dict:
                 "accepted_sha": conv["accepted_sha"],
             })
         for att in db.list_attachments(line_id):
-            if att["status"] not in LIVE:
+            if att["status"] not in LIVE or not counts(att):
                 continue
             matched = match_preset(att, presets)
             if matched is not None:
@@ -111,7 +112,7 @@ def staffing_line(db, conv_id: str, *, runtime=None) -> str:
     compacted = compaction_counts(db)
     for conv in db.list_conversations():
         for att in db.list_attachments(conv["id"]):
-            if att["status"] not in LIVE:
+            if att["status"] not in LIVE or not counts(att):
                 continue
             matched = match_preset(att, presets)
             if matched is not None:

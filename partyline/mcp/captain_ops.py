@@ -107,6 +107,8 @@ def execute(client, op, args, state):
         _target(client, state, conv, ("attach",))
         body = {key: args[key] for key in ("name", "adapter")}
         body["command"] = args.get("command", "")
+        if "counts_toward_total" in args:
+            body["counts_toward_total"] = args["counts_toward_total"]
         if args.get("allow_shared_branch") is True:
             body["allow_shared_branch"] = True
         preset_name = args.get("preset_name")

@@ -200,6 +200,8 @@ def register_conversation_routes(
         if handle_taken(runtime.db, body.name):
             raise HTTPException(409, f"'{body.name}' is registered to a human account")
         name = unique_handle(db, conv_id, body.name)
+        if body.adapter != "raw" and body.counts_toward_total is not None:
+            raise HTTPException(400, "counts_toward_total is only available for raw adapters")
         try:
             command = validated_attachment_command(
                 body.adapter, body.command, s.ADAPTERS, s.ADAPTER_METADATA
@@ -220,7 +222,7 @@ def register_conversation_routes(
         att = await reserve_new_attachment(
             db, att_id=att_id, conv_id=conv_id, name=name, adapter=body.adapter,
             command=command, cwd=cwd, runtime_owner=runtime_owner,
-            start_after_history=True,
+            start_after_history=True, counts_toward_total=bool(body.counts_toward_total),
         )
         try:
             placed = ensure_placed(db, conv_id, ignore_attachment_id=att_id)

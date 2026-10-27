@@ -14,6 +14,7 @@ LIVE_JOIN = (
     "LEFT JOIN attachments v ON v.id=t.reviewer_id "
     "LEFT JOIN attachments a "
     "ON a.conv_id=c.id AND a.status IN ('starting','running') "
+    "AND (a.adapter != 'raw' OR a.counts_toward_total=1) "
 )
 ACTIVE_CONVERSATIONS = LIVE_JOIN + (
     "WHERE c.archived_at IS NULL GROUP BY c.id ORDER BY c.created_at DESC"

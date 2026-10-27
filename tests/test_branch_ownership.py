@@ -83,6 +83,17 @@ class BranchOwnershipTest(unittest.TestCase):
         ).fetchall()
         return [row["body"] for row in rows]
 
+    def test_raw_count_opt_in_and_non_raw_rejection(self):
+        url = f"/api/conversations/{self.kid['id']}/attachments"
+        made = self.client.post(url, json={"name": "helper", "adapter": "raw",
+                                          "command": "sh", "counts_toward_total": True})
+        self.assertEqual(made.status_code, 200, made.text)
+        self.assertTrue(made.json()["counts_toward_total"])
+        rejected = self.client.post(url, json={"name": "other", "adapter": "codex",
+                                               "counts_toward_total": False})
+        self.assertEqual(rejected.status_code, 400)
+        self.assertIn("only available for raw", rejected.text)
+
     def test_a_person_attach_outside_the_worktree_warns_on_the_line(self):
         made = self.attach("stray", cwd=self.elsewhere)
         self.assertEqual(made.status_code, 200, made.text)
