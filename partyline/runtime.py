@@ -82,12 +82,9 @@ class ChatRuntime(DeliveryCreditMixin):
         return found
 
     async def shutdown(self):
-        self.stopping = True
-        for adapter in list(self.live.values()):
-            try:
-                await adapter.stop()
-            except Exception:
-                pass
+        from .restart_scope import shutdown_runtime
+
+        await shutdown_runtime(self)
 
     async def broadcast(self, conv_id: str, event: Event):
         if hidden_from_people(self.db, conv_id, event):
@@ -178,6 +175,8 @@ class ChatRuntime(DeliveryCreditMixin):
 
     def status_callback(self, att_id: str, conv_id: str, runtime_owner: str):
         async def on_status(status: str):
+            if status == "detached" and att_id in getattr(self, "_shutdown_resume", set()):
+                status = "exited"
             if not await self.db.set_attachment_status_async(
                 att_id, status, runtime_owner
             ):

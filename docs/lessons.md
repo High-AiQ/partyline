@@ -1,5 +1,12 @@
 # Lessons: the false-assumptions ledger
 
+## A restart plan is not a shutdown snapshot
+
+A process listed at approval may detach or finish before shutdown. Counting every
+planned id as an expected return creates false failures. Snapshot the live fleet
+at shutdown, retain exclusion reasons, and distinguish shutdown stops from
+intentional detachments. Finished tasks are not recovery targets; live raw helpers are.
+
 
 ## A captain waiting to record a verdict is a routing failure, not a review
 

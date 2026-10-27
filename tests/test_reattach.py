@@ -733,7 +733,7 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
             bodies,
         )
         self.assertTrue(any("1 continuation unconfirmed" in body for body in bodies), bodies)
-        self.assertFalse(any("failed" in body for body in bodies), bodies)
+        self.assertFalse(any("1 failed" in body for body in bodies), bodies)
 
     async def test_a_process_that_exits_is_still_a_failure(self):
         """The control for the two above. Loosening the timeout must not loosen
@@ -1017,6 +1017,65 @@ class FleetPlanTest(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(raised.exception.status_code, 409)
+
+    async def test_shutdown_snapshot_skips_detached_finished_and_restores_raw(self):
+        self.db.create_conversation("done", "Finished task")
+        self.db.add_attachment("finished", "done", "worker", "fake", ["fake"], self.directory.name)
+        self.db._exec(
+            "INSERT INTO task_reviews(conv_id,root_id,implementer_id,implementer_preset,"
+            "policy,tag,status,created_at) "
+            "VALUES('done','owner','finished','fake','captain','done','done',0)"
+        )
+        self.db.set_attachment_status("finished", "running", None)
+        self.runtime.live["finished"] = SimpleNamespace(att={})
+        self.db.add_attachment("helper", "other", "helper", "raw", ["raw"], self.directory.name)
+        self.db.set_attachment_status("helper", "running", None)
+        self.runtime.live["helper"] = SimpleNamespace(att={})
+        self.db.save_restart_plan("owner", ["one", "two", "finished", "helper"], "resume")
+        self.db.set_attachment_status("two", "detached", None)
+        self.runtime.live.pop("two")
+        from partyline.restart_scope import snapshot_shutdown_plan
+
+        self.assertEqual(snapshot_shutdown_plan(self.db, self.runtime.live), {"one", "helper"})
+        plan = self.db.get_restart_plan()
+        self.assertEqual(plan["skipped"], ["detached", "finished task"])
+        async def resume(ident, pending):
+            adapter = ReadyAdapter(self.order, self.db.get_attachment(ident)["name"])
+            self.runtime.live[ident] = adapter
+            return ResumedAttachment(adapter, False)
+
+        self.runtime.live.pop("helper")
+        self.db.set_attachment_status("helper", "exited", None)
+        self.runtime.live.pop("one")
+        self.db.set_attachment_status("one", "exited", None)
+        result = await ReattachCoordinator(self.runtime, resume).run(plan, None)
+        self.assertEqual(result.failed, ())
+        summary = self.db.list_messages("owner")[-1]["body"]
+        self.assertIn("2 ready, 0 failed, 2 skipped", summary)
+        self.assertIn("1 detached", summary)
+
+    async def test_shutdown_marks_planned_stop_as_exit_and_leaves_detached_skipped(self):
+        self.db.save_restart_plan("owner", ["one", "two"], "resume")
+        self.db.set_attachment_status("two", "detached", None)
+        self.runtime.live.pop("two")
+        async def stop():
+            await self.runtime.status_callback("one", "owner", None)("detached")
+        self.runtime.live["one"].stop = stop
+
+        await self.runtime.shutdown()
+
+        self.assertEqual(self.db.get_attachment("one")["status"], "exited")
+        self.assertEqual(self.db.get_restart_plan()["attachment_ids"], ["one"])
+        self.assertEqual(self.db.get_restart_plan()["skipped"], ["detached"])
+
+    def test_planning_includes_live_raw_helpers(self):
+        self.db.add_attachment("helper", "owner", "helper", "raw", ["raw"], self.directory.name)
+        self.db.set_attachment_status("helper", "running", None)
+        self.runtime.live["helper"] = SimpleNamespace(att={})
+        metadata = {**self.resumable_metadata(), "raw": {"capabilities": {"listens": False}}}
+        response = create_restart_plan(self.runtime, metadata,
+                                       RestartPlanRequest(conversation_id="owner", mode="automatic"))
+        self.assertEqual([item.id for item in response.attachments], ["one", "helper"])
 
     async def test_recovery_reaches_both_lines_and_reads_each_ones_own_history(self):
         # Unread history: written past routing, since a person's plain post on a
