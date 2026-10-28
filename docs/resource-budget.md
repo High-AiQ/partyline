@@ -313,3 +313,14 @@ never changes hardware settings. Waiters remain queued until a healthy check.
 After an unplanned stop, notices include persisted lease holders, resource names,
 lines, and task notes before stale attachments are cleared. Queued claims are
 not reported as held leases.
+
+## Host kernel log
+
+People and root captains can read recent kernel diagnostics through
+`GET /api/host/kernel-log?boot=previous&lines=100`. `boot` accepts `previous`
+(the default) or `current`; `lines` defaults to 100 and accepts 1–300. The
+response is an array of redacted text lines, never stored by Partyline. The
+server needs `journalctl` and permission to read the journal; add its service
+user to `systemd-journal` when needed. Unavailable or timed-out journal access
+returns 503. Redaction covers common credentials, MAC addresses and IP
+addresses, but kernel messages may contain other sensitive information.
