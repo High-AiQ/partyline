@@ -2,6 +2,7 @@ import asyncio
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -68,6 +69,30 @@ class MessageRoutesTest(unittest.TestCase):
             asyncio.run(
                 conversation_detail_response(self.runtime, Presence(), self.media, "missing")
             )
+
+    def test_fast_detail_returns_messages_without_waiting_for_git(self):
+        async def exercise():
+            started = asyncio.Event()
+            release = asyncio.Event()
+
+            async def slow_git(_runtime, attachment):
+                started.set()
+                await release.wait()
+                return attachment
+
+            with patch('partyline.message_routes._attachment_response', side_effect=slow_git):
+                slow = asyncio.create_task(conversation_detail_response(
+                    self.runtime, Presence(), self.media, 'line'))
+                await started.wait()
+                detail = await asyncio.wait_for(conversation_detail_response(
+                    self.runtime, Presence(), self.media, 'line', include_git=False), timeout=0.2)
+                self.assertEqual(detail['messages'][-1]['id'], self.messages[-1]['id'])
+                self.assertIsNone(detail['attachments'][0]['cwd_git'])
+                self.assertFalse(slow.done())
+                release.set()
+                await slow
+
+        asyncio.run(exercise())
 
     def test_before_pages_are_oldest_to_newest_without_overlap(self):
         latest = self.client.get("/api/conversations/line/messages")

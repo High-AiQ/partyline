@@ -1,6 +1,8 @@
 """Detach shipped tasks, and optionally archive their retained history."""
 
 import asyncio
+
+from .periodic_timing import tick as timed_tick
 import logging
 import os
 
@@ -60,7 +62,8 @@ async def tick(runtime):
         if not await asyncio.to_thread(shipped, db, row):
             continue
         # Never detach or discard work newer than the approved SHA.
-        state = await asyncio.to_thread(worktree_state, db, db.get_conversation(row['conv_id']))
+        conv = await asyncio.to_thread(db.get_conversation, row['conv_id'])
+        state = await asyncio.to_thread(worktree_state, db, conv)
         if state is None or not state['clean'] or not state['merged']:
             continue
         db._exec('UPDATE task_reviews SET merged=1 WHERE conv_id=?', (row['conv_id'],))
@@ -88,7 +91,8 @@ async def tick(runtime):
 async def run(runtime):
     while True:
         try:
-            await tick(runtime)
+            with timed_tick('task maintenance'):
+                await tick(runtime)
         except Exception:
             logger.exception('task maintenance failed; retrying next tick')
         await asyncio.sleep(30)

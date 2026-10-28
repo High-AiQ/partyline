@@ -1,5 +1,6 @@
 """Durable task reports, with deduplicated and retryable notification delivery."""
 
+import asyncio
 import time
 
 from . import reports
@@ -23,7 +24,13 @@ async def report(runtime, row):
             row['status'] == 'in_review' and row['policy'] == 'captain') and row['stall_stage'] != 3:
         return
     if row['report_id'] is None:
-        text = report_text(db, row)
+        text = await asyncio.to_thread(report_text, db, row)
+        # Another caller may have reported while the Git checks ran.
+        current = task(db, row['conv_id'])
+        if current is None:
+            return
+        if current != row:
+            return await report(runtime, current)
         record, wake = reports.add(db, row['root_id'], row['conv_id'], 'task server', text, notify=True)
         db._exec('UPDATE task_reviews SET report_id=? WHERE conv_id=?', (record['id'], row['conv_id']))
     else:
