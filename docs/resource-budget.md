@@ -324,3 +324,24 @@ server needs `journalctl` and permission to read the journal; add its service
 user to `systemd-journal` when needed. Unavailable or timed-out journal access
 returns 503. Redaction covers common credentials, MAC addresses and IP
 addresses, but kernel messages may contain other sensitive information.
+
+## Docker CLI container defaults
+
+On Linux and macOS, each attached process receives a `docker` shim first on
+PATH. For `docker run`, `docker create`, and their `docker container` forms,
+when no `--memory` or `-m` is specified, it adds `--memory` and
+`--memory-swap` equal to half the attachment's effective memory cap, with a
+6 MiB floor (Docker's minimum). Set `PARTYLINE_DOCKER_MEMORY_FRACTION` on the
+Partyline server to a number greater than zero and at most one to change the
+fraction for newly started attachments. The shim resolves the real Docker CLI
+from the remaining PATH, and fails clearly if none exists. Explicit memory
+limits are left to the caller; other subcommands pass through unchanged.
+
+This is a per-container default, not an aggregate limit: multiple containers
+can exceed the attachment budget together, and an explicit memory or swap
+option can override it. Docker containers are charged to the daemon, not the
+attachment's scope. Absolute paths to Docker, changed PATHs, direct Docker socket
+API calls and other clients bypass the shim. `docker compose` is passed through:
+Compose creates containers through its own API calls, so compose services need
+explicit memory limits in their configuration. Windows attachments do not get
+the shim. This is a guardrail, not a security boundary.
