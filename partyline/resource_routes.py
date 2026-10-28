@@ -13,6 +13,8 @@ KEYS = (
 
 
 def register_resource_routes(app, runtime) -> None:
+    from .kernel_log import register_kernel_log_route
+    register_kernel_log_route(app, runtime)
     @app.get("/api/resources", response_model=ResourceSnapshot)
     def resources(request: Request):
         request_principal(request)  # all authenticated people and machines may read

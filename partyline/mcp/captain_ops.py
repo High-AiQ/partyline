@@ -31,6 +31,11 @@ def execute(client, op, args, state):
     if op not in OPERATIONS:
         raise ValueError("unknown captain operation")
     _check_lead(state)
+    if op == "kernel_log":
+        if state.get("parent_id", "unknown") is not None:
+            raise ApiError("only root captains can read the kernel log")
+        return client.request("GET", "/api/host/kernel-log" +
+                              ("?" + urlencode(args) if args else ""))
     if op == "list_presets":
         return client.request("GET", "/api/presets")
     if op == "docs_read":

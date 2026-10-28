@@ -209,3 +209,7 @@ These are advisory coordination leases, separate from fleet memory admission and
 legacy `/api/leases` TTL API. Lifecycle cleanup and a five-second stale-holder sweep
 prevent abandoned attachments from wedging a resource. See
 [the resource contract](../hierarchy.md#captain-declared-exclusive-resources).
+
+Root captains can use the read-only `kernel_log` operation with optional `boot`
+(`previous` or `current`) and `lines` (1–300). It returns redacted kernel
+journal text lines; see [host kernel log](../resource-budget.md#host-kernel-log).
