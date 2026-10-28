@@ -20,6 +20,8 @@ def schema(name):
         "staffing": obj(line, ["conv_id"]),
         "write_set_requests": obj(line, ["conv_id"]),
         "list_presets": obj(),
+        "kernel_log": obj({"boot": {"type": "string", "enum": ["previous", "current"]},
+                           "lines": {"type": "integer", "minimum": 1, "maximum": 300}}),
         "attach_worker": obj({**line, "name": text("Exact worker handle.", 32, 1),
             "adapter": text("Exact adapter id.", 80, 1), "command": text("Optional command.", 2000),
             "preset_name": text("Optional exact preset name; read-only match.", 32),
@@ -84,7 +86,7 @@ OPERATIONS = tuple(schema_name for schema_name in (
     "create_child", "appoint_lead", "retire_child", "retirement_preview", "accept", "review_worktree",
     "share_ref", "request_write_set",
     "decide_write_set", "request_restart", "process_overview", "ack_report", "set_goal",
-    "set_gates", "docs_read", "reports"))
+    "set_gates", "docs_read", "reports", "kernel_log"))
 
 
 ACK_HINT = "acknowledging a report is the captain op ack_report(conv_id, report_id, revision)"
