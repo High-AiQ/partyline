@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""Apply an attachment's default to Docker's direct container commands."""
+import os
+import sys
+
+# Docker global options that consume a separate argument.
+GLOBAL_VALUES = {"--config", "--context", "-c", "--host", "-H", "--log-level", "-l", "--tlscacert",
+                 "--tlscert", "--tlskey"}
+# Container options that consume a separate argument. Stop at the image, so a
+# command inside the container containing -m is never mistaken for a limit.
+RUN_VALUES = set("""--add-host --annotation --attach -a --blkio-weight --blkio-weight-device
+--cap-add --cap-drop --cgroup-parent --cgroupns --cidfile --cpu-count --cpu-percent
+--cpu-period --cpu-quota --cpu-rt-period --cpu-rt-runtime --cpu-shares -c --cpus
+--cpuset-cpus --cpuset-mems --device --device-cgroup-rule --device-read-bps
+--device-read-iops --device-write-bps --device-write-iops --dns --dns-option --dns-search
+--domainname --entrypoint --env -e --env-file --expose --gpus --group-add --health-cmd
+--health-interval --health-retries --health-start-interval --health-start-period --health-timeout
+--hostname -h --init-path --io-maxbandwidth --io-maxiops --ip --ip6 --ipc --isolation
+--kernel-memory --label -l --label-file --link --link-local-ip --log-driver --log-opt
+--mac-address --memory-reservation --memory-swap --memory-swappiness --mount --name
+--network --network-alias --oom-score-adj --pid --pids-limit --platform --publish -p
+--publish-all --pull --read-only-tmpfs --restart --runtime --security-opt --shm-size
+--stop-signal --stop-timeout --storage-opt --sysctl --tmpfs --ulimit --user -u
+--userns --uts --volume -v --volume-driver --volumes-from --workdir -w""".split())
+RUN_VALUES.discard("--publish-all")
+
+
+def command_index(args):
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if not arg.startswith("-"):
+            if arg == "container" and i + 1 < len(args):
+                return i + 1
+            return i
+        i += 2 if arg in GLOBAL_VALUES else 1
+    return i
+
+
+def rewrite(args, limit):
+    i = command_index(args)
+    if i >= len(args) or args[i] not in ("run", "create"):
+        return list(args)
+    j = i + 1
+    while j < len(args):
+        arg = args[j]
+        if arg == "--" or not arg.startswith("-") or arg == "-":
+            break
+        if arg in ("--memory", "-m") or arg.startswith("--memory=") or (
+            arg.startswith("-m") and not arg.startswith("--")
+        ):
+            return list(args)
+        j += 2 if arg in RUN_VALUES else 1
+    return args[:i + 1] + ["--memory", limit, "--memory-swap", limit] + args[i + 1:]
+
+
+def real_docker(path, shim):
+    shim = os.path.realpath(shim)
+    for directory in path.split(os.pathsep):
+        candidate = os.path.join(directory or os.curdir, "docker")
+        if os.path.realpath(candidate) == shim:
+            continue
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def main():
+    executable = real_docker(os.environ.get("PATH", os.defpath), __file__)
+    if executable is None:
+        print("partyline docker shim: real docker executable not found on PATH", file=sys.stderr)
+        return 127
+    limit = os.environ.get("PARTYLINE_DOCKER_MEMORY_BYTES")
+    if not limit or not limit.isdecimal() or int(limit) <= 0:
+        print("partyline docker shim: missing or invalid memory limit", file=sys.stderr)
+        return 1
+    os.execv(executable, [executable, *rewrite(sys.argv[1:], limit)])
+
+
+if __name__ == "__main__":
+    sys.exit(main())
