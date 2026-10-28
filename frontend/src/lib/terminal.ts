@@ -17,7 +17,7 @@ export type { SocketLocation } from "./socket-auth";
 
 export interface TerminalHandshake {
   geometry: TerminalGeometry;
-  snapshot: string;
+  snapshot: string | Uint8Array;
 }
 
 export type FrameReader =
@@ -40,7 +40,8 @@ export const terminalSocketUrl = (
   loc: SocketLocation,
   accessToken: string | null = readAccessToken(),
 ): string => {
-  return authenticatedSocketUrl(`/ws/attachments/${attId}/terminal`, loc, accessToken);
+  const url = authenticatedSocketUrl(`/ws/attachments/${attId}/terminal`, loc, accessToken);
+  return `${url}${url.includes("?") ? "&" : "?"}replay=1`;
 };
 
 /** First text frame is geometry JSON; the second is the pyte snapshot. */
@@ -64,9 +65,9 @@ export function readTextFrame(reader: FrameReader, text: string): TextFrameResul
   return { ok: false, error: "unexpected text frame after handshake" };
 }
 
-/** Binary frames are raw pty bytes and only apply after the handshake. */
+/** Binary frames carry the replay handshake and then raw live pty bytes. */
 export function readBinaryFrame(reader: FrameReader, data: ArrayBuffer): Uint8Array | null {
-  if (reader.phase !== "live") return null;
+  if (reader.phase === "geometry") return null;
   return new Uint8Array(data);
 }
 

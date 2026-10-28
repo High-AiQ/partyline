@@ -345,3 +345,19 @@ API calls and other clients bypass the shim. `docker compose` is passed through:
 Compose creates containers through its own API calls, so compose services need
 explicit memory limits in their configuration. Windows attachments do not get
 the shim. This is a guardrail, not a security boundary.
+
+## Peek replay memory
+
+Each live Unix or Windows attachment retains up to 256 KiB of raw terminal
+output in memory. `PARTYLINE_TERMINAL_REPLAY_BYTES` sets the per-attachment
+byte limit (0 disables retention, capped at 1 MiB); it is not persisted across
+restart. Rings reserve from a server-wide 64 MiB budget; when the budget is
+full, new attachments use the snapshot fallback for their lifetime. At most 64
+terminal viewers can be connected to a server. Each can
+hold one replay copy, plus a queue of at most 32 output chunks of at most
+64 KiB (up to 2 MiB); shared chunks may reduce actual usage. Thus for V viewers
+the retained payload is bounded by 64 MiB for rings plus V times the ring limit
+plus 2 MiB per viewer, aside from transient
+copies, snapshots, protocol overhead and browser memory. Each browser terminal
+also caps scrollback at 3,000 lines. Slow viewers are disconnected and must
+reconnect. Access is subject to the same terminal authorization as live output.

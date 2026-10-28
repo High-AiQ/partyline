@@ -21,19 +21,19 @@ import {
 describe("terminalSocketUrl", () => {
   it("uses wss on https and includes the attachment id", () => {
     expect(terminalSocketUrl("att-1", { protocol: "https:", host: "example.test" })).toBe(
-      "wss://example.test/ws/attachments/att-1/terminal",
+      "wss://example.test/ws/attachments/att-1/terminal?replay=1",
     );
   });
 
   it("authenticates the terminal socket with an encoded access token", () => {
     expect(terminalSocketUrl("att-1", { protocol: "https:", host: "example.test" }, "jwt+/=")).toBe(
-      "wss://example.test/ws/attachments/att-1/terminal?token=jwt%2B%2F%3D",
+      "wss://example.test/ws/attachments/att-1/terminal?token=jwt%2B%2F%3D&replay=1",
     );
   });
 
   it("uses ws on http", () => {
     expect(terminalSocketUrl("att-1", { protocol: "http:", host: "127.0.0.1:8642" })).toBe(
-      "ws://127.0.0.1:8642/ws/attachments/att-1/terminal",
+      "ws://127.0.0.1:8642/ws/attachments/att-1/terminal?replay=1",
     );
   });
 });
@@ -100,7 +100,7 @@ describe("readBinaryFrame", () => {
     expect(readBinaryFrame(newFrameReader(), raw)).toBeNull();
     const geometry = readTextFrame(newFrameReader(), '{"cols":80,"rows":24}');
     if (!geometry.ok) throw new Error("expected geometry");
-    expect(readBinaryFrame(geometry.reader, raw)).toBeNull();
+    expect(readBinaryFrame(geometry.reader, raw)).toEqual(new Uint8Array([0x1b, 0x5b, 0x41]));
     const live = readTextFrame(geometry.reader, "");
     if (!live.ok) throw new Error("expected snapshot");
     expect(readBinaryFrame(live.reader, raw)).toEqual(new Uint8Array([0x1b, 0x5b, 0x41]));

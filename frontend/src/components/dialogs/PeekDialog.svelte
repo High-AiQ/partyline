@@ -6,8 +6,7 @@
    * The keypad still POSTs named keys — the phone fallback, and the path
    * that works when the socket is down. The terminal does not capture
    * keystrokes until you explicitly drive it; a click to inspect or
-   * select text stays watch-only. scrollback is 0 to match the old
-   * <pre> viewport — the server screen is authoritative, not a local log.
+   * select text stays watch-only. Replay gives a bounded local scrollback.
    */
   import { onDestroy, tick, untrack } from "svelte";
   import type { IDisposable } from "@xterm/xterm";
@@ -103,7 +102,7 @@
   function invalidateGate(generation: number): void {
     lastGeneration = generation;
     gate = discardGeneration(gate, generation);
-    disarm();
+    disposeTerm();
   }
 
   $effect(() => {
@@ -119,12 +118,12 @@
       term = new Ctor({
         cols: next.geometry.cols,
         rows: next.geometry.rows,
-        convertEol: true,
+        convertEol: false,
         cursorBlink: false,
         disableStdin: true,
         fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
         fontSize: 12,
-        scrollback: 0,
+        scrollback: 3000,
         minimumContrastRatio: 4.5,
         theme: PEEK_THEME,
       });
@@ -136,7 +135,7 @@
       term.resize(next.geometry.cols, next.geometry.rows);
     }
     if (!paintIsCurrent(gate, generation, paintId)) return;
-    term.write(next.snapshot);
+    term.write(typeof next.snapshot === "string" ? next.snapshot.replace(/\n/g, "\r\n") : next.snapshot);
     const opened = openLive(gate, generation, paintId);
     if (!paintIsCurrent(opened.gate, generation, paintId)) return;
     gate = opened.gate;
