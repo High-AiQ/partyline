@@ -100,7 +100,14 @@ is delayed. `PARTYLINE_LOOP_LAG_INTERVAL` sets the sampling interval in seconds
 (default 0.1, minimum 0.01), `PARTYLINE_LOOP_LAG_THRESHOLD` sets the warning
 threshold (default 0.25 seconds), and `PARTYLINE_LOOP_LAG_COOLDOWN` sets the
 minimum time between warnings (default 10 seconds). Warnings contain the delay,
-not callback representations, request URLs, or message contents.
+not callback representations, request URLs, or message contents. They name the
+slowest overlapping instrumented periodic job when one is known; overlap alone
+does not establish the cause. A separate watchdog thread samples only code
+locations when the loop stops responding. `PARTYLINE_LOOP_WATCHDOG_THRESHOLD`
+(default 0.3 seconds), `PARTYLINE_LOOP_WATCHDOG_INTERVAL` (default 0.1 seconds),
+and `PARTYLINE_LOOP_WATCHDOG_COOLDOWN` (default 5 seconds) tune its threshold,
+polling interval, and warning cooldown. The threshold and interval minimum is
+0.01 seconds; the cooldown minimum is zero.
 
 | env var | default | notes |
 |---|---|---|

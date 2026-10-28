@@ -84,3 +84,41 @@ class CleanupTest(TaskFixture):
             await tick(self.runtime)
         self.assertEqual(self.db.get_attachment(row['implementer_id'])['status'], 'running')
         self.assertIsNone(self.db.get_conversation(self.conv_id)['archived_at'])
+
+    async def test_report_construction_runs_off_event_loop(self):
+        import threading
+        from partyline.orchestrator_notices import report
+
+        await self.create('none')
+        self.db._exec("UPDATE task_reviews SET status='done',report_id=NULL WHERE conv_id=?",
+                      (self.conv_id,))
+        main_thread = threading.get_ident()
+        called = []
+
+        def build(_db, _row):
+            called.append(threading.get_ident())
+            return 'done'
+
+        with patch('partyline.orchestrator_notices.report_text', side_effect=build):
+            await report(self.runtime, self.row())
+        self.assertEqual(len(called), 1)
+        self.assertNotEqual(called[0], main_thread)
+
+    async def test_concurrent_report_creation_is_deduplicated(self):
+        import asyncio
+        import threading
+        from partyline.orchestrator_notices import report
+
+        await self.create('none')
+        self.db._exec("UPDATE task_reviews SET status='done',report_id=NULL WHERE conv_id=?",
+                      (self.conv_id,))
+        both_started = threading.Barrier(2, timeout=5)
+
+        def build(_db, _row):
+            both_started.wait()
+            return 'done'
+
+        with patch('partyline.orchestrator_notices.report_text', side_effect=build):
+            await asyncio.gather(report(self.runtime, self.row()), report(self.runtime, self.row()))
+        reports = self.db._exec('SELECT COUNT(*) FROM line_reports').fetchone()[0]
+        self.assertEqual(reports, 1)

@@ -15,21 +15,33 @@ from .message_routing import post_identified
 from .reaction_store import attach
 
 
-async def conversation_detail_response(runtime, presence, media, conv_id: str, principal=None) -> dict:
+async def conversation_detail_response(
+    runtime, presence, media, conv_id: str, principal=None, *, include_git=True,
+) -> dict:
     conversation = runtime.db.get_conversation(conv_id)
     if conversation is None:
         raise HTTPException(404)
     messages, has_more = runtime.db.message_page(conv_id)
+    attachments = runtime.db.list_attachments(conv_id)
+    if include_git:
+        attachments = await asyncio.gather(*(_attachment_response(runtime, att) for att in attachments))
+    else:
+        attachments = [_attachment_without_git(runtime, att) for att in attachments]
     return {
         "conversation": conversation,
         "messages": attach(runtime.db, media.attach(messages), principal),
         "has_more_messages": has_more,
-        "attachments": await asyncio.gather(
-            *(_attachment_response(runtime, att) for att in runtime.db.list_attachments(conv_id))
-        ),
+        "attachments": attachments,
         "working": presence.working_ids(conv_id),
         "presence": presence.snapshot(conv_id),
     }
+
+
+def _attachment_without_git(runtime, attachment):
+    from .attachment_contracts import AttachmentResponse
+
+    payload = AttachmentResponse.model_validate(attachment).model_dump()
+    return attach_bridge(attach_memory_usage(payload, runtime.memory_usage.get(attachment["id"])), runtime.db)
 
 
 async def _attachment_response(runtime, attachment):
