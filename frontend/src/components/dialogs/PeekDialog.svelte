@@ -14,7 +14,7 @@
   import Modal from "../Modal.svelte";
   import CompactButton from "./CompactButton.svelte";
   import { api } from "../../lib/api";
-  import { loadXterm } from "../../lib/xterm";
+  import { enableWebgl, loadXterm, PEEK_THEME } from "../../lib/xterm";
   import type { XtermCtor, XtermTerminal } from "../../lib/xterm";
   import type { Attachment } from "../../lib/contracts";
   import type { TerminalHandshake } from "../../lib/terminal";
@@ -125,9 +125,12 @@
         fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
         fontSize: 12,
         scrollback: 0,
-        theme: { background: "#0a0c0b", foreground: "#c9c4b6", cursor: "#c9c4b6" },
+        minimumContrastRatio: 4.5,
+        theme: PEEK_THEME,
       });
       term.open(host);
+      const openedTerm = term;
+      void enableWebgl(openedTerm, () => term === openedTerm);
     } else {
       term.reset();
       term.resize(next.geometry.cols, next.geometry.rows);
