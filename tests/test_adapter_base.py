@@ -680,6 +680,22 @@ class DigestTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[greg]: ship it", digest)
         self.assertIn("humans read everything", digest)
 
+    async def test_delivery_formats_digest_off_loop(self):
+        import threading
+        main = threading.get_ident()
+        threads = []
+        class Silent(Recorder):
+            async def send_keys(self, text):
+                pass
+        adapter = Silent(["cat"])
+        def digest(_messages):
+            threads.append(threading.get_ident())
+            return "wake"
+        adapter.format_digest = digest
+        await adapter.deliver([])
+        self.assertEqual(len(threads), 1)
+        self.assertNotEqual(threads[0], main)
+
     async def test_deliver_sends_nothing_when_there_is_nothing_to_say(self):
         sent = []
 
