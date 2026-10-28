@@ -71,7 +71,13 @@ export class TerminalStream {
       }
       if (event.data instanceof ArrayBuffer) {
         const bytes = readBinaryFrame(reader, event.data);
-        if (bytes) handlers.onBytes(bytes);
+        if (bytes && reader.phase === "snapshot") {
+          const geometry = reader.geometry;
+          reader = { phase: "live" };
+          authenticationPhase = "initial";
+          handshaken = true;
+          handlers.onHandshake({ geometry, snapshot: bytes });
+        } else if (bytes) handlers.onBytes(bytes);
       }
     };
 

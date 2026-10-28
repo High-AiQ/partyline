@@ -123,9 +123,11 @@ class TerminalAuthorizationTest(unittest.IsolatedAsyncioTestCase):
         ws.incoming.put_nowait("denied")
         await self.assert_refused(ws, task, adapter)
 
-    async def test_revoked_between_geometry_and_snapshot_sends_no_snapshot(self):
+    async def test_revoked_between_geometry_and_replay_sends_no_replay(self):
         adapter = FakeTerminalAdapter()
         ws = FakeWebSocket(token=self.token)
+        ws.query_params["replay"] = "1"
+        adapter.registry.publish(b"secret history")
         send = ws.send_text
 
         async def revoke_after_geometry(data):

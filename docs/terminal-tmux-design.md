@@ -65,6 +65,12 @@ A tmux server with no attached client or a shared server for all attachments
 would complicate geometry, isolation, resource accounting and failure cleanup;
 a private server is the only tmux option worth prototyping here.
 
+## Bounded raw replay (implemented)
+
+The opt-in Peek protocol replays raw output on Unix and Windows. Older clients
+retain the snapshot protocol, and the current client accepts the snapshot from
+older servers. Replay is best effort; it is not an exact screen recovery.
+
 ## Candidate: bounded raw replay
 
 Keep a per-attachment ring of approximately 256 KiB of pty output, sized by

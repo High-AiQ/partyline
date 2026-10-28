@@ -74,6 +74,7 @@ class WindowsRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.adapter.on_output = AsyncMock()
         await self.runtime.drain()
         self.adapter.on_output.assert_awaited_once_with(b'fixture output')
+        self.assertEqual(self.adapter.attach_terminal_viewer().replay, b'fixture output')
         self.adapter._post_to_chat.assert_not_awaited()
         self.console.wait = AsyncMock(return_value=7)
         await self.runtime.watch_exit()
