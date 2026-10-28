@@ -62,6 +62,8 @@ class Room {
   #removed = new Set<string>();
 
   notice = $state<RoomNotice | null>(null);
+  pendingMessages = $state<{ id: number; convId: string; body: string }[]>([]);
+  #pendingSequence = 0;
 
   #epoch = 0;
   #noticeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -220,13 +222,16 @@ class Room {
   // ── talking ─────────────────────────────────────────────────────────
   async say(body: string): Promise<boolean> {
     const conversation = this.conversation;
-    if (!conversation) return false;
+    if (!conversation || !body.trim()) return false;
+    const pending = { id: ++this.#pendingSequence, convId: conversation.id, body: body.trim() };
+    this.pendingMessages = [...this.pendingMessages, pending];
     const result = await sayOnLine(conversation.id, body);
+    this.pendingMessages = this.pendingMessages.filter((item) => item.id !== pending.id);
     if (!result.ok) {
       if (result.error) this.showNotice(result.error, "error");
       return false;
     }
-    if (result.message) this.#absorb(result.message);
+    if (result.message && this.conversation?.id === conversation.id) this.#absorb(result.message);
     return true;
   }
   /** Post to a line we are not on — see `sendOffLine`. */

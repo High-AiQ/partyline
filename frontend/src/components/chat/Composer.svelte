@@ -93,10 +93,13 @@
     if (!hasLiveProcess && draft.text.trim()) return;
     if (!pendingFiles.files.length) {
       if (!hasLiveProcess) return;
-      if (!(await room.say(draft.text))) return;
+      const conversation = room.conversation;
+      const text = draft.text;
+      if (!conversation || !text.trim()) return;
       draft.clear();
       closeToken();
       requestAnimationFrame(resize);
+      if (!(await room.say(text))) draft.restoreFailed(conversation.id, text);
       return;
     }
     const conversation = room.conversation;

@@ -93,6 +93,7 @@ from .approval_bubble import register_approval_routes
 from .tmp_reap_routes import register_tmp_reap_routes
 from .scratch_worktrees import register_scratch_routes
 from .startup_state import engage_startup
+from .event_loop_lag import monitor as monitor_event_loop_lag
 from .line_gates import register_gates_routes
 from .prereview import register_prereview_route
 from .captain_docs import register_docs_route
@@ -179,11 +180,11 @@ async def lifespan(app):
     await engage_startup(runtime)
     automatic_task = asyncio.create_task(_run_automatic_reattachment())
     app.state.automatic_reattach_task = automatic_task
-    # The monitor's state is in the database, so a restart resumes whatever the
-    # lead had configured — including an unsettled wake, which stays unsettled.
+    # The monitor's database state survives restarts, including an unsettled wake.
     # Behind the `heartbeat` flag (off by default since 1.23.0): a switched-off
     # server neither ticks nor answers the routes.
-    tasks = [automatic_task, asyncio.create_task(run_memory_sampler(runtime)),
+    tasks = [automatic_task, asyncio.create_task(monitor_event_loop_lag()),
+             asyncio.create_task(run_memory_sampler(runtime)),
              asyncio.create_task(run_task_maintenance(runtime)),
              asyncio.create_task(run_resource_leases(runtime))]
     if features.enabled("heartbeat"):

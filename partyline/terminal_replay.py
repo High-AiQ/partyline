@@ -1,12 +1,14 @@
 """Bounded raw terminal history, with conservative truncation boundaries."""
 
 import os
+import re
 from weakref import WeakSet
 
 DEFAULT_REPLAY_BYTES = 256 * 1024
 MAX_REPLAY_BYTES = 1024 * 1024
 TOTAL_REPLAY_BYTES = 64 * 1024 * 1024
 _rings: WeakSet = WeakSet()
+_SPECIAL = re.compile(rb'[\x1b\xc2-\xf4]')
 
 
 def replay_limit() -> int:
@@ -70,6 +72,11 @@ class RawReplay:
         while index < len(self.data) and (
             index < excess or (self.truncated and (self.state != "ground" or self.utf))
         ):
+            if self.state == "ground" and not self.utf and index < excess:
+                match = _SPECIAL.search(self.data, index, excess)
+                index = match.start() if match else excess
+                if index >= excess:
+                    break
             self._discard(self.data[index])
             index += 1
         if index:

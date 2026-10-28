@@ -69,6 +69,29 @@ describe("composer narrow layout", () => {
 });
 
 describe("composer process requirement", () => {
+  it("clears immediately and restores a failed send without losing newer text", async () => {
+    room.conversation = conversation;
+    room.attachments = [liveAttachment];
+    draft.openLine(conversation.id);
+    draft.text = "first message";
+    let resolve!: (value: boolean) => void;
+    vi.spyOn(room, "say").mockReturnValue(new Promise((done) => (resolve = done)));
+    const component = mount(Composer, { target: document.body });
+    try {
+      await tick();
+      document
+        .querySelector<HTMLTextAreaElement>("#input")
+        ?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      expect(draft.text).toBe("");
+      draft.text = "new draft";
+      resolve(false);
+      await tick();
+      expect(draft.text).toBe("first message\nnew draft");
+    } finally {
+      await unmount(component);
+    }
+  });
+
   it("keeps the draft and does not send on Enter while disabled", async () => {
     room.conversation = conversation;
     draft.openLine(conversation.id);
