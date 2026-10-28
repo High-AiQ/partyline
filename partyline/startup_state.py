@@ -100,19 +100,28 @@ def stale_live_rows(db) -> list[dict]:
     return [dict(row) for row in rows]
 
 
-def interruption_notice(state: dict, rows: list[dict]) -> dict[str, str]:
+def interruption_notice(state: dict, rows: list[dict], claims: list[dict] | None = None) -> dict[str, str]:
     """The per-line bodies for an unplanned stop; empty when it was orderly."""
-    if state["orderly"] or not rows:
+    if state["orderly"] or (not rows and not claims):
         return {}
     reason = "the host rebooted" if state["rebooted"] else \
         "partyline stopped without reaching its orderly shutdown"
     per_line: dict[str, list[str]] = {}
     for row in rows:
         per_line.setdefault(row["conv_id"], []).append(f"@{row['name']}")
+    held: dict[str, list[str]] = {}
+    for claim in claims or []:
+        conv_id = claim["holder_line"]
+        per_line.setdefault(conv_id, [])
+        held.setdefault(conv_id, []).append(
+            f"{claim['name']} by @{claim['handle']} on «{claim['line_name']}» "
+            f"(line {conv_id}; task note: {claim['note'] or 'none'})")
     return {
         conv_id: (
             f"⚠ the last partyline stop was unplanned: {reason}. "
-            f"Processes that were running: {', '.join(names)}. "
+            + (f"Processes that were running: {', '.join(names)}. " if names else "")
+            + (f"Resource leases held: {'; '.join(held[conv_id])}. " if conv_id in held else "")
+            +
             "Do not replay interrupted heavy work (GPU or Docker batches) "
             "without a person's go-ahead."
         )
@@ -148,7 +157,12 @@ async def post_interruption_notices(runtime, *,
         # First start after this feature deploys: the old server wrote no
         # marker, and a crash-free history must not read as unplanned.
         return False
-    bodies = interruption_notice(state, stale_live_rows(db))
+    claims = db._exec(
+        "SELECT q.name,q.note,a.name AS handle,a.conv_id AS holder_line,c.name AS line_name "
+        "FROM line_resource_claims q JOIN attachments a ON a.id=q.attachment_id "
+        "JOIN conversations c ON c.id=a.conv_id WHERE q.granted_at IS NOT NULL "
+        "ORDER BY a.conv_id,q.id").fetchall()
+    bodies = interruption_notice(state, stale_live_rows(db), [dict(row) for row in claims])
     for conv_id, body in bodies.items():
         await post_system_notice(runtime, conv_id, body)
     return bool(bodies)
