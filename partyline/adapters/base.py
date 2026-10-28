@@ -21,7 +21,7 @@ if sys.platform != "win32":
     import fcntl
     import termios
 
-from partyline import process_memory, process_exit
+from partyline import process_memory, process_exit, docker_shim_env
 from partyline.adapters import activation, fence, mcp_hooks, pty_io, startup_prompt
 from partyline.adapters.process_shutdown import stop_process_group
 from partyline.adapters.process_wait import wait_for_process
@@ -133,7 +133,7 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
             else:
                 env.pop(key, None)
 
-        if sys.platform == "win32":
+        if docker_shim_env.prepare(env, self.memory_limit):
             from .windows_runtime import start
             return await start(self, env)
 
