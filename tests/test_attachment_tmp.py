@@ -195,6 +195,24 @@ class AttachmentTmpTest(unittest.TestCase):
 class CloseReapTest(unittest.IsolatedAsyncioTestCase):
     """Close reaps the temp dir; an internal detach never does (5.12)."""
 
+    async def test_usage_cache_refresh_does_not_block_loop(self):
+        import asyncio
+        import threading
+        from partyline import tmp_usage_cache
+        main = threading.get_ident()
+        threads = []
+        cache = {"at": 0, "value": None}
+        def snapshot():
+            threads.append(threading.get_ident())
+            return {"tmp_total_bytes": 10, "tmp_used_bytes": 5, "sizes": {}, "tmp_partyline_bytes": 0}
+        first = tmp_usage_cache.get(cache, snapshot, 5)
+        self.assertIsNone(first["tmp_total_bytes"])
+        await tmp_usage_cache._refresh_task
+        self.assertEqual(threads and len(threads), 1)
+        self.assertNotEqual(threads[0], main)
+        self.assertEqual(tmp_usage_cache.get(cache, snapshot, 5)["tmp_total_bytes"], 10)
+        await asyncio.sleep(0)
+
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)

@@ -50,11 +50,12 @@ def shipped(db, row):
 
 async def tick(runtime):
     db = runtime.db
-    rows = db._exec("SELECT t.* FROM task_reviews t JOIN conversations c ON c.id=t.conv_id "
-                    'WHERE c.archived_at IS NULL').fetchall()
+    rows = await asyncio.to_thread(
+        lambda: db._exec("SELECT t.* FROM task_reviews t JOIN conversations c ON c.id=t.conv_id "
+                         'WHERE c.archived_at IS NULL').fetchall())
     changed = False
     for record in rows:
-        row = task(db, record['conv_id'])
+        row = await asyncio.to_thread(task, db, record['conv_id'])
         await report(runtime, row)
         await resume_expired(runtime, row)
         if row['status'] not in ('approved', 'done'):

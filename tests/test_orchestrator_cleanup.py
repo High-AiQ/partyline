@@ -85,6 +85,21 @@ class CleanupTest(TaskFixture):
         self.assertEqual(self.db.get_attachment(row['implementer_id'])['status'], 'running')
         self.assertIsNone(self.db.get_conversation(self.conv_id)['archived_at'])
 
+    async def test_tick_scans_tasks_off_event_loop(self):
+        import threading
+        await self.create()
+        main = threading.get_ident()
+        original = self.db._exec
+        threads = []
+        def execute(query, args=()):
+            if query.startswith("SELECT t.* FROM task_reviews"):
+                threads.append(threading.get_ident())
+            return original(query, args)
+        with patch.object(self.db, '_exec', side_effect=execute):
+            await tick(self.runtime)
+        self.assertEqual(len(threads), 1)
+        self.assertNotEqual(threads[0], main)
+
     async def test_report_construction_runs_off_event_loop(self):
         import threading
         from partyline.orchestrator_notices import report

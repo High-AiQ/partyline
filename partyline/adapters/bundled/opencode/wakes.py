@@ -35,7 +35,7 @@ class WakeSettlement:
         """
         if self._ready_result is not True:  # type: ignore[attr-defined]
             return False
-        digest = self.format_digest(messages)  # type: ignore[attr-defined]
+        digest = await asyncio.to_thread(self.format_digest, messages)  # type: ignore[attr-defined]
         ids = [m["id"] for m in messages if isinstance(m.get("id"), int)]
         marker = self._new_paste_marker()  # type: ignore[attr-defined]
         self._pending_paste_marker = marker  # type: ignore[attr-defined]
