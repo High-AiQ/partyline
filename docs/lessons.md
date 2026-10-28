@@ -1,5 +1,14 @@
 # Lessons: the false-assumptions ledger
 
+## Request URLs in logs can carry live credentials
+
+WebSocket authentication puts a JWT in the query string, and Uvicorn logs the
+full handshake URL to the journal. The false assumption was that access logs
+contain only harmless routing information. Strip query strings from both HTTP
+access records and WebSocket handshake records, including rejected handshakes;
+Uvicorn emits the latter through its error logger. Regression tests exercise the
+configured loggers and preserve unrelated messages.
+
 ## A starting task worker is still a restart target
 
 An approved plan can contain an implementer that has not yet claimed a session,

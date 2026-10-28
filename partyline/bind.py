@@ -5,12 +5,14 @@ import logging
 import os
 import tomllib
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 
 import uvicorn
 
 from . import features
+from .log_filter import AccessQueryFilter
 
 
 DEFAULT_HOST = "127.0.0.1"
@@ -189,11 +191,16 @@ def forwarded_allow_ips(env: Mapping[str, str]) -> str:
 
 def uvicorn_config(app, host: str, port: int, env: Mapping[str, str] | None = None):
     """The server's uvicorn settings, proxy trust included."""
+    log_config = deepcopy(uvicorn.config.LOGGING_CONFIG)
+    log_config["filters"] = {"strip_query": {"()": AccessQueryFilter}}
+    for name in ("uvicorn.error", "uvicorn.access"):
+        log_config["loggers"][name]["filters"] = ["strip_query"]
     return uvicorn.Config(
         app,
         host=host,
         port=port,
         log_level="info",
+        log_config=log_config,
         proxy_headers=True,
         forwarded_allow_ips=forwarded_allow_ips(os.environ if env is None else env),
     )
