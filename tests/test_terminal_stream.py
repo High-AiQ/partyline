@@ -195,6 +195,32 @@ if __name__ == "__main__":
     unittest.main()
 
 class TerminalReplayTest(unittest.IsolatedAsyncioTestCase):
+    async def test_fast_truncation_matches_bytewise_parser(self):
+        import random
+        from partyline.terminal_replay import RawReplay
+
+        rng = random.Random(42)
+        fast, reference = RawReplay(127), RawReplay(127)
+        samples = [b'plain text ', b'\x1b[31m', b'\x1b]title\x1b\\',
+                   '€'.encode(), b'\xff', b'\x1bPpayload\x07']
+        for _ in range(200):
+            chunk = b''.join(rng.choices(samples, k=20))
+            fast.append(chunk)
+            reference.data.extend(chunk)
+            excess = max(0, len(reference.data) - reference.limit)
+            if excess:
+                reference.truncated = True
+            index = 0
+            while index < len(reference.data) and (
+                index < excess or (reference.truncated and
+                                   (reference.state != 'ground' or reference.utf))
+            ):
+                reference._discard(reference.data[index])
+                index += 1
+            del reference.data[:index]
+            self.assertEqual(fast.copy(), reference.copy())
+            self.assertEqual((fast.state, fast.utf), (reference.state, reference.utf))
+
     async def test_truncation_skips_partial_utf8_and_escape(self):
         from partyline.terminal_replay import RawReplay
 
