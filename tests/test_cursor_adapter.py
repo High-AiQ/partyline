@@ -1399,7 +1399,9 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                     json.dumps({"type": "turn_ended", "status": "success"}) + "\n",
                 ]
                 path.write_text("".join(rewritten), encoding="utf-8")
-                await asyncio.sleep(0.05)
+                async with asyncio.timeout(5):
+                    while receipts_seen != [BEGAN, ENDED, ENDED, BEGAN, ENDED]:
+                        await asyncio.sleep(0.01)
 
                 adapter.proc.stop()
                 await task
@@ -1551,7 +1553,9 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                     json.dumps({"type": "turn_ended", "status": "success"}) + "\n",
                 ]
                 path.write_text("".join(rewritten), encoding="utf-8")
-                await asyncio.sleep(0.05)
+                async with asyncio.timeout(5):
+                    while receipts_seen != [ENDED, BEGAN, ENDED]:
+                        await asyncio.sleep(0.01)
 
                 adapter.proc.stop()
                 await task
@@ -1649,7 +1653,9 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                     json.dumps({"type": "turn_ended", "status": "success"}) + "\n",
                 ]
                 path.write_text("".join(rewritten), encoding="utf-8")
-                await asyncio.sleep(0.05)
+                async with asyncio.timeout(5):
+                    while receipts_seen != [ENDED, BEGAN, ENDED]:
+                        await asyncio.sleep(0.01)
 
                 adapter.proc.stop()
                 await task
