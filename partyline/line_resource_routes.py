@@ -26,7 +26,7 @@ class AcquireIn(BaseModel):
 
 
 async def maintain(runtime):
-    leases.sweep(runtime.db)
+    await asyncio.to_thread(leases.sweep, runtime.db)
     db = runtime.db
     # Claim notification before awaiting. Persist the message in the grant
     # transaction, so retrying delivery never creates a second private copy.
@@ -90,7 +90,7 @@ def register_line_resource_routes(app, runtime):
     async def acquire(request: Request, name: str, body: AcquireIn):
         att = own_task(request)
         conv = leases.resolve(db, att['conv_id'], name)
-        result = leases.acquire(db, conv, name, att['id'], body.note)
+        result = await asyncio.to_thread(leases.acquire, db, conv, name, att['id'], body.note)
         await maintain(runtime)
         return result
 
@@ -98,6 +98,6 @@ def register_line_resource_routes(app, runtime):
     async def release(request: Request, name: str):
         att = own_task(request)
         conv = leases.resolve(db, att['conv_id'], name)
-        result = leases.release(db, conv, name, att['id'])
+        result = await asyncio.to_thread(leases.release, db, conv, name, att['id'])
         await maintain(runtime)
         return result

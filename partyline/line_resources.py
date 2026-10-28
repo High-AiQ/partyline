@@ -6,6 +6,7 @@ import time
 from fastapi import HTTPException
 
 from .hierarchy import ancestors
+from .resource_probe import probe
 
 MAX_QUEUE = 64
 NAME = r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$'
@@ -26,7 +27,25 @@ def resolve(db, line, name):
     raise HTTPException(404, 'resource is not declared on this line or its ancestors')
 
 
-def _sweep(conn):
+def _probe_results(db, required=None):
+    # Snapshot names briefly under the lock; never run an external command there.
+    with db.lock:
+        names = {row['name'] for row in db.conn.execute(
+            'SELECT DISTINCT name FROM line_resource_claims WHERE granted_at IS NULL')}
+    if required is not None:
+        names.discard(required)
+        probe(required)
+    results = {required: True} if required is not None else {}
+    for name in names:
+        try:
+            probe(name)
+            results[name] = True
+        except HTTPException:
+            results[name] = False
+    return results
+
+
+def _sweep(conn, probes):
     # Check every holder AND waiter before granting: removed, stopped, archived
     # attachments cannot retain a resource after a crash.
     conn.execute("DELETE FROM line_resource_claims WHERE attachment_id NOT IN "
@@ -45,6 +64,8 @@ def _sweep(conn):
                            'ORDER BY id LIMIT 1', key).fetchone()
         if row is None:
             continue
+        if not probes.get(row['name'], False):
+            continue  # Retry missing or unhealthy results on the next sweep.
         now = time.time()
         att = conn.execute('SELECT * FROM attachments WHERE id=?',
                            (row['attachment_id'],)).fetchone()
@@ -58,9 +79,10 @@ def _sweep(conn):
 
 
 def sweep(db):
+    probes = _probe_results(db)
     with db.lock, db.conn:
         db.conn.execute('BEGIN IMMEDIATE')
-        _sweep(db.conn)
+        _sweep(db.conn, probes)
 
 
 def manage(db, conv, operation, name=None):
@@ -85,9 +107,10 @@ def acquire(db, conv, name, att_id, note=''):
     validate_name(name)
     if not isinstance(note, str) or len(note) > 500:
         raise HTTPException(422, 'note is capped at 500 characters')
+    probes = _probe_results(db, name)
     with db.lock, db.conn:
         db.conn.execute('BEGIN IMMEDIATE')
-        _sweep(db.conn)
+        _sweep(db.conn, probes)
         valid = db.conn.execute(
             "SELECT 1 FROM line_resources r JOIN conversations c ON c.id=r.conv_id "
             "JOIN attachments a ON a.id=? JOIN conversations h ON h.id=a.conv_id "
@@ -122,11 +145,12 @@ def acquire(db, conv, name, att_id, note=''):
 
 
 def release(db, conv, name, att_id):
+    probes = _probe_results(db)
     with db.lock, db.conn:
         db.conn.execute('BEGIN IMMEDIATE')
         db.conn.execute('DELETE FROM line_resource_claims WHERE conv_id=? AND name=? '
                         'AND attachment_id=?', (conv, name, att_id))
-        _sweep(db.conn)
+        _sweep(db.conn, probes)
     return {'status': 'released'}
 
 
