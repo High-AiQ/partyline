@@ -301,6 +301,15 @@ no new claim is queued. Queued claims are checked again before promotion and
 remain queued until a later successful check. A probe is a point-in-time check,
 not a guarantee that hardware remains healthy during a job.
 
+Set `PARTYLINE_GPU_MAX_POWER_W` to a positive finite number of watts to also
+check every GPU's configured power limit before acquiring or granting `gpu`.
+Partyline runs `nvidia-smi --query-gpu=power.limit --format=csv,noheader,nounits`
+read-only with the same timeout, even if the ordinary GPU probe is disabled.
+An absent `nvidia-smi` skips this check; invalid settings, failed commands and
+unparseable limits refuse acquisition. If any limit exceeds the maximum, a
+person must lower it (for example with `nvidia-smi -pl`) and retry. Partyline
+never changes hardware settings. Waiters remain queued until a healthy check.
+
 After an unplanned stop, notices include persisted lease holders, resource names,
 lines, and task notes before stale attachments are cleared. Queued claims are
 not reported as held leases.
