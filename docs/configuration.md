@@ -95,6 +95,13 @@ heartbeat = true   # off by default since 1.23.0
 
 ## Environment and config file
 
+The event-loop lag monitor logs a rate-limited warning when a scheduled wake
+is delayed. `PARTYLINE_LOOP_LAG_INTERVAL` sets the sampling interval in seconds
+(default 0.1, minimum 0.01), `PARTYLINE_LOOP_LAG_THRESHOLD` sets the warning
+threshold (default 0.25 seconds), and `PARTYLINE_LOOP_LAG_COOLDOWN` sets the
+minimum time between warnings (default 10 seconds). Warnings contain the delay,
+not callback representations, request URLs, or message contents.
+
 | env var | default | notes |
 |---|---|---|
 | `PARTYLINE_PORT` | `8642` | bind setting; see [Serving on a specific IP or port](#serving-on-a-specific-ip-or-port) |
