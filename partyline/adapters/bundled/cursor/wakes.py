@@ -76,7 +76,7 @@ class WakeSettlement:
         self._confirm_event = asyncio.Event()
 
     async def deliver(self, messages: list[dict]):
-        digest = self.format_digest(messages)
+        digest = await asyncio.to_thread(self.format_digest, messages)
         ids = tuple(m["id"] for m in messages if isinstance(m.get("id"), int))
         mid_turn = self._turn_open
         await super().deliver(messages)  # type: ignore[misc]

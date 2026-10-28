@@ -167,6 +167,8 @@ def dir_size(path: Path, budget: float | None = SIZE_BUDGET_SECONDS) -> int:
         try:
             with os.scandir(stack.pop()) as entries:
                 for entry in entries:
+                    if deadline is not None and time.monotonic() > deadline:
+                        break
                     try:
                         if entry.is_symlink():
                             continue
@@ -195,16 +197,21 @@ def _usage_snapshot() -> dict:
     except OSError:
         pass
     walked = 0
+    deadline = time.monotonic() + SIZE_BUDGET_SECONDS
     if root.is_dir():
         try:
-            entries = sorted(os.listdir(root))
+            from .tmp_usage_cache import bounded_entries
+            entries = bounded_entries(root, deadline)
         except OSError:
             entries = []
         for entry in entries:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
             path = root / entry
             if not path.is_dir() or os.path.islink(path):
                 continue
-            size = dir_size(path)
+            size = dir_size(path, budget=remaining)
             walked += size
             if ID_PATTERN.match(entry):
                 value["sizes"][entry] = size
@@ -213,12 +220,9 @@ def _usage_snapshot() -> dict:
 
 
 def cached_usage(*, cached: bool = True) -> dict:
-    """The walk result, refreshed at most once per TTL."""
-    now = time.monotonic()
-    if cached and _summary_cache["value"] is not None and now - _summary_cache["at"] < SUMMARY_TTL_SECONDS:
-        return _summary_cache["value"]
-    _summary_cache["at"], _summary_cache["value"] = now, _usage_snapshot()
-    return _summary_cache["value"]
+    """Read stale data while one background refresh runs."""
+    from .tmp_usage_cache import get
+    return get(_summary_cache, _usage_snapshot, SUMMARY_TTL_SECONDS, cached=cached)
 
 
 def tmp_summary(*, cached: bool = True) -> dict[str, int | None]:

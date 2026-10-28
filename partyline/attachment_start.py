@@ -75,7 +75,7 @@ async def start_attachment(att, *, runtime, presence, make_adapter, hook_url,
                            checkpoint="", fresh=False):
     ident, conv_id, owner = att["id"], att["conv_id"], att["runtime_owner"]
     try:
-        prepare_attachment(att, runtime, hook_url, checkpoint)
+        await asyncio.to_thread(prepare_attachment, att, runtime, hook_url, checkpoint)
         adapter = make_adapter(
             att["adapter"], att,
             presence.posting(conv_id, ident, runtime.post_callback(ident, conv_id, owner)),

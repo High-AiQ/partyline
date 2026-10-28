@@ -110,7 +110,7 @@ class WakeReceipts:
         )
         if message_ids and any(wake.message_ids == message_ids for wake in self.pending):
             return False
-        digest = adapter.format_digest(messages)
+        digest = await asyncio.to_thread(adapter.format_digest, messages)
         if not message_ids:
             if digest.strip():
                 await adapter.send_keys(digest)
@@ -174,7 +174,7 @@ class WakeReceipts:
             )
             return
         self.prompt_index = prompt_index
-        content = self._full_content(adapter, prompt_index, content)
+        content = await asyncio.to_thread(self._full_content, adapter, prompt_index, content)
         matched_index: int | None = None
         fingerprint_content = content
         for index, wake in enumerate(self.pending):

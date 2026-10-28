@@ -254,7 +254,7 @@ class Adapter(JsonlPasteReceipts, activation.Activation, pty_io.PtyWriter,
             return False
         # Being woken ends post-resume silence — only once the wake reached the pty:
         # clearing first lets a tail release held speech before the turn is recorded.
-        text = self.format_digest(messages)
+        text = await asyncio.to_thread(self.format_digest, messages)
         marker = getattr(self, "_pending_paste_marker", None)
         self._pending_paste_marker = None
         if marker is None and getattr(self, "jsonl_paste_receipts", False):
