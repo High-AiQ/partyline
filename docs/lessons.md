@@ -1,5 +1,13 @@
 # Lessons: the false-assumptions ledger
 
+## Transcript reads can stall the event loop
+
+Assuming line-by-line reads yield to asyncio missed that file reads and JSON
+parsing are synchronous, even when their callers are async. A large existing
+transcript can monopolize the loop across many adapters. Read bounded batches
+of new bytes and parse them in workers; preserve partial records and prove the
+thread boundary in a regression test.
+
 ## Small synchronous probes can stall the event loop
 
 Assuming a bounded directory walk or a quick Git query is safe in a digest or

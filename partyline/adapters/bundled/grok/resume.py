@@ -10,6 +10,7 @@ matches occurrences in order; unmatched transcript records are the backlog.
 
 from __future__ import annotations
 
+import asyncio
 from bisect import bisect_left
 from collections.abc import Callable
 from collections import defaultdict
@@ -62,7 +63,7 @@ async def settled_snapshot(
         if current == previous:
             stable_for += adapter.POLL_SECONDS
             if stable_for >= adapter.SETTLE_SECONDS:
-                scanned = scan(path)
+                scanned = await asyncio.to_thread(scan, path)
                 if scanned is not None and adapter._identity(path) == current:
                     return scanned, current
                 previous, stable_for = None, 0.0

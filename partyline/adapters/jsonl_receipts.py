@@ -145,13 +145,55 @@ class JsonlPasteReceipts:
         return True
 
 
+def _read_batch(file, pending, path, anchor):
+    """Read at most 64 KiB of new bytes and decode complete records."""
+    current = os.fstat(file.fileno())
+    try:
+        target = os.stat(path)
+    except FileNotFoundError:
+        target = current
+    if (current.st_dev, current.st_ino) != (target.st_dev, target.st_ino):
+        return [], False, "replaced"
+    offset = file.tell()
+    changed = current.st_size < offset
+    if not changed and anchor:
+        file.seek(offset - len(anchor))
+        changed = file.read(len(anchor)) != anchor
+        file.seek(offset)
+    if changed:
+        file.seek(0)
+        pending.clear()
+        anchor.clear()
+    chunk = file.read(65536)
+    if chunk:
+        anchor[:] = (anchor + chunk)[-64:]
+    start = len(pending)
+    pending.extend(chunk)
+    lines = []
+    end = chunk.rfind(b"\n")
+    if end < 0:
+        return lines, bool(chunk), None
+    end += start
+    complete = bytes(pending[:end + 1])
+    del pending[:end + 1]
+    for raw in complete.split(b"\n")[:-1]:
+        line = raw.decode("utf-8", errors="replace") + "\n"
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            record = None
+        lines.append((line, record))
+    return lines, bool(chunk), None
+
+
 async def tail_jsonl(adapter, path: str, handle_line) -> None:
     """Follow a JSONL transcript, scanning existing receipts before ready."""
     adapter._jsonl_tail_path = path
-    with open(path, encoding="utf-8", errors="replace") as file:
-        if adapter.recorded_claim(path):
+    file = await asyncio.to_thread(open, path, "rb", buffering=0)
+    try:
+        if await asyncio.to_thread(adapter.recorded_claim, path):
             adapter._mark_claim_proven()
-        elif adapter.foreign_claim(path):
+        elif await asyncio.to_thread(adapter.foreign_claim, path):
             await adapter.post(
                 "system", "system",
                 f"{adapter.att['name']}: not adopting {os.path.basename(path)} — "
@@ -162,48 +204,41 @@ async def tail_jsonl(adapter, path: str, handle_line) -> None:
         # callback may immediately repool an unproved paste. A preclaim user
         # record must get its chance to settle first. Keep the file at EOF so
         # handled records are not replayed after the readiness boundary.
+        ready = False
+        pending = bytearray()
+        anchor = bytearray()
         while True:
-            position = file.tell()
-            line = file.readline()
-            if not line:
-                break
-            if not line.endswith("\n"):
+            lines, read, change = await asyncio.to_thread(_read_batch, file, pending, path, anchor)
+            if change:
+                replacement = await asyncio.to_thread(open, path, "rb", buffering=0)
+                await asyncio.to_thread(file.close)
+                file = replacement
+                pending.clear()
+                anchor.clear()
+                if await asyncio.to_thread(adapter.foreign_claim, path):
+                    await adapter.post(
+                        "system", "system",
+                        f"{adapter.att['name']}: not adopting {os.path.basename(path)} — "
+                        "it carries another attachment's claim marker",
+                    )
+                    return
+                continue
+            if not lines:
+                if read:
+                    continue
+                partial = bool(pending)
+                if not partial and not ready:
+                    adapter.mark_ready()
+                    ready = True
                 if not adapter.alive():
                     return
-                file.seek(position)
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.3 if partial else 0.5)
                 continue
-            if adapter._claim_in_line(line):
-                adapter._mark_claim_proven()
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(record, dict):
-                await adapter._observe_jsonl_paste(record)
-                await handle_line(record)
-        adapter.mark_ready()
-        while True:
-            position = file.tell()
-            line = file.readline()
-            if not line:
-                if not adapter.alive():
-                    return
-                await asyncio.sleep(0.5)
-                continue
-            if not line.endswith("\n"):
-                if not adapter.alive():
-                    return
-                file.seek(position)
-                await asyncio.sleep(0.3)
-                continue
-            if adapter._claim_in_line(line):
-                adapter._mark_claim_proven()
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(record, dict):
-                continue
-            await adapter._observe_jsonl_paste(record)
-            await handle_line(record)
+            for line, record in lines:
+                if adapter._claim_in_line(line):
+                    adapter._mark_claim_proven()
+                if isinstance(record, dict):
+                    await adapter._observe_jsonl_paste(record)
+                    await handle_line(record)
+    finally:
+        await asyncio.to_thread(file.close)

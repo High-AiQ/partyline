@@ -17,6 +17,7 @@ from partyline.adapters.bundled.cursor.parse import (
     parse_record,
     resync_fingerprints,
     resync_positional,
+    scan_transcript,
     transcript_path,
 )
 from partyline.adapters.bundled.cursor.startup import (
@@ -96,21 +97,16 @@ class PartylineAdapter(WakeSettlement, Adapter):
         self, path: Path, seen_fps: list[str], failures: int
     ) -> tuple[list[str], int]:
         try:
-            with open(path, encoding="utf-8", errors="replace") as fh:
-                lines = fh.readlines()
+            lines, incoming_fps, sentinels = await asyncio.to_thread(scan_transcript, path)
         except OSError:
             return seen_fps, failures
-        complete = [line for line in lines if line.endswith("\n")]
-        incoming_fps = [fingerprint(line) for line in complete]
-        for line, fp in zip(complete, incoming_fps, strict=True):
-            if self._tail_is_turn_ended([line]):
-                self._sentinel_fps.add(fp)
-        resynced = resync_fingerprints(path, seen_fps, incoming_fps)
+        self._sentinel_fps.update(sentinels)
+        resynced = await asyncio.to_thread(resync_fingerprints, path, seen_fps, incoming_fps)
         if resynced == seen_fps and seen_fps:
             # An unchanged prefix is a successful sequential re-read, not a
             # failed re-anchor.  During Cursor's atomic rewrites this is the
             # usual case, so it must clear any earlier fruitless attempts.
-            sequential = resync_positional(path, seen_fps, incoming_fps)
+            sequential = await asyncio.to_thread(resync_positional, path, seen_fps, incoming_fps)
             if not self._has_complete_jsonl_tail(lines):
                 return seen_fps, failures
             if sequential == seen_fps:
@@ -146,7 +142,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
                     "re-anchoring positionally",
                 )
                 self._failed_snapshot = None
-                return resync_positional(path, seen_fps, incoming_fps), 0
+                return await asyncio.to_thread(resync_positional, path, seen_fps, incoming_fps), 0
             return seen_fps, failures
         self._failed_snapshot = None
         return resynced, 0
@@ -167,12 +163,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
         self._sentinel_fps = set()
         if self.resume and path.is_file():
             try:
-                with open(path, encoding="utf-8", errors="replace") as f:
-                    for line in f:
-                        if line.endswith("\n"):
-                            seen_fps.append(fingerprint(line))
-                            if self._tail_is_turn_ended([line]):
-                                self._sentinel_fps.add(seen_fps[-1])
+                _, seen_fps, self._sentinel_fps = await asyncio.to_thread(scan_transcript, path)
             except OSError:
                 pass
 
@@ -185,14 +176,14 @@ class PartylineAdapter(WakeSettlement, Adapter):
                     open_mtime_ns = path.stat().st_mtime_ns
                     matched = 0
                     while self.alive():
-                        if self._is_replaced(fh, path, open_mtime_ns):
+                        if await asyncio.to_thread(self._is_replaced, fh, path, open_mtime_ns):
                             seen_fps, resync_failures = await self._handle_resync(
                                 path, seen_fps, resync_failures
                             )
                             await asyncio.sleep(self.POLL_SECONDS)
                             break
                         pos = fh.tell()
-                        line = fh.readline()
+                        line = await asyncio.to_thread(fh.readline)
                         if not line:
                             await asyncio.sleep(self.POLL_SECONDS)
                             continue
@@ -202,7 +193,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
                             fh.seek(pos)
                             await asyncio.sleep(0.3)
                             continue
-                        fp = fingerprint(line)
+                        fp = await asyncio.to_thread(fingerprint, line)
                         self.observe_claim(line)
                         if matched < len(seen_fps):
                             if seen_fps[matched] == fp:
@@ -224,7 +215,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
                         seen_fps.append(fp)
                         matched += 1
                         try:
-                            record = json.loads(line)
+                            record = await asyncio.to_thread(json.loads, line)
                         except json.JSONDecodeError:
                             continue
                         if not isinstance(record, dict):

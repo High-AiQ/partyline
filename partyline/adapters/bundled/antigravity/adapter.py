@@ -84,7 +84,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
 
     async def start(self):
         os.makedirs(LOG_ROOT, exist_ok=True)
-        self._remember_log_mark()
+        await asyncio.to_thread(self._remember_log_mark)
         await super().start()
 
     def _remember_log_mark(self) -> None:
@@ -142,13 +142,13 @@ class PartylineAdapter(WakeSettlement, Adapter):
         while not os.path.exists(self.log_path()) and self.alive():
             await asyncio.sleep(0.5)
         try:
-            file = open(self.log_path(), encoding="utf-8", errors="replace")
+            file = await asyncio.to_thread(open, self.log_path(), encoding="utf-8", errors="replace")
         except OSError:
             return
         with file:
-            file.seek(0, os.SEEK_END)  # only fresh lines may judge a wake
+            await asyncio.to_thread(file.seek, 0, os.SEEK_END)  # only fresh lines may judge a wake
             while self.alive():
-                line = file.readline()
+                line = await asyncio.to_thread(file.readline)
                 if not line:
                     await asyncio.sleep(0.5)
                     continue
@@ -193,7 +193,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
 
     async def _run(self):
         os.makedirs(LOG_ROOT, exist_ok=True)
-        self._remember_log_mark()
+        await asyncio.to_thread(self._remember_log_mark)
         await asyncio.sleep(4.0)
         if not self.alive():
             return
@@ -203,8 +203,8 @@ class PartylineAdapter(WakeSettlement, Adapter):
         conversation = ""
         waited = 0.0
         while not conversation and self.alive():
-            after = suffix_offset(Path(self.log_path()), self._log_mark)
-            conversation = self._conversation_from_log(after=after) or ""
+            after = await asyncio.to_thread(suffix_offset, Path(self.log_path()), self._log_mark)
+            conversation = await asyncio.to_thread(self._conversation_from_log, after=after) or ""
             if conversation:
                 break
             await asyncio.sleep(1.0)
