@@ -74,6 +74,7 @@
    */
   $effect.pre(() => {
     void room.messages.length;
+    void room.pendingMessages.length;
     wasFollowing =
       !room.history.highlightedId &&
       (!feed || feed.scrollHeight - feed.scrollTop - feed.clientHeight < STICK_PX);
@@ -81,6 +82,7 @@
 
   $effect(() => {
     void room.messages.length;
+    void room.pendingMessages.length;
     if (wasFollowing && feed) feed.scrollTop = feed.scrollHeight;
   });
 
@@ -153,7 +155,7 @@
       <div class="art mb-2.5 font-serif text-[26px] italic text-cream-dim">no line selected</div>
       pick a conversation, or open a new one
     </div>
-  {:else if !room.messages.length}
+  {:else if !room.messages.length && !room.pendingMessages.some((item) => item.convId === room.conversation?.id)}
     <div class="empty mt-[12vh] text-center text-[12.5px] text-cream-faint">
       <div class="art mb-2.5 font-serif text-[26px] italic text-cream-dim">the line is open</div>
       {#if line?.task_status}
@@ -193,6 +195,12 @@
           </button>
         </div>
       {/each}
+    {/each}
+    {#each room.pendingMessages.filter((item) => item.convId === room.conversation?.id) as pending (pending.id)}
+      <div class="mb-[14px] max-w-[860px]" aria-label="message pending">
+        <div class="text-[10px] text-cream-faint">sending…</div>
+        <div class="whitespace-pre-wrap break-words text-cream">{pending.body}</div>
+      </div>
     {/each}
   {/if}
 </div>

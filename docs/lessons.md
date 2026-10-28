@@ -1,5 +1,14 @@
 # Lessons: the false-assumptions ledger
 
+## Small per-byte replay costs accumulate across terminals
+
+Assuming one fast replay update stayed cheap across many busy attachments
+missed event-loop contention. In a synthetic twelve-ring workload, synchronous
+truncation delayed message POSTs; skip plain runs in bulk while preserving the
+bytewise escape and UTF-8 parser at boundaries. Compare the optimized parser
+against the bytewise reference and monitor event-loop lag without logging
+callback arguments, which may contain secrets.
+
 ## Request URLs in logs can carry live credentials
 
 WebSocket authentication puts a JWT in the query string, and Uvicorn logs the

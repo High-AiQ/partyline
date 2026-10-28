@@ -115,6 +115,17 @@ describe("resync after a reconnect", () => {
 });
 
 describe("room.say", () => {
+  it("shows pending sends until the response arrives", async () => {
+    room.conversation = conversation;
+    let resolve!: (value: { ok: boolean }) => void;
+    vi.spyOn(roomSay, "sayOnLine").mockReturnValue(new Promise((done) => (resolve = done)));
+    const sending = room.say("waiting");
+    expect(room.pendingMessages.map((item) => item.body)).toContain("waiting");
+    resolve({ ok: true });
+    await sending;
+    expect(room.pendingMessages).toHaveLength(0);
+  });
+
   it("absorbs a REST message into the feed", async () => {
     room.conversation = conversation;
     const posted = {

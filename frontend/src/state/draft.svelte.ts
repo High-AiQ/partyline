@@ -107,6 +107,14 @@ export class Draft {
     this.text = "";
   }
 
+  restoreFailed(conversationId: string, text: string): void {
+    const current = this.#texts.get(conversationId) ?? restoreDraft(conversationId, this.#storage);
+    const restored = current ? `${text}\n${current}` : text;
+    this.#texts.set(conversationId, restored);
+    persistDraft(conversationId, restored, this.#storage);
+    if (this.#activeId === conversationId) this.externalEdits++;
+  }
+
   /** Append a handle, keeping exactly one space between it and what came before. */
   mention(name: string): void {
     const current = this.text;
