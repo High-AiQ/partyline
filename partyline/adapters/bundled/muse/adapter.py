@@ -222,7 +222,7 @@ class PartylineAdapter(Adapter):
             self.mark_ready()
             while True:
                 position = file.tell()
-                line = file.readline()
+                line = await asyncio.to_thread(file.readline)
                 if not line:
                     if not self.alive():
                         return
@@ -235,7 +235,7 @@ class PartylineAdapter(Adapter):
                     await asyncio.sleep(0.3)
                     continue
                 self.observe_claim(line)
-                record = self._decode(line)
+                record = await asyncio.to_thread(self._decode, line)
                 message = self._assistant_message(record or {})
                 if message is None:
                     continue
@@ -252,11 +252,11 @@ class PartylineAdapter(Adapter):
     async def _run(self):
         try:
             waited = 0.0
-            path = self._find_and_claim()
+            path = await asyncio.to_thread(self._find_and_claim)
             while path is None and self.alive() and waited < self.DISCOVERY_TIMEOUT:
                 await asyncio.sleep(self.POLL_SECONDS)
                 waited += self.POLL_SECONDS
-                path = self._find_and_claim()
+                path = await asyncio.to_thread(self._find_and_claim)
             if path is None:
                 if self.alive():
                     await self.post(

@@ -208,7 +208,7 @@ class PartylineAdapter(Adapter):
                     raise RuntimeError(
                         "stored dsh session transcript is missing or already claimed"
                     )
-                self._seen = self._snapshot_sequences(existing)
+                self._seen = await asyncio.to_thread(self._snapshot_sequences, existing)
                 await self._request("session/resume", {
                     "sessionId": self._session_id, "cwd": self.att["cwd"], "mcpServers": [],
                 })
@@ -241,7 +241,7 @@ class PartylineAdapter(Adapter):
         with self._transcript.open(encoding="utf-8", errors="replace") as file:
             while self.alive():
                 position = file.tell()
-                line = file.readline()
+                line = await asyncio.to_thread(file.readline)
                 if not line:
                     file.seek(position)
                     await asyncio.sleep(0.5)
@@ -252,7 +252,7 @@ class PartylineAdapter(Adapter):
                     continue
                 self.observe_claim(line)
                 try:
-                    record = json.loads(line)
+                    record = await asyncio.to_thread(json.loads, line)
                 except json.JSONDecodeError:
                     continue
                 if isinstance(record, dict):
