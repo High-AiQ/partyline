@@ -193,3 +193,73 @@ class TerminalEndpointTest(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TerminalReplayTest(unittest.IsolatedAsyncioTestCase):
+    async def test_truncation_skips_partial_utf8_and_escape(self):
+        from partyline.terminal_replay import RawReplay
+
+        replay = RawReplay(7)
+        replay.append(b'\xe2\x82\xac123456')
+        self.assertEqual(replay.copy(), b'123456')
+        replay = RawReplay(6)
+        replay.append(b'\x1b[31mhello')
+        self.assertEqual(replay.copy(), b'hello')
+
+    async def test_handoff_orders_replay_before_later_bytes(self):
+        registry = TerminalViewerRegistry(lambda: 'screen')
+        early = registry.attach()
+        registry.publish(b'first\xe2')
+        late = registry.attach()
+        registry.publish(b'\x82\xaclast')
+        self.assertEqual(late.replay + late.queue.get_nowait(), b'first\xe2\x82\xaclast')
+        self.assertEqual(early.queue.get_nowait() + early.queue.get_nowait(),
+                         b'first\xe2\x82\xaclast')
+        reconnect = registry.attach()
+        self.assertEqual(reconnect.replay, b'first\xe2\x82\xaclast')
+
+    async def test_binary_handshake(self):
+        fixture = TerminalEndpointTest()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        adapter = FakeTerminalAdapter()
+        adapter.registry.publish(b'old\xe2')
+        ws = FakeWebSocket(token=fixture.token)
+        ws.query_params['replay'] = '1'
+        task = asyncio.create_task(terminal_endpoint(
+            SimpleNamespace(live={'att-1': adapter}, db=fixture.db))(ws, 'att-1'))
+        await eventually(lambda: len(ws.sent) == 2, 'binary replay')
+        adapter.registry.publish(b'\x82\xac')
+        await eventually(lambda: len(ws.sent) == 3, 'live bytes')
+        self.assertEqual(ws.sent[1:], [('bytes', b'old\xe2'), ('bytes', b'\x82\xac')])
+        ws.incoming.put_nowait(None)
+        await task
+
+    async def test_replay_limit_and_oversized_fanout(self):
+        from unittest.mock import patch
+        from partyline.terminal_replay import RawReplay, replay_limit
+
+        with patch.dict(os.environ, {'PARTYLINE_TERMINAL_REPLAY_BYTES': '4'}):
+            self.assertEqual(replay_limit(), 4)
+            registry = TerminalViewerRegistry(lambda: '')
+        viewer = registry.attach()
+        registry.publish(b'abcdef')
+        self.assertEqual(registry.attach().replay, b'cdef')
+        self.assertEqual(viewer.queue.get_nowait(), b'abcdef')
+        registry.publish(b'x' * 65537)
+        self.assertIsNone(viewer.queue.get_nowait())
+        with patch.dict(os.environ, {'PARTYLINE_TERMINAL_REPLAY_BYTES': 'invalid'}):
+            self.assertEqual(replay_limit(), 256 * 1024)
+        replay = RawReplay(3)
+        replay.append(b'\x1b]title\x07end')
+        self.assertEqual(replay.copy(), b'end')
+
+    async def test_ring_budget_falls_back_to_snapshot(self):
+        from unittest.mock import patch
+
+        with patch('partyline.terminal_replay.TOTAL_REPLAY_BYTES', 0):
+            registry = TerminalViewerRegistry(lambda: 'fallback')
+            registry.publish(b'output')
+            viewer = registry.attach()
+        self.assertFalse(viewer.replay_available)
+        self.assertEqual(viewer.snapshot, 'fallback')
+        self.assertEqual(viewer.replay, b'')

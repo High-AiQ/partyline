@@ -67,6 +67,29 @@ describe("TerminalStream retry", () => {
     expect(paintIsCurrent(gate, 1, paintId)).toBe(false);
   });
 
+  it("delivers binary replay before live bytes and ignores stale sockets on reconnect", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("WebSocket", FakeSocket);
+    const onHandshake = vi.fn();
+    const onBytes = vi.fn();
+    const stream = new TerminalStream();
+    stream.connect("att-1", { onHandshake, onBytes, onUnavailable: vi.fn(), onGeneration: vi.fn() });
+    const first = FakeSocket.instances[0];
+    if (!first?.onmessage || !first.onclose) throw new Error("expected a socket");
+    first.onmessage({ data: '{"cols":80,"rows":24}' });
+    first.onmessage({ data: new Uint8Array([0xe2]).buffer });
+    first.onmessage({ data: new Uint8Array([0x82, 0xac]).buffer });
+    expect(onHandshake).toHaveBeenCalledWith({
+      geometry: { cols: 80, rows: 24 },
+      snapshot: new Uint8Array([0xe2]),
+    });
+    expect(onBytes).toHaveBeenCalledWith(new Uint8Array([0x82, 0xac]));
+    first.onclose({ code: 1000 });
+    vi.advanceTimersByTime(TERMINAL_RETRY_MS);
+    first.onmessage({ data: new Uint8Array([1]).buffer });
+    expect(onBytes).toHaveBeenCalledTimes(1);
+  });
+
   it("retries the access token before refreshing a twice-rejected socket", async () => {
     vi.stubGlobal("WebSocket", FakeSocket);
     storeTokens("expired-access", "valid-refresh");

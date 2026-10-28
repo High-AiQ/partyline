@@ -18,6 +18,8 @@ if TYPE_CHECKING:
 
 # Quiet terminals must also lose access promptly after credential/role changes.
 AUTH_CHECK_INTERVAL = 1.0
+MAX_TERMINAL_VIEWERS = 64
+_active_viewers = 0
 
 
 class TerminalAuthority:
@@ -65,6 +67,7 @@ async def _receive_terminal(ws: WebSocket, adapter: Adapter, authority: Terminal
 
 def terminal_endpoint(runtime: "ChatRuntime"):
     async def stream(ws: WebSocket, att_id: str) -> None:
+        global _active_viewers
         if await websocket_principal(runtime.db, ws) is None:
             return
         adapter = runtime.live.get(att_id)
@@ -76,16 +79,24 @@ def terminal_endpoint(runtime: "ChatRuntime"):
         authority = TerminalAuthority(runtime, ws, att_id, att["conv_id"], adapter)
         if not await authority.require("read"):
             return
-        viewer = adapter.attach_terminal_viewer()
+        if _active_viewers >= MAX_TERMINAL_VIEWERS:
+            await ws.close(code=1013, reason="terminal viewer limit reached")
+            return
+        _active_viewers += 1
+        viewer = None
         tasks = []
         try:
+            viewer = adapter.attach_terminal_viewer()
             cols, rows = adapter.terminal_dimensions()
             if not await authority.require("read"):
                 return
             await ws.send_text(TerminalGeometry(cols=cols, rows=rows).model_dump_json())
             if not await authority.require("read"):
                 return
-            await ws.send_text(viewer.snapshot)
+            if ws.query_params.get("replay") == "1" and viewer.replay_available:
+                await ws.send_bytes(viewer.replay)
+            else:
+                await ws.send_text(viewer.snapshot)
             tasks = [asyncio.create_task(_send_terminal(ws, viewer, authority)),
                      asyncio.create_task(_receive_terminal(ws, adapter, authority))]
             await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
@@ -95,7 +106,9 @@ def terminal_endpoint(runtime: "ChatRuntime"):
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
-            adapter.detach_terminal_viewer(viewer)
+            if viewer is not None:
+                adapter.detach_terminal_viewer(viewer)
+            _active_viewers -= 1
 
     return stream
 

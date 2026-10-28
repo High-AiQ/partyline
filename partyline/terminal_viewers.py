@@ -4,6 +4,8 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from .terminal_replay import RawReplay, replay_limit
+
 
 VIEWER_QUEUE_LIMIT = 32
 
@@ -12,6 +14,8 @@ VIEWER_QUEUE_LIMIT = 32
 class TerminalViewer:
     queue: asyncio.Queue[bytes | None]
     snapshot: str
+    replay: bytes
+    replay_available: bool
 
 
 class TerminalViewerRegistry:
@@ -22,6 +26,7 @@ class TerminalViewerRegistry:
 
     def __init__(self, snapshot: Callable[[], str]):
         self._snapshot = snapshot
+        self._replay = RawReplay(replay_limit())
         self._queues: set[asyncio.Queue[bytes | None]] = set()
         self._closed = False
 
@@ -33,14 +38,15 @@ class TerminalViewerRegistry:
             queue.put_nowait(None)
         else:
             self._queues.add(queue)
-        return TerminalViewer(queue, snapshot)
+        return TerminalViewer(queue, snapshot, self._replay.copy(), self._replay.available)
 
     def detach(self, viewer: TerminalViewer) -> None:
         self._queues.discard(viewer.queue)
 
     def publish(self, data: bytes) -> None:
+        self._replay.append(data)
         for queue in tuple(self._queues):
-            if queue.full():
+            if queue.full() or len(data) > 65536:
                 while not queue.empty():
                     queue.get_nowait()
                 queue.put_nowait(None)
