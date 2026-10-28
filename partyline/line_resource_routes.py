@@ -1,6 +1,8 @@
 """Authorized resource operations and retryable private grant notifications."""
 
 import asyncio
+
+from .periodic_timing import tick as timed_tick
 import logging
 import time
 
@@ -60,7 +62,8 @@ async def maintain(runtime):
 async def run(runtime):
     while True:
         try:
-            await maintain(runtime)
+            with timed_tick('resource lease sweep'):
+                await maintain(runtime)
         except Exception:
             logging.getLogger(__name__).exception('resource lease sweep failed')
         await asyncio.sleep(5)

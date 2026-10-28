@@ -140,7 +140,7 @@ class Room {
 
     let detail;
     try {
-      detail = await api.conversation(conversation.id);
+      detail = await api.conversation(conversation.id, false);
     } catch {
       // The line went away between being listed and being opened.
       if (epoch === this.#epoch) this.leave();
@@ -152,6 +152,7 @@ class Room {
     this.attachments = withoutForgotten(detail.attachments, this.#removed);
     presenceSync.finish(presenceFetch, detail.presence, detail.working);
     this.history.seed(detail.messages, detail.has_more_messages);
+    void this.#loadAttachmentGit(conversation.id, epoch).catch(ignoreBackgroundFailure);
     void this.pins.load(conversation.id).catch(ignoreBackgroundFailure);
     openPendingBanners(conversation.id);
     void this.loadConversations().catch(ignoreBackgroundFailure);
@@ -162,15 +163,28 @@ class Room {
     if (!conversation) return;
     const epoch = this.#epoch;
     const afterId = this.history.newestId;
-    const [detail, presenceFetch] = await presenceSync.fetch(api.conversation(conversation.id));
+    const [detail, presenceFetch] = await presenceSync.fetch(api.conversation(conversation.id, false));
     if (epoch !== this.#epoch) return;
 
     this.conversation = detail.conversation;
     this.attachments = withoutForgotten(detail.attachments, this.#removed);
     presenceSync.finish(presenceFetch, detail.presence, detail.working);
     this.history.merge(detail.messages);
+    void this.#loadAttachmentGit(conversation.id, epoch).catch(ignoreBackgroundFailure);
     await this.history.catchUp(conversation.id, afterId);
     resyncPendingBanners(conversation.id);
+  }
+
+  async #loadAttachmentGit(conversationId: string, epoch: number): Promise<void> {
+    const original = new Map(this.attachments.map((attachment) => [attachment.id, attachment]));
+    const detail = await api.conversation(conversationId);
+    if (epoch !== this.#epoch) return;
+    const git = new Map(detail.attachments.map((attachment) => [attachment.id, attachment]));
+    this.attachments = this.attachments.map((attachment) => {
+      const refreshed = git.get(attachment.id);
+      if (original.get(attachment.id) !== attachment || refreshed?.cwd !== attachment.cwd) return attachment;
+      return { ...attachment, cwd_git: refreshed.cwd_git };
+    });
   }
 
   async toggleReaction(messageId: number, emoji: string): Promise<void> {

@@ -75,11 +75,11 @@ def register_conversation_routes(
         return conv
 
     @app.get("/api/conversations/{conv_id}", response_model=ConversationDetailResponse)
-    async def conversation_detail(request: Request, conv_id: str):
+    async def conversation_detail(request: Request, conv_id: str, include_git: bool = True):
         s = _server()
         deny_unless(s.runtime.db, request_principal(request), conv_id, "read")
         return await conversation_detail_response(
-            s.runtime, s.presence, s.media, conv_id, request_principal(request)
+            s.runtime, s.presence, s.media, conv_id, request_principal(request), include_git=include_git
         )
 
     @app.put("/api/conversations/{conv_id}/topic", response_model=ConversationResponse)

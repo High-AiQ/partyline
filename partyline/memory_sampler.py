@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+
+from .periodic_timing import tick as timed_tick
 from concurrent.futures import ThreadPoolExecutor
 import logging
 import sys
@@ -91,7 +93,7 @@ async def _warn(runtime, row: dict, usage: int, cap: int, shmem: int = 0,
     tmp_note = await tmpfs_note_for(str(attachment_tmp_dir(row["id"])), shmem) or ""
     adapter = runtime.live.get(row["id"])
     pid = getattr(getattr(adapter, "proc", None), "pid", None)
-    top = process_breakdown(pid) if isinstance(pid, int) else []
+    top = await asyncio.to_thread(process_breakdown, pid) if isinstance(pid, int) else []
     # The copy to the process itself must not name it as the speaker: routing
     # never rings a process with its own words.
     await post_private(runtime, row["conv_id"], "system", "system",
@@ -128,132 +130,133 @@ async def run(runtime, clock=time.monotonic, sampler=read_usage) -> None:
     try:
         while True:
             try:
-                rows = live_rows(runtime.db)
-                live_ids = {row["id"] for row in rows}
-                states = (runtime.memory_usage, armed, notified, over, activation,
-                          reclaim_backoff, tmp_backoff)
-                for attachment_id in set().union(*states) - live_ids:
-                    for state in states:
-                        state.pop(attachment_id, None)
-                if rows:
-                    start = cursor % len(rows)
-                    batch = (rows[start:] + rows[:start])[:CHUNK]
-                    cursor = (start + len(batch)) % len(rows)
-                    cgroup_samples = {}
-                    needs_snapshot = False
-                    if sampler is read_usage:
+                with timed_tick('memory sampler'):
+                    rows = live_rows(runtime.db)
+                    live_ids = {row["id"] for row in rows}
+                    states = (runtime.memory_usage, armed, notified, over, activation,
+                              reclaim_backoff, tmp_backoff)
+                    for attachment_id in set().union(*states) - live_ids:
+                        for state in states:
+                            state.pop(attachment_id, None)
+                    if rows:
+                        start = cursor % len(rows)
+                        batch = (rows[start:] + rows[:start])[:CHUNK]
+                        cursor = (start + len(batch)) % len(rows)
+                        cgroup_samples = {}
+                        needs_snapshot = False
+                        if sampler is read_usage:
+                            for row in batch:
+                                adapter = runtime.live.get(row["id"])
+                                pid = getattr(getattr(adapter, "proc", None), "pid", None)
+                                if not isinstance(pid, int):
+                                    continue
+                                if sys.platform.startswith("linux"):
+                                    cgroup_samples[row["id"]] = await asyncio.to_thread(cgroup_usage, pid)
+                                    needs_snapshot |= cgroup_samples[row["id"]] is None
+                                else:
+                                    needs_snapshot = True
+                        # A single off-loop process listing serves all RSS fallbacks.
+                        table = (await loop.run_in_executor(executor, process_snapshot)
+                                 if needs_snapshot else None)
+                        config = settings(runtime.db)
                         for row in batch:
                             adapter = runtime.live.get(row["id"])
-                            pid = getattr(getattr(adapter, "proc", None), "pid", None)
-                            if not isinstance(pid, int):
+                            if adapter is None:
                                 continue
-                            if sys.platform.startswith("linux"):
-                                cgroup_samples[row["id"]] = cgroup_usage(pid)
-                                needs_snapshot |= cgroup_samples[row["id"]] is None
-                            else:
-                                needs_snapshot = True
-                    # A single off-loop process listing serves all RSS fallbacks.
-                    table = (await loop.run_in_executor(executor, process_snapshot)
-                             if needs_snapshot else None)
-                    config = settings(runtime.db)
-                    for row in batch:
-                        adapter = runtime.live.get(row["id"])
-                        if adapter is None:
-                            continue
-                        sample = (sampler(adapter, process_table=table,
-                                          cgroup_sample=cgroup_samples.get(
-                                              row["id"], _NO_CGROUP_SAMPLE))
-                                  if sampler is read_usage else sampler(adapter))
-                        if sample is None:
-                            continue
-                        if activation.get(row["id"]) is not adapter:
-                            for state in (armed, notified, over):
-                                state.pop(row["id"], None)
-                            activation[row["id"]] = adapter
-                        sample_dict = cgroup_samples.get(row["id"])
-                        raw = sample[3] if len(sample) > 3 else sample[0]
-                        usage = sample[0]
-                        cap = cap_bytes(row, config)
-                        effective = warning_limit(cap)
-                        # Finding 5.15: when the working set crosses the
-                        # threshold, first reap old pytest runs in this
-                        # process's own temp directory (once per backoff
-                        # window), then re-read before deciding.
-                        if (sample_dict is not None
-                                and crosses_warning(usage, effective,
-                                                    config["memory_warn_percent"])
-                                and clock() - tmp_backoff.get(row["id"], -60.0)
-                                >= 60.0):
-                            tmp_backoff[row["id"]] = clock()
-                            await asyncio.to_thread(reap_pytest_if_tmpfs,
-                                                    attachment_tmp_dir(row["id"]))
-                            pid = getattr(getattr(adapter, "proc", None),
-                                          "pid", None)
-                            fresh = (await asyncio.to_thread(cgroup_usage, pid)
-                                     if isinstance(pid, int) else None)
-                            if fresh is not None:
-                                usage = fresh["working_set"]
-                                raw = fresh["current"]
-                                sample_dict = fresh
-                        # The working-set fix: file cache inflates
-                        # memory.current past the threshold while the working
-                        # set is fine. Reclaim the difference off the event
-                        # loop (with a per-attachment backoff — the kernel
-                        # answers EAGAIN when it cannot reclaim the full
-                        # amount), re-read, and only then decide.
-                        attempted_recently = (
-                            clock() - reclaim_backoff.get(row["id"], -RECLAIM_BACKOFF_SECONDS)
-                            < RECLAIM_BACKOFF_SECONDS)
-                        if (sample_dict is not None and usage < effective
-                                and crosses_warning(raw, effective,
-                                                    config["memory_warn_percent"])
-                                and not attempted_recently):
-                            reclaim_backoff[row["id"]] = clock()
-                            amount = sample_dict["current"] - usage
-                            await asyncio.to_thread(reclaim_scope,
-                                                    sample_dict["root"], amount)
-                            pid = getattr(getattr(adapter, "proc", None),
-                                          "pid", None)
-                            fresh = (await asyncio.to_thread(cgroup_usage, pid)
-                                     if isinstance(pid, int) else None)
-                            if fresh is not None:
-                                usage = fresh["working_set"]
-                                raw = fresh["current"]
-                                sample_dict = fresh
-                        shmem = (sample_dict or {}).get("shmem", 0)
-                        anonymous = (sample_dict or {}).get("anon")
-                        file_cache = (sample_dict or {}).get("file")
-                        kernel = (sample_dict or {}).get("kernel_total")
-                        if usage < effective * REARM_RATIO:
-                            armed[row["id"]] = True
-                            over[row["id"]] = False
-                        elif usage >= effective > 0 and not over.get(row["id"]):
-                            over[row["id"]] = True
-                            armed[row["id"]] = False
-                            notified[row["id"]] = clock()
-                            await _warn(runtime, row, usage, cap, shmem=shmem, sample=sample_dict)
-                        elif crosses_warning(usage, effective, config["memory_warn_percent"]):
-                            now = clock()
-                            inside_window = now - notified.get(row["id"], -NOTICE_WINDOW) < NOTICE_WINDOW
-                            if armed.get(row["id"], True) and not inside_window:
+                            sample = (sampler(adapter, process_table=table,
+                                              cgroup_sample=cgroup_samples.get(
+                                                  row["id"], _NO_CGROUP_SAMPLE))
+                                      if sampler is read_usage else sampler(adapter))
+                            if sample is None:
+                                continue
+                            if activation.get(row["id"]) is not adapter:
+                                for state in (armed, notified, over):
+                                    state.pop(row["id"], None)
+                                activation[row["id"]] = adapter
+                            sample_dict = cgroup_samples.get(row["id"])
+                            raw = sample[3] if len(sample) > 3 else sample[0]
+                            usage = sample[0]
+                            cap = cap_bytes(row, config)
+                            effective = warning_limit(cap)
+                            # Finding 5.15: when the working set crosses the
+                            # threshold, first reap old pytest runs in this
+                            # process's own temp directory (once per backoff
+                            # window), then re-read before deciding.
+                            if (sample_dict is not None
+                                    and crosses_warning(usage, effective,
+                                                        config["memory_warn_percent"])
+                                    and clock() - tmp_backoff.get(row["id"], -60.0)
+                                    >= 60.0):
+                                tmp_backoff[row["id"]] = clock()
+                                await asyncio.to_thread(reap_pytest_if_tmpfs,
+                                                        attachment_tmp_dir(row["id"]))
+                                pid = getattr(getattr(adapter, "proc", None),
+                                              "pid", None)
+                                fresh = (await asyncio.to_thread(cgroup_usage, pid)
+                                         if isinstance(pid, int) else None)
+                                if fresh is not None:
+                                    usage = fresh["working_set"]
+                                    raw = fresh["current"]
+                                    sample_dict = fresh
+                            # The working-set fix: file cache inflates
+                            # memory.current past the threshold while the working
+                            # set is fine. Reclaim the difference off the event
+                            # loop (with a per-attachment backoff — the kernel
+                            # answers EAGAIN when it cannot reclaim the full
+                            # amount), re-read, and only then decide.
+                            attempted_recently = (
+                                clock() - reclaim_backoff.get(row["id"], -RECLAIM_BACKOFF_SECONDS)
+                                < RECLAIM_BACKOFF_SECONDS)
+                            if (sample_dict is not None and usage < effective
+                                    and crosses_warning(raw, effective,
+                                                        config["memory_warn_percent"])
+                                    and not attempted_recently):
+                                reclaim_backoff[row["id"]] = clock()
+                                amount = sample_dict["current"] - usage
+                                await asyncio.to_thread(reclaim_scope,
+                                                        sample_dict["root"], amount)
+                                pid = getattr(getattr(adapter, "proc", None),
+                                              "pid", None)
+                                fresh = (await asyncio.to_thread(cgroup_usage, pid)
+                                         if isinstance(pid, int) else None)
+                                if fresh is not None:
+                                    usage = fresh["working_set"]
+                                    raw = fresh["current"]
+                                    sample_dict = fresh
+                            shmem = (sample_dict or {}).get("shmem", 0)
+                            anonymous = (sample_dict or {}).get("anon")
+                            file_cache = (sample_dict or {}).get("file")
+                            kernel = (sample_dict or {}).get("kernel_total")
+                            if usage < effective * REARM_RATIO:
+                                armed[row["id"]] = True
+                                over[row["id"]] = False
+                            elif usage >= effective > 0 and not over.get(row["id"]):
+                                over[row["id"]] = True
                                 armed[row["id"]] = False
-                                notified[row["id"]] = now
+                                notified[row["id"]] = clock()
                                 await _warn(runtime, row, usage, cap, shmem=shmem, sample=sample_dict)
-                        runtime.memory_usage[row["id"]] = {
-                            "usage_bytes": usage, "cap_bytes": cap,
-                            "raw_bytes": raw, "anon_bytes": anonymous,
-                            "file_bytes": file_cache, "kernel_bytes": kernel,
-                            "percent": min(100, usage * 100 // max(cap, 1)),
-                            "source": sample[2], "sampled_at": time.time(),
-                        }
-                        await runtime.broadcast(row["conv_id"], MemoryUsageEvent(
-                            attachment_id=row["id"], usage_bytes=usage, cap_bytes=cap,
-                            raw_bytes=raw, anon_bytes=anonymous, file_bytes=file_cache,
-                            kernel_bytes=kernel,
-                            percent=min(100, usage * 100 // max(cap, 1)),
-                        ))
-                inventory.kick(runtime)
-                await pusher.tick(runtime)
+                            elif crosses_warning(usage, effective, config["memory_warn_percent"]):
+                                now = clock()
+                                inside_window = now - notified.get(row["id"], -NOTICE_WINDOW) < NOTICE_WINDOW
+                                if armed.get(row["id"], True) and not inside_window:
+                                    armed[row["id"]] = False
+                                    notified[row["id"]] = now
+                                    await _warn(runtime, row, usage, cap, shmem=shmem, sample=sample_dict)
+                            runtime.memory_usage[row["id"]] = {
+                                "usage_bytes": usage, "cap_bytes": cap,
+                                "raw_bytes": raw, "anon_bytes": anonymous,
+                                "file_bytes": file_cache, "kernel_bytes": kernel,
+                                "percent": min(100, usage * 100 // max(cap, 1)),
+                                "source": sample[2], "sampled_at": time.time(),
+                            }
+                            await runtime.broadcast(row["conv_id"], MemoryUsageEvent(
+                                attachment_id=row["id"], usage_bytes=usage, cap_bytes=cap,
+                                raw_bytes=raw, anon_bytes=anonymous, file_bytes=file_cache,
+                                kernel_bytes=kernel,
+                                percent=min(100, usage * 100 // max(cap, 1)),
+                            ))
+                    inventory.kick(runtime)
+                    await pusher.tick(runtime)
             except asyncio.CancelledError:
                 raise
             except Exception:

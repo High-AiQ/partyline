@@ -95,7 +95,7 @@ export interface PartylineApi {
   adapters(): Promise<Adapter[]>;
   importAdapters(repository: string, ref: string): Promise<AdapterImportResult>;
   conversations(archived?: boolean): Promise<Conversation[]>;
-  conversation(id: string): Promise<ConversationDetail>;
+  conversation(id: string, includeGit?: boolean): Promise<ConversationDetail>;
   messagePage(id: string, page?: MessagePageRequest): Promise<MessagePage>;
   createConversation(name: string): Promise<Conversation>;
   renameConversation(id: string, name: string): Promise<Conversation>;
@@ -173,7 +173,10 @@ export const api: PartylineApi = {
     request(`/api/conversations${archived ? "?archived=1" : ""}`, {
       schema: ConversationSchema.array(),
     }),
-  conversation: (id) => request(`/api/conversations/${id}`, { schema: ConversationDetailSchema }),
+  conversation: (id, includeGit = true) =>
+    request(`/api/conversations/${id}${includeGit ? "" : "?include_git=false"}`, {
+      schema: ConversationDetailSchema,
+    }),
   messagePage,
   createConversation: (name) =>
     request("/api/conversations", { schema: ConversationSchema, method: "POST", body: { name } }),
