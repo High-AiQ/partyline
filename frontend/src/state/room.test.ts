@@ -176,3 +176,65 @@ describe("conversations_changed event", () => {
     expect(archiveSpy).toHaveBeenCalled();
   });
 });
+
+describe("line opening with slow git metadata", () => {
+  it("fills in git metadata after the fast response", async () => {
+    session.user = { id: 1, email: "greg@example.com", handle: "greg" };
+    vi.spyOn(wire, "connect").mockReturnValue(undefined);
+    vi.spyOn(room, "loadConversations").mockResolvedValue(undefined);
+    const detail: ConversationDetail = {
+      conversation,
+      messages: [],
+      has_more_messages: false,
+      attachments: [jack],
+      working: [],
+      presence: null,
+    };
+    let finish!: (detail: ConversationDetail) => void;
+    const slow = new Promise<ConversationDetail>((resolve) => (finish = resolve));
+    vi.spyOn(api, "conversation").mockImplementation((_id, includeGit) =>
+      includeGit === false ? Promise.resolve(detail) : slow,
+    );
+    await room.open(conversation);
+    finish({ ...detail, attachments: [{ ...jack, cwd_git: { sha: "d87b3ae", dirty: false } }] });
+    await vi.waitFor(() => {
+      expect(room.attachments[0]?.cwd_git?.sha).toBe("d87b3ae");
+    });
+  });
+
+  it("shows messages before git completes and keeps newer attachment events", async () => {
+    session.user = { id: 1, email: "greg@example.com", handle: "greg" };
+    vi.spyOn(wire, "connect").mockReturnValue(undefined);
+    vi.spyOn(room, "loadConversations").mockResolvedValue(undefined);
+    const message = {
+      id: 42,
+      conv_id: conversation.id,
+      sender: "greg",
+      sender_type: "human" as const,
+      body: "already here",
+      created_at: 2,
+      files: [],
+    };
+    const detail: ConversationDetail = {
+      conversation,
+      messages: [message],
+      has_more_messages: false,
+      attachments: [jack],
+      working: [],
+      presence: null,
+    };
+    let finish!: (detail: ConversationDetail) => void;
+    const slow = new Promise<ConversationDetail>((resolve) => (finish = resolve));
+    vi.spyOn(api, "conversation").mockImplementation((_id, includeGit) =>
+      includeGit === false ? Promise.resolve(detail) : slow,
+    );
+
+    await room.open(conversation);
+    expect(room.messages.map((item) => item.body)).toContain("already here");
+    room.upsertAttachment({ ...jack, status: "running" });
+    finish({ ...detail, attachments: [{ ...jack, cwd_git: { sha: "d87b3ae", dirty: false } }] });
+    await Promise.resolve();
+    expect(room.attachments[0]?.status).toBe("running");
+    expect(room.attachments[0]?.cwd_git).toBeNull();
+  });
+});
