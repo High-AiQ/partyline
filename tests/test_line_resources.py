@@ -283,6 +283,56 @@ class LineResourcesTest(TaskFixture):
 
 
 class ResourceProbeTest(LineResourcesTest):
+    async def test_gpu_power_limit_checks_and_waiter_recovery(self):
+        import os
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as directory:
+            command = Path(directory) / 'nvidia-smi'
+            def fake(body):
+                command.write_text('#!/bin/sh\n'
+                                   '[ "$1" = "--query-gpu=power.limit" ] || exit 2\n'
+                                   '[ "$2" = "--format=csv,noheader,nounits" ] || exit 2\n'
+                                   + body + '\n')
+                command.chmod(0o755)
+
+            with patch.dict(os.environ, {'PATH': directory, 'PARTYLINE_GPU_MAX_POWER_W': '200'}):
+                for output in ('199.5', '200', '150\\n200'):
+                    fake(f"printf '{output}\\n'")
+                    self.assertEqual(self.acquire().status_code, 200)
+                    self.release()
+                for output in ('201', '150\\n201', 'N/A', '150\\nNaN', ''):
+                    fake(f"printf '{output}\\n'")
+                    response = self.acquire()
+                    self.assertEqual(response.status_code, 503)
+                    if '201' in output:
+                        self.assertIn('201 W', response.json()['detail'])
+                        self.assertIn('200 W', response.json()['detail'])
+                        self.assertIn('person must lower', response.json()['detail'])
+                    self.assertEqual(self.claims()['queue'], [])
+                fake('exit 1')
+                self.assertEqual(self.acquire().status_code, 503)
+                fake("printf '100\\n'")
+                self.acquire()
+                self.acquire(self.second)
+                fake("printf '250\\n'")
+                self.release()
+                self.assertIsNone(self.claims()['holder'])
+                self.assertEqual(len(self.claims()['queue']), 1)
+                fake("printf '200\\n'")
+                await maintain(self.runtime)
+                self.assertEqual(self.claims()['holder']['attachment_id'], 'inspect')
+                command.unlink()
+                self.assertEqual(self.acquire(self.second).status_code, 200)
+
+            with patch.dict(os.environ, {'PATH': directory,
+                                         'PARTYLINE_RESOURCE_PROBES': '{"gpu":null}'}, clear=True):
+                fake('exit 1')
+                self.assertEqual(self.acquire(self.second).status_code, 200)
+            with patch.dict(os.environ, {'PARTYLINE_GPU_MAX_POWER_W': 'nan'}):
+                self.assertEqual(self.acquire().status_code, 503)
+
     async def test_probes_run_without_database_lock_or_transaction(self):
         checked = []
 
