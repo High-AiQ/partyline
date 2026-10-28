@@ -8,6 +8,7 @@ is what filled WSL RAM on 2026-08-19.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -25,16 +26,16 @@ async def tail_grok_transcript(adapter, path: Path, handle) -> None:
     while adapter.alive():
         try:
             with path.open(encoding="utf-8", errors="replace") as file:
-                if not delivery_plan_matches(adapter, file):
+                if not await asyncio.to_thread(delivery_plan_matches, adapter, file):
                     await resync_after_replace(adapter, path)
                     continue
                 assistant_index = 0
                 adapter.mark_ready()
                 while adapter.alive():
                     position = file.tell()
-                    line = file.readline()
+                    line = await asyncio.to_thread(file.readline)
                     if not line:
-                        if adapter._replaced(file, path):
+                        if await asyncio.to_thread(adapter._replaced, file, path):
                             await resync_after_replace(adapter, path)
                             break
                         if adapter._restoring_to is not None:
@@ -53,7 +54,7 @@ async def tail_grok_transcript(adapter, path: Path, handle) -> None:
                         await adapter._poll()
                         continue
                     try:
-                        record = json.loads(line)
+                        record = await asyncio.to_thread(json.loads, line)
                     except json.JSONDecodeError:
                         continue
                     adapter.observe_claim(line)

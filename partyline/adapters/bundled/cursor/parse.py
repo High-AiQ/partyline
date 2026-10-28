@@ -223,3 +223,23 @@ def resync_positional(
     else:
         incoming = incoming_fps
     return incoming[: len(seen_fps)]
+
+
+def scan_transcript(path):
+    """Read a transcript and compute fingerprints and turn-end sentinels."""
+    with open(path, encoding="utf-8", errors="replace") as file:
+        lines = file.readlines()
+    fingerprints = []
+    sentinels = set()
+    for line in lines:
+        if not line.endswith("\n"):
+            continue
+        fp = fingerprint(line)
+        fingerprints.append(fp)
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(record, dict) and record.get("type") == "turn_ended":
+            sentinels.add(fp)
+    return lines, fingerprints, sentinels
