@@ -118,7 +118,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
             self._composer_shows(wake[0]) for wake in self._outstanding
         ):
             await self._write_all(b"\r")
-        digest = self.format_digest(messages)
+        digest = await asyncio.to_thread(self.format_digest, messages)
         marker = self._pending_paste_marker = self._new_paste_marker()
         return await self._deliver_with_wake_receipt(messages, digest, marker)
 

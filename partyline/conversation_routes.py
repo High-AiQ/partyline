@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 
@@ -225,7 +226,7 @@ def register_conversation_routes(
             start_after_history=True, counts_toward_total=bool(body.counts_toward_total),
         )
         try:
-            placed = ensure_placed(db, conv_id, ignore_attachment_id=att_id)
+            placed = await asyncio.to_thread(ensure_placed, db, conv_id, ignore_attachment_id=att_id)
             if placed and describe(placed):
                 await runtime.post_message(conv_id, "system", "system", describe(placed))
             cwd = os.path.abspath(os.path.expanduser(chosen or line_cwd(db, conv_id) or cwd))
@@ -233,7 +234,7 @@ def register_conversation_routes(
                 raise HTTPException(400, f"cwd does not exist: {cwd}")
             db._exec("UPDATE attachments SET cwd=? WHERE id=?", (cwd, att_id))
             att["cwd"] = cwd
-            if warning := outside_worktree_note(db, conv_id, cwd):
+            if warning := await asyncio.to_thread(outside_worktree_note, db, conv_id, cwd):
                 await runtime.post_message(conv_id, "system", "system", warning)
         except BaseException:
             await db.set_attachment_status_async(att_id, "exited", runtime_owner)

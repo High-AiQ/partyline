@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
+
 
 async def deliver_prompt(adapter, messages: list[dict]) -> bool | None:
     """Send one ACP prompt and leave ids uncredited until its transcript record."""
     if not adapter._session_id:
         raise RuntimeError("ACP session is not ready")
     adapter._silent_until_wake = False
-    digest = adapter.format_digest(messages)
+    digest = await asyncio.to_thread(adapter.format_digest, messages)
     marker = adapter._new_paste_marker()
     tracked = adapter._track_jsonl_paste(digest, messages, marker)
     try:

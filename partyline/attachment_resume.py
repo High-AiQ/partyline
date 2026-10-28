@@ -222,14 +222,14 @@ async def _resume_adapter_locked(
     att["hook_url"] = hook_url(att_id, runtime_owner)
     att["review_worktrees"] = list_review_worktrees(runtime.db, att["conv_id"])
     load_write_grants(runtime.db, att)
-    fence_workspaces.load(runtime.db, att)
+    await asyncio.to_thread(fence_workspaces.load, runtime.db, att)
     att["global_prose"] = runtime.db.get_setting("global_prose")
     att["db_paths"] = database_paths(runtime.db)
     provision_connection(runtime.db.path, att)
     att["digest_rider"] = lambda: ""
     bind_connection_hint(att)
     bind_role_delivery(runtime.db, att, runtime)
-    history = delivered_history(runtime.db, att)
+    history = await asyncio.to_thread(delivered_history, runtime.db, att)
     att["delivered_bodies"] = history.bodies
     att["delivered_transcript_records"] = history.transcript_records
     att["legacy_relayed_bodies"] = history.legacy_relayed_bodies
@@ -261,7 +261,7 @@ async def _resume_adapter_locked(
             att_id, session, runtime_owner
         ),
     )
-    startup_staged = adapter.stage_startup_delivery(startup_messages or [])
+    startup_staged = await asyncio.to_thread(adapter.stage_startup_delivery, startup_messages or [])
     att["memory_limit"] = att.get("memory_limit") or format_limit(
         settings(runtime.db)["default_process_memory_bytes"]
     )

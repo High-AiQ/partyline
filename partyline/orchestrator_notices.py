@@ -19,7 +19,7 @@ async def tell(runtime, ident, text, source=None):
 
 async def report(runtime, row):
     db = runtime.db
-    row = task(db, row['conv_id'])
+    row = await asyncio.to_thread(task, db, row['conv_id'])
     if row['status'] not in ('done', 'approved', 'blocked') and not (
             row['status'] == 'in_review' and row['policy'] == 'captain') and row['stall_stage'] != 3:
         return

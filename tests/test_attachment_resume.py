@@ -206,6 +206,25 @@ class AttachmentResumeTest(unittest.IsolatedAsyncioTestCase):
     @patch("partyline.attachment_resume.bind_role_delivery")
     @patch("partyline.attachment_resume.bind_connection_hint")
     @patch("partyline.attachment_resume.provision_connection")
+    async def test_resume_loads_fence_and_history_off_loop(self, *_mocks):
+        import threading
+        from partyline.attachment_resume import delivered_history
+        main = threading.get_ident()
+        threads = []
+        def fence(_db, _att):
+            threads.append(threading.get_ident())
+        def history(db, att):
+            threads.append(threading.get_ident())
+            return delivered_history(db, att)
+        with patch("partyline.attachment_resume.fence_workspaces.load", side_effect=fence), \
+             patch("partyline.attachment_resume.delivered_history", side_effect=history):
+            await resume_adapter("one", None, **self.resume_arguments())
+        self.assertEqual(len(threads), 2)
+        self.assertTrue(all(ident != main for ident in threads))
+
+    @patch("partyline.attachment_resume.bind_role_delivery")
+    @patch("partyline.attachment_resume.bind_connection_hint")
+    @patch("partyline.attachment_resume.provision_connection")
     async def test_resume_adapter_loads_write_grants(self, *_mocks):
         await resume_adapter("one", None, **self.resume_arguments())
         self.assertEqual([row["path"] for row in self.captured["write_grants"]], [self.grant])

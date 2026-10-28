@@ -1,5 +1,13 @@
 # Lessons: the false-assumptions ledger
 
+## Small synchronous probes can stall the event loop
+
+Assuming a bounded directory walk or a quick Git query is safe in a digest or
+restart path missed contention and large trees in production. Run filesystem,
+Git and database scans in workers, keep temp summaries stale while refreshing,
+and enforce one shared walk budget across all attachment directories. Test the
+thread boundary as well as the resulting output.
+
 ## Small per-byte replay costs accumulate across terminals
 
 Assuming one fast replay update stayed cheap across many busy attachments
