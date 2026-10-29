@@ -1216,3 +1216,22 @@ either. The wait only defers the check: when it runs out the task owes a hand-of
 again and gets the same single reminder, never a skipped straight to a stall
 report. A wait is a structured statement, never prose: a chat message saying
 "still waiting" waits for nothing.
+
+## Captain handover (phase 1)
+
+A captain can use `offer_handover(attachment_id, debrief)` to offer its role to
+another live attachment on the same line after that attachment has been held for
+at least 60 seconds. The debrief is required and limited to 4000 characters;
+refer to files, directories, notes, worktrees and report IDs. The receiver hears
+the marked offer and can call `accept_handover(handover_id)`; the old captain
+can call `cancel_handover(handover_id)` while it is offered. Only one handover
+may be pending per line. An offer expires after 15 minutes, including across a
+server restart. A captain must resolve or cancel its pending restart request
+before offering or accepting a handover.
+
+Acceptance atomically transfers captainship, any open bridge ambassador role,
+heartbeat, and pending write-set and memory-request receipt targets. Reports
+and tasks are line-owned. Resource leases and attachment notes remain with their
+original process. The old captain stays attached as an ordinary participant
+marked as handing off; the new captain receives the captain pack. Two-party
+completion and detachment are pending phase 2 and are not available yet.

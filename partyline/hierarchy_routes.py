@@ -8,6 +8,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from .auth_guard import request_principal
+from .captain_handover import HandoverIdIn, OfferIn
 from .contracts import (
     ConversationEvent,
     ConversationResponse,
@@ -79,9 +80,13 @@ def hierarchy_router(runtime) -> APIRouter:
         from .role_delivery import _instructions, current_role
 
         state = current_role(db, principal.attachment_id)
+        from .captain_handover import state_text
+        handover_state = state_text(db, principal.attachment_id)
         if state.role != "lead":
+            if handover_state:
+                return {"briefing": handover_state}
             raise HTTPException(403, "the captain pack is only available to captains")
-        return {"briefing": _instructions(state, db)}
+        return {"briefing": "\n\n".join(filter(None, (_instructions(state, db), handover_state)))}
 
     @router.get("/api/conversations/{conv_id}/lead", response_model=LeadOut)
     def get_lead(request: Request, conv_id: str):
@@ -147,6 +152,21 @@ def hierarchy_router(runtime) -> APIRouter:
             )
             await ring_workers(runtime, conv_id, att)  # workers learn their pack now, not later
         return LeadOut(attachment_id=body.attachment_id)
+
+    @router.post("/api/conversations/{conv_id}/handover/offer")
+    async def offer_handover(request: Request, conv_id: str, body: OfferIn):
+        from .captain_handover import offer_route
+        return await offer_route(runtime, request, conv_id, body)
+
+    @router.post("/api/conversations/{conv_id}/handover/cancel")
+    async def cancel_handover(request: Request, conv_id: str, body: HandoverIdIn):
+        from .captain_handover import cancel_route
+        return await cancel_route(runtime, request, conv_id, body)
+
+    @router.post("/api/conversations/{conv_id}/handover/accept")
+    async def accept_handover(request: Request, conv_id: str, body: HandoverIdIn):
+        from .captain_handover import accept_route
+        return await accept_route(runtime, request, conv_id, body)
 
     @router.put("/api/conversations/{conv_id}/parent", response_model=ConversationResponse)
     async def link_parent(request: Request, conv_id: str, body: ParentIn):
