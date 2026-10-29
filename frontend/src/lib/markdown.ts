@@ -220,6 +220,20 @@ export function renderMessage(body: string | undefined, rich: boolean | "human" 
   return highlightMentions(host, document).innerHTML;
 }
 
+/** Render an uploaded Markdown document with the chat parser and safe remote images. */
+export function renderFileMarkdown(body: string): string {
+  const parsed = richMarkedForMessage().parse(escapeHtml(body));
+  if (typeof parsed !== "string") throw new Error("Markdown must render synchronously");
+  const fragment = DOMPurify.sanitize(parsed, {
+    ...PURIFY_CONFIG,
+    ALLOWED_TAGS: [...PURIFY_CONFIG.ALLOWED_TAGS, "img"],
+    ALLOWED_ATTR: [...PURIFY_CONFIG.ALLOWED_ATTR, "src", "alt", "title"],
+  });
+  const host = document.createElement("div");
+  host.append(fragment);
+  return host.innerHTML;
+}
+
 export function hue(name: string): number {
   let h = 0;
   for (const character of name) h = (h * 31 + character.charCodeAt(0)) % 360;

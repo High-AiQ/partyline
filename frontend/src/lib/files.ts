@@ -63,3 +63,16 @@ export async function downloadFile(file: FileRef): Promise<void> {
     URL.revokeObjectURL(objectUrl);
   }, 60_000);
 }
+
+export const VIEW_MAX_BYTES = 1024 * 1024;
+
+export function viewableFileType(file: FileRef): "txt" | "md" | null {
+  const match = file.filename?.match(/\.(txt|md)$/i);
+  return match ? (match[1]?.toLowerCase() as "txt" | "md") : null;
+}
+
+export async function readFileForView(file: FileRef): Promise<string> {
+  if (file.bytes > VIEW_MAX_BYTES) throw new Error("file is too large to view");
+  const blob = await requestBlob(file.urls.original, true, VIEW_MAX_BYTES);
+  return blob.text();
+}
