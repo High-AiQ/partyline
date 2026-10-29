@@ -5,11 +5,13 @@
    * so they ride the same tokened URL the image tiers use; the download card
    * instead fetches bytes with a header and saves them under the uploaded name.
    */
-  import { downloadFile, fileLabel, humanSize } from "../../lib/files";
+  import { downloadFile, fileLabel, humanSize, viewableFileType } from "../../lib/files";
   import { authenticatedResourceUrl } from "../../lib/socket-auth";
   import type { FileRef } from "../../lib/contracts";
   import { tooltip } from "../../lib/tooltip";
   import { isModelFile } from "../../lib/model-files";
+  import { dialogs } from "../../state/dialogs.svelte";
+  import FileViewerDialog from "../dialogs/FileViewerDialog.svelte";
   import ModelAttachment from "./ModelAttachment.svelte";
 
   interface Props {
@@ -66,13 +68,20 @@
       <ModelAttachment {file} {index} />
     {:else}
       <div
-        class="card grid items-center gap-2.5 overflow-hidden rounded-md border border-line bg-ink-2 px-2.5 py-2 [grid-template-columns:24px_minmax(0,1fr)_auto_auto]"
+        class="card grid items-center gap-2.5 overflow-hidden rounded-md border border-line bg-ink-2 px-2.5 py-2 [grid-template-columns:24px_minmax(0,1fr)_auto_auto_auto]"
       >
         <span class="text-center text-[15px]" aria-hidden="true">📎</span>
         <span class="truncate text-xs text-cream" use:tooltip={{ label: fileLabel(file, index) }}
           >{fileLabel(file, index)}</span
         >
         <span class="truncate text-[10px] text-cream-faint">{file.mime} · {humanSize(file.bytes)}</span>
+        {#if viewableFileType(file)}
+          <button
+            type="button"
+            class="min-h-11 border-0 bg-transparent p-0 text-[11px] text-copper-hot hover:bg-transparent hover:underline"
+            onclick={() => dialogs.open(FileViewerDialog, { file })}>View</button
+          >
+        {/if}
         <button
           class="download min-h-11 border-0 bg-transparent p-0 text-[11px] text-copper-hot hover:bg-transparent hover:underline disabled:cursor-wait disabled:opacity-60"
           type="button"
