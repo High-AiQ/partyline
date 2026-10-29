@@ -90,9 +90,11 @@ def briefing_pointer(conv_id: str) -> str:
 
 
 def bind_role_delivery(db, att: dict, runtime=None) -> None:
+    from .captain_handover import state_text
     initial = current_role(db, att["id"])
     att["role_briefing"] = "\n\n".join(
-        part for part in (_instructions(initial, db), pack_for(db, att["id"])) if part)
+        part for part in (_instructions(initial, db), pack_for(db, att["id"]),
+                          state_text(db, att["id"])) if part)
     original_rider = att["digest_rider"]
     # The startup briefing already carries the pack for both fresh and resumed
     # attachments.  A resume therefore starts at the current role just like a
@@ -163,7 +165,8 @@ def bind_role_delivery(db, att: dict, runtime=None) -> None:
         else:
             worker_reminder_sent = False
         return "\n".join(
-            part for part in (original_rider(), goal, staffing, handoff, update, worker,
+            part for part in (original_rider(), state_text(db, att["id"]), goal, staffing, handoff,
+                              update, worker,
                               pointer, docs, resource)
             if part)
 
