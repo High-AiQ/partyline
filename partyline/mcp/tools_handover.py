@@ -15,7 +15,9 @@ def tool_list(state):
          'directories, notes, worktrees and report IDs in the required debrief (maximum 4000 characters).'),
         ('cancel_handover', 'cancel', 'Cancel your pending handover offer.'),
         ('accept_handover', 'accept', 'Accept an offer addressed to your attachment. A pending restart '
-         'request from the old captain must be resolved or cancelled first.')):
+         'request from the old captain must be resolved or cancelled first.'),
+        ('complete_handover', 'complete', 'Confirm the accepted handover. Both old and new captains must '
+         'confirm before the old captain is detached. A person may resolve a timed-out handover.')):
         properties = ({'attachment_id': ref, 'debrief': {'type': 'string', 'minLength': 1, 'maxLength': 4000}}
                       if tail == 'offer' else {'handover_id': ref})
         result.append({'name': name, 'description': description, 'inputSchema': {

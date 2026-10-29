@@ -163,7 +163,7 @@ class HandoverTest(unittest.TestCase):
         from partyline.mcp import tools_handover
         state = {'kind': 'machine', 'role': 'worker'}
         self.assertEqual({t['name'] for t in tools_handover.tool_list(state)},
-                         {'offer_handover', 'accept_handover', 'cancel_handover'})
+                         {'offer_handover', 'accept_handover', 'cancel_handover', 'complete_handover'})
         with self.assertRaisesRegex(ValueError, '4001'):
             tools_handover.call(None, 'offer_handover',
                                 {'attachment_id': 'new', 'debrief': 'x' * 4001}, state)

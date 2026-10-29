@@ -13,3 +13,9 @@ MIGRATIONS = [
     "CREATE UNIQUE INDEX IF NOT EXISTS captain_handovers_pending ON captain_handovers(conv_id) "
     "WHERE state IN ('offered','accepted')",
 ]
+
+# Completion persists a detach intent and a deduplicated timeout notice.
+MIGRATIONS += [
+    "ALTER TABLE captain_handovers ADD COLUMN timeout_notified_at REAL",
+    "ALTER TABLE captain_handovers ADD COLUMN detach_finished_at REAL",
+]

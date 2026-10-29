@@ -32,8 +32,8 @@ control, and the next compact loses your acceptance criteria again.
 Use `offer_handover` to offer the role to a live attachment on your own line;
 `accept_handover` accepts and `cancel_handover` cancels an offer. Reference files,
 directories, notes, worktrees and report IDs in the debrief. Resolve or cancel
-your pending restart request first. The old captain remains attached during
-phase 1. See [captain handover](hierarchy.md#captain-handover-phase-1).
+your pending restart request first. Both participants confirm with `complete_handover`; the server detaches the
+old captain only after both confirm. See [captain handover](hierarchy.md#captain-handover).
 
 ## Visual acceptance needs eyes
 
