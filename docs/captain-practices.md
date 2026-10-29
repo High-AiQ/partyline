@@ -27,6 +27,14 @@ fresh instance keeps the captain role if it held one and starts from the
 re-briefing. Do not re-prompt it — the summary it kept is not under your
 control, and the next compact loses your acceptance criteria again.
 
+## Hand over captainship
+
+Use `offer_handover` to offer the role to a live attachment on your own line;
+`accept_handover` accepts and `cancel_handover` cancels an offer. Reference files,
+directories, notes, worktrees and report IDs in the debrief. Resolve or cancel
+your pending restart request first. The old captain remains attached during
+phase 1. See [captain handover](hierarchy.md#captain-handover-phase-1).
+
 ## Visual acceptance needs eyes
 
 Know which presets can read images or audio. A contract whose acceptance
