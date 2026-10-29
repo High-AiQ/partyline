@@ -12,6 +12,7 @@ from .auto_compact_schema import MIGRATIONS as AUTO_COMPACT
 from .docker_mode_schema import MIGRATIONS as DOCKER_MODE
 from .bridge_schema import MIGRATIONS as BRIDGE
 from .retirement_schema import MIGRATIONS as RETIREMENT
+from .captain_handover_schema import MIGRATIONS as HANDOVER
 from .orchestrator_schema import MIGRATIONS as ORCHESTRATOR
 MIGRATIONS = [
     "ALTER TABLE attachments ADD COLUMN cli_session TEXT",
@@ -278,13 +279,10 @@ MIGRATIONS = [
     )""",
     """CREATE TRIGGER IF NOT EXISTS delete_process_incidents AFTER DELETE ON attachments
         BEGIN DELETE FROM process_incidents WHERE attachment_id=OLD.id; END""",
-    # Instance-wide preferences; a general key/value table avoids one-off columns.
     """CREATE TABLE IF NOT EXISTS settings(
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
     )""",
-    # Per-line bookmarks. Message ownership is checked by the API because the
-    # legacy messages table has no foreign keys; purge explicitly removes pins.
     """CREATE TABLE IF NOT EXISTS message_pins(
         conv_id TEXT NOT NULL,
         message_id INTEGER NOT NULL,
@@ -297,4 +295,5 @@ MIGRATIONS = [
         BEGIN DELETE FROM message_pins WHERE conv_id=OLD.conv_id AND message_id=OLD.id; END""",
 ]
 MIGRATIONS.extend(MEMORY + IDEMPOTENCY + NOTES + COMPACTION + ACCEPT_HISTORY
-                  + SCRATCH + LEASE + GATES + AUTO_COMPACT + DOCKER_MODE + BRIDGE + RETIREMENT + ORCHESTRATOR)
+                  + SCRATCH + LEASE + GATES + AUTO_COMPACT + DOCKER_MODE + BRIDGE + RETIREMENT + ORCHESTRATOR
+                  + HANDOVER)

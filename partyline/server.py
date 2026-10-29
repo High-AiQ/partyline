@@ -161,7 +161,6 @@ async def _run_automatic_reattachment() -> None:
             "and will retry on the next restart"
         )
 
-
 @asynccontextmanager
 async def lifespan(app):
     deployment.prime()  # pin the served checkout's HEAD to this boot, before any pull
@@ -183,7 +182,9 @@ async def lifespan(app):
     # The monitor's database state survives restarts, including an unsettled wake.
     # Behind the `heartbeat` flag (off by default since 1.23.0): a switched-off
     # server neither ticks nor answers the routes.
-    tasks = [automatic_task, asyncio.create_task(monitor_event_loop_lag()),
+    from .captain_handover import expire_offers
+    tasks = [automatic_task, asyncio.create_task(expire_offers(runtime)),
+             asyncio.create_task(monitor_event_loop_lag()),
              asyncio.create_task(run_memory_sampler(runtime)),
              asyncio.create_task(run_task_maintenance(runtime)),
              asyncio.create_task(run_resource_leases(runtime))]
@@ -197,7 +198,6 @@ async def lifespan(app):
             with suppress(asyncio.CancelledError):
                 await task
         await runtime.shutdown()
-
 
 app = FastAPI(lifespan=lifespan)
 app.state.bind = BindConfig()
