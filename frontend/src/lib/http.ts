@@ -1,5 +1,5 @@
 /** Authenticated HTTP transport shared by every REST surface. */
-
+import { boundedBlob } from "./bounded-blob";
 import type { ZodError, ZodType } from "zod";
 import { ApiErrorBodySchema, AuthTokenResponseSchema } from "./contracts";
 import type { AuthTokenResponse } from "./contracts";
@@ -148,7 +148,7 @@ export async function recoverSocketAuthentication(
 }
 
 /** Fetch protected binary content without putting a bearer token in its URL. */
-export async function requestBlob(path: string, allowRetry = true): Promise<Blob> {
+export async function requestBlob(path: string, allowRetry = true, maxBytes?: number): Promise<Blob> {
   const startedWith = readAccessToken();
   const headers = startedWith ? { Authorization: `Bearer ${startedWith}` } : undefined;
   let response: Response;
@@ -166,11 +166,11 @@ export async function requestBlob(path: string, allowRetry = true): Promise<Blob
       if (!isAuthenticationFailure(failure)) throw failure;
       clearSessionIfCurrent(startedWith);
     }
-    if (refreshed) return requestBlob(path, false);
+    if (refreshed) return requestBlob(path, false, maxBytes);
   }
   if (response.status === 401) clearSessionIfCurrent(startedWith);
   if (!response.ok) throw await responseError(response, "could not download the file");
-  return response.blob();
+  return maxBytes === undefined ? response.blob() : boundedBlob(response, maxBytes);
 }
 
 export async function request<Output>(
