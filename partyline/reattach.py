@@ -248,7 +248,7 @@ class ReattachCoordinator:
                     failure_details.append(f"{attachment_id}: attachment missing")
                     self.runtime.reattaching.discard(attachment_id)
                     continue
-                reason = skip_reason(self.runtime.db, attachment)
+                reason = skip_reason(self.runtime.db, attachment, plan["created_at"])
                 if reason:
                     skipped.append(reason)
                     self.runtime.reattaching.discard(attachment_id)

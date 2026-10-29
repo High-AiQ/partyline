@@ -68,7 +68,13 @@ def planned_conversation_ids(
     return [conversation_id, *others]
 
 
-def skip_reason(db: ScopeDb, attachment: Mapping[str, object]) -> str | None:
+def skip_reason(db: ScopeDb, attachment: Mapping[str, object],
+                plan_created_at: float | None = None) -> str | None:
+    if plan_created_at is not None and hasattr(db, '_exec') and db._exec(
+        "SELECT 1 FROM captain_handovers WHERE from_attachment_id=? AND state='completed' "
+        "AND (detach_finished_at IS NULL OR detach_finished_at>=?)", (attachment['id'], plan_created_at)
+    ).fetchone():
+        return "completed captain handover"
     line = db.get_conversation(attachment["conv_id"])
     if line is None or line["archived_at"]:
         return "retired line"

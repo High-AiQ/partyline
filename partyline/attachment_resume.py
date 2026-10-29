@@ -17,6 +17,7 @@ import uuid
 
 from fastapi import HTTPException
 
+from .captain_handover_completion import ensure_handover_detached
 from .adapter_capabilities import adapter_completion
 from .activation_diagnostics import activation_context, line_name
 from .auth_store import rotate_api_token
@@ -161,7 +162,6 @@ def claim_refusal_detail(runtime, attachment: dict) -> str:
         f"runtime state changed{activation_context(runtime, current)}"
     )
 
-
 async def resume_adapter(
     att_id: str,
     startup_messages: list[dict] | None,
@@ -184,7 +184,6 @@ async def resume_adapter(
             hook_url=hook_url,
         )
 
-
 async def _resume_adapter_locked(
     att_id: str,
     startup_messages: list[dict] | None,
@@ -198,6 +197,7 @@ async def _resume_adapter_locked(
     att = runtime.db.get_attachment(att_id)
     if not att:
         raise HTTPException(404)
+    ensure_handover_detached(runtime.db, att_id)
     conv = runtime.db.get_conversation(att["conv_id"])
     if att["status"] in ("starting", "running") or att_id in runtime.live:
         raise HTTPException(409, already_live_detail(runtime, att))
@@ -215,7 +215,6 @@ async def _resume_adapter_locked(
     if not att["resume"]:
         att["cli_session"] = None
         startup_messages = []
-    # Mint the activation before provisioning its hooks and credentials.
     runtime_owner = str(uuid.uuid4())
     att["runtime_owner"] = runtime_owner
     att["api_token"] = rotate_api_token(runtime.db, att_id)

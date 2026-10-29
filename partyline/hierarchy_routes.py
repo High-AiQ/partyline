@@ -66,6 +66,8 @@ def _report_model(row: dict) -> dict:
 def hierarchy_router(runtime) -> APIRouter:
     router = APIRouter()
     db = runtime.db
+    from .captain_handover_completion import router_for
+    router.include_router(router_for(runtime))
 
     @router.get("/api/capabilities", response_model=CapabilityState)
     def get_capabilities(request: Request, conv_id: str | None = Query(default=None)):
