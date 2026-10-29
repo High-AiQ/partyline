@@ -1217,7 +1217,7 @@ again and gets the same single reminder, never a skipped straight to a stall
 report. A wait is a structured statement, never prose: a chat message saying
 "still waiting" waits for nothing.
 
-## Captain handover (phase 1)
+## Captain handover
 
 A captain can use `offer_handover(attachment_id, debrief)` to offer its role to
 another live attachment on the same line after that attachment has been held for
@@ -1232,6 +1232,13 @@ before offering or accepting a handover.
 Acceptance atomically transfers captainship, any open bridge ambassador role,
 heartbeat, and pending write-set and memory-request receipt targets. Reports
 and tasks are line-owned. Resource leases and attachment notes remain with their
-original process. The old captain stays attached as an ordinary participant
-marked as handing off; the new captain receives the captain pack. Two-party
-completion and detachment are pending phase 2 and are not available yet.
+original process. The old captain remains attached as an ordinary participant while handing off;
+the new captain receives the captain pack. Both participants call
+`complete_handover(handover_id)`, in either order. Once both confirm, completion
+and a detach intent are recorded atomically; the server stops the old captain
+through the normal detach path and retries unfinished detaches after restart.
+A one-sided confirmation never detaches the old captain. After 30 minutes the
+line receives one notice naming who has not confirmed. A person can resolve a
+stale handover with `POST /api/conversations/{conv_id}/handover/resolve` and
+`{"handover_id":"…"}`; this releases the pending slot without detaching the old
+captain. A person may detach it separately if appropriate.
