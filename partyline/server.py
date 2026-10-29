@@ -177,13 +177,13 @@ async def lifespan(app):
     # Findings 5.13/5.14/5.15 startup housekeeping: notices, stale rows,
     # legacy temp reaping, previous tmpfs root — each step guarded inside.
     await engage_startup(runtime)
+    from .captain_handover_completion import maintenance, maintenance_once
+    await maintenance_once(runtime)
     automatic_task = asyncio.create_task(_run_automatic_reattachment())
     app.state.automatic_reattach_task = automatic_task
-    # The monitor's database state survives restarts, including an unsettled wake.
-    # Behind the `heartbeat` flag (off by default since 1.23.0): a switched-off
-    # server neither ticks nor answers the routes.
     from .captain_handover import expire_offers
     tasks = [automatic_task, asyncio.create_task(expire_offers(runtime)),
+             asyncio.create_task(maintenance(runtime)),
              asyncio.create_task(monitor_event_loop_lag()),
              asyncio.create_task(run_memory_sampler(runtime)),
              asyncio.create_task(run_task_maintenance(runtime)),

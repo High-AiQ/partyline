@@ -51,6 +51,9 @@ def _validate(conn, conv_id, old_id, target_id, live, pending, now):
         raise HTTPException(404, "Target attachment must be on this same line")
     if target['status'] != 'running' or target_id not in live:
         raise HTTPException(409, "Target attachment must be currently attached and live")
+    if conn.execute("SELECT 1 FROM captain_handovers WHERE state='completed' AND detach_finished_at IS NULL "
+                    "AND from_attachment_id IN (?,?)", (old_id, target_id)).fetchone():
+        raise HTTPException(409, 'A participant has an unfinished handover detach')
     remaining = math.ceil(MIN_ATTACHMENT_SECONDS - (now - target['created_at']))
     if remaining > 0:
         raise HTTPException(409, f"Target must be attached for 60 seconds; {remaining} seconds remain")
@@ -161,9 +164,18 @@ def state_text(db, att_id):
                    (att_id, att_id)).fetchone()
     if not row or (row['state'] == 'offered' and row['offered_at'] + OFFER_TTL_SECONDS <= time.time()):
         return ''
-    return (f"Captain handover {row['id']}: {row['state']}; "
-            f"{'you are handing off' if row['from_attachment_id'] == att_id else 'you are the receiver'}. "
-            "Completion and detachment require the follow-up protocol.")
+    if row['state'] == 'accepted':
+        remaining = []
+        if not row['from_done']:
+            remaining.append('old captain')
+        if not row['to_done']:
+            remaining.append('new captain')
+        role = "you are handing off" if row['from_attachment_id'] == att_id else "you are the receiver"
+        return (f"Captain handover {row['id']}: accepted; {role}; "
+                f"awaiting {', '.join(remaining)}. "
+                "Both participants call complete_handover with this id.")
+    return (f"Captain handover {row['id']}: offered; "
+            f"{'you are handing off' if row['from_attachment_id'] == att_id else 'you are the receiver'}.")
 
 
 def _principal(request, conv):
