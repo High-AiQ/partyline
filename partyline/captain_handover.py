@@ -4,6 +4,8 @@ import math
 import time
 import uuid
 
+from .attachment_broadcast import broadcast_captain
+
 from fastapi import HTTPException, Request
 from pydantic import BaseModel
 
@@ -235,6 +237,7 @@ async def accept_route(runtime, request: Request, conv: str, body: HandoverIdIn)
     old, target, msg = await _locks(runtime, ids, lambda: accept(runtime.db, conv, actor.attachment_id,
         body.handover_id, _live_ids(runtime, ids), getattr(runtime, 'restart_request', None)))
     await runtime.broadcast(conv, MessageEvent(message=MessageResponse.model_validate(msg)))
+    await broadcast_captain(runtime, conv)
     pack = _instructions(current_role(runtime.db, target['id']), runtime.db)
     private = await post_private(runtime, conv, 'system', 'system',
                        f"☏ You accepted captainship from {old['name']}.\n\n{pack}\n\n"

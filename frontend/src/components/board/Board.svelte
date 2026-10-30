@@ -27,13 +27,16 @@
     room.setCaptain(conversationId, null);
     captainRequest += 1;
     const requestId = captainRequest;
+    const revision = room.captainRevision;
     void hierarchyApi
       .lead(conversationId)
       .then((lead) => {
-        if (requestId === captainRequest) room.setCaptain(conversationId, lead.attachment_id);
+        if (requestId === captainRequest && revision === room.captainRevision)
+          room.setCaptain(conversationId, lead.attachment_id);
       })
       .catch(() => {
-        if (requestId === captainRequest) room.setCaptain(conversationId, null);
+        if (requestId === captainRequest && revision === room.captainRevision)
+          room.setCaptain(conversationId, null);
       });
   });
   // This describes the registry now, not the adapter class used when an
