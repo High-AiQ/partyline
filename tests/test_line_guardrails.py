@@ -113,6 +113,7 @@ class GuardrailTest(unittest.TestCase):
                                   headers=captain)
         self.assertEqual(second.status_code, 409, second.text)
         self.assertIn("parallel slices mean parallel lines", second.json()["detail"])
+        self.assertIn("successor=true", second.json()["detail"])
         self.assertIn("allow_shared_branch", second.json()["detail"])
         self.assertIn("close the old one first (DELETE /api/attachments/<id>)",
                       second.json()["detail"])
@@ -163,6 +164,7 @@ class GuardrailTest(unittest.TestCase):
                                     headers=self.machine("root-lead"))
         self.assertEqual(sideways.status_code, 403, sideways.text)
         self.assertIn("work goes down, not sideways", sideways.json()["detail"])
+        self.assertIn("successor=true", sideways.json()["detail"])
         down = self.client.post(f"/api/conversations/{mid['id']}/attachments", json=payload,
                                 headers=self.machine("root-lead"))
         self.assertEqual(down.status_code, 200, down.text)
