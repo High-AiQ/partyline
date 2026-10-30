@@ -217,13 +217,24 @@ async def hint_root_captain(runtime, conv_id: str, message: dict, unresolved: se
         return
     unresolved = unresolved - {speaker["name"].lower()}
     unresolved -= known_mention_names(runtime.db, conv_id, unresolved)
+    # The parser offers both the literal spelling and the spelling without
+    # trailing punctuation. Do not call the literal spelling a ghost when
+    # the other spelling already names a process or person.
+    stripped = {name.rstrip(".-_") for name in unresolved}
+    known = known_mention_names(runtime.db, conv_id, stripped)
+    unresolved = {name for name in unresolved if name.rstrip(".-_") not in known}
     if not unresolved:
         return
     handles = ", ".join(f"@{name}" for name in sorted(unresolved))
+    if root["name"].lower() in unresolved:
+        body = (f"⚠ {handles} reached nobody — the root captain could not be routed; "
+                "check the captain's connection and retry")
+    else:
+        body = (f"⚠ {handles} reached nobody — line names are not mentionable; "
+                f"to reach the root captain, mention @{root['name']}")
     await post_private(
         runtime, conv_id, "system", "system",
-        f"⚠ {handles} reached nobody — line names are not mentionable; "
-        f"to reach the root captain, mention @{root['name']}",
+        body,
         audience=speaker["id"], route=False,
     )
     from .task_ghost_mentions import report_ghost_incidents  # it imports this module

@@ -1,9 +1,10 @@
 """A task process reaches its root captain, and its brief says how."""
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from partyline.auth_store import create_user
+from partyline.attachment_lifecycle import remove_stopped_record
 from partyline.orchestrator_contracts import MessageTaskIn, ReviewRequestIn
 from partyline.orchestrator_handles import message_task
 from partyline.orchestrator_service import request_review
@@ -33,6 +34,22 @@ class RootMentionTest(TaskFixture):
                    if m.get('audience_attachment_id') == 'captain']
         self.assertTrue(relayed)
         self.assertEqual(relayed[-1]['source_conv_id'], self.conv_id)
+
+    async def test_removed_and_reattached_captain_with_sentence_punctuation(self):
+        await self.setUp_task()
+        self.db._exec("UPDATE attachments SET status='detached' WHERE id='captain'")
+        self.runtime.live.pop('captain')
+        await remove_stopped_record(self.db, 'captain')
+        self.db.add_attachment('new-captain', 'root', 'captain', 'fake', ['fake'], self.repo, 'new')
+        self.db._exec("UPDATE attachments SET is_lead=1,status='running' WHERE id='new-captain'")
+        adapter = SimpleNamespace(att={'runtime_owner': 'new'}, deliver=AsyncMock(return_value=True))
+        self.runtime.live['new-captain'] = adapter
+        await self.say('done @captain.')
+        adapter.deliver.assert_awaited()
+        self.assertTrue([m for m in self.db.messages_after('root', 0)
+                         if m.get('audience_attachment_id') == 'new-captain'
+                         and m['body'] == 'done @captain.'])
+        self.assertFalse([m for m in self.posts(self.conv_id) if 'reached nobody' in m['body']])
 
     async def test_task_to_root_exchange_is_hidden_from_people_on_the_root_line(self):
         await self.setUp_task()
@@ -76,6 +93,18 @@ class RootMentionTest(TaskFixture):
                  and m['audience_attachment_id'] == self.worker.attachment_id]
         self.assertEqual(len(hints), 1)
         self.assertIn('@captain', hints[0]['body'])
+
+    async def test_unresolved_captain_name_explains_routing_failure(self):
+        from partyline.mention_relay import hint_root_captain
+
+        await self.setUp_task()
+        message = self.db.add_message(self.conv_id, self.worker.name, 'agent', 'ping @captain')
+        with patch('partyline.mention_relay.known_mention_names', return_value=set()):
+            await hint_root_captain(self.runtime, self.conv_id, message, {'captain'})
+        hints = [m['body'] for m in self.posts(self.conv_id) if 'reached nobody' in m['body']]
+        self.assertEqual(len(hints), 1)
+        self.assertIn('could not be routed', hints[0])
+        self.assertNotIn('mention @captain', hints[0])
 
     async def test_pack_names_root_line_and_captain(self):
         await self.create()
