@@ -1,5 +1,7 @@
 """Explicit fresh-session and stopped-roster HTTP actions."""
 
+from .attachment_broadcast import broadcast_captain
+
 import asyncio
 import os
 
@@ -46,6 +48,8 @@ def register_attachment_lifecycle_routes(app, runtime, *, start, validate):
             response = await start(replacement, checkpoint=body.checkpoint, fresh=True)
         except (Exception, asyncio.CancelledError) as exc:
             if replacement["id"] in runtime.live:
+                if att.get("is_lead"):
+                    await broadcast_captain(runtime, att["conv_id"])
                 raise HTTPException(500, "fresh start failed; the replacement is still tracked. "
                                     "Detach it before retrying.") from exc
             await runtime.db.set_attachment_status_async(
@@ -62,6 +66,8 @@ def register_attachment_lifecycle_routes(app, runtime, *, start, validate):
                 raise
             raise HTTPException(500, f"failed to start fresh: {exc}") from exc
         await remove_stopped_record(runtime.db, att["id"], missing_ok=True)
+        if att.get("is_lead"):
+            await broadcast_captain(runtime, att["conv_id"])
         await _removed_event(att)
         await runtime.broadcast(att["conv_id"], AttachmentEvent(attachment=response))
         return response
@@ -165,6 +171,8 @@ def register_attachment_lifecycle_routes(app, runtime, *, start, validate):
             raise HTTPException(409, "detach the process before removing it")
         att = await remove_stopped_record(runtime.db, att_id)
         reap_tmp_dir(att_id)
+        if att.get("is_lead"):
+            await broadcast_captain(runtime, att["conv_id"])
         await _removed_event(att)
         return {"ok": True}
 

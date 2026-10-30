@@ -18,6 +18,7 @@ export interface RoomWireSink extends RefusalTarget {
   absorb(message: ChatMessage): void;
   upsertAttachment(attachment: Attachment): void;
   removeAttachment(attachmentId: string): void;
+  setCaptain(conversationId: string, attachmentId: string | null): void;
   leave(): void;
   loadConversations(): Promise<void>;
   refreshArchiveIfOpen(): void;
@@ -40,6 +41,9 @@ export function onRoomWireEvent(room: RoomWireSink, event: WireEvent, context: W
     case "attachment":
       resources.scheduleRefresh();
       room.upsertAttachment(event.attachment);
+      break;
+    case "captain_changed":
+      room.setCaptain(event.conversation_id, event.attachment_id);
       break;
     case "attachment_removed":
       resources.scheduleRefresh();
