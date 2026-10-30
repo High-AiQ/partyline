@@ -274,7 +274,8 @@ def capability_state(db: Db, principal: Principal, conv_id: str | None = None) -
     elif principal.is_lead:
         role = "lead"
     else:
-        role = "implementer"
+        att = db.get_attachment(principal.attachment_id) if principal.attachment_id else None
+        role = "attachment" if att and att.get("is_successor") else "implementer"
     from .orchestrator_store import task
     task_row = task(db, principal.conv_id) if principal.conv_id else None
     if task_row and task_row["reviewer_id"] == principal.attachment_id:

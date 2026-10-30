@@ -26,7 +26,9 @@ def schema(name):
             "adapter": text("Exact adapter id.", 80, 1), "command": text("Optional command.", 2000),
             "preset_name": text("Optional exact preset name; read-only match.", 32),
             "counts_toward_total": {"type": "boolean"},
-            "allow_shared_branch": {"type": "boolean"}}, ["conv_id", "name", "adapter"]),
+            "allow_shared_branch": {"type": "boolean"},
+            "successor": {"type": "boolean", "description": "Staff your own line handover successor."}},
+            ["conv_id", "name", "adapter"]),
         "detach_worker": obj({**line, "attachment_id": text(
             "Attachment id, or a process handle on that line such as impl-48da9d.", 80)},
             ["conv_id", "attachment_id"]),

@@ -171,6 +171,66 @@ class GuardrailTest(unittest.TestCase):
                                   json={**payload, "name": "grok3"})
         self.assertEqual(person.status_code, 200, person.text)
 
+    def test_successor_is_reserved_for_handover(self):
+        import time
+        from partyline.captain_handover import offer, accept
+        from partyline.captain_handover_completion import confirm, finish_detach
+        from partyline.line_depth import live_workers
+        from unittest.mock import AsyncMock
+        import asyncio
+
+        child = self.child("root", "mid", self.machine("root-lead"))
+        payload = {"name": "successor", "adapter": "raw", "command": "sh", "successor": True}
+        path = "/api/conversations/root/attachments"
+        self.assertEqual(self.client.post(path, json=payload).status_code, 403)
+        child_lead = self.captain(child["id"], "child-captain")
+        self.assertEqual(self.client.post(path, json=payload, headers=child_lead).status_code, 403)
+        lead = self.machine("root-lead")
+        attached = self.client.post(path, json=payload, headers=lead)
+        self.assertEqual(attached.status_code, 200, attached.text)
+        ident = attached.json()["id"]
+        self.assertEqual(live_workers(self.db, "root"), [])
+        capabilities = self.client.get("/api/capabilities", headers=self.machine(ident))
+        self.assertEqual(capabilities.json()["role"], "attachment")
+        second = self.client.post(path, json={**payload, "name": "another"}, headers=lead)
+        self.assertEqual(second.status_code, 409, second.text)
+        self.db._exec("UPDATE attachments SET status='running' WHERE id=?", (ident,))
+        now = time.time() + 61
+        live = {"root-lead", ident}
+        handover, _ = offer(self.db, "root", "root-lead", ident, "notes", live, now=now)
+        accept(self.db, "root", ident, handover, live, now=now)
+        self.assertFalse(self.db.get_attachment(ident)["is_successor"])
+        confirm(self.db, "root", "root-lead", handover, now=now)
+        row, _ = confirm(self.db, "root", ident, handover, now=now)
+        async def detach(runtime, attachment_id):
+            runtime.db._exec("UPDATE attachments SET status='detached' WHERE id=?", (attachment_id,))
+        with patch("partyline.captain_handover_completion.detach_attachment",
+                   new=AsyncMock(side_effect=detach)):
+            asyncio.run(finish_detach(self.runtime, row))
+        self.assertIsNone(self.db.get_attachment("root-lead"))
+
+    def test_successor_bypasses_parallel_worker_rule_and_resume_is_capped(self):
+        import asyncio
+        from fastapi import HTTPException
+        from partyline.resource_budget import claim_resume
+
+        lead = self.machine("root-lead")
+        path = "/api/conversations/root/attachments"
+        payload = {"name": "worker", "adapter": "raw", "command": "sh"}
+        self.assertEqual(self.client.post(path, json=payload, headers=lead).status_code, 200)
+        refused = self.client.post(path, json={**payload, "name": "other"}, headers=lead)
+        self.assertEqual(refused.status_code, 409)
+        successor = self.client.post(path, json={**payload, "name": "next", "successor": True}, headers=lead)
+        self.assertEqual(successor.status_code, 200, successor.text)
+        ident = successor.json()["id"]
+        self.db._exec("UPDATE attachments SET status='detached' WHERE id=?", (ident,))
+        replacement = self.client.post(path, json={**payload, "name": "next2", "successor": True},
+                                       headers=lead)
+        self.assertEqual(replacement.status_code, 200, replacement.text)
+        with self.assertRaises(HTTPException) as denied:
+            asyncio.run(claim_resume(self.db, ident, "owner", 1024))
+        self.assertEqual(denied.exception.status_code, 409)
+
     def test_an_archived_child_no_longer_blocks_its_parent_from_staffing(self):
         payload = {"name": "grok", "adapter": "raw", "command": "sh"}
         child = self.child("root", "finished", self.machine("root-lead"))

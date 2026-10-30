@@ -50,6 +50,12 @@ class CaptainToolTests(unittest.TestCase):
                 {"name": "helper", "adapter": "raw", "command": "cat",
                  "counts_toward_total": value}))
 
+    def test_attach_worker_forwards_successor(self):
+        client = Client()
+        tools_captain.call(client, "attach_worker", {
+            "conv_id": "home", "name": "next", "adapter": "raw", "successor": True}, client.state)
+        self.assertTrue(client.calls[-1][2]["successor"])
+
     def test_unknown_dispatch_is_rejected_without_api_call(self):
         client = Client()
         with self.assertRaisesRegex(ValueError, "unknown captain"):

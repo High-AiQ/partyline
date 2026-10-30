@@ -132,7 +132,7 @@ def accept(db, conv, caller, ident, live, pending=None, now=None):
                 raise HTTPException(403, 'Only the offered attachment may accept')
             old, target = _validate(db.conn, conv, row['from_attachment_id'], caller, live, pending, now)
             db.conn.execute("UPDATE attachments SET is_lead=0 WHERE id=?", (old['id'],))
-            db.conn.execute("UPDATE attachments SET is_lead=1 WHERE id=?", (caller,))
+            db.conn.execute("UPDATE attachments SET is_lead=1,is_successor=0 WHERE id=?", (caller,))
             for side in ('a', 'b'):
                 db.conn.execute(f"UPDATE line_bridges SET {side}_attachment_id=? WHERE {side}_conv_id=? "
                                 f"AND {side}_attachment_id=? AND closed_at IS NULL",

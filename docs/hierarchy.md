@@ -1219,7 +1219,12 @@ report. A wait is a structured statement, never prose: a chat message saying
 
 ## Captain handover
 
-A captain can use `offer_handover(attachment_id, debrief)` to offer its role to
+After completion, the old captain is detached and removed from the line roster.
+The handover record and line messages remain; interrupted removal is retried after restart.
+
+Staff a successor on your own line with `attach_worker` and `successor=true`, then wait
+60 seconds. This attachment is not an implementer; only one live successor may be
+staffed at a time. A captain can use `offer_handover(attachment_id, debrief)` to offer its role to
 another live attachment on the same line after that attachment has been held for
 at least 60 seconds. The debrief is required and limited to 4000 characters;
 refer to files, directories, notes, worktrees and report IDs. The receiver hears

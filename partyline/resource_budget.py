@@ -217,16 +217,20 @@ def reject_if_full(db, requested_lease: int, *, exclude_id: str | None = None) -
 
 
 async def reserve_new_attachment(db, *, att_id, conv_id, name, adapter, command,
-                                cwd, runtime_owner, start_after_history=False, counts_toward_total=False):
+                                cwd, runtime_owner, start_after_history=False,
+                                counts_toward_total=False, successor=False):
     """Atomically admit and persist a starting row before any spawn work."""
     async with db._runtime_serialized_async():
+        if successor and any(a.get("is_successor") and a["status"] in LIVE
+                             for a in db.list_attachments(conv_id)):
+            raise HTTPException(409, "this line already has a live successor")
         lease = settings(db)["default_process_memory_bytes"]
         if adapter != "raw" or counts_toward_total:
             reject_if_full(db, lease)
         return db.add_attachment(
             att_id, conv_id, name, adapter, command, cwd, runtime_owner,
             start_after_history=start_after_history, memory_limit=format_limit(lease),
-            counts_toward_total=counts_toward_total,
+            counts_toward_total=counts_toward_total, successor=successor,
         )
 
 
@@ -249,7 +253,13 @@ async def claim_resume(db, att_id: str, owner: str, requested_lease: int,
             ).fetchone()
         if claimable is None:
             return False
-        if not grandfathered and counts(db.get_attachment(att_id)):
+        att = db.get_attachment(att_id)
+        if att.get("is_successor") and any(
+            other.get("is_successor") and other["id"] != att_id and other["status"] in LIVE
+            for other in db.list_attachments(att["conv_id"])
+        ):
+            raise HTTPException(409, "this line already has a live successor")
+        if not grandfathered and counts(att):
             reject_if_full(db, requested_lease)
         claimed = db._claim_attachment(att_id, owner)
         if claimed:
