@@ -158,6 +158,9 @@ class HandoverTest(unittest.TestCase):
         self.assertEqual(response.json()['state'], 'accepted')
         self.assertEqual(runtime.route_mentions.await_args_list[0].args[1]['body'], '')
         self.assertTrue(self.db.get_attachment('new')['is_lead'])
+        events = [call.args for call in runtime.broadcast.await_args_list]
+        self.assertTrue(any(line == 'line' and event.type == 'captain_changed'
+                            and event.attachment_id == 'new' for line, event in events))
 
     def test_mcp_tools_available_to_receiver(self):
         from partyline.mcp import tools_handover

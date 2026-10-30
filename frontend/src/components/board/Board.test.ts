@@ -6,6 +6,7 @@ import { api } from "../../lib/api";
 import { hierarchyApi } from "../../lib/hierarchy-api";
 import { ConversationDetailSchema } from "../../lib/contracts";
 import { room } from "../../state/room.svelte";
+import { onRoomWireEvent } from "../../state/room-wire-events";
 
 const conversation = {
   id: "line",
@@ -40,6 +41,29 @@ afterEach(() => {
 });
 
 describe("Board captain status", () => {
+  it("moves the badge when a captain event arrives without fetching", async () => {
+    const lead = vi.spyOn(hierarchyApi, "lead").mockResolvedValue({ attachment_id: attachment.id });
+    room.conversation = conversation;
+    room.attachments = [attachment, { ...attachment, id: "successor", name: "successor" }];
+    const board = mount(Board, { target: document.body, props: { onmention: vi.fn() } });
+    try {
+      await vi.waitFor(() => {
+        expect(document.querySelector(".captain-badge")?.parentElement?.textContent).toContain("worker");
+      });
+      onRoomWireEvent(
+        room,
+        { type: "captain_changed", conversation_id: "line", attachment_id: "successor" },
+        { wasReady: true, claimRejected: false, rejectClaim: vi.fn() },
+      );
+      await vi.waitFor(() => {
+        expect(document.querySelector(".captain-badge")?.parentElement?.textContent).toContain("successor");
+      });
+      expect(lead).toHaveBeenCalledTimes(1);
+    } finally {
+      await unmount(board);
+    }
+  });
+
   it("updates the visible card immediately when management appoints a captain", async () => {
     const detail = ConversationDetailSchema.parse({ conversation, messages: [], attachments: [attachment] });
     vi.spyOn(api, "conversation").mockResolvedValue(detail);
