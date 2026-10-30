@@ -29,7 +29,8 @@ control, and the next compact loses your acceptance criteria again.
 
 ## Hand over captainship
 
-Use `offer_handover` to offer the role to a live attachment on your own line;
+Staff a successor on your own line with `attach_worker(successor=true)`, wait 60
+seconds, then use `offer_handover` to offer the role to a live attachment on your own line;
 `accept_handover` accepts and `cancel_handover` cancels an offer. Reference files,
 directories, notes, worktrees and report IDs in the debrief. Resolve or cancel
 your pending restart request first. Both participants confirm with `complete_handover`; the server detaches the
