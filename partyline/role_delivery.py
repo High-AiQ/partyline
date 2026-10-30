@@ -70,6 +70,8 @@ def current_role(db, attachment_id: str) -> RoleState:
 def _instructions(state: RoleState, db=None) -> str:
     """The pack for a state: the captain's, else the worker's when a captain is live."""
     from .orchestrator_pack import task_pack
+    if state.role == "attachment":
+        return "You are the captain handover successor. Wait for the offer and accept it when ready."
     pack = task_pack(db, state.conv_id, state.role) or role_instructions(
         state.actions, state.conv_id, state.parent_id, state.depth, state.staffed, state.captain_mode
     ) or worker_instructions(state.captained)
@@ -152,7 +154,7 @@ def bind_role_delivery(db, att: dict, runtime=None) -> None:
                     if part)
             if not captain_transition:
                 pointer = briefing_pointer(current.conv_id)
-        elif current.captained:
+        elif current.captained and current.role != "attachment":
             if not worker_reminder_sent or (worker_now and not worker_was):
                 worker = WORKER_REMINDER
             worker_reminder_sent = True

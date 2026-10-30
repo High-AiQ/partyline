@@ -116,6 +116,8 @@ def execute(client, op, args, state):
             body["counts_toward_total"] = args["counts_toward_total"]
         if args.get("allow_shared_branch") is True:
             body["allow_shared_branch"] = True
+        if args.get("successor") is True:
+            body["successor"] = True
         preset_name = args.get("preset_name")
         if preset_name:
             presets = client.request("GET", "/api/presets")

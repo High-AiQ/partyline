@@ -37,7 +37,8 @@ def may_create_children(db, conv_id: str) -> bool:
 def live_workers(db, conv_id: str) -> list[dict]:
     """Processes on this line that are not its captain and could take work."""
     return [att for att in db.list_attachments(conv_id)
-            if not att.get("is_lead") and att["status"] in ("starting", "running")]
+            if not att.get("is_lead") and not att.get("is_successor")
+            and att["status"] in ("starting", "running")]
 
 
 def has_captain(db, conv_id: str) -> bool:

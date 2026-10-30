@@ -1,5 +1,12 @@
 # Lessons: the false-assumptions ledger
 
+## A captain successor is not a parallel worker
+
+Treating every non-captain attachment as an implementer blocked captains with
+child lines from staffing a handover. Reserve one explicit successor on the
+captain’s own line, exclude it from worker counts, and preserve the ordinary
+staffing guardrails. Test the full handover and removal recovery.
+
 ## Transcript reads can stall the event loop
 
 Assuming line-by-line reads yield to asyncio missed that file reads and JSON
