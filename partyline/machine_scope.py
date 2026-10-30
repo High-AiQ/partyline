@@ -72,11 +72,9 @@ def _home_lead_tree(db: Db, principal: Principal, conv_id: str) -> bool:
 def _live_lead(db: Db, conv_id: str) -> dict | None:
     """The manager row only while its process can actually run.
 
-    A detached or exited lead keeps ``is_lead=1`` so resuming it restores the
-    role. That stale flag must not be treated as a manager that could still be
-    re-pointed: after the sole lead detaches, no machine satisfies
-    ``_home_lead_tree``, so without this the line can never get a new manager
-    except from a human.
+    A detached or exited lead keeps ``is_lead=1`` so resuming restores the role.
+    That stale flag must not be treated as a manager: after the sole lead detaches,
+    no machine satisfies ``_home_lead_tree``, so only a human can appoint a new one.
     """
     lead = lead_attachment(db, conv_id)
     if lead is None or lead["status"] not in ("starting", "running"):
@@ -239,6 +237,8 @@ def deny_sideways_attach(db: Db, principal: Principal, conv_id: str) -> None:
         return
     reason = sideways_attach_reason(db, conv_id)
     if reason:
+        if principal.is_lead and principal.conv_id == conv_id:
+            reason += " To staff a handover successor on your line, attach with successor=true."
         raise HTTPException(403, reason)
 
 

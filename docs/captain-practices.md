@@ -29,9 +29,10 @@ control, and the next compact loses your acceptance criteria again.
 
 ## Hand over captainship
 
-Staff a successor on your own line with `attach_worker(successor=true)`, wait 60
-seconds, then use `offer_handover` to offer the role to a live attachment on your own line;
-`accept_handover` accepts and `cancel_handover` cancels an offer. Reference files,
+Staff a successor on your own line with `attach_worker(successor=true)`, including
+when the line has children or a worker. Wait 60 seconds, then use `offer_handover`
+to offer captainship to that live attachment. `accept_handover` accepts and
+`cancel_handover` cancels an offer. Reference files,
 directories, notes, worktrees and report IDs in the debrief. Resolve or cancel
 your pending restart request first. Both participants confirm with `complete_handover`; the server detaches the
 old captain only after both confirm. See [captain handover](hierarchy.md#captain-handover).

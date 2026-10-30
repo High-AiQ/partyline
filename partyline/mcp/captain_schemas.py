@@ -27,7 +27,8 @@ def schema(name):
             "preset_name": text("Optional exact preset name; read-only match.", 32),
             "counts_toward_total": {"type": "boolean"},
             "allow_shared_branch": {"type": "boolean"},
-            "successor": {"type": "boolean", "description": "Staff your own line handover successor."}},
+            "successor": {"type": "boolean", "description": "Staff a handover successor on your own line; "
+                "after 60 seconds use offer_handover to offer captainship."}},
             ["conv_id", "name", "adapter"]),
         "detach_worker": obj({**line, "attachment_id": text(
             "Attachment id, or a process handle on that line such as impl-48da9d.", 80)},
