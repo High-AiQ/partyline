@@ -119,9 +119,31 @@ class CompletionTest(unittest.TestCase):
             asyncio.run(maintenance_once(runtime))
             asyncio.run(maintenance_once(runtime))
         self.assertEqual(stop.await_count, 1)
-        self.assertEqual(self.db.get_attachment('old')['status'], 'detached')
+        self.assertIsNone(self.db.get_attachment('old'))
+        self.assertNotIn('old', [a['id'] for a in self.db.list_attachments('line')])
+        self.assertTrue(self.db.list_messages('line'))
         self.assertIsNotNone(self.row()['detach_finished_at'])
         ensure_handover_detached(self.db, 'old')
+
+    def test_removal_retry_after_restart_and_missing_record(self):
+        confirm(self.db, 'line', 'old', self.ident, now=self.now)
+        confirm(self.db, 'line', 'new', self.ident, now=self.now)
+        self.db.set_attachment_status('old', 'detached', None)
+        runtime = SimpleNamespace(db=self.db, live={}, broadcast=AsyncMock())
+        with patch('partyline.captain_handover_completion.remove_stopped_record',
+                   new_callable=AsyncMock, side_effect=RuntimeError('interrupted')):
+            asyncio.run(maintenance_once(runtime))
+        self.assertIsNone(self.row()['detach_finished_at'])
+        self.db.close()
+        self.db = Db(self.path)
+        runtime.db = self.db
+        asyncio.run(maintenance_once(runtime))
+        self.assertIsNone(self.db.get_attachment('old'))
+        self.assertIsNotNone(self.row()['detach_finished_at'])
+        self.assertTrue(self.db.list_messages('line'))
+        self.db._exec('UPDATE captain_handovers SET detach_finished_at=NULL WHERE id=?', (self.ident,))
+        asyncio.run(maintenance_once(runtime))
+        self.assertIsNotNone(self.row()['detach_finished_at'])
 
     def test_completion_http_and_person_resolution(self):
         from fastapi import FastAPI
@@ -191,4 +213,4 @@ class CompletionTest(unittest.TestCase):
             asyncio.run(maintenance_once(runtime))
         self.assertEqual(attempts, ['old', 'old'])
         self.assertIsNotNone(self.row()['detach_finished_at'])
-        self.assertEqual(runtime.broadcast.await_count, 1)
+        self.assertEqual(runtime.broadcast.await_count, 2)

@@ -6,7 +6,10 @@ import time
 from fastapi import APIRouter, HTTPException, Request
 
 from .auth_guard import request_principal
-from .contracts import MessageEvent, MessageResponse
+from .contracts import AttachmentRemovedEvent, MessageEvent, MessageResponse
+from .attachment_lifecycle import remove_stopped_record
+from .attachment_tmp import reap_tmp_dir
+from .agent_connection import remove_connection
 from .line_process_routes import detach_attachment
 from .message_queries import as_message
 
@@ -127,6 +130,17 @@ async def finish_detach(runtime, row):
             raise HTTPException(409, 'old attachment is now a captain; detach requires human resolution')
         if att and (att['status'] != 'detached' or att_id in runtime.live):
             await detach_attachment(runtime, att_id)
+        await remove_stopped_record(runtime.db, att_id, missing_ok=True)
+        reap_tmp_dir(att_id)
+        remove_connection(runtime.db.path, att_id)
+        getattr(runtime, "uncredited", {}).pop(att_id, None)
+        getattr(runtime, "unclaimed_noticed", set()).discard(att_id)
+        getattr(runtime, "reattaching", set()).discard(att_id)
+        try:
+            await runtime.broadcast(current["conv_id"], AttachmentRemovedEvent(
+                attachment_id=att_id, conversation_id=current["conv_id"]))
+        except Exception:
+            logger.exception("could not broadcast removal of %s", att_id)
         runtime.db._exec("UPDATE captain_handovers SET detach_finished_at=? WHERE id=? "
                          "AND state='completed' AND detach_finished_at IS NULL", (time.time(), row['id']))
 

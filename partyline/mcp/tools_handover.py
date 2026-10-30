@@ -11,7 +11,8 @@ def tool_list(state):
     result = []
     for name, tail, description in (
         ('offer_handover', 'offer', 'Offer captainship to a live attachment on your line, attached for '
-         '60 seconds. A pending restart request must be resolved or cancelled first. Reference files, '
+         '60 seconds. Staff one with attach_worker(successor=true) on your own line, then wait 60 seconds. '
+         'A pending restart request must be resolved or cancelled first. Reference files, '
          'directories, notes, worktrees and report IDs in the required debrief (maximum 4000 characters).'),
         ('cancel_handover', 'cancel', 'Cancel your pending handover offer.'),
         ('accept_handover', 'accept', 'Accept an offer addressed to your attachment. A pending restart '

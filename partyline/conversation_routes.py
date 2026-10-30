@@ -181,13 +181,17 @@ def register_conversation_routes(
             raise HTTPException(409, "restore the line before attaching to it")
         from .orchestrator_store import refuse_task_attach
         refuse_task_attach(db, conv_id)
-        deny_sideways_attach(db, principal, conv_id)
+        if body.successor and not (principal.kind == "machine" and principal.is_lead
+                                   and principal.conv_id == conv_id):
+            raise HTTPException(403, "only the line captain may attach its own successor")
+        if not body.successor:
+            deny_sideways_attach(db, principal, conv_id)
         # Finding 2.14: a second implementer on a captained, staffed line puts
         # two slices on one branch, which accepts all-or-nothing. A machine
         # captain must name the override; a person is never refused — their
         # line, their call — but the shared branch is flagged on the line.
         shared_branch = body.allow_shared_branch
-        if parallel_worker_reason(db, conv_id):
+        if not body.successor and parallel_worker_reason(db, conv_id):
             if is_human(principal):
                 shared_branch = True
             elif not shared_branch:
@@ -224,9 +228,11 @@ def register_conversation_routes(
             db, att_id=att_id, conv_id=conv_id, name=name, adapter=body.adapter,
             command=command, cwd=cwd, runtime_owner=runtime_owner,
             start_after_history=True, counts_toward_total=bool(body.counts_toward_total),
+            successor=body.successor,
         )
         try:
-            placed = await asyncio.to_thread(ensure_placed, db, conv_id, ignore_attachment_id=att_id)
+            placed = (None if body.successor else
+                      await asyncio.to_thread(ensure_placed, db, conv_id, ignore_attachment_id=att_id))
             if placed and describe(placed):
                 await runtime.post_message(conv_id, "system", "system", describe(placed))
             cwd = os.path.abspath(os.path.expanduser(chosen or line_cwd(db, conv_id) or cwd))
@@ -242,7 +248,7 @@ def register_conversation_routes(
             raise
         if update_argv:
             await apply_update(runtime.post_message, conv_id, name, update_argv)
-        if shared_branch and parallel_worker_reason(db, conv_id):
+        if not body.successor and shared_branch and parallel_worker_reason(db, conv_id):
             await post_system_notice(
                 runtime, conv_id,
                 f"⚠ @{name} joins a shared branch (attached by @{principal.name}): parallel "
