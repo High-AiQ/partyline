@@ -54,6 +54,12 @@ export const AttachmentEventSchema = z.object({
 });
 export type AttachmentEvent = z.infer<typeof AttachmentEventSchema>;
 
+export const CaptainChangedEventSchema = z.object({
+  type: z.literal("captain_changed"),
+  conversation_id: z.string(),
+  attachment_id: z.string().nullable().default(null),
+});
+
 /** A stopped jack was forgotten (or replaced by a fresh one); drop its card. */
 export const AttachmentRemovedEventSchema = z.object({
   type: z.literal("attachment_removed"),
@@ -196,6 +202,7 @@ const CurrentWireEventSchema = z.discriminatedUnion("type", [
   ReactionEventSchema,
   AttachmentEventSchema,
   AttachmentRemovedEventSchema,
+  CaptainChangedEventSchema,
   LineLiveEventSchema,
   AttentionEventSchema,
   WorkingEventSchema,

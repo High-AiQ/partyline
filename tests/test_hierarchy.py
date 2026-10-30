@@ -99,6 +99,16 @@ class HierarchyApiTest(unittest.TestCase):
         self.db.close()
         self.directory.cleanup()
 
+    def test_appointment_broadcasts_captain_change(self):
+        from unittest.mock import AsyncMock, patch
+        with patch.object(self.runtime, "broadcast", new_callable=AsyncMock) as broadcast:
+            response = self.client.post("/api/conversations/parent/lead",
+                                        json={"attachment_id": "impl-att"})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(any(call.args[0] == "parent" and call.args[1].type == "captain_changed"
+                            and call.args[1].attachment_id == "impl-att"
+                            for call in broadcast.await_args_list))
+
     def activate_impl(self):
         self.db.set_attachment_status("impl-att", "running", None)
         return self.impl

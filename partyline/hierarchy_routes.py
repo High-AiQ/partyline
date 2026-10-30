@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 
-
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from .attachment_broadcast import broadcast_captain
 from .auth_guard import request_principal
 from .captain_handover import HandoverIdIn, OfferIn
 from .contracts import (
@@ -122,6 +122,7 @@ def hierarchy_router(runtime) -> APIRouter:
                 db._exec("UPDATE conversations SET captain_mode=?,default_review_policy=? WHERE id=?",
                          (prior["captain_mode"], prior["default_review_policy"], conv_id))
             raise _http(exc) from exc
+        await broadcast_captain(runtime, conv_id)
         att = db.get_attachment(body.attachment_id) if body.attachment_id else None
 
         def live(row):

@@ -202,6 +202,12 @@ class AttachmentEvent(BaseModel):
     attachment: AttachmentResponse
 
 
+class CaptainChangedEvent(BaseModel):
+    type: Literal["captain_changed"] = "captain_changed"
+    conversation_id: str
+    attachment_id: str | None
+
+
 class AttachmentRemovedEvent(BaseModel):
     type: Literal["attachment_removed"] = "attachment_removed"
     attachment_id: str
@@ -272,6 +278,7 @@ Event = (
     | MessageEvent
     | AttachmentEvent
     | AttachmentRemovedEvent
+    | CaptainChangedEvent
     | LineLiveEvent
     | AttentionEvent
     | WorkingEvent

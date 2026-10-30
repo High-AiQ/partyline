@@ -1,7 +1,7 @@
 """Keep same-line jack state and every tab's line rail in one broadcast path."""
 
 from .attachment_view import attach_bridge, attach_memory_usage, attachment_response
-from .contracts import AttachmentEvent, LineLiveEvent
+from .contracts import AttachmentEvent, CaptainChangedEvent, LineLiveEvent
 
 
 async def broadcast_attachment_state(runtime, conv_id: str, att_id: str) -> None:
@@ -25,3 +25,13 @@ async def broadcast_attachment_state(runtime, conv_id: str, att_id: str) -> None
     event = LineLiveEvent(conversation_id=conv_id, live_count=conversation["live_count"])
     for socket_conv_id in tuple(runtime.sockets):
         await runtime.broadcast(socket_conv_id, event)
+
+
+async def broadcast_captain(runtime, conv_id: str) -> None:
+    """Send the current captain to the line and its ancestor views."""
+    from .hierarchy import ancestors, lead_attachment
+
+    lead = lead_attachment(runtime.db, conv_id)
+    event = CaptainChangedEvent(conversation_id=conv_id, attachment_id=lead["id"] if lead else None)
+    for line in [conv_id, *ancestors(runtime.db, conv_id)]:
+        await runtime.broadcast(line, event)

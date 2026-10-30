@@ -3,6 +3,7 @@
 
 import { SvelteSet } from "svelte/reactivity";
 import { api } from "../lib/api";
+import { hierarchyApi } from "../lib/hierarchy-api";
 import { toggleReaction } from "../lib/reaction-api";
 import type {
   Attachment,
@@ -55,6 +56,7 @@ class Room {
   conversation = $state<Conversation | null>(null);
   attachments = $state<Attachment[]>([]);
   captains = $state<Record<string, string | null>>({});
+  captainRevision = 0;
   reattachOffer = $state<ReattachOfferEvent | null>(null);
   history = new MessageHistory(() => session.handle);
   pins = new LinePins();
@@ -163,6 +165,14 @@ class Room {
     if (!conversation) return;
     const epoch = this.#epoch;
     const afterId = this.history.newestId;
+    const captainRevision = this.captainRevision;
+    void hierarchyApi
+      .lead(conversation.id)
+      .then((lead) => {
+        if (epoch === this.#epoch && captainRevision === this.captainRevision)
+          this.setCaptain(conversation.id, lead.attachment_id);
+      })
+      .catch(ignoreBackgroundFailure);
     const [detail, presenceFetch] = await presenceSync.fetch(api.conversation(conversation.id, false));
     if (epoch !== this.#epoch) return;
 
@@ -292,6 +302,7 @@ class Room {
   }
 
   setCaptain(conversationId: string, attachmentId: string | null): void {
+    this.captainRevision += 1;
     this.captains[conversationId] = attachmentId;
   }
   #absorb(message: ChatMessage): void {
