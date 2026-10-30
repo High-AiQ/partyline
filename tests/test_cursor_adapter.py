@@ -46,6 +46,12 @@ def tearDownModule():
     _write_fence_override.__exit__(None, None, None)
 
 
+async def wait_for(predicate):
+    async with asyncio.timeout(5):
+        while not predicate():
+            await asyncio.sleep(0.01)
+
+
 class Process:
     def __init__(self):
         self.returncode = None
@@ -539,7 +545,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 side_effect=mock_receipt,
             ):
                 task = asyncio.create_task(adapter._tail_transcript(path))
-                await asyncio.sleep(0.05)
+                await wait_for(lambda: len(receipts_seen) >= 2 and len(self.messages) >= 1)
                 adapter.proc.stop()
                 await task
 
@@ -585,7 +591,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 side_effect=mock_receipt,
             ):
                 task = asyncio.create_task(adapter._tail_transcript(path))
-                await asyncio.sleep(0.05)
+                await wait_for(lambda: adapter._ready.is_set())
 
                 # Append new turn
                 new_lines = [
@@ -612,7 +618,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 with open(path, "a", encoding="utf-8") as fh:
                     fh.write("".join(new_lines))
 
-                await asyncio.sleep(0.05)
+                await wait_for(lambda: len(receipts_seen) >= 2 and len(self.messages) >= 1)
                 adapter.proc.stop()
                 await task
 
@@ -645,7 +651,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             adapter.proc = Process()
 
             task = asyncio.create_task(adapter._tail_transcript(path))
-            await asyncio.sleep(0.05)
+            await wait_for(lambda: len(self.messages) >= 2)
             self.assertEqual(
                 self.messages,
                 [("agent", "agent", "msg 1"), ("agent", "agent", "msg 2")],
@@ -662,7 +668,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 + "\n"
             ]
             path.write_text("".join(rewritten_lines), encoding="utf-8")
-            await asyncio.sleep(0.05)
+            await wait_for(lambda: len(self.messages) >= 3)
 
             # msg 1 and msg 2 should not be repeated
             self.assertEqual(
@@ -685,7 +691,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 + "\n"
             ]
             path.write_text("".join(compacted_lines), encoding="utf-8")
-            await asyncio.sleep(0.05)
+            await wait_for(lambda: len(self.messages) >= 4)
 
             adapter.proc.stop()
             await task
@@ -915,7 +921,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 return_value=transcript,
             ):
                 task = asyncio.create_task(adapter._run())
-                await asyncio.sleep(0.05)
+                await wait_for(lambda: len(self.messages) >= 1 and bool(self.sessions))
                 adapter.proc.stop()
                 await task
 
@@ -1032,9 +1038,9 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 side_effect=mock_receipt,
             ):
                 task = asyncio.create_task(adapter._tail_transcript(path))
-                await asyncio.sleep(0.05)
+                await wait_for(lambda: adapter._ready.is_set())
                 path.write_text(after, encoding="utf-8")
-                await asyncio.sleep(0.1)
+                await wait_for(lambda: len(receipts_seen) >= 2 and len(self.messages) >= 1)
                 adapter.proc.stop()
                 await task
 
@@ -1124,7 +1130,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 side_effect=mock_receipt,
             ):
                 task = asyncio.create_task(adapter._tail_transcript(path))
-                await asyncio.sleep(0.05)
+                await wait_for(lambda: len(receipts_seen) >= 2 and len(self.messages) >= 1)
                 adapter.proc.stop()
                 await task
 
@@ -1153,7 +1159,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             side_effect=mock_receipt,
         ):
             task = asyncio.create_task(adapter._tail_transcript(fixture_path))
-            await asyncio.sleep(0.05)
+            await wait_for(lambda: len(receipts_seen) >= 3 and len(self.messages) >= 2)
             adapter.proc.stop()
             await task
 
@@ -1185,7 +1191,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             "partyline.adapters.bundled.cursor.adapter.receipt", new=AsyncMock()
         ):
             task = asyncio.create_task(adapter._tail_transcript(fixture_path))
-            await asyncio.sleep(0.05)
+            await wait_for(lambda: len(self.messages) >= 5)
             adapter.proc.stop()
             await task
 
@@ -1223,7 +1229,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 side_effect=mock_receipt,
             ):
                 task = asyncio.create_task(adapter._tail_transcript(path))
-                await asyncio.sleep(0.05)
+                await wait_for(lambda: adapter._ready.is_set())
 
                 self.assertEqual(self.messages, [])
                 self.assertEqual(receipts_seen, [])
@@ -1259,7 +1265,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 )
 
                 path.write_text("\n".join(rewritten_lines) + "\n", encoding="utf-8")
-                await asyncio.sleep(0.05)
+                await wait_for(lambda: len(receipts_seen) >= 2 and len(self.messages) >= 1)
 
                 adapter.proc.stop()
                 await task
@@ -1302,7 +1308,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 side_effect=mock_receipt,
             ):
                 task = asyncio.create_task(adapter._tail_transcript(path))
-                await asyncio.sleep(0.05)
+                await wait_for(lambda: len(receipts_seen) >= 2 and len(self.messages) >= 1)
 
                 self.assertEqual(self.messages, [("agent", "agent", "ok")])
                 self.assertEqual(receipts_seen, [BEGAN, ENDED])
@@ -1326,7 +1332,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 ]
                 with open(path, "a", encoding="utf-8") as f:
                     f.write("".join(turn2))
-                await asyncio.sleep(0.05)
+                await wait_for(lambda: len(receipts_seen) >= 4 and len(self.messages) >= 2)
 
                 adapter.proc.stop()
                 await task
@@ -1371,7 +1377,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 side_effect=mock_receipt,
             ):
                 task = asyncio.create_task(adapter._tail_transcript(path))
-                await asyncio.sleep(0.05)
+                await wait_for(lambda: len(receipts_seen) >= 2 and len(self.messages) >= 1)
 
                 self.assertEqual(self.messages, [("agent", "agent", "ok")])
                 self.assertEqual(receipts_seen, [BEGAN, ENDED])
@@ -1469,7 +1475,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 side_effect=mock_receipt,
             ):
                 task = asyncio.create_task(adapter._tail_transcript(path))
-                await asyncio.sleep(0.05)
+                await wait_for(lambda: adapter._ready.is_set())
 
                 self.assertEqual(self.messages, [])
                 self.assertEqual(receipts_seen, [])
@@ -1616,7 +1622,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 side_effect=mock_receipt,
             ):
                 task = asyncio.create_task(adapter._tail_transcript(path))
-                await asyncio.sleep(0.05)
+                await wait_for(lambda: adapter._ready.is_set())
 
                 self.assertEqual(self.messages, [])
                 self.assertEqual(receipts_seen, [])
@@ -1695,11 +1701,11 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 side_effect=mock_receipt,
             ):
                 task = asyncio.create_task(adapter._tail_transcript(path))
-                await asyncio.sleep(0.05)
+                await wait_for(lambda: adapter._ready.is_set())
                 self.assertEqual(self.messages, [])
 
                 path.write_text(after, encoding="utf-8")
-                await asyncio.sleep(0.3)
+                await wait_for(lambda: ENDED in receipts_seen and bool(self.messages))
 
                 adapter.proc.stop()
                 await task
@@ -1770,17 +1776,27 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             async def mock_receipt(att, event):
                 receipts_seen.append(event)
 
+            parsed = []
+
+            def capture_record(record, name):
+                parsed.append(record)
+                return parse_record(record, name)
+
             with patch(
                 "partyline.adapters.bundled.cursor.adapter.receipt",
                 side_effect=mock_receipt,
-            ):
+            ), patch("partyline.adapters.bundled.cursor.adapter.parse_record", side_effect=capture_record):
                 task = asyncio.create_task(adapter._tail_transcript(path))
+                await wait_for(lambda: len(receipts_seen) >= 1)
                 for stage in stages[1:]:
-                    await asyncio.sleep(0.05)
+                    parsed.clear()
+                    content = stage.read_text(encoding="utf-8")
+                    last_record = json.loads(content.splitlines()[-1])
                     path.write_text(
-                        stage.read_text(encoding="utf-8"), encoding="utf-8"
+                        content, encoding="utf-8"
                     )
-                await asyncio.sleep(0.05)
+                    await wait_for(lambda record=last_record: record in parsed)
+                await wait_for(lambda: len(receipts_seen) >= 4 and len(self.messages) >= 2)
                 adapter.proc.stop()
                 await task
 
@@ -1820,7 +1836,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             adapter.proc = Process()
 
             task = asyncio.create_task(adapter._tail_transcript(path))
-            await asyncio.sleep(0.05)
+            await wait_for(lambda: len(self.messages) >= 1)
             adapter.proc.stop()
             await task
 
