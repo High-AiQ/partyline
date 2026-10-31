@@ -195,7 +195,9 @@ def register_conversation_routes(
             if is_human(principal):
                 shared_branch = True
             elif not shared_branch:
-                raise HTTPException(409, PARALLEL_WORKERS_REFUSAL)
+                hint = (" To staff a handover successor on your line, attach with successor=true."
+                        if principal.is_lead and principal.conv_id == conv_id else "")
+                raise HTTPException(409, PARALLEL_WORKERS_REFUSAL + hint)
         if not NAME_RE.match(body.name):
             raise HTTPException(
                 400, "name must be alphanumeric ([A-Za-z0-9_.-], max 32)"

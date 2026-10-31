@@ -47,6 +47,8 @@ def tool_list(state: dict) -> list[dict]:
                   "fallback"]["inputSchema"]}]
     for op in permitted(state):
         descriptions = {
+            "attach_worker": "Staff a worker. For handover, attach on your own line with successor=true, "
+                "wait 60 seconds, then use offer_handover to offer captainship.",
             "process_overview": "Inspect lines and live processes, including every task workspace's real and "
                 "mirror tips. The mirror tip is where the worker's commits live until accept.",
             "retirement_preview": "Inspect bounded retirement evidence and obtain a principal-bound token. "
