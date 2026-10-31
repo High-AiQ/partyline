@@ -153,6 +153,9 @@ TOPICS = [
        "The checks that say the restart actually worked.",
        "docs/restart.md", "Verifying afterward"),
     # best-practices — how to captain well
+    _t("best-practices", "handover", "Hand over captainship",
+       "Staff a successor and transfer captainship.",
+       "docs/captain-practices.md", "Hand over captainship"),
     _t("best-practices", "brief-short-contract-long", "Brief short, contract long",
        "A short topic plus a long contract file named in it.",
        "docs/captain-practices.md", "Brief short, contract long"),
