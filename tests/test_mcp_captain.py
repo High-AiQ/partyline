@@ -108,6 +108,14 @@ class CaptainToolTests(unittest.TestCase):
                 "conv_id": "child", "goal": "x"}}, client.state)
         self.assertEqual(client.calls, [])
 
+    def test_docs_read_remains_captain_only_when_workers_use_guide(self):
+        client = Client()
+        worker = {**client.state, "role": "implementer", "is_lead": False}
+        with self.assertRaisesRegex(ApiError, "not a line captain"):
+            tools_captain.call(client, "captain", {"op": "docs_read", "args": {
+                "category": "captaining"}}, worker)
+        self.assertEqual(client.calls, [])
+
     def test_demoted_cached_named_tool_is_denied_without_side_effect(self):
         client = Client()
         out = io.StringIO()

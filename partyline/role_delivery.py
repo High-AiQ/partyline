@@ -110,7 +110,6 @@ def bind_role_delivery(db, att: dict, runtime=None) -> None:
     def rider() -> str:
         nonlocal previous, last_goal, last_staffing, last_handoff, worker_reminder_sent
         nonlocal last_docs_id, last_resource_at
-        nonlocal last_docs_id
         current = current_role(db, att["id"])
         update = ""
         captain_transition = previous is None or (
@@ -133,7 +132,8 @@ def bind_role_delivery(db, att: dict, runtime=None) -> None:
             elif not update and (demoted or (worker_was and not worker_now)):
                 update = ("Your current role is ordinary participant, not captain. "
                           "Use only your own line's tools.")
-        goal = staffing = handoff = worker = pointer = docs = resource = ""
+        goal = staffing = handoff = worker = pointer = resource = ""
+        docs, last_docs_id = reminder_line(db, current.conv_id, last_docs_id, current.role)
         if current.role == "lead":
             current_goal = goal_rider(db, current.conv_id)
             current_staffing = staffing_line(db, current.conv_id, runtime=runtime)
@@ -143,7 +143,6 @@ def bind_role_delivery(db, att: dict, runtime=None) -> None:
             handoff = _delta(current_handoff, last_handoff, "hand-offs")
             last_goal, last_staffing, last_handoff = (
                 current_goal, current_staffing, current_handoff)
-            docs, last_docs_id = reminder_line(db, current.conv_id, last_docs_id)
             if time.time() - last_resource_at >= RESOURCE_RIDER_INTERVAL:
                 last_resource_at = time.time()
                 from .attachment_tmp import tmp_resource_line

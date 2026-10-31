@@ -502,6 +502,28 @@ class CoreToolTests(unittest.TestCase):
         self.assertNotIn("post_message", names)
         self.assertEqual(client.requests, [])
 
+    def test_worker_guide_includes_live_task_tools_and_the_docs_route(self):
+        client = FakeClient(actions=("read", "request_review", "waiting"))
+        state = {**client.state, "role": "implementer", "is_lead": False}
+        guide = tools_core.call(client, "guide", {"topic": "worker"}, state)
+        names = {tool["name"] for tool in guide["tools"]}
+        self.assertIn("read_messages", names)
+        self.assertIn("request_review", names)
+        self.assertIn("waiting", names)
+        self.assertIn("acquire_resource", names)
+        self.assertNotIn("post_message", names)
+        self.assertNotIn("docs_read", names)
+        self.assertEqual(guide["docs"]["index"], "GET /api/docs")
+        self.assertEqual(client.requests, [])
+
+    def test_worker_guide_category_and_topic_read_the_docs_route(self):
+        client = FakeClient(actions=("read",))
+        state = {**client.state, "role": "implementer", "is_lead": False}
+        tools_core.call(client, "guide", {
+            "category": "partyline-development", "topic": "gates"}, state)
+        self.assertEqual(client.requests, [
+            ("GET", "/api/docs/partyline-development/gates", None)])
+
 
 class CoreArgumentValidationTests(unittest.TestCase):
     @staticmethod
