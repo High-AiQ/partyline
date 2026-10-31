@@ -146,7 +146,12 @@ async def settle(runtime, att):
 
 
 def resume(db, conv_id):
-    """A structured attempt starts a new progress episode, even if admission fails."""
+    """A structured attempt starts a new progress episode, even if admission fails.
+
+    One lock-guarded write, but the loop must not wait on the database: async
+    callers run it through `asyncio.to_thread` so a busy `db.lock` or a slow
+    commit spends a worker's time, not the watchdog's budget.
+    """
     db._exec("UPDATE task_reviews SET status='implementing',stall_stage=0,stall_notice_id=NULL,"
              "wait_until=NULL,"
              "report_id=CASE WHEN status='blocked' OR stall_stage=3 THEN NULL ELSE report_id END "
@@ -188,7 +193,7 @@ async def resume_work(runtime, actor, conv_id, body):
 
 
 async def _unblock(runtime, row, note=None):
-    resume(runtime.db, row['conv_id'])
+    await asyncio.to_thread(resume, runtime.db, row['conv_id'])
     await runtime.broadcast_all(ConversationsChangedEvent())
     if note:
         await notify_root(runtime, row, f'unblocked: {note}')

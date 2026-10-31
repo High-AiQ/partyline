@@ -98,7 +98,7 @@ async def request_review(runtime, actor, conv_id, body):
                     raise
             return task(db, conv_id, visibility=True)
         from .orchestrator_stall import resume
-        resume(db, conv_id)
+        await asyncio.to_thread(resume, db, conv_id)
         cwd = line_cwd(db, conv_id)
         entries = [(item.repository, item.sha) for item in body.repositories or []]
         primary = (row['repositories'] or [{}])[0].get('repository')

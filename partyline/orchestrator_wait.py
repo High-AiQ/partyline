@@ -15,6 +15,7 @@ never silences the task, and the line says why in one gentle note.
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 from fastapi import HTTPException
@@ -43,6 +44,18 @@ def note(row):
             'a hand-off is not due yet.')
 
 
+def _declare(db, conv_id, reason, until):
+    """Record the wait, then read the row back: one lock-guarded write.
+
+    `Db` is a single connection behind `db.lock`, opened `check_same_thread=False`,
+    so this is safe in a worker — and off the event loop a busy lock or a slow
+    commit spends a worker's time, not the watchdog's budget.
+    """
+    db._exec('UPDATE task_reviews SET wait_reason=?,wait_until=? WHERE conv_id=?',
+             (reason, until, conv_id))
+    return task(db, conv_id)
+
+
 async def waiting(runtime, actor, conv_id, body):
     """The implementer says it is waiting on a long command."""
     db = runtime.db
@@ -50,11 +63,10 @@ async def waiting(runtime, actor, conv_id, body):
     if row['status'] not in ('implementing', 'idle'):
         raise HTTPException(409, 'only an implementing task can wait')
     until = time.time() + body.seconds
-    db._exec('UPDATE task_reviews SET wait_reason=?,wait_until=? WHERE conv_id=?',
-             (body.reason, until, conv_id))
-    await runtime.post_message(conv_id, 'system', 'system', note(task(db, conv_id)))
+    row = await asyncio.to_thread(_declare, db, conv_id, body.reason, until)
+    await runtime.post_message(conv_id, 'system', 'system', note(row))
     await runtime.broadcast_all(ConversationsChangedEvent())
-    return task(db, conv_id)
+    return row
 
 
 def expired(row, now=None):

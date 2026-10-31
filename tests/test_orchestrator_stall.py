@@ -2,6 +2,7 @@
 
 import os
 import re
+import threading
 import time
 from unittest.mock import AsyncMock, patch
 
@@ -11,10 +12,10 @@ from partyline.db import Db
 from partyline.git_fence import _mirror_dir, _worktree_gitdir, common_gitdir
 from partyline.machine_scope import allows
 from partyline.mcp.tools_tasks import tool_list
-from partyline.orchestrator_contracts import BlockedIn, ReviewRequestIn, WaitingIn
+from partyline.orchestrator_contracts import BlockedIn, ResumeIn, ReviewRequestIn, WaitingIn
 from partyline.orchestrator_notices import report
 from partyline.orchestrator_service import request_review
-from partyline.orchestrator_stall import GENERIC, began, blocked, ended
+from partyline.orchestrator_stall import GENERIC, began, blocked, ended, resume_work
 from partyline.orchestrator_wait import expired, live, resume_expired, waiting as declare_wait
 from partyline.return_path import ReturnPath
 from partyline.task_workspaces import moved, workspaces
@@ -366,6 +367,46 @@ class StallTest(TaskFixture):
         self.assertEqual(row['stall_stage'], 3)
         from partyline.reports import get
         self.assertIn('stalled', get(self.db, row['report_id'])['body'])
+
+    async def test_the_wait_write_leaves_the_event_loop_free(self):
+        """The wait row is written in a worker: a busy db.lock is not a loop stall."""
+        await self.create('captain')
+        main = threading.get_ident()
+        threads = []
+        original = self.db._exec
+
+        def traced(query, args=(), **kwargs):
+            if 'wait_reason' in query:
+                threads.append(threading.get_ident())
+            return original(query, args, **kwargs)
+
+        with patch.object(self.db, '_exec', side_effect=traced):
+            row = await self.wait()
+        self.assertEqual(row['wait_reason'], 'pytest ./scripts/capped-test')
+        self.assertTrue(row['wait_until'])
+        self.assertEqual(threads and len(threads), 1)
+        self.assertNotEqual(threads[0], main)
+
+    async def test_every_resume_write_leaves_the_event_loop_free(self):
+        """Both callers of resume — resume_work and request_review — run it in a worker."""
+        await self.create('none')
+        main = threading.get_ident()
+        threads = []
+        original = self.db._exec
+
+        def traced(query, args=(), **kwargs):
+            if "status='implementing',stall_stage=0" in query:
+                threads.append(threading.get_ident())
+            return original(query, args, **kwargs)
+
+        with patch.object(self.db, '_exec', side_effect=traced):
+            await blocked(self.runtime, self.worker, self.conv_id, BlockedIn(reason='dependency'))
+            await resume_work(self.runtime, self.worker, self.conv_id, ResumeIn(note='back'))
+            await request_review(self.runtime, self.worker, self.conv_id,
+                                 ReviewRequestIn(sha=self.commit(), what='wrote', where='code'))
+        self.assertEqual(self.row()['status'], 'done')
+        self.assertEqual(len(threads), 2)
+        self.assertNotIn(main, threads)
 
     async def test_a_worked_implementer_is_not_stalled_while_its_tool_call_runs(self):
         await self.create('captain')
