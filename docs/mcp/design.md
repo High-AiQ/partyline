@@ -52,7 +52,7 @@ The server lists tools for the caller's live state only. Names are short and uni
 | Tool | Requires | Routes | Notes |
 | --- | --- | --- | --- |
 | `whoami` | always | own line detail and children; capability state is refreshed by MCP before tool dispatch | identity, role, actions, members, parent, children |
-| `guide` | always | `/api/docs` by category and topic for leads; local tool schemas for other roles | on-demand docs for leads; workers get their current permission-filtered core tools without a docs request; with `topic: captain` and no category, returns the caller's captain operations (empty unless a live lead) |
+| `guide` | always | `/api/docs` by category and topic; local tool schemas for no-argument worker calls | all attached processes read docs on demand; `topic: captain` with no category returns captain operations (empty unless a live lead), while `topic: worker` returns the caller's live non-captain core, task, resource, and handover tools plus the docs route |
 | `read_messages` | `read` | messages, messages around an id | limit clamped to 1 to 50 |
 | `post_message` | listed for `write` or `assign` | message post | refuses the caller's own line; `client_key` required; no action check in MCP, the message route decides |
 | `react` | listed for `write` | reactions, by message id | POST toggles the reaction; `remove: true` uses DELETE; the route decides line authorization |

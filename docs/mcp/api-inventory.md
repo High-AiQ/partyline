@@ -177,9 +177,9 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 8 | POST | `/api/auth/login` | anyone (exempt) | **excluded** | human password login |
 | 9 | POST | `/api/auth/refresh` | anyone (exempt) | **excluded** | human session refresh |
 | 13 | GET | `/api/bridges` | M with `read` | **excluded** | bridges are person-only; machines get no bridge read |
-| 16 | GET | `/api/docs` | H, or lead | **guide**: `guide` (no arguments) | docs index, read on demand |
-| 17 | GET | `/api/docs/{category}` | H, or lead | **guide**: `guide` (category) | topic list, read on demand |
-| 18 | GET | `/api/docs/{category}/{topic}` | H, or lead | **guide**: `guide` (category, topic); captain op `docs_read` | bounded doc slice; `docs_read` is the lead-only form |
+| 16 | GET | `/api/docs` | H, or M | **guide**: no arguments for leads; direct route for workers | docs index, read on demand by any attached process |
+| 17 | GET | `/api/docs/{category}` | H, or M | **guide**: `guide` (category) | topic list, read on demand |
+| 18 | GET | `/api/docs/{category}/{topic}` | H, or M | **guide**: `guide` (category, topic); captain op `docs_read` | bounded doc slice; `docs_read` is the lead-only form |
 | 19 | POST | `/api/attachments/{att_id}/compact` | M with `attach` | **excluded** | adapter-specific process control; not a captain op |
 | 20 | DELETE | `/api/conversations/{conv_id}` | H, or M lead with `archive` on a descendant | **op**: captain op `retire_child` | archive a direct child only; `stop_processes` optional; purge stays excluded (row 28) |
 | 21 | GET | `/api/conversations` | H; M for visible lines | **excluded** | no tool lists conversations across the caller's visible lines; `whoami` reports only its own line and children |

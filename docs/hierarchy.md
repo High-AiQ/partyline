@@ -538,19 +538,27 @@ the accepted branch must sit at the accepted SHA with a clean status — a
 stale or dirty checkout is reported (`⚠ tree not in sync: …`) in the accept
 response, never fixed automatically.
 
-## Partyline docs for captains
+## Partyline docs for processes
 
 Partyline's own documentation is readable over the API, in shelves rather
 than one dump: `GET /api/docs` lists the categories (captaining, attachments,
 review-and-accept, fence-and-write-set, memory-and-resources, restart,
-best-practices, lessons), `GET /api/docs/<category>` lists a category's
-topics, and `GET /api/docs/<category>/<topic>` returns one section — sliced
-live from the repository's `docs/*.md`, so there is no second copy to drift;
-a mapped heading that disappears is refused, not paraphrased. People and
-current captains read them; workers and ordinary participants are refused.
-A captain's wake carries the pointer `(partyline docs: GET /api/docs — …)`
-roughly every N line messages since the last one — a setting,
-`docs_reminder_every_messages`, default 40 — and never on every wake.
+best-practices, partyline-development, lessons), `GET /api/docs/<category>`
+lists a category's topics, and `GET /api/docs/<category>/<topic>` returns one
+section — sliced live from the repository's `docs/*.md`, so there is no second
+copy to drift; a mapped heading that disappears is refused, not paraphrased.
+People and every attached process read them on demand. Captains can also use
+the MCP `docs_read` operation; that operation remains captain-only.
+
+Each process has its own message counter and help pointer. A fresh binding
+starts counting from its first wake, then the pointer rides roughly every N
+line messages since that process's last pointer, never on consecutive wakes —
+`docs_reminder_every_messages`, default 40, configures N. Captains are pointed
+to `guide(topic="captain")` and `docs_read(category="captaining")`; workers,
+reviewers, and ordinary participants are pointed to `guide(topic="worker")`
+and `GET /api/docs`. The worker guide lists the caller's live non-captain
+tools, including task and resource operations, and shows how to read a docs
+topic through `guide(category=…, topic=…)`.
 
 ## Compaction as a line event
 

@@ -1,12 +1,11 @@
-"""Curated partyline docs for captains, sliced from the repository's own docs.
+"""Curated partyline docs, sliced from the repository's own docs.
 
 The text lives once, in ``docs/*.md`` and ``README.md``; this module only
 maps (category, topic) to a heading and slices that section at request time,
-so the captain-facing copy can never drift from the docs. Greg asked for
-shelves, not a dump: the index lists the categories, a captain requests a
-category, then a topic. People and current captains read; workers and
-ordinary participants are refused — the docs are for the process that has to
-decide, not for every implementer's context budget.
+so the served copy can never drift from the docs. Greg asked for shelves,
+not a dump: the index lists the categories, a process requests a category,
+then a topic. People and attached processes read on demand; the digest
+pointer tells each role where to start without spending an extra turn.
 """
 
 from __future__ import annotations
@@ -28,10 +27,8 @@ DOCS_ROOT = Path(__file__).resolve().parent.parent
 
 
 def may_read_docs(principal) -> bool:
-    """People read the docs; so do processes currently captaining a line."""
-    if principal.kind == "user":
-        return True
-    return principal.kind == "machine" and principal.is_lead
+    """People and every attached process may read the curated docs."""
+    return principal.kind in ("user", "machine")
 
 
 def _doc_text(doc: str) -> str:
@@ -106,16 +103,17 @@ def topic_body(category: str, slug: str) -> dict | None:
     return None
 
 
-def reminder_line(db, conv_id: str, last_seen_id: int | None) -> tuple[str, int]:
-    """The docs pointer once N line messages have passed since the last one.
+def reminder_line(db, conv_id: str, last_seen_id: int | None, role: str = "lead") -> tuple[str, int]:
+    """The role's help pointer once N line messages have passed since its last one.
 
     Returns ``(line, top message id)``. A fresh binding (``last_seen_id``
-    None) measures from now without riding, so a captain sees the pointer
+    None) measures from now without riding, so each process sees its pointer
     roughly every N messages, never on every wake. A minimal db — the rider
     tests' fake — has nothing to count and never rides.
     """
-    slugs = " · ".join(slug for slug, _title, _summary in CATEGORIES)
-    line = f"(partyline docs: GET /api/docs — {slugs})"
+    line = ('(help: MCP guide(topic="captain") · docs_read(category="captaining"))'
+            if role == "lead" else
+            '(help: MCP guide(topic="worker") · GET /api/docs)')
     try:
         row = db._exec(
             "SELECT COALESCE(MAX(id), 0) AS top, COUNT(*) AS fresh FROM messages "
@@ -131,20 +129,19 @@ def reminder_line(db, conv_id: str, last_seen_id: int | None) -> tuple[str, int]
 
 
 def register_docs_route(app, runtime) -> None:
-    def deny_workers(request: Request) -> None:
+    def deny_unauthorized(request: Request) -> None:
         principal = request_principal(request)
         if not may_read_docs(principal):
-            raise HTTPException(
-                403, "partyline docs are for people and current captains")
+            raise HTTPException(403, "partyline docs are for people and attached processes")
 
     @app.get("/api/docs")
     async def docs_index(request: Request):
-        deny_workers(request)
+        deny_unauthorized(request)
         return category_index()
 
     @app.get("/api/docs/{category}")
     async def docs_category(request: Request, category: str):
-        deny_workers(request)
+        deny_unauthorized(request)
         topics = category_topics(category)
         if topics is None:
             raise HTTPException(404, f"no docs category {category}")
@@ -152,7 +149,7 @@ def register_docs_route(app, runtime) -> None:
 
     @app.get("/api/docs/{category}/{topic}")
     async def docs_topic(request: Request, category: str, topic: str):
-        deny_workers(request)
+        deny_unauthorized(request)
         body = topic_body(category, topic)
         if body is None:
             raise HTTPException(404, f"no docs topic {category}/{topic}")

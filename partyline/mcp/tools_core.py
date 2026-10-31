@@ -6,7 +6,7 @@ from ..upload_scope import UPLOAD_ONLY_CAPTION_REFUSAL
 from .client import ApiError, MAX_UPLOAD, MAX_MODEL_UPLOAD
 from .uploads import validate_uploads
 from .tools_media import model_upload_tool, multi_upload_tool, validate_model_path
-from . import tools_captain
+from . import tools_captain, tools_worker
 
 
 def _schema(properties=None, required=None):
@@ -155,7 +155,9 @@ def call(client, name: str, args: dict, home_state: dict):
         category, topic = args.get("category"), args.get("topic")
         if topic == "captain" and not category:
             return tools_captain.guide(home_state)
-        if not (home_state.get("kind") == "machine"
+        if topic == "worker" and not category:
+            return tools_worker.guide(home_state)
+        if not (category or topic) and not (home_state.get("kind") == "machine"
                 and home_state.get("role") == "lead"
                 and home_state.get("is_lead") is True):
             return {"title": "Partyline MCP tools",
