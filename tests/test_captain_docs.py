@@ -1,4 +1,4 @@
-"""Curated captain docs: shelves over the repository's own docs, captains only."""
+"""Curated process docs: shelves over the repository's own docs."""
 
 import tempfile
 import unittest
@@ -79,12 +79,15 @@ class CaptainDocsTest(unittest.TestCase):
             self.client.get("/api/docs/captaining/nope",
                             headers=self.captain).status_code, 404)
 
-    def test_people_and_captains_read_workers_are_refused(self):
-        self.assertEqual(self.client.get("/api/docs", headers=self.worker).status_code, 403)
-        self.assertEqual(
-            self.client.get("/api/docs/captaining", headers=self.worker).status_code, 403)
-        self.assertEqual(self.client.get("/api/docs", headers=self.captain).status_code, 200)
-        self.assertEqual(self.client.get("/api/docs", headers=self.human).status_code, 200)
+    def test_people_captains_and_workers_read_the_docs(self):
+        for headers in (self.worker, self.captain, self.human):
+            with self.subTest(credential=headers):
+                self.assertEqual(self.client.get("/api/docs", headers=headers).status_code, 200)
+                self.assertEqual(
+                    self.client.get("/api/docs/captaining", headers=headers).status_code, 200)
+                seen = self.client.get("/api/docs/partyline-development/gates", headers=headers)
+                self.assertEqual(seen.status_code, 200, seen.text)
+                self.assertIn("capped-test", seen.json()["body"])
 
     def test_every_mapped_section_exists_in_the_real_docs(self):
         for topic in TOPICS:

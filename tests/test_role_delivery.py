@@ -60,7 +60,7 @@ class RoleDeliveryTests(unittest.TestCase):
             role.return_value = worker
             self.assertIn("ordinary participant", att["digest_rider"]())
 
-    def test_the_docs_pointer_rides_every_n_messages_for_captains_only(self):
+    def test_the_help_pointer_rides_every_n_messages_with_a_counter_per_process(self):
         import os
         import tempfile
 
@@ -83,20 +83,27 @@ class RoleDeliveryTests(unittest.TestCase):
         with patch("partyline.role_delivery.current_role", side_effect=role_for):
             bind_role_delivery(db, cap)
             bind_role_delivery(db, wrk)
-            # a fresh binding measures from now: nothing rides yet
-            self.assertNotIn("partyline docs", cap["digest_rider"]())
+            # Each fresh binding measures from now: neither rides yet.
+            self.assertNotIn("(help:", cap["digest_rider"]())
+            self.assertNotIn("(help:", wrk["digest_rider"]())
             db.add_message("line", "a", "human", "one")
-            self.assertNotIn("partyline docs", cap["digest_rider"]())  # 1 of 2
+            self.assertNotIn("(help:", cap["digest_rider"]())  # captain: 1 of 2
+            self.assertNotIn("(help:", wrk["digest_rider"]())  # worker: 1 of 2
             db.add_message("line", "a", "human", "two")
-            rider = cap["digest_rider"]()  # 2 since the last ride: it rides
-            self.assertIn("(partyline docs: GET /api/docs", rider)
-            self.assertIn("captaining · attachments", rider)
-            self.assertNotIn("partyline docs", cap["digest_rider"]())  # not again yet
+            captain_rider = cap["digest_rider"]()
+            worker_rider = wrk["digest_rider"]()
+            self.assertIn('guide(topic="captain")', captain_rider)
+            self.assertIn('docs_read(category="captaining")', captain_rider)
+            self.assertIn('guide(topic="worker")', worker_rider)
+            self.assertIn("GET /api/docs", worker_rider)
+            self.assertNotIn("(help:", cap["digest_rider"]())  # not again on the next wake
+            self.assertNotIn("(help:", wrk["digest_rider"]())  # independent per-process anchor
             db.add_message("line", "a", "human", "three")
-            self.assertNotIn("partyline docs", cap["digest_rider"]())  # 1 of 2
+            self.assertNotIn("(help:", cap["digest_rider"]())  # 1 of 2
+            self.assertNotIn("(help:", wrk["digest_rider"]())  # 1 of 2
             db.add_message("line", "a", "human", "four")
-            self.assertIn("(partyline docs", cap["digest_rider"]())  # N more: again
-            self.assertNotIn("partyline docs", wrk["digest_rider"]())  # workers: never
+            self.assertIn("(help:", cap["digest_rider"]())  # N more: again
+            self.assertIn("(help:", wrk["digest_rider"]())  # N more: again
 
     def test_a_demoted_captain_keeps_the_scope_warning_next_to_the_worker_pack(self):
         captain = RoleState("lead", "line", None, ("assign", "create_child"))
