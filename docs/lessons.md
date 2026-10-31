@@ -1,5 +1,13 @@
 # Lessons: the false-assumptions ledger
 
+## A mention with trailing punctuation has two candidate spellings
+
+The parser offers both the literal handle and its punctuation-stripped form.
+Treating the unused spelling as a separate failed mention produced a ghost
+notice even after the captain received the message. Suppress that candidate
+when its stripped form is known, and test delivery after captain removal and
+reattachment as well as the notice.
+
 ## A captain successor is not a parallel worker
 
 Treating every non-captain attachment as an implementer blocked captains with
