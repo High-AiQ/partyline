@@ -7,9 +7,10 @@
    * actions lit, so the ⋯ does not vanish out from under the pointer on the way
    * down to the menu.
    */
+  import { SvelteSet } from "svelte/reactivity";
   import TaskStatusChip from "./TaskStatusChip.svelte";
   import LineMenu from "./LineMenu.svelte";
-  import { orderedLines } from "../../lib/line-hierarchy";
+  import { lineTree, readExpandedLines, storeExpandedLines } from "../../lib/line-tree";
   import { toggleSelection } from "../../lib/bulk-select";
   import { tooltip } from "../../lib/tooltip";
   import type { Conversation } from "../../lib/contracts";
@@ -29,6 +30,17 @@
   }
 
   let { onrename, onmanagement, oncloseprocesses, ondelete, onarchivemany }: Props = $props();
+
+  let expanded = $state<Set<string>>(readExpandedLines());
+  const rows = $derived(lineTree(room.conversations, expanded, room.conversation?.id));
+
+  function toggleTree(id: string): void {
+    const next = new SvelteSet(expanded);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    expanded = next;
+    storeExpandedLines(next);
+  }
 
   /** Bulk select mode: rows toggle a checkbox instead of opening the line. */
   let selecting = $state(false);
@@ -81,15 +93,16 @@
 {/if}
 
 <nav id="convs" class="min-h-0 flex-1 overflow-y-auto py-2.5" aria-label="lines">
-  {#each orderedLines(room.conversations) as { line: conversation, depth } (conversation.id)}
+  {#each rows.filter((row) => row.visible) as { line: conversation, depth, descendants, liveDescendants, expanded: isExpanded, forced } (conversation.id)}
     {@const open = menu?.conversation.id === conversation.id}
     <div class="conv-row group relative flex items-stretch" class:menu-open={open}>
       <button
-        class="conv relative flex min-w-0 w-full flex-1 cursor-pointer items-center gap-2 border-0 p-[9px] pl-5 pr-[54px] text-left text-[13.5px] [font-family:inherit] {room
+        class="conv relative flex min-w-0 w-full flex-1 cursor-pointer items-center gap-2 border-0 p-[9px] pl-5 text-left text-[13.5px] [font-family:inherit] {room
           .conversation?.id === conversation.id
           ? 'bg-ink-3 text-copper-hot'
           : 'bg-transparent text-cream-dim group-hover:bg-ink-3 group-hover:text-cream group-focus-within:bg-ink-3 group-focus-within:text-cream group-[.menu-open]:bg-ink-3 group-[.menu-open]:text-cream'}"
         class:active={room.conversation?.id === conversation.id}
+        style:padding-right="{descendants > 0 ? 120 : 54}px"
         style:padding-left="{20 + Math.min(depth, 4) * 16}px"
         use:tooltip={{ label: conversation.name }}
         aria-pressed={selecting ? selected.has(conversation.id) : undefined}
@@ -119,6 +132,30 @@
           >
         {/if}
       </button>
+      {#if descendants > 0}
+        <button
+          type="button"
+          class="tree-toggle absolute top-1/2 right-11 -translate-y-1/2 bg-ink-2 px-1 text-xs text-cream-faint hover:text-cream"
+          aria-label={forced
+            ? `Sublines of ${conversation.name} expanded to show the selected line`
+            : `${isExpanded ? "Collapse" : "Expand"} sublines of ${conversation.name}`}
+          disabled={forced}
+          aria-expanded={isExpanded}
+          onclick={() => {
+            toggleTree(conversation.id);
+          }}>{isExpanded ? "▾" : "▸"}</button
+        >
+        {#if !isExpanded}
+          <span
+            class="tree-count absolute top-1/2 right-[76px] -translate-y-1/2 bg-ink-2 px-1 text-[10px] text-cream-faint"
+            use:tooltip={{
+              label: `${String(descendants)} sublines, ${String(liveDescendants)} active processes`,
+            }}
+            aria-label="{descendants} sublines, {liveDescendants} active processes"
+            >{descendants} · {liveDescendants}▶</span
+          >
+        {/if}
+      {/if}
       {#if !selecting}
         <div
           class="conv-actions absolute top-1/2 right-2 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto group-[.menu-open]:opacity-100 group-[.menu-open]:pointer-events-auto"
