@@ -87,6 +87,7 @@ describe("conversation rail bulk select", () => {
       },
     });
     try {
+      document.querySelector<HTMLButtonElement>(".tree-toggle")?.click();
       document.querySelector<HTMLButtonElement>(".bulk-select")?.click();
       await vi.waitFor(() => {
         expect(document.querySelectorAll(".bulk-check")).toHaveLength(3);
