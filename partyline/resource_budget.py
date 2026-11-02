@@ -65,7 +65,7 @@ def memory_ceiling(host: Host | None = None) -> int:
     host = host or host_resources()
     configured = process_memory_limit({
         "PARTYLINE_PROCESS_MEMORY_LIMIT": os.environ.get(
-            "PARTYLINE_MAX_PROCESS_MEMORY_LIMIT", "8G"
+            "PARTYLINE_MAX_PROCESS_MEMORY_LIMIT", "16G"
         )
     })
     return min(parse_size(configured), host.ram_bytes * 3 // 4)
