@@ -1,5 +1,6 @@
 """Request decisions enforce role, ceiling and replacement-resume rules."""
 
+import os
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -91,6 +92,24 @@ class MemoryRequestTest(unittest.TestCase):
         self.assertEqual(approved.status_code, 200, approved.text)
         self.assertEqual(self.db.get_attachment("worker")["memory_limit"], "7G")
         self.assertEqual(self.resumed, [("worker", True)])
+
+    def test_person_can_approve_16g_on_large_host_but_small_host_clamps_ceiling(self):
+        from partyline.resource_budget import GIB, memory_ceiling
+
+        self.host.stop()
+        with patch.dict("os.environ"):
+            os.environ.pop("PARTYLINE_MAX_PROCESS_MEMORY_LIMIT", None)
+            with patch("partyline.resource_budget.host_resources", return_value=Host(4, 32 * GIB)):
+                self.assertEqual(memory_ceiling(), 16 * GIB)
+                response = self.file("16G")
+                self.assertEqual(response.status_code, 200, response.text)
+                self.actor = Principal(kind="user", name="person", user_id=1)
+                approved = self.client.post(f"/api/memory-requests/{response.json()['id']}/approve")
+                self.assertEqual(approved.status_code, 200, approved.text)
+                self.assertEqual(self.db.get_attachment("worker")["memory_limit"], "16G")
+            with patch("partyline.resource_budget.host_resources", return_value=Host(4, 8 * GIB)):
+                self.assertEqual(memory_ceiling(), 6 * GIB)
+                self.assertEqual(self.file("16G").status_code, 400)
 
     def test_captain_can_deny_a_request(self):
         self.assertEqual(self.file("7G").status_code, 200)
