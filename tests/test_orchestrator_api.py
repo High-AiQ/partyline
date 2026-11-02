@@ -221,3 +221,44 @@ class ApiTest(TaskFixture):
         self.assertEqual(self.db.get_conversation(self.conv_id)['task_reviewer_name'], 'captain')
         await self.create('none')
         self.assertEqual(self.db.get_conversation(self.conv_id)['task_reviewer_name'], 'none')
+
+    async def test_task_goal_update_and_rider(self):
+        from partyline.role_delivery import bind_role_delivery
+
+        row = await self.create()
+        conv = row['conv_id']
+        self.app.include_router(self._goal_router())
+        self.actor = self.captain
+        response = self.client.put(f'/api/conversations/{conv}/goal', json={'goal': 'wrong'})
+        self.assertEqual(response.status_code, 409)
+        self.assertIn('set_task_goal', response.text)
+        att = {'id': row['implementer_id'], 'digest_rider': lambda: ''}
+        bind_role_delivery(self.db, att)
+        self.assertIn('(task goal: Build the feature)', att['digest_rider']())
+        self.assertNotIn('task goal:', att['digest_rider']())
+        await request_review(self.runtime, self.worker, conv, ReviewRequestIn(what='ready', where='code'))
+        reviewer_id = self.row()['reviewer_id']
+        reviewer = {'id': reviewer_id, 'digest_rider': lambda: ''}
+        bind_role_delivery(self.db, reviewer)
+        self.assertIn('(task goal: Build the feature)', reviewer['digest_rider']())
+        response = self.client.post(f'/api/conversations/{conv}/task/goal', json={'goal': 'new goal'})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.db.get_conversation(conv)['goal'], 'new goal')
+        self.assertIn('(task goal: new goal)', att['digest_rider']())
+        self.assertIn('(task goal: new goal)', reviewer['digest_rider']())
+        messages = [msg for msg in self.db.list_messages(conv) if 'Task goal updated' in msg['body']]
+        self.assertEqual({msg['audience_attachment_id'] for msg in messages},
+                         {row['implementer_id'], reviewer_id})
+        restarted = {'id': row['implementer_id'], 'digest_rider': lambda: ''}
+        bind_role_delivery(self.db, restarted)
+        self.assertIn('(task goal: new goal)', restarted['digest_rider']())
+        self.actor = self.worker
+        self.assertEqual(self.client.post(f'/api/conversations/{conv}/task/goal',
+                                          json={'goal': 'bad'}).status_code, 403)
+
+    def _goal_router(self):
+        from fastapi import FastAPI
+        from partyline.goal import register_goal_route
+        app = FastAPI()
+        register_goal_route(app, self.runtime)
+        return app.router

@@ -1,5 +1,21 @@
 # Partyline MCP design
 
+## Choosing a goal operation
+
+| Goal decision | MCP operation |
+| --- | --- |
+| New task | `create_task(name, goal, implementer, review)` |
+| Change active task direction | `set_task_goal(task_conv_id, goal)` |
+| New work on an approved or done task | `reopen_task(task_conv_id, goal)` |
+| New sub-captain | `create_child(parent_conv_id, name, goal)`; later `set_goal(child_conv_id, goal)` |
+
+The task or child ID is distinct from the captain's parent ID; creation returns the child ID.
+The task implementer and reviewer see the stored goal on their first wake, when changed,
+and on their first wake after restart. `set_task_goal` also sends each live participant a
+durable private message. Ordinary workers receive assignments from their captain, not
+captain-only goal framing. Never park briefs in `/tmp` files; commit a longer brief in a
+repository at the child's base and reference it in the goal.
+
 This document describes the MCP implementation and its known limits. Current source claims refer to
 the checked-out code; client behaviour is labelled by its evidence: **retained run** (a sanitized log
 under `fixture/`), **source** (read from pinned upstream code), or **code** (read from this

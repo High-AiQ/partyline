@@ -58,6 +58,13 @@ def goal_rider(db, conv_id: str) -> str:
     return f"(goal you are seeing through: {goal}; {rule})"
 
 
+def task_goal_rider(db, conv_id: str) -> str:
+    """Task direction for its implementer and reviewer, without captain framing."""
+    conv = db.get_conversation(conv_id) or {}
+    goal = " ".join(str(conv.get("goal") or "").split())
+    return f"(task goal: {goal})" if goal else ""
+
+
 def register_goal_route(app: FastAPI, runtime) -> None:
     @app.put("/api/conversations/{conv_id}/goal", response_model=ConversationResponse)
     async def put_goal(request: Request, conv_id: str, body: GoalIn):
@@ -69,6 +76,10 @@ def register_goal_route(app: FastAPI, runtime) -> None:
         conv = db.get_conversation(conv_id)
         if conv is None:
             raise HTTPException(404)
+        from .orchestrator_store import task
+        if task(db, conv_id):
+            raise HTTPException(409, "task line: use set_task_goal(conv_id, goal), or "
+                                "reopen_task for an approved/done task")
         goal = body.goal.strip()
         if len(goal) > MAX_GOAL:
             raise HTTPException(400, f"goal is capped at {MAX_GOAL} characters")

@@ -31,7 +31,17 @@ def permitted(state):
 
 
 def guide(state):
-    return {"operations": [{"name": name, "inputSchema": schema(name)}
+    return {"goal_decisions": [
+                {"need": "New task", "operation": "create_task(name, goal, implementer, review)"},
+                {"need": "Change active task goal", "operation": "set_task_goal(task_conv_id, goal)"},
+                {"need": "New work on approved/done task", "operation": "reopen_task(task_conv_id, goal)"},
+                {"need": "Sub-captain line", "operation": "create_child(parent_conv_id, name, goal); "
+                              "later set_goal(child_conv_id, goal)"}],
+            "goal_context": ("Task participants receive the goal on their first wake, after changes, and "
+                             "after restart; live participants also receive a durable message on updates. "
+                             "Ordinary workers get assignments from their captain, not captain goal framing. "
+                             "Use the child's line id for task operations; never park briefs in /tmp files."),
+            "operations": [{"name": name, "inputSchema": schema(name)}
                             for name in permitted(state)],
             "fallback": {"name": "captain", "inputSchema": {
                 "type": "object", "properties": {
