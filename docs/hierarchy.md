@@ -667,6 +667,24 @@ gate commands are never run unfenced inside the server.
 
 ## The goal
 
+| Need | Operation |
+| --- | --- |
+| New orchestrator task | `create_task(name, goal, implementer, review)` |
+| Change an active task's goal | `set_task_goal(conv_id, goal)` |
+| Continue an approved or done task with a new goal | `reopen_task(conv_id, goal)` |
+| New sub-captain line | `create_child(conv_id, name, goal)`; edit later with `set_goal(child_conv_id, goal)` |
+
+`create_task` and `create_child` store the goal on the new child line. For task
+operations, `conv_id` is the task line's ID, not the root captain's ID. For
+`create_child`, `conv_id` is the parent; the returned ID identifies the child.
+Each worker's briefing names its own line ID. Task implementers and reviewers
+receive the stored task goal on their first wake and whenever it changes, including
+on the first wake after restart. `set_task_goal` also sends a durable private message
+to each live task participant. Ordinary workers on captain lines receive assignments
+from their captain; the manager goal rider and its captain-only framing are not sent
+to them. Keep long briefs in a committed repository file visible at the child's
+base, referenced in the goal; never park briefs in `/tmp` files.
+
 A line carries a `goal`: what its manager is seeing through. A person or the
 line's manager records it once with `PUT /api/conversations/<id>/goal` and JSON
 `{"goal":"..."}`; the change is announced on the line. From then on the goal
