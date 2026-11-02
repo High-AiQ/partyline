@@ -438,7 +438,7 @@ An authorized captain or person can change a **stopped** process with
 restore the host default, then use the existing resume action. A worker cannot
 grant itself more memory. Overrides survive resume and fresh-session replacement.
 The API ceiling is the smaller of `PARTYLINE_MAX_PROCESS_MEMORY_LIMIT` (default
-`8G`) and 75% of host RAM. These caps do not reserve RAM or guarantee that the
+`16G`) and 75% of host RAM. These caps do not reserve RAM or guarantee that the
 combined workload fits; the captain still needs to consider other live processes.
 
 First inspect the failed command and its error output. A failing assertion that

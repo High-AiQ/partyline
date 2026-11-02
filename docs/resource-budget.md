@@ -41,8 +41,8 @@ can lower the effective count further.
 Settings accept 4–32 processes, a reserve from zero through 90% of RAM, a
 default cap from 256 MiB through the existing per-process ceiling, and a
 reservation from 256 MiB through the default cap. A saved change must leave at
-least one reservation inside the memory budget. The per-process cap ceiling is
-at most 8 GiB and 75% of host RAM. Existing attachment memory settings remain
+least one reservation inside the memory budget. The per-process cap ceiling defaults to the smaller of 16 GiB and 75% of host
+RAM; `PARTYLINE_MAX_PROCESS_MEMORY_LIMIT` can change the 16 GiB limit. Existing attachment memory settings remain
 available through the per-attachment memory endpoint. An unset cap is resolved
 from the global default and saved on the attachment at admission, so later
 edits to the cap do not change a live process. People can change the saved cap
@@ -72,7 +72,7 @@ hard limit; on macOS, `RLIMIT_AS` is best-effort
 address-space limiting and does not guarantee resident-memory use. A person or
 captain can change an attachment's cap for its next activation with
 `PUT /api/attachments/{id}/memory`; a process cannot grant itself more. The
-ceiling is `min(8 GiB, 3/4 of host RAM)`. A process or captain asks for more with
+ceiling defaults to `min(16 GiB, 3/4 of host RAM)`. A process or captain asks for more with
 `POST /api/attachments/{id}/memory-requests`; approval restarts the process with
 the new cap.
 

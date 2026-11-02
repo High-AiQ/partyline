@@ -1,6 +1,7 @@
 """Global admission counts and serializes starting attachment reservations."""
 
 import asyncio
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -96,6 +97,17 @@ class ResourceBudgetTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(values["memory_reserve_bytes"], 2 * GIB)
         self.assertEqual(values["default_process_memory_bytes"], 2 * GIB)
         self.assertEqual(values["memory_reservation_bytes"], GIB)
+
+    def test_settings_accept_16g_default_on_large_host(self):
+        host = Host(cpus=10, ram_bytes=32 * GIB)
+        with patch.dict("os.environ"):
+            os.environ.pop("PARTYLINE_MAX_PROCESS_MEMORY_LIMIT", None)
+            values = {**defaults(host), "default_process_memory_bytes": 16 * GIB,
+                      "memory_captain_ceiling_bytes": 16 * GIB}
+            validate_settings(values, host)
+            self.assertEqual(defaults(host)["memory_captain_ceiling_bytes"], 8 * GIB)
+            with self.assertRaisesRegex(ValueError, "process ceiling"):
+                validate_settings(values, self.host)
 
     def test_ordinary_tests_use_the_pinned_host_budget(self):
         self.assertEqual(host_resources(), PINNED_TEST_HOST)
