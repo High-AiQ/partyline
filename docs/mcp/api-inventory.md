@@ -193,7 +193,7 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 31 | GET | `/api/docker-workloads` | H; M for visible rows | **excluded** | host infrastructure |
 | 32 | POST | `/api/docker-workloads/{container_id}/stop` | owning principal | **excluded** | destructive, host-level container stop |
 | 33 | GET | `/api/docker-gpu` | any principal | **excluded** | host GPU admission state; not captain or worker scope |
-| 36 | PUT | `/api/conversations/{conv_id}/goal` | M with `assign`, or H | **tool**: `goal` (set) and captain op `set_goal` | line goal; both forms reach this route, and `goal` set needs `assign` |
+| 36 | PUT | `/api/conversations/{conv_id}/goal` | M with `assign`, or H | **tool**: `goal` (set) and captain op `set_goal` | captain line goal; task lines must use `set_task_goal` or `reopen_task` |
 | 37 | GET | `/api/heartbeat` | H, or root-lead attachment | **excluded** | root heartbeat belongs to the root manager, not captain or worker scope |
 | 38 | POST | `/api/heartbeat` | root-lead machine (H refused) | **excluded** | root heartbeat belongs to the root manager |
 | 39 | GET | `/api/heartbeat/status` | root-lead attachment | **excluded** | root heartbeat belongs to the root manager |
@@ -381,3 +381,5 @@ These routes extend the fixed inventory above; they are separate from `/api/leas
 `process_overview` also includes each line's declared resources with holder,
 grant timestamp, note and FIFO queue. See the
 [contract](../hierarchy.md#captain-declared-exclusive-resources) for bounds and cleanup.
+
+| POST | `/api/conversations/{conv_id}/task/goal` | `task_goal` | H or orchestrator root captain | yes | tool: `set_task_goal`; stores active task direction and messages live participants |

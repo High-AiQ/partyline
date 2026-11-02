@@ -43,7 +43,7 @@ captain wrote, not a paraphrase of them.
 
 ## Checking the length
 
-A goal longer than 3000 characters is refused: `set_goal` and `PUT …/goal` return HTTP 400
+A goal longer than 3000 characters is refused: `set_goal` and `PUT …/goal` on captain lines return HTTP 400
 (`goal is capped at 3000 characters`), and `create_task` fails validation because
 `TaskIn.goal` has `max_length=3000`. Shorten the goal and move the rest into the brief; do
 not split a goal across several messages.
