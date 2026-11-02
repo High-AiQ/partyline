@@ -4,7 +4,7 @@ import os
 import time
 from typing import NamedTuple
 
-from .goal import goal_rider
+from .goal import goal_rider, task_goal_rider
 from .accept_sha import handoff_rider
 from .bridge_pack import pack_for
 from .captain_docs import reminder_line
@@ -75,6 +75,8 @@ def _instructions(state: RoleState, db=None) -> str:
     pack = task_pack(db, state.conv_id, state.role) or role_instructions(
         state.actions, state.conv_id, state.parent_id, state.depth, state.staffed, state.captain_mode
     ) or worker_instructions(state.captained)
+    if state.role != "lead" and state.role != "attachment":
+        pack = f"Your own line id is {state.conv_id}.\n" + pack
     if state.role == "lead" and state.parent_id is None and hasattr(db, "get_setting"):
         from .resource_budget import snapshot
         capacity = snapshot(db)
@@ -119,7 +121,7 @@ def bind_role_delivery(db, att: dict, runtime=None) -> None:
         worker_now = current.role != "lead" and current.captained
         worker_was = previous is not None and previous.role != "lead" and previous.captained
         if current.role != "lead":
-            last_goal = last_staffing = last_handoff = None
+            last_staffing = last_handoff = None
         mode_transition = current.captain_mode != previous.captain_mode
         if current != previous:
             demoted = previous is not None and previous.role == "lead" and current.role != "lead"
@@ -153,6 +155,11 @@ def bind_role_delivery(db, att: dict, runtime=None) -> None:
                     if part)
             if not captain_transition:
                 pointer = briefing_pointer(current.conv_id)
+        elif (current.role in ("implementer", "reviewer")
+              and is_task_participant(db, att["id"], current.conv_id)):
+            current_goal = task_goal_rider(db, current.conv_id)
+            goal = _delta(current_goal, last_goal, "task goal")
+            last_goal = current_goal
         elif current.captained and current.role != "attachment":
             if not worker_reminder_sent or (worker_now and not worker_was):
                 worker = WORKER_REMINDER
@@ -172,6 +179,12 @@ def bind_role_delivery(db, att: dict, runtime=None) -> None:
             if part)
 
     att["digest_rider"] = rider
+
+
+def is_task_participant(db, attachment_id: str, conv_id: str) -> bool:
+    from .orchestrator_store import task
+    row = task(db, conv_id)
+    return bool(row and attachment_id in (row['implementer_id'], row['reviewer_id']))
 
 
 def _delta(value: str, previous: str | None, label: str) -> str:

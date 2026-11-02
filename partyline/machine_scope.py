@@ -25,9 +25,9 @@ Capability = Literal[
     "notify",
     "read_reports",
     "appoint_lead",
-    "archive",
-    "link_parent",
-    "create_task", "tasks", "restart_reviewer", "restart_implementer", "reopen_task", "message_task",
+    "archive", "link_parent",
+    "create_task", "tasks", "restart_reviewer", "restart_implementer", "reopen_task",
+    "message_task", "set_task_goal",
     "resume_work", "request_review", "review_verdict", "blocked", "waiting",
 ]
 
@@ -42,9 +42,9 @@ ALL_CAPABILITIES: tuple[Capability, ...] = (
     "notify",
     "read_reports",
     "appoint_lead",
-    "archive",
-    "link_parent",
-    "create_task", "tasks", "restart_reviewer", "restart_implementer", "reopen_task", "message_task",
+    "archive", "link_parent",
+    "create_task", "tasks", "restart_reviewer", "restart_implementer", "reopen_task",
+    "message_task", "set_task_goal",
     "resume_work", "request_review", "review_verdict", "blocked", "waiting",
 )
 
@@ -104,7 +104,7 @@ def allows(db: Db, principal: Principal, conv_id: str, capability: Capability) -
     if capability == "resume_work" and capability in task_actions(db, principal, conv_id):
         return True
     if capability in ("create_task", "tasks", "restart_reviewer", "restart_implementer", "reopen_task",
-                      "message_task", "resume_work"):
+                      "message_task", "set_task_goal", "resume_work"):
         return (conv_id == home and principal.is_lead and conv['parent_id'] is None
                 and conv.get('captain_mode', 'manager_tree') == 'orchestrator')
     if task_row and capability == "archive" and not (

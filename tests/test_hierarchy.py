@@ -489,7 +489,7 @@ class HierarchyApiTest(unittest.TestCase):
             self.runtime.live[att_id] = adapter_for(att_id)
         worker = {"id": "w2-att", "digest_rider": lambda: ""}
         bind_role_delivery(self.db, worker)
-        self.assertEqual(worker["role_briefing"], "")  # nothing to brief: no captain yet
+        self.assertIn("Your own line id is parent.", worker["role_briefing"])
 
         appointed = self.client.post(
             "/api/conversations/parent/lead", json={"attachment_id": "lead-att"})

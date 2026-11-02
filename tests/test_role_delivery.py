@@ -18,7 +18,7 @@ class RoleDeliveryTests(unittest.TestCase):
         att = {"id": "worker", "digest_rider": lambda: "task board"}
         with patch("partyline.role_delivery.current_role", return_value=ordinary) as role:
             bind_role_delivery(NO_GOAL, att)
-            self.assertEqual(att["role_briefing"], "")
+            self.assertIn("Your own line id is line.", att["role_briefing"])
             self.assertEqual(att["digest_rider"](), "task board")
             role.return_value = manager
             self.assertIn("Captain pack", att["digest_rider"]())
@@ -53,7 +53,7 @@ class RoleDeliveryTests(unittest.TestCase):
         att = {"id": "worker", "digest_rider": lambda: "task board"}
         with patch("partyline.role_delivery.current_role", return_value=worker) as role:
             bind_role_delivery(NO_GOAL, att)
-            self.assertEqual(att["role_briefing"], "")
+            self.assertIn("Your own line id is line.", att["role_briefing"])
             self.assertNotIn("Worker pack", att["digest_rider"]())
             role.return_value = captained
             self.assertIn("Worker pack", att["digest_rider"]())

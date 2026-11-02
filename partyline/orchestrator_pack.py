@@ -46,7 +46,8 @@ def task_pack(db, conv_id, role):
         return ''
     return (
         '\n\n## Task line pack\n'
-        f"You are the {role}. Task of {row['root_id']}, one implementer, policy {row['policy']}. "
+        f"You are the {role}. Your task line id is {conv_id}; its root line id is {row['root_id']}. "
+        f"One implementer, policy {row['policy']}. "
         f"{_handles(row, role)}"
         f"{_root_sentence(db, conv_id, row['root_id'])}"
         f"{_workspace_sentence(db, conv_id, role)}"

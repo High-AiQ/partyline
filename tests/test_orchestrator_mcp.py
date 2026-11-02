@@ -69,3 +69,12 @@ class TaskToolsTest(unittest.TestCase):
                        'params': {'name': 'tasks', 'arguments': {}}})
         result = json.loads(output.getvalue().splitlines()[-1])
         self.assertTrue(result['result']['isError'])
+
+    def test_set_task_goal_schema_and_route(self):
+        state = {**self.root, 'actions': ['set_task_goal']}
+        tool = tools_tasks.tool_list(state)[0]
+        self.assertEqual(set(tool['inputSchema']['required']), {'conv_id', 'goal'})
+        tools_tasks.call(self.client, 'set_task_goal', {'conv_id': 'child', 'goal': 'new'}, state)
+        self.client.request.assert_called_with('POST', '/api/conversations/child/task/goal', {'goal': 'new'})
+        with self.assertRaises(ValueError):
+            tools_tasks.call(self.client, 'set_task_goal', {'goal': 'new'}, state)

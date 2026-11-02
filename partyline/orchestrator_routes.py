@@ -67,6 +67,12 @@ def orchestrator_router(runtime):
         actor = request_principal(request)
         return await reopen_task(runtime, actor, task_line(db, actor, conv_id), body)
 
+    @router.post('/api/conversations/{conv_id}/task/goal', response_model=TaskReview)
+    async def task_goal(request: Request, conv_id: str, body: ReopenIn):
+        from .orchestrator_goal import set_task_goal
+        actor = request_principal(request)
+        return await set_task_goal(runtime, actor, task_line(db, actor, conv_id), body.goal)
+
     @router.post('/api/conversations/{conv_id}/task/message', response_model=TaskReview)
     async def message(request: Request, conv_id: str, body: MessageTaskIn):
         actor = request_principal(request)
