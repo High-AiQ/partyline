@@ -7,7 +7,7 @@ from typing import Annotated
 from pydantic import BaseModel, Field, StringConstraints
 
 from .contracts import ConversationResponse
-from .goal import MAX_GOAL, MAX_TOPIC
+from .goal import MAX_GOAL, MAX_TASK_GOAL, MAX_TOPIC
 
 MAX_REPORT_BODY = 2000
 MAX_MESSAGE_BODY = 8000
@@ -42,6 +42,10 @@ class ChildIn(BaseModel):
     # parent's, for work that lives in another project. Optional; the default
     # stays the parent line's own repository.
     repository: str = Field(default="", max_length=4096)
+
+
+class TaskChildIn(ChildIn):
+    goal: str = Field(max_length=MAX_TASK_GOAL)
 
 
 class AcceptIn(BaseModel):

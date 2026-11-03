@@ -37,8 +37,9 @@ def guide(state):
                 {"need": "New work on approved/done task", "operation": "reopen_task(conv_id, goal)"},
                 {"need": "Sub-captain line", "operation": "create_child(parent_conv_id, name, goal); "
                               "later set_goal(child_conv_id, goal)"}],
-            "goal_context": ("Task participants receive the goal on their first wake, after changes, and "
-                             "after restart; live participants also receive a durable message on updates. "
+            "goal_context": ("Task participants receive the goal in their joining pack and on wakes until "
+                             "delivery is proven, then on goal change or restart. Live participants "
+                             "receive a durable update message. "
                              "Ordinary workers get assignments from their captain, not captain goal framing. "
                              "Use the child's line id for task operations; never park briefs in /tmp files."),
             "operations": [{"name": name, "inputSchema": schema(name)}

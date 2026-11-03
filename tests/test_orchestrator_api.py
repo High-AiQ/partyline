@@ -160,9 +160,9 @@ class ApiTest(TaskFixture):
     async def test_implementer_spawn_refusal_is_loud(self):
         self.actor = self.captain
         with patch('partyline.orchestrator_service.spawn', AsyncMock(side_effect=ValueError('missing CLI'))):
-            with self.assertRaises(ValueError):
-                await create_task(self.runtime, self.captain, 'root', TaskIn(
-                    name='failed', goal='goal', implementer='builder'))
+            refused = await create_task(self.runtime, self.captain, 'root', TaskIn(
+                name='failed', goal='goal', implementer='builder'))
+            self.assertIn('missing CLI', refused['creation_error'])
         pending = self.db._exec('SELECT conv_id FROM task_reviews').fetchone()['conv_id']
         result = await create_task(self.runtime, self.captain, 'root', TaskIn(
             name='failed', goal='goal', implementer='builder'))
@@ -235,7 +235,7 @@ class ApiTest(TaskFixture):
         att = {'id': row['implementer_id'], 'digest_rider': lambda: ''}
         bind_role_delivery(self.db, att)
         self.assertIn('(task goal: Build the feature)', att['digest_rider']())
-        self.assertNotIn('task goal:', att['digest_rider']())
+        self.assertIn('(task goal: Build the feature)', att['digest_rider']())
         await request_review(self.runtime, self.worker, conv, ReviewRequestIn(what='ready', where='code'))
         reviewer_id = self.row()['reviewer_id']
         reviewer = {'id': reviewer_id, 'digest_rider': lambda: ''}

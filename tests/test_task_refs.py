@@ -27,6 +27,8 @@ class TaskRefTest(TaskFixture):
     async def test_a_name_shared_by_two_tasks_is_refused_with_409(self):
         await self.create()
         second = await self.create()
+        # Legacy databases and renames can still contain duplicate display names.
+        self.db.rename_conversation(second['conv_id'], 'slice')
         self.actor = self.captain
         response = self.client.post('/api/conversations/slice/task/message', json={'text': 'x'})
         self.assertEqual(response.status_code, 409, response.text)

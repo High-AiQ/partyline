@@ -28,6 +28,9 @@ def delivery_hooks(runtime, conv_id: str, att_id: str):
                 return True
             messages = runtime.db.messages_by_ids(conv_id, deliverable_ids)
             if messages and await live.deliver(messages) is False:
+                # A queue flush is still an unproved paste. Keep suppression
+                # until its transcript receipt, including after the hello turn.
+                runtime._record_unproved(att, live, messages)
                 return False
             if messages and not runtime.db.set_last_seen(
                 att_id, messages[-1]["id"], runtime_owner

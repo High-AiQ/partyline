@@ -973,6 +973,35 @@ class CodexThreadHistoryTest(unittest.IsolatedAsyncioTestCase):
                 self.adapter, self.home, "thread-1", timeout=timeout
             )
 
+    async def test_input_proof_precedes_turn_end_that_flushes_claim_retry(self):
+        from partyline.adapters.receipts import ENDED
+
+        marker = self.adapter._new_paste_marker()
+        assignment = f"{marker}\n{self.adapter._claim_token}\nImplement this task: persistent goal"
+        self.adapter._track_jsonl_paste(assignment, [{'id': 71}], marker)
+        events = []
+        duplicate_pastes = []
+
+        async def confirm(ids):
+            events.append('input proved')
+            return True
+
+        async def boundary(att, event):
+            if event == ENDED:
+                events.append('turn ended')
+                # Presence flushes a pre-claim assignment at this boundary.
+                if self.adapter._jsonl_receipts:
+                    duplicate_pastes.append(assignment)
+
+        self.adapter.att['confirm_delivery_ids'] = confirm
+        self.write_store(items=[self.item('u1', 'userMessage', {
+            'type': 'userMessage', 'content': [{'type': 'text', 'text': assignment}]})],
+            turns=[('thread-1', 'turn-1', 'completed', int(self.spawned_at), None)])
+        with patch.object(self.th, 'receipt', boundary):
+            self.assertTrue(await self.run_tail())
+        self.assertEqual(events, ['input proved', 'turn ended'])
+        self.assertEqual(duplicate_pastes, [])
+
     async def test_resumed_agent_message_is_relayed_from_thread_history(self):
         token = self.adapter._claim_token
         self.write_store(

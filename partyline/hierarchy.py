@@ -120,7 +120,8 @@ def would_cycle(db: Db, conv_id: str, parent_id: str) -> bool:
     return conv_id in ancestors(db, parent_id) or is_descendant(db, conv_id, parent_id)
 
 
-def create_child_conversation(db: Db, parent_id: str, child_id: str, name: str) -> dict:
+def create_child_conversation(db: Db, parent_id: str, child_id: str, name: str, *,
+                              goal: str = "", topic: str = "") -> dict:
     parent = db.get_conversation(parent_id)
     if parent is None:
         raise HierarchyError(404, "parent line not found")
@@ -129,8 +130,8 @@ def create_child_conversation(db: Db, parent_id: str, child_id: str, name: str) 
     if would_cycle(db, child_id, parent_id):
         raise HierarchyError(400, "that parent would cycle the line tree")
     db._exec(
-        "INSERT INTO conversations(id,name,created_at,parent_id) VALUES(?,?,?,?)",
-        (child_id, name, time.time(), parent_id),
+        "INSERT INTO conversations(id,name,created_at,parent_id,goal,topic) VALUES(?,?,?,?,?,?)",
+        (child_id, name, time.time(), parent_id, goal, topic),
     )
     return db.get_conversation(child_id)
 

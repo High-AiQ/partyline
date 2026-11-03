@@ -203,8 +203,8 @@ class WorkflowTest(TaskFixture):
 
         assignment = TaskIn(name='retry', goal='feature', implementer='builder')
         with patch('partyline.server._start_attachment', fail):
-            with self.assertRaises(HTTPException):
-                await create_task(self.runtime, self.captain, 'root', assignment)
+            refused = await create_task(self.runtime, self.captain, 'root', assignment)
+            self.assertIn('PTY unavailable', refused['creation_error'])
         pending = tasks(self.db, 'root')[0]
         with patch('partyline.server._start_attachment', original_start):
             result = await create_task(self.runtime, self.captain, 'root', assignment)

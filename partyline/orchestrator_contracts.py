@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .goal import MAX_TASK_GOAL
+
 
 class CaptainStyleIn(BaseModel):
     model_config = ConfigDict(extra='forbid')
@@ -13,8 +15,8 @@ class CaptainStyleIn(BaseModel):
 
 class TaskIn(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    name: str = Field(min_length=1, max_length=120)
-    goal: str = Field(min_length=1, max_length=3000)
+    name: str = Field(min_length=1, max_length=120, pattern=r'\S')
+    goal: str = Field(min_length=1, max_length=MAX_TASK_GOAL, pattern=r'\S')
     implementer: str = Field(min_length=1, max_length=120)
     review: str | None = Field(default=None, min_length=1, max_length=120)
     base: Literal['head', 'upstream'] = 'head'
@@ -69,7 +71,7 @@ class ResumeIn(BaseModel):
 
 class ReopenIn(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    goal: str = Field(min_length=1, max_length=3000, pattern=r'\S')
+    goal: str = Field(min_length=1, max_length=MAX_TASK_GOAL, pattern=r'\S')
 
 
 class VerdictIn(BaseModel):
@@ -122,6 +124,8 @@ class TaskReview(BaseModel):
     implementer_handle: str | None = None
     reviewer_handle: str | None = None
     overridden_by: str | None = None
+    goal: str = ''
+    creation_error: str | None = None
 
 
 class MessageTaskIn(BaseModel):

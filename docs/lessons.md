@@ -1,5 +1,42 @@
 # Lessons: the false-assumptions ledger
 
+## A posted assignment is not a delivered goal
+
+Assuming successful task creation meant the caller received the result missed
+HTTP timeouts: MCP's generic `invalid tool arguments or local file` masks
+`OSError`, including timeouts, after server-side effects. Length validation
+rejects before HTTP; that generic error is not evidence of a goal-size refusal.
+Serialize creation by root, reserve active names, return committed task identities
+on staffing/notification failure, and make same-assignment retries reuse them.
+Task goals now accept 20,000 characters and report that limit before creation.
+
+Assuming digest construction meant a goal was read also spent its first-wake
+rider before transcript claim or a successful paste. A joining worker's pack
+contained no goal, so its hello could ask for work while its assignment waited
+for the claim and turn-end retry. Include the goal in the joining pack and repeat it in
+task digests until transcript claim and the cursor prove the pending assignment.
+Then omit the unchanged goal; reset the proof boundary on goal change or restart. Store a child's goal in its initial conversation INSERT, before
+awaiting placement or notices, and read task response goals from that same column.
+A Codex history snapshot also processed turn ends before user-input receipts.
+That could flush a held claim retry before crediting the original paste in the
+same snapshot. Settle user-input proofs before emitting turn boundaries;
+`CodexThreadHistoryTest.test_input_proof_precedes_turn_end_that_flushes_claim_retry`
+pins that order and prevents the duplicate paste. A queue flush that pastes
+without proof must also restore runtime suppression. A successful repool means
+the queue owns only ids still persisted there (or already credited); an idle
+repool can already have flushed them without proof. Keep those ids suppressed
+until their receipt so a later state check cannot paste the assignment a third
+time. Delivery-gate regressions cover both idle and post-hello retry ordering.
+A memory-cap approval also restarts idle workers. When there is no interrupted
+turn or unread addressed message, the common resume path has no wake to carry
+the new rider, so a worker can say READY and remain idle. Queue a private memory
+restart continuation before selecting the resume backlog, with current task
+state and an instruction appropriate to that state. Rebinding the rider then
+sends the full goal on the first actual continuation wake.
+`tests/test_task_memory_continuation.py` covers this idle approval ordering.
+`tests/test_task_creation_delivery.py` covers lost replies, concurrent creation,
+interrupted placement, database reopen, and assignment-before-claim recovery.
+
 ## A mention with trailing punctuation has two candidate spellings
 
 The parser offers both the literal handle and its punctuation-stripped form.
