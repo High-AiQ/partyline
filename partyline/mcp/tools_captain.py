@@ -33,8 +33,8 @@ def permitted(state):
 def guide(state):
     return {"goal_decisions": [
                 {"need": "New task", "operation": "create_task(name, goal, implementer, review)"},
-                {"need": "Change active task goal", "operation": "set_task_goal(task_conv_id, goal)"},
-                {"need": "New work on approved/done task", "operation": "reopen_task(task_conv_id, goal)"},
+                {"need": "Change active task goal", "operation": "set_task_goal(conv_id, goal)"},
+                {"need": "New work on approved/done task", "operation": "reopen_task(conv_id, goal)"},
                 {"need": "Sub-captain line", "operation": "create_child(parent_conv_id, name, goal); "
                               "later set_goal(child_conv_id, goal)"}],
             "goal_context": ("Task participants receive the goal on their first wake, after changes, and "
