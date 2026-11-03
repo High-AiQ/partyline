@@ -8,9 +8,10 @@ from fastapi import HTTPException
 from partyline.auth_guard import Principal
 from partyline.hook_routes import handle_hook
 from partyline.mcp.tools_tasks import call, tool_list
-from partyline.orchestrator_contracts import BlockedIn, ResumeIn
+from partyline.orchestrator_contracts import BlockedIn, ResumeIn, WaitingIn
 from partyline.orchestrator_pack import task_pack
-from partyline.orchestrator_stall import blocked, resume_work
+from partyline.orchestrator_stall import blocked, ended, resume_work
+from partyline.orchestrator_wait import waiting as declare_wait
 from partyline.reports import get
 from partyline.return_path import ReturnPath
 from tests.orchestrator_fixture import TaskFixture
@@ -75,6 +76,38 @@ class ResumeTest(TaskFixture):
         response = self.client.post(url, json={'note': 'unblocked'})
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()['status'], 'implementing')
+
+    async def test_idle_and_stalled_resume_refusals_point_to_a_working_nudge(self):
+        await self.create('captain')
+        await ended(self.runtime, self.db.get_attachment(self.worker.attachment_id))
+        self.assertEqual(self.row()['status'], 'idle')
+        self.actor = self.captain
+        url = f'/api/conversations/{self.conv_id}/task/resume'
+        for stall_stage in (0, 3):
+            with self.subTest(stall_stage=stall_stage):
+                self.db._exec('UPDATE task_reviews SET stall_stage=? WHERE conv_id=?',
+                              (stall_stage, self.conv_id))
+                response = self.client.post(url, json={'note': 'report progress'})
+                self.assertEqual(response.status_code, 409)
+                self.assertIn('message_task(conv_id, text)', response.json()['detail'])
+                self.assertIn('idle or stalled', response.json()['detail'])
+        response = self.client.post(f'/api/conversations/{self.conv_id}/task/message',
+                                    json={'text': 'report progress'})
+        self.assertEqual(response.status_code, 200, response.text)
+        sent = self.spoken('report progress')[-1]
+        self.assertEqual(sent['audience_attachment_id'], self.worker.attachment_id)
+
+    async def test_resume_refusal_names_a_live_wait(self):
+        await self.create('captain')
+        await declare_wait(self.runtime, self.worker, self.conv_id,
+                           WaitingIn(reason='background build', seconds=600))
+        await ended(self.runtime, self.db.get_attachment(self.worker.attachment_id))
+        self.actor = self.captain
+        response = self.client.post(f'/api/conversations/{self.conv_id}/task/resume',
+                                    json={'note': 'report progress'})
+        self.assertEqual(response.status_code, 409)
+        self.assertIn('waiting on «background build»', response.json()['detail'])
+        self.assertIn('message_task(conv_id, text)', response.json()['detail'])
 
     async def test_mcp_tool_and_pack(self):
         await self.create()

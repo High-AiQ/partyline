@@ -179,7 +179,11 @@ async def resume_work(runtime, actor, conv_id, body):
     captain (or a person) gives a blocked implementer new direction, which clears the block."""
     row, by_root = require_task_or_root(runtime.db, actor, conv_id)
     if row['status'] != 'blocked':
-        raise HTTPException(409, 'only a blocked task can resume work')
+        detail = ('only a blocked task can resume work; use message_task(conv_id, text) '
+                  'to nudge an idle or stalled task')
+        if live_wait(row):
+            detail += f"; the implementer is waiting on «{row['wait_reason']}»"
+        raise HTTPException(409, detail)
     if not by_root:
         await _unblock(runtime, row, body.note)
         return task(runtime.db, conv_id)

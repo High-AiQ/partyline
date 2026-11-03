@@ -360,6 +360,14 @@ waiting and the genuinely stalled regressions in `tests/test_orchestrator_stall.
 both fail against the old behaviour; a chat message saying "still waiting"
 waits for nothing.
 
+## An idle task is not a blocked task
+
+`idle` means an implementer's turn ended without queued mail; a stall is a separate stage on
+that row, and a declared wait lives in `wait_reason` and `wait_until`. Treating `resume_work`
+as a generic captain nudge therefore gave an idle or stalled task a blocked-only 409 with no
+way forward. Keep the blocked-only transition, but make the refusal name `message_task` and
+any live wait reason. `tests/test_orchestrator_resume.py` proves the recommended nudge works.
+
 ## A scope launcher exit code does not identify an OOM
 
 An OpenCode worker twice appeared to exit with SIGTERM while running tests. Its
