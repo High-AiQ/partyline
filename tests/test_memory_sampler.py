@@ -461,7 +461,8 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
         self.db._exec("UPDATE attachments SET is_lead=1,status='running' WHERE id='captain'")
         runtime = ChatRuntime(self.db)
         runtime.live["captain"] = SimpleNamespace(att=self.db.get_attachment("captain"))
-        with patch("partyline.memory_sampler.post_private", new_callable=AsyncMock) as private:
+        with patch("partyline.memory_sampler.post_private", new_callable=AsyncMock,
+                   return_value={"id": 1}) as private:
             await _warn(runtime, worker, 3 * 1024**3, 4 * 1024**3)
         audiences = [call.kwargs["audience"] for call in private.await_args_list]
         self.assertEqual(audiences, ["worker", "captain"])
@@ -475,7 +476,8 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
         runtime = ChatRuntime(self.db)
         runtime.live["worker"] = SimpleNamespace(att=self.db.get_attachment("worker"))
         row = {"id": "worker", "name": "captain", "conv_id": "line"}
-        with patch("partyline.memory_sampler.post_private", new_callable=AsyncMock) as private:
+        with patch("partyline.memory_sampler.post_private", new_callable=AsyncMock,
+                   return_value={"id": 1}) as private:
             await _warn(runtime, row, 3 * 1024**3, 4 * 1024**3)
         self.assertEqual([call.kwargs["audience"] for call in private.await_args_list], ["worker"])
         self.assertEqual(private.await_args.args[1], "line")
@@ -491,7 +493,8 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
         runtime.live["worker"] = SimpleNamespace(att=self.db.get_attachment("worker"))
         runtime.live["parent-captain"] = SimpleNamespace(att=self.db.get_attachment("parent-captain"))
         row = {"id": "worker", "name": "captain", "conv_id": "line"}
-        with patch("partyline.memory_sampler.post_private", new_callable=AsyncMock) as private:
+        with patch("partyline.memory_sampler.post_private", new_callable=AsyncMock,
+                   return_value={"id": 1}) as private:
             await _warn(runtime, row, 3 * 1024**3, 4 * 1024**3)
         calls = [(call.args[1], call.kwargs["audience"]) for call in private.await_args_list]
         self.assertEqual(calls, [("line", "worker"), ("parent", "parent-captain")])
