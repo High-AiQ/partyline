@@ -82,8 +82,10 @@ class TaskFixture(unittest.IsolatedAsyncioTestCase):
         return await self.start(att)
 
     async def create(self, policy='inspector'):
+        count = len(self.db._exec("SELECT conv_id FROM task_reviews").fetchall())
         row = await create_task(self.runtime, self.captain, 'root', TaskIn(
-            name='slice', goal='Build the feature', implementer='builder', review=policy))
+            name='slice' if not count else f'slice-{count + 1}',
+            goal='Build the feature', implementer='builder', review=policy))
         self.conv_id = row['conv_id']
         self.worker = self.principal(row['implementer_id'])
         return row

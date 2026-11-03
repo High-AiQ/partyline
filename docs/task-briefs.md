@@ -1,11 +1,10 @@
 # Task briefs: the goal is a pointer, the brief is a file
 
-`create_task(name, goal, implementer, review)` takes a `goal` of at most **3000 characters**
-(`MAX_GOAL` in `partyline/goal.py`; `TaskIn.goal` in `partyline/orchestrator_contracts.py`).
-That is enough for an outcome, a pointer and the one or two constraints that cannot be
-found in the code. It is not enough for a real brief: scope, file lists, acceptance checks,
-gates, out-of-scope items and the reasons behind them. Those go in a committed file, and the
-goal names the file.
+`create_task(name, goal, implementer, review)` accepts a `goal` of at most
+**20,000 characters** (`MAX_TASK_GOAL` in `partyline/goal.py`). `set_task_goal` and
+`reopen_task` share that limit. Captain-line goals and `create_child` retain their
+3,000-character limit. Long reusable briefs can still live in a committed file
+that the goal names, so implementer and reviewer read the same requirements.
 
 ## The pattern
 
@@ -43,7 +42,30 @@ captain wrote, not a paraphrase of them.
 
 ## Checking the length
 
-A goal longer than 3000 characters is refused: `set_goal` and `PUT …/goal` on captain lines return HTTP 400
-(`goal is capped at 3000 characters`), and `create_task` fails validation because
-`TaskIn.goal` has `max_length=3000`. Shorten the goal and move the rest into the brief; do
-not split a goal across several messages.
+Task goals above 20,000 characters are rejected before creation by MCP validation
+(which names the field and limit) or HTTP validation (422). Captain-line goals
+above 3,000 characters are refused by `set_goal` and `PUT …/goal` with HTTP 400.
+
+## Retrying creation
+
+An active child name is reserved under its root. Repeating `create_task` with the
+same trimmed name, goal, implementer and review policy returns the existing task
+without starting a second worker. A failed initial worker launch can be retried
+under the same task and attachment identity. A conflicting assignment or an
+unfinished child without a task record returns 409 with the existing line ID;
+inspect it before choosing a different name. Archived names may be reused.
+
+Once the task exists, a staffing or notification failure returns its task record
+with `creation_error` describing the failure. A lost HTTP response can still leave
+the result unknown to the caller; retry with the same name and assignment or use
+`tasks()`, rather than changing the name. Task responses expose `goal` from the
+conversation's durable goal column; there is no separate task-row goal to reconcile.
+The joining task pack includes that goal. Wake riders repeat it until the
+transcript is claimed and the delivery cursor proves the pending batch, including
+its assignment or goal update. Later wakes omit an unchanged proven goal. A goal
+change or the first wake after restart sends the full goal again, with the same
+proof requirement for retries.
+
+Memory-cap approvals queue a private continuation before resuming the process.
+Even an idle task therefore gets a first wake with the fresh goal rider and its
+current task state, rather than only a READY greeting.

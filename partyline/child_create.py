@@ -15,7 +15,7 @@ from .task_workspaces import UpstreamUnavailable, describe as task_describe, pla
 from .system_notice import post_system_notice
 
 
-async def create_child(runtime, principal, conv_id, body, workspace=False):
+async def create_child(runtime, principal, conv_id, body, workspace=False, on_ready=None):
     db = runtime.db
     from .orchestrator_store import task
     if task(db, conv_id):
@@ -38,7 +38,8 @@ async def create_child(runtime, principal, conv_id, body, workspace=False):
         raise HTTPException(409, base_error)
     name = body.name.strip() or "untitled"
     try:
-        conv = create_child_conversation(db, conv_id, str(uuid.uuid4()), name)
+        conv = create_child_conversation(db, conv_id, str(uuid.uuid4()), name,
+                                         goal=body.goal.strip(), topic=body.topic.strip())
     except HierarchyError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc
     placed = None
@@ -59,6 +60,8 @@ async def create_child(runtime, principal, conv_id, body, workspace=False):
         db.delete_conversation(conv["id"])
         raise HTTPException(
             409, f"the child worktree could not be created on {base_ref or target}")
+    if on_ready is not None:
+        on_ready(conv)
     if where := (task_describe(placed) if placed.get("workspaces") else describe(placed)):
         await post_system_notice(runtime, conv["id"], where, actor=principal)
     if placed.get("branch"):
@@ -72,8 +75,6 @@ async def create_child(runtime, principal, conv_id, body, workspace=False):
         # Born briefed: the goal rides the child manager's wakes, the topic
         # is standing context for everyone on the child line. Both are
         # announced there so the hand-off is on the record.
-        db._exec("UPDATE conversations SET goal=?, topic=? WHERE id=?", (goal, topic, conv["id"]))
-        conv = db.get_conversation(conv["id"])
         who = f"@{principal.name}"
         if topic:
             await post_system_notice(

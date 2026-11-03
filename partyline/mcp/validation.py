@@ -39,7 +39,7 @@ def validate_arguments(schema: dict, args: dict, enum_hint: str = "") -> None:
             if len(value) < rule.get("minLength", 0):
                 invalid("field is too short")
             if len(value) > rule.get("maxLength", float("inf")):
-                invalid("field is too long")
+                invalid(f"{key} is capped at {rule['maxLength']} characters")
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             if value < rule.get("minimum", float("-inf")):
                 invalid("field is below minimum")

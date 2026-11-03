@@ -10,9 +10,11 @@
 | New sub-captain | `create_child(parent_conv_id, name, goal)`; later `set_goal(child_conv_id, goal)` |
 
 The task or child ID is distinct from the captain's parent ID; creation returns the child ID.
-The task implementer and reviewer see the stored goal on their first wake, when changed,
-and on their first wake after restart. `set_task_goal` also sends each live participant a
-durable private message. Ordinary workers receive assignments from their captain, not
+The task implementer and reviewer see the stored goal in their joining pack and on
+wakes until transcript claim and cursor proof confirm delivery. After proof, an
+unchanged goal is omitted; a goal change or the first wake after restart sends it
+again. Claim retries retain the full goal until proven. `set_task_goal` also sends
+each live participant a durable private message. Ordinary workers receive assignments from their captain, not
 captain-only goal framing. Never park briefs in `/tmp` files; commit a longer brief in a
 repository at the child's base and reference it in the goal.
 
