@@ -119,18 +119,20 @@
             checked={selected.has(conversation.id)}
           />{/if}
         {#if depth > 0}<span class="text-cream-faint" aria-label="child line">↳</span>{/if}
+        <span class="inline-flex w-[7px] flex-none items-center">
+          {#if conversation.live_count > 0}
+            <span
+              class="line-live inline-flex flex-none"
+              use:tooltip={{ label: `${String(conversation.live_count)} live` }}
+              aria-label="{conversation.live_count} live"
+              ><span class="led running" aria-hidden="true"></span></span
+            >
+          {/if}
+        </span>
         <span class="min-w-0 flex flex-col items-start gap-1">
           <span class="conv-name w-full min-w-0 truncate">{conversation.name}</span>
           <TaskStatusChip status={conversation.task_status} round={conversation.task_round} />
         </span>
-        {#if conversation.live_count > 0}
-          <span
-            class="line-live inline-flex flex-none"
-            use:tooltip={{ label: `${String(conversation.live_count)} live` }}
-            aria-label="{conversation.live_count} live"
-            ><span class="led running" aria-hidden="true"></span></span
-          >
-        {/if}
       </button>
       {#if descendants > 0}
         <button
