@@ -262,3 +262,19 @@ class ApiTest(TaskFixture):
         app = FastAPI()
         register_goal_route(app, self.runtime)
         return app.router
+
+    async def test_create_task_goal_reaches_implementer_without_set_task_goal(self):
+        from partyline.role_delivery import bind_role_delivery
+
+        row = await self.create()
+        att = {'id': row['implementer_id'], 'digest_rider': lambda: ''}
+        bind_role_delivery(self.db, att)
+        self.assertIn('(task goal: Build the feature)', att['digest_rider']())
+        assigned = [m for m in self.db.list_messages(row['conv_id']) if 'Implement this task' in m['body']]
+        self.assertIn('Build the feature', assigned[0]['body'])
+
+    async def test_set_task_goal_on_root_id_hints_create_task(self):
+        self.actor = self.captain
+        response = self.client.post('/api/conversations/root/task/goal', json={'goal': 'x'})
+        self.assertEqual(response.status_code, 404)
+        self.assertIn('create_task', response.text)
