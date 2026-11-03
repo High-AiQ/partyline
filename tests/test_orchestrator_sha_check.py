@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+import uuid
 from unittest.mock import AsyncMock, patch
 
 from partyline.git_fence import _mirror_dir
@@ -143,6 +144,55 @@ class ShaCheckTest(TaskFixture):
         self.assertIn('unverified SHAs', body)
         self.assertIn(FAKE, body)
         self.assertEqual(self.flagged_notices()[0]['audience_attachment_id'], 'captain')
+
+    def memory_request(self, ident):
+        """The row a pending memory-limit request leaves on its line."""
+        self.db._exec(
+            "INSERT INTO memory_limit_requests(id,attachment_id,conv_id,requester,"
+            "requester_attachment_id,requested_limit,reason,created_at) VALUES(?,?,?,?,?,?,?,?)",
+            (ident, self.worker.attachment_id, self.conv_id, 'builder', None, '8G', 'oom', 1.0))
+
+    async def test_a_memory_request_id_on_record_is_not_flagged(self):
+        await self.create('none')
+        ident = uuid.uuid4().hex[:12]
+        self.memory_request(ident)
+        # No phrase names its kind: the row alone is what saves the id.
+        self.assertEqual(quoted(self.db, self.conv_id, f'capped at {ident}'), [])
+        row = await blocked(self.runtime, self.worker, self.conv_id,
+                            BlockedIn(reason=f'capped at {ident}'))
+        self.assertEqual(flagged(self.db, row), [])
+        self.assertNotIn('unverified SHAs', get(self.db, row['report_id'])['body'])
+
+    async def test_a_decided_memory_request_id_named_in_findings_is_not_flagged(self):
+        await self.create('none')
+        row = await blocked(self.runtime, self.worker, self.conv_id,
+                            BlockedIn(reason='memory request ' + uuid.uuid4().hex[:12] + ' was approved'))
+        self.assertEqual(flagged(self.db, row), [])
+
+    async def test_a_real_missing_sha_is_still_flagged_next_to_a_request_id(self):
+        await self.create('none')
+        row = await blocked(self.runtime, self.worker, self.conv_id,
+                            BlockedIn(reason=f'memory request {uuid.uuid4().hex[:12]} is open; '
+                                             f'files staged at {FAKE}'))
+        self.assertEqual(flagged(self.db, row), [FAKE])
+
+    async def test_other_ids_partyline_minted_are_not_flagged(self):
+        await self.create('none')
+        grant, handover, restart = (uuid.uuid4().hex[:12], uuid.uuid4().hex, uuid.uuid4().hex[:12])
+        self.db._exec(
+            "INSERT INTO conversation_write_grant_requests(conv_id,id,path,requester,"
+            "requester_attachment_id,created_at) VALUES(?,?,?,?,?,?)",
+            (self.conv_id, grant, '/x', 'builder', self.worker.attachment_id, 1.0))
+        self.db._exec(
+            "INSERT INTO captain_handovers(id,conv_id,from_attachment_id,to_attachment_id,"
+            "debrief,state,offered_at) VALUES(?,?,?,?,?,?,?)",
+            (handover, self.conv_id, self.worker.attachment_id, 'captain', 'handing over',
+             'offered', 1.0))
+        self.db._exec("INSERT INTO operator_restart_approvals(request_id,token_hash,expires_at) "
+                      "VALUES(?,?,?)", (restart, 'hash', 9999999999.0))
+        # None of the three is named as a request or hand-over: the rows do the work.
+        self.assertEqual(quoted(self.db, self.conv_id, f'grant {grant} and {handover} '
+                                                       f'and restart {restart}'), [])
 
     async def test_a_live_root_captain_is_rung_once_about_a_missing_commit(self):
         await self.create('none')
