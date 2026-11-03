@@ -34,6 +34,9 @@ describe("conversation rail live state", () => {
       expect(indicator).toBeInstanceOf(HTMLSpanElement);
       if (!(indicator instanceof HTMLSpanElement)) throw new Error("missing live indicator");
       expect(indicator.getAttribute("aria-label")).toBe("2 live");
+      const name = document.querySelector(".conv-name");
+      if (!name) throw new Error("missing line name");
+      expect(indicator.compareDocumentPosition(name)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
       expect(indicator.querySelector(".led.running")).toBeInstanceOf(HTMLSpanElement);
       expect(document.querySelector(".conv-name")?.textContent).toBe("Release line");
       expect(document.querySelector(".conv")?.textContent.trim()).toBe("Release line");
@@ -61,7 +64,7 @@ describe("conversation rail bulk select", () => {
         topic: "",
         created_at: 2,
         archived_at: null,
-        live_count: 0,
+        live_count: 1,
         parent_id: "root",
       },
       {
@@ -92,6 +95,20 @@ describe("conversation rail bulk select", () => {
       await vi.waitFor(() => {
         expect(document.querySelectorAll(".bulk-check")).toHaveLength(3);
       });
+      const rows = document.querySelectorAll(".conv");
+      const child = rows[1];
+      const check = child?.querySelector(".bulk-check");
+      const marker = child?.querySelector('[aria-label="child line"]');
+      const live = child?.querySelector(".line-live");
+      const name = child?.querySelector(".conv-name");
+      if (!check || !marker || !live || !name) throw new Error("missing child row elements");
+      expect(check.compareDocumentPosition(marker)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      expect(marker.compareDocumentPosition(live)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      expect(live.compareDocumentPosition(name)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      expect(rows[0]?.querySelector(".line-live")).toBeNull();
+      expect(rows[0]?.querySelector(".conv-name")?.parentElement?.previousElementSibling?.className).toBe(
+        live.parentElement?.className,
+      );
       expect(document.querySelector(".conv-more")).toBeNull();
       document.querySelector<HTMLButtonElement>(".conv")?.click();
       await vi.waitFor(() => {
