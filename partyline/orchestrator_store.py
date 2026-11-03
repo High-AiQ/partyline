@@ -17,6 +17,9 @@ def _parsed(row, db=None, visibility=False):
     if row is None:
         return None
     record = dict(row)
+    conv = db.get_conversation(record['conv_id']) if db else None
+    record['goal'] = (conv or {}).get('goal', '')
+    record['creation_error'] = None
     record['implementer_handle'] = _handle(db, record.get('implementer_id'))
     record['reviewer_handle'] = _handle(db, record.get('reviewer_id'))
     try:

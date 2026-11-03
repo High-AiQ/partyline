@@ -270,6 +270,38 @@ class ReadinessDeliveryGateTest(unittest.IsolatedAsyncioTestCase):
         await adapter.att["confirm_delivery_ids"]([only])
         self.assertEqual(self.db.get_attachment("att")["last_seen"], only)
 
+    async def test_unproved_claim_retry_stays_suppressed_after_hello_ends(self):
+        adapter = self.adapter(transcript=True, completion="receipt")
+        adapter.delivery_result = False
+        only = self.say("Implement this task: persistent goal")
+        await self.runtime.deliver_pending("line", self.attachment(), adapter)
+        await self.presence.started("line", "att", "owner")
+        adapter.mark_ready()
+        await asyncio.sleep(0)
+        self.assertEqual(self.presence.queue.held_ids("att"), [only])
+        await self.presence.ended("line", "att", "owner")
+        self.assertEqual(len(adapter.deliveries), 2)
+        # The retry was pasted, but no transcript user record has proved it.
+        self.assertFalse(await self.runtime.deliver_pending("line", self.attachment(), adapter))
+        self.assertEqual(len(adapter.deliveries), 2)
+        await adapter.att["confirm_delivery_ids"]([only])
+        self.assertEqual(self.attachment()['last_seen'], only)
+
+    async def test_idle_unproved_claim_retry_stays_suppressed(self):
+        adapter = self.adapter(transcript=True, completion="receipt")
+        adapter.delivery_result = False
+        only = self.say("Implement this task: persistent goal")
+        await self.runtime.deliver_pending("line", self.attachment(), adapter)
+        adapter.delivery_event.clear()
+        adapter.mark_ready()
+        await asyncio.wait_for(adapter.delivery_event.wait(), timeout=1)
+        await asyncio.sleep(0)
+        self.assertEqual(len(adapter.deliveries), 2)
+        await self.runtime.deliver_pending("line", self.attachment(), adapter)
+        self.assertEqual(len(adapter.deliveries), 2)
+        await adapter.att["confirm_delivery_ids"]([only])
+        self.assertEqual(self.attachment()['last_seen'], only)
+
     async def test_claim_keeps_old_ids_suppressed_until_retry_queue_owns_them(self):
         adapter = self.adapter(transcript=True, completion="receipt")
         adapter.delivery_result = False
@@ -283,7 +315,7 @@ class ReadinessDeliveryGateTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(message_ids, [first])
             entered.set()
             await release.wait()
-            return True
+            return await self.db.queue_delivery_ids("att", message_ids, "owner")
 
         adapter.att["repool_message_ids"] = blocked_repool
         adapter.mark_ready()

@@ -93,6 +93,32 @@ def briefing_pointer(conv_id: str) -> str:
     return f"(captain pack: GET /api/conversations/{conv_id}/briefing)"
 
 
+def _task_goal_delivery(db, att, runtime):
+    """Repeat a goal until this activation proves the wake that carries it."""
+    from .adapter_capabilities import transcript_claimed
+
+    previous, pending_id, text = None, None, ''
+
+    def render(goal):
+        nonlocal previous, pending_id, text
+        current = db.get_attachment(att['id'])
+        if goal != previous:
+            text = goal or ('(task goal cleared)' if previous else '')
+            previous = goal
+            pending = db.messages_after(current['conv_id'], current['last_seen'],
+                                        current['name'], current['id'])
+            # Snapshot the pending batch, including the assignment/update. A
+            # claim or an older receipt must not consume a newly changed goal.
+            pending_id = max((item['id'] for item in pending), default=current['last_seen'] + 1)
+        adapter = runtime.live.get(att['id']) if runtime is not None else None
+        if (adapter is not None and transcript_claimed(adapter)
+                and pending_id is not None and current['last_seen'] >= pending_id):
+            return ''
+        return text
+
+    return render
+
+
 def bind_role_delivery(db, att: dict, runtime=None) -> None:
     from .captain_handover import state_text
     initial = current_role(db, att["id"])
@@ -100,6 +126,7 @@ def bind_role_delivery(db, att: dict, runtime=None) -> None:
         part for part in (_instructions(initial, db), pack_for(db, att["id"]),
                           state_text(db, att["id"])) if part)
     original_rider = att["digest_rider"]
+    task_goal_delivery = _task_goal_delivery(db, att, runtime)
     # The startup briefing already carries the pack for both fresh and resumed
     # attachments.  A resume therefore starts at the current role just like a
     # fresh attachment; a later role change still produces a new pack.
@@ -158,8 +185,7 @@ def bind_role_delivery(db, att: dict, runtime=None) -> None:
         elif (current.role in ("implementer", "reviewer")
               and is_task_participant(db, att["id"], current.conv_id)):
             current_goal = task_goal_rider(db, current.conv_id)
-            goal = _delta(current_goal, last_goal, "task goal")
-            last_goal = current_goal
+            goal = task_goal_delivery(current_goal)
         elif current.captained and current.role != "attachment":
             if not worker_reminder_sent or (worker_now and not worker_was):
                 worker = WORKER_REMINDER

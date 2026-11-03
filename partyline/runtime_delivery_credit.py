@@ -180,8 +180,13 @@ class DeliveryCreditMixin:
             # normal busy hold. Keep runtime suppression until that handoff.
             entry = self.uncredited.get(att_id)
             if entry is not None and entry["owner"] == runtime_owner:
-                entry["ids"].difference_update(message_ids)
-                entry.setdefault("confirmed", set()).difference_update(message_ids)
+                queued = set(self.db.queued_delivery_ids(att_id))
+                seen = (self.db.get_attachment(att_id) or {}).get("last_seen", 0)
+                handed_off = {mid for mid in message_ids if mid in queued or mid <= seen}
+                # An idle repool may already have pasted without proof. Those
+                # ids belong to runtime suppression again, not an empty queue.
+                entry["ids"].difference_update(handed_off)
+                entry.setdefault("confirmed", set()).difference_update(handed_off)
                 entry.pop("claim_retry_pending", None)
                 if not entry["ids"]:
                     self.uncredited.pop(att_id, None)

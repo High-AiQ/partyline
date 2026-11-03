@@ -30,7 +30,11 @@ _WHO = {'resume_work': "the task's implementer and the root captain",
 _DESCRIBE = {
     'create_task': ('START new work: creates a new task line (conv_id defaults to your root line) with one '
                     'implementer. Its goal is stored on the task line and sent to the implementer '
-                    'automatically at birth and on every first wake; do not re-send it with set_task_goal.'),
+                    'at birth and on wakes until delivery is proven, then on change or restart. '
+                    'Goals allow 20000 characters. '
+                    'Retry with the same name and assignment to recover the existing task; '
+                    'conflicting names are refused. '
+                    'A creation_error means the task exists but staffing or notification needs attention.'),
     'set_task_goal': ('CHANGE the direction of an EXISTING active task. conv_id is the task line id (from '
                       'create_task or tasks), never your root id. Does not start work or create anything; '
                       'refused for approved or done tasks (use reopen_task).'),

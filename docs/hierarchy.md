@@ -678,9 +678,10 @@ gate commands are never run unfenced inside the server.
 operations, `conv_id` is the task line's ID, not the root captain's ID. For
 `create_child`, `conv_id` is the parent; the returned ID identifies the child.
 Each worker's briefing names its own line ID. Task implementers and reviewers
-receive the stored task goal on their first wake and whenever it changes, including
-on the first wake after restart. `set_task_goal` also sends a durable private message
-to each live task participant. Ordinary workers on captain lines receive assignments
+receive the stored task goal in their joining pack and on wakes until transcript
+claim and cursor proof confirm delivery. An unchanged proven goal is omitted; a
+change or the first wake after restart sends it again. `set_task_goal` also sends a durable
+private message to each live task participant. Ordinary workers on captain lines receive assignments
 from their captain; the manager goal rider and its captain-only framing are not sent
 to them. Keep long briefs in a committed repository file visible at the child's
 base, referenced in the goal; never park briefs in `/tmp` files.
@@ -1089,8 +1090,9 @@ remains the default. A child cannot be an orchestrator, and style cannot change
 while children exist. The root's `default_review_policy` defaults to `captain`;
 it may also be `none` or an exact reviewer preset name.
 
-An orchestrator creates tasks through `create_task(name, goal, implementer, review)`. The goal is capped at 3000 characters, so a detailed brief is a
-committed file that the goal names: see `docs/task-briefs.md`.
+An orchestrator creates tasks through `create_task(name, goal, implementer, review)`.
+The task goal is capped at 20,000 characters; longer briefs live in a committed file
+that the goal names: see `docs/task-briefs.md`.
 The server creates each task line in a managed worktree, attaches exactly one
 implementer from the named preset and briefs it. Direct attach, including the
 shared-branch override, cannot add an implementer. Task lines have no subcaptain

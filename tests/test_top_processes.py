@@ -4,7 +4,7 @@ import pathlib
 import unittest
 from unittest.mock import patch
 
-from partyline.goal import MAX_GOAL
+from partyline.goal import MAX_GOAL, MAX_TASK_GOAL
 from partyline.memory_warning import format_top, warning_text
 import os
 
@@ -86,7 +86,9 @@ class TaskBriefDocTest(unittest.TestCase):
     def test_brief_pattern_doc_names_the_real_goal_cap(self):
         text = (ROOT / "docs" / "task-briefs.md").read_text(encoding="utf-8")
         self.assertEqual(MAX_GOAL, 3000)
-        self.assertIn(f"{MAX_GOAL} characters", text)
+        self.assertEqual(MAX_TASK_GOAL, 20000)
+        self.assertIn(f"{MAX_TASK_GOAL:,} characters", text)
+        self.assertIn(f"{MAX_GOAL:,} characters", text)
         self.assertIn("create_task", text)
         self.assertIn("committed file", text)
         self.assertIn("base='upstream'", text)
