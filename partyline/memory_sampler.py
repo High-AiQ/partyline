@@ -16,6 +16,7 @@ from .hierarchy import ancestors
 from .legacy_tmp import reap_pytest_if_tmpfs
 from .memory_contracts import MemoryUsageEvent
 from .mention_relay import live_manager, post_private
+from .resolved_notices import tag_memory_notice
 from .resource_budget import cap_bytes, live_rows, settings
 from .cgroup_sample import cgroup_usage, reclaim_scope
 from .process_memory import backstop_bytes, process_snapshot
@@ -96,17 +97,19 @@ async def _warn(runtime, row: dict, usage: int, cap: int, shmem: int = 0,
     top = await asyncio.to_thread(process_breakdown, pid) if isinstance(pid, int) else []
     # The copy to the process itself must not name it as the speaker: routing
     # never rings a process with its own words.
-    await post_private(runtime, row["conv_id"], "system", "system",
-                       warning_text(row, usage, cap, own=True, top=top,
-                                    tmp_note=tmp_note, sample=sample),
-                       audience=row["id"], source=(None, row["conv_id"]))
+    own = await post_private(runtime, row["conv_id"], "system", "system",
+                             warning_text(row, usage, cap, own=True, top=top,
+                                          tmp_note=tmp_note, sample=sample),
+                             audience=row["id"], source=(None, row["conv_id"]))
+    tag_memory_notice(runtime.db, own["id"], row["id"], cap)
     source = (row["id"], row["conv_id"])
     detail = warning_text(row, usage, cap, top=top, tmp_note=tmp_note, sample=sample)
     for line in [row["conv_id"], *ancestors(runtime.db, row["conv_id"])]:
         captain = live_manager(runtime, line)
         if captain is not None and captain["id"] != row["id"]:
-            await post_private(runtime, line, "system", "system", detail,
-                               audience=captain["id"], source=source)
+            copy = await post_private(runtime, line, "system", "system", detail,
+                                      audience=captain["id"], source=source)
+            tag_memory_notice(runtime.db, copy["id"], row["id"], cap)
             return
 
 
