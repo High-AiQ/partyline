@@ -27,6 +27,18 @@ _WHO = {'resume_work': "the task's implementer and the root captain",
         'waiting': "the task's implementer"}
 
 
+_DESCRIBE = {
+    'create_task': ('START new work: creates a new task line (conv_id defaults to your root line) with one '
+                    'implementer. Its goal is stored on the task line and sent to the implementer '
+                    'automatically at birth and on every first wake; do not re-send it with set_task_goal.'),
+    'set_task_goal': ('CHANGE the direction of an EXISTING active task. conv_id is the task line id (from '
+                      'create_task or tasks), never your root id. Does not start work or create anything; '
+                      'refused for approved or done tasks (use reopen_task).'),
+    'reopen_task': 'CONTINUE an approved or done EXISTING task with a new goal; conv_id is the task line id.',
+    'message_task': 'Message an existing task participant privately; it does not change the goal.',
+}
+
+
 def _refusal(name):
     if name in _WHO:
         return f'{name} is available to {_WHO[name]}'
@@ -55,7 +67,7 @@ def tool_list(state):
         if name == 'review_verdict' and state.get('is_lead'):
             schema['properties']['conv_id'] = {'type': 'string', 'minLength': 1}
             schema['required'].append('conv_id')
-        description = f'Server-authorized task operation: {name}.'
+        description = _DESCRIBE.get(name, f'Server-authorized task operation: {name}.')
         if name == 'tasks':
             description += (" Workspaces show real and mirror tips; the mirror tip is where the worker's "
                             "commits live until accept.")
