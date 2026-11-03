@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .message_queries import MESSAGE_SELECT, as_message
+from .resolved_notices import drop_resolved
 from .mentions import known_mention_names, line_addressed, mentioned_names
 from .solo_line import implied_addressee
 
@@ -55,7 +56,8 @@ def addressed_backlog(runtime, att: dict, *, include_message_ids=()) -> list[dic
             and addressed_human_message(runtime, att, latest)
         ):
             selected.append(latest)
-    return sorted({message["id"]: message for message in selected}.values(), key=lambda m: m["id"])
+    kept = drop_resolved(runtime, att, list(selected), keep=included)
+    return sorted({message["id"]: message for message in kept}.values(), key=lambda m: m["id"])
 
 
 def addressed_human_message(runtime, att: dict, message: dict) -> bool:
