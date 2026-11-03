@@ -70,6 +70,59 @@ class MemoryRequestTest(unittest.TestCase):
             "requested_limit": amount, "reason": "large test bundle",
         })
 
+    def subtree(self):
+        """A child line under 'line' with its own running worker attachment."""
+        self.db.create_conversation("sub", "Sub")
+        self.db._exec("UPDATE conversations SET parent_id='line' WHERE id='sub'")
+        self.db.add_attachment("subworker", "sub", "subworker", "fake", ["fake"], self.temp.name)
+        self.db._exec("UPDATE attachments SET status='running' WHERE id='subworker'")
+
+    def file_as(self, actor, att_id, amount="5G"):
+        self.actor = actor
+        return self.client.post(f"/api/attachments/{att_id}/memory-requests", json={
+            "requested_limit": amount, "reason": "large test bundle",
+        })
+
+    def captain(self, conv_id="line", att_id="captain"):
+        return Principal(kind="machine", name="captain", conv_id=conv_id,
+                         attachment_id=att_id, is_lead=True)
+
+    def test_captain_files_for_subtree_worker_and_approves_within_ceiling(self):
+        self.subtree()
+        filed = self.file_as(self.captain(), "subworker")
+        self.assertEqual(filed.status_code, 200, filed.text)
+        approved = self.client.post(f"/api/memory-requests/{filed.json()['id']}/approve")
+        self.assertEqual(approved.status_code, 200, approved.text)
+        self.assertEqual(self.db.get_attachment("subworker")["memory_limit"], "5G")
+        self.assertEqual(self.resumed, [("subworker", True)])
+
+    def test_captain_filed_above_ceiling_for_subtree_worker_needs_a_person(self):
+        self.subtree()
+        filed = self.file_as(self.captain(), "subworker", "7G")
+        self.assertEqual(filed.status_code, 200, filed.text)
+        request_id = filed.json()["id"]
+        self.assertEqual(
+            self.client.post(f"/api/memory-requests/{request_id}/approve").status_code, 403)
+        self.actor = Principal(kind="user", name="person", user_id=1)
+        approved = self.client.post(f"/api/memory-requests/{request_id}/approve")
+        self.assertEqual(approved.status_code, 200, approved.text)
+        self.assertEqual(self.db.get_attachment("subworker")["memory_limit"], "7G")
+
+    def test_captain_that_filed_for_another_process_can_decline_it(self):
+        self.subtree()
+        filed = self.file_as(self.captain(), "subworker")
+        self.assertEqual(
+            self.client.delete(f"/api/memory-requests/{filed.json()['id']}").status_code, 200)
+        self.assertIsNone(
+            self.client.get("/api/conversations/sub/memory-request").json()["request"])
+
+    def test_captain_cannot_file_for_attachment_outside_its_scope(self):
+        self.db.create_conversation("elsewhere", "Elsewhere")
+        self.db.add_attachment("stranger", "elsewhere", "stranger", "fake", ["fake"],
+                               self.temp.name)
+        self.db._exec("UPDATE attachments SET status='running' WHERE id='stranger'")
+        self.assertEqual(self.file_as(self.captain(), "stranger").status_code, 403)
+
     def test_captain_approves_under_ceiling_releases_lease_and_resumes(self):
         self.assertEqual(self.file().status_code, 200)
         pending = self.client.get("/api/conversations/line/memory-request").json()["request"]
@@ -123,6 +176,7 @@ class MemoryRequestTest(unittest.TestCase):
         self.assertEqual(self.file("9G").status_code, 400)
         pending = self.file().json()
         self.assertEqual(self.client.post(f"/api/memory-requests/{pending['id']}/approve").status_code, 403)
+        self.assertEqual(self.client.delete(f"/api/memory-requests/{pending['id']}").status_code, 403)
 
     def test_non_captain_worker_cannot_approve(self):
         self.assertEqual(self.file().status_code, 200)

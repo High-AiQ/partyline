@@ -261,7 +261,9 @@ person decides above it. Approve with `POST /api/memory-requests/{request_id}/ap
 Approval stores the new cap and replaces the activation
 through the normal resume path. The old admission lease is released first and the
 replacement is grandfathered through admission. A process cannot approve the
-request for its own cap. Only one memory request can be pending on a line at a
+request for its own cap, but a captain that filed a request for another process
+in its scope may approve that request itself, still within the ceiling. Only one
+memory request can be pending on a line at a
 time; further requests receive HTTP 409 until it is approved or declined. The
 warning threshold and captain ceiling are people-only settings in the resource
 budget dialog.
