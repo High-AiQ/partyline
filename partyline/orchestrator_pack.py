@@ -75,6 +75,7 @@ def task_pack(db, conv_id, role):
         'While reviewing, hand off only between the implementer and reviewer. '
         'The root captain receives one terminal report and always merges and pushes. '
         'Never archive or retire this task line. Processes detach after work ships. '
+        f"Task goal: {row['goal']}\n"
         f"Current state: {row['status']}, round {row['round']}, SHA {row['sha']}, "
         f"review checkout {row['review_worktree']}. "
         f"Request: {row['what'][:300]} — {row['location'][:200]}. "

@@ -45,6 +45,27 @@ async def expire_memory_requests(runtime, att_id: str) -> None:
         await broadcast_approval_change(runtime, conv_id)
 
 
+async def _queue_memory_continuation(runtime, att, limit):
+    """An idle resumed CLI still needs an addressed wake to continue its work."""
+    from .orchestrator_store import attachment_task
+
+    row = attachment_task(runtime.db, att['id'])
+    action = 'continue your current work'
+    state = ''
+    if row:
+        action = 'continue the task'
+        if row['status'] in ('approved', 'done'):
+            action = 'wait for the root captain to reopen the task before starting new work'
+        elif row['status'] == 'in_review' and att['id'] == row['implementer_id']:
+            action = 'wait for the current review verdict'
+        state = (f" Current task state: {row['status']}, round {row['round']}, "
+                 f"SHA {row['sha'] or 'none'}.")
+    await post_private(
+        runtime, att['conv_id'], 'system', 'system',
+        f'You were restarted with a new memory cap ({limit}); {action}.' + state,
+        audience=att['id'], route=False)
+
+
 def register_memory_request_routes(app: FastAPI, runtime, resume) -> None:
     db = runtime.db
 
@@ -150,6 +171,7 @@ def register_memory_request_routes(app: FastAPI, runtime, resume) -> None:
                             (current["requested_limit"], att["id"]))
         runtime.reattaching.add(att["id"])
         try:
+            await _queue_memory_continuation(runtime, att, current["requested_limit"])
             await resume_with_backlog(runtime, att["id"], resume)
         except Exception as exc:
             text = (f"☏ memory cap for @{att['name']} is now {current['requested_limit']}, "

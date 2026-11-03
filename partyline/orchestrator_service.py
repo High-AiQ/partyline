@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import os
 import time
 import uuid
@@ -10,7 +11,7 @@ from fastapi import HTTPException
 
 from .child_create import create_child
 from .contracts import ConversationsChangedEvent
-from .hierarchy_contracts import ChildIn
+from .hierarchy_contracts import TaskChildIn
 from .line_worktree import line_cwd, rev
 from .git_fence import mirror_branch_ref
 from .task_workspaces import anchor, moved, tip, workspaces
@@ -27,30 +28,58 @@ from .orchestrator_store import (
     preset, require_override, require_root, require_task, task, validate_policy)
 
 
+logger = logging.getLogger(__name__)
+
+
 async def create_task(runtime, actor, root_id, body):
+    # Serialize retries through placement, staffing and the response snapshot.
+    async with task_lock(runtime, f'create:{root_id}'):
+        return await _create_task(runtime, actor, root_id, body)
+
+
+async def _create_task(runtime, actor, root_id, body):
     db = runtime.db
     root = require_root(db, actor, root_id)
     preset(db, body.implementer)
     policy = validate_policy(db, body.review or root['default_review_policy'])
-    pending = db._exec(
-        'SELECT t.* FROM task_reviews t JOIN conversations c ON c.id=t.conv_id '
-        'LEFT JOIN attachments a ON a.id=t.implementer_id '
-        "WHERE t.root_id=? AND c.name=? AND c.goal=? AND t.implementer_preset=? AND t.policy=? "
-        "AND t.status IN ('implementing','idle') AND c.archived_at IS NULL "
-        "AND (a.id IS NULL OR (a.status='exited' AND a.cli_session IS NULL)) LIMIT 1",
-        (root_id, body.name.strip(), body.goal.strip(), body.implementer, policy)).fetchone()
+    existing_line = db._exec(
+        'SELECT id FROM conversations WHERE parent_id=? AND name=? AND archived_at IS NULL',
+        (root_id, body.name.strip())).fetchone()
+    pending = task(db, existing_line['id']) if existing_line else None
+    if existing_line:
+        if (not pending or pending['goal'] != body.goal.strip()
+                or pending['implementer_preset'] != body.implementer or pending['policy'] != policy):
+            raise HTTPException(409, f"line {existing_line['id']} already uses this task name; "
+                                'inspect it or choose a different name for new work')
+        att = db.get_attachment(pending['implementer_id'])
+        if (pending['status'] not in ('implementing', 'idle') or
+                (att and (att['status'] != 'exited' or att['cli_session']))):
+            return task(db, pending['conv_id'], visibility=True)
+    creation_error = None
     if pending:
         conv_id, ident = pending['conv_id'], pending['implementer_id']
     else:
         base = 'upstream' if body.base == 'upstream' else 'checkout'
-        result = await create_child(runtime, actor, root_id,
-                                    ChildIn(name=body.name, goal=body.goal, base=base),
-                                    workspace=True)
-        conv_id, ident = result.conversation.id, str(uuid.uuid4())
-        db._exec(
-            'INSERT INTO task_reviews(conv_id,root_id,implementer_id,implementer_preset,policy,tag,'
-            'created_at) VALUES(?,?,?,?,?,?,?)',
-            (conv_id, root_id, ident, body.implementer, policy, pick_tag(db, conv_id), time.time()))
+        conv_id, ident = None, str(uuid.uuid4())
+
+        def reserve(conv):
+            nonlocal conv_id
+            conv_id = conv['id']
+            db._exec(
+                'INSERT INTO task_reviews(conv_id,root_id,implementer_id,implementer_preset,policy,tag,'
+                'created_at) VALUES(?,?,?,?,?,?,?)',
+                (conv_id, root_id, ident, body.implementer, policy, pick_tag(db, conv_id), time.time()))
+
+        try:
+            await create_child(runtime, actor, root_id,
+                               TaskChildIn(name=body.name, goal=body.goal, base=base),
+                               workspace=True, on_ready=reserve)
+        except (HTTPException, ValueError, OSError) as exc:
+            if conv_id is None:
+                raise  # placement never completed; no task was reserved
+            creation_error = str(getattr(exc, 'detail', exc))
+            logger.exception('task creation announcement failed for %s', conv_id)
+    spawn_failed = False
     try:
         existing = db.get_attachment(ident)
         if existing:
@@ -59,15 +88,27 @@ async def create_task(runtime, actor, root_id, body):
             tag = task(db, conv_id)['tag']
             await spawn(runtime, conv_id, body.implementer, ident,
                         handle=f'impl-{tag}' if tag else None)
-    except (HTTPException, ValueError) as exc:
-        await spawn_refused(runtime, task(db, conv_id), getattr(exc, 'detail', str(exc)), implementer=True)
-        raise
-    await tell(runtime, ident,
-               f"Implement this task: {body.goal}. Commit on this line's branch (in each repository folder "
-               'you change); never push. '
-               'Call request_review(sha, what, where) when ready. The server owns review staffing.')
-    await runtime.broadcast_all(ConversationsChangedEvent())
+    except (HTTPException, ValueError, OSError) as exc:
+        spawn_failed = True
+        creation_error = str(getattr(exc, 'detail', exc))
+        # Creation committed: return its identity even when staffing is refused.
+        # Retrying the same assignment will retry this reservation, never fork it.
+        try:
+            await spawn_refused(runtime, task(db, conv_id), creation_error, implementer=True)
+        except (HTTPException, ValueError, OSError):
+            logger.exception('task creation refusal notice failed for %s', conv_id)
+    if not spawn_failed:
+        try:
+            await tell(runtime, ident,
+                       f"Implement this task: {body.goal}. Commit on this line's branch "
+                       '(in each repository folder you change); never push. '
+                       'Call request_review(sha, what, where) when ready. The server owns review staffing.')
+            await runtime.broadcast_all(ConversationsChangedEvent())
+        except (HTTPException, ValueError, OSError) as exc:
+            creation_error = str(getattr(exc, 'detail', exc))
+            logger.exception('task creation delivery failed for %s', conv_id)
     row = task(db, conv_id, visibility=True)
+    row['creation_error'] = creation_error
     # The task folder already holds a worktree of every repository under the
     # captain's folder; the review entry waits for one, so say so now.
     if not row['repositories']:

@@ -139,11 +139,6 @@ async def tail_thread_history(adapter, home: str, thread_id: str, *, timeout: fl
         opening = not opened
         if opening:
             opened = True
-        for turn_id, status, started_at in turns:
-            if started_at is not None and started_at < (adapter.spawned_at - 5):
-                seen_turns[turn_id] = status
-                continue
-            open_turn = await _emit_turn(adapter, turn_id, status, seen_turns, open_turn)
         # Claims first: a batch may carry this activation's nonce and its
         # speech, and proof must not depend on row order inside that batch.
         speech: list[str] = []
@@ -167,6 +162,13 @@ async def tail_thread_history(adapter, home: str, thread_id: str, *, timeout: fl
             body = agent_text(item).strip()
             if body:
                 speech.append(body)
+        # Input receipts in this snapshot must settle before a Stop hook can
+        # flush the same assignment from the pre-claim retry queue.
+        for turn_id, status, started_at in turns:
+            if started_at is not None and started_at < (adapter.spawned_at - 5):
+                seen_turns[turn_id] = status
+                continue
+            open_turn = await _emit_turn(adapter, turn_id, status, seen_turns, open_turn)
         if opening:
             adapter.mark_ready()
         for body in speech:

@@ -134,8 +134,13 @@ class MCPServer:
         except (ApiError, ValueError, KeyError, TypeError, OSError) as exc:
             self._revoked = self._revoked or (
                 isinstance(exc, ApiError) and "HTTP 401" in str(exc))
-            message = (str(exc) if isinstance(exc, (ApiError, ValueError))
-                       else "invalid tool arguments or local file")
+            creating = name == "create_task" or (name == "captain" and args.get("op") == "create_task")
+            if creating and isinstance(exc, OSError):
+                message = ("create_task connection failed; the task may already exist. "
+                           "Retry create_task with the same name and assignment, or inspect tasks().")
+            else:
+                message = (str(exc) if isinstance(exc, (ApiError, ValueError))
+                           else "invalid tool arguments or local file")
             return self.response(ident, {
                 "content": [{"type": "text", "text": message}], "isError": True})
         except Exception:
