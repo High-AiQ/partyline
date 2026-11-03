@@ -116,7 +116,10 @@ def register_memory_request_routes(app: FastAPI, runtime, resume) -> None:
             raise HTTPException(
                 410, "worker gone: its process was detached or its line retired, so this "
                      "request expired; decline it to clear it and file a new one if needed")
-        if actor.kind == "machine" and actor.attachment_id == current["requester_attachment_id"]:
+        # The requester is refused only when it filed for itself; a captain may
+        # approve a request it filed for another process within its scope.
+        if (actor.kind == "machine" and actor.attachment_id == current["requester_attachment_id"]
+                and current["requester_attachment_id"] == current["attachment_id"]):
             raise HTTPException(403, "a process cannot approve its own memory request")
         if (approving and actor.kind == "machine"
                 and actor.attachment_id == current["attachment_id"]):
