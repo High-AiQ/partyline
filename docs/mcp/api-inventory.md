@@ -95,8 +95,8 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 66 | GET | `/api/conversations/{conv_id}/images` | partyline/media_routes.py:list_files (registration line 192) | M with `read` | yes | see Set 2 |
 | 67 | GET | `/api/conversations/{conv_id}/memory-request` | partyline/memory_requests.py:pending (registration line 42) | M with `read` | yes | see Set 2 |
 | 68 | POST | `/api/attachments/{att_id}/memory-requests` | partyline/memory_requests.py:file (registration line 47) | M with `attach` | yes | see Set 2 |
-| 69 | POST | `/api/memory-requests/{request_id}/approve` | partyline/memory_requests.py:approve (registration line 111) | M with `assign`, not the requester; or H | yes | see Set 2 |
-| 70 | DELETE | `/api/memory-requests/{request_id}` | partyline/memory_requests.py:deny (registration line 152) | M with `assign`, not the requester; or H | yes | see Set 2 |
+| 69 | POST | `/api/memory-requests/{request_id}/approve` | partyline/memory_requests.py:approve (registration line 111) | M with `assign`, never the target attachment; or H | yes | see Set 2 |
+| 70 | DELETE | `/api/memory-requests/{request_id}` | partyline/memory_requests.py:deny (registration line 152) | M with `assign`, not a process that filed for itself; or H | yes | see Set 2 |
 | 71 | GET | `/api/attachments/{att_id}/memory` | partyline/memory_routes.py:get_memory (registration line 31) | M with `read` | yes | see Set 2 |
 | 72 | PUT | `/api/attachments/{att_id}/memory` | partyline/memory_routes.py:set_memory (registration line 36) | M with `attach` (self-grant refused); H | yes | see Set 2 |
 | 73 | POST | `/api/conversations/{conv_id}/messages/{message_id}/forward` | partyline/message_forward.py:forward_message (registration line 39) | M with `read` (source), `write` (target) | yes | see Set 2 |
@@ -226,8 +226,8 @@ Sources of truth for the implemented surface: `partyline/mcp/tools_core.py` (`to
 | 66 | GET | `/api/conversations/{conv_id}/images` | M with `read` | **excluded** | image listing is not needed; same as row 65 |
 | 67 | GET | `/api/conversations/{conv_id}/memory-request` | M with `read` | **excluded** | host memory budget; adjustments belong to the approved memory-lease design, where the root captain adjudicates |
 | 68 | POST | `/api/attachments/{att_id}/memory-requests` | M with `attach` | **excluded** | host memory budget; same design as row 67 |
-| 69 | POST | `/api/memory-requests/{request_id}/approve` | M with `assign`, not the requester; or H | **excluded** | host memory budget; same design as row 67 |
-| 70 | DELETE | `/api/memory-requests/{request_id}` | M with `assign`, not the requester; or H | **excluded** | host memory budget; same design as row 67 |
+| 69 | POST | `/api/memory-requests/{request_id}/approve` | M with `assign`, never the target attachment; or H | **excluded** | host memory budget; same design as row 67 |
+| 70 | DELETE | `/api/memory-requests/{request_id}` | M with `assign`, not a process that filed for itself; or H | **excluded** | host memory budget; same design as row 67 |
 | 71 | GET | `/api/attachments/{att_id}/memory` | M with `read` | **excluded** | host memory budget |
 | 72 | PUT | `/api/attachments/{att_id}/memory` | M with `attach` (self-grant refused); H | **excluded** | a process cannot raise its own limit; host budget |
 | 73 | POST | `/api/conversations/{conv_id}/messages/{message_id}/forward` | M with `read` (source), `write` (target) | **excluded** | `post_message` carries cross-line speech; forwarding is not needed by the tool set |
