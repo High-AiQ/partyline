@@ -5,9 +5,11 @@ existed — the files were only staged — and the report reached the captain
 unchallenged. Every hex token a worker quotes in ``request_review``,
 ``blocked``, ``review_verdict`` or a stall escalation is checked with
 ``git cat-file -e`` in the task's worktrees, and a token that is no commit
-is flagged, visibly, in the report the captain reads. The report is never
-rejected: an ambiguous token (a colour code, a hash) may still name real
-work, and the captain decides.
+is flagged, visibly, in the report the captain reads. Tokens that name
+another kind of hash — a model revision, a file digest, an id partyline
+minted for one of its own requests or hand-overs — are not commit claims
+and are passed over. The report is never rejected: an ambiguous token
+(a colour code, a hash) may still name real work, and the captain decides.
 """
 
 from __future__ import annotations
@@ -25,10 +27,11 @@ from .task_workspaces import workspaces
 # style token like B007 must not be read as a claimed commit.
 TOKEN = re.compile(r"(?<![0-9A-Za-z])[0-9a-f]{7,40}(?![0-9A-Za-z])")
 # Words that name another kind of hash or version when they come just before a
-# token: a model revision, a weights checksum, a file digest.
+# token: a model revision, a weights checksum, a file digest — and the ids
+# partyline mints for its own requests and hand-overs, which are bare hex too.
 OTHER_KIND = re.compile(
     r"\b(?:revision|rev|HF|hugging face|weights|model|checkpoint|sha256|md5|"
-    r"checksum|digest|hash of a file|blob|etag|tag)\b", re.IGNORECASE)
+    r"checksum|digest|hash of a file|blob|etag|tag|request|handover)\b", re.IGNORECASE)
 SENTENCE_END = re.compile(r"[.!?;\n]")
 WINDOW = 30  # characters before a token that may name its kind
 
@@ -48,8 +51,8 @@ def _in_url_or_path(text: str, start: int, end: int) -> bool:
 def suspected(text: str) -> list[str]:
     """Bare hex tokens that may be a commit hash, in order, unique.
 
-    A token is skipped when another kind of hash is named just before it, or
-    when it sits inside a URL or path.
+    A token is skipped when another kind of hash is named just before it —
+    including a request or hand-over id — or when it sits inside a URL or path.
     """
     text = text or ""
     found = []
@@ -83,12 +86,30 @@ def _commit(name: str, found: list[str], mirrors: list[str]) -> bool:
                    for mirror in mirrors))
 
 
+def _minted(db) -> set[str]:
+    """Hex ids partyline minted for its own requests and hand-overs.
+
+    A worker's findings may quote one beside a commit; none of them can name
+    one. Only rows still on record are caught here — a decided request's row
+    is deleted — so OTHER_KIND covers the phrasing once the row is gone.
+    """
+    ids = set()
+    for query in ("SELECT id FROM memory_limit_requests",
+                  "SELECT id FROM conversation_write_grant_requests",
+                  "SELECT id FROM captain_handovers",
+                  "SELECT request_id FROM operator_restart_approvals"):
+        ids.update(row[0] for row in db._exec(query))
+    return ids
+
+
 def quoted(db, conv_id: str, *texts: str) -> list[str]:
     """The commits actually missing from the task's worktrees, clones and mirrors."""
     names = suspected(" ".join(text for text in texts if text))
+    known = _minted(db) if names else set()
     found = places(db, conv_id)
     mirrors = stores(db, conv_id)
-    return [name for name in names if found and not _commit(name, found, mirrors)]
+    return [name for name in names
+            if name not in known and found and not _commit(name, found, mirrors)]
 
 
 def flagged(db, row) -> list[str]:
