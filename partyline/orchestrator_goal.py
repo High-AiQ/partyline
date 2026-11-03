@@ -13,7 +13,8 @@ async def set_task_goal(runtime, actor, conv_id, goal):
     db = runtime.db
     row = task(db, conv_id)
     if row is None:
-        raise HTTPException(404, 'task not found')
+        raise HTTPException(404, 'task not found: set_task_goal changes an existing task (conv_id is the '
+                                 'task line id, not the root id); create_task starts new work')
     require_root(db, actor, row['root_id'])
     if row['status'] in ('approved', 'done'):
         raise HTTPException(409, 'use reopen_task(conv_id, goal) for an approved or done task')
