@@ -1,6 +1,9 @@
 """A detached task implementer is brought back by the root captain or a person."""
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+
+from partyline import server
+from partyline.adapters import Adapter
 
 from fastapi import HTTPException
 
@@ -33,6 +36,33 @@ class ImplementerRestartTest(TaskFixture):
         response = self.client.post(self.url())
         self.assertEqual(response.status_code, 409)
         self.assertIn('already running', response.json()['detail'])
+
+    async def test_claimed_v2_resume_without_work_can_be_restarted(self):
+        await self.create()
+        ident = self.row()['implementer_id']
+        self.db._exec("UPDATE attachments SET adapter='opencode-v2',cli_session='session' WHERE id=?",
+                      (ident,))
+        live = self.runtime.live[ident]
+        live.resume = True
+        live._claim_proven = True
+        live.resume_work_received = False
+        with patch.dict(server.ADAPTERS, {"opencode-v2": Adapter}):
+            response = self.client.post(self.url())
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIsNot(self.runtime.live[ident], live)
+        self.assertEqual(self.db.get_attachment(ident)['status'], 'running')
+        self.assertTrue(any('continue the task' in m['body']
+                            for m in self.db.list_messages(self.conv_id)))
+
+    async def test_v2_resume_with_work_or_without_claim_is_still_a_conflict(self):
+        await self.create()
+        ident = self.row()['implementer_id']
+        self.db._exec("UPDATE attachments SET adapter='opencode-v2' WHERE id=?", (ident,))
+        live = self.runtime.live[ident]
+        for resumed, claimed, received in ((True, True, True), (True, False, False),
+                                           (False, True, False)):
+            live.resume, live._claim_proven, live.resume_work_received = resumed, claimed, received
+            self.assertEqual(self.client.post(self.url()).status_code, 409)
 
     async def test_restart_relaunches_notifies_and_returns_the_task(self):
         await self.create()

@@ -584,7 +584,8 @@ command `opencode2`) for v2. Both run the interactive TUI in a real PTY. V2 uses
 fence. Remote/shared servers are refused. Startup input travels through `--prompt`;
 the adapter presses Enter once the claim-bearing prompt is visible if the TUI has
 not submitted it. Subsequent messages use bracketed paste. Only the current activation's claim in a
-structured user message opens readiness and speech.
+structured user message opens speech. On resume, readiness waits for the
+resume-check turn's structured idle record before accepting continuation input.
 
 The v2 adapter reads `session_v2` / `session_message`, relays completed assistant
 text, filters reasoning/tool records from speech, feeds `compaction` records to the
