@@ -96,7 +96,18 @@ async def restart_implementer(runtime, actor, conv_id):
         if att is None:
             raise HTTPException(409, 'this task has no implementer attachment to restart')
         if att['status'] in LIVE_STATUSES:
-            raise HTTPException(409, 'the implementer is already running')
+            live = runtime.live.get(att['id'])
+            stalled_resume = (
+                att['adapter'] == 'opencode-v2' and live is not None
+                and live.att.get('runtime_owner') == att.get('runtime_owner')
+                and getattr(live, 'resume', False) and getattr(live, '_claim_proven', False)
+                and not getattr(live, 'resume_work_received', True)
+            )
+            if not stalled_resume:
+                raise HTTPException(409, 'the implementer is already running')
+            from .line_process_routes import detach_attachment
+            await detach_attachment(runtime, att['id'], survivors=False)
+            att = db.get_attachment(att['id'])
         await restart(runtime, att)
     await tell(runtime, att['id'],
                f"resumed by {actor.name}; continue the task: {row['what']} — {row['location']}",

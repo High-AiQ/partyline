@@ -35,6 +35,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
         self._claim_seq = 0
         self._seen: set[str] = set()
         self._busy = False
+        self.resume_work_received = False
 
     def build_command(self) -> list[str]:
         cmd = list(self.att["command"]) or ["opencode2"]
@@ -121,11 +122,11 @@ class PartylineAdapter(WakeSettlement, Adapter):
     async def _poll(self):
         with contextlib.closing(self._connect()) as db:
             rows = db.execute(
-                "SELECT id, type, data FROM session_message "
+                "SELECT id, type, data, seq FROM session_message "
                 "WHERE session_id = ? AND seq >= ? ORDER BY seq",
                 (self._session_id, self._claim_seq),
             ).fetchall()
-        for ident, kind, raw in rows:
+        for ident, kind, raw, seq in rows:
             if ident in self._seen:
                 continue
             data = self._decode(raw)
@@ -153,18 +154,28 @@ class PartylineAdapter(WakeSettlement, Adapter):
                         if isinstance(text, str) and text.strip():
                             await self.post(self.att["name"], "agent", text)
             elif kind == "user":
+                if seq > self._claim_seq:
+                    self.resume_work_received = True
                 self.observe_claim(raw)
                 await self._observe_user_part(raw, part_id=ident)
                 if not self._busy:
                     self._busy = True
                     await receipt(self.att, BEGAN)
-                self.mark_ready()
+                if not self.resume:
+                    self.mark_ready()
             elif kind == "idle":
                 if self._busy:
                     self._busy = False
                     await receipt(self.att, ENDED)
+                # A resume claim starts a real model turn. The TUI can drop
+                # input during that turn; open delivery only at its idle receipt.
+                self.mark_ready()
                 self._schedule_unproved_repool()
             self._seen.add(ident)
+        # An idle TUI may discard a paste without producing another record.
+        # Revisit unproved input even when there is no new idle row to tail.
+        if not self._busy:
+            self._schedule_unproved_repool()
 
     async def _run(self):
         try:

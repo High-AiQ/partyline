@@ -1,5 +1,23 @@
 # Lessons: the false-assumptions ledger
 
+## A resume claim is input to a turn, not an idle TUI
+
+OpenCode v2's resume check records the claim before answering READY. Treating
+that user row as readiness lets the continuation be pasted during the check's
+model turn, when the TUI can discard input. Keep resumed delivery closed until
+its structured idle record; an assistant READY reply alone cannot open it or
+credit a wake. Credit each wake only when its paste nonce appears in a user
+row of the claimed session. An idle TUI can drop a paste without writing any
+new record, so retrying only when a new idle row arrives strands that paste
+forever. Revisit unproved wakes on idle polls, recheck busy state after the
+grace period, and retain the receipt if the durable queue refuses the handoff.
+`tests/test_opencode_v2_resume.py` covers pre-claim wakes, READY without idle,
+idle retry, and withholding credit for assistant echoes and unrelated input.
+A running process is also not proof of useful resume progress: permit an
+explicit implementer restart after a v2 resume claim when no subsequent user
+input has reached its transcript. Preserve the normal live-process conflict
+once it has received work.
+
 ## A posted assignment is not a delivered goal
 
 Assuming successful task creation meant the caller received the result missed
