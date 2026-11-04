@@ -67,16 +67,18 @@ async def tick(runtime):
         state = await asyncio.to_thread(worktree_state, db, conv)
         if state is None or not state['clean'] or not state['merged']:
             continue
-        db._exec('UPDATE task_reviews SET merged=1 WHERE conv_id=?', (row['conv_id'],))
+        await asyncio.to_thread(
+            db._exec, 'UPDATE task_reviews SET merged=1 WHERE conv_id=?', (row['conv_id'],))
         for ident in (row['implementer_id'], row['reviewer_id']):
-            att = db.get_attachment(ident) if ident else None
+            att = await asyncio.to_thread(db.get_attachment, ident) if ident else None
             if att and att['status'] in ('starting', 'running'):
                 if getattr(runtime, 'presence', None) and runtime.presence.is_working(ident):
                     continue
                 await detach_attachment(runtime, ident, survivors=False)
-        if db.get_setting('auto_clean_task_history') != 'true':
+        if await asyncio.to_thread(db.get_setting, 'auto_clean_task_history') != 'true':
             continue
-        if any(att['status'] in ('starting', 'running') for att in db.list_attachments(row['conv_id'])):
+        remaining = await asyncio.to_thread(db.list_attachments, row['conv_id'])
+        if any(att['status'] in ('starting', 'running') for att in remaining):
             continue
         removed, reason = await asyncio.to_thread(archive_worktree_if_safe, db, row['conv_id'])
         if reason or not removed:

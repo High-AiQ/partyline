@@ -1,5 +1,6 @@
 """A missing structured task result recovers once, then reports the stall."""
 
+import asyncio
 import os
 import re
 import threading
@@ -386,6 +387,54 @@ class StallTest(TaskFixture):
         self.assertTrue(row['wait_until'])
         self.assertEqual(threads and len(threads), 1)
         self.assertNotEqual(threads[0], main)
+
+    async def test_a_wait_redeclared_after_the_read_is_not_cleared_and_does_not_settle(self):
+        """The reset matches the expired value it read, so a fresh wait survives it."""
+        await self.create('captain')
+        await self.wait(seconds=60)
+        self.db._exec('UPDATE task_reviews SET wait_until=? WHERE conv_id=?',
+                      (time.time() - 1, self.conv_id))
+        row = self.row()  # the orchestrator's read: this wait has run out
+        # The implementer re-declares between that read and the reset write.
+        await self.wait(reason='still running', seconds=600)
+        redeclared = self.row()
+        await resume_expired(self.runtime, row)
+        fresh = self.row()
+        self.assertEqual(fresh['wait_reason'], 'still running')
+        self.assertEqual(fresh['wait_until'], redeclared['wait_until'])
+        self.assertEqual(fresh['stall_stage'], 0)
+        self.assertEqual(self.reminders(), [])
+
+    async def test_the_expired_wait_reset_runs_off_the_event_loop(self):
+        """The reset write and its attachment read are a worker's, not the loop's."""
+        await self.create('captain')
+        await self.wait(seconds=60)
+        self.db._exec('UPDATE task_reviews SET wait_until=? WHERE conv_id=?',
+                      (time.time() - 1, self.conv_id))
+        row = self.row()
+        main = threading.get_ident()
+        threads = []
+        original = self.db._exec
+
+        def traced(query, args=(), **kwargs):
+            if 'wait_until=NULL,stall_stage=0' in query:
+                threads.append(threading.get_ident())
+            return original(query, args, **kwargs)
+
+        dispatched = []
+        real_to_thread = asyncio.to_thread
+
+        async def traced_to_thread(fn, /, *args, **kwargs):
+            dispatched.append(getattr(fn, '__name__', str(fn)))
+            return await real_to_thread(fn, *args, **kwargs)
+
+        with patch.object(self.db, '_exec', side_effect=traced), \
+                patch('asyncio.to_thread', side_effect=traced_to_thread):
+            await resume_expired(self.runtime, row)
+        self.assertEqual(self.row()['stall_stage'], 1)  # the reset still settles
+        self.assertEqual(threads and len(threads), 1)
+        self.assertNotEqual(threads[0], main)
+        self.assertIn('_reset_expired', dispatched)
 
     async def test_every_resume_write_leaves_the_event_loop_free(self):
         """Both callers of resume — resume_work and request_review — run it in a worker."""
