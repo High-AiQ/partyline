@@ -7,11 +7,12 @@ from fastapi import HTTPException
 from .attachment_commands import validated_attachment_command
 from .conversation_routes import unique_handle
 from .line_worktree import line_cwd
+from .process_memory import parse_size
 from .resource_budget import claim_resume, reserve_new_attachment, settings
 from .orchestrator_store import preset
 
 
-async def spawn(runtime, conv_id, preset_name, ident, cwd=None, handle=None):
+async def spawn(runtime, conv_id, preset_name, ident, cwd=None, handle=None, memory_limit=None):
     from . import server
     selected = preset(runtime.db, preset_name)
     command = validated_attachment_command(
@@ -20,7 +21,8 @@ async def spawn(runtime, conv_id, preset_name, ident, cwd=None, handle=None):
     await reserve_new_attachment(
         runtime.db, att_id=ident, conv_id=conv_id, name=name,
         adapter=selected['adapter'], command=command, cwd=cwd or line_cwd(runtime.db, conv_id),
-        runtime_owner=str(uuid.uuid4()), start_after_history=True)
+        runtime_owner=str(uuid.uuid4()), start_after_history=True,
+        lease=parse_size(memory_limit) if memory_limit else None)
     runtime.db._exec('UPDATE attachments SET preset=? WHERE id=?', (selected['name'], ident))
     return await server._start_attachment(runtime.db.get_attachment(ident))
 

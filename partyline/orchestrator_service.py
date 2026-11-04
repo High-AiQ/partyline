@@ -23,6 +23,7 @@ from .orchestrator_sha_check import flag
 from .orchestrator_revive import (
     brief_reviewer, reviewer_is_live, revive_reviewer, staffed_by_preset, task_lock)
 from .orchestrator_handles import pick_tag
+from .memory_live_raise import check_task_memory
 from .orchestrator_staff import ensure_reviewer, restart, spawn
 from .orchestrator_store import (
     preset, require_override, require_root, require_task, task, validate_policy)
@@ -41,6 +42,7 @@ async def _create_task(runtime, actor, root_id, body):
     db = runtime.db
     root = require_root(db, actor, root_id)
     preset(db, body.implementer)
+    check_task_memory(db, actor, body.memory_limit)
     policy = validate_policy(db, body.review or root['default_review_policy'])
     existing_line = db._exec(
         'SELECT id FROM conversations WHERE parent_id=? AND name=? AND archived_at IS NULL',
@@ -83,11 +85,15 @@ async def _create_task(runtime, actor, root_id, body):
     try:
         existing = db.get_attachment(ident)
         if existing:
+            if body.memory_limit and existing['status'] == 'exited':
+                db._exec('UPDATE attachments SET memory_limit=? WHERE id=?',
+                         (body.memory_limit, ident))
+                existing = db.get_attachment(ident)
             await restart(runtime, existing)
         else:
             tag = task(db, conv_id)['tag']
             await spawn(runtime, conv_id, body.implementer, ident,
-                        handle=f'impl-{tag}' if tag else None)
+                        handle=f'impl-{tag}' if tag else None, memory_limit=body.memory_limit)
     except (HTTPException, ValueError, OSError) as exc:
         spawn_failed = True
         creation_error = str(getattr(exc, 'detail', exc))
