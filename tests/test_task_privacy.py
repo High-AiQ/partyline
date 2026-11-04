@@ -1,53 +1,54 @@
-"""The root captain's messages to task processes stay off the root transcript."""
+"""A root captain's message is hidden only when it opens by addressing task processes."""
 
-from unittest.mock import AsyncMock
-
-from partyline.contracts import MessageEvent, MessageResponse
+from partyline.orchestrator_schema import MIGRATIONS
+from partyline.task_privacy import is_task_only
 from tests.orchestrator_fixture import TaskFixture
 
 
 class TaskPrivacyTest(TaskFixture):
-    async def say_on_root(self, body):
-        """The root captain speaks; the event goes through the real fan-out."""
-        self.runtime.broadcast = type(self.runtime).broadcast.__get__(self.runtime)
-        self.runtime.sockets['root'] = {AsyncMock()}
+    async def setUp_names(self):
+        await self.create()
+        self.db._exec("UPDATE attachments SET name='impl-abc123' WHERE id=?", (self.worker.attachment_id,))
+
+    def said(self, body):
         message = self.db.add_message('root', 'captain', 'agent', body)
-        await self.runtime.broadcast(
-            'root', MessageEvent(message=MessageResponse.model_validate(message)))
-        sent = list(self.runtime.sockets['root'])[0].send_json
-        return message, sent.await_count
+        return message, is_task_only(self.db, 'root', message)
 
-    def visible(self, message):
-        return message['id'] in [m['id'] for m in self.db.message_page('root', limit=100)[0]]
+    async def test_opening_mention_of_task_processes_is_hidden(self):
+        await self.setUp_names()
+        self.assertTrue(self.said('@impl-abc123 please rebase')[1])
+        self.assertTrue(self.said('  @impl-abc123, @impl-abc123 rebase both')[1])
 
-    async def test_all_task_mentions_are_hidden_but_kept_for_the_task_line(self):
-        await self.create()
-        handle = self.db.get_attachment(self.worker.attachment_id)['name']
-        message, sends = await self.say_on_root(f'@{handle} please carry on')
-        self.assertEqual(sends, 0)
-        self.assertFalse(self.visible(message))
-        self.assertIn(message['id'], [m['id'] for m in self.db.messages_after('root', 0)])
+    async def test_prose_for_a_person_naming_a_handle_stays_visible(self):
+        await self.setUp_names()
+        self.assertFalse(self.said('Greg, the reader passed review. @impl-abc123')[1])
+        self.assertFalse(self.said('done. @impl-abc123')[1])
+        self.assertFalse(self.said('nothing to mention')[1])
 
-    async def test_a_message_that_also_mentions_a_person_stays_visible(self):
-        await self.create()
-        handle = self.db.get_attachment(self.worker.attachment_id)['name']
-        message, sends = await self.say_on_root(f'@{handle} and @greg: status?')
-        self.assertEqual(sends, 1)
-        self.assertTrue(self.visible(message))
+    async def test_other_exemptions_hold(self):
+        await self.setUp_names()
+        self.assertFalse(self.said('@impl-abc123 and @greg look')[1])
+        self.assertFalse(self.said('@all @impl-abc123 look')[1])
 
-    async def test_a_message_naming_no_one_or_everyone_stays_visible(self):
-        await self.create()
-        for body in ('plain update', '@all heads up'):
-            message, sends = await self.say_on_root(body)
-            self.assertEqual(sends, 1, body)
-            self.assertTrue(self.visible(message), body)
+    async def test_migration_unhides_lead_prose_and_keeps_relay_copies(self):
+        await self.setUp_names()
+        lead, _ = self.said('Greg, it passed. @impl-abc123')
+        opening, _ = self.said('@impl-abc123 rebase')
+        relay = self.db.add_message('root', 'captain', 'agent', 'Greg, relay')
+        stamped = self.db.add_message('root', 'captain', 'agent', 'Greg, stamped')
+        task = self.db.add_message('root', 'impl-abc123', 'agent', 'plain from task')
+        self.db._exec("UPDATE messages SET task_private=1,audience_attachment_id='captain'"
+                      " WHERE id=?", (relay['id'],))
+        self.db._exec("UPDATE messages SET task_private=1,source_attachment_id='captain'"
+                      " WHERE id=?", (stamped['id'],))
+        for row in (lead, opening, task):
+            self.db._exec("UPDATE messages SET task_private=1 WHERE id=?", (row['id'],))
 
-    async def test_the_task_line_copy_stays_visible(self):
-        await self.create()
-        self.runtime.route_mentions = type(self.runtime).route_mentions.__get__(self.runtime)
-        self.runtime.live[self.worker.attachment_id].deliver = AsyncMock(return_value=True)
-        handle = self.db.get_attachment(self.worker.attachment_id)['name']
-        message = self.db.add_message('root', 'captain', 'agent', f'@{handle} go')
-        await self.runtime.route_mentions('root', message)
-        shown = [m['body'] for m in self.db.message_page(self.conv_id, limit=100)[0]]
-        self.assertIn(f'@{handle} go', shown)
+        unhide = next(m for m in MIGRATIONS if m.startswith('UPDATE messages SET task_private=0'))
+
+        def hidden():
+            return {r['id'] for r in self.db._exec('SELECT id FROM messages WHERE task_private=1')}
+
+        for _ in range(2):  # the second pass changes nothing
+            self.db._exec(unhide)
+            self.assertEqual(hidden(), {opening['id'], relay['id'], task['id']})
