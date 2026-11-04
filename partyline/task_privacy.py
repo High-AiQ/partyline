@@ -3,12 +3,18 @@
 A message the root captain posts on an orchestrator root line, whose every
 mention is a process on one of that root's task lines, is the other half of the
 exchange `task_private` already hides when a task process answers: people read
-it on the task line, where the relay copy stays visible. A message that also
+it on the task line, where the relay copy stays visible. Only a message that
+*opens* with those mentions is addressed to them; prose for a person that merely
+names a handle ("Greg, it passed review. @impl-a") stays. A message that also
 names a person or a root-line process, names no one, or says ``@all`` stays.
 """
 
+import re
+
 from .mention_relay import speaker_attachment
 from .mentions import mentioned_names
+
+_LEADING = re.compile(r"\s*(?:@!?[A-Za-z0-9][A-Za-z0-9_.-]*[\s,]*)+")
 
 
 def is_task_only(db, conv_id: str, message: dict) -> bool:
@@ -17,8 +23,11 @@ def is_task_only(db, conv_id: str, message: dict) -> bool:
     speaker = speaker_attachment(db, conv_id, message)
     if not (speaker and speaker.get("is_lead") and speaker["conv_id"] == conv_id):
         return False
-    names = mentioned_names(message.get("body") or "")
+    body = message.get("body") or ""
+    names = mentioned_names(body)
     if not names or "all" in names:
+        return False
+    if not _LEADING.match(body):
         return False
     task_names = {
         row["name"].lower() for row in db._exec(

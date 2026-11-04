@@ -1682,3 +1682,14 @@ Preflight the nested guards before teardown, keep the Git link and registration 
 removing files, and prune only after the directory is gone. Refuse a legacy orphan with
 manual recovery steps. `tests/test_retirement_nested.py` covers the refusal and retry,
 an interrupted removal, and the orphan diagnostic.
+
+## 2026-11-04 — A visibility rule keyed on mentions hid prose written for people
+
+The root captain's side of a task exchange was hidden whenever every `@mention` in it named a
+task process. Captains are told to `@name` only who acts next, so a status update to the person
+("Greg, the reader passed review. @impl-5dfad8") named only a handle and vanished from the main
+chat; most root-captain messages to the person were stored `task_private=1`. A rule keyed on
+who is mentioned cannot tell a message addressed to a process from prose that merely names one.
+The rule now hides only a message that opens with task-process mentions, and a data fix
+restores the root lead's rows that do not open with an `@mention`. `tests/test_task_privacy.py`
+covers opening, trailing and mixed mentions and the migration.
