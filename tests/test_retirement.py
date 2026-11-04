@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+import tarfile
 import tempfile
 import unittest
 
@@ -306,16 +307,18 @@ class RetirementTest(unittest.TestCase):
         self.assertTrue(resp.json()["worktree_removed"])
         self.assertFalse(os.path.exists(mid["cwd"]))
 
-    def test_a_person_without_discard_still_keeps_the_dirty_worktree(self):
+    def test_a_person_without_discard_gets_a_recovery_snapshot(self):
         mid = self.child()
         self.dirty(mid["cwd"])
 
         resp = self.retire(mid["id"], headers=self.human)
 
         self.assertEqual(resp.status_code, 200, resp.text)
-        self.assertFalse(resp.json()["worktree_removed"])
-        self.assertEqual(resp.json()["worktree_kept_reason"], "uncommitted changes")
-        self.assertTrue(os.path.isdir(mid["cwd"]))
+        self.assertTrue(resp.json()["worktree_removed"])
+        self.assertIsNone(resp.json()["worktree_kept_reason"])
+        self.assertFalse(os.path.isdir(mid["cwd"]))
+        with tarfile.open(os.path.join(resp.json()["worktree_snapshot"], "untracked.tar")) as archive:
+            self.assertEqual(archive.extractfile("scratch.txt").read(), b"wip")
 
     def test_child_lines_block_unless_include_children(self):
         mid = self.child()

@@ -3,6 +3,7 @@
 import os
 import subprocess
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -124,7 +125,7 @@ class WorktreeLifecycleTest(unittest.TestCase):
         self.assertEqual(archive_worktree_if_safe(self.db, "kid"), (False, "unmerged commits"))
         self.assertTrue(os.path.isdir(placed["cwd"]))
 
-    def test_uncommitted_changes_keep_the_worktree(self):
+    def test_uncommitted_changes_are_snapshotted(self):
         repo = self._repo()
         self._root_on(repo)
         placed = place_child(self.db, "root", self.db.create_conversation("kid", "kid")["id"])
@@ -132,8 +133,8 @@ class WorktreeLifecycleTest(unittest.TestCase):
             fh.write("wip")
         reason = worktree_removal_reason(self.db, self.db.get_conversation("kid"))
         self.assertEqual(reason, "uncommitted changes")
-        self.assertEqual(archive_worktree_if_safe(self.db, "kid"), (False, "uncommitted changes"))
-        self.assertTrue(os.path.isdir(placed["cwd"]))
+        self.assertEqual(archive_worktree_if_safe(self.db, "kid"), (True, None))
+        self.assertFalse(os.path.isdir(placed["cwd"]))
 
     def test_a_git_failure_reads_as_unmerged_never_as_safe(self):
         repo = self._repo()
@@ -244,11 +245,31 @@ class WorktreeLifecycleTest(unittest.TestCase):
         mid = self.child("root", "mid", self.machine("root-lead"))
         with open(os.path.join(mid["cwd"], "scratch.txt"), "w") as fh:
             fh.write("wip")
-        resp = self.client.delete(f"/api/conversations/{mid['id']}")
+        from partyline.conversation_archive import latest_snapshot
+        lookup_threads = []
+        event_loop_threads = []
+
+        def lookup(*args):
+            lookup_threads.append(threading.get_ident())
+            return latest_snapshot(*args)
+
+        from partyline.conversation_archive import post_system_notice
+
+        async def notice(*args, **kwargs):
+            event_loop_threads.append(threading.get_ident())
+            return await post_system_notice(*args, **kwargs)
+
+        with patch('partyline.conversation_archive.latest_snapshot', side_effect=lookup), \
+             patch('partyline.conversation_archive.post_system_notice', side_effect=notice):
+            resp = self.client.delete(f"/api/conversations/{mid['id']}")
+        self.assertEqual(len(lookup_threads), 2)
+        self.assertTrue(event_loop_threads)
+        self.assertTrue(set(lookup_threads).isdisjoint(event_loop_threads))
         self.assertEqual(resp.status_code, 200, resp.text)
-        self.assertFalse(resp.json()["worktree_removed"])
-        self.assertEqual(resp.json()["worktree_kept_reason"], "uncommitted changes")
-        self.assertTrue(os.path.isdir(mid["cwd"]))
+        self.assertTrue(resp.json()["worktree_removed"])
+        self.assertIsNone(resp.json()["worktree_kept_reason"])
+        self.assertTrue(os.path.isfile(resp.json()["worktree_snapshot"] + "/manifest.json"))
+        self.assertFalse(os.path.isdir(mid["cwd"]))
 
     def test_archiving_a_line_with_no_worktree_of_its_own_reports_neither(self):
         # A root line (or one on an inherited, non-git directory) has no
@@ -267,6 +288,8 @@ class WorktreeLifecycleTest(unittest.TestCase):
         mid = self.child("root", "mid", self.machine("root-lead"))
         with open(os.path.join(mid["cwd"], "scratch.txt"), "w") as fh:
             fh.write("wip")
+        _git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q",
+             "--allow-empty", "-m", "unmerged", cwd=mid["cwd"])
         archived = self.client.delete(f"/api/conversations/{mid['id']}")
         self.assertEqual(archived.status_code, 200, archived.text)
         self.assertTrue(os.path.isdir(mid["cwd"]))  # kept: dirty
@@ -293,7 +316,7 @@ class WorktreeLifecycleTest(unittest.TestCase):
 
         self.assertTrue(os.path.isdir(kid["cwd"]))  # still a live line: untouched
         self.assertFalse(os.path.exists(ghost["cwd"]))  # clean orphan: removed
-        self.assertTrue(os.path.isdir(dirty_ghost["cwd"]))  # dirty orphan: kept
+        self.assertFalse(os.path.isdir(dirty_ghost["cwd"]))  # dirty merged orphan: snapshotted
 
     def test_startup_sweep_never_touches_an_archived_lines_worktree(self):
         repo = self._repo()
