@@ -79,6 +79,23 @@ def expired(row, now=None):
     return row
 
 
+def _reset_expired(db, row):
+    """Clear the expired wait — unless a newer one took its place — off the loop.
+
+    The implementer can re-declare a wait between the orchestrator's read and
+    this write, so the UPDATE matches the expired value that was read: a newer
+    wait is left standing and owes no settle. `Db` is a single connection
+    behind `db.lock`, opened `check_same_thread=False`, so this is safe in a
+    worker — and off the event loop a busy lock or a slow commit spends a
+    worker's time, not the watchdog's budget.
+    """
+    changed = db._exec('UPDATE task_reviews SET wait_until=NULL,stall_stage=0,stall_notice_id=NULL '
+                       'WHERE conv_id=? AND wait_until=?', (row['conv_id'], row['wait_until']))
+    if changed.rowcount != 1:
+        return None
+    return db.get_attachment(row['implementer_id'])
+
+
 async def resume_expired(runtime, row):
     """A wait that ran out: the stall check starts over, with a fresh reminder.
 
@@ -93,10 +110,7 @@ async def resume_expired(runtime, row):
     presence = getattr(runtime, 'presence', None)
     if presence is not None and presence.is_working(row['implementer_id']):
         return  # a tool call in flight: the hand-off is not due yet
-    db = runtime.db
-    db._exec('UPDATE task_reviews SET wait_until=NULL,stall_stage=0,stall_notice_id=NULL '
-             'WHERE conv_id=?', (row['conv_id'],))
-    att = db.get_attachment(row['implementer_id'])
+    att = await asyncio.to_thread(_reset_expired, runtime.db, row)
     if att is None:
         return
     from .orchestrator_stall import settle
