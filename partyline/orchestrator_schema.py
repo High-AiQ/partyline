@@ -107,6 +107,17 @@ MIGRATIONS += [
     # cleared wherever `findings` is rewritten, so it always describes the verdict
     # actually stored.
     "ALTER TABLE task_reviews ADD COLUMN overridden_by TEXT",
+    # Undo the over-broad task-only hiding: a root lead's own message that does not open with
+    # an @mention was written for people. The lead is matched by its stamped attachment id, or
+    # for unstamped adapter speech by handle; relay copies (audience set, or a task process's
+    # stamp/handle) never match, and the pattern cannot hide a row again, so it is idempotent.
+    """UPDATE messages SET task_private=0 WHERE task_private=1 AND sender_type='agent'
+        AND bridge_id IS NULL AND audience_attachment_id IS NULL
+        AND ltrim(body, ' ' || char(9, 10, 13)) NOT LIKE '@%'
+        AND conv_id IN (SELECT id FROM conversations WHERE captain_mode='orchestrator')
+        AND EXISTS(SELECT 1 FROM attachments a WHERE a.conv_id=messages.conv_id AND a.is_lead=1
+            AND ((messages.source_attachment_id IS NOT NULL AND a.id=messages.source_attachment_id)
+              OR (messages.source_attachment_id IS NULL AND lower(a.name)=lower(messages.sender))))""",
 ]
 
 MIGRATIONS += LINE_RESOURCES
