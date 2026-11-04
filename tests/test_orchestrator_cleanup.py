@@ -100,6 +100,46 @@ class CleanupTest(TaskFixture):
         self.assertEqual(len(threads), 1)
         self.assertNotEqual(threads[0], main)
 
+    async def test_shipping_writes_and_reads_run_off_event_loop(self):
+        """The merged marker, attachment reads and the retention read are a worker's."""
+        import asyncio
+        import threading
+        row = await self.done()
+        await tick(self.runtime)
+        git(self.repo, 'merge', '--ff-only', row['sha'])
+        main = threading.get_ident()
+        threads = []
+        original_exec = self.db._exec
+        original_setting = self.db.get_setting
+
+        def traced_exec(query, args=(), **kwargs):
+            if 'SET merged=1' in query:
+                threads.append(threading.get_ident())
+            return original_exec(query, args, **kwargs)
+
+        def traced_setting(key):
+            if key == 'auto_clean_task_history':
+                threads.append(threading.get_ident())
+            return original_setting(key)
+
+        dispatched = []
+        real_to_thread = asyncio.to_thread
+
+        async def traced_to_thread(fn, /, *args, **kwargs):
+            dispatched.append(getattr(fn, '_mock_name', None) or fn.__name__)
+            return await real_to_thread(fn, *args, **kwargs)
+
+        with patch.object(self.db, '_exec', side_effect=traced_exec), \
+                patch.object(self.db, 'get_setting', side_effect=traced_setting), \
+                patch('asyncio.to_thread', side_effect=traced_to_thread):
+            await tick(self.runtime)
+        self.assertEqual(self.row()['merged'], 1)
+        self.assertEqual(self.db.get_attachment(row['implementer_id'])['status'], 'detached')
+        self.assertEqual(len(threads), 2)
+        self.assertTrue(all(tid != main for tid in threads))
+        self.assertIn('get_attachment', dispatched)
+        self.assertIn('get_setting', dispatched)
+
     async def test_report_construction_runs_off_event_loop(self):
         import threading
         from partyline.orchestrator_notices import report
