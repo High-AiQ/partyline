@@ -4,19 +4,25 @@
 
 OpenCode v2's resume check records the claim before answering READY. Treating
 that user row as readiness lets the continuation be pasted during the check's
-model turn, when the TUI can discard input. Keep resumed delivery closed until
-its structured idle record; an assistant READY reply alone cannot open it or
-credit a wake. Credit each wake only when its paste nonce appears in a user
+model turn, when the TUI can discard input. Prefer its structured idle record
+before opening resumed delivery, but bound the wait to 30 seconds after claim:
+a provider can hang or fail without writing idle, and sequential recovery must
+continue. The fallback grants neither credit nor an idle receipt. Credit each
+wake only when its paste nonce appears in a user
 row of the claimed session. An idle TUI can drop a paste without writing any
 new record, so retrying only when a new idle row arrives strands that paste
 forever. Revisit unproved wakes on idle polls, recheck busy state after the
 grace period, and retain the receipt if the durable queue refuses the handoff.
+Only unproved receipts warrant a retry task; proven receipts may be retained
+while an earlier delivery gap prevents cursor credit.
 `tests/test_opencode_v2_resume.py` covers pre-claim wakes, READY without idle,
 idle retry, and withholding credit for assistant echoes and unrelated input.
-A running process is also not proof of useful resume progress: permit an
-explicit implementer restart after a v2 resume claim when no subsequent user
-input has reached its transcript. Preserve the normal live-process conflict
-once it has received work.
+A recorded wake is not proof of continuing progress: the reported incidents
+contained wake user rows followed by tool calls, then stalled mid-turn.
+Track new and changed transcript rows, including streaming/tool mutations;
+rereading an unchanged row is not activity. Permit an explicit v2 implementer
+restart after 15 minutes without transcript progress, even if it received work.
+An active worker's 409 reports the activity age and points to message_task.
 
 ## A posted assignment is not a delivered goal
 
