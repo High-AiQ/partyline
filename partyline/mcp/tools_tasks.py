@@ -32,6 +32,9 @@ _DESCRIBE = {
                     'implementer. Its goal is stored on the task line and sent to the implementer '
                     'at birth and on wakes until delivery is proven, then on change or restart. '
                     'Goals allow 20000 characters. '
+                    'Optional memory_limit (e.g. "8G") starts a heavy line with a bigger budget, '
+                    'within the host ceiling and, for a captain, the captain approval ceiling '
+                    '(above it: 403, file a memory request for a person). '
                     'Retry with the same name and assignment to recover the existing task; '
                     'conflicting names are refused. '
                     'A creation_error means the task exists but staffing or notification needs attention.'),

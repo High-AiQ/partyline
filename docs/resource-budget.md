@@ -73,8 +73,8 @@ address-space limiting and does not guarantee resident-memory use. A person or
 captain can change an attachment's cap for its next activation with
 `PUT /api/attachments/{id}/memory`; a process cannot grant itself more. The
 ceiling defaults to `min(16 GiB, 3/4 of host RAM)`. A process or captain asks for more with
-`POST /api/attachments/{id}/memory-requests`; approval restarts the process with
-the new cap.
+`POST /api/attachments/{id}/memory-requests`; approval raises the running process's
+backstop in place (no restart) when it can, else restarts it with the new cap.
 
 ### Can the Linux backstop kill for page cache?
 
@@ -258,9 +258,20 @@ A process, its captain, or a person can file `POST /api/attachments/{id}/memory-
 with `requested_limit` and a reason. A captain can approve within the configurable
 captain ceiling (default twice the process cap, bounded by the host ceiling); a
 person decides above it. Approve with `POST /api/memory-requests/{request_id}/approve`.
-Approval stores the new cap and replaces the activation
-through the normal resume path. The old admission lease is released first and the
-replacement is grandfathered through admission. A process cannot approve the
+While the process is live in a known systemd scope, approval runs
+`systemctl --user set-property --runtime <unit> MemoryMax=<new backstop> MemorySwapMax=0`
+off the event loop, reads the scope's `memory.max` back, stores the new cap and
+leaves the CLI running: no detach, resume or continuation wake. The approval notice
+says whether the cap was applied to the running process or the process restarted.
+When the live raise is unavailable (non-Linux, unknown unit, `set-property` failure,
+or a read-back that does not match), approval stores the new cap and replaces the
+activation through the normal resume path. The old admission lease is released first
+and the replacement is grandfathered through admission.
+
+A captain can also start a heavy task with a bigger budget: `create_task` takes an
+optional `memory_limit` (same pattern as `requested_limit`). It is bounded by the host
+ceiling (400) and, for a machine caller, the captain ceiling (403: file a memory
+request for a person instead). A process cannot approve the
 request for its own cap, but a captain that filed a request for another process
 in its scope may approve that request itself, still within the ceiling. Only one
 memory request can be pending on a line at a

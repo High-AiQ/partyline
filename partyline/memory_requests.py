@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from .adapters import ADAPTER_METADATA
 from .approval_bubble import broadcast_approval_change, bubble_approval
 from .auth_guard import request_principal
+from .memory_live_raise import raise_live
 from .machine_scope import deny_unless, is_human
 from .memory_contracts import MemoryRequestEvent
 from .resume_continuation import resume_with_backlog
@@ -64,6 +65,34 @@ async def _queue_memory_continuation(runtime, att, limit):
         runtime, att['conv_id'], 'system', 'system',
         f'You were restarted with a new memory cap ({limit}); {action}.' + state,
         audience=att['id'], route=False)
+
+
+async def _restart_with_cap(runtime, resume, att, current, announce) -> bool:
+    """Fallback: detach, record the cap and resume. False when the resume failed."""
+    from .line_process_routes import detach_attachment
+    db = runtime.db
+    if att["id"] in runtime.live:
+        await detach_attachment(runtime, att["id"], survivors=False, expire=False)
+    with db.lock, db.conn:
+        db.conn.execute("UPDATE attachments SET memory_limit=? WHERE id=?",
+                        (current["requested_limit"], att["id"]))
+    runtime.reattaching.add(att["id"])
+    try:
+        await _queue_memory_continuation(runtime, att, current["requested_limit"])
+        await resume_with_backlog(runtime, att["id"], resume)
+    except Exception as exc:
+        text = (f"☏ memory cap for @{att['name']} is now {current['requested_limit']}, "
+                f"but resume failed ({exc}); request remains open and the process is "
+                "stopped. Retry approval or resume it manually.")
+        try:
+            await announce(current["conv_id"], text)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("could not announce memory resume failure")
+        return False
+    finally:
+        runtime.reattaching.discard(att["id"])
+    return True
 
 
 def register_memory_request_routes(app: FastAPI, runtime, resume) -> None:
@@ -161,34 +190,22 @@ def register_memory_request_routes(app: FastAPI, runtime, resume) -> None:
         att = db.get_attachment(current["attachment_id"])
         if att is None:
             raise HTTPException(410, "worker gone: its attachment was removed")
-        if not adapter_can_resume(ADAPTER_METADATA.get(att["adapter"], {})):
-            raise HTTPException(409, f"@{att['name']} uses an adapter that cannot resume")
-        from .line_process_routes import detach_attachment
-        if att["id"] in runtime.live:
-            await detach_attachment(runtime, att["id"], survivors=False, expire=False)
-        with db.lock, db.conn:
-            db.conn.execute("UPDATE attachments SET memory_limit=? WHERE id=?",
-                            (current["requested_limit"], att["id"]))
-        runtime.reattaching.add(att["id"])
-        try:
-            await _queue_memory_continuation(runtime, att, current["requested_limit"])
-            await resume_with_backlog(runtime, att["id"], resume)
-        except Exception as exc:
-            text = (f"☏ memory cap for @{att['name']} is now {current['requested_limit']}, "
-                    f"but resume failed ({exc}); request remains open and the process is "
-                    "stopped. Retry approval or resume it manually.")
-            try:
-                await announce(current["conv_id"], text)
-            except Exception:
-                import logging
-                logging.getLogger(__name__).exception("could not announce memory resume failure")
-            return {"request": _pending(db, current["conv_id"]), "resume_failed": True}
-        finally:
-            runtime.reattaching.discard(att["id"])
+        limit = current["requested_limit"]
+        live = att["id"] in runtime.live and await raise_live(runtime, att["id"], limit)
+        if live:
+            with db.lock, db.conn:
+                db.conn.execute("UPDATE attachments SET memory_limit=? WHERE id=?",
+                                (limit, att["id"]))
+        else:
+            if not adapter_can_resume(ADAPTER_METADATA.get(att["adapter"], {})):
+                raise HTTPException(409, f"@{att['name']} uses an adapter that cannot resume")
+            if not await _restart_with_cap(runtime, resume, att, current, announce):
+                return {"request": _pending(db, current["conv_id"]), "resume_failed": True}
         with db.lock, db.conn:
             db.conn.execute("DELETE FROM memory_limit_requests WHERE id=?", (request_id,))
         text = (f"☏ memory request for @{att['name']} approved by @{actor.name}; "
-                f"new cap {current['requested_limit']} is active")
+                f"new cap {limit} is active "
+                f"({'applied to the running process, no restart' if live else 'process restarted'})")
         await announce(current["conv_id"], text)
         if current["requester_attachment_id"]:
             target = db.get_attachment(current["requester_attachment_id"])

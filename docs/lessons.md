@@ -1760,3 +1760,13 @@ Preserve nested encoding in log fixtures. OpenCode writes `args` as a quoted
 logfmt string containing a JSON array; decoding the outer string does not yield
 a list. The literal quoted-args regression fails if the inner JSON decode is
 removed. Reformatting that field into a bare array concealed the binding bug.
+## An approved memory raise must reach the running process
+
+Approving a memory request used to detach the worker and resume it with the new cap.
+Heavy jobs (Blender, numpy) climb from 80% to 150% of budget in seconds, so the process
+hit the old backstop before the restart finished, and even a timely approval killed the
+running job. A budget change is a cgroup property, not a launch property: approval now
+runs `systemctl --user set-property --runtime` on the live scope and verifies
+`memory.max`, restarting only when that is unavailable. `create_task` also accepts
+`memory_limit` so a heavy line starts with the right budget instead of needing a raise.
+Tests: `tests/test_memory_live_raise.py`.
