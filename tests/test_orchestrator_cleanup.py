@@ -177,3 +177,35 @@ class CleanupTest(TaskFixture):
             await asyncio.gather(report(self.runtime, self.row()), report(self.runtime, self.row()))
         reports = self.db._exec('SELECT COUNT(*) FROM line_reports').fetchone()[0]
         self.assertEqual(reports, 1)
+
+
+    async def test_auto_clean_leaves_dirty_merged_task_and_ignored_builds_untouched(self):
+        from partyline.worktree_storage import latest_snapshot
+
+        self.db.set_setting('auto_clean_task_history', 'true')
+        row = await self.done()
+        git(self.repo, 'merge', '--ff-only', row['sha'])
+        cwd = self.db.get_conversation(self.conv_id)['cwd']
+        with open(os.path.join(self.repo, '.git', 'info', 'exclude'), 'a') as file:
+            file.write('\nbuild-cache/\n')
+        builds = os.path.join(cwd, 'build-cache')
+        os.mkdir(builds)
+        artifact = os.path.join(builds, 'output')
+        with open(artifact, 'w') as file:
+            file.write('reusable build')
+        # Dirt created after the tick's initial clean check must survive its recheck too.
+        from partyline.orchestrator_cleanup import detach_attachment
+
+        async def detach(*args, **kwargs):
+            await detach_attachment(*args, **kwargs)
+            with open(os.path.join(cwd, 'unfinished'), 'w') as file:
+                file.write('not shipped')
+
+        with patch('partyline.orchestrator_cleanup.detach_attachment', side_effect=detach):
+            await tick(self.runtime)
+        await tick(self.runtime)
+        self.assertIsNone(self.db.get_conversation(self.conv_id)['archived_at'])
+        self.assertTrue(os.path.isfile(os.path.join(cwd, 'unfinished')))
+        with open(artifact) as file:
+            self.assertEqual(file.read(), 'reusable build')
+        self.assertIsNone(latest_snapshot(self.db, self.repo, cwd))

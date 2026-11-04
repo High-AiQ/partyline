@@ -80,7 +80,8 @@ async def tick(runtime):
         remaining = await asyncio.to_thread(db.list_attachments, row['conv_id'])
         if any(att['status'] in ('starting', 'running') for att in remaining):
             continue
-        removed, reason = await asyncio.to_thread(archive_worktree_if_safe, db, row['conv_id'])
+        removed, reason = await asyncio.to_thread(
+            archive_worktree_if_safe, db, row['conv_id'], preserve=False)
         if reason or not removed:
             continue
         await archive_line(runtime, row['conv_id'])
