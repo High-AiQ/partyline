@@ -103,7 +103,8 @@ class WakeSettlement:
         return True
 
     def _schedule_unproved_repool(self) -> None:
-        if self._wake_receipts and (self._repool_task is None or self._repool_task.done()):
+        if (any(not wake["proven"] for wake in self._wake_receipts)
+                and (self._repool_task is None or self._repool_task.done())):
             self._repool_task = asyncio.create_task(self._repool_unproved())
 
     async def _repool_unproved(self) -> None:

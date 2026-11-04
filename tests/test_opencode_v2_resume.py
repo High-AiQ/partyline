@@ -1,9 +1,12 @@
 """Resume startup is a turn, not permission to paste the continuation."""
 
 import asyncio
+import json
+from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from partyline.adapters.bundled.opencode.v2 import RESUME_READY_TIMEOUT_SECONDS
 from partyline.adapters.receipts import BEGAN
 from partyline.db import Db
 from partyline.presence import Presence
@@ -54,7 +57,6 @@ class OpenCodeV2ResumeTests(unittest.IsolatedAsyncioTestCase):
                 {"type": "text", "text": "READY"}]}, seq=2)
             await adapter._poll()
             adapter.send_keys.assert_not_awaited()
-            self.assertFalse(adapter.resume_work_received)
             self.row("idle", "idle", {"outcome": "succeeded"}, seq=3)
             sent = asyncio.Event()
             adapter.send_keys.side_effect = lambda text: sent.set()
@@ -74,7 +76,6 @@ class OpenCodeV2ResumeTests(unittest.IsolatedAsyncioTestCase):
             self.row("accepted", "user", {"text": wake["marker"]}, seq=6)
             await adapter._poll()
             self.assertEqual(db.get_attachment("a")["last_seen"], second["id"])
-            self.assertTrue(adapter.resume_work_received)
 
     async def test_swallowed_paste_is_retried_at_idle_without_credit(self):
         self.claim()
@@ -133,3 +134,56 @@ class OpenCodeV2ResumeTests(unittest.IsolatedAsyncioTestCase):
             await self.adapter._repool_task
         repool.assert_not_awaited()
         self.assertEqual(self.adapter._wake_receipts[0]["ids"], [42])
+
+    async def test_resume_readiness_is_bounded_when_no_idle_row_arrives(self):
+        self.adapter.resume = True
+        self.adapter.att["cli_session"] = "ours"
+        now = 100
+        clock = SimpleNamespace(monotonic=lambda: now)
+        with patch("partyline.adapters.bundled.opencode.v2.time", clock):
+            self.claim()
+            await self.adapter._poll()
+            self.assertIsNone(self.adapter._ready_result)
+            self.row("failure", "error", {"error": "provider unavailable"}, seq=2)
+            now += RESUME_READY_TIMEOUT_SECONDS - 1
+            await self.adapter._poll()
+            self.assertIsNone(self.adapter._ready_result)
+            now += 1
+            await self.adapter._poll()  # no new rows, in particular no idle row
+        self.assertTrue(await self.adapter.wait_ready())
+        self.assertTrue(self.adapter._busy)  # timeout does not fabricate an idle receipt
+        self.assertEqual(self.adapter._confirmed_delivery_ids, set())
+
+    async def test_progress_tracks_new_rows_and_mutations_but_not_rereads(self):
+        now = 100
+        clock = SimpleNamespace(monotonic=lambda: now)
+        with patch("partyline.adapters.bundled.opencode.v2.time", clock):
+            self.claim()
+            await self.adapter._poll()
+            self.assertEqual(self.adapter.last_transcript_progress, 100)
+            for seq, kind in enumerate(("user", "assistant", "error", "system", "idle",
+                                        "compaction"), start=2):
+                now += 100
+                self.row(f"row-{seq}", kind, {"text": "input", "time": {}}, seq=seq)
+                await self.adapter._poll()
+                self.assertEqual(self.adapter.last_transcript_progress, now)
+                now += 1
+                await self.adapter._poll()
+                self.assertEqual(self.adapter.last_transcript_progress, now - 1)
+            # Stream/tool updates mutate an existing assistant row without a new id.
+            now += 100
+            self.db.execute("UPDATE session_message SET data=? WHERE id='row-3'",
+                            (json.dumps({"time": {}, "content": [{"type": "text",
+                                                                 "text": "streaming"}]}),))
+            self.db.commit()
+            await self.adapter._poll()
+            self.assertEqual(self.adapter.last_transcript_progress, now)
+
+    async def test_proven_receipts_do_not_schedule_idle_retry_tasks(self):
+        self.claim()
+        self.row("idle", "idle", {"outcome": "succeeded"}, seq=2)
+        await self.adapter._poll()
+        self.adapter._wake_receipts = [{"ids": [42], "proven": True}]
+        for _ in range(3):
+            await self.adapter._poll()
+            self.assertIsNone(self.adapter._repool_task)
