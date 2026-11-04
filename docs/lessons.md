@@ -1,5 +1,17 @@
 # Lessons: the false-assumptions ledger
 
+## A report pointer belongs to one review round
+
+The false assumption was that a delivered task report could deduplicate all later
+review requests. After a changes verdict advanced the round, the old report_id
+still pointed at an acknowledged, notified report; the next captain review
+silently skipped both a fresh report and its wake. Clear report_id in the same
+update that advances the round. Preserve it on approval so that retries and
+captain approval within a round remain quiet. Reviewer-policy approvals must
+also escape stale pointers after changes. `tests/test_orchestrator_rereview.py`
+covers acknowledged round-one reports, round-two wakes, duplicate requests,
+and approval under both policies.
+
 ## A resume claim is input to a turn, not an idle TUI
 
 OpenCode v2's resume check records the claim before answering READY. Treating
