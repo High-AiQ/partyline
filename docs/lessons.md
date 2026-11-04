@@ -1717,3 +1717,21 @@ who is mentioned cannot tell a message addressed to a process from prose that me
 The rule now hides only a message that opens with task-process mentions, and a data fix
 restores the root lead's rows that do not open with an `@mention`. `tests/test_task_privacy.py`
 covers opening, trailing and mixed mentions and the migration.
+
+## Git status does not inventory every filesystem object
+
+The worktree cleanup regression tests exposed another false assumption in the old
+clean-worktree rule: `git status --porcelain` ignores untracked FIFOs. An empty
+status therefore did not prove that deleting the directory would lose no data.
+Cleanup now checks the filesystem before removal, refuses unsupported special
+files, and scans ignored dependencies for repositories without the usual discovery
+depth/skip shortcuts. `tests/test_worktree_cleanup.py` covers a FIFO omitted by Git,
+a clone inside ignored dependencies, snapshot restoration, and a clean orphan
+whose detached or branch commits must survive. Use Git to classify tracked and
+ignored files, and a filesystem guard to prove the directory is disposable.
+
+Ignored-file reclamation must also prove that Git's top-level directory is the
+checkout being cleaned and that its own Git link is present. Without that link,
+Git walks up to the parent repository, which may ignore the whole worktree folder;
+using that classification would delete the orphan's real changes. The missing-Git-link
+regression asserts both tracked content and untracked work survive.

@@ -29,6 +29,8 @@ from .scratch_worktrees import prune_scratch_worktrees
 from .attachment_tmp import reap_line_tmp
 from .legacy_tmp import reap_legacy_temp
 from .system_notice import post_system_notice
+from .worktree_storage import latest_snapshot
+from .worktree_paths import managed_root
 from .worktree_lifecycle import archive_worktree_if_safe, discard_worktree
 from .retirement_preview import preview
 from .retirement_contracts import RetirementAudit, RetirementPreview
@@ -134,8 +136,12 @@ def register_archive_route(app: FastAPI, presence):
         else:
             stopped, archived = await archive_line(runtime, conv_id), [conv_id]
         stopped = [*pre_stopped, *stopped]
-        removed, kept_reason = False, None
+        removed, kept_reason, snapshot = False, None, None
         for line_id in archived:
+            line = db.get_conversation(line_id)
+            cwd = line.get("cwd") or ""
+            root = managed_root(cwd)
+            previous = await asyncio.to_thread(latest_snapshot, db, root, cwd) if root else None
             if discard:
                 # The explicit discard: a merged branch's dirty worktree goes.
                 line_removed = await asyncio.to_thread(discard_worktree, db, line_id)
@@ -143,18 +149,23 @@ def register_archive_route(app: FastAPI, presence):
             else:
                 line_removed, reason = await asyncio.to_thread(
                     archive_worktree_if_safe, db, line_id)
+            saved = (await asyncio.to_thread(latest_snapshot, db, root, cwd)
+                     if root and line_removed else None)
+            saved = saved if saved != previous else None
+            if saved:
+                await post_system_notice(runtime, line_id, f"☏ worktree changes saved to {saved}")
             await asyncio.to_thread(prune_review_worktrees, db, line_id)
             await asyncio.to_thread(prune_scratch_worktrees, db, line_id)
             await asyncio.to_thread(reap_line_tmp, db, line_id)
             if line_id == conv_id:
-                removed, kept_reason = line_removed, reason
+                removed, kept_reason, snapshot = line_removed, reason, saved
         # One walk of the legacy locations for the whole archive, after the
         # per-line loop — not one walk per archived line.
         await asyncio.to_thread(reap_legacy_temp, db)
         await runtime.broadcast_all(ConversationsChangedEvent())
         return {"ok": True, "archived": True, "stopped": stopped,
                 "archived_ids": archived, "worktree_removed": removed,
-                "worktree_kept_reason": kept_reason,
+                "worktree_kept_reason": kept_reason, "worktree_snapshot": snapshot,
                 "conversation": db.get_conversation(conv_id)}
 
     return archive_conversation
