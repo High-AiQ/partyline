@@ -206,9 +206,10 @@ async def review_verdict(runtime, actor, conv_id, body):
     changed = db._exec(
         'UPDATE task_reviews SET status=?,findings=?,previous_findings=CASE WHEN ? THEN previous_findings '
         'ELSE ? END,round=round+?,reviewer_restarts=0,'
+        'report_id=CASE WHEN ? THEN report_id ELSE NULL END,'
         "settled_at=?,reopen_noticed=0,overridden_by=? WHERE conv_id=? AND status='in_review'",
         ('approved' if approved else 'implementing', body.findings, approved, body.findings,
-         int(not approved), time.time() if approved else None,
+         int(not approved), approved, time.time() if approved else None,
          captain['name'] if captain else None, conv_id))
     if changed.rowcount != 1:
         raise HTTPException(409, 'there is no open review for this task')
