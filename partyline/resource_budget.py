@@ -218,13 +218,13 @@ def reject_if_full(db, requested_lease: int, *, exclude_id: str | None = None) -
 
 async def reserve_new_attachment(db, *, att_id, conv_id, name, adapter, command,
                                 cwd, runtime_owner, start_after_history=False,
-                                counts_toward_total=False, successor=False):
+                                counts_toward_total=False, successor=False, lease=None):
     """Atomically admit and persist a starting row before any spawn work."""
     async with db._runtime_serialized_async():
         if successor and any(a.get("is_successor") and a["status"] in LIVE
                              for a in db.list_attachments(conv_id)):
             raise HTTPException(409, "this line already has a live successor")
-        lease = settings(db)["default_process_memory_bytes"]
+        lease = lease or settings(db)["default_process_memory_bytes"]
         if adapter != "raw" or counts_toward_total:
             reject_if_full(db, lease)
         return db.add_attachment(

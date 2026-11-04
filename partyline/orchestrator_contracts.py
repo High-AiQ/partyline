@@ -20,6 +20,7 @@ class TaskIn(BaseModel):
     implementer: str = Field(min_length=1, max_length=120)
     review: str | None = Field(default=None, min_length=1, max_length=120)
     base: Literal['head', 'upstream'] = 'head'
+    memory_limit: str | None = Field(default=None, pattern=r'^[1-9][0-9]{0,5}[KMG]$')
 
 
 class RepositoryShaIn(BaseModel):
