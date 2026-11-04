@@ -1,0 +1,5 @@
+timestamp=2026-11-04T09:09:06.100Z level=INFO run=02a21d74 message="cli starting" version=2.2.5 channel=latest local=false args="[\"--standalone\",\"--prompt\",\"[partyline-claim: ours]\"]" role=cli
+timestamp=2026-11-04T09:09:06.129Z level=INFO run=02a21d74 message="spawning process" command=/x/opencode2 args="[\"serve\",\"--stdio\",\"--port\",\"0\"]" cwd=/work/one role=cli
+timestamp=2026-11-04T09:09:06.130Z level=INFO run=4708f720 message="cli starting" version=2.2.5 channel=latest local=false args="[\"serve\",\"--stdio\",\"--port\",\"0\"]" role=cli
+timestamp=2026-11-04T09:09:06.131Z level=INFO run=4708f720 message="spawning process" command=git args="[\"rev-parse\",\"--show-toplevel\"]" cwd=/work/one http.span=6 role=server
+timestamp=2026-11-04T09:09:06.132Z level=ERROR run=4708f720 message="Failed to drain Session" cause="AI.Error: Account x is suspended …\n    at …"
