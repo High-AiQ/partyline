@@ -597,6 +597,18 @@ reader. V2 defaults `OPENCODE_DB` to `opencode-v2.db` to keep its migrations sep
 from v1; an explicit `OPENCODE_DB` override wins. The selected binary's
 `debug paths db` resolves the actual path, including XDG and release-channel rules.
 Configuration and provider credentials remain shared by the vendor's defaults.
+Before spawning, v2 resolves `debug paths log` and snapshots the application log's
+EOF. Incremental background reads bind a run only when its `cli starting` args
+contain this activation's claim marker. The standalone server has a separate
+run: after this TUI logs its `serve --stdio` spawn, the first new serve run whose
+first process spawn confirms the attachment cwd is bound as its child. This
+keeps simultaneous starts in different worktrees distinct. Provider ERROR records
+from either bound run post
+one redacted failure-class notice per cause class and notify the root captain
+once with the preset name. A failed turn suppresses task-stall escalation until
+successful assistant output shows recovery. Log rotation and truncation restart
+the cursor without replaying the pre-spawn backlog. Arbitrary provider details
+are replaced with fixed summaries to avoid leaking accounts or credentials.
 V2.0.18's full TUI does not accept v1's `-m` flag; select the model in OpenCode's
 configuration or model picker. No compact shortcut or immediate-delivery capability
 is advertised without a live probe proving it.

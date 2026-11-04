@@ -104,6 +104,9 @@ def reminder(db, att):
 
 
 async def settle(runtime, att):
+    adapter = getattr(runtime, "live", {}).get(att["id"])
+    if getattr(adapter, "provider_failed", False) is True:
+        return
     if not candidate(runtime.db, att):
         return
     db = runtime.db
