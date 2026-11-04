@@ -173,6 +173,7 @@ class ArchiveResponse(RetirementRecovery):
     archived_ids: list[str] = []
     worktree_removed: bool = False
     worktree_kept_reason: str | None = None
+    worktree_snapshot: str | None = None
     conversation: ConversationResponse
 
 class PurgeResponse(BaseModel):

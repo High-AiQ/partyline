@@ -17,9 +17,12 @@ import logging
 import os
 import subprocess
 
+from .worktree_cleanup import cleanup, reclaim_task, task_disposable
+from .worktree_storage import reclaim_ignored, record_kept
+from .git_fence import mirror_branch_ref
 from .hierarchy import parent_id_of
 from .line_worktree import WORKTREES_DIR, _git, line_cwd, repo_root
-from .worktree_paths import managed_root
+from .worktree_paths import branch_name, managed_root
 from .retirement_worktree import remove_directory
 from .nested_repositories import keep_reason, nested_repositories
 from .review_worktrees import sweep_review_worktrees
@@ -152,7 +155,8 @@ def worktree_state(db, conv: dict | None) -> dict | None:
     branch = _current_branch(cwd)
     parent_cwd = line_cwd(db, parent_id_of(conv)) if parent_id_of(conv) else None
     bases = [b for b in (_base_ref(parent_cwd), _default_branch(root)) if b]
-    tips = [tip for tip in dict.fromkeys((branch, "HEAD")) if tip]
+    mirror = mirror_branch_ref(cwd, conv.get("id") or "", branch_name(cwd))
+    tips = [tip for tip in dict.fromkeys((branch, "HEAD", mirror)) if tip]
     merged = bool(bases) and bool(tips) and all(_in_history(cwd, t, bases) for t in tips)
     return {"clean": _is_clean(cwd), "merged": merged, "nested": nested_repositories(cwd)}
 
@@ -187,13 +191,20 @@ def discard_worktree(db, conv_id: str) -> bool:
     state = worktree_state(db, conv)
     if state is None or not state["merged"]:
         return False
-    remove_for_line(conv, db)
-    return not os.path.isdir(conv.get("cwd") or "")
+    if (spaces := workspaces(db, conv_id)):
+        if not task_disposable(spaces, conv["cwd"]):
+            reclaim_task(spaces, conv["cwd"])
+            return False
+        remove_for_line(conv, db)
+        reclaim_task(spaces, conv.get("cwd") or "")
+        return not os.path.isdir(conv.get("cwd") or "")
+    return cleanup(db, _worktree_root(conv["cwd"]), conv["cwd"], True, force=True)[0]
 
 
-def archive_worktree_if_safe(db, conv_id: str) -> tuple[bool, str | None]:
-    """Remove a line's worktree when SAFE; otherwise leave it and say why.
+def archive_worktree_if_safe(db, conv_id: str, *, preserve: bool = True) -> tuple[bool, str | None]:
+    """Remove merged worktrees, preserving dirty state outside them first.
 
+    ``preserve=False`` keeps the maintenance tick clean-only, with no snapshot or reclaim.
     Returns ``(removed, kept_reason)``. A line with no worktree of its own
     reports ``(False, None)`` too — SAFE and "removed" are not the same
     thing, and a caller that only checked the reason would tell a person a
@@ -203,11 +214,29 @@ def archive_worktree_if_safe(db, conv_id: str) -> tuple[bool, str | None]:
     cwd = (conv or {}).get("cwd") or ""
     if _worktree_root(cwd) is None:
         return False, None
-    reason = worktree_removal_reason(db, conv)
-    if reason is not None:
-        return False, reason
-    remove_for_line(conv, db)
-    return not os.path.isdir(cwd), None
+    if not preserve:
+        reason = worktree_removal_reason(db, conv)
+        if reason:
+            return False, reason
+        if not task_disposable(workspaces(db, conv_id), cwd):
+            return False, "contains repositories or uninspectable files"
+        remove_for_line(conv, db)
+        return not os.path.isdir(cwd), None
+    state = worktree_state(db, conv)
+    spaces = workspaces(db, conv_id)
+    disposable = bool(spaces) and task_disposable(spaces, cwd)
+    if disposable and state["clean"] and state["merged"]:
+        remove_for_line(conv, db)
+        return not os.path.isdir(cwd), None
+    if spaces:
+        reclaim_task(spaces, cwd)
+        if disposable and not state["merged"]:
+            try:
+                record_kept(db, _worktree_root(cwd), cwd, "unmerged commits")
+            except OSError:
+                pass
+            return False, "unmerged commits"
+    return cleanup(db, _worktree_root(cwd), cwd, state["merged"])
 
 
 def sweep_orphaned_worktrees(db) -> None:
@@ -233,23 +262,26 @@ def sweep_orphaned_worktrees(db) -> None:
     # cwd — a repo's own root as much as a worktree under it — names a root.
     roots = {root for cwd in known_cwds if (root := repo_root(cwd))}
     for root in sorted(roots):
-        _sweep_repo(root, known_cwds)
+        _sweep_repo(root, known_cwds, db)
         sweep_review_worktrees(db, root)
         sweep_scratch_worktrees(db, root)
 
 
-def _sweep_repo(root: str, known_cwds: set[str]) -> None:
+def _sweep_repo(root: str, known_cwds: set[str], db=None) -> None:
     worktrees_dir = os.path.join(root, WORKTREES_DIR)
     if os.path.isdir(worktrees_dir):
         for name in sorted(os.listdir(worktrees_dir)):
             path = os.path.join(worktrees_dir, name)
-            if not os.path.isdir(path) or path in known_cwds:
+            if os.path.islink(path) or not os.path.isdir(path) or path in known_cwds:
                 continue
-            if _is_clean(path):
-                _git("worktree", "remove", "--force", path, cwd=root)
-                logger.info("worktree sweep: removed orphaned worktree %s", path)
+            bases = [base for base in (_default_branch(root),) if base]
+            merged = bool(bases) and _in_history(path, "HEAD", bases)
+            if db is not None:
+                removed, reason = cleanup(db, root, path, merged)
+                logger.info("worktree sweep: %s %s (%s)",
+                            "removed" if removed else "kept", path, reason or "safe")
             else:
-                logger.info("worktree sweep: kept dirty or repository-holding orphaned worktree %s", path)
+                reclaim_ignored(path)
     try:
         _git("worktree", "prune", cwd=root)
     except (OSError, subprocess.SubprocessError):

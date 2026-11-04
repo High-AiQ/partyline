@@ -88,6 +88,7 @@ from .accept_sha import register_accept_route
 from .accept_history import register_accept_history_route
 from .line_resource_routes import register_line_resource_routes, run as run_resource_leases
 from .resource_leases import register_lease_routes
+from .worktree_routes import register_worktree_routes
 from .review_worktrees import register_review_routes
 from .approval_bubble import register_approval_routes
 from .tmp_reap_routes import register_tmp_reap_routes
@@ -207,6 +208,7 @@ install_static_cache(app)
 register_terminal_route(app, runtime)
 register_accept_route(app, runtime)
 register_accept_history_route(app, runtime)
+register_worktree_routes(app, runtime)
 register_review_routes(app, runtime)
 register_scratch_routes(app, runtime)
 register_approval_routes(app, runtime)
@@ -283,7 +285,6 @@ LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 # which case there is no server object to ask politely and we signal instead.
 _uvicorn_server = None
 
-
 def require_loopback(request: Request) -> None:
     """Keep process-control endpoints local even when the server binds widely."""
     client = request.client.host if request.client else None
@@ -293,7 +294,6 @@ def require_loopback(request: Request) -> None:
         client = client[7:]
     if client not in LOOPBACK:
         raise HTTPException(403, "process control may only be requested from this machine")
-
 
 def save_restart_plan(body: RestartPlanRequest) -> RestartPlanResponse:
     try:
