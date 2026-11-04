@@ -103,14 +103,21 @@ class WakeSettlement:
         return True
 
     def _schedule_unproved_repool(self) -> None:
-        if self._wake_receipts and (self._repool_task is None or self._repool_task.done()):
+        if (any(not wake["proven"] for wake in self._wake_receipts)
+                and (self._repool_task is None or self._repool_task.done())):
             self._repool_task = asyncio.create_task(self._repool_unproved())
 
     async def _repool_unproved(self) -> None:
         await asyncio.sleep(REPOOL_GRACE)
+        if getattr(self, "_busy", False):
+            return
         doomed = [wake for wake in self._wake_receipts if not wake["proven"]]
         self._wake_receipts = [wake for wake in self._wake_receipts if wake["proven"]]
         ids = [message_id for wake in doomed for message_id in wake["ids"]]
         repool = self.att.get("repool_message_ids")  # type: ignore[attr-defined]
-        if ids and repool is not None:
-            await repool(ids)
+        handed_off = False
+        try:
+            handed_off = bool(ids) and repool is not None and await repool(ids)
+        finally:
+            if not handed_off:
+                self._wake_receipts[:0] = doomed

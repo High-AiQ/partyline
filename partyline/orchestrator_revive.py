@@ -7,6 +7,7 @@ There is no polling, timer or watchdog.
 
 import asyncio
 import logging
+import time
 
 from fastapi import HTTPException
 
@@ -17,6 +18,7 @@ from .orchestrator_store import attachment_task, require_root, task
 
 logger = logging.getLogger(__name__)
 LIVE_STATUSES = ('starting', 'running')
+IMPLEMENTER_STALL_SECONDS = 15 * 60
 _pending: set = set()
 
 
@@ -96,7 +98,20 @@ async def restart_implementer(runtime, actor, conv_id):
         if att is None:
             raise HTTPException(409, 'this task has no implementer attachment to restart')
         if att['status'] in LIVE_STATUSES:
-            raise HTTPException(409, 'the implementer is already running')
+            live = runtime.live.get(att['id'])
+            progress = getattr(live, 'last_transcript_progress', None)
+            age = None
+            if (att['adapter'] == 'opencode-v2' and progress is not None
+                    and live.att.get('runtime_owner') == att.get('runtime_owner')):
+                age = max(0, time.monotonic() - progress)
+            if age is None or age < IMPLEMENTER_STALL_SECONDS:
+                detail = 'the implementer is already running'
+                if age is not None:
+                    detail += f'; active {age:.0f}s ago; message_task it'
+                raise HTTPException(409, detail)
+            from .line_process_routes import detach_attachment
+            await detach_attachment(runtime, att['id'], survivors=False)
+            att = db.get_attachment(att['id'])
         await restart(runtime, att)
     await tell(runtime, att['id'],
                f"resumed by {actor.name}; continue the task: {row['what']} — {row['location']}",
