@@ -1,0 +1,14 @@
+timestamp=2026-11-04T17:00:00.000Z level=INFO run=aaaaaa01 message="cli starting" version=2.2.5 channel=latest local=false args="[\"--standalone\",\"--auto\",\"--prompt\",\"[partyline-claim: ours]\"]" role=cli
+timestamp=2026-11-04T17:00:00.000Z level=INFO run=bbbbbb01 message="cli starting" version=2.2.5 channel=latest local=false args="[\"--standalone\",\"--auto\",\"--prompt\",\"[partyline-claim: theirs]\"]" role=cli
+timestamp=2026-11-04T17:00:00.010Z level=INFO run=aaaaaa01 message="spawning process" command=runtime args="[\"serve\",\"--stdio\",\"--port\",\"0\"]" cwd=/work/one role=cli
+timestamp=2026-11-04T17:00:00.010Z level=INFO run=bbbbbb01 message="spawning process" command=runtime args="[\"serve\",\"--stdio\",\"--port\",\"0\"]" cwd=/work/two role=cli
+timestamp=2026-11-04T17:00:00.020Z level=INFO run=bbbbbb02 message="cli starting" version=2.2.5 channel=latest local=false args="[\"serve\",\"--stdio\",\"--port\",\"0\"]" role=cli
+timestamp=2026-11-04T17:00:00.021Z level=INFO run=aaaaaa02 message="cli starting" version=2.2.5 channel=latest local=false args="[\"serve\",\"--stdio\",\"--port\",\"0\"]" role=cli
+timestamp=2026-11-04T17:00:00.030Z level=INFO run=bbbbbb02 message="spawning process" command=tool args="[\"--mode\",\"probe\",\"--format\",\"json\"]" cwd=/work/two http.span=1 role=server
+timestamp=2026-11-04T17:00:00.031Z level=INFO run=bbbbbb02 message="spawning process" command=tool args="[]" cwd=/work/one role=server
+timestamp=2026-11-04T17:00:00.032Z level=ERROR run=bbbbbb02 message="Failed to drain Session" cause="AI.Error: quota exceeded for private@example.test token=secret" role=server
+timestamp=2026-11-04T17:00:00.040Z level=INFO run=aaaaaa02 message="spawning process" command=tool args="[\"--mode\",\"probe\",\"--format\",\"json\"]" cwd=/work/one http.span=2 role=server
+timestamp=2026-11-04T17:00:00.050Z level=INFO run=aaaaaa02 message="Failed to drain Session" cause="AI.Error: not an ERROR record" role=server
+timestamp=2026-11-04T17:00:00.060Z level=ERROR run=aaaaaa02 message="Failed to drain Session" cause="AI.Error: Account private@example.test sk-secret is suspended\n    at private stack" role=server
+timestamp=2026-11-04T17:00:00.061Z level=ERROR run=aaaaaa02 message="Failed to drain Session" cause="AI.Error: Account private@example.test sk-secret is suspended" role=server
+timestamp=2026-11-04T17:00:00.070Z level=ERROR run=aaaaaa01 message="provider failed" cause="unknown model private-model" role=cli
