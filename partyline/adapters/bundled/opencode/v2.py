@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import sqlite3
 import subprocess
+import time
 
 from partyline.adapters import Adapter
 from partyline.adapters.bundled.opencode.wakes import WakeSettlement
@@ -21,6 +22,7 @@ from partyline.adapters.receipts import BEGAN, ENDED, receipt
 from partyline.mcp_attach import opencode_config_content, server_for
 
 logger = logging.getLogger(__name__)
+RESUME_READY_TIMEOUT_SECONDS = 30.0
 
 
 class PartylineAdapter(WakeSettlement, Adapter):
@@ -35,6 +37,9 @@ class PartylineAdapter(WakeSettlement, Adapter):
         self._claim_seq = 0
         self._seen: set[str] = set()
         self._busy = False
+        self.last_transcript_progress = time.monotonic()
+        self._row_versions: dict[str, int] = {}
+        self._resume_claimed_at: float | None = None
 
     def build_command(self) -> list[str]:
         cmd = list(self.att["command"]) or ["opencode2"]
@@ -107,6 +112,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
             if isinstance(data.get("text"), str) and self._claim_token in data["text"]:
                 self._claim_seq = seq
                 self.observe_claim(data["text"])
+                self._resume_claimed_at = time.monotonic()
                 return session
         return None
 
@@ -126,6 +132,10 @@ class PartylineAdapter(WakeSettlement, Adapter):
                 (self._session_id, self._claim_seq),
             ).fetchall()
         for ident, kind, raw in rows:
+            version = hash((kind, raw))
+            if self._row_versions.get(ident) != version:
+                self._row_versions[ident] = version
+                self.last_transcript_progress = time.monotonic()
             if ident in self._seen:
                 continue
             data = self._decode(raw)
@@ -158,13 +168,26 @@ class PartylineAdapter(WakeSettlement, Adapter):
                 if not self._busy:
                     self._busy = True
                     await receipt(self.att, BEGAN)
-                self.mark_ready()
+                if not self.resume:
+                    self.mark_ready()
             elif kind == "idle":
                 if self._busy:
                     self._busy = False
                     await receipt(self.att, ENDED)
+                # A resume claim starts a real model turn. The TUI can drop
+                # input during that turn; open delivery only at its idle receipt.
+                self.mark_ready()
                 self._schedule_unproved_repool()
             self._seen.add(ident)
+        # Readiness must not strand sequential recovery if the provider hangs
+        # or errors without an idle row. This opens no delivery credit or idle.
+        if (self.resume and self._resume_claimed_at is not None
+                and time.monotonic() - self._resume_claimed_at >= RESUME_READY_TIMEOUT_SECONDS):
+            self.mark_ready()
+        # An idle TUI may discard a paste without producing another record.
+        # Revisit unproved input even when there is no new idle row to tail.
+        if not self._busy:
+            self._schedule_unproved_repool()
 
     async def _run(self):
         try:
