@@ -1735,3 +1735,28 @@ checkout being cleaned and that its own Git link is present. Without that link,
 Git walks up to the parent repository, which may ignore the whole worktree folder;
 using that classification would delete the orphan's real changes. The missing-Git-link
 regression asserts both tracked content and untracked work survive.
+
+### Provider refusals can bypass the transcript
+
+A claimed session and delivered wake do not prove a model call can succeed.
+OpenCode v2 can record provider refusals only in its structured application log,
+so silence must not become evidence that the implementer ignored the hand-off.
+Snapshot the log before spawn, bind its run to the activation claim marker, and
+read incrementally off the event loop. Provider-log regression tests cover
+interleaved runs, redaction, deduplication, rotation and false-stall suppression.
+
+Keep source and the release version fixed while a gate is running. A suite can
+retain the imported version while its helper subprocesses load a later version
+from disk; `test_generated_helper_loads_service_package_from_any_cwd` detects
+that inconsistent snapshot. Finish edits before starting the full gate.
+
+The TUI run is not necessarily the model caller. OpenCode's standalone TUI
+launches a `serve --stdio` child with its own log run id; provider errors belong
+to that server. Confirm the child using the parent's serve spawn and the child's
+first spawning-process cwd, rather than assigning the next run globally.
+The interleaved TUI/server fixture guards this observed process boundary.
+
+Preserve nested encoding in log fixtures. OpenCode writes `args` as a quoted
+logfmt string containing a JSON array; decoding the outer string does not yield
+a list. The literal quoted-args regression fails if the inner JSON decode is
+removed. Reformatting that field into a bare array concealed the binding bug.

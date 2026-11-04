@@ -16,6 +16,7 @@ import subprocess
 import time
 
 from partyline.adapters import Adapter
+from partyline.adapters.bundled.opencode.provider_log import ProviderLog
 from partyline.adapters.bundled.opencode.wakes import WakeSettlement
 from partyline.adapters.compaction import is_compaction_record
 from partyline.adapters.receipts import BEGAN, ENDED, receipt
@@ -36,6 +37,8 @@ class PartylineAdapter(WakeSettlement, Adapter):
         self._session_id: str | None = None
         self._claim_seq = 0
         self._seen: set[str] = set()
+        self.provider_failed = False
+        self._provider_log = None
         self._busy = False
         self.last_transcript_progress = time.monotonic()
         self._row_versions: dict[str, int] = {}
@@ -75,17 +78,29 @@ class PartylineAdapter(WakeSettlement, Adapter):
         content = opencode_config_content(os.environ.get("OPENCODE_CONFIG_CONTENT", ""), server)
         return {} if content is None else {"OPENCODE_CONFIG_CONTENT": content}
 
+    async def start(self):
+        path = await asyncio.to_thread(self._resolve_path, "log")
+        self._provider_log = await asyncio.to_thread(self._open_provider_log, path)
+        await super().start()
+
+    def _open_provider_log(self, path):
+        return ProviderLog(path if path.suffix == ".log" else path / "opencode.log",
+                           self._claim_token, self.att["cwd"])
+
     def _resolve_store(self) -> Path:
+        return self._resolve_path("db")
+
+    def _resolve_path(self, kind) -> Path:
         # This diagnostic prints a path only: no server, session, or model call.
         executable = (self.att["command"] or ["opencode2"])[0]
         result = subprocess.run(
-            [executable, "debug", "paths", "db"], check=True, capture_output=True,
+            [executable, "debug", "paths", kind], check=True, capture_output=True,
             text=True, timeout=15, cwd=self.att["cwd"],
             env=dict(os.environ, **self.spawn_env()),
         )
         path = Path(result.stdout.strip())
         if not path.is_absolute():
-            raise ValueError("OpenCode v2 must use an absolute, on-disk transcript database")
+            raise ValueError("OpenCode v2 must use an absolute, on-disk diagnostic path")
         return path
 
     def _connect(self):
@@ -124,6 +139,22 @@ class PartylineAdapter(WakeSettlement, Adapter):
             return {}
         return data if isinstance(data, dict) else {}
 
+    async def _poll_provider(self):
+        if self._provider_log is None:
+            return
+        errors = await asyncio.to_thread(self._provider_log.poll)
+        if not errors:
+            return
+        self.provider_failed = True
+        self._busy = False
+        for cause, fresh in errors:
+            if noted := self.att.get("on_provider_error"):
+                await noted(cause, fresh)
+            elif fresh:
+                await self.post("system", "system",
+                                f"⚠ @{self.att['name']}: model provider error — {cause}")
+        await receipt(self.att, ENDED)
+
     async def _poll(self):
         with contextlib.closing(self._connect()) as db:
             rows = db.execute(
@@ -161,6 +192,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
                             continue
                         text = part.get("text")
                         if isinstance(text, str) and text.strip():
+                            self.provider_failed = False
                             await self.post(self.att["name"], "agent", text)
             elif kind == "user":
                 self.observe_claim(raw)
@@ -221,6 +253,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
                 if self.on_cli_session:
                     self.on_cli_session(self._session_id)
                 break
+            await self._poll_provider()
             # 2.0.18 can leave --prompt in the composer without submitting it.
             # Only press Enter once it is visibly loaded; readiness and speech
             # still require the nonce in a structured user row, never the screen.
@@ -236,6 +269,7 @@ class PartylineAdapter(WakeSettlement, Adapter):
                 await self._poll()
             except sqlite3.Error as exc:
                 logger.debug("OpenCode v2 poll skipped: %s", exc)
+            await self._poll_provider()
             await asyncio.sleep(0.5)
 
     def _release_claim(self):
