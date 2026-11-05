@@ -177,6 +177,22 @@ class LaunchArgvTest(unittest.TestCase):
             last = max(i for i, item in enumerate(argv) if item == "--bind")
             self.assertEqual(argv[last + 1:last + 3], [grant, grant])
 
+    def test_missing_grants_warn_and_are_not_bound_or_allowed(self):
+        with tempfile.TemporaryDirectory() as base:
+            missing = os.path.join(base, "missing")
+            present = os.path.join(base, "present")
+            os.makedirs(present)
+            att = _att(present, grants=[{"path": missing}, {"path": present}])
+            att["protected_roots"] = [base]
+            for plan in (lambda: fence._bwrap_argv(att, ["cli"]),
+                         lambda: fence._darwin_scope(att)[1]):
+                with self.assertLogs("partyline.fence", level="WARNING") as captured:
+                    paths = plan()
+                self.assertNotIn(missing, paths)
+                self.assertIn(present, paths)
+                self.assertIn(missing, captured.output[0])
+                self.assertIn("path does not exist", captured.output[0])
+
     def test_a_grant_through_a_symlinked_parent_is_dropped(self):
         # The 2.18 incident: /var/run -> /run resolves outside the sandbox
         # root, and binding it killed every process before its CLI started.
@@ -966,6 +982,7 @@ class WriteSetGrantApiTest(unittest.TestCase):
 
     def test_person_grants_scope_and_it_is_recorded(self):
         target = os.path.join(self.repo, "shared-assets")
+        os.makedirs(target)
         response = self.client.post(f"/api/conversations/{self.kid['id']}/write-set",
                                     json={"path": target})
         self.assertEqual(response.status_code, 200, response.text)
@@ -975,6 +992,7 @@ class WriteSetGrantApiTest(unittest.TestCase):
 
     def test_grant_is_idempotent(self):
         target = os.path.join(self.repo, "assets")
+        os.makedirs(target)
         for _ in range(2):
             response = self.client.post(f"/api/conversations/{self.kid['id']}/write-set",
                                         json={"path": target})
@@ -985,6 +1003,7 @@ class WriteSetGrantApiTest(unittest.TestCase):
         self.db.add_attachment("kid-worker", self.kid["id"], "worker", "fake",
                                ["fake"], self.directory.name)
         target = os.path.join(self.repo, "x")
+        os.makedirs(target)
         response = self.client.post(
             f"/api/conversations/{self.kid['id']}/write-set",
             json={"path": target},
@@ -999,6 +1018,7 @@ class WriteSetGrantApiTest(unittest.TestCase):
 
     def test_a_captain_above_can_file_a_write_set_request(self):
         target = os.path.join(self.repo, "captain-requested")
+        os.makedirs(target)
         response = self.client.post(
             f"/api/conversations/{self.kid['id']}/write-set",
             json={"path": target},
@@ -1012,6 +1032,8 @@ class WriteSetGrantApiTest(unittest.TestCase):
         headers = self.machine("kid-worker")
         first = os.path.join(self.repo, "first")
         second = os.path.join(self.repo, "second")
+        os.makedirs(first)
+        os.makedirs(second)
         self.assertEqual(self.client.post(
             f"/api/conversations/{self.kid['id']}/write-set",
             json={"path": first}, headers=headers).status_code, 200)

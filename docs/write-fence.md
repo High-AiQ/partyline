@@ -482,7 +482,7 @@ This follows from deriving the protected set from the database.
 | the repository's `.review/` directory | yes | disposable review checkouts may be created after spawn; only the line's recorded review checkouts get writable Git metadata |
 | git shared state (child lines) | partially | see the mirror below |
 | Partyline's database, lock, and sidecars | no | attachment processes cannot alter Partyline state directly |
-| granted paths (`conversation_write_grants`) | yes | requested, granted, recorded, and bound last |
+| granted paths (`conversation_write_grants`) | yes | must exist when requested; granted, recorded, and bound last if still present |
 | paths outside the protected set | platform-dependent | the protect list is intentionally derived from active Partyline lines |
 
 For any line working in a repository, the whole canonical `<repo>/.review/`
@@ -607,7 +607,13 @@ strict ancestor of the requesting line, must not be the requester, and the
 requested path — resolved through symlinks — must lie inside a write grant on its
 own line. Anything wider is refused with `outside your grants; a person decides`. Grants are
 rows in `conversation_write_grants` with the grantor recorded. Paths must be
-absolute and normalized; a path that does not exist at spawn time binds nothing.
+absolute and normalized, and must name an existing regular file or directory.
+A missing path is refused with **400**, naming its nearest existing ancestor
+directory: request that directory instead, or ask a person to create the path
+first. The server never creates the path or widens the request automatically.
+For new directories, request an existing directory that will contain them.
+If a recorded grant disappears before spawn, it binds nothing and logs a warning
+naming the path and the reason `path does not exist`.
 
 ## Feature flag
 

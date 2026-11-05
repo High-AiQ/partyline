@@ -23,6 +23,8 @@ WORKER = (
     "SHA before it is accepted — a report is receipt, not acceptance. In your hand-off name "
     "the SHA and the gates you actually ran, so the captain can reuse that evidence there.\n"
     "### When the fence blocks a write\n"
+    "Request an existing directory; for a new path, request its nearest existing ancestor "
+    "directory or ask a person to create it first. "
     "A read-only or EROFS error on a path inside the fence is the write set saying no — POST "
     "$PARTYLINE_API/api/conversations/$PARTYLINE_CONV_ID/write-set with "
     '{{"path":"/abs/normalized/path"}} and wait for a person to approve it in the banner; '
