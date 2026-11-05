@@ -380,6 +380,16 @@ class ReadinessDeliveryGateTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await confirm([message_id]))
         self.assertEqual(self.db.get_attachment("att")["last_seen"], 0)
 
+    async def test_raw_style_adapter_credits_cursor_on_bounded_write(self):
+        adapter = self.adapter(transcript=False)
+        adapter._ready_result = True
+        adapter.credit_on_write = True
+        adapter.att["adapter_metadata"] = {"delivery_proof": "receipt-boundary"}
+        message_id = self.say("bounded wake")
+        self.assertTrue(await self.runtime.deliver_pending("line", self.attachment(), adapter))
+        self.assertEqual(self.db.get_attachment("att")["last_seen"], message_id)
+        self.assertNotIn("att", self.runtime.uncredited)
+
     async def test_fallback_credits_only_at_structured_turn_end(self):
         adapter = self.adapter(transcript=False, completion="receipt")
         adapter.att["adapter_metadata"] = {

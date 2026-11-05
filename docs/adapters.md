@@ -153,6 +153,17 @@ output before posting. The record is consumed line by line and expires after
 `ECHO_WINDOW`; genuine output equal to the input is still posted. A flush holding only
 echo posts nothing but still credits the delivery boundary. Other adapters do not strip.
 
+A truncated echo counts as echo: when a non-reading process fills the tty input buffer the
+terminal echoes only the start of a line, so output that is a prefix of the next expected
+input line is dropped too (never a line that merely differs). The raw digest is bounded to
+`DIGEST_LIMIT` (1000 bytes, far below the 4095-byte canonical line limit): the newest
+messages are kept and a leading `(N earlier messages omitted)` line summarises the rest. Capping
+by size rather than filtering to mentions keeps the rule simple and still shows the
+conversation context. Because a bare process may never read stdin and offers no transcript,
+the bounded pty write is its only possible evidence, so `RawAdapter.credit_on_write`
+makes the runtime credit the cursor when that write completes; the quiet-period flush
+remains the declared `receipt-boundary`. Transcript adapters are unchanged.
+
 Startup dialogs are adapter-specific. Claude holds the briefing and queued wakes behind its
 known trust/login/update prompts, and Grok waits for its session transcript to appear. The other
 rows do not claim that modal or trust screens create user-input transcript records. If a process

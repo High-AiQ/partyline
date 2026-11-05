@@ -22,6 +22,11 @@ class RawAdapter(Adapter):
     kind = "raw"
     QUIET_SECONDS = 1.2
     ECHO_WINDOW = 5.0
+    # A bare process may never read stdin, so the bounded write is the only
+    # evidence there will ever be: the runtime credits the cursor on it.
+    credit_on_write = True
+    # Well under the 4095-byte canonical line limit a non-reading tty accepts.
+    DIGEST_LIMIT = 1000
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -42,7 +47,7 @@ class RawAdapter(Adapter):
         *lines, tail = (self._carry + text).split("\n")
         out = []
         for line in lines:
-            if self._echo and line.rstrip().endswith(self._echo[0]):
+            if self._is_echo(line):
                 self._echo.popleft()  # echoed input, possibly after a prompt
             else:
                 out.append(line + "\n")
@@ -52,6 +57,13 @@ class RawAdapter(Adapter):
         else:
             out.append(tail)
         return "".join(out)
+
+    def _is_echo(self, line: str) -> bool:
+        """A whole echoed line, or a truncated start of one (tty buffer full)."""
+        if not self._echo:
+            return False
+        text, expected = line.rstrip(), self._echo[0]
+        return text.endswith(expected) or (bool(text) and expected.startswith(text))
 
     async def on_output(self, data: bytes):
         text = ANSI_RE.sub("", data.decode("utf-8", errors="replace"))
@@ -65,7 +77,7 @@ class RawAdapter(Adapter):
 
     def _end_echo_window(self) -> None:
         carry, self._carry = self._carry, ""
-        if carry and not (self._echo and carry.rstrip().endswith(self._echo[0])):
+        if carry and not self._is_echo(carry):
             self._buffer.append(carry)
         self._echo.clear()
 
@@ -91,10 +103,22 @@ class RawAdapter(Adapter):
 
     def format_digest(self, messages: list[dict]) -> str:
         mention = re.compile(rf"@{re.escape(self.att['name'])}\b[,:]?\s*", re.IGNORECASE)
-        lines = "\n".join(
+        bodies = [
             mention.sub("", message["body"]).strip()
             for message in messages if message["sender_type"] != "system"
-        )
+        ]
+        kept: list[str] = []
+        size = 0
+        for body in reversed(bodies):  # newest first; the backlog is not replayed
+            body = body.encode()[: self.DIGEST_LIMIT].decode(errors="ignore")
+            if kept and size + len(body) + 1 > self.DIGEST_LIMIT:
+                break
+            kept.append(body)
+            size += len(body) + 1
+        kept.reverse()
+        if len(kept) < len(bodies):
+            kept.insert(0, f"({len(bodies) - len(kept)} earlier messages omitted)")
+        lines = "\n".join(kept)
         return "\n".join(part for part in (lines, cwd_git_digest(self.att["cwd"])) if part)
 
     async def send_keys(self, text: str):
