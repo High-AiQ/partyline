@@ -1,5 +1,14 @@
 # Lessons: the false-assumptions ledger
 
+## Approval cannot make a missing grant path writable
+
+The false assumption was that approving a future directory made it writable once
+created. The fence only binds or allows existing paths, so approval was a silent
+no-op and mkdir still failed. Refuse missing paths when filing or granting, name
+the nearest existing ancestor directory, and warn if an older grant is missing
+at spawn. Never widen to the parent or create paths automatically. Regression
+coverage lives in `tests/test_write_set_requests.py` and `tests/test_fence.py`.
+
 ## Attachment teardown does not prove background work ended
 
 The false assumption was that detaching a captain made its attachment temp

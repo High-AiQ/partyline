@@ -5,6 +5,7 @@ import os
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi import FastAPI
@@ -122,6 +123,32 @@ class WriteSetRequestTest(unittest.TestCase):
         recorder = Recorder(att, on_stop=on_stop)
         self.runtime.live[att_id] = recorder
         return recorder
+
+    def test_missing_paths_are_refused_without_recording_or_creating_them(self):
+        missing = os.path.join(self.target, "new", "skill")
+        for headers in (self.worker, self.human):
+            with self.subTest(headers="worker" if headers == self.worker else "human"):
+                response = self.file(headers, missing)
+                self.assertEqual(response.status_code, 400, response.text)
+                detail = response.json()["detail"]
+                self.assertIn(f"ancestor directory {os.path.realpath(self.target)} instead", detail)
+                self.assertIn("ask a person to create the path first", detail)
+                self.assertFalse(os.path.exists(os.path.dirname(missing)))
+                self.assertEqual(list_write_grants(self.db, "line"), [])
+                pending = self.client.get("/api/conversations/line/write-set/request",
+                                          headers=self.human).json()
+                self.assertIsNone(pending["request"])
+
+    def test_existing_file_and_symlink_remain_grantable(self):
+        target = os.path.join(self.target, "file")
+        with open(target, "w") as stream:
+            stream.write("existing")
+        link = os.path.join(self.target, "link")
+        os.symlink(target, link)
+        for path in (target, link):
+            response = self.file(self.human, path)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertIn(path, [row["path"] for row in response.json()])
 
     def test_a_worker_files_a_request_a_stranger_cannot_and_the_line_hears_it(self):
         self.db.create_conversation("stranger", "Stranger")
@@ -318,7 +345,9 @@ class WriteSetRequestTest(unittest.TestCase):
             fh.write("portable work\n")
         _git("add", "-A", cwd=repo)
         _identity("commit", "-q", "-m", "portable work", cwd=repo)
-        return repo, _git("rev-parse", "HEAD", cwd=repo).stdout.strip()
+        sha = _git("rev-parse", "HEAD", cwd=repo).stdout.strip()
+        os.makedirs(os.path.join(repo, ".review", sha))
+        return repo, sha
 
     def test_a_request_can_name_a_review_worktree_by_repository_and_sha(self):
         repo, sha = self._subtree_repo_with_commit()
@@ -393,6 +422,8 @@ class WriteSetRequestTest(unittest.TestCase):
         shared = self._seed_subtree()
         self.grant_on("line", shared)
         inner = os.path.join(shared, "inner", "file.txt")
+        os.makedirs(os.path.dirname(inner))
+        Path(inner).touch()
         self.file_on_kid(inner)
         request_id = self.db._exec(
             "SELECT id FROM conversation_write_grant_requests").fetchone()["id"]
@@ -411,6 +442,8 @@ class WriteSetRequestTest(unittest.TestCase):
                 "(conv_id,id,path,requester,requester_attachment_id,created_at) "
                 "VALUES('kid','r1',?,'digger','kid-worker',0)", (path,))
         else:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            Path(path).touch()
             self.file_on_kid(path)
         request_id = self.db._exec(
             "SELECT id FROM conversation_write_grant_requests").fetchone()["id"]
@@ -564,6 +597,7 @@ class WriteSetRequestTest(unittest.TestCase):
             "UPDATE attachments SET is_lead=1, status='running' WHERE id='kid-lead'")
         kid_lead = {"Authorization": "Bearer " + auth_store.ensure_api_token(
             self.db, "kid-lead")}
+        os.makedirs(os.path.join(shared, "inner"))
         made = self.client.post("/api/conversations/kid/write-set",
                                 json={"path": os.path.join(shared, "inner")},
                                 headers=kid_lead)
@@ -590,6 +624,7 @@ class WriteSetRequestTest(unittest.TestCase):
         os.makedirs(other, exist_ok=True)
         # the captain's home line holds the grant; the request is on mid
         self.grant_on("line", other)
+        os.makedirs(os.path.join(other, "inner"))
         self.client.post("/api/conversations/mid/write-set",
                          json={"path": os.path.join(other, "inner")},
                          headers=mid_worker)

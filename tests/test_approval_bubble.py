@@ -62,6 +62,7 @@ class ApprovalBubbleTest(unittest.TestCase):
         self.db._exec("UPDATE conversations SET parent_id='kid' WHERE id='grand'")
         self.repo = os.path.join(self.directory.name, "repo")
         os.makedirs(self.repo)
+        os.makedirs(os.path.join(self.repo, "extra"))
         subprocess.run(["git", "init", "-q", "-b", "main"], cwd=self.repo,
                        check=True, capture_output=True)
         subprocess.run(["git", "-c", "user.email=t@example.com", "-c", "user.name=t",
