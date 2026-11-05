@@ -87,7 +87,7 @@ def validate_path(path: str) -> str:
 def validate_grantable(db, path: str) -> str:
     """The path a filing may grant: inside a protected repository, and bindable.
 
-    Two refusals at filing time (2.18), because a grant the fence cannot use
+    Refuse unusable paths at filing time, because a grant the fence cannot use
     is worse than no grant: it either does nothing or kills the spawn. A path
     outside every protected root is already writable — the fence leaves the
     rest of the filesystem open — so say that rather than silently storing a
@@ -110,7 +110,15 @@ def validate_grantable(db, path: str) -> str:
         raise HTTPException(
             400, f"{path} is already writable outside the protected repositories "
                  "— no grant needed")
-    if os.path.exists(resolved) and not (
+    if not os.path.exists(resolved):
+        ancestor = os.path.dirname(resolved)
+        while not os.path.isdir(ancestor):
+            ancestor = os.path.dirname(ancestor)
+        raise HTTPException(
+            400, f"{path}: path does not exist; request the nearest existing "
+                 f"ancestor directory {ancestor} instead, or ask a person to "
+                 "create the path first")
+    if not (
             os.path.isfile(resolved) or os.path.isdir(resolved)):
         raise HTTPException(
             400, f"{path} is not a regular file or directory; only files and "

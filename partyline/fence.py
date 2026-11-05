@@ -135,7 +135,10 @@ def _grant_paths(att: dict) -> list[str]:
     kept: list[str] = []
     for grant in att.get("write_grants") or []:
         raw = str(grant.get("path", ""))
-        if not raw or not os.path.lexists(raw):
+        if not raw:
+            continue
+        if not os.path.exists(raw):
+            logger.warning("write-set grant %s inactive: path does not exist", raw)
             continue
         resolved = os.path.realpath(raw)
         if not any(_inside(resolved, root) for root in protected):

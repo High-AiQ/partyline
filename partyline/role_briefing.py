@@ -60,7 +60,8 @@ PROCEDURE = (
     "whole diff from its intended base, gates run, hunting what the report omits "
     "(skills/adversarial-review/SKILL.md). Add "
     '{{"repository":"<abs path>"}} to review a commit in any repository of this subtree, '
-    'and a write-set request may name {{"repository","sha"}} instead of the path. '
+    'and a write-set request may name {{"repository","sha"}} instead of the path, '
+    "after the review checkout exists. "
     "Run it or delegate it, but hold its findings; "
     "never accept on a bare 'done'. Work accepted below still gets fresh scrutiny here, at "
     "your own scope: a lower captain's acceptance is input, never a substitute. Commission "
