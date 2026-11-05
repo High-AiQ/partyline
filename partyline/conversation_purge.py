@@ -24,7 +24,7 @@ async def execute_purge(runtime, media, db, conv: dict) -> None:
     media.delete_conversation(conv_id)
     purge_reports(db, conv_id)
     remove_for_line(conv, db)
-    reap_line_tmp(db, conv_id)
+    await asyncio.to_thread(reap_line_tmp, db, conv_id)
     # The legacy walk touches /tmp; keep it off the event loop.
     await asyncio.to_thread(reap_legacy_temp, db)
     prune_review_worktrees(db, conv_id)

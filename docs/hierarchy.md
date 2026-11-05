@@ -1309,3 +1309,49 @@ line receives one notice naming who has not confirmed. A person can resolve a
 stale handover with `POST /api/conversations/{conv_id}/handover/resolve` and
 `{"handover_id":"…"}`; this releases the pending slot without detaching the old
 captain. A person may detach it separately if appropriate.
+
+Before either completion confirmation, the server inventories the outgoing captain's
+live descendants (excluding its CLI and configured MCP service processes), including
+available memory-scope members. MCP commands come from the attachment's config;
+jobs started by those services still count. Process inventory runs in a worker
+thread before the database transaction. Rider/briefing text uses a five-second
+cache, refreshed off-loop; inspection failures appear as unavailable state text.
+Offer and accepted state text show each job's pid, short command, cwd, and observed
+cwd/open files under the outgoing attachment's temp directory. A live job makes
+completion return 409 before recording that confirmation or creating a detach intent.
+Finish or kill each job, or explicitly call
+`complete_handover(handover_id, live_jobs="transfer")`. Each confirmation with live
+jobs needs this acknowledgement; completion inventories again, so jobs started
+between confirmations are checked too. The successor receives a system notice
+listing the jobs and retained paths. Transfer acknowledges the jobs and preserves
+their files; the normal detach signals still apply.
+
+Retained temp directories become line-owned through a private, durable manifest in
+`<instance>/.pending-reaps/<old-attachment-id>.json`. They stay at their original
+absolute paths, with a `TMPDIR/retained/<old-attachment-id>` link under the successor's
+temp directory where directory symlinks are supported (otherwise use the original
+retained path). Attached processes run as the server user, so they can read and write
+these private directories. Keeping the original directory avoids breaking inherited
+TMPDIR values and absolute redirects; it also preserves cwd-relative writes without
+a cross-filesystem copy or rename. The manifest records process identities, not only
+pids, and survives roster removal and restart. Copy deliverables to durable project
+storage before the jobs finish: these files remain temporary.
+
+Every attachment temp reap checks Linux server-user processes' cwd and open fds.
+Readable cwd/fd holders and acknowledged live jobs defer cleanup. Before detach,
+the server durably captures the attachment's process tree and scope; incomplete
+inspection of those owned processes also defers cleanup. Permission denial from
+an unrelated process does not pin the directory. Ownership snapshots in
+`<instance>/.tmp-owners/<attachment-id>.json` keep earlier activation scopes until
+cleanup and are removed with the reaped directory. Pending cleanup also waits
+while the attachment is active. Other platforms conservatively
+defer when they cannot prove the directory unused. Async cleanup routes run the
+process scan and reap in worker threads.
+Maintenance retries pending reaps every 30 seconds, even after the attachment row
+has gone. A handover without live jobs or temp holders follows the usual immediate
+detach and cleanup path.
+
+On POSIX, detach currently signals the attachment's original process group with
+TERM then KILL, and confirms that group exited. It does not stop the entire systemd
+memory scope. A child that starts a separate session/process group can survive;
+this handover change does not alter those kill semantics.

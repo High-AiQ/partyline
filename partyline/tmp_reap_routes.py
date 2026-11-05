@@ -9,6 +9,8 @@ detached and exited rows can all resume, so their directories stay.
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import FastAPI, HTTPException, Request
 
 from .attachment_tmp import reap_missing_tmp
@@ -35,5 +37,5 @@ def register_tmp_reap_routes(app: FastAPI, runtime) -> None:
                     or lead["status"] not in LIVE):
                 raise HTTPException(
                     403, "only the live root captain or a person may reap")
-        freed, reaped = reap_missing_tmp(db)
+        freed, reaped = await asyncio.to_thread(reap_missing_tmp, db)
         return {"ok": True, "freed_bytes": freed, "reaped": reaped}
