@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from .auth_guard import request_principal
 from .contracts import AttachmentRemovedEvent, MessageEvent, MessageResponse
 from .attachment_lifecycle import remove_stopped_record
-from .attachment_tmp import reap_tmp_dir
+from .attachment_tmp import attachment_tmp_dir
 from .agent_connection import remove_connection
 from .line_process_routes import detach_attachment
 from .message_queries import as_message
@@ -25,7 +25,7 @@ def _insert_notice(conn, conv_id, body, now):
                            body=body, created_at=now))
 
 
-def confirm(db, conv, att_id, ident, now=None):
+def confirm(db, conv, att_id, ident, now=None, *, jobs=(), live_jobs=None):
     """Record the caller's confirmation and atomically create a detach intent."""
     now = time.time() if now is None else now
     with db.lock:
@@ -42,6 +42,10 @@ def confirm(db, conv, att_id, ident, now=None):
                 return dict(row), None
             if row['state'] != 'accepted':
                 raise HTTPException(409, 'Only an accepted handover may be completed')
+            from .handover_jobs import jobs_text
+            if jobs and live_jobs != 'transfer':
+                raise HTTPException(409, jobs_text(jobs) +
+                    '\nFinish or kill each job, or explicitly acknowledge with live_jobs="transfer".')
             column = 'from_done' if att_id == row['from_attachment_id'] else 'to_done'
             db.conn.execute(f'UPDATE captain_handovers SET {column}=1 WHERE id=?', (ident,))
             current = db.conn.execute('SELECT * FROM captain_handovers WHERE id=?', (ident,)).fetchone()
@@ -53,9 +57,16 @@ def confirm(db, conv, att_id, ident, now=None):
                                       (current['from_attachment_id'],)).fetchone()
                 new = db.conn.execute('SELECT name FROM attachments WHERE id=?',
                                       (current['to_attachment_id'],)).fetchone()
+                transfer = ''
+                if jobs:
+                    path = attachment_tmp_dir(current['from_attachment_id'])
+                    transfer = (jobs_text(jobs) + f'\nFiles retained for this line at {path}; '
+                                'Successor TMPDIR/retained links to this path where supported. '
+                                'Detach still stops the original process group; transfer preserves files.')
                 notice = _insert_notice(db.conn, conv,
                     f"☏ Captain handover {ident} completed by {old['name'] if old else 'old captain'} "
-                    f"and {new['name'] if new else 'new captain'}; detaching the old captain.", now)
+                    f"and {new['name'] if new else 'new captain'}; detaching the old captain."
+                    + transfer, now)
                 current = db.conn.execute('SELECT * FROM captain_handovers WHERE id=?', (ident,)).fetchone()
             db.conn.commit()
             return dict(current), notice
@@ -128,11 +139,27 @@ async def finish_detach(runtime, row):
         att = runtime.db.get_attachment(att_id)
         if att and att.get('is_lead'):
             raise HTTPException(409, 'old attachment is now a captain; detach requires human resolution')
+        from .handover_temp import prepare, reap_notice
+        await asyncio.to_thread(prepare, runtime, dict(current))
         if att and (att['status'] != 'detached' or att_id in runtime.live):
             await detach_attachment(runtime, att_id)
         await remove_stopped_record(runtime.db, att_id, missing_ok=True)
-        reap_tmp_dir(att_id)
+        text = await asyncio.to_thread(reap_notice, dict(current))
+        if text is not None:
+            with runtime.db.lock, runtime.db.conn:
+                exists = runtime.db.conn.execute(
+                    'SELECT 1 FROM messages WHERE conv_id=? AND body=?',
+                    (current['conv_id'], text)).fetchone()
+                notice = None if exists else _insert_notice(
+                    runtime.db.conn, current['conv_id'], text, time.time())
+            if notice:
+                await runtime.broadcast(current['conv_id'],
+                                        MessageEvent(message=MessageResponse.model_validate(notice)))
+                if hasattr(runtime, 'route_mentions'):
+                    await runtime.route_mentions(current['conv_id'],
+                        {**notice, 'audience_attachment_id': current['to_attachment_id']}, force=True)
         remove_connection(runtime.db.path, att_id)
+        getattr(runtime, "handover_job_cache", {}).pop(att_id, None)
         getattr(runtime, "uncredited", {}).pop(att_id, None)
         getattr(runtime, "unclaimed_noticed", set()).discard(att_id)
         getattr(runtime, "reattaching", set()).discard(att_id)
@@ -153,6 +180,8 @@ async def _try_detach(runtime, row):
 
 
 async def maintenance_once(runtime):
+    from .tmp_retention import reap_pending
+    await asyncio.to_thread(reap_pending, set(runtime.live))
     for message in timeout_notices(runtime.db):
         try:
             await runtime.broadcast(message['conv_id'],
@@ -175,13 +204,26 @@ async def maintenance(runtime):
 async def complete_route(runtime, request: Request, conv: str, body):
     from .captain_handover import _locks, _principal
     actor = _principal(request, conv)
-    row = runtime.db._exec('SELECT from_attachment_id,to_attachment_id FROM captain_handovers '
+    row = runtime.db._exec('SELECT * FROM captain_handovers '
                            'WHERE id=? AND conv_id=?', (body.handover_id, conv)).fetchone()
     ids = [actor.attachment_id] + ([row['from_attachment_id'], row['to_attachment_id']] if row else [])
+    jobs = []
+    if (row and row['state'] == 'accepted'
+            and actor.attachment_id in (row['from_attachment_id'], row['to_attachment_id'])):
+        from .handover_jobs import inspect_completion
+        jobs = await asyncio.to_thread(inspect_completion, runtime, row['from_attachment_id'])
     current, notice = await _locks(runtime, ids, lambda: confirm(runtime.db, conv, actor.attachment_id,
-                                                                 body.handover_id))
+                                                                 body.handover_id, jobs=jobs,
+                                                                 live_jobs=body.live_jobs))
     if notice:
+        if jobs:
+            from .tmp_retention import remember
+            await asyncio.to_thread(remember, current['from_attachment_id'], conv,
+                                    current['to_attachment_id'], jobs)
         await runtime.broadcast(conv, MessageEvent(message=MessageResponse.model_validate(notice)))
+        if hasattr(runtime, 'route_mentions'):
+            await runtime.route_mentions(conv,
+                {**notice, 'audience_attachment_id': current['to_attachment_id']}, force=True)
     # Schedule teardown after returning control; the persisted intent survives a crash.
     if current['state'] == 'completed' and current['detach_finished_at'] is None:
         asyncio.create_task(_try_detach(runtime, current))
@@ -199,11 +241,11 @@ async def resolve_route(runtime, request: Request, conv: str, body):
 
 
 def router_for(runtime):
-    from .captain_handover import HandoverIdIn
+    from .captain_handover import CompleteIn, HandoverIdIn
     router = APIRouter()
 
     @router.post('/api/conversations/{conv}/handover/complete')
-    async def complete(request: Request, conv: str, body: HandoverIdIn):
+    async def complete(request: Request, conv: str, body: CompleteIn):
         return await complete_route(runtime, request, conv, body)
 
     @router.post('/api/conversations/{conv}/handover/resolve')

@@ -129,6 +129,8 @@ async def detach_attachment(runtime, att_id: str, *, survivors: bool = True,
             raise HTTPException(500, "no local adapter owns the running record; stop unconfirmed")
         stop_error = None
         if adapter:
+            from .tmp_owners import record
+            await asyncio.to_thread(record, att_id, adapter)
             try:
                 await asyncio.wait_for(adapter.stop(), timeout=DETACH_STOP_TIMEOUT)
             except (Exception, asyncio.CancelledError) as exc:
@@ -200,12 +202,10 @@ async def close_attachment(runtime, att_id: str) -> dict:
     """The person-called close (``DELETE /api/attachments/<id>``): detach,
     then reap the attachment's temp directory (5.12).
 
-    Every other detach — replace, restart, an approval dropping a process —
-    goes through ``detach_attachment`` and keeps the directory: the same id
-    resumes into the same path, and no CLI keeps durable state in ``TMPDIR``.
+    Other detach paths preserve the directory for resume.
     """
     response = await detach_attachment(runtime, att_id, hint=True)
-    reap_tmp_dir(att_id)
+    await asyncio.to_thread(reap_tmp_dir, att_id)
     return response
 
 
