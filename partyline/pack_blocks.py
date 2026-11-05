@@ -24,6 +24,8 @@ STAFFING_TRAITS = (
 
 ASK_FIRST = (
     "### Ask the person first\n"
+    "Request an existing directory; for a new path, request its nearest existing ancestor "
+    "directory or ask a person to create it first. "
     "Every process runs fenced; if an attach is refused with write fence unavailable, "
     "the remedy in the banner is a person-side install, not a flag. A read-only or EROFS "
     "write inside the fence is the write set saying no: POST {root}/write-set with "
