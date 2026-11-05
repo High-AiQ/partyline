@@ -1,5 +1,15 @@
 # Lessons: the false-assumptions ledger
 
+## Terminal output is not all the program's speech
+
+The false assumption was that everything the raw adapter reads from the pty is the
+process talking. The tty echoes the digest we type, so every raw reply began with our
+own message. Turning ECHO off is not enough: readline and prompt_toolkit re-enable or
+redraw it. Record each payload and strip its echoed lines (after a prompt, across
+chunks) for a bounded window only, so real output equal to the input is posted. An
+echo-only flush must still credit the delivery boundary, or a silent program never
+proves delivery. `tests/test_raw_echo.py` covers cat, bash, chunking and expiry.
+
 ## A report pointer belongs to one review round
 
 The false assumption was that a delivered task report could deduplicate all later
