@@ -141,7 +141,9 @@ class ChatRuntime(DeliveryCreditMixin):
             proof = metadata.get("delivery_proof")
             if proof == "transcript-user-record" and pasted is not False:
                 pasted = False  # a successful pty write is never transcript evidence
-            if proof in {"none-with-reason", "receipt-boundary"}:
+            if proof in {"none-with-reason", "receipt-boundary"} and not getattr(
+                adapter, "credit_on_write", False
+            ):
                 if not getattr(adapter, "_delivery_proof_warning_logged", False):
                     adapter._delivery_proof_warning_logged = True
                     logger.warning(

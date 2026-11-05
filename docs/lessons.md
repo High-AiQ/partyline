@@ -1830,3 +1830,14 @@ runs `systemctl --user set-property --runtime` on the live scope and verifies
 `memory.max`, restarting only when that is unavailable. `create_task` also accepts
 `memory_limit` so a heavy line starts with the right budget instead of needing a raise.
 Tests: `tests/test_memory_live_raise.py`.
+
+## A process that never reads stdin turns every wake into a replay
+
+Raw processes running scripts that never read stdin were typed the whole unread backlog.
+The tty echoed it until its 4095-byte input buffer filled, the write stalled, delivery
+failed before the cursor was credited, and every later wake replayed the same stale
+messages. The echo filter only dropped whole lines, so the truncated first line of the
+echo was posted under the process's own handle. Bound what you type into a pty to far
+less than its buffer, treat a prefix of recent input as echo, and credit a process with no
+transcript on the completed bounded write rather than on output it may never produce.
+Tests: `tests/test_raw_bounded_delivery.py`, `tests/test_delivery_gate.py`.
