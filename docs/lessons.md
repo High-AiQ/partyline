@@ -1,5 +1,34 @@
 # Lessons: the false-assumptions ledger
 
+## Attachment teardown does not prove background work ended
+
+The false assumption was that detaching a captain made its attachment temp
+directory disposable. A background script survived the original process group's
+termination, while handover cleanup deleted its script, log and output directory.
+Later absolute redirects failed and the successor could not recover the log
+through another session's permission-restricted /proc fd links.
+
+Completion now inventories live descendants and scope members before recording a
+confirmation, rejects unacknowledged jobs, and reports acknowledged transfers to
+the successor. Configured MCP servers are CLI infrastructure, not background jobs;
+matching their exact configured commands avoids routine false-positive transfers.
+Inventory runs off-loop before the database lock, and riders use a short cache
+that reports unavailable inspection without throwing. Temp reaping checks live
+cwd/fd holders; denied reads defer cleanup only for the attachment's saved tree,
+scope and tracked pids. An unrelated unreadable process must not pin all temp
+directories forever. A durable, line-owned pending-reap manifest
+survives attachment deletion; a link under the successor temp directory exposes the
+original path. Keeping that path preserves absolute redirects and inherited TMPDIR,
+as well as cwd-relative writes. Maintenance retries cleanup after jobs exit.
+Regression tests use real short-lived children and temporary databases in
+`tests/test_handover_live_jobs.py`.
+
+Detach still sends TERM/KILL to the original process group, rather than stopping
+the entire memory scope; a child with a separate session/group can survive.
+Changing those semantics needs a separate decision. A line-owned job runner and
+resumable side effects are the durable follow-up: acknowledgement and file
+retention cannot guarantee completion of a background publish script.
+
 ## Terminal output is not all the program's speech
 
 The false assumption was that everything the raw adapter reads from the pty is the

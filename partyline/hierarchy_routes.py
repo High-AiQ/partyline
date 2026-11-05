@@ -83,7 +83,7 @@ def hierarchy_router(runtime) -> APIRouter:
 
         state = current_role(db, principal.attachment_id)
         from .captain_handover import state_text
-        handover_state = state_text(db, principal.attachment_id)
+        handover_state = state_text(db, principal.attachment_id, runtime)
         if state.role != "lead":
             if handover_state:
                 return {"briefing": handover_state}
