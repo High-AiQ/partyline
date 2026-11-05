@@ -147,6 +147,12 @@ inferred from an idle transcript.
 | DeepSeek Harness | `$DSH_HOME/sessions/<project>/<session>/session.v3.jsonl` | Expected `user/message`, `data.role=user`, text in `data.content`; no local session found | Not verified locally | Not observed locally | Not captured | Transcript proof reader test; no local fixture | inferred, no local transcript |
 | raw | No structured transcript | None | None | No marker oracle | Not applicable | `receipt-boundary`; completed quiescence output flush credits pending pastes with a warning; weaker than a transcript user record | weaker boundary fallback |
 
+Raw echo: the pty echoes what we type, so `RawAdapter` keeps a short-lived record of each
+`send_keys` payload and drops matching lines (after any prompt prefix, across chunks) from
+output before posting. The record is consumed line by line and expires after
+`ECHO_WINDOW`; genuine output equal to the input is still posted. A flush holding only
+echo posts nothing but still credits the delivery boundary. Other adapters do not strip.
+
 Startup dialogs are adapter-specific. Claude holds the briefing and queued wakes behind its
 known trust/login/update prompts, and Grok waits for its session transcript to appear. The other
 rows do not claim that modal or trust screens create user-input transcript records. If a process
