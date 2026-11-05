@@ -28,10 +28,12 @@ from .task_workspaces import workspaces
 TOKEN = re.compile(r"(?<![0-9A-Za-z])[0-9a-f]{7,40}(?![0-9A-Za-z])")
 # Words that name another kind of hash or version when they come just before a
 # token: a model revision, a weights checksum, a file digest — and the ids
-# partyline mints for its own requests and hand-overs, which are bare hex too.
+# partyline mints for its own requests and hand-overs, which are bare hex too,
+# and a test or CI run id ("run 02a21d74") quoted in a finding.
 OTHER_KIND = re.compile(
     r"\b(?:revision|rev|HF|hugging face|weights|model|checkpoint|sha256|md5|"
-    r"checksum|digest|hash of a file|blob|etag|tag|request|handover)\b", re.IGNORECASE)
+    r"checksum|digest|hash of a file|blob|etag|tag|request|handover|run id|run)\b",
+    re.IGNORECASE)
 SENTENCE_END = re.compile(r"[.!?;\n]")
 WINDOW = 30  # characters before a token that may name its kind
 
