@@ -21,8 +21,12 @@ def tool_list(state):
          'confirm before the old captain is detached. A person may resolve a timed-out handover.')):
         properties = ({'attachment_id': ref, 'debrief': {'type': 'string', 'minLength': 1, 'maxLength': 4000}}
                       if tail == 'offer' else {'handover_id': ref})
+        required = list(properties)
+        if tail == 'complete':
+            properties['live_jobs'] = {'type': 'string', 'enum': ['transfer'],
+                'description': 'Explicitly acknowledge live jobs and retain their files for the line.'}
         result.append({'name': name, 'description': description, 'inputSchema': {
-            'type': 'object', 'properties': properties, 'required': list(properties),
+            'type': 'object', 'properties': properties, 'required': required,
             'additionalProperties': False}})
     return result
 

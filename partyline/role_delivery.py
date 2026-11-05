@@ -124,7 +124,7 @@ def bind_role_delivery(db, att: dict, runtime=None) -> None:
     initial = current_role(db, att["id"])
     att["role_briefing"] = "\n\n".join(
         part for part in (_instructions(initial, db), pack_for(db, att["id"]),
-                          state_text(db, att["id"])) if part)
+                          state_text(db, att["id"], runtime)) if part)
     original_rider = att["digest_rider"]
     task_goal_delivery = _task_goal_delivery(db, att, runtime)
     # The startup briefing already carries the pack for both fresh and resumed
@@ -199,7 +199,7 @@ def bind_role_delivery(db, att: dict, runtime=None) -> None:
         else:
             worker_reminder_sent = False
         return "\n".join(
-            part for part in (original_rider(), state_text(db, att["id"]), goal, staffing, handoff,
+            part for part in (original_rider(), state_text(db, att["id"], runtime), goal, staffing, handoff,
                               update, worker,
                               pointer, docs, resource)
             if part)

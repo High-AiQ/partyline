@@ -10,20 +10,17 @@ hex of the database path, because several instances share a host and must
 never reap each other's directories — then one per attachment id, private
 (0700).
 
-Reaping happens only at the moments an attachment ends: a person- or
-captain-called close (``DELETE /api/attachments/<id>``), record removal, a
-line archive, or a purge — the same moments Greg's finding names. A
-restart-driven detach keeps the directory: the same id always resumes into
-the same path, and no CLI keeps durable state in ``TMPDIR`` anyway. Every
+Reaping happens at close (``DELETE /api/attachments/<id>``), record removal, a
+line archive, or a purge. A restart-driven detach keeps the directory. Live
+cwd/fd holders delay cleanup and create a durable pending reap, retried by
+handover maintenance. Every
 delete is guarded — the directory on disk must be exactly
 ``<base>/partyline/<instance>/<id>``, so a symlink planted at any level is
 refused, never followed out; the path comparison runs on resolved parents
 so macOS's symlinked ``/var/folders`` temp still reaps.
 
-Sizing never trusts a whole-tree walk to finish: one budgeted walk per few
-seconds fills the mount totals, the instance total and the per-id sizes
-together, and everything else reads the cache — a huge tree costs a partial
-answer per tick, never a stalled event loop.
+Sizing uses a budgeted walk to fill mount, instance and per-id totals
+together; cached reads keep large trees from stalling the event loop.
 """
 
 from __future__ import annotations
@@ -31,7 +28,6 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import shutil
 import sys
 import tempfile
 import time
@@ -100,6 +96,8 @@ def guarded_path(att_id: str) -> Path | None:
     symlinked ``/var/folders`` still matches; a symlink planted on the
     partyline root, the instance dir or the leaf itself is refused.
     """
+    if not ID_PATTERN.fullmatch(att_id):
+        return None
     instance = base_dir()
     partyline = instance.parent
     expected = instance / att_id
@@ -113,12 +111,8 @@ def guarded_path(att_id: str) -> Path | None:
 
 def reap_tmp_dir(att_id: str) -> int | None:
     """Delete one attachment's temp dir; the bytes it freed, or None if absent."""
-    path = guarded_path(att_id)
-    if path is None:
-        return None
-    freed = dir_size(path, budget=None)
-    shutil.rmtree(path, ignore_errors=True)
-    return freed
+    from .tmp_retention import reap
+    return reap(att_id)
 
 
 def line_tmp_ids(db, conv_ids: list[str]) -> list[str]:

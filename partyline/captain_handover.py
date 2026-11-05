@@ -3,6 +3,7 @@ import asyncio
 import math
 import time
 import uuid
+from typing import Literal
 
 from .attachment_broadcast import broadcast_captain
 
@@ -30,6 +31,10 @@ class OfferIn(BaseModel):
 
 class HandoverIdIn(BaseModel):
     handover_id: str
+
+
+class CompleteIn(HandoverIdIn):
+    live_jobs: Literal["transfer"] | None = None
 
 
 def _expire(conn, conv_id, now):
@@ -158,7 +163,7 @@ def accept(db, conv, caller, ident, live, pending=None, now=None):
             raise
 
 
-def state_text(db, att_id):
+def state_text(db, att_id, runtime=None):
     if not hasattr(db, '_exec'):
         return ''
     row = db._exec("SELECT * FROM captain_handovers WHERE state IN ('offered','accepted') "
@@ -166,6 +171,8 @@ def state_text(db, att_id):
                    (att_id, att_id)).fetchone()
     if not row or (row['state'] == 'offered' and row['offered_at'] + OFFER_TTL_SECONDS <= time.time()):
         return ''
+    from .handover_job_cache import state_jobs
+    jobs = state_jobs(runtime, row['from_attachment_id']) if runtime else ''
     if row['state'] == 'accepted':
         remaining = []
         if not row['from_done']:
@@ -175,9 +182,10 @@ def state_text(db, att_id):
         role = "you are handing off" if row['from_attachment_id'] == att_id else "you are the receiver"
         return (f"Captain handover {row['id']}: accepted; {role}; "
                 f"awaiting {', '.join(remaining)}. "
-                "Both participants call complete_handover with this id.")
+                "Both participants call complete_handover with this id." + jobs)
     return (f"Captain handover {row['id']}: offered; "
-            f"{'you are handing off' if row['from_attachment_id'] == att_id else 'you are the receiver'}.")
+            f"{'you are handing off' if row['from_attachment_id'] == att_id else 'you are the receiver'}."
+            + jobs)
 
 
 def _principal(request, conv):
@@ -218,6 +226,8 @@ async def offer_route(runtime, request: Request, conv: str, body: OfferIn):
         runtime.db, conv, actor.attachment_id, body.attachment_id, body.debrief,
         _live_ids(runtime, [actor.attachment_id, body.attachment_id]),
         getattr(runtime, 'restart_request', None)))
+    from .handover_job_cache import refresh
+    await refresh(runtime, actor.attachment_id)
     await runtime.route_mentions(conv, {**msg, 'body': ''}, force=True)
     return {'handover_id': ident, 'state': 'offered'}
 
@@ -238,6 +248,8 @@ async def accept_route(runtime, request: Request, conv: str, body: HandoverIdIn)
         body.handover_id, _live_ids(runtime, ids), getattr(runtime, 'restart_request', None)))
     await runtime.broadcast(conv, MessageEvent(message=MessageResponse.model_validate(msg)))
     await broadcast_captain(runtime, conv)
+    from .handover_job_cache import refresh
+    await refresh(runtime, old['id'])
     pack = _instructions(current_role(runtime.db, target['id']), runtime.db)
     private = await post_private(runtime, conv, 'system', 'system',
                        f"☏ You accepted captainship from {old['name']}.\n\n{pack}\n\n"

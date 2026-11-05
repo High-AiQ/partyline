@@ -170,7 +170,7 @@ def register_attachment_lifecycle_routes(app, runtime, *, start, validate):
         if att_id in runtime.live:
             raise HTTPException(409, "detach the process before removing it")
         att = await remove_stopped_record(runtime.db, att_id)
-        reap_tmp_dir(att_id)
+        await asyncio.to_thread(reap_tmp_dir, att_id)
         if att.get("is_lead"):
             await broadcast_captain(runtime, att["conv_id"])
         await _removed_event(att)

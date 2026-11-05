@@ -216,21 +216,8 @@ class ChatRuntime(DeliveryCreditMixin):
 
     async def stop_attachments(self, conv_id: str) -> list[str]:
         """Kill every live process on a line. Returns the handles actually stopped."""
-        stopped: list[str] = []
-        for att in self.db.list_attachments(conv_id):
-            adapter = self.live.pop(att["id"], None)
-            if adapter is None:
-                continue
-            stopped.append(att["name"])
-            try:
-                await adapter.stop()
-            except Exception:
-                # A pty that refuses to die must not strand the archive: the row is
-                # already out of `live`, so nothing can route to it either way.
-                await self.db.set_attachment_status_async(
-                    att["id"], "exited", adapter.att.get("runtime_owner")
-                )
-        return stopped
+        from .line_process_stop import stop_attachments
+        return await stop_attachments(self, conv_id)
 
     async def websocket(
         self,
