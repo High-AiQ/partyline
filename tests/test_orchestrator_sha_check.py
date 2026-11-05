@@ -63,6 +63,14 @@ class ShaCheckTest(TaskFixture):
             with self.subTest(phrasing=phrasing):
                 self.assertEqual(suspected(phrasing), [])
 
+    def test_a_run_id_is_not_suspected_but_a_real_commit_beside_it_is(self):
+        self.assertEqual(suspected('TUI run 02a21d74, server 4708f720'), [])
+        self.assertEqual(suspected('run id 4708f720 failed'), [])
+        self.assertEqual(suspected(f'run 02a21d74 red; fix landed in commit {FAKE}'), [FAKE])
+        self.assertEqual(suspected(f'rerun 02a21d74 and running 4708f720 at {FAKE}'),
+                         ['02a21d74', '4708f720', FAKE])
+        self.assertEqual(suspected(f'the run finished. commit {FAKE} landed'), [FAKE])
+
     def test_a_qualifier_in_an_earlier_sentence_does_not_excuse_a_commit(self):
         self.assertEqual(suspected(f'the model was retrained. commit {FAKE} landed'), [FAKE])
         self.assertEqual(suspected(f'checksum noted; SHA {FAKE}'), [FAKE])
