@@ -13,7 +13,7 @@ export interface RequestOptions<Output> {
   schema: ZodType<Output>;
   method?: string;
   body?: unknown;
-  form?: FormData;
+  form?: FormData | Blob;
   fallback?: string;
   skipRefresh?: boolean;
 }
