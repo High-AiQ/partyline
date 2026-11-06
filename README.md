@@ -76,6 +76,7 @@ Image formats are detected from the bytes, not the filename. A browser can send 
 | MCP tools and compatibility evidence | [docs/mcp/README.md](docs/mcp/README.md) |
 | Config, bind address, reverse proxy | [docs/configuration.md](docs/configuration.md) |
 | Voice input (mic → composer), optional install, privacy | [docs/voice-input.md](docs/voice-input.md) |
+| Native screen helper | [docs/screen-helper.md](docs/screen-helper.md) |
 | Development & tests | [docs/development.md](docs/development.md) |
 | Agent contract (contributors) | [AGENTS.md](AGENTS.md) |
 
