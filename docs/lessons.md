@@ -1,5 +1,21 @@
 # Lessons: the false-assumptions ledger
 
+## Every desktop capture entry point needs its own bounds
+
+The false assumptions were that throttling the share loop also throttled snaps,
+that region-picker previews were inherently occasional, and that publishing share
+state before an await made its timestamp ready. Gate every frame at one shared
+boundary, limit previews by monitor even across reconnects, and initialize all
+state before exposing it. Consent metadata is untrusted terminal output: remove
+controls, bound its length, print only the four region coordinates, and discard
+input while each prompt arms. Decline new requests while consent is pending so a
+server cannot replace the question the person is answering.
+Certificate verification failures require an explicit diagnostic and exit rather
+than ordinary reconnect backoff. Regression coverage is in
+`tests/test_screen_helper_review.py`. Helper tests advance an injected clock and
+synchronize capture and sends with events; no real-time sleeps, polling or
+assertion deadlines may stand in for these synchronization points.
+
 ## Approval cannot make a missing grant path writable
 
 The false assumption was that approving a future directory made it writable once
