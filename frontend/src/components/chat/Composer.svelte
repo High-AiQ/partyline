@@ -11,6 +11,7 @@
   import MentionPopover from "./MentionPopover.svelte";
   import FileAttachmentPicker from "./FileAttachmentPicker.svelte";
   import ComposerDropZone from "./ComposerDropZone.svelte";
+  import VoiceInput from "./VoiceInput.svelte";
   import { room } from "../../state/room.svelte.js";
   import { draft } from "../../state/draft.svelte.js";
   import { layout } from "../../state/layout.svelte.js";
@@ -212,6 +213,7 @@
         />
       </svg>
     </button>
+    <VoiceInput {box} oninserted={resize} />
     <textarea
       id="input"
       class="max-h-[180px] min-h-7 flex-1 resize-none border-0 bg-transparent text-cream outline-0 [font-family:inherit]"

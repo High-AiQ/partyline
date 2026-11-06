@@ -20,6 +20,8 @@ from .idempotent_posts import (
 from .media import MediaError, MediaStore, prepared_files, validated_metadata
 from .media_digest import digest_body
 from .media_rows import VARIANTS
+from .transcribe_routes import transcribe_router
+from .asr_presets import shared_registry
 from .machine_scope import allows, deny_unless, is_human
 from .upload_scope import UPLOAD_ONLY_CAPTION_REFUSAL
 
@@ -226,4 +228,5 @@ def media_router(runtime, store: MediaStore) -> APIRouter:
             },
         )
 
+    router.include_router(transcribe_router(runtime, shared_registry))
     return router

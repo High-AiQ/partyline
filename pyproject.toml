@@ -15,6 +15,15 @@ dependencies = [
     "pywin32>=311 ; sys_platform == 'win32'",
 ]
 
+[project.optional-dependencies]
+# Server-side speech to text for the composer microphone; see docs/voice-input.md.
+voice = ["faster-whisper>=1.1", "av<19"] # av 19 dropped an argument faster-whisper passes
+# CUDA 12 runtime libraries ctranslate2 loads for GPU decoding; skip on CPU-only hosts.
+voice-gpu = [
+    "nvidia-cublas-cu12>=12,<13 ; sys_platform == 'linux'",
+    "nvidia-cudnn-cu12>=9,<10 ; sys_platform == 'linux'",
+]
+
 [project.scripts]
 partyline = "partyline.launch:main"
 

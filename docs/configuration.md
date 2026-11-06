@@ -120,10 +120,11 @@ polling interval, and warning cooldown. The threshold and interval minimum is
 | `PARTYLINE_SYSTEMD_UNIT` | auto-detected | Optional user service unit override for `partyline doctor` when discovery is ambiguous or the service uses a custom name |
 | `PARTYLINE_MEDIA_DIR` | `<PARTYLINE_DB stem>/media` | uploaded files, one subdirectory per line |
 | `PARTYLINE_ADAPTERS_DIR` | `~/.partyline/adapters` | where imported adapter repos are checked out |
+| `PARTYLINE_TRANSCRIBE_*` | see doc | optional voice input (model, device, model dir, idle unload, size cap); see [Voice input](voice-input.md) |
 | `PARTYLINE_FEATURE_<NAME>` | registry default | switch one feature flag on or off (`1/true/on` or `0/false/off`); see [Feature flags](#feature-flags) |
 | `PARTYLINE_FORWARDED_ALLOW_IPS` | `127.0.0.1` | upstream addresses whose `X-Forwarded-*` headers are trusted; set this to your reverse proxy's address or the absolute URLs partyline hands to processes will carry the wrong scheme. See [Behind a reverse proxy](#behind-a-reverse-proxy) |
 
-The optional server config file uses `[server] host` and `port`, plus optional `[instance] name`; see
+The optional server config file uses `[server] host` and `port`, plus optional `[instance] name` and `[[asr]]` speech recognizers (see [Voice input](voice-input.md)); see
 [Serving on a specific IP or port](#serving-on-a-specific-ip-or-port) for its search paths and
 precedence.
 
