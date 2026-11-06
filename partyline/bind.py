@@ -11,7 +11,7 @@ from pathlib import Path
 
 import uvicorn
 
-from . import features
+from . import asr_presets, features
 from .log_filter import AccessQueryFilter
 
 
@@ -117,6 +117,7 @@ def apply_server_config(state, args, env, config_dict) -> tuple[str, int]:
     state.bind = BindConfig(host, port)
     state.instance_name = resolve_instance_name(args, env, config_dict)
     features.install(features.resolve(env, config_dict))
+    asr_presets.install(config_dict, env)
     return host, port
 
 
