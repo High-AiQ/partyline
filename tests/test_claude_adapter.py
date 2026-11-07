@@ -2,12 +2,14 @@
 
 import asyncio
 import contextlib
+import gc
 import json
 import os
 import shutil
 import tempfile
 import tomllib
 import unittest
+import weakref
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -1081,7 +1083,8 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
                              "message": {"content": "z" * 4_000}})
         buried = json.dumps({"type": "user", "cwd": "/work",
                              "message": {"content": adapter._claim_token}})
-        path.write_text("\n".join([filler] * 200 + [buried]) + "\n", encoding="utf-8")
+        path.write_text("\n".join([filler] * 200 + [buried] + [filler] * 200) + "\n",
+                        encoding="utf-8")
 
         with self.searching():
             self.assertIsNone(adapter._find_transcript())
@@ -1117,10 +1120,88 @@ class ClaudeLostPinTest(unittest.IsolatedAsyncioTestCase):
         adapter.resume = True
         pinned = self.write_session("attachment-1")
         os.utime(pinned, (adapter.spawned_at + 5, adapter.spawned_at + 5))
-        PartylineAdapter._CLAIMED.add(pinned)
+        rival = self.make_adapter()
+        PartylineAdapter._CLAIMED[pinned] = rival
 
         with self.searching():
             self.assertIsNone(adapter._find_transcript())
+
+    def write_long_resume(self, name: str, token: str, *, cwd: str = "/work") -> str:
+        """A resumed session: an old briefing, huge request blobs, then the new wake."""
+        blob = {"type": "api-request-blob", "blob": "x" * 150_000}
+        records = [{"type": "user", "cwd": cwd, "message": {"content": "old wake"}}]
+        records += [blob] * 5  # ~750 KB, past SCAN_BYTES
+        records.append({"type": "user", "cwd": cwd, "message": {"content": f"wake\n\n{token}"}})
+        records.append(blob)
+        path = self.root / f"{name}.jsonl"
+        path.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
+        return str(path)
+
+    def test_a_resumed_token_written_past_the_head_window_still_claims(self):
+        """yue2: the resume's token landed at byte ~723K of a 940K transcript."""
+        adapter = self.make_adapter()
+        adapter.resume = True
+        pinned = self.write_long_resume("attachment-1", adapter._claim_token)
+        rival = self.make_adapter()  # a live rival, held by the map weakly
+        PartylineAdapter._CLAIMED[pinned] = rival
+
+        with self.searching():
+            self.assertEqual(adapter._find_transcript(), pinned)
+        self.assertTrue(adapter._claim_proven)
+        self.assertTrue(adapter.recorded_claim(pinned))
+        self.assertFalse(adapter.foreign_claim(pinned))
+
+    def test_a_long_session_with_another_directory_token_is_not_adopted(self):
+        adapter = self.make_adapter()
+        adapter.resume = True
+        self.write_long_resume("elsewhere", adapter._claim_token, cwd="/other")
+
+        with self.searching("missing.jsonl"):
+            self.assertIsNone(adapter._find_transcript())
+
+    def test_a_dead_claimants_hold_does_not_block_the_resume_fallback(self):
+        """The first activation quit on its own, so stop() never released the pin."""
+        previous = self.make_adapter()
+        adapter = self.make_adapter()
+        adapter.resume = True
+        pinned = self.write_session("attachment-1")
+        os.utime(pinned, (adapter.spawned_at + 5, adapter.spawned_at + 5))
+        PartylineAdapter._CLAIMED[pinned] = previous
+        previous.alive = lambda: False
+
+        with self.searching():
+            self.assertEqual(adapter._find_transcript(), pinned)
+        self.assertIs(PartylineAdapter._CLAIMED[pinned], adapter)
+
+    def test_a_claim_record_crossing_the_head_boundary_is_found_in_the_tail(self):
+        """The head rejects the record that crosses 512 KB; the tail must still see it."""
+        adapter = self.make_adapter()
+        adapter.resume = True
+        blob = json.dumps({"type": "api-request-blob", "blob": "x" * 99_000})
+        wake = json.dumps({"type": "user", "cwd": "/work", "message": {
+            "content": f"{'y' * 40_000}\n\n{adapter._claim_token}"}})
+        lines = [blob] * 5 + [wake] + [blob] * 2
+        head_end = 5 * (len(blob) + 1)
+        self.assertTrue(head_end < 524_288 < head_end + len(wake))  # the wake straddles
+        path = self.root / "attachment-1.jsonl"
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        with self.searching("missing.jsonl"):
+            self.assertEqual(adapter._find_transcript(), str(path))
+
+    async def test_exited_adapters_are_not_retained_by_the_claim_map(self):
+        """A CLI that quits on its own never reaches stop(); the map must not pin it."""
+        adapter = self.make_adapter()
+        pinned = self.write_session("attachment-1", pasted=adapter.briefing())
+        with self.searching():
+            self.assertEqual(adapter._find_transcript(), pinned)
+        probe = weakref.ref(adapter)
+        adapter.alive = lambda: False
+        del adapter
+        gc.collect()
+
+        self.assertIsNone(probe())
+        self.assertNotIn(pinned, PartylineAdapter._CLAIMED)
 
     async def test_stop_releases_the_claim(self):
         """A detached attachment must not hold a session another can use."""
