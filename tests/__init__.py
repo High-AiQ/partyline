@@ -12,8 +12,10 @@ test package's job, done once, per process, in a directory that dies with it.
 import atexit
 import os
 import shutil
+import sqlite3
 import tempfile
 
+from partyline import db as _db
 from partyline import docker_bridge_client as _docker_bridge_client
 from partyline import docker_relay as _docker_relay
 from partyline import resource_budget as _resource_budget
@@ -59,5 +61,23 @@ def _pinned_host_resources():
 _resource_budget.host_resources = _pinned_host_resources
 # Usage sampling reads /proc; ordinary tests get a flat None instead.
 _resource_usage.server_usage_bytes = lambda *args, **kwargs: None
+
+
+class _UnsyncedSqlite:
+    """``sqlite3`` for ``partyline.db`` with fsync off: a test never survives a power cut, and a
+    synced commit costs milliseconds on CI disks, so one retirement's hundreds of audit and state
+    writes alone could take a second."""
+
+    def __getattr__(self, name):
+        return getattr(sqlite3, name)
+
+    @staticmethod
+    def connect(*args, **kwargs):
+        connection = sqlite3.connect(*args, **kwargs)
+        connection.execute("PRAGMA synchronous=OFF")
+        return connection
+
+
+_db.sqlite3 = _UnsyncedSqlite()
 # The media directory follows the database path, so it lands in the sandbox too.
 atexit.register(shutil.rmtree, _SANDBOX, True)
