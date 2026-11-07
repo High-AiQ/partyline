@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import os
 import signal
 import stat
@@ -133,10 +134,14 @@ class BridgeProcessTest(unittest.IsolatedAsyncioTestCase):
 
             # Do not let the daemon's close race the relay and reset the reply.
             daemon_writers = []
+            requested, collected = asyncio.Event(), asyncio.Event()
 
             async def daemon(reader, writer):
                 daemon_writers.append(writer)
-                writer.write(b"hi:" + await reader.read())
+                request = await reader.read()
+                requested.set()
+                await collected.wait()
+                writer.write(b"hi:" + request)
                 await writer.drain()
 
             server = await asyncio.start_unix_server(daemon, path=host)
@@ -162,6 +167,12 @@ class BridgeProcessTest(unittest.IsolatedAsyncioTestCase):
                 reader, writer = await REAL_OPEN(path)
                 writer.write(b"x")
                 writer.write_eof()
+                # The request is half-closed and fully forwarded; the reply is still
+                # pending. A cyclic GC pass here (CI's busy worker hits one at random)
+                # used to collect the unanchored relay and close both of its sockets.
+                await asyncio.wait_for(requested.wait(), 5)
+                gc.collect()
+                collected.set()
                 self.assertEqual(await asyncio.wait_for(reader.readexactly(4), 5), b"hi:x")
                 writer.close()
                 for daemon_writer in daemon_writers:

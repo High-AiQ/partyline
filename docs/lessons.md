@@ -1,5 +1,18 @@
 # Lessons: the false-assumptions ledger
 
+## A pending stream callback does not survive a GC pass after the client half-closes
+
+The false assumption was that a `start_unix_server` handler waiting on its reply stays
+alive while it is pending. After the client's `write_eof()` the accepted transport leaves
+the selector, and the upstream `StreamReaderProtocol` holds its reader only by weakref, so
+the handler task, readers and writers form an unrooted cycle. One cyclic GC pass ran
+`StreamWriter.__del__`, closed both sockets, and the client read EOF with 0 bytes (CI run
+42399105584: `Task was destroyed but it is pending` for `handle()`, then the daemon's
+`ConnectionResetError('Connection lost')`). #440 kept the daemon's writers, the wrong side
+of the connection. `docker_bridge.serve()` now roots each client writer in a set until its
+handler ends, as `docker_relay` does with `relay.clients`. Test: the daemon parks its reply
+until `gc.collect()` has run, in `tests/test_docker_bridge.py`.
+
 ## Media named in a task can live on an ancestor line
 
 The false assumption was that a process only needs media from lines whose message
