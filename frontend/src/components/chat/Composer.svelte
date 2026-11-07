@@ -32,6 +32,10 @@
   let openPicker = $state(0);
   let fileIntake = $state<FileIntake>({ generation: 0, files: [] });
   let uploading = $state(false);
+  let includeScreen = $state(true);
+  $effect(() => {
+    if (room.screenShare?.share_id) includeScreen = true;
+  });
   function queueFiles(files: File[]): void {
     fileIntake = { generation: fileIntake.generation + 1, files };
   }
@@ -92,7 +96,7 @@
   async function send(): Promise<void> {
     if (uploading) return;
     if (!hasLiveProcess && draft.text.trim()) return;
-    if (!pendingFiles.files.length) {
+    if (!pendingFiles.files.length && !(includeScreen && room.screenShare?.status === "active")) {
       if (!hasLiveProcess) return;
       const conversation = room.conversation;
       const text = draft.text;
@@ -112,6 +116,7 @@
         body: draft.text.trim(),
         title: pendingFiles.title.trim() || null,
         description: pendingFiles.description.trim() || null,
+        includeScreen: includeScreen && room.screenShare?.status === "active",
       });
       pendingFiles = { files: [], title: "", description: "" };
       fileIntake = { generation: 0, files: [] };
@@ -239,6 +244,9 @@
       onclick={() => void send()}>{uploading ? "uploading…" : "send"}</button
     >
   </div>
+  {#if room.screenShare?.status === "active"}
+    <label><input type="checkbox" bind:checked={includeScreen} /> Attach screen frames</label>
+  {/if}
   <div class="hint mt-1.5 text-[10px] text-cream-faint" class:blocked={!hasLiveProcess} aria-live="polite">
     {#if !hasLiveProcess}
       attach a process to message this line

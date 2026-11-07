@@ -37,7 +37,7 @@ _EXEMPT_PREFIXES = ("/api/auth/", "/api/hooks/", "/assets/")
 # report_token) plus a loopback check, exactly like the hooks routes.
 # Operator approval has a one-use capability issued through local DB write access.
 _EXEMPT_PATHS = {"/", "/api/version", "/api/restart-plan/failure",
-                 "/api/restart-request/operator-approve"}
+                 "/api/restart-request/operator-approve", "/api/screen/pair/claim"}
 
 
 @dataclass(frozen=True)

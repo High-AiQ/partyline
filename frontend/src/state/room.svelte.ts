@@ -31,6 +31,7 @@ import { MessageHistory } from "./message-history.svelte";
 import { presenceSync } from "./presence-coordinator.svelte.js";
 import { draft } from "./draft.svelte.js";
 import { LinePins } from "./line-pins.svelte.js";
+import type { ScreenShare } from "../lib/screen-api";
 
 export interface RoomNotice {
   message: string;
@@ -58,6 +59,7 @@ class Room {
   captains = $state<Record<string, string | null>>({});
   captainRevision = 0;
   reattachOffer = $state<ReattachOfferEvent | null>(null);
+  screenShare = $state<ScreenShare | null>(null);
   history = new MessageHistory(() => session.handle);
   pins = new LinePins();
   attention = new SvelteSet<string>();
@@ -125,6 +127,7 @@ class Room {
     this.attention.clear();
     this.#removed.clear();
     this.reattachOffer = null;
+    this.screenShare = null;
 
     wire.connect(
       conversation.id,

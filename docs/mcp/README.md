@@ -75,6 +75,17 @@ per file and has no smaller request-body cap on this path; the browser adds
 no upload size limit. Reverse proxies must permit the multipart request plus
 its metadata overhead.
 
+## Screen frame tool
+
+When a person is actively sharing a screen on your line, use `screen_frame` to
+inspect the current display while answering a question or following a walkthrough.
+It asks the paired helper for a fresh still frame (up to three seconds) and stores
+it as an ordinary line media item for an audit trail. If the helper does not answer
+in time, it uses the latest buffered frame. `mark_pointer=true` overlays the
+reported pointer position. The result includes a file id; fetch it with `get_media`
+using the `slim` or `original` variant. With no active share, the tool returns a clear error.
+Frames not attached to a message or requested by this tool remain in server memory.
+
 ## Evidence index
 
 | File | What it is | What it proves |

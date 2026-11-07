@@ -1,5 +1,4 @@
 """partyline server: REST, WebSocket, and adapters as members of the line."""
-
 import asyncio
 import logging
 import os
@@ -10,7 +9,6 @@ import sys
 from collections.abc import Sequence
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
@@ -109,6 +107,7 @@ from .heartbeat_routes import heartbeat_router
 from .hierarchy_routes import hierarchy_router
 from .write_set_routes import write_set_router
 from .media_routes import media_router
+from .screen_routes import register_screen_routes
 from .preset_routes import presets_router
 from .process_signal import signal_router
 from .staffing_routes import staffing_router
@@ -233,6 +232,7 @@ register_restart_request_routes(
     lambda: request_exit(runtime.db.path))
 app.include_router(auth_router(runtime.db, on_handle_change=user_sockets.close_all))
 app.include_router(media_router(runtime, media))
+register_screen_routes(app, runtime, media)
 app.include_router(message_router(runtime, media))
 app.include_router(reaction_router(runtime))
 app.include_router(pin_router(runtime))

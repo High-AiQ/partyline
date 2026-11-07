@@ -62,9 +62,9 @@ class HandleRefTests(unittest.TestCase):
 
     def test_detach_by_unknown_handle_or_foreign_id_is_refused_without_delete(self):
         client = Client(ROWS)
-        with self.assertRaisesRegex(ApiError, "not on the authorized target line"):
+        with self.assertRaisesRegex(ApiError, "no attachment or handle"):
             self.detach(client, "impl-zzzzzz")
-        with self.assertRaisesRegex(ApiError, "not on the authorized target line"):
+        with self.assertRaisesRegex(ApiError, "no attachment or handle"):
             self.detach(client, "att-9999")
         self.assertFalse([call for call in client.calls if call[0] == "DELETE"])
 

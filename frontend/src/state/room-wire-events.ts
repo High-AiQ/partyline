@@ -7,11 +7,13 @@ import { presenceSync } from "./presence-coordinator.svelte.js";
 import { applyPendingWireEvent, ignoreBackgroundFailure } from "./room-pending-sync.js";
 import type { Pin } from "../lib/pin-contracts";
 import { resources } from "./resources.svelte.js";
+import { screenStatus } from "./screen-status.svelte.js";
 
 export interface RoomWireSink extends RefusalTarget {
   conversation: Conversation | null;
   conversations: Conversation[];
   reattachOffer: { token: string } | null;
+  screenShare: import("../lib/screen-api").ScreenShare | null;
   attachments: Attachment[];
   attention: { add(id: string): void; delete(id: string): void };
   archiveOpen: boolean;
@@ -31,6 +33,12 @@ export function onRoomWireEvent(room: RoomWireSink, event: WireEvent, context: W
   switch (event.type) {
     case "message":
       room.absorb(event.message);
+      break;
+    case "screen_share":
+      room.screenShare = event.share;
+      break;
+    case "screen_devices_changed":
+      screenStatus.revision++;
       break;
     case "reaction":
       room.history.updateReactions(event.message_id, event.reactions);

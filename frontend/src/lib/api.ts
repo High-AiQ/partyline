@@ -76,12 +76,7 @@ export interface PresetDraft {
   implements?: boolean;
 }
 
-export interface FileUpload {
-  files: readonly File[];
-  body: string;
-  title: string | null;
-  description: string | null;
-}
+import type { FileUpload } from "./screen-upload";
 
 export interface PartylineApi {
   register(payload: AuthRegisterRequest): Promise<AuthTokenResponse>;
@@ -228,6 +223,7 @@ export const api: PartylineApi = {
     const form = new FormData();
     for (const file of upload.files) form.append("file", file);
     if (upload.body) form.append("body", upload.body);
+    if (upload.includeScreen) form.append("include_screen", "true");
     if (upload.title) form.append("title", upload.title);
     if (upload.description) form.append("description", upload.description);
     return request(`/api/conversations/${conversationId}/files`, {
