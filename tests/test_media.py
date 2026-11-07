@@ -24,10 +24,12 @@ from PIL import Image
 from partyline import auth_store, auth_tokens, media_files as files, media_images as images
 from partyline.auth_guard import Principal, install_auth_guard
 from partyline.db import Db
-from partyline.media import MediaError, MediaStore, media_root
+from partyline.media import MediaError, MediaStore, media_root, prepared_files
 from partyline.presence import Presence
 from partyline.runtime import ChatRuntime
 from partyline.media_routes import media_router
+from partyline.machine_scope import allows
+from partyline.auth_guard import resolve_principal
 
 
 def png(width=8, height=8, color=(200, 30, 30)) -> bytes:
@@ -426,6 +428,37 @@ class ImageApiTest(unittest.TestCase):
         self.post()
         self.assertTrue((self.root / "line").is_dir())
         self.assertFalse((self.root / "other").exists())
+
+    def test_machine_media_reads_follow_ancestors_only(self):
+        for line, parent in (("parent", "line"), ("task", "parent"),
+                             ("sibling", "parent"), ("child", "task"), ("other", None)):
+            self.db.create_conversation(line, line)
+            self.db._exec("UPDATE conversations SET parent_id=? WHERE id=?", (parent, line))
+        self.db.add_attachment("worker", "task", "worker", "fake", ["fake"], "/tmp", "owner")
+        self.db.set_attachment_status("worker", "running", "owner")
+        headers = self.machine_headers("worker")
+        principal = resolve_principal(self.db, headers["Authorization"].split()[1])
+        self.assertFalse(allows(self.db, principal, "line", "read"))
+        ids = {}
+        for line in ("line", "parent", "task", "sibling", "child", "other"):
+            message = self.db.add_message(line, "greg", "human", "image")
+            prepared = prepared_files([(tiff(), "image.tiff", "image/tiff")])
+            ids[line] = self.store.store(line, message["id"], prepared, None, None)[0].id
+        for line, expected in (("line", 200), ("parent", 200), ("task", 200),
+                               ("sibling", 403), ("child", 403), ("other", 403)):
+            with self.subTest(line=line):
+                self.assertEqual(self.client.get(f"/api/conversations/{line}/files",
+                                                 headers=headers).status_code, expected)
+                for variant in ("thumb", "slim", "original", "readable"):
+                    response = self.client.get(f"/api/media/{ids[line]}/{variant}", headers=headers)
+                    self.assertEqual(response.status_code, expected, (line, variant))
+        self.db._exec("UPDATE attachments SET is_lead=1 WHERE id=?", ("worker",))
+        self.assertEqual(self.client.get(f"/api/media/{ids['child']}/slim", headers=headers).status_code, 200)
+        self.db.set_attachment_status("worker", "exited", "owner")
+        self.assertEqual(self.client.get(f"/api/media/{ids['line']}/slim", headers=headers).status_code, 401)
+        self.db.set_attachment_status("worker", "running", "owner")
+        self.db._exec("UPDATE attachments SET api_token=NULL WHERE id=?", ("worker",))
+        self.assertEqual(self.client.get(f"/api/media/{ids['line']}/slim", headers=headers).status_code, 401)
 
     def test_stored_paths_are_relative_so_the_root_can_move(self):
         image = self.post().json()["files"][0]
