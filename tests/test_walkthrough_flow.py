@@ -115,6 +115,11 @@ class WalkthroughFlowTest(unittest.TestCase):
             self.assertIn("pointer at -50,50", message["body"])
             self.assertIn("/api/media/", message["body"])
             self.assertGreaterEqual(len(message["files"]), 2)
+            self.assertEqual(message["files"][0]["title"], "Walkthrough contact sheet")
+            self.assertTrue(all(item["title"] == "Walkthrough frame" for item in message["files"][1:]))
+            self.assertLess(message["body"].index("Walkthrough contact sheet"),
+                            message["body"].index("Walkthrough frame"))
+            self.assertIn("Contact sheet first", message["body"])
             self.assertNotIn(share, self.hub.walkthroughs.items)
             self.assertEqual(self.client.post(path + "/finish", json=payload).json()["message"]["id"],
                              message["id"])
@@ -146,6 +151,20 @@ class WalkthroughFlowTest(unittest.TestCase):
             self.assertTrue(message["files"])
             self.assertIn("→ frame", message["body"])
             self.assertNotIn('""', message["body"])
+
+    def test_store_rejects_mismatched_titles(self):
+        with self.assertRaises(ValueError):
+            self.store.store("line", 1, [], None, None, titles=["extra"])
+
+    def test_empty_take_has_no_sheet(self):
+        with self.socket() as ws:
+            path, share = self.start(ws)
+            self.hub.walkthroughs.items[share].buffer.clear()
+            result = self.client.post(path + "/finish", json={})
+            self.assertEqual(result.status_code, 200, result.text)
+            message = result.json()["message"]
+            self.assertEqual(message["files"], [])
+            self.assertNotIn("Contact sheet", message["body"])
 
     def test_cancel_discards_and_cannot_finish(self):
         with self.socket() as ws:
