@@ -9,6 +9,7 @@
   import MicLevel from "./MicLevel.svelte";
   import { room } from "../../state/room.svelte.js";
   import { draft } from "../../state/draft.svelte.js";
+  import { layout } from "../../state/layout.svelte.js";
   import { screenStatus } from "../../state/screen-status.svelte.js";
   import { voicePresets } from "../../state/voice-presets.svelte.js";
   import { walkthrough } from "../../state/walkthrough.svelte.js";
@@ -272,7 +273,7 @@
 </script>
 
 <svelte:window onkeydown={keydown} />
-{#if online || stage !== "idle"}
+{#if (online && !layout.narrow) || stage !== "idle"}
   <div class="flex flex-wrap items-center gap-2 text-sm" role="group" aria-label="Walkthrough">
     {#if stage === "idle"}
       <button

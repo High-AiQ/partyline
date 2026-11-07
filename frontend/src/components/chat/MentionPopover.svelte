@@ -3,6 +3,7 @@
    *  owns the textarea; this only draws and reports clicks. */
   import { hue } from "../../lib/markdown";
   import type { MentionCandidate } from "../../lib/mentions";
+  import ControlBadge from "./ControlBadge.svelte";
 
   interface Props {
     candidates: MentionCandidate[];
@@ -89,6 +90,7 @@
       >
         @{candidate.name}
       </span>
+      {#if !candidate.all}<ControlBadge handle={candidate.name} />{/if}
       <span
         class="text-[9.5px] tracking-[0.06em] text-cream-faint"
         style:color={candidate.all ? "var(--color-copper)" : null}
