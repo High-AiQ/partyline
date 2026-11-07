@@ -31,6 +31,7 @@ from .role_delivery import bind_role_delivery
 from . import fence_workspaces
 from .review_worktrees import list_review_worktrees
 from .reattach import ResumedAttachment
+from .resume_folder import ensure_resume_folder
 from .restart_capabilities import adapter_can_restart, adapter_can_resume, resume_needs_session
 from .transcript_delivery import TranscriptDeliveryRecord
 from .write_set_routes import load_write_grants
@@ -210,6 +211,7 @@ async def _resume_adapter_locked(
 
     if conv["archived_at"]:
         raise HTTPException(409, "restore the line before resuming its processes")
+    await asyncio.to_thread(ensure_resume_folder, runtime.db, att)
     att["conv_name"] = conv["name"]
     att["resume"] = adapter_can_resume(capabilities)
     if not att["resume"]:
@@ -241,7 +243,6 @@ async def _resume_adapter_locked(
     )
     att["startup_attention"] = lambda prompt: surface_attention(runtime, att, prompt)
     att["on_process_exit"] = exit_callback(runtime, att)
-
     adapter = make_adapter(
         att["adapter"],
         att,

@@ -93,6 +93,18 @@ host usable, while the latter makes an OOM kill only the affected attachment.
   are serialized per attachment so the same process is never started twice. Whoever was mid-turn
   when the restart landed is rung once their process resumes.
 
+   Nobody has to restart the queued processes by hand. The start banner on each covered line
+   says how many previously attached processes are queued, names them (the requester's line
+   hears about every one, any other line about its own), tells the reader not to restart or
+   reattach them, and promises a closing `sequential reattachment finished` notice. While the
+   plan runs, the staffing digest and `GET /api/conversations/{id}/staffing` (`reattaching`)
+   list the processes still queued, so "in use" does not read as "gone", and the task 409s
+   (`message_task`, `share_ref`, `restart_implementer`, `restart_reviewer`) say a queued worker
+   is awaiting automatic reattachment instead of pointing at `restart_*` (`partyline/reattach_queue.py`).
+   A reviewer whose managed review checkout (`<repo>/.review/task-<line id>`) was removed gets it
+   recreated at its last round's SHAs on resume; any other missing working folder fails with a
+   message naming it (`partyline/resume_folder.py`).
+
 The plan machinery — `restart_plan` table and columns, `reattach.py`, the claim/renew/release/complete
 lease lifecycle — is unchanged from the earlier operator-CLI-driven procedure; only that naming
 retired. Do not rename the table or its columns: live databases carry them.

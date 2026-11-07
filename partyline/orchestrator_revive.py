@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from . import reports
 from .orchestrator_notices import handed_to, tell
 from .orchestrator_staff import ensure_reviewer, restart
+from .reattach_queue import is_queued, queued_detail
 from .orchestrator_store import attachment_task, require_root, task
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,8 @@ async def restart_reviewer(runtime, actor, conv_id):
             raise HTTPException(409, 'only a task in review with a reviewer preset has a reviewer to restart')
         if reviewer_is_live(db, row):
             raise HTTPException(409, 'the reviewer is already running')
+        if is_queued(runtime, row['reviewer_id']):
+            raise HTTPException(409, queued_detail('reviewer'))
         db._exec('UPDATE task_reviews SET reviewer_restarts=0 WHERE conv_id=?', (conv_id,))
         await revive_reviewer(runtime, row)
     return task(db, conv_id)
@@ -97,6 +100,8 @@ async def restart_implementer(runtime, actor, conv_id):
         att = db.get_attachment(row['implementer_id']) if row['implementer_id'] else None
         if att is None:
             raise HTTPException(409, 'this task has no implementer attachment to restart')
+        if is_queued(runtime, att['id']):
+            raise HTTPException(409, queued_detail('implementer'))
         if att['status'] in LIVE_STATUSES:
             live = runtime.live.get(att['id'])
             progress = getattr(live, 'last_transcript_progress', None)
