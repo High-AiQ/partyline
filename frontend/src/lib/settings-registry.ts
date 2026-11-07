@@ -29,7 +29,7 @@ const GENERAL: SectionInfo = {
 export const SECTIONS: readonly SectionInfo[] = [
   GENERAL,
   { id: "appearance", label: "Appearance", blurb: "How Partyline looks in this browser" },
-  { id: "voice", label: "Voice", blurb: "Speech recognizers for the composer microphone" },
+  { id: "voice", label: "Voice", blurb: "Microphone and speech recognizers for the composer" },
   { id: "processes", label: "Processes", blurb: "Attach presets, adapters and task history" },
   { id: "resources", label: "Resources", blurb: "How many processes run and how much memory they get" },
   { id: "storage", label: "Storage", blurb: "What Partyline keeps on disk" },
@@ -59,6 +59,13 @@ export const SETTINGS: readonly SettingInfo[] = [
     label: "Theme",
     description: "Light, dark, or follow the system setting",
     keywords: "dark mode light mode colour color",
+  },
+  {
+    id: "setting-voice-microphone",
+    section: "voice",
+    label: "Microphone",
+    description: "Choose which microphone to record from, and test its level",
+    keywords: "mic input device audio headset level meter test muted allow permission",
   },
   {
     id: "setting-voice-mic",

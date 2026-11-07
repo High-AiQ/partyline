@@ -4,7 +4,9 @@
   import { walkthroughApi } from "../../lib/walkthrough-api";
   import { voiceApi, type Transcript } from "../../lib/voice-api";
   import { VoiceRecorder, browserSources, type RecorderSources } from "../../lib/voice-recorder";
-  import { formatElapsed } from "../../lib/voice";
+  import { stageText, type WalkthroughStage } from "../../lib/walkthrough-status";
+  import { MicReadout } from "../../state/mic-readout.svelte.js";
+  import MicLevel from "./MicLevel.svelte";
   import { room } from "../../state/room.svelte.js";
   import { draft } from "../../state/draft.svelte.js";
   import { screenStatus } from "../../state/screen-status.svelte.js";
@@ -13,7 +15,8 @@
 
   let { sources = browserSources() }: { sources?: RecorderSources } = $props();
   let devices = $state<ScreenDevice[]>([]);
-  let stage = $state<"idle" | "waiting" | "starting" | "recording" | "finishing">("idle");
+  let stage = $state<WalkthroughStage>("idle");
+  const mic = new MicReadout();
   let mark = $state(false);
   let error = $state("");
   let elapsed = $state(0);
@@ -27,7 +30,9 @@
   const recorder = new VoiceRecorder(
     untrack(() => sources),
     {
+      ...mic.hooks,
       onphase: (phase) => {
+        if (phase === "starting") mic.reset();
         if (phase === "recording") void arm();
       },
       onelapsed: (ms) => {
@@ -276,15 +281,12 @@
         onclick={() => void begin()}>Show me</button
       >
     {:else}
-      <span role="status"
-        >{stage === "waiting"
-          ? "Choose a screen and allow sharing…"
-          : stage === "starting"
-            ? "Opening microphone…"
-            : stage === "recording"
-              ? `● Recording walkthrough ${formatElapsed(elapsed)}`
-              : "Preparing walkthrough…"}</span
-      >
+      <span role="status">{stageText(stage, elapsed)}</span>
+      {#if stage === "recording"}
+        <MicLevel level={mic.level} label={mic.label} named wide />
+        {#if mic.silent}<span class="text-red" role="alert">no input detected — is the mic muted?</span>{/if}
+      {/if}
+      {#if mic.notice}<span role="status">{mic.notice}</span>{/if}
       {#if stage === "recording"}<button type="button" onclick={stop}>Stop and send</button>{/if}
       {#if stage === "finishing" && finishData && error}<button type="button" onclick={() => void finish()}
           >Retry</button
