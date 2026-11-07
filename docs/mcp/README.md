@@ -85,6 +85,9 @@ in time, it uses the latest buffered frame. `mark_pointer=true` overlays the
 reported pointer position. The result includes a file id; fetch it with `get_media`
 using the `slim` or `original` variant. With no active share, the tool returns a clear error.
 Frames not attached to a message or requested by this tool remain in server memory.
+During a Show me recording, `screen_frame` is temporarily unavailable so only
+the final walkthrough's selected frames are persisted. Use the completed
+message's image references instead.
 
 ## Evidence index
 

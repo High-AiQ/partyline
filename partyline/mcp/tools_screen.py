@@ -6,7 +6,8 @@ def screen_frame_tool():
         "name": "screen_frame",
         "description": (
             "Inspect the active screen share when visual context is needed; stores a media audit item. "
-            "Use get_media to fetch it; mark_pointer labels the reported pointer."
+            "Use get_media to fetch it; mark_pointer labels the reported pointer. Unavailable during "
+            "a Show me recording; use the completed walkthrough's image references."
         ),
         "inputSchema": {
             "type": "object",

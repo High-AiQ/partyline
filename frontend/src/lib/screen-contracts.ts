@@ -21,5 +21,7 @@ export const ScreenShareSchema = z.object({
   region: ScreenRegionSchema,
   status: z.enum(["waiting", "active", "declined"]),
   reason: z.string().optional(),
+  walkthrough: z.boolean().optional(),
+  recording: z.boolean().optional(),
 });
 export type ScreenShare = z.infer<typeof ScreenShareSchema>;

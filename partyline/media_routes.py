@@ -111,6 +111,8 @@ def media_router(runtime, store: MediaStore) -> APIRouter:
         caller_id = principal_identity(principal)
         hub = getattr(request.app.state, "screen_hub", None)
         bound_share = hub.shares.get(conv_id) if hub and include_screen else None
+        if bound_share and bound_share.share_id in hub.walkthroughs.items:
+            raise HTTPException(409, "screen frames are unavailable while a walkthrough is in progress")
         upload_key = (
             "upload:" + hashlib.sha256(client_key.encode()).hexdigest()
             if client_key else None
