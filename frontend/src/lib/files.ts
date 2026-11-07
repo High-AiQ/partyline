@@ -34,6 +34,22 @@ export function visibleMessageBody(
   return lines.slice(0, end).join("\n").trimEnd();
 }
 
+/** Walkthroughs carry agent-only timeline lines alongside their image digests. */
+export function isWalkthrough(message: Pick<ChatMessage, "body" | "files">): boolean {
+  return (
+    message.body.includes("Contact sheet first: open it, then fetch only the frames you need") &&
+    message.files[0]?.title === "Walkthrough contact sheet" &&
+    message.files.slice(1).every((file) => file.title === "Walkthrough frame")
+  );
+}
+
+export function visibleWalkthroughBody(message: Pick<ChatMessage, "body" | "files">): string {
+  return visibleMessageBody(message)
+    .split("\n")
+    .filter((line) => !line.startsWith("Contact sheet first:") && !/^\[\d+:\d{2}\] → frame \d+/.test(line))
+    .join("\n");
+}
+
 export function fileLabel(file: FileRef, position: number): string {
   return file.filename ?? file.description ?? file.title ?? `shared file ${String(position + 1)}`;
 }
