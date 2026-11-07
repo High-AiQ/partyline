@@ -190,3 +190,27 @@ describe("composer process requirement", () => {
     }
   });
 });
+
+describe("screen and voice controls", () => {
+  it("keeps the microphone and the enabled screen attachment toggle together", async () => {
+    room.conversation = conversation;
+    room.screenShare = {
+      share_id: "share",
+      handle: "alice",
+      device_name: "Desk",
+      region: { x: -100, y: 0, width: 100, height: 100 },
+      status: "active",
+    };
+    const component = mount(Composer, { target: document.body });
+    try {
+      await tick();
+      expect(document.querySelector('[aria-label="record voice message"]')).not.toBeNull();
+      const toggle = document.querySelector<HTMLInputElement>('input[type="checkbox"]');
+      expect(toggle?.checked).toBe(true);
+      toggle?.click();
+      expect(toggle?.checked).toBe(false);
+    } finally {
+      await unmount(component);
+    }
+  });
+});

@@ -139,6 +139,15 @@ Object-shaped values that cross a function, component, store, REST, or wire
 boundary need a named interface, type, or schema. Local object literals are
 normal implementation code; anonymous object *contracts* are what is banned.
 
+## Screen sharing
+
+Pair the native screen helper from a line's Computers panel. The helper reports
+monitors in OS virtual-desktop coordinates; the browser uses its monitor preview
+to select a crop and asks the helper to start. The helper requests local consent
+before capture. Frames arrive as bounded still images at about one frame per
+second and stay in server memory until attached to a message or requested by
+`screen_frame`. The line composer can attach up to three recent distinct frames.
+
 
 Orchestrator controls live in `CaptainStyleSection` (root-line management only)
 and `TaskHistorySetting` (beside the resource budget). Line responses carry derived

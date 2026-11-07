@@ -13,12 +13,17 @@ def _path(conv, tail):
 
 
 def _target(client, home, conv, actions):
+    """Authorize `actions` on the line `conv` names and return that line's id.
+
+    `conv` is a line id, a task's tag, its impl-/review- handle or its line name; the server
+    resolves it (one resolver for every route) and an unknown ref is its 404 quoting the ref.
+    """
     if not isinstance(conv, str) or not conv:
         raise ValueError("conv_id is required")
     state = home if conv == client.home else client.capabilities(conv)
     if not set(actions).issubset(set(state.get("actions", []))):
         raise ApiError("captain is not authorized for that target line")
-    return state
+    return conv if conv == client.home else state.get("target_conv_id") or conv
 
 
 def _check_lead(state):
@@ -51,19 +56,9 @@ def execute(client, op, args, state):
     if op == "reports":
         return reports(client, state, args)
     if op == "detach_worker":
-        conv = args.get("conv_id")
-        _target(client, state, conv, ("close",))
-        ref = args.get("attachment_id")
-        if not isinstance(ref, str) or not ref:
-            raise ValueError("attachment_id is required")
-        rows = _attachment_rows(client, conv)
-        att = _resolve_handle(rows, ref)
-        if not any(row.get("id") == att for row in rows):
-            raise ApiError("attachment is not on the authorized target line")
-        return client.request("DELETE", f"/api/attachments/{quote(att, safe='')}")
+        return _detach_worker(client, state, args)
     if op == "retirement_preview":
-        conv = args.get("conv_id")
-        _target(client, state, conv, ("archive",))
+        conv = _target(client, state, args.get("conv_id"), ("archive",))
         query = "?include_children=true" if args.get("include_children") is True else ""
         return client.request("GET", _path(conv, "retirement-preview") + query)
     if op == "retire_child":
@@ -88,14 +83,14 @@ def execute(client, op, args, state):
         _target(client, state, conv, ("close",))
         conv = client.home
     if op == "resources":
-        _target(client, state, conv, ("assign",))
+        conv = _target(client, state, conv, ("assign",))
         return client.request("POST", _path(conv, "resources"),
                               {key: args[key] for key in ("operation", "name") if key in args})
     if op == "staffing":
-        _target(client, state, conv, ("assign",))
+        conv = _target(client, state, conv, ("assign",))
         return client.request("GET", _path(conv, "staffing"))
     if op == "write_set_requests":
-        _target(client, state, conv, ("read",))
+        conv = _target(client, state, conv, ("read",))
         pending = client.request("GET", _path(conv, "write-set/request"))
         grants = client.request("GET", _path(conv, "write-set"))
         rows = grants if isinstance(grants, list) else []
@@ -109,7 +104,7 @@ def execute(client, op, args, state):
             "grants_truncated": len(rows) > _MAX_WRITE_SET_GRANTS,
         }
     if op == "attach_worker":
-        _target(client, state, conv, ("attach",))
+        conv = _target(client, state, conv, ("attach",))
         body = {key: args[key] for key in ("name", "adapter")}
         body["command"] = args.get("command", "")
         if "counts_toward_total" in args:
@@ -143,7 +138,7 @@ def execute(client, op, args, state):
     if op == "decide_write_set":
         return _decide_write_set(client, state, args)
     action, method, tail = paths[op]
-    _target(client, state, conv, (action,))
+    conv = _target(client, state, conv, (action,))
     if op == "appoint_lead" and args.get("attachment_id"):
         args = {**args, "attachment_id": _resolve_handle(_attachment_rows(client, conv),
                                                           args["attachment_id"])}
@@ -154,11 +149,43 @@ def execute(client, op, args, state):
 _HANDLE_STATUSES = ("starting", "running", "idle")
 
 
-def _attachment_rows(client, conv):
-    """The attachments on one target line, as the server lists them."""
+def _line_attachments(client, conv):
+    """One target line's display name and its attachments, as the server lists them."""
     detail = client.request("GET", f"/api/conversations/{quote(conv, safe='')}")
-    rows = detail.get("attachments", []) if isinstance(detail, dict) else []
-    return [row for row in rows if isinstance(row, dict)]
+    detail = detail if isinstance(detail, dict) else {}
+    line = detail.get("conversation")
+    rows = [row for row in detail.get("attachments", []) if isinstance(row, dict)]
+    return (line.get("name") if isinstance(line, dict) else None) or conv, rows
+
+
+def _attachment_rows(client, conv):
+    return _line_attachments(client, conv)[1]
+
+
+def _detach_worker(client, state, args):
+    """Detach one live worker on the target line.
+
+    A worker that is no longer attached there (an implementer `accept` already detached)
+    is an idempotent success, `already_detached: true`: the captain wants it gone and it is,
+    and nothing is closed again, so its temp directory is not reaped a second time. A ref no
+    attachment on that line carries (a typo, or a handle from another line) is refused.
+    """
+    conv = _target(client, state, args.get("conv_id"), ("close",))
+    ref = args.get("attachment_id")
+    if not isinstance(ref, str) or not ref:
+        raise ValueError("attachment_id is required")
+    label, rows = _line_attachments(client, conv)
+    att = _resolve_handle(rows, ref)
+    row = next((row for row in rows if row.get("id") == att),
+               next((row for row in rows if row.get("name") == ref), None))
+    if row is None:
+        raise ApiError(f"no attachment or handle '{ref}' on «{label}»; "
+                       "it may belong to another line, or be misspelled")
+    if row.get("status") not in _HANDLE_STATUSES:
+        return {"ok": True, "already_detached": True, "attachment_id": row["id"],
+                "message": f"{row.get('name') or ref} is not attached to «{label}» "
+                           f"(already detached, status {row.get('status')})"}
+    return client.request("DELETE", f"/api/attachments/{quote(row['id'], safe='')}")
 
 
 def _resolve_handle(rows, ref):
@@ -204,8 +231,8 @@ def _body(op, args):
 
 
 def _decide_write_set(client, state, args):
-    conv, req, decision = args.get("conv_id"), args.get("request_id"), args.get("decision")
-    _target(client, state, conv, ("read",))
+    req, decision = args.get("request_id"), args.get("decision")
+    conv = _target(client, state, args.get("conv_id"), ("read",))
     base = _path(conv, f"write-set/request/{quote(str(req), safe='')}")
     if decision == "approve":
         return client.request("POST", base + "/approve", {})

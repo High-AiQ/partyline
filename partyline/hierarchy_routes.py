@@ -39,7 +39,8 @@ from .hierarchy_contracts import (
 from .accept_sha import accepted_note
 from . import checkout_health
 from .line_worktree import line_cwd
-from .machine_scope import capability_state, deny_unless
+from .machine_scope import deny_unless
+from .orchestrator_handles import capabilities_for
 from .reports import (
     ReportError,
     acknowledge,
@@ -71,7 +72,7 @@ def hierarchy_router(runtime) -> APIRouter:
 
     @router.get("/api/capabilities", response_model=CapabilityState)
     def get_capabilities(request: Request, conv_id: str | None = Query(default=None)):
-        return capability_state(db, request_principal(request), conv_id)
+        return capabilities_for(db, request_principal(request), conv_id)
 
     @router.get("/api/conversations/{conv_id}/briefing")
     def get_briefing(request: Request, conv_id: str):
