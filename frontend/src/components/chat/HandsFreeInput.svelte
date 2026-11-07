@@ -10,6 +10,7 @@
   import { HandsFreeQueue } from "../../lib/hands-free-queue";
   import { isLive } from "../../lib/attachments";
   import { tooltip } from "../../lib/tooltip";
+  import ComposerBubble from "./ComposerBubble.svelte";
 
   let { sources = browserListenerSources() }: { sources?: ListenerSources } = $props();
   let phase = $state<ListeningPhase>("off");
@@ -32,6 +33,28 @@
             : "",
   );
   const enabled = $derived(handsFree.value.enabled);
+  /** The compact word beside the icon; the full sentence lives in the status text and tooltip. */
+  const badge = $derived(
+    suspended
+      ? "paused"
+      : reason
+        ? "unavailable"
+        : phase === "starting"
+          ? "opening mic…"
+          : phase === "off"
+            ? "mic stopped"
+            : phase === "speaking"
+              ? "speech"
+              : "listening",
+  );
+  const listening = $derived(!suspended && !reason && (phase === "listening" || phase === "speaking"));
+  const buttonLabel = $derived(
+    enabled
+      ? `Hands-free: ${badge} — click to turn off`
+      : reason
+        ? `Hands-free: off — ${reason}`
+        : "Hands-free: off — click to listen and send by voice",
+  );
   const listener = new VoiceListener(
     untrack(() => sources),
     {
@@ -99,6 +122,17 @@
     });
   });
 
+  // The "Voice sent" bubble floats over the feed, so it leaves on its own.
+  $effect(() => {
+    if (!lastSent) return;
+    const timer = setTimeout(() => {
+      lastSent = "";
+    }, 8000);
+    return () => {
+      clearTimeout(timer);
+    };
+  });
+
   function visibility(): void {
     if (hiddenTimer !== null) clearTimeout(hiddenTimer);
     hiddenTimer = null;
@@ -128,33 +162,44 @@
   });
 </script>
 
-<div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px]">
+<div class="flex flex-none items-center">
   <button
     type="button"
-    class="hands-free flex min-h-9 flex-none items-center gap-2 px-2.5"
+    class="hands-free relative flex h-11 flex-none items-center justify-center gap-1.5 px-3 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-line disabled:hover:bg-ink-3 disabled:hover:text-cream-dim"
     class:recording={enabled}
-    aria-label="hands-free voice"
+    class:border-copper={enabled}
+    class:text-copper-hot={enabled}
+    aria-label={buttonLabel}
     aria-pressed={enabled}
     disabled={!enabled && (!room.conversation || Boolean(reason))}
-    use:tooltip={{
-      label: enabled
-        ? "Turn hands-free voice off"
-        : reason || "Listen for speech and send transcripts automatically",
-    }}
+    use:tooltip={{ label: buttonLabel }}
     onclick={() => {
       handsFree.update({ enabled: !enabled });
     }}
   >
-    <span
+    <svg
+      class="size-[18px] fill-none stroke-current stroke-[1.8] [stroke-linecap:round] [stroke-linejoin:round]"
+      viewBox="0 0 24 24"
       aria-hidden="true"
-      class="size-1.5 rounded-full"
-      class:bg-copper={enabled}
-      class:bg-cream-faint={!enabled}
-    ></span>
-    hands-free {enabled ? "on" : "off"}
+    >
+      <path d="M6 8.5a6.5 6.5 0 1 1 13 0c0 6-6 6-6 10a3.5 3.5 0 1 1-7 0" />
+      <path d="M15 8.5a2.5 2.5 0 0 0-5 0v1a2 2 0 1 1 0 4" />
+    </svg>
+    {#if enabled}
+      <span
+        aria-hidden="true"
+        data-hands-free-dot
+        class="absolute top-1.5 right-1.5 size-1.5 rounded-full {failure ? 'bg-red' : 'bg-copper'} {listening
+          ? 'motion-safe:animate-pulse'
+          : ''}"
+      ></span>
+      <span aria-hidden="true" class="text-[11px] max-[479px]:hidden"
+        >{badge}{pending ? ` · ${String(pending)}` : ""}</span
+      >
+    {/if}
   </button>
   {#if enabled}
-    <span role="status" class="text-copper">
+    <span role="status" class="sr-only">
       {suspended
         ? "paused while tab is hidden"
         : reason ||
@@ -169,10 +214,14 @@
       {pending ? ` · ${String(pending)} transcribing / queued` : ""}
     </span>
   {/if}
-  {#if failure}<span role="alert" class="min-w-0 break-words text-red">{failure}</span>{/if}
-  {#if lastSent}
-    <span class="w-full min-w-0 break-words text-cream-dim" aria-live="polite"
-      >Voice sent: <span class="text-cream">{lastSent}</span></span
-    >
+  {#if failure || lastSent}
+    <ComposerBubble>
+      {#if failure}<span role="alert" class="block text-red">{failure}</span>{/if}
+      {#if lastSent}
+        <span class="block text-cream-dim" aria-live="polite"
+          >Voice sent: <span class="text-cream">{lastSent}</span></span
+        >
+      {/if}
+    </ComposerBubble>
   {/if}
 </div>
