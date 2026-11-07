@@ -32,6 +32,8 @@ def main(argv=None):
                      help="Auto-accept every request (unsafe on shared servers)")
     run.add_argument("--log", type=Path, help="Append output to this file (used at login)")
     run.add_argument("--wait", action="store_true", help=argparse.SUPPRESS)
+    run.add_argument("--no-border", action="store_true",
+                     help="Do not draw the capture-zone border while sharing")
     commands.add_parser("unpair")
     commands.add_parser("install", help="Register partyline:// links and start at login (once)")
     commands.add_parser("uninstall", help="Remove what install registered (keeps pairing)")
@@ -39,7 +41,7 @@ def main(argv=None):
     opener.add_argument("url")
     commands.add_parser("monitors")
     args = parser.parse_args(argv)
-    desktop = None
+    desktop = border = None
     try:
         if args.command == "pair":
             pair(args.server, args.code, args.name)
@@ -65,7 +67,11 @@ def main(argv=None):
                 from .terminal import Terminal
                 if args.yes:
                     print("WARNING: --yes auto-accepts ALL screen share requests without asking locally.")
-                asyncio.run(serve(load_config(), desktop, Terminal(dialog=auto_dialog()), args.yes))
+                if not args.no_border:
+                    from .border import CaptureBorder
+                    border = CaptureBorder(scale=desktop.scale)
+                asyncio.run(serve(load_config(), desktop, Terminal(dialog=auto_dialog()), args.yes,
+                                  border=border))
     except KeyboardInterrupt:
         print("Helper stopped.")
     except ImportError:
@@ -79,5 +85,7 @@ def main(argv=None):
         print("Helper could not start/pair. Check server, pairing code, config and desktop permissions.")
         raise SystemExit(1) from None
     finally:
+        if border:
+            border.close()
         if desktop:
             desktop.close()

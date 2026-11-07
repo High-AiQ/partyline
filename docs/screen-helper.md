@@ -103,6 +103,14 @@ Enter to stop a share, or Ctrl+C to stop and exit. Keep this terminal visible.
 `run --yes` explicitly disables per-request confirmation and prints a warning;
 use it only when you intend every incoming request to be accepted.
 
+While sharing, a thin amber border appears just **outside** the selected rectangle
+so you can see exactly which region is being sent. It is click-through, stays on
+top, never takes focus, and is outside the captured pixels; supported Windows
+versions also exclude the border windows from capture. The border disappears on
+local or remote stop, disconnect, errors, and Ctrl+C. Run with `run --no-border`
+to disable it. If the native overlay cannot be created, the helper prints one
+warning and continues sharing without it.
+
 Only the selected desktop region is captured after acceptance. Monitor previews
 are an exception: the connected server can request low-resolution whole-monitor
 stills for region picking, without a share consent prompt. Their long edge is
@@ -131,8 +139,10 @@ require a new request and fresh consent. Backoff reaches at most 60 seconds.
 
 - **Windows:** no administrator access required. Per-monitor DPI awareness is set
   before initializing capture or pointer reading so coordinates use physical
-  desktop pixels, including negative origins. UAC and secure-desktop windows are
-  not captured. Keep the helper on the interactive desktop session.
+  desktop pixels, including negative origins. On Windows 10 2004 and later the
+  border uses `WDA_EXCLUDEFROMCAPTURE` in addition to lying outside the region.
+  UAC and secure-desktop windows are not captured. Keep the helper on the
+  interactive desktop session.
 - **macOS:** System Settings → Privacy & Security → Screen Recording (called
   Screen & System Audio Recording on newer versions): enable the terminal or
   Python application running the helper, then quit and reopen it. Reading the
@@ -142,8 +152,10 @@ require a new request and fresh consent. Backoff reaches at most 60 seconds.
   the helper multiplies desktop points and pointer positions by the uniform
   display backing scale and converts capture rectangles back to points. Mixed
   Retina display scales are refused rather than reporting ambiguous coordinates;
-  use displays with the same scale. Test monitor selection on your actual Mac
-  before sharing sensitive material.
+  use displays with the same scale. The border uses PyObjC when it is already
+  installed; without PyObjC the helper prints a notice and shares without a
+  border. Test monitor selection on your actual Mac before sharing sensitive
+  material.
 - **Linux:** use an X11 session with access to its display. A Wayland session
   (`XDG_SESSION_TYPE=wayland` or a set `WAYLAND_DISPLAY`) exits with
   `Wayland is not supported yet (needs the xdg-desktop-portal ScreenCast/RemoteDesktop route)`.

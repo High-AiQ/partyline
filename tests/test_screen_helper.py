@@ -484,7 +484,7 @@ class RetinaTests(unittest.TestCase):
 
 class ExtraHelperTests(unittest.IsolatedAsyncioTestCase):
     async def test_run_cli(self):
-        fake = Mock()
+        fake = Mock(scale=1)
         with patch.object(desktop, "Desktop", return_value=fake), \
                 patch.object(cli, "load_config", return_value={}), \
                 patch("partyline_helper.terminal.Terminal"), \
