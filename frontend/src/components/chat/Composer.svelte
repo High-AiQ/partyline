@@ -12,6 +12,8 @@
   import FileAttachmentPicker from "./FileAttachmentPicker.svelte";
   import ComposerDropZone from "./ComposerDropZone.svelte";
   import VoiceInput from "./VoiceInput.svelte";
+  import HandsFreeInput from "./HandsFreeInput.svelte";
+  import { handsFree } from "../../state/hands-free.svelte.js";
   import WalkthroughControl from "./WalkthroughControl.svelte";
   import { walkthrough } from "../../state/walkthrough.svelte.js";
   import { room } from "../../state/room.svelte.js";
@@ -222,7 +224,7 @@
         />
       </svg>
     </button>
-    {#if !walkthrough.active}<VoiceInput {box} oninserted={resize} />{/if}
+    {#if !walkthrough.active && !handsFree.value.enabled}<VoiceInput {box} oninserted={resize} />{/if}
     <textarea
       id="input"
       class="max-h-[180px] min-h-7 flex-1 resize-none border-0 bg-transparent text-cream outline-0 [font-family:inherit]"
@@ -249,6 +251,7 @@
       onclick={() => void send()}>{uploading ? "uploading…" : "send"}</button
     >
   </div>
+  {#if !walkthrough.active}<HandsFreeInput />{/if}
   <WalkthroughControl />
   {#if room.screenShare?.status === "active" && !room.screenShare.walkthrough}
     <label><input type="checkbox" bind:checked={includeScreen} /> Attach screen frames</label>

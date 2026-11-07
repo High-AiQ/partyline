@@ -2,12 +2,57 @@
 
 The composer has a microphone button. Click it, speak, click again: the take is sent to the
 server, transcribed there, and the text is inserted at the caret in the message box. Nothing is
-sent for you — review the text, edit it, and press send. Processes are CLIs and cannot take
+sent for you in manual mode — review the text, edit it, and press send. Processes are CLIs and cannot take
 audio, so speech is turned into text before it reaches a line.
 
 While a take records or transcribes, a **cancel** button sits beside the mic, and Escape in the
 composer does the same: the take is discarded, nothing is uploaded or inserted, an upload in
 flight is aborted (a late answer is ignored), and the microphone is released at once.
+
+## Hands-free mode
+
+Click **hands-free off** below the composer once to turn it on; the same toggle turns it off.
+The choice is remembered on this device (this browser profile). While enabled it shows
+**listening**, or **listening · speech detected** during a take. Speech is transcribed with
+*Use for my mic* and **sent automatically** to the current line, without touching the keyboard
+or mouse. The sent message appears in the feed and the latest transcript remains visible as
+**Voice sent:** below the composer. To correct a sent instruction, send a follow-up correction.
+Your typed draft is kept separately and is never included in an automatic voice message.
+A live process and an available recognizer are required.
+
+Detection runs locally in the browser using Silero VAD v5 through pinned
+[`@ricky0123/vad-web`](https://github.com/ricky0123/vad) 0.0.31 (ISC) and
+`onnxruntime-web` 1.24.3 (MIT). This model scores speech rather than using a volume threshold,
+and supplies pre-roll, a speech minimum and pause detection. The model, worklet and WASM are
+bundled and served by Partyline, with no CDN requests. See [third-party notices](voice-third-party.txt).
+
+- About 300 ms of pre-roll (288 ms at v5's 32 ms frame size) preserves the first word.
+  At least 416 ms must score as speech (probability ≥0.7); shorter takes and low-score
+  coughs/noise are dropped locally. A pause below probability 0.35 ends the take after
+  **1.4 seconds** by default. Settings → Voice → **Hands-free speech pause** changes this
+  on this device. Pause duration is rounded down to whole 32 ms frames.
+- Each take is capped at **60 seconds**. Listening continues during transcription, with
+  at most two requests in flight, up to eight unsent takes in memory, and sends in capture
+  order. If the queue fills, the new take is dropped with a visible error. Transcription or
+  delivery errors stay visible; failed messages are not retried automatically.
+- Empty transcripts and transcripts made only of fillers such as “um”, “uh”, “erm” and “hmm”
+  are discarded. This is a small English filler list, not semantic intent recognition.
+- **“Cancel”** as the entire transcript discards that take. **“Scratch that”**, alone or at
+  the start of a transcript, also discards the immediately previous queued take **if it has
+  not begun sending**. Any words after “scratch that” are sent as a replacement. Recognition
+  may finish out of order, so a quick correction can overtake a slow unsent take. Already
+  sent messages cannot be recalled; these commands do not retract an instruction from an
+  agent. Case and normal sentence punctuation are ignored.
+- The existing microphone picker applies here too, including its default-device fallback.
+  Changing microphones or recognizers, changing the speech pause, switching lines, or turning
+  the mode off discards unfinished takes and aborts uploads. Audio never moves between lines.
+- Settings → Voice → **Release hidden microphone** sets the hidden-tab timeout (default one
+  minute). After it expires, the microphone is released and unfinished/queued takes are
+  discarded. Returning to the tab resumes listening automatically. Turning the mode off or
+  leaving the composer releases the microphone immediately. Browser permission/autoplay
+  restrictions or device errors can still prevent capture; the status explains the failure.
+
+Wake words and server-side streaming ASR are follow-ups, outside this mode's scope.
 
 ## Install
 
@@ -178,8 +223,12 @@ Word timings stay in your script's own output; Partyline passes the segments thr
 ## Privacy
 
 What happens to a take depends on the recognizer you pick. Whatever the preset, the audio is
-never stored in the database and never posted to the line — only the text you choose to send is —
-and the browser releases the microphone as soon as you stop recording.
+never stored in the database and never posted to the line — only text is. In manual mode you
+choose when to send it; hands-free sends detected speech automatically. **Audio is uploaded only
+for detected speech takes in hands-free mode, never streamed continuously.** Silence and
+rejected short/low-score takes stay in the browser. While listening, the mic remains open; it
+is released when hands-free is off or the configured hidden-tab timeout expires. Manual mode
+releases it as soon as you stop recording.
 
 - **`faster-whisper` (local):** the audio is processed on this server, read into memory for the
   length of one request, decoded from a stream, and discarded. It is never written to disk.

@@ -9,6 +9,7 @@
   import SettingsSection from "../SettingsSection.svelte";
   import SettingRow from "../SettingRow.svelte";
   import SaveIndicator from "../SaveIndicator.svelte";
+  import HandsFreeSettings from "../voice/HandsFreeSettings.svelte";
   import MicrophoneSetting from "../voice/MicrophoneSetting.svelte";
   import VoicePresetCard from "../voice/VoicePresetCard.svelte";
   import VoicePresetForm from "../voice/VoicePresetForm.svelte";
@@ -131,6 +132,7 @@
 </script>
 
 <SettingsSection id="voice">
+  <HandsFreeSettings />
   <SettingRow
     id="setting-voice-microphone"
     label="Microphone"

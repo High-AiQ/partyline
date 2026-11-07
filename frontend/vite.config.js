@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { basename, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { voiceAssets } from "./voice-assets.config.js";
 import { vitestMaxWorkers } from "./worker-cap.config.js";
 
 const frontendDir = fileURLToPath(new URL(".", import.meta.url));
@@ -14,11 +15,20 @@ const outDir = fileURLToPath(new URL("../partyline/static", import.meta.url));
 const buildId = sourceBuildId();
 
 export default defineConfig(({ command }) => ({
-  plugins: [buildManifest(), woff2OnlyKatex(), tailwindcss(), svelte()],
+  plugins: [voiceAssets(), buildManifest(), woff2OnlyKatex(), tailwindcss(), svelte()],
   // Component tests run in jsdom but still resolve packages through Vite.
   // Without this condition Svelte's default server export wins, and `mount()`
   // fails before the browser behavior under test can run.
-  ...(command === "build" ? {} : { resolve: { conditions: ["browser"] } }),
+  resolve: {
+    // The CJS runtime loads our versioned WASM path. Its ESM entry also emits
+    // an unused second copy of the 12 MB WASM binary through import.meta.url.
+    alias: {
+      "onnxruntime-web/wasm": fileURLToPath(
+        new URL("./node_modules/onnxruntime-web/dist/ort.wasm.min.js", import.meta.url),
+      ),
+    },
+    ...(command === "build" ? {} : { conditions: ["browser"] }),
+  },
   define: {
     // The production bundle knows which source snapshot made it. The server
     // reports the same value from build.json on every WebSocket handshake, so
@@ -90,7 +100,13 @@ function buildManifest() {
 
 /** A deterministic identity for the inputs that can change the runtime UI. */
 function sourceBuildId() {
-  const files = ["index.html", "package.json", "package-lock.json", "vite.config.js"];
+  const files = [
+    "index.html",
+    "package.json",
+    "package-lock.json",
+    "vite.config.js",
+    "voice-assets.config.js",
+  ];
   const visit = (directory) => {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name);
