@@ -1,7 +1,10 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import Modal from "../Modal.svelte";
   import { screenStatus } from "../../state/screen-status.svelte.js";
   import { room } from "../../state/room.svelte.js";
+  import { walkthrough } from "../../state/walkthrough.svelte.js";
+  import { walkthroughApi } from "../../lib/walkthrough-api";
   import {
     screenApi,
     mapPreviewRegion,
@@ -25,16 +28,18 @@
   let start = $state<Point | null>(null);
   let crop = $state<NormalizedRegion | null>(null);
   let image = $state<HTMLImageElement | null>(null);
+  let walkthroughDialog = false;
   const device = $derived(devices.find((item) => item.id === deviceId));
   const monitor = $derived(device?.monitors.find((item) => item.id === monitorId));
 
   $effect(() => {
     const id = room.conversation?.id;
+    const before = untrack(() => room.screenShare);
     if (id)
       void screenApi
         .current(id)
         .then((result) => {
-          if (room.conversation?.id === id) room.screenShare = result.share;
+          if (room.conversation?.id === id && room.screenShare === before) room.screenShare = result.share;
         })
         .catch((e: unknown) => {
           error = e instanceof Error ? e.message : "Could not load sharing status";
@@ -43,6 +48,15 @@
   $effect(() => {
     void screenStatus.revision;
     if (open) void refresh();
+  });
+  $effect(() => {
+    if (walkthrough.choose > 0 && walkthrough.selecting) {
+      walkthroughDialog = true;
+      open = true;
+    } else if (walkthroughDialog) {
+      walkthroughDialog = false;
+      close();
+    }
   });
   async function refresh(): Promise<void> {
     if (!room.conversation) return;
@@ -57,6 +71,7 @@
   }
   function close(): void {
     open = false;
+    walkthrough.selecting = false;
     deviceId = "";
     monitorId = "";
     previews = {};
@@ -113,7 +128,21 @@
   async function share(): Promise<void> {
     if (!room.conversation || !monitor) return;
     try {
-      await screenApi.start(room.conversation.id, deviceId, mapPreviewRegion(monitor, crop));
+      const line = room.conversation.id;
+      const region = mapPreviewRegion(monitor, crop);
+      const selectedDeviceId = deviceId;
+      const forWalkthrough = walkthrough.selecting;
+      const selection = walkthrough.choose;
+      const result = await screenApi.start(line, selectedDeviceId, region, forWalkthrough);
+      if (forWalkthrough) {
+        if (!walkthrough.selecting || selection !== walkthrough.choose || walkthrough.line !== line) {
+          await walkthroughApi.cancel(line, result.share_id);
+          return;
+        }
+        walkthrough.last = { line, device: selectedDeviceId, region };
+        walkthrough.line = line;
+        walkthrough.shareId = result.share_id;
+      }
       close();
     } catch (e) {
       error = e instanceof Error ? e.message : "Could not start sharing";
@@ -130,7 +159,9 @@
           ? `Sharing declined: ${room.screenShare.reason ?? "no reason given"}`
           : room.screenShare.status === "waiting"
             ? `Waiting for consent on ${room.screenShare.device_name}…`
-            : `${room.screenShare.handle} is sharing ${room.screenShare.device_name} (${String(room.screenShare.region.x)}, ${String(room.screenShare.region.y)}, ${String(room.screenShare.region.width)} × ${String(room.screenShare.region.height)})`}</span
+            : room.screenShare.recording
+              ? `${room.screenShare.handle} is recording a walkthrough on ${room.screenShare.device_name}`
+              : `${room.screenShare.handle} is sharing ${room.screenShare.device_name} (${String(room.screenShare.region.x)}, ${String(room.screenShare.region.y)}, ${String(room.screenShare.region.width)} × ${String(room.screenShare.region.height)})`}</span
       >
       {#if room.screenShare.status !== "declined"}
         <button

@@ -30,6 +30,19 @@ only when attached to a message or fetched through `screen_frame`, where normal 
 records provide the audit trail. Revocation or socket loss ends the share and drops
 its buffered frames.
 
+Walkthroughs use the same per-share local consent. While recording, a line-wide
+indicator identifies the person recording. Candidate frames and microphone
+audio stay in memory: only the final message and selected image uploads are
+saved. Ordinary frame attachment and `screen_frame` are unavailable during a
+walkthrough. Cancel discards the take; a disconnected helper stops capture while the
+owner can still send or discard the frames already received. Abandoned takes
+expire automatically. Per-take limits are configurable with
+`PARTYLINE_WALKTHROUGH_SECONDS` (default 600), `PARTYLINE_WALKTHROUGH_FRAMES`
+(default 600), `PARTYLINE_WALKTHROUGH_BYTES` (default 134217728 per take),
+and `PARTYLINE_WALKTHROUGH_TOTAL_BYTES` (default 536870912 across takes). The
+duration limit also stops the share. Microphone audio is sent to the selected
+speech recognizer and follows that recognizer's privacy policy.
+
 Machine credentials are confined to their own line. A designated manager also
 receives explicit capabilities on descendant lines; unrelated lines remain
 inaccessible. Roles are read from current database records on every request.

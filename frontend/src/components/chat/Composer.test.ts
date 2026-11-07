@@ -192,6 +192,33 @@ describe("composer process requirement", () => {
 });
 
 describe("screen and voice controls", () => {
+  it("sends ordinary messages without attaching a walkthrough's private frames", async () => {
+    room.conversation = conversation;
+    room.attachments = [liveAttachment];
+    room.screenShare = {
+      share_id: "share",
+      handle: "alice",
+      device_name: "Desk",
+      region: { x: 0, y: 0, width: 100, height: 100 },
+      status: "active",
+      walkthrough: true,
+    };
+    draft.openLine(conversation.id);
+    draft.text = "hello";
+    const say = vi.spyOn(room, "say").mockResolvedValue(true);
+    const upload = vi.spyOn(api, "uploadFiles");
+    const component = mount(Composer, { target: document.body });
+    try {
+      await tick();
+      document.querySelector<HTMLButtonElement>("#send")?.click();
+      await tick();
+      expect(say).toHaveBeenCalledWith("hello");
+      expect(upload).not.toHaveBeenCalled();
+    } finally {
+      await unmount(component);
+    }
+  });
+
   it("keeps the microphone and the enabled screen attachment toggle together", async () => {
     room.conversation = conversation;
     room.screenShare = {

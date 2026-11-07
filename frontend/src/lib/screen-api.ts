@@ -78,11 +78,16 @@ export const screenApi = {
         encodeURIComponent(String(monitorId)),
       { schema: PreviewSchema, method: "POST" },
     ),
-  start: (convId: string, device_id: string, region: ReturnType<typeof mapPreviewRegion>) =>
+  start: (
+    convId: string,
+    device_id: string,
+    region: ReturnType<typeof mapPreviewRegion>,
+    walkthrough = false,
+  ) =>
     request("/api/screen/shares?conv_id=" + encodeURIComponent(convId), {
       schema: StartSchema,
       method: "POST",
-      body: { device_id, region },
+      body: { device_id, region, walkthrough },
     }),
   stop: (shareId: string) =>
     request("/api/screen/shares/" + encodeURIComponent(shareId), {
