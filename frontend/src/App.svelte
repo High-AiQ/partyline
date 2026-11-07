@@ -13,6 +13,8 @@
   import Composer from "./components/chat/Composer.svelte";
   import Board from "./components/board/Board.svelte";
   import ReattachOfferDialog from "./components/dialogs/ReattachOfferDialog.svelte";
+  import SettingsRoute from "./components/settings/SettingsRoute.svelte";
+  import { isSettingsRoute } from "./lib/settings-route";
 
   import { room } from "./state/room.svelte.js";
   import { session } from "./state/session.svelte.js";
@@ -93,7 +95,8 @@
   }
 
   function routeChange(): void {
-    room.onRouteChange();
+    // A settings tab is not a line: the line underneath stays where it was.
+    if (!isSettingsRoute(location.hash)) room.onRouteChange();
   }
 </script>
 
@@ -122,6 +125,8 @@
 
 {#if !session.signedIn}
   <Gate />
+{:else}
+  <SettingsRoute />
 {/if}
 
 {#if session.signedIn}

@@ -124,7 +124,7 @@ polling interval, and warning cooldown. The threshold and interval minimum is
 | `PARTYLINE_FEATURE_<NAME>` | registry default | switch one feature flag on or off (`1/true/on` or `0/false/off`); see [Feature flags](#feature-flags) |
 | `PARTYLINE_FORWARDED_ALLOW_IPS` | `127.0.0.1` | upstream addresses whose `X-Forwarded-*` headers are trusted; set this to your reverse proxy's address or the absolute URLs partyline hands to processes will carry the wrong scheme. See [Behind a reverse proxy](#behind-a-reverse-proxy) |
 
-The optional server config file uses `[server] host` and `port`, plus optional `[instance] name` and `[[asr]]` speech recognizers (see [Voice input](voice-input.md)); see
+The optional server config file uses `[server] host` and `port`, plus optional `[instance] name` and `[[asr]]` speech recognizers (see [Voice input](voice-input.md); people can also add recognizers in Settings → Voice, and a settings preset with the same name as an `[[asr]]` table wins); see
 [Serving on a specific IP or port](#serving-on-a-specific-ip-or-port) for its search paths and
 precedence.
 

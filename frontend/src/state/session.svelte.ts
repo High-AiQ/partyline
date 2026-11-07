@@ -13,6 +13,7 @@ import {
   storeTokens,
 } from "../lib/http";
 import { readOrMintClientId } from "../lib/identity";
+import { voicePresets } from "./voice-presets.svelte.js";
 
 class Session {
   user = $state<AuthUser | null>(null);
@@ -109,6 +110,8 @@ class Session {
     this.instanceName = instanceName;
     if (this.user && this.user.handle !== handle) this.user = { ...this.user, handle };
     void this.loadAdapters();
+    // A restart may have added recognizers: the mic follows the server too.
+    voicePresets.refresh();
   }
 
   async loadAdapters(): Promise<void> {

@@ -172,3 +172,21 @@ hide peek and offer restart alongside edit command when stopped. Restart reruns
 the stored command through `POST /api/attachments/<id>/resume` (the server reruns a
 non-listener fresh, and the route is not loopback-gated) with no checkpoint dialog. A
 failed resume or restart shows as a toast and as inline text on the card.
+
+Settings is one modal with tabs (`components/dialogs/SettingsDialog.svelte`), routed by
+`#/settings/<tab>`: the tab links are real links, so a deep link opens the modal on that tab and
+Back/Forward move between tabs. `state/settings-nav.svelte.ts` reads the hash and
+`components/settings/SettingsRoute.svelte` opens or closes the modal to match; App skips
+`room.onRouteChange()` for settings routes so the line underneath stays put. Every tab and row is
+listed once in `lib/settings-registry.ts`, which drives the nav, the search box and the focus
+target for a search hit. Tabs are built from `SettingsSection` + `SettingRow`; one-control
+settings save on change, multi-field forms (global prose, resource budget, a recognizer) have an
+explicit save, and both report through `SaveIndicator` ("saving…", a brief "saved ✓", or the
+error). Every tab opened since the modal opened stays mounted (hidden when not shown), so a
+search or a tab switch never discards an unsaved draft. A hidden tab must stop anything live:
+`components/settings/section-shown.ts` tells a tab whether it is on screen, and a hidden Voice tab
+closes its test panels, which cancels a test take. The Voice tab refetches its listing on
+`voicePresets.revision` (a live event, a reconnect, or recovery after a failed load), retries its
+own failed listing with backoff, and retries at once when shown again. A tab that grows — Computers, when screen pairing lands — replaces only its own
+component in `components/settings/sections/`. Settings shows only settings that exist and do
+something on this server.

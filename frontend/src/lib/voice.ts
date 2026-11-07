@@ -104,3 +104,12 @@ export function savePreset(name: string): void {
     // remembering the choice is a convenience only
   }
 }
+
+/** Back to the server default. */
+export function clearSavedPreset(): void {
+  try {
+    localStorage.removeItem(PRESET_KEY);
+  } catch {
+    // as above
+  }
+}
