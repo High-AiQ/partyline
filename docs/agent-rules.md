@@ -42,6 +42,7 @@ cd frontend && npm run verify       # format:check + lint + svelte-check + tests
 A hung allocating test has twice taken this whole machine down (19 GB and 31 GB incidents,
 `docs/lessons.md`); `./scripts/capped-test` exits 137 when a test *allocated without bound*,
 not when an assertion failed. The 300-line cap is a context budget, not a style rule.
+Vitest automatically sizes its workers for the cgroup memory limit and a 4 GiB budget.
 
 | DO | DO NOT |
 | --- | --- |
