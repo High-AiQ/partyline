@@ -28,7 +28,7 @@ class WalkthroughTest(unittest.TestCase):
     def test_selection_spans_a_long_take_with_a_fixed_budget(self):
         frames = [frame(i * 1000) for i in range(100)]
         selected = select_frames(frames, [])
-        self.assertEqual(len(selected), 12)
+        self.assertEqual(len(selected), 24)
         self.assertIs(selected[0], frames[0])
         self.assertIs(selected[-1], frames[-1])
         self.assertTrue(any(item.ts_ms >= 45_000 and item.ts_ms <= 55_000 for item in selected))
@@ -60,7 +60,9 @@ class WalkthroughTest(unittest.TestCase):
         image = BufferedFrame(b"x", 1200, {"x": 10, "y": 20, "width": 100, "height": 100},
                               10, 10, {"x": 12, "y": 24, "visible": True}, "image/png")
         body = assemble_message("notes", [{"start": 0, "end": 1, "text": "click"}], [image], True)
-        self.assertEqual(body, 'notes\nSpeech transcription failed; the screen frames are included below.\n'
+        self.assertEqual(body, 'notes\nContact sheet first: open it, then fetch only the frames you need '
+                         '(thumb ≈ 230 tokens, slim ≈ 1,400).\nSpeech transcription failed; '
+                         'the screen frames are included below.\n'
                          '[0:00] "click"\n[0:01] → frame 1 (pointer at 12,24)')
         image.pointer["x"] = 500
         self.assertNotIn("pointer at", assemble_message("", [], [image]))

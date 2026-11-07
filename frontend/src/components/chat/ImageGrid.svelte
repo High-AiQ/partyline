@@ -36,7 +36,10 @@
       }}
     >
       <img
-        class="tile-img block w-full transition-opacity duration-150 ease-in-out hover:opacity-[0.88] {imgClass}"
+        class="tile-img block w-full transition-opacity duration-150 ease-in-out hover:opacity-[0.88] {image.title ===
+        'Walkthrough contact sheet'
+          ? 'h-full min-h-[120px] max-h-[300px] object-contain'
+          : imgClass}"
         src={authenticatedResourceUrl(image.urls.thumb)}
         alt={fileLabel(image, index)}
         width={image.thumb?.width ?? image.width}

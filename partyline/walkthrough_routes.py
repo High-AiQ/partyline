@@ -14,6 +14,7 @@ from .media_files import prepared_file
 from .media_images import MediaError
 from .screen_routes import _mark_pointer, pointer_coordinates
 from .walkthrough import assemble_message, select_frames
+from .walkthrough_sheet import contact_sheet
 
 
 class Segment(BaseModel):
@@ -95,11 +96,16 @@ def walkthrough_router(runtime, hub, store):
             try:
                 def prepare():
                     items = []
+                    images = []
                     for frame in frames:
                         marked = body.mark_pointer and pointer_coordinates(frame)["frame"] is not None
                         data = _mark_pointer(frame) if marked else frame.data
                         mime = "image/png" if marked else frame.mime
+                        images.append(data)
                         items.append(prepared_file((data, "screen-frame", mime)))
+                    sheet = contact_sheet(frames, images)
+                    if sheet:
+                        items.insert(0, prepared_file((sheet, "contact-sheet.png", "image/png")))
                     return items
                 prepared = await asyncio.to_thread(prepare)
             except MediaError as exc:
@@ -108,7 +114,9 @@ def walkthrough_router(runtime, hub, store):
                 raise HTTPException(409, "walkthrough was cancelled")
             message = runtime.db.add_message(conv_id, principal.name, "human", "")
             try:
-                refs = store.store(conv_id, message["id"], prepared, "Walkthrough frame", None)
+                refs = store.store(conv_id, message["id"], prepared, "Walkthrough frame", None,
+                                   titles=(["Walkthrough contact sheet"] +
+                                           ["Walkthrough frame"] * len(frames)) if frames else [])
             except Exception:
                 runtime.db._exec("DELETE FROM messages WHERE id=?", (message["id"],))
                 raise

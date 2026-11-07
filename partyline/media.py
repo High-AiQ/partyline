@@ -104,6 +104,7 @@ class MediaStore:
         prepared: list[PreparedFile],
         title: str | None,
         description: str | None,
+        *, titles: list[str | None] | None = None,
     ) -> list[FileRef]:
         """Write the bytes, then the rows, for one message's files.
 
@@ -111,6 +112,8 @@ class MediaStore:
         disk with no row pointing at them are invisible to every query here and
         would never be cleaned up by anything.
         """
+        if titles is not None and len(titles) != len(prepared):
+            raise ValueError("one title is required per prepared file")
         directory = self._conv_dir(conv_id)
         directory.mkdir(parents=True, exist_ok=True)
         created_at = time.time()
@@ -141,7 +144,8 @@ class MediaStore:
                     f"{conv_id}/{names[item.readable.suffix]}" if item.readable else None
                 )
                 rows.append((
-                    file_id, conv_id, message_id, position, title, description,
+                    file_id, conv_id, message_id, position,
+                    titles[position] if titles is not None else title, description,
                     item.mime, item.width or 0, item.height or 0, len(item.data),
                     f"{conv_id}/{names['']}",
                     thumb_path, item.thumb.mime if item.thumb else None,
