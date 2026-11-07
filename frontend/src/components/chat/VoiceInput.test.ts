@@ -3,11 +3,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import VoiceInput from "./VoiceInput.svelte";
 import { room } from "../../state/room.svelte.js";
 import { draft } from "../../state/draft.svelte.js";
+import { voicePresets } from "../../state/voice-presets.svelte.js";
 import { voiceApi } from "../../lib/voice-api";
 import { ApiError } from "../../lib/http";
 import type { RecorderSources } from "../../lib/voice-recorder";
 
 afterEach(() => {
+  vi.useRealTimers();
+  voicePresets.reset();
+  voicePresets.choose(null);
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   room.leave({ clearRoute: false });
@@ -60,7 +64,7 @@ describe("VoiceInput", () => {
     const target = document.body.appendChild(document.createElement("div"));
     const comp = mount(VoiceInput, { target, props: { box: null, oninserted: () => undefined } });
     await tick();
-    const button = target.querySelector("button");
+    const button = target.querySelector<HTMLButtonElement>("button.voice");
     expect(button?.disabled).toBe(true);
     void unmount(comp);
   });
@@ -75,7 +79,7 @@ describe("VoiceInput", () => {
     const target = document.body.appendChild(document.createElement("div"));
     const comp = mount(VoiceInput, { target, props: { box: null, oninserted: () => undefined } });
     await settle();
-    expect(target.querySelector("button")?.disabled).toBe(true);
+    expect(target.querySelector<HTMLButtonElement>("button.voice")?.disabled).toBe(true);
     void unmount(comp);
   });
 
@@ -106,7 +110,7 @@ describe("VoiceInput", () => {
       props: { box, oninserted: inserted, sources: sourcesWithTake() },
     });
     await tick();
-    const button = target.querySelector("button");
+    const button = target.querySelector<HTMLButtonElement>("button.voice");
     button?.click();
     await settle();
     expect(button?.getAttribute("aria-pressed")).toBe("true");
@@ -132,7 +136,7 @@ describe("VoiceInput", () => {
       props: { box: null, oninserted: () => undefined, sources: sourcesWithTake() },
     });
     await tick();
-    const button = target.querySelector("button");
+    const button = target.querySelector<HTMLButtonElement>("button.voice");
     button?.click();
     await settle();
     expect(button?.getAttribute("aria-pressed")).toBe("true");
@@ -178,7 +182,7 @@ describe("VoiceInput", () => {
       props: { box: null, oninserted: () => undefined, sources: sourcesWithTake() },
     });
     await tick();
-    const button = target.querySelector("button");
+    const button = target.querySelector<HTMLButtonElement>("button.voice");
     button?.click();
     await settle();
     expect(button?.getAttribute("aria-pressed")).toBe("true");
@@ -214,21 +218,21 @@ describe("VoiceInput", () => {
       props: { box: null, oninserted: () => undefined, sources: sourcesWithTake() },
     });
     await settle();
-    expect(target.querySelector("select")).not.toBeNull();
-    const button = target.querySelector("button");
+    expect(target.querySelector("select")).toBeNull();
+    const button = target.querySelector<HTMLButtonElement>("button.voice");
     button?.click();
     await settle();
     expect(button?.getAttribute("aria-pressed")).toBe("true");
     button?.click();
     await settle();
-    expect(button?.disabled).toBe(true);
-    const select = target.querySelector("select");
-    if (select) {
-      select.value = "b";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-    }
-    await settle();
+    // "a" is marked down; with no pick of its own the mic falls through to "b" and stays usable.
+    expect(voicePresets.listing?.presets.find((entry) => entry.name === "a")?.available).toBe(false);
+    expect(voicePresets.active).toBe("b");
     expect(button?.disabled).toBe(false);
+    // A remembered pick that is down falls through the same way.
+    voicePresets.choose("a");
+    await settle();
+    expect(voicePresets.active).toBe("b");
     void unmount(comp);
   });
 
@@ -251,7 +255,7 @@ describe("VoiceInput", () => {
       props: { box: null, oninserted: () => undefined, sources: sourcesWithTake() },
     });
     await tick();
-    const button = target.querySelector("button");
+    const button = target.querySelector<HTMLButtonElement>("button.voice");
     button?.click();
     await settle();
     expect(button?.getAttribute("aria-pressed")).toBe("true");
@@ -294,7 +298,7 @@ describe("VoiceInput", () => {
       props: { box: null, oninserted: () => undefined, sources },
     });
     await tick();
-    const button = target.querySelector("button");
+    const button = target.querySelector<HTMLButtonElement>("button.voice");
     button?.click();
     await tick();
     expect(button?.disabled).toBe(false);

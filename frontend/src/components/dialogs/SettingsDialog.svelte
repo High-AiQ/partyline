@@ -1,282 +1,144 @@
 <script lang="ts">
-  /** Instance settings that affect the next briefing sent to a process. */
-  import { onMount } from "svelte";
-  import { tick } from "svelte";
-  import TaskHistorySetting from "./TaskHistorySetting.svelte";
-  import StorageSection from "./StorageSection.svelte";
+  /**
+   * The settings modal: a tab column (a scrolling tab strip on a phone), a
+   * search box across every tab, and the open tab. The tab lives in the URL
+   * (`#/settings/<tab>`) — see `state/settings-nav.svelte.ts` — so this
+   * component only draws what the route says and reports when it closes.
+   */
+  import { onDestroy, tick } from "svelte";
   import Modal from "../Modal.svelte";
-  import { ApiError } from "../../lib/api";
-  import { getGlobalProse, setGlobalProse } from "../../lib/settings-api";
-  import {
-    getResourceSettings,
-    resetResourceSettings,
-    setResourceSettings,
-    type ResourceSettings,
-  } from "../../lib/resource-api";
-  import { resources } from "../../state/resources.svelte.js";
+  import SettingsNav from "../settings/SettingsNav.svelte";
+  import SettingsSearchResults from "../settings/SettingsSearchResults.svelte";
+  import { SECTION_COMPONENTS } from "../settings/sections";
+  import { provideSectionShown } from "../settings/section-shown";
+  import { countBySection, searchSettings } from "../../lib/settings-registry";
+  import type { SettingInfo } from "../../lib/settings-registry";
+  import { DEFAULT_SECTION } from "../../lib/settings-route";
+  import type { SectionId } from "../../lib/settings-route";
+  import { settingsNav } from "../../state/settings-nav.svelte.js";
 
   interface Props {
     close: () => void;
-    focusBudget?: boolean;
+    ondismiss?: () => void;
   }
 
-  let { close, focusBudget = false }: Props = $props();
-  const MAX = 10000;
-  let value = $state("");
-  let loading = $state(true);
-  let saving = $state(false);
-  let error = $state("");
-  let field = $state<HTMLTextAreaElement | null>(null);
-  let budgetSection = $state<HTMLElement | null>(null);
-  let budget = $state<ResourceSettings | null>(null);
-  let maxProcesses = $state(4);
-  let reserveGb = $state(2);
-  let leaseGb = $state(4);
-  let reservationGb = $state(1);
-  let warnPercent = $state(80);
-  let captainCeilingGb = $state(8);
-  let budgetLoading = $state(true);
-  let budgetSaving = $state(false);
-  let resettingBudget = $state(false);
-  let budgetError = $state("");
-  const GIB = 1024 ** 3;
+  let { close, ondismiss }: Props = $props();
+  let query = $state("");
+  let search = $state<HTMLInputElement | null>(null);
+  let content = $state<HTMLElement | null>(null);
+  const section = $derived(settingsNav.section ?? DEFAULT_SECTION);
+  const results = $derived(searchSettings(query));
+  const searching = $derived(query.trim().length > 0);
+  /**
+   * Every tab opened since the modal opened stays mounted (hidden when not
+   * shown), so searching or switching tabs never throws away an unsaved draft.
+   */
+  const visited = $state<SectionId[]>([settingsNav.section ?? DEFAULT_SECTION]);
+  $effect(() => {
+    if (!visited.includes(section)) visited.push(section);
+  });
+  provideSectionShown((id) => !searching && id === section);
 
-  function displayGb(bytes: number): number {
-    return Number((bytes / GIB).toFixed(2));
-  }
-
-  function bytesForSave(value: number, originalBytes: number): number {
-    return displayGb(originalBytes) === Number(value.toFixed(2)) ? originalBytes : Math.round(value * GIB);
-  }
-
-  onMount(() => {
-    void load();
+  onDestroy(() => {
+    ondismiss?.();
+    settingsNav.close();
   });
 
-  async function load(): Promise<void> {
-    try {
-      value = (await getGlobalProse()).value ?? "";
-    } catch (failure: unknown) {
-      error = failure instanceof ApiError ? failure.message : "could not load settings";
-    } finally {
-      loading = false;
-    }
-    try {
-      budget = await getResourceSettings();
-      maxProcesses = budget.max_live_processes;
-      reserveGb = displayGb(budget.memory_reserve_bytes);
-      leaseGb = displayGb(budget.default_process_memory_bytes);
-      reservationGb = displayGb(budget.memory_reservation_bytes);
-      warnPercent = budget.memory_warn_percent;
-      captainCeilingGb = displayGb(budget.memory_captain_ceiling_bytes);
-      if (focusBudget) {
-        await tick();
-        budgetSection?.scrollIntoView({ block: "center" });
-      }
-    } catch (failure: unknown) {
-      budgetError = failure instanceof ApiError ? failure.message : "could not load resource settings";
-    } finally {
-      budgetLoading = false;
+  /** A new tab starts at its top with focus on its heading; a search pick lands on its row. */
+  let landed: string | null = null;
+  $effect(() => {
+    const target = settingsNav.focusTarget;
+    const showing = section;
+    // Clearing the target after landing re-runs this; the tab has not changed, so stay put.
+    if (!target && showing === landed) return;
+    void tick().then(() => {
+      land(showing, target);
+    });
+  });
+
+  function land(showing: string, target: string | null): void {
+    landed = showing;
+    const row = target ? document.getElementById(target) : null;
+    if (row) {
+      settingsNav.focusTarget = null;
+      row.scrollIntoView({ block: "center" });
+      row.classList.remove("flash");
+      void row.offsetWidth;
+      row.classList.add("flash");
+      row.querySelector<HTMLElement>("input, select, textarea, button")?.focus({ preventScroll: true });
+    } else if (!target && !searching) {
+      content?.scrollTo({ top: 0 });
+      document.getElementById(`settings-heading-${showing}`)?.focus({ preventScroll: true });
     }
   }
 
-  async function saveBudget(event: SubmitEvent): Promise<void> {
+  function pick(setting: SettingInfo): void {
+    query = "";
+    settingsNav.show(setting.section, setting.id);
+  }
+
+  /** `/` jumps to search from anywhere in settings that is not a text field. */
+  function shortcut(event: KeyboardEvent): void {
+    if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
+    const target = event.target;
+    if (target instanceof HTMLElement && target.closest("input, textarea, select, [contenteditable]")) return;
     event.preventDefault();
-    if (budgetSaving) return;
-    budgetSaving = true;
-    budgetError = "";
-    try {
-      budget = await setResourceSettings({
-        max_live_processes: maxProcesses,
-        memory_reserve_bytes: bytesForSave(reserveGb, budget?.memory_reserve_bytes ?? 0),
-        default_process_memory_bytes: bytesForSave(leaseGb, budget?.default_process_memory_bytes ?? 0),
-        memory_reservation_bytes: bytesForSave(reservationGb, budget?.memory_reservation_bytes ?? 0),
-        memory_warn_percent: warnPercent,
-        memory_captain_ceiling_bytes: bytesForSave(
-          captainCeilingGb,
-          budget?.memory_captain_ceiling_bytes ?? 0,
-        ),
-      });
-      await resources.load();
-    } catch (failure: unknown) {
-      budgetError = failure instanceof ApiError ? failure.message : "could not save resource settings";
-    } finally {
-      budgetSaving = false;
-    }
-  }
-
-  async function resetBudget(): Promise<void> {
-    if (budgetSaving || resettingBudget) return;
-    resettingBudget = true;
-    budgetError = "";
-    try {
-      budget = await resetResourceSettings();
-      maxProcesses = budget.max_live_processes;
-      reserveGb = displayGb(budget.memory_reserve_bytes);
-      leaseGb = displayGb(budget.default_process_memory_bytes);
-      reservationGb = displayGb(budget.memory_reservation_bytes);
-      warnPercent = budget.memory_warn_percent;
-      captainCeilingGb = displayGb(budget.memory_captain_ceiling_bytes);
-      await resources.load();
-    } catch (failure: unknown) {
-      budgetError = failure instanceof ApiError ? failure.message : "could not reset resource settings";
-    } finally {
-      resettingBudget = false;
-    }
-  }
-
-  async function save(event: SubmitEvent): Promise<void> {
-    event.preventDefault();
-    if (saving) return;
-    saving = true;
-    error = "";
-    try {
-      await setGlobalProse(value);
-      close();
-    } catch (failure: unknown) {
-      error = failure instanceof ApiError ? failure.message : "could not save global prose";
-      saving = false;
-    }
+    search?.focus();
   }
 </script>
 
-<Modal title="settings" {close}>
-  <section id="resource-budget" bind:this={budgetSection} class="mb-5 border-b border-line pb-4">
-    <h2 class="mb-2 text-[12px] text-cream">resource budget</h2>
-    {#if budget}
-      <p class="dialog-note mb-2">
-        host {Math.round(budget.host_ram_bytes / 1024 ** 3)} GB · available after reserve {Math.floor(
-          budget.memory_budget_bytes / 1024 ** 3,
-        )} GB · process cap ceiling {Math.floor(budget.memory_ceiling_bytes / 1024 ** 3)} GB
-      </p>
-    {/if}
-    <form class="line-form" onsubmit={saveBudget}>
-      <label for="maxLiveProcesses">maximum live processes</label>
-      <input
-        id="maxLiveProcesses"
-        type="number"
-        min="4"
-        max="32"
-        step="1"
-        bind:value={maxProcesses}
-        disabled={budgetLoading || budgetSaving || resettingBudget}
-      />
-      {#if budget}
-        <p class="dialog-note">default: {budget.computed_defaults.max_live_processes}</p>
-      {/if}
-      <label for="memoryReserve">memory reserve (GB)</label>
-      <input
-        id="memoryReserve"
-        type="number"
-        min="0"
-        step="0.01"
-        bind:value={reserveGb}
-        disabled={budgetLoading || budgetSaving || resettingBudget}
-      />
-      {#if budget}
-        <p class="dialog-note">
-          default: {displayGb(budget.computed_defaults.memory_reserve_bytes)} GB
-        </p>
-      {/if}
-      <label for="defaultLease">default process memory budget (GB)</label>
-      <input
-        id="defaultLease"
-        type="number"
-        min="0.25"
-        step="0.01"
-        bind:value={leaseGb}
-        disabled={budgetLoading || budgetSaving || resettingBudget}
-      />
-      {#if budget}
-        <p class="dialog-note">
-          Per-process soft budget: warnings fire as a process nears and passes it. On Linux the kernel kills
-          only at a higher emergency backstop (1.5× or +1 GB, within ¾ of RAM); Windows enforces it as a hard
-          limit; macOS is best-effort; default: {displayGb(
-            budget.computed_defaults.default_process_memory_bytes,
-          )} GB
-        </p>
-      {/if}
-      <label for="memoryReservation">memory reservation (GB)</label>
-      <input
-        id="memoryReservation"
-        type="number"
-        min="0.25"
-        step="0.01"
-        bind:value={reservationGb}
-        disabled={budgetLoading || budgetSaving || resettingBudget}
-      />
-      {#if budget}
-        <p class="dialog-note">
-          Admission accounting estimate per process; it does not limit the process. default: {displayGb(
-            budget.computed_defaults.memory_reservation_bytes,
-          )} GB
-        </p>
-      {/if}
-      <label for="memoryWarnPercent">early memory warning (%)</label>
-      <input
-        id="memoryWarnPercent"
-        type="number"
-        min="50"
-        max="95"
-        step="1"
-        bind:value={warnPercent}
-        disabled={budgetLoading || budgetSaving || resettingBudget}
-      />
-      <p class="dialog-note">People only · default: 80%</p>
-      <label for="memoryCaptainCeiling">captain approval ceiling (GB)</label>
-      <input
-        id="memoryCaptainCeiling"
-        type="number"
-        min="0.25"
-        step="0.01"
-        bind:value={captainCeilingGb}
-        disabled={budgetLoading || budgetSaving || resettingBudget}
-      />
-      <p class="dialog-note">
-        Requests above this ceiling need a person · default: twice the process cap, up to the host ceiling
-      </p>
-      <div class="line-status" class:error={Boolean(budgetError)} aria-live="polite">
-        {budgetLoading ? "loading resource settings…" : budgetError}
-      </div>
-      <div class="line-actions">
-        <button
-          type="button"
-          onclick={resetBudget}
-          disabled={budgetLoading || budgetSaving || resettingBudget}
+<svelte:window onkeydown={shortcut} />
+
+<Modal title="settings" panel {close}>
+  {#snippet tools()}
+    <div
+      class="order-last w-full pb-2 min-[900px]:order-none min-[900px]:w-auto min-[900px]:flex-1 min-[900px]:pb-0"
+    >
+      <label for="settingsSearch" class="sr-only">search settings</label>
+      <div class="relative mx-auto max-w-[420px] min-[900px]:max-w-[380px]">
+        <input
+          id="settingsSearch"
+          bind:this={search}
+          bind:value={query}
+          type="search"
+          autocomplete="off"
+          placeholder="search settings"
+          class="w-full rounded border border-line bg-ink-3 py-2 pr-8 pl-3 text-[12.5px] text-cream placeholder:text-cream-faint"
+          onkeydown={(event) => {
+            if (event.key === "Escape" && query) {
+              event.stopPropagation();
+              query = "";
+            } else if (event.key === "Enter" && results[0]) pick(results[0]);
+          }}
+        />
+        <kbd
+          class="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 rounded border border-line px-1.5 text-[10px] text-cream-faint max-[899px]:hidden"
+          aria-hidden="true">/</kbd
         >
-          {resettingBudget ? "resetting…" : "reset to defaults"}
-        </button>
-        <button class="primary" type="submit" disabled={budgetLoading || budgetSaving || resettingBudget}>
-          {budgetSaving ? "saving…" : "save resource budget"}
-        </button>
       </div>
-    </form>
-  </section>
-  <TaskHistorySetting />
-  <StorageSection />
-  <p class="dialog-text">
-    This text is added after the opening line of every process briefing. Changes apply when a process next
-    joins or resumes.
-  </p>
-  <form id="globalProseForm" class="line-form" onsubmit={save}>
-    <label for="globalProse">global prose</label>
-    <textarea
-      id="globalProse"
-      bind:this={field}
-      bind:value
-      rows={8}
-      maxlength={MAX}
-      disabled={loading || saving}
-      placeholder="shared instructions for every process…"></textarea>
-    <p class="dialog-note">{value.length} / {MAX} characters</p>
-    <div class="line-status" class:error={Boolean(error)} aria-live="polite">
-      {loading ? "loading settings…" : error}
     </div>
-    <div class="line-actions">
-      <button type="button" onclick={close}>cancel</button>
-      <button class="primary" type="submit" disabled={loading || saving}>
-        {saving ? "saving…" : "save settings"}
-      </button>
+  {/snippet}
+  <div
+    class="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] min-[900px]:grid-cols-[200px_minmax(0,1fr)] min-[900px]:grid-rows-1"
+  >
+    <SettingsNav
+      current={section}
+      counts={searching ? countBySection(results) : null}
+      onnavigate={() => (query = "")}
+    />
+    <div
+      bind:this={content}
+      class="min-w-0 overflow-x-hidden overflow-y-auto bg-ink px-4 pt-5 pb-10 min-[900px]:px-8 min-[900px]:pt-7"
+    >
+      <div class="mx-auto w-full max-w-[720px] min-w-0">
+        {#if searching}
+          <SettingsSearchResults {query} {results} onpick={pick} />
+        {/if}
+        {#each visited as id (id)}
+          {@const Section = SECTION_COMPONENTS[id]}
+          <div hidden={searching || id !== section}><Section /></div>
+        {/each}
+      </div>
     </div>
-  </form>
+  </div>
 </Modal>

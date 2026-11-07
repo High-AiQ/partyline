@@ -2,6 +2,7 @@
   /** What Partyline keeps on disk, with a Clear button for the data it can recreate. */
   import { onMount } from "svelte";
   import StorageClearDialog from "./StorageClearDialog.svelte";
+  import SettingRow from "../settings/SettingRow.svelte";
   import { ApiError } from "../../lib/api";
   import { humanSize } from "../../lib/files";
   import { storageApi, type StorageCategory } from "../../lib/storage-api";
@@ -25,15 +26,22 @@
   onMount(() => void load());
 </script>
 
-<section class="mb-5 border-b border-line pb-4" aria-label="storage">
-  <h2 class="mb-2 text-[12px] text-cream">storage</h2>
+<SettingRow
+  id="setting-storage"
+  label="Storage usage"
+  description="Disk used by lines, media and worktrees. Clear removes only what Partyline can recreate, after a confirmation."
+  stacked
+>
   <div class="line-status" class:error={Boolean(error)} aria-live="polite">
     {loading ? "measuring…" : error}
   </div>
   <ul class="text-[12px] text-cream-dim">
     {#each categories as category (category.key)}
-      <li class="flex items-center justify-between gap-2 py-1" data-storage={category.key}>
-        <span>
+      <li
+        class="flex items-center justify-between gap-2 border-b border-line/60 py-2 last:border-b-0"
+        data-storage={category.key}
+      >
+        <span class="min-w-0 break-words">
           {category.label}: {category.approximate ? "≈ " : ""}{humanSize(category.bytes)}
           {#if category.clearable}
             · clearable {humanSize(category.clearable_bytes)} ({category.clearable_count})
@@ -51,4 +59,4 @@
     {/each}
   </ul>
   <button type="button" class="mt-1" onclick={() => void load()} disabled={loading}>refresh</button>
-</section>
+</SettingRow>
