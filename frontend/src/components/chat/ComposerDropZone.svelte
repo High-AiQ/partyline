@@ -56,7 +56,7 @@
   id="composer"
   role="group"
   aria-label="message composer"
-  class="composer relative border-t border-line px-7 pt-3.5 pb-5 {dragging
+  class="composer relative flex-none border-t border-line px-7 pt-3.5 pb-5 {dragging
     ? 'bg-[rgb(217_142_74/0.08)]'
     : ''}"
   ondragenter={onDragEnter}
