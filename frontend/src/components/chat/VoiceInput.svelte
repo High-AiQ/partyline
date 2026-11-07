@@ -11,6 +11,8 @@
   import { room } from "../../state/room.svelte.js";
   import { draft } from "../../state/draft.svelte.js";
   import { voicePresets } from "../../state/voice-presets.svelte.js";
+  import { MicReadout } from "../../state/mic-readout.svelte.js";
+  import MicLevel from "./MicLevel.svelte";
   import { tooltip } from "../../lib/tooltip";
   import { voiceApi } from "../../lib/voice-api";
   import { formatElapsed, insertAtCursor, voiceUnsupported } from "../../lib/voice";
@@ -35,6 +37,7 @@
   let takeLine: string | null = null;
   let takeId = 0;
   let upload: AbortController | null = null;
+  const mic = new MicReadout();
 
   const unsupported = voiceUnsupported({
     isSecureContext: typeof window !== "undefined" && window.isSecureContext,
@@ -61,7 +64,7 @@
   const label = $derived(
     live
       ? recording
-        ? "stop recording and transcribe"
+        ? `stop recording and transcribe${mic.label ? ` (Mic: ${mic.label})` : ""}${mic.silent ? "; no input detected" : ""}`
         : "cancel"
       : (reason ??
           (transcribing
@@ -73,8 +76,10 @@
   const recorder = new VoiceRecorder(
     untrack(() => sources),
     {
+      ...mic.hooks,
       onphase: (next) => {
         phase = next;
+        if (next === "starting") mic.reset();
       },
       onelapsed: (ms) => {
         elapsed = ms;
@@ -83,6 +88,10 @@
       onerror: (message) => {
         failure = message;
         room.showNotice(message, "error");
+      },
+      onnotice: (message) => {
+        mic.hooks.onnotice(message);
+        room.showNotice(message);
       },
     },
   );
@@ -210,8 +219,14 @@
   {#if transcribing}
     <span class="text-[11px]">transcribing…</span>
   {:else if recording}
-    <span class="size-2.5 animate-pulse rounded-sm bg-red-500"></span>
+    <MicLevel level={mic.level} label={mic.label} />
     <span class="text-[11px] tabular-nums">{formatElapsed(elapsed)}</span>
+    {#if mic.silent}
+      <span
+        class="mic-silent absolute right-0 bottom-full mb-1 rounded border border-line bg-ink-2 px-2 py-1 text-[10.5px] whitespace-nowrap text-red"
+        aria-hidden="true">no input detected — is the mic muted?</span
+      >
+    {/if}
   {:else}
     <svg
       class="size-[18px] fill-none stroke-current stroke-[1.8] [stroke-linecap:round] [stroke-linejoin:round]"
@@ -223,3 +238,4 @@
     </svg>
   {/if}
 </button>
+<span class="sr-only" role="status">{recording && mic.silent ? "no input detected" : ""}</span>
