@@ -34,12 +34,12 @@ class PartylineClient:
     def home(self) -> str:
         return self.connection["conversation_id"]
 
-    def request(self, method: str, path: str, payload=None):
+    def request(self, method: str, path: str, payload=None, timeout: float = 30):
         body = None if payload is None else json.dumps(payload).encode()
         headers = {"Content-Type": "application/json"}
         if body is not None:
             headers["Content-Length"] = str(len(body))
-        response = self._send(method, path, body, headers, MAX_RESPONSE)
+        response = self._send(method, path, body, headers, MAX_RESPONSE, timeout)
         try:
             return json.loads(response.decode("utf-8")) if response else {}
         except (UnicodeError, ValueError) as exc:
@@ -59,10 +59,11 @@ class PartylineClient:
         return cls(base.hostname, port, timeout=30)
 
     def _send(self, method: str, path: str, body: bytes | None, headers: dict,
-              limit: int) -> bytes:
+              limit: int, timeout: float = 30) -> bytes:
         if not path.startswith("/api/") or "\r" in path or "\n" in path:
             raise ValueError("request path must be a local /api/ path")
         connection = self._origin()
+        connection.timeout = timeout  # http.client reads it when it connects
         try:
             headers = {**headers, "Authorization": "Bearer " + self.connection["token"]}
             connection.request(method, path, body=body, headers=headers)

@@ -8,7 +8,7 @@ import contextlib
 from PIL import Image, ImageDraw
 
 COLORS = {"offline": (128, 128, 128), "paired": (46, 160, 67), "sharing": (240, 165, 0),
-          "control": (215, 58, 73)}
+          "control": (215, 58, 73), "tools": (130, 80, 220)}
 TITLE = "Partyline Helper"
 
 
@@ -35,12 +35,17 @@ class Tray:
     def sharing(self, item=None):
         return self.status.state in ("sharing", "control")
 
+    def tools(self, item=None):
+        return self.status.tools_active
+
     def menu(self):
         item = self.backend.MenuItem
         return self.backend.Menu(
             item(lambda _: self.status.label, None, enabled=False),
             item("Stop sharing", lambda *_: self.status.request_stop_share(),
                  enabled=lambda _: self.sharing()),
+            item("End agent session", lambda *_: self.status.request_stop_tools(),
+                 enabled=lambda _: self.tools()),
             item("Quit Partyline Helper", lambda *_: self.status.request_quit()))
 
     def start(self):

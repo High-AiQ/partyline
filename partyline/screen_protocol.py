@@ -67,6 +67,7 @@ class HelperHello(HelperMessage):
     helper_version: str
     monitors: list[Monitor]
     control: int = 0  # agent-control protocol version; absent on helpers that predate it
+    tools: int = 0  # local-tools protocol version; absent on helpers that predate it
 
 
 class HelperFrame(HelperMessage):

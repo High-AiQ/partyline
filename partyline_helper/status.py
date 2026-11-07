@@ -7,14 +7,16 @@ import contextlib
 
 LABELS = {"offline": "Not connected to Partyline", "paired": "Paired with Partyline",
           "sharing": "Sharing part of your screen",
-          "control": "An agent is controlling your mouse and keyboard"}
+          "control": "An agent is controlling your mouse and keyboard",
+          "tools": "An agent is running a local tool session"}
 
 
 class Status:
     def __init__(self):
         self.state = "offline"
         self.listeners, self.attention_listeners = [], []
-        self.stop_share = self.quit = None
+        self.stop_share = self.quit = self.stop_tools = None
+        self.tools_active = False
 
     @property
     def label(self):
@@ -36,6 +38,10 @@ class Status:
     def request_stop_share(self):
         if self.stop_share:
             self.stop_share()
+
+    def request_stop_tools(self):
+        if self.stop_tools:
+            self.stop_tools()
 
     def request_quit(self):
         if self.quit:
