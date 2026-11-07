@@ -8,12 +8,17 @@
    */
   import { tick } from "svelte";
   import Message from "./Message.svelte";
+  import { formatDayLabel, startsNewDay } from "../../lib/message-time";
+  import { clock } from "../../state/clock.svelte.js";
   import { room } from "../../state/room.svelte.js";
 
   const line = $derived(
     room.conversations.find((line) => line.id === room.conversation?.id) ?? room.conversation,
   );
   let feed = $state<HTMLDivElement | null>(null);
+
+  // Day labels and stamps are relative to now, so they follow the clock past midnight.
+  $effect(() => clock.run());
   /** Within this much of the bottom counts as "following". */
   const STICK_PX = 140;
   const HISTORY_PX = 120;
@@ -179,7 +184,16 @@
         onclick={() => void loadOlder()}>earlier messages could not load · retry</button
       >
     {/if}
-    {#each room.messages as message (message.id)}
+    {#each room.messages as message, index (message.id)}
+      {#if startsNewDay(room.messages[index - 1]?.created_at, message.created_at)}
+        <div
+          class="day-divider mx-auto mt-[18px] mb-[14px] w-fit max-w-full text-center text-[10px] tracking-[0.04em] text-cream-faint"
+          role="separator"
+          data-day-divider
+        >
+          {formatDayLabel(message.created_at, clock.now)}
+        </div>
+      {/if}
       <Message {message} />
       {#each room.history.gaps.filter((gap) => gap.afterId === message.id) as gap (gap.afterId)}
         <div class="mx-auto my-3 flex w-fit justify-center" data-history-gap={gap.afterId}>
