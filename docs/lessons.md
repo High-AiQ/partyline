@@ -1,5 +1,13 @@
 # Lessons: the false-assumptions ledger
 
+## Overlapping phrases can make a regex stall the event loop
+
+The false assumption was that repeating a small list of silence phrases in a regex
+was bounded: overlapping alternatives backtracked exponentially on a legitimate
+word after repeated farewells. Walkthrough silence matching now uses bounded phrase
+lengths and a linear reachability scan; punctuation and long mixed transcripts are
+covered in `tests/test_walkthrough.py`.
+
 ## A detector must be releasable before it starts
 
 The false assumption was that MicVAD's destroy method can release a detector returned

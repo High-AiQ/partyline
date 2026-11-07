@@ -3,7 +3,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from partyline.screen_frames import BufferedFrame, ShareBuffer
-from partyline.walkthrough import WalkthroughBuffer, assemble_message, select_frames
+from partyline.walkthrough import (WalkthroughBuffer, assemble_message, deduplicate_frames,
+                                   select_frames, speech_segments)
 from partyline.walkthrough_takes import Takes
 
 
@@ -20,7 +21,7 @@ class WalkthroughTest(unittest.TestCase):
 
     def test_distinct_frames_and_small_limits(self):
         frames = [frame(0, b"a"), frame(100, b"b"), frame(200, b"b"), frame(300, b"c")]
-        self.assertEqual(select_frames(frames, [], 4), [frames[0], frames[2], frames[3]])
+        self.assertEqual(select_frames(frames, [], 4), [frames[0], frames[1], frames[3]])
         self.assertEqual(select_frames(frames, [], 0), [])
         self.assertEqual(select_frames(frames, [], 1), frames[:1])
         self.assertEqual(select_frames([], []), [])
@@ -60,7 +61,8 @@ class WalkthroughTest(unittest.TestCase):
         image = BufferedFrame(b"x", 1200, {"x": 10, "y": 20, "width": 100, "height": 100},
                               10, 10, {"x": 12, "y": 24, "visible": True}, "image/png")
         body = assemble_message("notes", [{"start": 0, "end": 1, "text": "click"}], [image], True)
-        self.assertEqual(body, 'notes\nContact sheet first: open it, then fetch only the frames you need '
+        self.assertEqual(body, 'Walkthrough · 0:01 · 1 frame\nnotes\n'
+                         'Contact sheet first: open it, then fetch only the frames you need '
                          '(thumb ≈ 230 tokens, slim ≈ 1,400).\nSpeech transcription failed; '
                          'the screen frames are included below.\n'
                          '[0:00] "click"\n[0:01] → frame 1 (pointer at 12,24)')
@@ -68,6 +70,36 @@ class WalkthroughTest(unittest.TestCase):
         self.assertNotIn("pointer at", assemble_message("", [], [image]))
         self.assertIn("no speech", assemble_message("", [], []))
         self.assertIn("no screen frames", assemble_message("", [], [], True))
+
+    def test_silence_and_sentence_boundaries(self):
+        def segment(text, start, end):
+            return {"text": text, "start": start, "end": end}
+        fake = [segment("You!", 0, 1), segment(" THANK YOU. ", 2, 3)]
+        self.assertEqual(speech_segments(fake, False), [])
+        self.assertEqual(speech_segments([segment("you, YOU!", 0, 2)], False), [])
+        self.assertEqual(speech_segments([segment("Thanks... for watching!", 0, 1)] * 2, False), [])
+        repetition = segment("bye " * 2000 + "hello", 0, 1)
+        self.assertEqual(speech_segments([repetition], False), [repetition])
+        self.assertEqual(speech_segments([segment("Hello there", 0, 1)], True), [])
+        actual = [segment("Now I", 0, 1), segment("have my mouse over it.", 1.1, 2),
+                  segment("Thank you.", 3, 4)]
+        joined = speech_segments(actual, False)
+        self.assertEqual([item["text"] for item in joined],
+                         ["Now I have my mouse over it.", "Thank you."])
+        self.assertIn("(no speech detected — check the microphone)", assemble_message("", [], []))
+
+    def test_deduplicate_near_frames_without_losing_pointer_changes(self):
+        from io import BytesIO
+        from PIL import Image
+        def image(color, x):
+            data = BytesIO()
+            Image.new("RGB", (16, 16), color).save(data, format="PNG")
+            return BufferedFrame(data.getvalue(), x * 100, {"x": 0, "y": 0, "width": 100, "height": 100},
+                                 16, 16, {"x": x, "y": 10, "visible": True}, "image/png")
+        first, near, moved, changed = image((100, 100, 100), 10), image((100, 100, 101), 12), \
+            image((100, 100, 100), 20), image((0, 0, 0), 20)
+        self.assertEqual(deduplicate_frames([first, near, moved, changed]), [first, moved, changed])
+        self.assertEqual(select_frames([first, near, moved, changed], []), [first, moved, changed])
 
 
 class TakeBudgetTest(unittest.IsolatedAsyncioTestCase):
