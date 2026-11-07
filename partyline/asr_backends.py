@@ -63,11 +63,17 @@ def parse_payload(payload: Any, fallback_language: str = "") -> Transcript:
 class OpenAICompatible:
     kind = "openai-compatible"
 
-    def __init__(self, base_url: str, model: str, api_key_env: str | None = None, timeout: float = 120.0):
+    def __init__(self, base_url: str, model: str, api_key_env: str | None = None, timeout: float = 120.0,
+                 response_format: str = "verbose_json", language: str | None = None,
+                 prompt: str | None = None):
         self.url = base_url.rstrip("/") + "/v1/audio/transcriptions"
         self.model = model
         self.api_key_env = api_key_env
         self.timeout = timeout
+        # whisper-1 answers verbose_json (segments); gpt-4o-*-transcribe refuse it and need json.
+        self.response_format = response_format
+        self.language = language
+        self.prompt = prompt
 
     def status(self) -> dict[str, Any]:
         if self.api_key_env and not os.environ.get(self.api_key_env):
@@ -80,7 +86,8 @@ class OpenAICompatible:
         if not state["available"]:
             raise TranscriberUnavailable(state["reason"])
         boundary = uuid.uuid4().hex
-        fields = {"model": self.model, "response_format": "verbose_json"}
+        fields = {"model": self.model, "response_format": self.response_format}
+        fields.update({k: v for k, v in (("language", self.language), ("prompt", self.prompt)) if v})
         parts = [f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode()
                  for k, v in fields.items()]
         suffix = _SUFFIX.get(mime.split(";")[0], ".webm")
@@ -95,10 +102,26 @@ class OpenAICompatible:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:  # noqa: S310 - operator-set URL
                 payload = json.loads(resp.read())
         except urllib.error.HTTPError as exc:
-            raise TakeFailed(f"the speech service answered {exc.code}", 502) from exc
+            raise TakeFailed(_http_failure(exc, headers.get("Authorization", "")), 502) from exc
         except (urllib.error.URLError, OSError, ValueError) as exc:
             raise TakeFailed(f"could not reach the speech service: {exc}", 502) from exc
-        return parse_payload(payload)
+        return parse_payload(payload, self.language or "")
+
+
+def _http_failure(exc: urllib.error.HTTPError, secret: str) -> str:
+    """The service's own complaint (e.g. "Use 'json' or 'text'"), never anything key-shaped."""
+    if exc.code in (401, 403):
+        return f"the speech service refused the API key ({exc.code})"
+    try:
+        body = json.loads(exc.read() or b"null")
+        detail = body.get("error", {}).get("message") if isinstance(body, dict) else None
+    except (ValueError, OSError, AttributeError):
+        detail = None
+    if not isinstance(detail, str) or not detail.strip():
+        return f"the speech service answered {exc.code}"
+    token = secret.removeprefix("Bearer ")
+    detail = detail.replace(token, "[redacted]") if token else detail
+    return f"the speech service answered {exc.code}: {detail.strip()[:200]}"
 
 
 class Command:

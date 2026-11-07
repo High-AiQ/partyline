@@ -23,6 +23,7 @@ from .media_files import MAX_FILES_PER_POST
 from .media_rows import VARIANTS
 from .transcribe_routes import transcribe_router
 from .asr_presets import shared_registry
+from .asr_settings_routes import asr_settings_router
 from .machine_scope import allows, deny_unless, is_human
 from .upload_scope import UPLOAD_ONLY_CAPTION_REFUSAL
 
@@ -267,5 +268,6 @@ def media_router(runtime, store: MediaStore) -> APIRouter:
             },
         )
 
-    router.include_router(transcribe_router(runtime, shared_registry))
+    router.include_router(transcribe_router(runtime, lambda: shared_registry(runtime.db)))
+    router.include_router(asr_settings_router(runtime))
     return router

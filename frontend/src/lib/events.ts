@@ -206,6 +206,9 @@ export const ScreenDevicesChangedEventSchema = z.object({
 export type MemoryRequestEvent = z.infer<typeof MemoryRequestEventSchema>;
 export type ConversationsChangedEvent = z.infer<typeof ConversationsChangedEventSchema>;
 
+/** Someone changed the speech presets in settings: refetch the preset list. */
+export const AsrPresetsChangedEventSchema = z.object({ type: z.literal("asr_presets_changed") });
+
 const CurrentWireEventSchema = z.discriminatedUnion("type", [
   HelloEventSchema,
   MessageEventSchema,
@@ -233,6 +236,7 @@ const CurrentWireEventSchema = z.discriminatedUnion("type", [
   ScreenShareEventSchema,
   ScreenDevicesChangedEventSchema,
   PinsChangedEventSchema,
+  AsrPresetsChangedEventSchema,
 ]);
 
 /** Normalize the boolean-only presence frame emitted by older servers. */

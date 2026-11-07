@@ -25,7 +25,12 @@ export type Transcript = z.infer<typeof TranscriptSchema>;
 export const voiceApi = {
   presets: (): Promise<VoiceListing> =>
     request("/api/transcribe/presets", { schema: ListingSchema, fallback: "could not check voice input" }),
-  transcribe: (conversationId: string, audio: Blob, preset: string | null): Promise<Transcript> =>
+  transcribe: (
+    conversationId: string,
+    audio: Blob,
+    preset: string | null,
+    signal?: AbortSignal,
+  ): Promise<Transcript> =>
     request(
       `/api/conversations/${conversationId}/transcribe${preset ? `?preset=${encodeURIComponent(preset)}` : ""}`,
       {
@@ -33,6 +38,7 @@ export const voiceApi = {
         method: "POST",
         form: audio,
         fallback: "could not transcribe that recording",
+        ...(signal ? { signal } : {}),
       },
     ),
 };

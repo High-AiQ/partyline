@@ -1,10 +1,9 @@
 <script lang="ts">
   /** Compact fleet-wide admission snapshot beside the account controls. */
   import { onMount } from "svelte";
-  import { dialogs } from "../../state/dialogs.svelte.js";
   import { resources } from "../../state/resources.svelte.js";
   import { tooltipsEnabled, tooltip } from "../../lib/tooltip";
-  import SettingsDialog from "../dialogs/SettingsDialog.svelte";
+  import { settingsNav } from "../../state/settings-nav.svelte.js";
 
   const view = $derived(resources.snapshot);
   const ratio = $derived(view ? Math.min(1, view.live_processes / view.max_live_processes) : 0);
@@ -48,7 +47,7 @@
 
   function openSettings(): void {
     resources.popoverOpen = false;
-    dialogs.open(SettingsDialog, { focusBudget: true });
+    settingsNav.show("resources", "setting-max-live-processes");
   }
 
   function activate(): void {

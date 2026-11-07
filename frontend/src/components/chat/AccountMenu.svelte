@@ -4,7 +4,7 @@
   import { session } from "../../state/session.svelte.js";
   import { tooltip } from "../../lib/tooltip";
   import ChangeHandleDialog from "../dialogs/ChangeHandleDialog.svelte";
-  import SettingsDialog from "../dialogs/SettingsDialog.svelte";
+  import { settingsNav } from "../../state/settings-nav.svelte.js";
 </script>
 
 <div class="account flex shrink-0 items-center gap-1.5">
@@ -13,7 +13,9 @@
     type="button"
     aria-label="settings"
     use:tooltip={{ label: "settings" }}
-    onclick={() => dialogs.open(SettingsDialog)}
+    onclick={() => {
+      settingsNav.show();
+    }}
     ><span class="button-label">settings</span><svg
       aria-hidden="true"
       viewBox="0 0 24 24"

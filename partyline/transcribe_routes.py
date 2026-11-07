@@ -39,7 +39,7 @@ class TranscribeResponse(BaseModel):
     segments: list[TranscribeSegment] = []
 
 
-async def _bounded_body(request: Request, limit: int) -> bytes:
+async def bounded_body(request: Request, limit: int) -> bytes:
     too_big = HTTPException(413, f"audio is larger than {limit // (1024 * 1024)} MB")
     declared = request.headers.get("content-length")
     if declared and declared.isdigit() and int(declared) > limit:
@@ -80,7 +80,7 @@ def transcribe_router(runtime, get_registry) -> APIRouter:
         state = backend.status()
         if not state["available"]:
             raise HTTPException(503, state["reason"])
-        data = await _bounded_body(request, registry.max_bytes)
+        data = await bounded_body(request, registry.max_bytes)
         mime = request.headers.get("content-type", "")
         try:
             result = await asyncio.to_thread(backend.transcribe, data, mime)

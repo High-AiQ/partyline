@@ -8,6 +8,7 @@ import { applyPendingWireEvent, ignoreBackgroundFailure } from "./room-pending-s
 import type { Pin } from "../lib/pin-contracts";
 import { resources } from "./resources.svelte.js";
 import { screenStatus } from "./screen-status.svelte.js";
+import { voicePresets } from "./voice-presets.svelte.js";
 
 export interface RoomWireSink extends RefusalTarget {
   conversation: Conversation | null;
@@ -115,6 +116,9 @@ export function onRoomWireEvent(room: RoomWireSink, event: WireEvent, context: W
     case "write_set_grant_request":
     case "memory_request":
       applyPendingWireEvent(event);
+      break;
+    case "asr_presets_changed":
+      voicePresets.refresh();
       break;
     case "error":
       if (event.conversation_id === convId) handleWireError(room, event, context);
