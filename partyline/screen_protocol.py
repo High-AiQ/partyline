@@ -66,6 +66,7 @@ class HelperHello(HelperMessage):
     os: str
     helper_version: str
     monitors: list[Monitor]
+    control: int = 0  # agent-control protocol version; absent on helpers that predate it
 
 
 class HelperFrame(HelperMessage):
@@ -99,6 +100,7 @@ class ShareCommand(BaseModel):
     max_fps: int = DEFAULT_MAX_FPS
     long_edge: int = DEFAULT_LONG_EDGE
     min_change: float = DEFAULT_MIN_CHANGE
+    control: bool = False  # the person asked for agent control with this share
 
 
 class ShareAccepted(HelperMessage):

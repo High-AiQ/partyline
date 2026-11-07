@@ -100,8 +100,9 @@ requester or region awaiting consent. Then answer
 `Share this region? [y/N]` with `y` within 60 seconds to accept. Silence or any other
 answer declines. The terminal displays SHARING ACTIVE until stopped. Type `s` and
 Enter to stop a share, or Ctrl+C to stop and exit. Keep this terminal visible.
-`run --yes` explicitly disables per-request confirmation and prints a warning;
-use it only when you intend every incoming request to be accepted.
+`run --yes` explicitly disables per-request share confirmation and prints a warning;
+use it only when you intend every incoming share request to be accepted. It never
+grants agent control (see below).
 
 While sharing, a thin amber border appears just **outside** the selected rectangle
 so you can see exactly which region is being sent. It is click-through, stays on
@@ -122,7 +123,9 @@ while you want these previews to be available.
 Frames contain compressed screen pixels, the selected rectangle, elapsed time,
 and the exact global pointer position with a flag indicating whether it lies in
 the region. Monitor layout, device name, OS and helper version are also sent.
-No audio or input events are collected. The helper never moves the pointer or types.
+No audio is collected. The helper moves the pointer or types only while you have
+granted agent control (below); while control is active it watches your keyboard
+for the kill switch but sends no keystrokes to Partyline.
 Pixels remain in memory; no screenshots are stored locally. The server may retain
 received images according to its own policy. Credentials persist until unpaired.
 
@@ -146,7 +149,7 @@ require a new request and fresh consent. Backoff reaches at most 60 seconds.
 - **macOS:** System Settings → Privacy & Security → Screen Recording (called
   Screen & System Audio Recording on newer versions): enable the terminal or
   Python application running the helper, then quit and reopen it. Reading the
-  pointer does not require Accessibility permission. The helper checks Screen
+  pointer does not require Accessibility permission; agent control does (below). The helper checks Screen
   Recording permission and rejects black captures with instructions (a completely black desktop can also
   trigger that warning). Retina capture pixels can differ from desktop points;
   the helper multiplies desktop points and pointer positions by the uniform
@@ -164,7 +167,93 @@ require a new request and fresh consent. Backoff reaches at most 60 seconds.
 If pairing fails, check the origin, network, TLS certificate and code expiry.
 If revoked, create a fresh code and pair again. If capture initialization fails,
 verify desktop permissions and install the `helper` extra. The dependencies are
-mss (MIT), pynput (LGPL-3.0), websockets and Pillow; pynput is used only for reading
-the pointer. Automated tests use fake capture and an in-process server. The
+mss (MIT), pynput (LGPL-3.0), websockets and Pillow; pynput reads the pointer and,
+only during agent control, injects input and listens for the kill switch. Automated tests use fake capture and an in-process server. The
 headless development server cannot verify real desktop capture; native interactive
 smoke testing is still required on each platform.
+
+## Agent control
+
+An agent on the line can ask to drive the mouse and keyboard **inside the shared
+region only**. This is a separate consent from sharing, and it lasts for one share.
+
+**Consent.** When an agent calls `screen_control_request`, the helper prints the
+requesting agent and line, ignores input for one second, then asks
+`Allow agent control? [y/N]`. Answer `y` within 60 seconds; silence or anything
+else declines, and the agent is told. Without a terminal (login autostart) the
+same question is a native Yes/No dialog with the same guard and timeout. To offer control with the share itself,
+start the share with `"control": true` (`POST /api/screen/shares`); the same
+prompt follows the share prompt and the grant covers every agent on the line.
+`run --yes` does **not** grant control. Only
+`run --allow-control-without-prompt` does, and it prints a loud warning at start
+and on every grant; use it only on a machine you are willing to hand over.
+Control ends when the share ends (`s` Enter, Ctrl+C, a stop from Partyline, or a
+disconnect). A new share needs a new grant.
+
+**Indicator.** While control is active the terminal shows
+`AGENT CONTROL ACTIVE` and logs every action (`Agent agent-x: click left at
+(-90, 20)`). The capture-zone border turns from amber to red while an agent has
+control and back to amber when control ends (unless the helper runs with
+`--no-border` or the overlay could not be drawn). The
+share API (`GET /api/screen/shares`) and the line's `screen_share` events carry
+`share.control` with its status, holder and action count.
+
+**Kill switch.** Physical input takes control back at once and revokes it for the
+rest of the share, after which actions and new requests are refused:
+
+- moving the pointer more than 8 pixels from where the agent last put it
+  (checked ten times a second and before every action);
+- pressing any key, even while the agent is typing. Windows and macOS flag the
+  agent's own keystrokes, so any unflagged key revokes. On X11 the agent's text is
+  flagged too, but named keys it presses (Enter, Tab, Ctrl, …) also echo once
+  unflagged; each such echo is accepted once, for at most half a second, and any
+  other key revokes. Text is typed one character at a time and stops at the first
+  key you press;
+- Ctrl+Alt+Esc, which always revokes;
+- `s` Enter, which stops sharing and so ends control.
+
+The person who started the share can also revoke control from Partyline
+(`DELETE /api/screen/shares/{share_id}/control`). A revocation or a stop takes
+effect at once: actions already queued on the helper are discarded, and one in
+progress (a drag or typing) stops at its next step. Every revocation is posted to the
+line and @mentions the agent that held or last used control.
+
+**What agents can do.** `screen_click`, `screen_move`, `screen_drag`,
+`screen_scroll`, `screen_type` and `screen_key` take coordinates in pixels of the
+latest `screen_frame` image ((0, 0) is its top-left corner). The server converts
+them with the frame's region and scale (the inverse of `mark_pointer`), and both
+the server and the helper refuse anything outside the region. Each action returns
+a fresh frame after a 0.3 second settle. Typing and keys are refused until the
+agent has clicked inside the region, so they cannot land in the helper's own
+terminal. These combos are blocked on both sides: Ctrl+Alt+Delete,
+Ctrl+Alt+Backspace, Ctrl+Alt+F1–F12, Ctrl+Alt+Esc, Win+L (Windows), Super+L and
+Ctrl+Alt+L (Linux), and Ctrl+Cmd+Q, Cmd+Alt+Esc and Cmd+Shift+Q (macOS), including
+any of them with extra modifiers.
+
+**Audit.** Actions are posted to the line as compact system notes, batched every
+five seconds (or every 20 actions) with repeated pointer moves folded together,
+and flushed when control ends. Typed text appears as its first 40 characters.
+An action that stopped partway is audited as `(interrupted: …)`, and one the
+computer never confirmed as `(unconfirmed)`.
+
+**Limits.** By default at most 10 actions per second, 500 characters per
+`screen_type`, and 300 actions per share; the helper also enforces a hard local
+ceiling of 20 actions per second and 500 characters. Server operators set the
+limits with `PARTYLINE_CONTROL_RATE`, `PARTYLINE_CONTROL_MAX_TEXT` (the helper's
+500 still applies) and `PARTYLINE_CONTROL_SESSION_ACTIONS`; invalid values stop
+the server at startup.
+
+**Permissions.**
+
+- **Windows:** none beyond running the helper on the interactive desktop. Input
+  cannot reach elevated (UAC) windows or the secure desktop.
+- **macOS:** System Settings → Privacy & Security → **Accessibility** (to move the
+  pointer and type) and **Input Monitoring** (for the kill-switch key listener):
+  enable the terminal or Python running the helper, then quit and reopen it.
+  Without them the helper refuses control and says why; it never runs control
+  without the kill switch.
+- **Linux:** an X11 session (XTest). Wayland is refused.
+
+**Compatibility.** The helper announces `control: 1` in its hello. Helpers that
+predate agent control get no control messages; agents receive `helper too old
+for control` instead.

@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from fastapi import WebSocket, WebSocketDisconnect
 
 from .screen_connections import device_valid, notice
+from .screen_control import CONTROL_MESSAGES, ControlHub
 from .screen_frames import BufferedFrame, ShareBuffer
 from .screen_pair_limits import PairLimits
 from .screen_requests import capture, end_share, preview
@@ -34,6 +35,7 @@ class ScreenHub:
         self.pending_codes: dict[str, tuple[int, str, float]] = {}
         self.snap_waiters: dict[str, tuple[ShareBuffer, asyncio.Future]] = {}
         self.preview_waiters: dict[str, tuple[str, str | int, asyncio.Future]] = {}
+        self.control = ControlHub(self)
 
     @staticmethod
     def digest(token: str) -> str:
@@ -74,7 +76,7 @@ class ScreenHub:
                 await ws.close(code=4403, reason="device revoked")
                 return
             current = {**device, "socket": ws, "name": hello.device_name,
-                       "os": hello.os, "helper_version": hello.helper_version,
+                       "os": hello.os, "helper_version": hello.helper_version, "control": hello.control,
                        "monitors": [item.model_dump() for item in hello.monitors],
                        "last_seen": time.monotonic()}
             old = self.devices.get(ident)
@@ -139,6 +141,8 @@ class ScreenHub:
                     share = self._share(result.share_id, ident)
                     if share:
                         await self.stop_share(share.share_id, result.reason)
+                elif kind in CONTROL_MESSAGES:
+                    await self.control.from_helper(current, message)
                 elif kind == "error":
                     request_id = message.get("request_id")
                     entry = self.snap_waiters.get(request_id)
@@ -184,7 +188,7 @@ class ScreenHub:
 
     async def start_share(self, conv_id: str, owner_id: int, requested_by: str,
                           device_id: str, region: dict, line_name: str,
-                          walkthrough: bool = False) -> ShareBuffer:
+                          walkthrough: bool = False, control: bool = False) -> ShareBuffer:
         device = self.devices.get(device_id)
         if not device or device["owner_id"] != owner_id:
             raise ValueError("choose one of your online computers")
@@ -202,13 +206,16 @@ class ScreenHub:
         command = ShareCommand(type="start_share", share_id=share.share_id, conv_id=conv_id,
                                line_name=line_name, requested_by=requested_by,
                                region=region, max_fps=DEFAULT_MAX_FPS,
-                               long_edge=DEFAULT_LONG_EDGE, min_change=DEFAULT_MIN_CHANGE)
+                               long_edge=DEFAULT_LONG_EDGE, min_change=DEFAULT_MIN_CHANGE,
+                               control=control and not walkthrough)
         try:
             await device["socket"].send_json(command.model_dump())
         except Exception:
             self.shares.pop(conv_id, None)
             self.walkthroughs.discard(share.share_id)
             raise
+        if command.control:
+            self.control.expect(share, requested_by)
         await self._line_event(conv_id, self._share_view(share, device))
         return share
 
@@ -219,6 +226,7 @@ class ScreenHub:
         status = share.status
         self.walkthroughs.share_ended(share.share_id)
         end_share(self, share)
+        await self.control.end(share, reason)
         device = self.devices.get(share.device_id)
         if device:
             try:
@@ -262,4 +270,5 @@ class ScreenHub:
             "status": share.status,
             "walkthrough": take is not None,
             "recording": bool(take and take.started is not None and not take.stopped),
+            "control": self.control.view(share),
         }}

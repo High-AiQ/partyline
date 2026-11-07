@@ -54,10 +54,21 @@ class Terminal:
                 f"{display_text(request['requested_by'])} asks to share part of your screen "
                 f"(line: {display_text(request['line_name'])}).\n\nRegion: {region_text}\n\n"
                 "Share this region?", timeout=timeout, sleep=self.sleep)
+        return await self.ask("Share this region? [y/N] ", timeout)
+
+    async def ask(self, question, timeout=60, dialog=None):
+        """The guarded y/N prompt; agent control uses it directly so --yes never applies.
+
+        Without a terminal, `dialog` = (title, message) is asked in the native dialog instead,
+        which has the same 1 s guard and timeout.
+        """
+        if self.dialog and dialog:
+            return await self.dialog(*dialog, timeout=timeout, sleep=self.sleep)
+        self.clear()
         deadline = self.clock() + timeout
         print("Please wait 1 second; earlier input is ignored.", flush=True)
         await self.sleep(min(PROMPT_DELAY, timeout))
         self.clear()
-        print("Share this region? [y/N] ", end="", flush=True)
+        print(question, end="", flush=True)
         remaining = max(0, deadline - self.clock())
         return await self.read(remaining) == "y"

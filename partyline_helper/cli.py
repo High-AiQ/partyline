@@ -29,11 +29,13 @@ def main(argv=None):
     pairing.add_argument("--name", default=socket.gethostname())
     run = commands.add_parser("run")
     run.add_argument("--yes", action="store_true",
-                     help="Auto-accept every request (unsafe on shared servers)")
+                     help="Auto-accept every share request (never grants agent control)")
     run.add_argument("--log", type=Path, help="Append output to this file (used at login)")
     run.add_argument("--wait", action="store_true", help=argparse.SUPPRESS)
     run.add_argument("--no-border", action="store_true",
                      help="Do not draw the capture-zone border while sharing")
+    run.add_argument("--allow-control-without-prompt", action="store_true",
+                     help="DANGEROUS: grant every agent control request without asking")
     commands.add_parser("unpair")
     commands.add_parser("install", help="Register partyline:// links and start at login (once)")
     commands.add_parser("uninstall", help="Remove what install registered (keeps pairing)")
@@ -70,8 +72,11 @@ def main(argv=None):
                 if not args.no_border:
                     from .border import CaptureBorder
                     border = CaptureBorder(scale=desktop.scale)
+                if args.allow_control_without_prompt:
+                    print("WARNING: --allow-control-without-prompt LETS AGENTS DRIVE THIS MOUSE AND "
+                          "KEYBOARD WITHOUT ASKING. Move the mouse or press a key to take control back.")
                 asyncio.run(serve(load_config(), desktop, Terminal(dialog=auto_dialog()), args.yes,
-                                  border=border))
+                                  border=border, allow_control=args.allow_control_without_prompt))
     except KeyboardInterrupt:
         print("Helper stopped.")
     except ImportError:
