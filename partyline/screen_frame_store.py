@@ -1,22 +1,26 @@
-"""Persist a screen frame as a line media message, shared by screen_frame and agent actions."""
+"""Persist screen frames as line-scoped media without posting chat messages."""
 
-from .contracts import MessageEvent, MessageResponse
+import asyncio
+import uuid
+
 from .media import prepared_files
-from .media_digest import digest_body
 
 
-async def store_frame(runtime, store, conv_id: str, sender: str, data: bytes, mime: str,
-                      caption: str):
-    """Store one image and broadcast its digest message; returns the file reference."""
-    prepared = prepared_files([(data, "screen-frame", mime)])
-    message = runtime.db.add_message(conv_id, sender, "agent", "")
-    try:
-        refs = store.store(conv_id, message["id"], prepared, "Screen frame", None)
-    except Exception:
-        runtime.db._exec("DELETE FROM messages WHERE id=?", (message["id"],))
-        raise
-    body = digest_body(caption, refs, "")
-    runtime.db._exec("UPDATE messages SET body=? WHERE id=?", (body, message["id"]))
-    await runtime.broadcast(conv_id, MessageEvent(message=MessageResponse.model_validate(
-        {**message, "body": body, "files": refs})))
+async def store_frame(store, conv_id: str, data: bytes, mime: str):
+    """Use a private negative media group, outside the positive chat message IDs."""
+    prepared = await asyncio.to_thread(prepared_files, [(data, "screen-frame", mime)])
+    group = -(uuid.uuid4().int % (2**63 - 1)) - 1
+    refs = await asyncio.to_thread(store.store, conv_id, group, prepared, "Screen frame", None)
     return refs[0]
+
+
+async def frame_reference(store, share, sender, frame, data, mime, marked=False):
+    """Reuse the last identical image delivered to this agent in this share."""
+    async with share.frame_lock:
+        previous = share.agent_frames.get(sender)
+        geometry = (frame.region, frame.out_width, frame.out_height, marked)
+        if previous and previous[0] == data and previous[1] == geometry:
+            return previous[2], True
+        ref = await store_frame(store, share.conv_id, data, mime)
+        share.agent_frames[sender] = (data, geometry, ref)
+        return ref, False

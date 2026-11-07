@@ -106,6 +106,7 @@ class ScreenTest(unittest.TestCase):
             self.assertEqual(upload.status_code, 200, upload.text)
             self.assertEqual(len(upload.json()["files"]), 1)
             self.assertIn("/api/media/", upload.json()["message"]["body"])
+            messages_before = len(self.db.list_messages("line"))
             future = self.executor.submit(
                 self.client.post, "/api/conversations/line/screen-frame?mark_pointer=true")
             command = ws.receive_json()
@@ -115,8 +116,19 @@ class ScreenTest(unittest.TestCase):
             ws.send_bytes(png())
             result = future.result()
             self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(len(self.db.list_messages("line")), messages_before)
             self.assertIn("'x': -50", result.json()["description"])
             file_id = result.json()["file"]["id"]
+            self.assertFalse(result.json()["unchanged"])
+            again = self.executor.submit(
+                self.client.post, "/api/conversations/line/screen-frame?mark_pointer=true")
+            command = ws.receive_json()
+            frame["request_id"] = command["request_id"]
+            ws.send_json(frame)
+            ws.send_bytes(png())
+            repeated = again.result()
+            self.assertTrue(repeated.json()["unchanged"])
+            self.assertEqual(repeated.json()["file"]["id"], file_id)
             saved = self.client.get(f"/api/media/{file_id}/original")
             self.assertEqual(saved.status_code, 200)
             self.assertNotEqual(saved.content, png())
