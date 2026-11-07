@@ -7,6 +7,17 @@ from urllib.error import URLError
 
 from .config import config_path, load_config, pair
 
+UVX_PREFIX = "uvx --from 'partyline[helper] @ git+https://github.com/High-AiQ/partyline.git' partyline-helper"
+CHECKOUT_PREFIX = "uv run --extra helper partyline-helper"
+
+
+def run_hint():
+    # How this helper was launched (uvx or a checkout) cannot be detected reliably, so show both.
+    return (f"Paired. Now start the helper on this computer and keep that terminal open:\n"
+            f"  {UVX_PREFIX} run          (if you used uvx)\n"
+            f"  {CHECKOUT_PREFIX} run     (from a partyline checkout)\n"
+            "Answer y to each share prompt.")
+
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="partyline-helper")
@@ -25,7 +36,7 @@ def main(argv=None):
     try:
         if args.command == "pair":
             pair(args.server, args.code, args.name)
-            print("Paired. Run partyline-helper run to connect.")
+            print(run_hint())
         elif args.command == "unpair":
             config_path().unlink(missing_ok=True)
             print("Local credential removed. Revoke the device in Partyline to invalidate its token.")

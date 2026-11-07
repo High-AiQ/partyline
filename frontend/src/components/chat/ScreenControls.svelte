@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import Modal from "../Modal.svelte";
+  import PairingSteps from "../PairingSteps.svelte";
   import { screenStatus } from "../../state/screen-status.svelte.js";
   import { room } from "../../state/room.svelte.js";
   import { walkthrough } from "../../state/walkthrough.svelte.js";
@@ -182,7 +183,7 @@
   <Modal title="Computers and screen sharing" {close} wide>
     <button type="button" onclick={() => void pair()}>Pair a computer</button>
     {#if code}<p>Code: <strong>{code}</strong> (expires in 5 minutes)</p>
-      <code>uv run --extra helper partyline-helper pair {window.location.origin} {code}</code>{/if}
+      <PairingSteps origin={window.location.origin} {code} />{/if}
     <button type="button" onclick={() => void refresh()}>Refresh</button>
     {#each devices as item (item.id)}
       <div class="flex gap-2">
