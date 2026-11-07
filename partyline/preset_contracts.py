@@ -69,8 +69,15 @@ class StaffingLine(BaseModel):
     accepted_sha: str
 
 
+class StaffingQueued(BaseModel):
+    line_id: str
+    handle: str
+    adapter: str
+
+
 class StaffingResponse(BaseModel):
     presets_in_use: bool
     presets: list[StaffingPreset] = Field(default_factory=list)
     processes: list[StaffingProcess] = Field(default_factory=list)
     lines: list[StaffingLine] = Field(default_factory=list)
+    reattaching: list[StaffingQueued] = Field(default_factory=list)
