@@ -1,0 +1,158 @@
+name: windows-installer
+
+# Builds the unsigned prototype installer for the screen helper (docs/screen-helper.md, "Windows installer").
+#   - every push to main and every pull request touching the helper: an artifact (Actions run page)
+#   - a v* tag: the same file as a release asset, named PartylineHelper-Setup.exe so that
+#       https://github.com/High-AiQ/partyline/releases/latest/download/PartylineHelper-Setup.exe is stable
+# Tags created by the tag-version job (GITHUB_TOKEN) cannot trigger this workflow directly, so that job
+# dispatches it with the new tag as `tag`.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "partyline_helper/**"
+      - "packaging/windows/**"
+      - ".github/workflows/windows-installer.yml"
+      - "pyproject.toml"
+      - "uv.lock"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build and attach the installer to (e.g. v2.89.0)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    name: installer
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # attach the release asset; nothing else writes
+    env:
+      TAG: ${{ inputs.tag || (startsWith(github.ref, 'refs/tags/v') && github.ref_name) || '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: version
+        shell: pwsh
+        run: |
+          $version = uv run --locked python -c "import partyline; print(partyline.__version__)"
+          if ($LASTEXITCODE -ne 0) { throw "cannot read the version" }
+          "VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          if ($env:TAG -and $env:TAG -ne "v$version") { throw "tag $env:TAG does not match version $version" }
+
+      - name: icon
+        shell: pwsh
+        run: uv run --locked --extra helper python packaging/windows/make_icon.py build/PartylineHelper.ico
+
+      - name: freeze the helper (PyInstaller, onedir, windowed)
+        shell: pwsh
+        run: uv run --locked --extra helper --with pyinstaller==6.14.2 pyinstaller --noconfirm packaging/windows/PartylineHelper.spec
+
+      - name: the frozen helper has everything it needs
+        shell: pwsh
+        run: |
+          $exe = "dist\PartylineHelper\PartylineHelper.exe"
+          $run = Start-Process $exe -ArgumentList "selfcheck" -Wait -PassThru -RedirectStandardOutput selfcheck.txt
+          if (Test-Path selfcheck.txt) { Get-Content selfcheck.txt }
+          if ($run.ExitCode -ne 0) { throw "selfcheck failed ($($run.ExitCode))" }
+          if (-not (Get-ChildItem -Recurse dist\PartylineHelper -Directory -Filter "partyline-$env:VERSION.dist-info")) {
+            throw "the exe does not carry the partyline $env:VERSION metadata it reports to the server"
+          }
+
+      # --- Code signing: off for the unsigned prototype. To turn it on, set the repository variable
+      # --- WINDOWS_SIGNING=true plus the AZURE_* secrets/variables (Azure Trusted Signing), or replace both steps
+      # --- with an OV certificate + signtool. The exe is signed before it is packed, the installer afterwards.
+      - name: sign the helper exe
+        if: ${{ vars.WINDOWS_SIGNING == 'true' }}
+        uses: azure/trusted-signing-action@v0.5.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\dist\PartylineHelper
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+          }
+          $dir = "${env:ProgramFiles(x86)}\Inno Setup 6"
+          "$dir" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+
+      - name: build the installer
+        shell: pwsh
+        run: iscc /Qp "/DAppVersion=$env:VERSION" packaging\windows\installer.iss
+
+      - name: sign the installer
+        if: ${{ vars.WINDOWS_SIGNING == 'true' }}
+        uses: azure/trusted-signing-action@v0.5.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\build\installer
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: install and uninstall silently, without administrator rights
+        shell: pwsh
+        run: |
+          $app = "$env:LOCALAPPDATA\Programs\Partyline Helper"
+          $setup = Start-Process build\installer\PartylineHelper-Setup.exe -Wait -PassThru `
+            -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=$PWD\install.log"
+          if ($setup.ExitCode -ne 0) { Get-Content install.log; throw "setup exited $($setup.ExitCode)" }
+          if (-not (Test-Path "$app\PartylineHelper.exe")) { throw "not installed to $app" }
+          reg query "HKCU\Software\Classes\partyline\shell\open\command"
+          if ($LASTEXITCODE -ne 0) { throw "partyline:// handler not registered" }
+          reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v PartylineHelper
+          if ($LASTEXITCODE -ne 0) { throw "start at login not registered" }
+          $un = Start-Process "$app\unins000.exe" -Wait -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES"
+          if ($un.ExitCode -ne 0) { throw "uninstall exited $($un.ExitCode)" }
+          reg query "HKCU\Software\Classes\partyline" 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "uninstall left the partyline:// handler behind" }
+          $global:LASTEXITCODE = 0  # the failed query above is the expected outcome, not the step's exit code
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PartylineHelper-Setup-${{ env.VERSION }}-${{ github.sha }}
+          path: build/installer/PartylineHelper-Setup.exe
+          if-no-files-found: error
+
+      - name: attach to the release
+        if: ${{ env.TAG != '' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view $env:TAG 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:TAG --title "Partyline $env:VERSION" --notes "Partyline $env:VERSION. The Windows screen-helper installer is attached (unsigned: see docs/screen-helper.md)."
+            if ($LASTEXITCODE -ne 0) { throw "cannot create the release" }
+          }
+          gh release upload $env:TAG build/installer/PartylineHelper-Setup.exe --clobber
+          if ($LASTEXITCODE -ne 0) { throw "cannot upload the installer" }

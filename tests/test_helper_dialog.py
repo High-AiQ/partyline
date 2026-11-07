@@ -1,8 +1,11 @@
 """Native consent dialogs: fake backends, a manual clock, no real windows or time."""
 import asyncio
+import base64
 import contextlib
 import io
 import json
+import os
+import subprocess
 import sys
 import threading
 import types
@@ -141,12 +144,30 @@ class DialogTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(sys, "stdin", SimpleNamespace(isatty=closed)):
             self.assertFalse(consent_dialog.interactive())
 
+    def test_windows_nul_stdin_is_not_a_terminal(self):
+        """A detached process gets NUL as stdin: a character device, so isatty() is True, nobody can type."""
+        nul = SimpleNamespace(isatty=lambda: True)
+        real_console = SimpleNamespace(isatty=lambda: True)
+        console = lambda stream: stream is real_console  # noqa: E731 - fakes GetConsoleMode
+        self.assertFalse(consent_dialog.interactive(nul, windows=True, console=console))
+        self.assertTrue(consent_dialog.interactive(real_console, windows=True, console=console))
+        self.assertFalse(consent_dialog.interactive(SimpleNamespace(isatty=lambda: False), windows=True,
+                                                    console=lambda stream: True))  # a pipe
+        self.assertTrue(consent_dialog.interactive(nul, windows=False, console=lambda stream: False))  # POSIX
+        def broken(stream):
+            raise OSError("no handle")
+        self.assertFalse(consent_dialog.interactive(real_console, windows=True, console=broken))
+
+    def test_a_background_run_always_uses_the_dialog(self):
+        self.assertIs(consent_dialog.auto_dialog(True, terminal=lambda: True), consent_dialog.confirm)
+        self.assertIs(consent_dialog.auto_dialog(True, terminal=lambda: False), consent_dialog.confirm)
+        self.assertIsNone(consent_dialog.auto_dialog(False, terminal=lambda: True))
+        self.assertIs(consent_dialog.auto_dialog(False, terminal=lambda: False), consent_dialog.confirm)
+
 
 class FakePopen:
     def __init__(self, command, returncode=0, **options):
         self.command, self.options, self.returncode, self.terminated = command, options, returncode, 0
-        self.stdin = io.BytesIO()
-        self.stdin.close = lambda: None
         self.running = True
 
     def wait(self):
@@ -159,24 +180,37 @@ class FakePopen:
         self.terminated += 1
 
 
+def decoded(command):
+    return json.loads(base64.urlsafe_b64decode(command[-1]))
+
+
 class ProcessDialogTests(unittest.TestCase):
-    def start(self, **kwargs):
+    def start(self, kind="ask", **kwargs):
         made = []
 
         def popen(command, **options):
             made.append(FakePopen(command, **kwargs, **options))
             return made[0]
-        return consent_dialog.ProcessDialog("Title", "Message ' $(x)", 12, popen), made[0]
+        return consent_dialog.ProcessDialog("Title", "Message ' $(x)", 12, popen, kind), made[0]
 
-    def test_dialog_runs_in_a_child_process_with_data_on_stdin_not_argv(self):
+    def test_dialog_request_travels_in_argv_not_stdin_and_names_this_process(self):
         handle, proc = self.start()
-        self.assertEqual(proc.command, [sys.executable, "-m", "partyline_helper.dialog_proc"])
-        self.assertNotIn("Message", " ".join(proc.command))
-        self.assertTrue(proc.stdin.getvalue().endswith(b"\n"))
-        self.assertEqual(json.loads(proc.stdin.getvalue()),
-                         {"title": "Title", "message": "Message ' $(x)", "timeout": 12})
+        self.assertEqual(proc.command[:3], [sys.executable, "-m", "partyline_helper.dialog_proc"])
+        self.assertEqual(decoded(proc.command), {"title": "Title", "message": "Message ' $(x)", "timeout": 12,
+                                                 "kind": "ask", "parent": os.getpid()})
+        self.assertIs(proc.options["stdin"], subprocess.DEVNULL)  # a windowed child may have no stdin
         self.assertNotIn("shell", proc.options)
         self.assertTrue(handle.wait())
+
+    def test_frozen_exe_runs_its_own_dialog_subcommand(self):
+        self.assertEqual(consent_dialog.dialog_command("req", frozen=True, executable="C:/h/Helper.exe"),
+                         ["C:/h/Helper.exe", "dialog", "req"])
+        with patch.object(sys, "frozen", True, create=True):
+            self.assertEqual(consent_dialog.dialog_command("req", executable="x")[1], "dialog")
+
+    def test_notices_use_the_info_kind(self):
+        _, proc = self.start(kind="info")
+        self.assertEqual(decoded(proc.command)["kind"], "info")
 
     def test_only_exit_status_zero_is_yes(self):
         for code, expected in ((0, True), (1, False), (2, False), (-15, False)):
@@ -194,13 +228,6 @@ class ProcessDialogTests(unittest.TestCase):
         proc.terminate = lambda: (_ for _ in ()).throw(OSError("gone"))
         handle.close()
 
-    def test_close_releases_the_pipe_so_the_child_sees_eof(self):
-        handle, proc = self.start()
-        closed = []
-        proc.stdin.close = lambda: closed.append(True)
-        handle.close()
-        self.assertEqual(closed, [True])
-
     def test_default_backend(self):
         with patch("partyline_helper.consent_dialog.importlib.util.find_spec", return_value=object()):
             self.assertIs(consent_dialog.default_backend(), consent_dialog.ProcessDialog)
@@ -210,8 +237,8 @@ class ProcessDialogTests(unittest.TestCase):
 
 class TkDialogProcessTests(unittest.TestCase):
     def fake_tk(self, press=None):
-        root = SimpleNamespace(destroyed=0, scheduled=None)
-        buttons = {}
+        root = SimpleNamespace(destroyed=0, scheduled=[], buttons={})
+        buttons = root.buttons
 
         class Widget:
             def __init__(self, *a, **k):
@@ -226,11 +253,14 @@ class TkDialogProcessTests(unittest.TestCase):
 
         def tk():
             root.title = lambda t: None
-            root.attributes = lambda *a: None
             root.protocol = lambda *a: None
             root.destroy = lambda: setattr(root, "destroyed", root.destroyed + 1)
-            root.after = lambda ms, fn: setattr(root, "scheduled", ms)
+            root.after = lambda ms, fn: root.scheduled.append(ms)
             root.mainloop = lambda: press and buttons[press]()
+            for name in ("update_idletasks", "deiconify", "lift", "attributes", "focus_force", "geometry"):
+                setattr(root, name, lambda *a: None)
+            root.winfo_reqwidth = root.winfo_reqheight = root.winfo_screenwidth = lambda: 800
+            root.winfo_screenheight = lambda: 600
             return root
         module = types.ModuleType("tkinter")
         module.Tk, module.Label, module.Frame, module.Button = tk, Widget, Widget, Button
@@ -241,63 +271,62 @@ class TkDialogProcessTests(unittest.TestCase):
             module, root = self.fake_tk(press)
             with self.subTest(press=press), patch.dict(sys.modules, {"tkinter": module}):
                 self.assertIs(dialog_proc.tk_ask("T", "M", 60), expected)
-                self.assertEqual(root.scheduled, 60000)
+                self.assertIn(60000, root.scheduled)
+                self.assertIn(0, root.scheduled)  # the raise-to-front attempt is queued
+
+    def test_a_notice_has_a_single_ok_button(self):
+        module, root = self.fake_tk("OK")
+        with patch.dict(sys.modules, {"tkinter": module}):
+            self.assertTrue(dialog_proc.tk_ask("T", "M", 5, "info"))
+        self.assertEqual(list(root.buttons), ["OK"])
 
     def test_main_maps_answers_to_exit_codes_and_failures_decline(self):
         module, _ = self.fake_tk("Yes")
-        payload = json.dumps({"title": "T", "message": "M", "timeout": 5}) + "\n"
+        request = dialog_proc.encode_request("T", "M", 5, parent=77)
         watched = []
         with patch.dict(sys.modules, {"tkinter": module}):
-            self.assertEqual(dialog_proc.main(io.StringIO(payload), watched.append), 0)
-        self.assertEqual(len(watched), 1)
+            self.assertEqual(dialog_proc.main([request], watched.append), 0)
+        self.assertEqual(watched, [77])
         module, _ = self.fake_tk("No")
         with patch.dict(sys.modules, {"tkinter": module}):
-            self.assertEqual(dialog_proc.main(io.StringIO(payload), watched.append), 1)
-        self.assertEqual(dialog_proc.main(io.StringIO("not json"), watched.append), 2)
-        self.assertEqual(dialog_proc.main(io.StringIO("{}\n"), watched.append), 2)
+            self.assertEqual(dialog_proc.main([request], watched.append), 1)
+        module, _ = self.fake_tk("OK")
+        with patch.dict(sys.modules, {"tkinter": module}):
+            self.assertEqual(dialog_proc.main([dialog_proc.encode_request("T", "M", 5, "info", 77)],
+                                              watched.append), 0)
+        self.assertEqual(dialog_proc.main(["not base64 json"], watched.append), 2)
+        self.assertEqual(dialog_proc.main([], watched.append), 2)
+        self.assertEqual(dialog_proc.main([base64.urlsafe_b64encode(b"{}").decode()], watched.append), 2)
 
-    def test_stdin_eof_means_the_parent_is_gone_and_the_dialog_exits(self):
+    def test_the_dialog_exits_when_the_helper_that_opened_it_is_gone(self):
         exits = []
-        dialog_proc.watch_parent(io.StringIO(""), exits.append).join()
+        dialog_proc.watch_parent(77, exits.append, lambda pid: None).join()
         self.assertEqual(exits, [3])
 
-        class Broken:
-            def read(self):
-                raise ValueError("closed")
-        dialog_proc.watch_parent(Broken(), exits.append).join()
-        self.assertEqual(exits, [3, 3])
+        def broken(pid):
+            raise OSError("no such process")
+        dialog_proc.watch_parent(77, exits.append, broken).join()
+        self.assertEqual(exits, [3])  # a parent we cannot watch must not make the dialog vanish
 
-    def test_a_real_child_dialog_exits_when_its_parent_closes_the_pipe(self):
-        """A blocked dialog (fake Tk mainloop) must die when stdin closes, without any timer."""
-        script = ("import sys, threading, types\n"
-                  "tk = types.ModuleType('tkinter')\n"
-                  "class W:\n"
-                  "    def __init__(self, *a, **k): pass\n"
-                  "    def pack(self, **k): pass\n"
-                  "    def title(self, t): pass\n"
-                  "    def attributes(self, *a): pass\n"
-                  "    def protocol(self, *a): pass\n"
-                  "    def destroy(self): pass\n"
-                  "    def after(self, *a): pass\n"
-                  "    def mainloop(self): threading.Event().wait()\n"
-                  "tk.Tk = tk.Label = tk.Frame = tk.Button = W\n"
-                  "sys.modules['tkinter'] = tk\n"
-                  "from partyline_helper import dialog_proc\n"
-                  "raise SystemExit(dialog_proc.main())\n")
-        import subprocess
-        child = subprocess.Popen([sys.executable, "-c", script], stdin=subprocess.PIPE,
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        child.stdin.write(json.dumps({"title": "T", "message": "M", "timeout": 3600}).encode() + b"\n")
-        child.stdin.flush()
-        self.assertIsNone(child.poll())
-        child.stdin.close()  # what the OS does when the helper is SIGTERMed
-        self.assertEqual(child.wait(timeout=30), 3)
+    def test_waiting_for_a_posix_parent_polls_until_the_pid_disappears(self):
+        calls, naps = [], []
+
+        def kill(pid, signal):
+            calls.append((pid, signal))
+            if len(calls) == 2:
+                raise PermissionError  # alive but not ours: keep waiting
+            if len(calls) == 3:
+                raise ProcessLookupError
+        with patch.object(os, "kill", kill), patch.object(os, "name", "posix"):
+            dialog_proc.process_gone(77, naps.append)
+        self.assertEqual(calls, [(77, 0)] * 3)
+        self.assertEqual(naps, [1, 1])
 
     def test_without_tkinter_off_windows_the_answer_is_no(self):
         with patch.dict(sys.modules, {"tkinter": None}):
             self.assertFalse(dialog_proc.ask("T", "M", 1))
 
-    def test_notify_never_raises(self):
+    def test_notify_never_raises_and_shows_a_notice_dialog(self):
         shown = []
         consent_dialog.notify("T", "M", lambda t, m: shown.append((t, m)))
         self.assertEqual(shown, [("T", "M")])
@@ -305,12 +334,17 @@ class TkDialogProcessTests(unittest.TestCase):
         def boom(*a):
             raise RuntimeError
         consent_dialog.notify("T", "M", boom)
-        module, _ = self.fake_tk()
-        module.messagebox = SimpleNamespace(showinfo=lambda *a, **k: shown.append("info"))
-        module.__dict__["Tk"] = lambda: SimpleNamespace(withdraw=lambda: None, destroy=lambda: None)
-        with patch.dict(sys.modules, {"tkinter": module, "tkinter.messagebox": module.messagebox}):
+        made = []
+
+        class Fake:
+            def __init__(self, title, message, timeout, kind):
+                made.append((title, message, kind))
+
+            def wait(self):
+                made.append("waited")
+        with patch.object(consent_dialog, "ProcessDialog", Fake):
             consent_dialog.notify("T", "M")
-        self.assertEqual(shown[-1], "info")
+        self.assertEqual(made, [("T", "M", "info"), "waited"])
 
 
 if __name__ == "__main__":

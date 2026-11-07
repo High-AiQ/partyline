@@ -3,7 +3,8 @@
 Run this program **on the computer whose desktop you want to share**. It makes an
 outbound connection to Partyline; it needs no inbound firewall rule or browser
 capture extension. Windows 11 is the primary target; macOS and Linux X11 need the
-permissions described below. Python 3.11+ and uv are required.
+permissions described below. On Windows the installer below needs nothing else; on Linux and
+macOS Python 3.11+ and uv are required.
 
 The Partyline dialog ("Computers / Share screen" → "Pair a computer") shows these
 commands with your server's address and a pairing code filled in, each with a copy
@@ -11,7 +12,96 @@ button. Run them in a terminal **on the computer you want to share, not on the
 Partyline server**. After `pair` succeeds the helper prints the full `run` command
 for both forms below. Keep the `run` terminal open and answer `y` to each share prompt.
 
-## One-time install (recommended)
+## Windows installer (prototype)
+
+For a person who should never open a terminal: one download, one double-click, then only native dialogs.
+In Partyline's **Pair a computer** dialog, a visitor on Windows sees **Download for Windows**
+(`https://github.com/High-AiQ/partyline/releases/latest/download/PartylineHelper-Setup.exe`; the
+release asset has a fixed name so that link stays valid). Linux and macOS visitors keep the `uvx`
+commands described below.
+
+1. Open `PartylineHelper-Setup.exe`. It installs for the current user only (no administrator rights, no UAC
+   prompt) to `%LOCALAPPDATA%\Programs\Partyline Helper`, adds a Start-menu entry and an uninstaller
+   (Settings → Apps), registers `partyline://` and start-at-login (the same `install` logic as the `uvx`
+   route, pointed at the installed exe) and starts the helper.
+2. **SmartScreen.** The prototype is not code-signed, so Windows may show "Windows protected your PC".
+   Click **More info**, then **Run anyway**. (Edge/Chrome may also ask to keep the download; choose **Keep**.)
+   This warning goes away once the installer is signed and has reputation.
+3. Back in Partyline click **Pair with installed helper** and answer the dialogs. A round icon appears in the
+   system tray.
+
+**Tray icon.** Grey: not connected; green: paired; amber: sharing; red: an agent controls the mouse and keyboard
+(the capture border changes colour the same way). The menu has the status, **Stop sharing** and **Quit Partyline
+Helper**. Quit ends any share cleanly (the server is told) and the helper returns at the next login.
+`run --no-tray` turns the icon off; it is on by default on Windows only.
+
+**Every prompt is a native window**, since the installed program has no console: pairing, share consent, agent
+control consent and error messages (a failed pairing, a rejected link, a missing capability). Starting the program
+from the Start menu while it already runs, or before pairing, explains that in a dialog.
+
+**Upgrade.** Run the newer installer over the old one. It first runs `PartylineHelper.exe stop`, replaces the
+files, re-registers, and starts the helper again. Settings and pairing stay. The same stop also ends an older
+`uvx`-installed copy, because both use the lock and pid under `%LOCALAPPDATA%\Partyline`. **Uninstall** stops the
+helper and removes the registry entries and files; pairing credentials are left (use "Unpair" through
+`PartylineHelper.exe`, or delete `%LOCALAPPDATA%\Partyline\helper.json`), and revoke the computer in Partyline.
+
+**`partyline-helper stop`** (any platform) asks the running helper to exit: it drops a `run.stop` file in the
+config directory, which the helper polls twice a second and answers by ending any share, removing the border and
+leaving. If the helper (for example an old version that predates this command) does not exit within about five
+seconds, the pid in `run.pid` is terminated, and the command waits for the run lock to be released. It prints what
+happened and is safe to run when nothing is running. `partyline-helper start` (what the Start menu runs, and what
+a bare `partyline-helper` does) starts the helper if it is not running. `version` prints the helper version and
+`selfcheck` verifies that every module the helper needs is importable (the CI runs it against the frozen build).
+
+**Why the share dialog never appeared (confirmed on Windows).** A detached helper is started with stdin on the
+NUL device. NUL is a character device, so Python's `isatty()` is True for it, the helper believed a terminal was
+attached, kept the `[y/N]` prompt, and wrote "Share this region?" into `helper.log` where nobody could answer.
+Now `consent_dialog.interactive()` also requires a real console on Windows (`GetConsoleMode` succeeds; NUL, pipes,
+no stdin and closed stdin do not), and a background run (`run --log`, login autostart, the frozen exe) always uses
+the native dialogs, for share consent and for agent-control consent alike. Earlier suspects, kept as defences:
+
+**Why a dialog could also stay hidden.** The old background helper started a dialog child from a `pythonw`
+process that held no foreground rights. Windows blocks `SetForegroundWindow` for such a process, so a normal
+window opens behind the browser and at most blinks on the taskbar, with a 60-second timeout that then silently
+declines. Two more suspects: the dialog child read its request from stdin, which a windowed process may not have,
+so it would decline without ever drawing; and an older copy that predates the native dialogs, left running after
+an update (the symptom reported), has no dialog at all. What changed (none of it could be tried on Windows here):
+
+- the request now travels as an argument, and the child watches the helper's pid instead of a stdin pipe;
+- the window is centred, topmost, and forced forward by `foreground.bring_to_front`: show/restore, topmost,
+  borrow the foreground thread's input queue, and if Windows still refuses, a synthetic Alt tap (the standard
+  unlock), then `SetForegroundWindow`; if that fails the taskbar button flashes until clicked. It retries for
+  about two seconds while the window maps;
+- the tray also raises a balloon notification when a prompt opens, as a second signal;
+- the frozen exe starts its own dialogs as `PartylineHelper.exe dialog <request>` (it cannot run `python -m`).
+
+**Version check.** The helper reports its version (`importlib.metadata`, carried inside the frozen build) in its
+hello. `GET /api/screen/devices` returns `helper_version` and `update_available` (true when the helper is older
+than the server's own version; `unknown` is never flagged), and the computers list in Partyline shows
+"Helper update available" with the download link for Windows computers.
+
+**Building.** `.github/workflows/windows-installer.yml` runs on `windows-latest`: it freezes the helper with
+PyInstaller (`packaging/windows/PartylineHelper.spec`), checks the frozen exe (`selfcheck`), builds the installer
+with Inno Setup (`packaging/windows/installer.iss`), installs and uninstalls it silently as a smoke test and
+uploads `PartylineHelper-Setup.exe` as an artifact of every main push (and of pull requests that touch the
+helper). A `v*` tag attaches it to the release; the tag-version job dispatches the workflow because a tag pushed
+with `GITHUB_TOKEN` cannot start another workflow itself. Locally on Windows, with uv:
+`uv run --extra helper python packaging/windows/make_icon.py build/PartylineHelper.ico`, then
+`uv run --extra helper --with pyinstaller==6.14.2 pyinstaller packaging/windows/PartylineHelper.spec`, then
+`iscc /DAppVersion=<version> packaging\windows\installer.iss`.
+
+Choices: **PyInstaller, onedir, windowed** (mature hooks for tkinter, Pillow, ctypes users; a onefile build would
+unpack ~60 MB to `%TEMP%` on every start including every dialog, and is flagged by antivirus more often; Nuitka
+needs a C toolchain and a slower build). **Inno Setup** (free, per-user installs without elevation, tiny scripting
+for the stop-before-upgrade step, preinstalled or one `choco` away on the runner; MSIX/WiX would force signing
+or admin-style plumbing the prototype does not need).
+
+**Signing (later).** Both signing steps in the workflow are already present and skipped until the repository
+variable `WINDOWS_SIGNING=true`, with the `AZURE_*` secrets/variables for Azure Trusted Signing (or replace the
+two steps with `signtool` and an OV certificate). The exe is signed before it is packed and the installer after.
+The Azure steps have never run; expect to adjust their inputs the first time.
+
+## One-time install with uv (Linux, macOS, or Windows with Python)
 
 Run this once on the computer you want to share, and you never type a helper
 command again:
@@ -200,7 +290,9 @@ share API (`GET /api/screen/shares`) and the line's `screen_share` events carry
 action so the count stays current.
 
 **Kill switch.** Physical input takes control back at once and revokes it for the
-rest of the share, after which actions and new requests are refused:
+rest of the share, after which actions and new requests are refused. It is armed by the agent's first
+action (the baseline is the agent's own injected point), so the person can move the mouse or type right after
+answering the consent dialog; only Ctrl+Alt+Esc works before that:
 
 - moving the pointer more than 8 pixels from where the agent last put it
   (checked ten times a second and before every action);

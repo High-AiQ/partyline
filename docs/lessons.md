@@ -1929,3 +1929,15 @@ uncredited and the agent's replies never posted. The exited first activation's `
 entry (it never reached `stop()`) also blocked the pinned-file fallback. Scan the head and
 the tail window, apply the cwd check to the token's own record, and hold claimants weakly and
 only while alive. Tests: `tests/test_transcript_scan.py`, `tests/test_claude_adapter.py`.
+
+## 2026-11-07 — On Windows a detached process's stdin is a "terminal", and a dialog click moves the mouse
+
+Two bugs found by Greg on the first real Windows installer. (1) A background helper is started with stdin on
+the NUL device, a character device, so `isatty()` is True: the helper kept the `[y/N]` prompt and asked
+"Share this region?" in `helper.log`, where nobody could answer. Never trust `isatty()` alone on Windows; a real
+console is one where `GetConsoleMode` succeeds, and a background run (`run --log`, autostart, the frozen exe)
+must use the native dialogs regardless. (2) Control was revoked the moment it was granted: the kill switch
+compared the pointer with where it was at the grant, which is where the dialog's Yes button was, and a person
+always moves the mouse after clicking. Takeback now arms on the agent's first injected move and baselines from
+the agent's own point; Ctrl+Alt+Esc works at any time. Tests: `tests/test_helper_dialog.py`,
+`tests/test_helper_windows.py`, `tests/test_screen_control_helper.py`.

@@ -427,7 +427,8 @@ class CliTests(unittest.TestCase):
             cli.main(["monitors"])
             obj.close.assert_called_once()
         with patch.object(desktop, "Desktop", side_effect=RuntimeError("Wayland is not supported yet")), \
-                patch("partyline_helper.links.claim_run", return_value=True):
+                patch("partyline_helper.links.claim_run", return_value=True), \
+                patch("partyline_helper.consent_dialog.notify"):
             with self.assertRaises(SystemExit):
                 cli.main(["run"])
         with patch.object(cli, "pair", side_effect=ValueError("secret")), \

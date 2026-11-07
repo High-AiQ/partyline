@@ -56,6 +56,7 @@ class CertificateReviewTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(cli, "load_config", return_value={}), \
                 patch("partyline_helper.terminal.Terminal"), \
                 patch("partyline_helper.links.claim_run", return_value=True), \
+                patch("partyline_helper.consent_dialog.notify"), \
                 patch("partyline_helper.client.serve",
                       new=AsyncMock(side_effect=CertificateError(message))), \
                 contextlib.redirect_stdout(io.StringIO()) as output:
@@ -262,6 +263,7 @@ class PlatformReviewTests(unittest.TestCase):
     def test_missing_extra_is_actionable(self):
         with patch.object(desktop, "Desktop", side_effect=ModuleNotFoundError("mss")), \
                 patch("partyline_helper.links.claim_run", return_value=True), \
+                patch("partyline_helper.consent_dialog.notify"), \
                 contextlib.redirect_stdout(io.StringIO()) as output:
             with self.assertRaises(SystemExit):
                 cli.main(["run"])
