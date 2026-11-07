@@ -14,6 +14,7 @@
   import VoiceInput from "./VoiceInput.svelte";
   import HandsFreeInput from "./HandsFreeInput.svelte";
   import { handsFree } from "../../state/hands-free.svelte.js";
+  import ScreenFramesToggle from "./ScreenFramesToggle.svelte";
   import WalkthroughControl from "./WalkthroughControl.svelte";
   import { walkthrough } from "../../state/walkthrough.svelte.js";
   import { room } from "../../state/room.svelte.js";
@@ -201,7 +202,7 @@
   {/key}
 
   <div
-    class="box flex items-end gap-3 rounded-md border border-line bg-ink-2 px-3 py-2.5 transition-colors focus-within:border-copper"
+    class="box flex flex-wrap items-end gap-x-2 gap-y-2 rounded-md border border-line bg-ink-2 px-3 py-2.5 transition-colors focus-within:border-copper min-[900px]:gap-x-3"
     aria-busy={uploading}
   >
     <button
@@ -225,38 +226,38 @@
       </svg>
     </button>
     {#if !walkthrough.active && !handsFree.value.enabled}<VoiceInput {box} oninserted={resize} />{/if}
-    <textarea
-      id="input"
-      class="max-h-[180px] min-h-7 flex-1 resize-none border-0 bg-transparent text-cream outline-0 [font-family:inherit]"
-      bind:this={box}
-      bind:value={draft.text}
-      rows="1"
-      {placeholder}
-      aria-label="message"
-      onkeydown={onKeydown}
-      oninput={() => {
-        resize();
-        refreshToken();
-      }}
-      onclick={refreshToken}
-      onblur={() => setTimeout(closeToken, 150)}></textarea>
-    <button
-      id="send"
-      class="primary min-h-11 self-end disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-line disabled:hover:bg-ink-3 disabled:hover:text-cream-dim"
-      type="button"
-      disabled={uploading ||
-        walkthrough.active ||
-        (!hasLiveProcess && Boolean(draft.text.trim())) ||
-        (!pendingFiles.files.length && !draft.text.trim())}
-      onclick={() => void send()}>{uploading ? "uploading…" : "send"}</button
-    >
-  </div>
-  <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5" data-composer-controls>
     {#if !walkthrough.active}<HandsFreeInput />{/if}
     <WalkthroughControl />
     {#if room.screenShare?.status === "active" && !room.screenShare.walkthrough}
-      <label><input type="checkbox" bind:checked={includeScreen} /> Attach screen frames</label>
+      <ScreenFramesToggle bind:pressed={includeScreen} />
     {/if}
+    <div class="flex min-w-[10rem] flex-1 items-end gap-2 min-[900px]:gap-3">
+      <textarea
+        id="input"
+        class="max-h-[180px] min-h-7 min-w-20 flex-1 resize-none border-0 bg-transparent text-cream outline-0 [font-family:inherit]"
+        bind:this={box}
+        bind:value={draft.text}
+        rows="1"
+        {placeholder}
+        aria-label="message"
+        onkeydown={onKeydown}
+        oninput={() => {
+          resize();
+          refreshToken();
+        }}
+        onclick={refreshToken}
+        onblur={() => setTimeout(closeToken, 150)}></textarea>
+      <button
+        id="send"
+        class="primary min-h-11 self-end disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-line disabled:hover:bg-ink-3 disabled:hover:text-cream-dim"
+        type="button"
+        disabled={uploading ||
+          walkthrough.active ||
+          (!hasLiveProcess && Boolean(draft.text.trim())) ||
+          (!pendingFiles.files.length && !draft.text.trim())}
+        onclick={() => void send()}>{uploading ? "uploading…" : "send"}</button
+      >
+    </div>
   </div>
   <div class="hint mt-1.5 text-[10px] text-cream-faint" class:blocked={!hasLiveProcess} aria-live="polite">
     {#if !hasLiveProcess}

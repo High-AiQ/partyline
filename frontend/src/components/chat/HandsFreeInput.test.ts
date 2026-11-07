@@ -112,6 +112,41 @@ describe("hands-free composer", () => {
     await unmount(s.component);
   });
 
+  it("is an icon button whose label and badge follow the state, with errors and sends floating above", async () => {
+    vi.spyOn(room, "say").mockResolvedValue(true);
+    vi.spyOn(voiceApi, "transcribe").mockResolvedValue({
+      text: "next slide",
+      language: "en",
+      duration: 1,
+      segments: [],
+    });
+    const s = await setup();
+    expect(button()?.textContent.trim()).toBe("");
+    expect(button()?.getAttribute("aria-label")).toBe("Hands-free: off — click to listen and send by voice");
+    button()?.click();
+    await settle();
+    expect(button()?.getAttribute("aria-label")).toBe("Hands-free: listening — click to turn off");
+    expect(button()?.textContent).toContain("listening");
+    expect(button()?.querySelector("[data-hands-free-dot]")?.className).toContain("animate-pulse");
+    await speak(s.vads[0]);
+    const bubble = document.querySelector('[aria-live="polite"]')?.parentElement;
+    expect(bubble?.className).toContain("absolute");
+    expect(bubble?.textContent).toContain("Voice sent: next slide");
+    await vi.advanceTimersByTimeAsync(8000);
+    await settle();
+    expect(document.body.textContent).not.toContain("Voice sent");
+    await unmount(s.component);
+  });
+
+  it("explains in its label why it is unavailable", async () => {
+    voicePresets.listing = { default: "", presets: [] };
+    voicePresets.choose(null);
+    const s = await setup();
+    expect(button()?.disabled).toBe(true);
+    expect(button()?.getAttribute("aria-label")).toBe("Hands-free: off — No speech recognizer is available.");
+    await unmount(s.component);
+  });
+
   it("releases a hidden mic on the configured fake timeout and resumes without interaction", async () => {
     handsFree.update({ enabled: true });
     const s = await setup();
