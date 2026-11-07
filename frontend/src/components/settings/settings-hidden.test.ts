@@ -96,7 +96,12 @@ it("stops a test take when Voice is hidden instead of uploading hidden audio at 
   vi.stubGlobal("MediaRecorder", FakeRecorder);
   vi.stubGlobal("isSecureContext", true);
   Object.defineProperty(navigator, "mediaDevices", {
-    value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [track] }) },
+    value: {
+      getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [track] }),
+      enumerateDevices: vi.fn().mockResolvedValue([]),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    },
     configurable: true,
   });
   vi.spyOn(settingsApi, "getGlobalProse").mockResolvedValue({ value: "saved" });

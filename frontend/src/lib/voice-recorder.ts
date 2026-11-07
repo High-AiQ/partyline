@@ -3,11 +3,26 @@
  * machine. The mic track is released the moment recording stops, and the audio
  * lives only in memory until the caller has transcribed it.
  */
+import { FALLBACK_NOTICE, openMicStream, readSavedMic, streamMicLabel } from "./mic-device";
+import { browserAudioContext, startMeter } from "./mic-meter";
+import type { MicMeter } from "./mic-meter";
 import { MAX_TAKE_MS, describeMicError, pickMimeType } from "./voice";
 
 export type RecorderPhase = "idle" | "starting" | "recording";
 
-export interface RecorderHooks {
+/** What a screen may show about the live mic; every hook is optional. */
+export interface MicHooks {
+  /** Input level 0..1 while a take is open. */
+  onlevel?(level: number): void;
+  /** True once the level has stayed near zero for about 3 s; false again when sound returns. */
+  onsilent?(silent: boolean): void;
+  /** The browser's name for the mic in use, when it gives one. */
+  onmic?(label: string | null): void;
+  /** The chosen mic was gone and the default one is used instead. */
+  onnotice?(message: string): void;
+}
+
+export interface RecorderHooks extends MicHooks {
   onphase(phase: RecorderPhase): void;
   onelapsed(ms: number): void;
   ontake(blob: Blob): void;
@@ -18,6 +33,10 @@ export interface RecorderSources {
   getUserMedia(constraints: MediaStreamConstraints): Promise<MediaStream>;
   createRecorder(stream: MediaStream, mimeType: string | undefined): MediaRecorder;
   isTypeSupported(type: string): boolean;
+  /** The remembered mic choice; absent means the default device. */
+  micDeviceId?: () => string | null;
+  /** Web Audio for the level meter; absent means no meter. */
+  createAudioContext?: () => AudioContext;
 }
 
 export function browserSources(): RecorderSources {
@@ -25,6 +44,8 @@ export function browserSources(): RecorderSources {
     getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
     createRecorder: (stream, mimeType) => new MediaRecorder(stream, mimeType ? { mimeType } : undefined),
     isTypeSupported: (type) => MediaRecorder.isTypeSupported(type),
+    micDeviceId: readSavedMic,
+    createAudioContext: browserAudioContext,
   };
 }
 
@@ -35,6 +56,7 @@ export class VoiceRecorder {
   private startedAt = 0;
   private ticker: ReturnType<typeof setInterval> | null = null;
   private cap: ReturnType<typeof setTimeout> | null = null;
+  private meter: MicMeter | null = null;
   /** Bumped by cancel(); a start that finds it changed was cancelled while the mic opened. */
   private generation = 0;
 
@@ -63,8 +85,12 @@ export class VoiceRecorder {
     this.setPhase("starting");
     const started = this.generation;
     let stream: MediaStream;
+    let fellBack: boolean;
     try {
-      stream = await this.sources.getUserMedia({ audio: true });
+      ({ stream, fellBack } = await openMicStream(
+        (constraints) => this.sources.getUserMedia(constraints),
+        this.sources.micDeviceId?.() ?? null,
+      ));
     } catch (error) {
       if (started !== this.generation) return;
       this.setPhase("idle");
@@ -73,9 +99,11 @@ export class VoiceRecorder {
     }
     if (started !== this.generation) {
       // Cancelled while the browser was asking for the mic: do not record, free the track.
-      this.releaseTracks(stream);
+      // Only the tracks: this.meter may already belong to a newer take.
+      this.stopTracks(stream);
       return;
     }
+    if (fellBack) this.hooks.onnotice?.(FALLBACK_NOTICE);
     try {
       const recorder = this.sources.createRecorder(
         stream,
@@ -97,6 +125,8 @@ export class VoiceRecorder {
         if (this.recorder === recorder) this.abort("recording failed");
       };
       recorder.start();
+      this.hooks.onmic?.(streamMicLabel(stream));
+      this.meter = startMeter(stream, this.sources.createAudioContext, this.hooks);
     } catch {
       this.releaseTracks(stream);
       this.stream = null;
@@ -183,6 +213,16 @@ export class VoiceRecorder {
   }
 
   private releaseTracks(stream: MediaStream | null): void {
+    if (this.meter) {
+      this.meter.close();
+      this.meter = null;
+      this.hooks.onlevel?.(0);
+      this.hooks.onsilent?.(false);
+    }
+    this.stopTracks(stream);
+  }
+
+  private stopTracks(stream: MediaStream | null): void {
     stream?.getTracks().forEach((track) => {
       track.stop();
     });

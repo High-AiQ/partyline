@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { VoiceRecorder } from "./voice-recorder";
+import { FALLBACK_NOTICE } from "./mic-device";
+import { SILENCE_MS } from "./mic-meter";
+import { FakeAudioContext, fakeAudioContext, fakeMicStream, gone } from "./mic-fakes";
 import type { RecorderPhase, RecorderSources } from "./voice-recorder";
 
 class FakeRecorder {
@@ -219,5 +222,195 @@ describe("VoiceRecorder", () => {
     vi.advanceTimersByTime(500);
     expect(recorder.phase).toBe("idle");
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+function metered(
+  options: { deviceId?: string | null; rejectFirst?: "NotFoundError" | "OverconstrainedError" } = {},
+) {
+  const { stream, stop } = fakeMicStream("Headset (Jabra)");
+  const getUserMedia = vi.fn<(c: MediaStreamConstraints) => Promise<MediaStream>>(() =>
+    Promise.resolve(stream),
+  );
+  if (options.rejectFirst) getUserMedia.mockRejectedValueOnce(gone(options.rejectFirst));
+  const sources: RecorderSources = {
+    getUserMedia,
+    createRecorder: () => new FakeRecorder() as unknown as MediaRecorder,
+    isTypeSupported: () => true,
+    micDeviceId: () => options.deviceId ?? null,
+    createAudioContext: fakeAudioContext,
+  };
+  const hooks = {
+    onphase: vi.fn(),
+    onelapsed: vi.fn(),
+    ontake: vi.fn(),
+    onerror: vi.fn(),
+    onlevel: vi.fn(),
+    onsilent: vi.fn(),
+    onmic: vi.fn(),
+    onnotice: vi.fn(),
+  };
+  return { recorder: new VoiceRecorder(sources, hooks), hooks, getUserMedia, stop };
+}
+
+describe("VoiceRecorder mic choice", () => {
+  beforeEach(() => {
+    FakeAudioContext.made = [];
+  });
+
+  it("opens the chosen device by exact id", async () => {
+    const { recorder, getUserMedia, hooks } = metered({ deviceId: "jabra-1" });
+    await recorder.start();
+    expect(getUserMedia).toHaveBeenCalledExactlyOnceWith({ audio: { deviceId: { exact: "jabra-1" } } });
+    expect(hooks.onnotice).not.toHaveBeenCalled();
+  });
+
+  it("asks for any mic when none is chosen", async () => {
+    const { recorder, getUserMedia } = metered();
+    await recorder.start();
+    expect(getUserMedia).toHaveBeenCalledExactlyOnceWith({ audio: true });
+  });
+
+  it.each(["NotFoundError", "OverconstrainedError"] as const)(
+    "falls back to the default mic with a notice when the chosen one is gone (%s)",
+    async (rejectFirst) => {
+      const { recorder, getUserMedia, hooks } = metered({ deviceId: "gone", rejectFirst });
+      await recorder.start();
+      expect(getUserMedia).toHaveBeenNthCalledWith(1, { audio: { deviceId: { exact: "gone" } } });
+      expect(getUserMedia).toHaveBeenNthCalledWith(2, { audio: true });
+      expect(hooks.onnotice).toHaveBeenCalledExactlyOnceWith(FALLBACK_NOTICE);
+      expect(recorder.phase).toBe("recording");
+    },
+  );
+
+  it("names the mic in use", async () => {
+    const { recorder, hooks } = metered();
+    await recorder.start();
+    expect(hooks.onmic).toHaveBeenCalledWith("Headset (Jabra)");
+  });
+});
+
+describe("VoiceRecorder level meter", () => {
+  beforeEach(() => {
+    FakeAudioContext.made = [];
+  });
+
+  it("reports the live level while recording", async () => {
+    const { recorder, hooks } = metered();
+    await recorder.start();
+    FakeAudioContext.last().analyser.amplitude = 0.05;
+    vi.advanceTimersByTime(100);
+    expect(hooks.onlevel).toHaveBeenLastCalledWith(expect.closeTo(0.3, 5));
+  });
+
+  it("raises the no-input hint after 3 s of silence and clears it when sound returns", async () => {
+    const { recorder, hooks } = metered();
+    await recorder.start();
+    vi.advanceTimersByTime(SILENCE_MS - 100);
+    expect(hooks.onsilent).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(100);
+    expect(hooks.onsilent).toHaveBeenLastCalledWith(true);
+    FakeAudioContext.last().analyser.amplitude = 0.2;
+    vi.advanceTimersByTime(100);
+    expect(hooks.onsilent).toHaveBeenLastCalledWith(false);
+  });
+
+  it("still records when Web Audio is missing", async () => {
+    const { stream } = fakeMicStream();
+    const sources: RecorderSources = {
+      getUserMedia: () => Promise.resolve(stream),
+      createRecorder: () => new FakeRecorder() as unknown as MediaRecorder,
+      isTypeSupported: () => true,
+    };
+    const recorder = new VoiceRecorder(sources, {
+      onphase: vi.fn(),
+      onelapsed: vi.fn(),
+      ontake: vi.fn(),
+      onerror: vi.fn(),
+    });
+    await recorder.start();
+    expect(recorder.phase).toBe("recording");
+  });
+});
+
+describe("VoiceRecorder audio cleanup", () => {
+  beforeEach(() => {
+    FakeAudioContext.made = [];
+  });
+
+  it("closes the AudioContext and stops the tracks on stop", async () => {
+    const { recorder, stop, hooks } = metered();
+    await recorder.start();
+    const context = FakeAudioContext.last();
+    expect(context.closed).toBe(false);
+    recorder.stop();
+    expect(context.closed).toBe(true);
+    expect(stop).toHaveBeenCalled();
+    expect(hooks.onlevel).toHaveBeenLastCalledWith(0);
+    expect(hooks.onsilent).toHaveBeenLastCalledWith(false);
+  });
+
+  it("closes the AudioContext and stops the tracks on cancel", async () => {
+    const { recorder, stop } = metered();
+    await recorder.start();
+    const context = FakeAudioContext.last();
+    recorder.cancel();
+    expect(context.closed).toBe(true);
+    expect(stop).toHaveBeenCalled();
+    vi.advanceTimersByTime(SILENCE_MS * 2);
+  });
+
+  it("opens no AudioContext for a start cancelled while the mic was opening", async () => {
+    const { recorder, stop } = metered();
+    const starting = recorder.start();
+    recorder.cancel();
+    await starting;
+    expect(stop).toHaveBeenCalled();
+    expect(FakeAudioContext.made).toHaveLength(0);
+  });
+
+  it("a stale pending start released late leaves the newer take's meter running", async () => {
+    const stale = fakeMicStream("Old");
+    const fresh = fakeMicStream("New");
+    let resolveStale: (stream: MediaStream) => void = () => undefined;
+    const getUserMedia = vi
+      .fn<(c: MediaStreamConstraints) => Promise<MediaStream>>()
+      .mockReturnValueOnce(new Promise((resolve) => (resolveStale = resolve)))
+      .mockResolvedValueOnce(fresh.stream);
+    const sources: RecorderSources = {
+      getUserMedia,
+      createRecorder: () => new FakeRecorder() as unknown as MediaRecorder,
+      isTypeSupported: () => true,
+      createAudioContext: fakeAudioContext,
+    };
+    const hooks = {
+      onphase: vi.fn(),
+      onelapsed: vi.fn(),
+      ontake: vi.fn(),
+      onerror: vi.fn(),
+      onsilent: vi.fn(),
+    };
+    const recorder = new VoiceRecorder(sources, hooks);
+    const first = recorder.start();
+    recorder.cancel();
+    await recorder.start();
+    const context = FakeAudioContext.last();
+    resolveStale(stale.stream);
+    await first;
+    expect(stale.stop).toHaveBeenCalled();
+    expect(recorder.phase).toBe("recording");
+    expect(context.closed).toBe(false);
+    vi.advanceTimersByTime(SILENCE_MS);
+    expect(hooks.onsilent).toHaveBeenLastCalledWith(true);
+    expect(fresh.stop).not.toHaveBeenCalled();
+  });
+
+  it("closes the AudioContext when the take ends by itself", async () => {
+    const { recorder } = metered({});
+    await recorder.start();
+    const context = FakeAudioContext.last();
+    vi.advanceTimersByTime(5 * 60 * 1000 + 1);
+    expect(recorder.phase).toBe("idle");
+    expect(context.closed).toBe(true);
   });
 });
