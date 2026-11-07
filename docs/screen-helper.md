@@ -11,6 +11,56 @@ button. Run them in a terminal **on the computer you want to share, not on the
 Partyline server**. After `pair` succeeds the helper prints the full `run` command
 for both forms below. Keep the `run` terminal open and answer `y` to each share prompt.
 
+## One-time install (recommended)
+
+Run this once on the computer you want to share, and you never type a helper
+command again:
+
+```sh
+uvx --from 'partyline[helper] @ git+https://github.com/High-AiQ/partyline.git' partyline-helper install
+```
+
+(From a checkout use `uv run --extra helper partyline-helper install`.) Afterwards the
+Partyline dialog's **Pair with installed helper** button is a `partyline://pair?...`
+link: your OS opens the helper, which asks "Pair this computer with <origin>?" in a
+native dialog (a web page can trigger the link, so it never pairs silently), pairs, and
+starts the helper in the background. The helper also starts at every login. Nothing
+needs administrator rights; everything is per user.
+
+`install` records the exact launch command (`<python> -m partyline_helper`) in
+`install.json` next to the credentials. If it detects a temporary `uvx` cache (which
+uv may delete), it first runs `uv tool install --force 'partyline[helper] @ git+...'`
+and points everything at that stable tool environment instead, and prints that it did so.
+It is idempotent: run it again to refresh after moving or upgrading. It prints each
+thing it registered and where:
+
+| OS | `partyline://` handler | Start at login | Log |
+| --- | --- | --- | --- |
+| Windows | `HKCU\Software\Classes\partyline` (uses `pythonw`, no console) | `HKCU\...\Run\PartylineHelper` | `helper.log` in the config dir |
+| Linux | `~/.local/share/applications/partyline-helper.desktop` (`MimeType=x-scheme-handler/partyline`) + `xdg-mime default` | `~/.config/autostart/partyline-helper.desktop` | same |
+| macOS | **not supported in phase 1** (receiving a URL needs a signed `.app` bundle); use the copyable commands | LaunchAgent `~/Library/LaunchAgents/io.partyline.helper.plist` | same |
+
+`partyline-helper uninstall` removes exactly those entries and `install.json`, and
+leaves pairing credentials alone (`unpair` deletes those). A tool installed by
+`uv tool install` is removed with `uv tool uninstall partyline`.
+
+Links are `partyline://pair?server=<origin>&code=<8 hex digits>[&name=<text>]` and
+`partyline://run`. `partyline-helper open <url>` (what the OS calls) accepts nothing else:
+the server must be an explicit `http(s)` origin (HTTP only on a private LAN, as for
+`pair`), the code must be the 8-hex-digit format, unknown or repeated parameters are
+rejected, and the URL is never passed through a shell. Only one helper runs per user (a
+lock file and `run.pid` under the config dir): a second `run` or `partyline://run` exits cleanly, and
+a new pairing replaces the credentials and restarts the running helper. Rejected links
+and failed pairings show a short native message; details go to `helper.log`.
+
+Without a terminal (login autostart, `pythonw`, or `open`), the share consent
+`Share this region?` is a native tkinter Yes/No dialog (a short-lived child process, closed if the prompt is cancelled or times out) instead of the y/N prompt. The
+1-second input guard and 60-second timeout still apply, and silence, closing the window
+or any error declines. The terminal-only `s` stop key is unavailable then; end the helper
+by revoking the device or killing its process.
+
+## Manual commands (fallback)
+
 From a checkout:
 
 ```sh
@@ -26,7 +76,7 @@ uvx --from 'partyline[helper] @ git+https://github.com/High-AiQ/partyline.git' p
 uvx --from 'partyline[helper] @ git+https://github.com/High-AiQ/partyline.git' partyline-helper run
 ```
 
-Create a short-lived pairing code in Partyline's screen devices UI first. Pairing
+Pairing codes are 8 hexadecimal digits. Create a short-lived pairing code in Partyline's screen devices UI first. Pairing
 claims that code and stores the server origin, device ID, device name and token.
 The helper never prints the token. HTTPS is the default when the scheme is omitted.
 Explicit HTTP is accepted only for private LAN addresses and prints an unencrypted

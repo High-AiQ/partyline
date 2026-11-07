@@ -47,7 +47,54 @@ describe("PairingSteps", () => {
     expect(text).toContain("Keep the run terminal open");
     expect(text).toContain("Screen Recording");
     expect(text).toContain("not Wayland");
-    expect(document.querySelectorAll("button")).toHaveLength(4);
+    expect(document.querySelectorAll("button")).toHaveLength(6);
+    await unmount(component);
+  });
+
+  it("offers a one-click link to the installed helper and the one-time install commands", async () => {
+    const component = mount(PairingSteps, {
+      target: document.body,
+      props: { origin: "http://192.168.1.5:8642", code: "ABCD1234" },
+    });
+    await tick();
+    const link = document.querySelector<HTMLAnchorElement>("a[data-testid=pair-link]");
+    expect(link?.textContent).toBe("Pair with installed helper");
+    expect(link?.getAttribute("href")).toBe(
+      "partyline://pair?server=http%3A%2F%2F192.168.1.5%3A8642&code=ABCD1234",
+    );
+    const text = document.body.textContent.replace(/\s+/g, " ");
+    expect(text).toContain("First time? Run … partyline-helper install once");
+    expect(text).toContain(`${UVX} install`);
+    expect(text).toContain(`${CHECKOUT} install`);
+    expect(text).toContain(`${UVX} pair http://192.168.1.5:8642 ABCD1234`);
+    await unmount(component);
+  });
+
+  it("shows no pair link for a placeholder code (Settings)", async () => {
+    const component = mount(PairingSteps, {
+      target: document.body,
+      props: { origin: "https://pl.example", code: "YOUR-CODE" },
+    });
+    await tick();
+    expect(document.querySelector("a[data-testid=pair-link]")).toBeNull();
+    expect(document.body.textContent).toContain("partyline-helper install");
+    await unmount(component);
+  });
+
+  it("copies the install command", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    setClipboard({ writeText });
+    const component = mount(PairingSteps, {
+      target: document.body,
+      props: { origin: "https://pl.example", code: "C" },
+    });
+    await tick();
+    copyButton("Copy Without a checkout (recommended) install command").click();
+    await settle();
+    expect(writeText).toHaveBeenCalledWith(`${UVX} install`);
+    copyButton("Copy From a partyline checkout install command").click();
+    await settle();
+    expect(writeText).toHaveBeenCalledWith(`${CHECKOUT} install`);
     await unmount(component);
   });
 
