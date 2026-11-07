@@ -8,6 +8,7 @@ from .attachment_view import attach_bridge, attach_memory_usage, attachment_resp
 from .auth_guard import request_principal
 from .contracts import MessageResponse
 from .hierarchy_contracts import MessageIn
+from .idempotent_posts import principal_identity
 from .machine_scope import deny_unless, is_human, sibling_messaging
 from .message_contracts import AroundMessageResponse, MessagePageResponse
 from .message_queries import select_message_by_id
@@ -126,8 +127,14 @@ def message_router(runtime, media) -> APIRouter:
             for attachment in runtime.db.list_attachments(conv_id)
         ):
             raise HTTPException(409, "attach a process to this line before sending")
-        return await post_identified(
+        hub = getattr(request.app.state, "screen_hub", None)
+        share = hub.shares.get(conv_id) if hub else None
+        latest_ts = share.frames[-1].ts_ms if share and share.frames else None
+        result = await post_identified(
             runtime, conv_id, principal, body.body, client_key=body.client_key
         )
+        if share and latest_ts is not None and not result.get("replayed"):
+            share.last_message_ts[principal_identity(principal) or principal.name] = latest_ts
+        return result
 
     return router

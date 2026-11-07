@@ -7,6 +7,7 @@ from fastapi import HTTPException
 
 from .auth_store import handle_taken
 from .hierarchy import tree_live_name_conflict
+from .machine_scope import capability_state
 from .mention_relay import LIVE, post_private
 from .orchestrator_store import all_tasks, require_root, task, tasks
 
@@ -43,6 +44,18 @@ def task_line(db, actor, ref):
     if len(matches) > 1:
         raise HTTPException(409, f'task name {ref} matches {len(matches)} tasks; use a line id')
     return matches[0] if matches else ref
+
+
+def capabilities_for(db, actor, ref):
+    """The caller's capability state on the line `ref` names: id, task tag, handle or line name.
+
+    The state's `target_conv_id` is the resolved line id. A ref naming no line is a 404 that
+    quotes it, so it is never mistaken for an authorization refusal (empty `actions`).
+    """
+    target = task_line(db, actor, ref) if ref else ref
+    if target and db.get_conversation(target) is None:
+        raise HTTPException(404, f"no line or task matches '{ref}'")
+    return capability_state(db, actor, target)
 
 
 async def message_task(runtime, actor, conv_id, body):

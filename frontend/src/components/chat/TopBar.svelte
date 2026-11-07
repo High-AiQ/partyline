@@ -17,6 +17,7 @@
   import ColumnToggle from "./ColumnToggle.svelte";
   import ThemeToggle from "./ThemeToggle.svelte";
   import ResourceIndicator from "./ResourceIndicator.svelte";
+  import ScreenControls from "./ScreenControls.svelte";
   import { tooltip } from "../../lib/tooltip";
 
   const topic = $derived((room.conversation?.topic ?? "").trim());
@@ -86,6 +87,7 @@
   </button>
 </div>
 
+<ScreenControls />
 <TaskLineHeader />
 
 <style>

@@ -1,5 +1,14 @@
 # Lessons: the false-assumptions ledger
 
+## A screen request cannot outlive its share
+
+The false assumptions were that a send could not fail after its waiter was
+registered, and that a resolved frame still belonged to an active share. Bound
+the send and response together, remove waiters on every exit, and on stop cancel
+the share's waiters and clear its buffer before yielding. Recheck the exact share
+identity after awaiting a frame, before persisting it. Event-driven regressions in
+`tests/test_screen_requests.py` cover send failure, cancellation, and stop races.
+
 ## Every desktop capture entry point needs its own bounds
 
 The false assumptions were that throttling the share loop also throttled snaps,
@@ -15,6 +24,14 @@ than ordinary reconnect backoff. Regression coverage is in
 `tests/test_screen_helper_review.py`. Helper tests advance an injected clock and
 synchronize capture and sends with events; no real-time sleeps, polling or
 assertion deadlines may stand in for these synchronization points.
+
+## A preview overlay must measure the image, not a stretched flex item
+
+The false assumption was that an inline preview wrapper kept its image width inside
+a flex column. It stretched across the dialog, so the drawn selection did not match
+the image coordinates sent to the helper. Size the overlay container to the image
+and test the dragged rectangle in a browser; `tests/ui/test_screen_picker.py` guards
+the bounds.
 
 ## Approval cannot make a missing grant path writable
 

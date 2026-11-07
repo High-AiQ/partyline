@@ -152,7 +152,11 @@ are in its Decisions section (1 to 14):
   tool therefore does nothing, and the refusal has no side effects (test
   `test_demoted_cached_named_tool_is_denied_without_side_effect`).
 - Any other line is checked with `capabilities(conv_id)` for the required action, in the core
-  helpers and in captain operations. The one exception is `post_message` to another line: MCP refreshes
+  helpers and in captain operations. Captain operations (all but `retire_child`) take the line as an id,
+  a task tag, an `impl-`/`review-` handle or a line name; the capabilities route resolves it with the
+  task-route resolver and answers an unknown ref with a 404 naming it. `detach_worker` of a worker already
+  detached on that line succeeds with `already_detached: true` (idempotent); another line's handle is refused.
+  The one exception is `post_message` to another line: MCP refreshes
   that target's state and the message route makes the final decision.
 - The route is the authority. The capability listing reads the same `allows()` function the routes
   use, so MCP decides what is offered and the server decides what succeeds.

@@ -165,7 +165,7 @@ class WebSocketAuditGuardTest(unittest.TestCase):
 
         self.assertCountEqual(
             [route.path for route in app.routes if isinstance(route, WebSocketRoute)],
-            ["/ws/{conv_id}", "/ws/attachments/{att_id}/terminal"],
+            ["/ws/{conv_id}", "/ws/attachments/{att_id}/terminal", "/api/screen/helper"],
             "Audit new WebSocket routes against their REST target checks first",
         )
 

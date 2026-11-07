@@ -15,6 +15,21 @@
 
 ## Machine API scope
 
+### Screen helper pairing
+
+Screen capture is performed by a native helper on the person's computer. Pairing
+codes are single-use and expire after five minutes. Issuance is limited per account;
+claims are limited per client address and globally, with repeated failed codes locked
+for the five-minute window. Limits reset on server restart. A claimed computer receives a
+random device token; Partyline stores only its SHA-256 hash and the owner can revoke
+the device. The helper asks for local consent for every share. Capture is limited to
+the selected OS-coordinate region and frames are size-capped. The WebSocket transport
+rejects messages above 4 MiB for all sockets; the server keeps only
+the latest 20 frames per active share in memory. A frame is written to media storage
+only when attached to a message or fetched through `screen_frame`, where normal media
+records provide the audit trail. Revocation or socket loss ends the share and drops
+its buffered frames.
+
 Machine credentials are confined to their own line. A designated manager also
 receives explicit capabilities on descendant lines; unrelated lines remain
 inaccessible. Roles are read from current database records on every request.
