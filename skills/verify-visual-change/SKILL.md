@@ -50,7 +50,7 @@ or `scripts/uidiff.py`.
 | — | Claim parity from a check against a stale `partyline/static/` — it renders the bundle, not the source |
 | Capture every state twice and compare only when consecutive captures agree — that separates a timing flake from a regression | Add a fuzz threshold that would hide small changes worth catching |
 | Run finite animations and transitions to their end state; pause only infinite ones (the LED pulse, a ringing jack) at a fixed frame | Suppress animations with `animation-duration: 0s` — `fill-mode: both` pins a zero-duration animation to its *opening* frame and the whole feed captures faded |
-| Give fixtures a fixed timestamp — messages render `HH:MM` | — |
+| Give fixtures a fixed past timestamp — stamps and day dividers are relative to now, and a fixed past instant renders the same every run | Seed a feed with "now"-relative times in a parity capture |
 | Wait for the *response* when a state loads async — a race wobbles instead of failing loudly | Wait on a rendered proxy (the empty feed looks identical before and after a line loads) |
 | Look at every reported difference, then accept intended ones by re-running `baseline` | Treat a reported difference as automatically a bug |
 

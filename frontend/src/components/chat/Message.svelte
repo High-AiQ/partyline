@@ -14,6 +14,9 @@
   import Reactions from "./Reactions.svelte";
   import MessageActions from "./MessageActions.svelte";
   import PinIcon from "../PinIcon.svelte";
+  import { formatFull, formatStamp, isoInstant } from "../../lib/message-time";
+  import { tooltip } from "../../lib/tooltip";
+  import { clock } from "../../state/clock.svelte.js";
   import { room } from "../../state/room.svelte.js";
   import type { ReactionEmoji } from "../../lib/reaction-contracts";
   import type { ChatMessage } from "../../lib/contracts";
@@ -35,9 +38,8 @@
   );
   const images = $derived(message.files.filter((file) => file.kind === "image"));
   const otherFiles = $derived(message.files.filter((file) => file.kind !== "image"));
-  const when = $derived(
-    new Date(message.created_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-  );
+  const when = $derived(formatStamp(message.created_at, clock.now));
+  const whenFull = $derived(formatFull(message.created_at));
   // Operational notices include multiline update and reattachment reports.
   // Their whitespace contract is the same as human-authored bodies.
   const bodyClass = $derived(
@@ -69,7 +71,11 @@
       >
         {message.sender}
       </span>
-      <span class="when text-[10px] text-cream-faint">{when}</span>
+      <time
+        class="when text-[10px] text-cream-faint"
+        datetime={isoInstant(message.created_at)}
+        use:tooltip={{ label: whenFull }}>{when}</time
+      >
       {#if via}
         <span class="via text-[10px] text-cream-faint italic">via «{via}»</span>
       {/if}
