@@ -12,6 +12,8 @@
   import FileAttachmentPicker from "./FileAttachmentPicker.svelte";
   import ComposerDropZone from "./ComposerDropZone.svelte";
   import VoiceInput from "./VoiceInput.svelte";
+  import WalkthroughControl from "./WalkthroughControl.svelte";
+  import { walkthrough } from "../../state/walkthrough.svelte.js";
   import { room } from "../../state/room.svelte.js";
   import { draft } from "../../state/draft.svelte.js";
   import { layout } from "../../state/layout.svelte.js";
@@ -96,7 +98,9 @@
   async function send(): Promise<void> {
     if (uploading) return;
     if (!hasLiveProcess && draft.text.trim()) return;
-    if (!pendingFiles.files.length && !(includeScreen && room.screenShare?.status === "active")) {
+    const attachScreen =
+      includeScreen && room.screenShare?.status === "active" && !room.screenShare.walkthrough;
+    if (!pendingFiles.files.length && !attachScreen) {
       if (!hasLiveProcess) return;
       const conversation = room.conversation;
       const text = draft.text;
@@ -116,7 +120,7 @@
         body: draft.text.trim(),
         title: pendingFiles.title.trim() || null,
         description: pendingFiles.description.trim() || null,
-        includeScreen: includeScreen && room.screenShare?.status === "active",
+        includeScreen: attachScreen,
       });
       pendingFiles = { files: [], title: "", description: "" };
       fileIntake = { generation: 0, files: [] };
@@ -169,7 +173,7 @@
     // line. On a phone it must not: the on-screen return key is the only way
     // to break a line, and a composer that fires off a half-written message
     // every time someone reaches for a paragraph is unusable. Tap send.
-    if (event.key === "Enter" && !event.shiftKey && !layout.narrow) {
+    if (event.key === "Enter" && !event.shiftKey && !layout.narrow && !walkthrough.active) {
       event.preventDefault();
       void send();
     }
@@ -218,7 +222,7 @@
         />
       </svg>
     </button>
-    <VoiceInput {box} oninserted={resize} />
+    {#if !walkthrough.active}<VoiceInput {box} oninserted={resize} />{/if}
     <textarea
       id="input"
       class="max-h-[180px] min-h-7 flex-1 resize-none border-0 bg-transparent text-cream outline-0 [font-family:inherit]"
@@ -239,12 +243,14 @@
       class="primary min-h-11 self-end disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-line disabled:hover:bg-ink-3 disabled:hover:text-cream-dim"
       type="button"
       disabled={uploading ||
+        walkthrough.active ||
         (!hasLiveProcess && Boolean(draft.text.trim())) ||
         (!pendingFiles.files.length && !draft.text.trim())}
       onclick={() => void send()}>{uploading ? "uploading…" : "send"}</button
     >
   </div>
-  {#if room.screenShare?.status === "active"}
+  <WalkthroughControl />
+  {#if room.screenShare?.status === "active" && !room.screenShare.walkthrough}
     <label><input type="checkbox" bind:checked={includeScreen} /> Attach screen frames</label>
   {/if}
   <div class="hint mt-1.5 text-[10px] text-cream-faint" class:blocked={!hasLiveProcess} aria-live="polite">

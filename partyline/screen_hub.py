@@ -15,6 +15,7 @@ from .screen_connections import device_valid, notice
 from .screen_frames import BufferedFrame, ShareBuffer
 from .screen_pair_limits import PairLimits
 from .screen_requests import capture, end_share, preview
+from .walkthrough_takes import Takes
 from .screen_protocol import (
     DEFAULT_LONG_EDGE, DEFAULT_MAX_FPS, DEFAULT_MIN_CHANGE, HEARTBEAT_SECONDS,
     HEARTBEAT_TIMEOUT, MAX_FRAME_BYTES, PROTOCOL_VERSION, HelperFrame,
@@ -29,6 +30,7 @@ class ScreenHub:
         self.pending_sockets: dict[str, set[WebSocket]] = {}
         self.limits = PairLimits()
         self.shares: dict[str, ShareBuffer] = {}
+        self.walkthroughs = Takes(self)
         self.pending_codes: dict[str, tuple[int, str, float]] = {}
         self.snap_waiters: dict[str, tuple[ShareBuffer, asyncio.Future]] = {}
         self.preview_waiters: dict[str, tuple[str, str | int, asyncio.Future]] = {}
@@ -129,8 +131,9 @@ class ScreenHub:
                     if share and share.status == "waiting":
                         share.status = "active"
                         await self._line_event(share.conv_id, self._share_view(share, current))
-                        text = f"@all {share.requested_by} is sharing {current['name']}; "
-                        await notice(self, share.conv_id, text + "screen_frame is available.")
+                        if share.share_id not in self.walkthroughs.items:
+                            text = f"@all {share.requested_by} is sharing {current['name']}; "
+                            await notice(self, share.conv_id, text + "screen_frame is available.")
                 elif kind in ("share_declined", "share_stopped"):
                     result = ShareEnded.model_validate(message)
                     share = self._share(result.share_id, ident)
@@ -173,13 +176,15 @@ class ScreenHub:
                               meta.out_width, meta.out_height,
                               meta.pointer.model_dump() if meta.pointer else None, meta.mime)
         share.add(frame)
+        self.walkthroughs.add(share, frame)
         if meta.request_id:
             entry = self.snap_waiters.get(meta.request_id)
             if entry and entry[0] is share and not entry[1].done():
                 entry[1].set_result(frame)
 
     async def start_share(self, conv_id: str, owner_id: int, requested_by: str,
-                          device_id: str, region: dict, line_name: str) -> ShareBuffer:
+                          device_id: str, region: dict, line_name: str,
+                          walkthrough: bool = False) -> ShareBuffer:
         device = self.devices.get(device_id)
         if not device or device["owner_id"] != owner_id:
             raise ValueError("choose one of your online computers")
@@ -192,6 +197,8 @@ class ScreenHub:
             raise ValueError("region must fit inside a monitor")
         share = ShareBuffer(str(uuid.uuid4()), conv_id, device_id, owner_id, requested_by, region)
         self.shares[conv_id] = share
+        if walkthrough:
+            self.walkthroughs.create(share)
         command = ShareCommand(type="start_share", share_id=share.share_id, conv_id=conv_id,
                                line_name=line_name, requested_by=requested_by,
                                region=region, max_fps=DEFAULT_MAX_FPS,
@@ -200,6 +207,7 @@ class ScreenHub:
             await device["socket"].send_json(command.model_dump())
         except Exception:
             self.shares.pop(conv_id, None)
+            self.walkthroughs.discard(share.share_id)
             raise
         await self._line_event(conv_id, self._share_view(share, device))
         return share
@@ -209,6 +217,7 @@ class ScreenHub:
         if not share:
             return
         status = share.status
+        self.walkthroughs.share_ended(share.share_id)
         end_share(self, share)
         device = self.devices.get(share.device_id)
         if device:
@@ -223,7 +232,7 @@ class ScreenHub:
             await self._line_event(share.conv_id, view)
         else:
             await self._line_event(share.conv_id, {"type": "screen_share", "share": None})
-        if status == "active":
+        if status == "active" and share.share_id not in self.walkthroughs.items:
             await notice(self, share.conv_id,
                 f"@all Screen sharing stopped ({reason}); screen_frame is no longer available.")
 
@@ -245,10 +254,12 @@ class ScreenHub:
                    "online": online}
         await self._line_event(device["conv_id"], payload)
 
-    @staticmethod
-    def _share_view(share: ShareBuffer, device: dict) -> dict:
+    def _share_view(self, share: ShareBuffer, device: dict) -> dict:
+        take = self.walkthroughs.items.get(share.share_id)
         return {"type": "screen_share", "share": {
             "share_id": share.share_id, "handle": share.requested_by,
             "device_name": device["name"], "region": share.region,
             "status": share.status,
+            "walkthrough": take is not None,
+            "recording": bool(take and take.started is not None and not take.stopped),
         }}
