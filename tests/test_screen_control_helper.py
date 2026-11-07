@@ -47,11 +47,16 @@ class ControlSessionTests(unittest.IsolatedAsyncioTestCase):
             await self.socket.next("frame")
             await self.terminal.waiting.get()
 
-    async def grant(self):
+    async def grant(self, armed=True):
+        """Grant control. Takeback detection arms on the agent's first action, so most tests arm it here
+        (as if the agent had already acted); the ones about the unarmed window pass armed=False."""
         self.terminal.control_answer = True
         with contextlib.redirect_stdout(self.out):
             await self.session.dispatch(ASK)
-            return await self.socket.next("control_granted")
+            granted = await self.socket.next("control_granted")
+        if armed:
+            self.session.control.armed, self.session.control.target = True, self.desktop.position
+        return granted
 
     async def result(self, message):
         with contextlib.redirect_stdout(self.out):  # the action prints from its own task
@@ -237,6 +242,64 @@ class ControlSessionTests(unittest.IsolatedAsyncioTestCase):
             await self.session.dispatch(ASK)
         self.assertIn("already revoked", (await self.socket.next("control_revoked"))["reason"])
         self.assertTrue(self.inputs.stopped)
+
+    async def test_the_person_may_move_and_type_after_the_dialog_until_the_agent_acts(self):
+        """Greg clicked Yes in the dialog and moved the mouse away: that must not revoke control."""
+        await self.share()
+        await self.grant(armed=False)
+        control_ = self.session.control
+        self.assertFalse(control_.armed)
+        self.desktop.position = (400, 400)  # far from the Yes button
+        self.clock.advance(control.WATCH)
+        self.inputs.on_key("q", False, True)  # the person types too
+        self.inputs.on_key("q", False, False)
+        await checkpoint()
+        self.assertTrue(control_.granted)
+        self.assertFalse(control_.drifted())
+
+    async def test_the_first_action_baselines_from_the_agents_point_not_the_grant_pointer(self):
+        await self.share()
+        await self.grant(armed=False)
+        self.desktop.position = (400, 400)  # where the person left the mouse
+        control_ = self.session.control
+        self.assertTrue((await self.result(act("move", x=10, y=10)))["ok"])
+        self.assertTrue(control_.armed and control_.granted)
+        self.assertEqual(control_.target, (10, 10))
+        self.desktop.position = (10, 10)  # the fake pointer follows the agent's injected move
+        self.clock.advance(control.WATCH)
+        await checkpoint()
+        self.assertTrue(control_.granted)
+
+    async def test_drift_and_keys_after_the_first_action_revoke(self):
+        await self.share()
+        await self.grant(armed=False)
+        await self.result(act("move", x=10, y=10))
+        self.desktop.position = (200, 200)
+        self.clock.advance(control.WATCH)
+        revoked = await self.socket.next("control_revoked")
+        self.assertIn("pointer was moved", revoked["reason"])
+        await self.remake()
+        await self.share()
+        await self.grant(armed=False)
+        await self.result(act("move", x=10, y=10))
+        self.inputs.on_key("q", False, True)
+        self.assertIn("key was pressed", (await self.socket.next("control_revoked"))["reason"])
+
+    async def test_ctrl_alt_esc_revokes_before_the_agent_has_acted(self):
+        await self.share()
+        await self.grant(armed=False)
+        for key in ("ctrl", "alt", "esc"):
+            self.inputs.on_key(key, False, True)
+        revoked = await self.socket.next("control_revoked")
+        self.assertEqual(revoked["reason"], "Ctrl+Alt+Esc pressed")
+        self.assertFalse(self.session.control.granted)
+
+    async def test_the_consent_text_says_takeback_starts_when_the_agent_acts(self):
+        await self.share()
+        await self.grant(armed=False)
+        message = self.terminal.dialogs[0][1]
+        self.assertIn("Once the agent starts acting", message)
+        self.assertIn("Ctrl+Alt+Esc", message)
 
     async def test_drift_is_checked_before_each_action(self):
         await self.share()
@@ -598,7 +661,8 @@ class CliControlFlagTests(unittest.TestCase):
             with patch("partyline_helper.desktop.Desktop"), \
                     patch.object(cli, "load_config", return_value={}), \
                     patch("partyline_helper.client.serve", new=Mock()) as serving, \
-                    patch("partyline_helper.terminal.Terminal"), patch.object(cli.asyncio, "run"), \
+                    patch("partyline_helper.terminal.Terminal"), \
+                    patch.object(cli.asyncio, "run", side_effect=lambda work: work.close()), \
                     patch("partyline_helper.links.claim_run", return_value=True), \
                     patch("partyline_helper.border.CaptureBorder"), \
                     contextlib.redirect_stdout(out):

@@ -35,7 +35,10 @@ class Acting:
         self.pending, self.runner, self.tasks = deque(), None, set()
 
     def reset_actions(self):
+        # Takeback is armed by the agent's first injected move; until then the person (who has just clicked
+        # Yes in the consent dialog and moves the mouse away) cannot revoke by drifting or typing.
         self.target, self.injecting, self.clicked, self.began = None, False, False, False
+        self.armed = False
         self.last_action = -math.inf
         self.expected = defaultdict(deque)  # key name -> deadlines of its outstanding injections
 
@@ -115,6 +118,7 @@ class Acting:
 
     def move(self, inputs, x, y):
         self.target = (x, y)  # before injecting, so the watcher never sees a stale target
+        self.armed = True  # the baseline is the agent's own point, never the pointer at the grant
         inputs.move(x, y)
 
     async def act(self, message):

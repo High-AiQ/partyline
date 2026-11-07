@@ -1,8 +1,5 @@
 """`partyline-helper open <url>`: what the OS runs for partyline:// links."""
 import asyncio
-import contextlib
-import os
-import signal
 import socket
 import sys
 import time
@@ -11,6 +8,7 @@ from . import consent_dialog
 from .config import config_path, load_config, pair
 from .instance import InstanceLock, spawn_detached
 from .launch import recorded_launch
+from .stopping import clear_stop, stop_helper
 from .urls import LinkError, parse_link
 
 
@@ -18,16 +16,16 @@ def log_path():
     return config_path().parent / "helper.log"
 
 
-def ensure_running(restart=False, spawn=spawn_detached, kill=os.kill, launch=recorded_launch,
+def ensure_running(restart=False, spawn=spawn_detached, stop=stop_helper, launch=recorded_launch,
                    lock=InstanceLock):
     """Start `run` unless one holds the run lock; `restart` replaces it (new credentials)."""
     holder = lock("run").holder()
     if holder and not restart:
         return f"The helper is already running (pid {holder})."
     if holder:
-        with contextlib.suppress(OSError):
-            kill(holder, signal.SIGTERM)
-        # The old process releases the lock as it exits; `--wait` lets the new one wait for that.
+        stopped, message = stop()  # polite first, then by pid; `--wait` covers the lock lagging a moment
+        if not stopped:
+            raise RuntimeError(message)  # never start a second helper beside one that would not stop
     spawn(launch() + ["run", "--log", str(log_path()), *(["--wait"] if holder else [])])
     return "Restarted the helper with the new pairing." if holder else "Started the helper in the background."
 
@@ -85,14 +83,31 @@ def claim_run(log=None, wait=False, lock=InstanceLock, sleep=time.sleep, attempt
     else:
         return False
     _held.append(guard)
+    clear_stop()  # a stop requested of the previous helper must not end this one
     if log:
         log.parent.mkdir(parents=True, exist_ok=True)
         sys.stdout = sys.stderr = open(log, "a", buffering=1)  # noqa: SIM115 - lives until exit
     return True
 
 
+def paired():
+    try:
+        load_config()
+    except (OSError, ValueError):
+        return False
+    return True
+
+
 def dispatch(args):
     from .install import install_command, uninstall_command
+    if args.command == "stop":
+        stopped, message = stop_helper()
+        if not stopped:
+            raise RuntimeError(message)  # the CLI shows it (a dialog when windowless) and exits 1
+        return message
+    if args.command == "start":
+        from .runtime import start_helper
+        return start_helper(paired, ensure_running)
     if args.command == "install":
         return install_command()
     if args.command == "uninstall":

@@ -152,4 +152,35 @@ describe("PairingSteps", () => {
     expect(window.getSelection()?.toString()).toBe(`${CHECKOUT} pair http://lan:1 C`);
     await unmount(component);
   });
+
+  it("offers the installer only to a visitor on Windows, with the SmartScreen steps", async () => {
+    const agent = vi.spyOn(navigator, "userAgent", "get");
+    agent.mockReturnValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130");
+    const windows = mount(PairingSteps, {
+      target: document.body,
+      props: { origin: "http://lan:1", code: "ABCDEF12" },
+    });
+    await tick();
+    const link = document.querySelector<HTMLAnchorElement>("[data-testid=download-windows]");
+    expect(link?.textContent).toBe("Download for Windows");
+    expect(link?.href).toBe(
+      "https://github.com/High-AiQ/partyline/releases/latest/download/PartylineHelper-Setup.exe",
+    );
+    const text = document.body.textContent.replace(/\s+/g, " ");
+    expect(text).toContain("More info");
+    expect(text).toContain("Run anyway");
+    expect(text).toContain("no administrator rights");
+    expect(text).toContain(`${UVX} run`); // the terminal path stays documented
+    await unmount(windows);
+    document.body.replaceChildren();
+    agent.mockReturnValue("Mozilla/5.0 (X11; Linux x86_64) Firefox/130");
+    const linux = mount(PairingSteps, {
+      target: document.body,
+      props: { origin: "http://lan:1", code: "C" },
+    });
+    await tick();
+    expect(document.querySelector("[data-testid=download-windows]")).toBeNull();
+    expect(document.querySelector("[data-testid=windows-installer]")).toBeNull();
+    await unmount(linux);
+  });
 });

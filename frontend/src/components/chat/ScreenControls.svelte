@@ -2,6 +2,7 @@
   import { untrack } from "svelte";
   import Modal from "../Modal.svelte";
   import PairingSteps from "../PairingSteps.svelte";
+  import { HELPER_WINDOWS_INSTALLER_URL } from "../../lib/helper-installer";
   import { screenStatus } from "../../state/screen-status.svelte.js";
   import ControlBadge from "./ControlBadge.svelte";
   import { layout } from "../../state/layout.svelte.js";
@@ -205,6 +206,18 @@
                 error = e instanceof Error ? e.message : "Revoke failed";
               })}>Revoke</button
         >
+        {#if item.update_available}
+          <span role="status" data-testid="helper-update"
+            >Helper update available{item.helper_version ? ` (running ${item.helper_version})` : ""}.
+            {#if item.os === "Windows"}
+              <a href={HELPER_WINDOWS_INSTALLER_URL} data-testid="helper-update-download"
+                >Download the new installer</a
+              > on that computer and run it.
+            {:else}
+              Run the install command from “Pair a computer” on that computer again.
+            {/if}</span
+          >
+        {/if}
       </div>
     {/each}
     {#if device}
