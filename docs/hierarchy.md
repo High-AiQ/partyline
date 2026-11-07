@@ -1215,6 +1215,13 @@ implementing, idle or blocked task. It resumes the implementer's own session whe
 adapter supports it, tells it `resumed by <actor>; continue the task: …`, and hands the
 return path from the root to it; `409` if it is still running.
 
+After a server restart the restart plan reattaches previously attached task workers one at a
+time, so a worker can be neither live nor detached for a while. Until the plan reaches it, the
+staffing digest and `GET …/staffing` list it as `reattaching (queued)`, and `message_task`,
+`share_ref`, `restart_implementer` and `restart_reviewer` answer `409` that it is queued for
+automatic reattachment and to wait for the `sequential reattachment finished` notice, rather than
+telling the caller to restart it. Only a truly detached worker gets the `restart_*` hint.
+
 New work on an approved or done task is a reopen, never a chat hand-off: the root
 captain or a person calls `reopen_task(conv_id, goal)` (`POST …/task/reopen`). The task
 returns to `implementing` with the new goal, round 0 and cleared review, stall and

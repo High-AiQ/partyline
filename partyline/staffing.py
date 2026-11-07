@@ -6,13 +6,14 @@ from .approval_bubble import pending_approvals
 from .compaction_events import compaction_counts
 from .hierarchy import descendants, subtree_conversation_ids
 from .process_counts import counts
+from .reattach_queue import queue_label, queued_attachments, queued_ids
 from .preset_traits import coerce_preset, coerce_traits, match_preset
 from .resource_leases import describe_leases
 
 LIVE = ("starting", "running")
 
 
-def staffing_report(db, conv_id: str) -> dict:
+def staffing_report(db, conv_id: str, *, runtime=None) -> dict:
     presets = [row for row in (coerce_preset(p) for p in db.list_presets()) if row]
     catalog = [
         {
@@ -27,7 +28,9 @@ def staffing_report(db, conv_id: str) -> dict:
     processes = []
     lines = []
     matched_any = False
-    for line_id in [conv_id, *descendants(db, conv_id)]:
+    queued = queued_ids(runtime) if runtime is not None else set()
+    scope = [conv_id, *descendants(db, conv_id)]
+    for line_id in scope:
         conv = db.get_conversation(line_id)
         if conv is None:
             continue
@@ -38,7 +41,7 @@ def staffing_report(db, conv_id: str) -> dict:
                 "accepted_sha": conv["accepted_sha"],
             })
         for att in db.list_attachments(line_id):
-            if att["status"] not in LIVE or not counts(att):
+            if att["status"] not in LIVE or not counts(att) or att["id"] in queued:
                 continue
             matched = match_preset(att, presets)
             if matched is not None:
@@ -61,6 +64,11 @@ def staffing_report(db, conv_id: str) -> dict:
         "presets": catalog,
         "processes": processes,
         "lines": lines,
+        # Not gone: a restart plan is bringing these back one at a time.
+        "reattaching": [
+            {"line_id": att["conv_id"], "handle": att["name"], "adapter": att["adapter"]}
+            for att in (queued_attachments(runtime, set(scope)) if runtime is not None else [])
+        ],
     }
 
 
@@ -104,7 +112,8 @@ def staffing_line(db, conv_id: str, *, runtime=None) -> str:
     """
     presets = [row for row in (coerce_preset(p) for p in db.list_presets()) if row]
     pending = pending_approvals(db, conv_id, runtime=runtime)
-    if not presets and not pending:
+    queued = queued_ids(runtime) if runtime is not None else set()
+    if not presets and not pending and not queued:
         return ""
     in_use: list[str] = []
     matched_counts: dict[str, int] = {}
@@ -112,7 +121,7 @@ def staffing_line(db, conv_id: str, *, runtime=None) -> str:
     compacted = compaction_counts(db)
     for conv in db.list_conversations():
         for att in db.list_attachments(conv["id"]):
-            if att["status"] not in LIVE or not counts(att):
+            if att["status"] not in LIVE or not counts(att) or att["id"] in queued:
                 continue
             matched = match_preset(att, presets)
             if matched is not None:
@@ -134,6 +143,9 @@ def staffing_line(db, conv_id: str, *, runtime=None) -> str:
     ) or "none"
     busy = "; ".join(in_use) or "nobody"
     parts = [f"in use: {busy}", f"free captains: {captains}", f"free workers: {workers}"]
+    waiting = queued_attachments(runtime, subtree) if runtime is not None else []
+    if waiting:
+        parts.insert(1, f"reattaching (queued): {queue_label(runtime, waiting, at='')}")
     leases = describe_leases(db)
     if leases:
         parts.append(leases)
