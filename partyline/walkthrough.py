@@ -42,7 +42,7 @@ class WalkthroughBuffer:
 
 
 def select_frames(frames: list[BufferedFrame], segments: list[dict],
-                  count: int = 12, pause_seconds: float = 0.5) -> list[BufferedFrame]:
+                  count: int = 24, pause_seconds: float = 0.5) -> list[BufferedFrame]:
     """Select endpoints, sentence-ending frames, then evenly spaced changed frames.
 
     Segment times are seconds relative to the take start. A pause selects the
@@ -93,6 +93,9 @@ def assemble_message(notes: str, segments: list[dict], frames: list[BufferedFram
         location = f" (pointer at {pointer['x']},{pointer['y']})" if visible else ""
         events.append((frame.ts_ms, 1, f"frame {index}{location}"))
     lines = [notes.strip()] if notes.strip() else []
+    if frames:
+        lines.append("Contact sheet first: open it, then fetch only the frames you need "
+                     "(thumb ≈ 230 tokens, slim ≈ 1,400).")
     if transcription_error:
         lines.append("Speech transcription failed; " + (
             "the screen frames are included below." if frames else "no screen frames were captured."))
