@@ -71,7 +71,7 @@ describe("composer narrow layout", () => {
 });
 
 describe("composer controls", () => {
-  it("groups the voice, walkthrough, and screen-frame controls above the hint", async () => {
+  it("keeps hands-free, Show me and the screen-frame toggle as icons in the input row, with no controls row", async () => {
     room.conversation = conversation;
     room.screenShare = {
       share_id: "share",
@@ -87,11 +87,33 @@ describe("composer controls", () => {
     try {
       await tick();
       await tick();
-      const controls = document.querySelector("[data-composer-controls]");
-      expect(controls?.querySelector('[aria-label="hands-free voice"]')).not.toBeNull();
-      expect(controls?.querySelector('[aria-label="Walkthrough"]')?.textContent).toContain("Show me");
-      expect(controls?.textContent).toContain("Attach screen frames");
-      expect(controls?.nextElementSibling?.classList.contains("hint")).toBe(true);
+      const box = document.querySelector(".box");
+      expect(document.querySelector("[data-composer-controls]")).toBeNull();
+      const handsFree = box?.querySelector<HTMLButtonElement>("button.hands-free");
+      expect(handsFree?.getAttribute("aria-label")).toMatch(/^Hands-free: off — /);
+      expect(handsFree?.getAttribute("aria-pressed")).toBe("false");
+      expect(handsFree?.textContent.trim()).toBe("");
+      const showMe = box?.querySelector('[aria-label="Walkthrough"] button');
+      expect(showMe?.getAttribute("aria-label")).toBe("Show me: record a narrated walkthrough");
+      expect(showMe?.textContent.trim()).toBe("");
+      const frames = box?.querySelector<HTMLButtonElement>('button[aria-label="Attach screen frames"]');
+      expect(frames?.getAttribute("aria-pressed")).toBe("true");
+      expect(document.querySelector("#composer")?.lastElementChild?.classList.contains("hint")).toBe(true);
+    } finally {
+      await unmount(component);
+    }
+  });
+
+  it("hides Show me and the screen-frame toggle when they do not apply", async () => {
+    room.conversation = conversation;
+    room.screenShare = null;
+    const component = mount(Composer, { target: document.body });
+    try {
+      await tick();
+      const box = document.querySelector(".box");
+      expect(box?.querySelector('button[aria-label="Attach screen frames"]')).toBeNull();
+      expect(box?.querySelector('[aria-label="Walkthrough"]')).toBeNull();
+      expect(box?.querySelector("button.hands-free")).not.toBeNull();
     } finally {
       await unmount(component);
     }
@@ -249,6 +271,45 @@ describe("screen and voice controls", () => {
     }
   });
 
+  it("attaches screen frames to a send only while the toggle is on", async () => {
+    room.conversation = conversation;
+    room.attachments = [liveAttachment];
+    room.screenShare = {
+      share_id: "share",
+      handle: "alice",
+      device_name: "Desk",
+      region: { x: 0, y: 0, width: 100, height: 100 },
+      status: "active",
+    };
+    draft.openLine(conversation.id);
+    draft.text = "look";
+    const say = vi.spyOn(room, "say").mockResolvedValue(true);
+    const upload = vi.spyOn(api, "uploadFiles").mockResolvedValue(undefined as never);
+    vi.spyOn(room, "resync").mockResolvedValue(undefined);
+    const component = mount(Composer, { target: document.body });
+    try {
+      await tick();
+      const toggle = document.querySelector<HTMLButtonElement>('button[aria-label="Attach screen frames"]');
+      toggle?.click();
+      await tick();
+      document.querySelector<HTMLButtonElement>("#send")?.click();
+      await tick();
+      expect(say).toHaveBeenCalledWith("look");
+      expect(upload).not.toHaveBeenCalled();
+      draft.text = "again";
+      toggle?.click();
+      await tick();
+      document.querySelector<HTMLButtonElement>("#send")?.click();
+      await tick();
+      expect(upload).toHaveBeenCalledWith(
+        conversation.id,
+        expect.objectContaining({ body: "again", includeScreen: true }),
+      );
+    } finally {
+      await unmount(component);
+    }
+  });
+
   it("keeps the microphone and the enabled screen attachment toggle together", async () => {
     room.conversation = conversation;
     room.screenShare = {
@@ -262,10 +323,12 @@ describe("screen and voice controls", () => {
     try {
       await tick();
       expect(document.querySelector('[aria-label="record voice message"]')).not.toBeNull();
-      const toggle = document.querySelector<HTMLInputElement>('input[type="checkbox"]');
-      expect(toggle?.checked).toBe(true);
+      const toggle = document.querySelector<HTMLButtonElement>('button[aria-label="Attach screen frames"]');
+      expect(toggle?.getAttribute("aria-pressed")).toBe("true");
       toggle?.click();
-      expect(toggle?.checked).toBe(false);
+      await tick();
+      expect(toggle?.getAttribute("aria-pressed")).toBe("false");
+      expect(toggle?.getAttribute("aria-label")).toBe("Attach screen frames");
     } finally {
       await unmount(component);
     }

@@ -13,6 +13,7 @@
   import { screenStatus } from "../../state/screen-status.svelte.js";
   import { voicePresets } from "../../state/voice-presets.svelte.js";
   import { walkthrough } from "../../state/walkthrough.svelte.js";
+  import ShowMeButton from "./ShowMeButton.svelte";
   let { sources = browserSources() }: { sources?: RecorderSources } = $props();
   let devices = $state<ScreenDevice[]>([]);
   let stage = $state<WalkthroughStage>("idle");
@@ -273,28 +274,26 @@
 </script>
 
 <svelte:window onkeydown={keydown} />
-{#if (online && !layout.narrow) || stage !== "idle"}
-  <div class="flex flex-wrap items-center gap-2 text-sm" role="group" aria-label="Walkthrough">
-    {#if stage === "idle"}
-      <button
-        type="button"
-        disabled={Boolean(room.screenShare && room.screenShare.status !== "declined")}
-        onclick={() => void begin()}>Show me</button
-      >
-    {:else}
-      <span role="status">{stageText(stage, elapsed)}</span>
-      {#if stage === "recording"}
-        <MicLevel level={mic.level} label={mic.label} named wide />
-        {#if mic.silent}<span class="text-red" role="alert">no input detected — is the mic muted?</span>{/if}
-      {/if}
-      {#if mic.notice}<span role="status">{mic.notice}</span>{/if}
-      {#if stage === "recording"}<button type="button" onclick={stop}>Stop and send</button>{/if}
-      {#if stage === "finishing" && finishData && error}<button type="button" onclick={() => void finish()}
-          >Retry</button
-        >{/if}
-      <button type="button" onclick={() => void cancel()}>Cancel</button>
-      <label><input type="checkbox" bind:checked={mark} /> Mark pointer</label>
+{#if stage === "idle" && online && !layout.narrow}
+  <ShowMeButton {error} onbegin={() => void begin()} />
+{:else if stage !== "idle"}
+  <div
+    class="order-last flex basis-full flex-wrap items-center gap-2 border-t border-line pt-2 text-sm"
+    role="group"
+    aria-label="Walkthrough"
+  >
+    <span role="status">{stageText(stage, elapsed)}</span>
+    {#if stage === "recording"}
+      <MicLevel level={mic.level} label={mic.label} named wide />
+      {#if mic.silent}<span class="text-red" role="alert">no input detected — is the mic muted?</span>{/if}
     {/if}
+    {#if mic.notice}<span role="status">{mic.notice}</span>{/if}
+    {#if stage === "recording"}<button type="button" onclick={stop}>Stop and send</button>{/if}
+    {#if stage === "finishing" && finishData && error}<button type="button" onclick={() => void finish()}
+        >Retry</button
+      >{/if}
+    <button type="button" onclick={() => void cancel()}>Cancel</button>
+    <label><input type="checkbox" bind:checked={mark} /> Mark pointer</label>
     {#if error}<span role="alert">{error}</span>{/if}
   </div>
 {/if}
