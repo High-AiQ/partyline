@@ -5,6 +5,12 @@ outbound connection to Partyline; it needs no inbound firewall rule or browser
 capture extension. Windows 11 is the primary target; macOS and Linux X11 need the
 permissions described below. Python 3.11+ and uv are required.
 
+The Partyline dialog ("Computers / Share screen" → "Pair a computer") shows these
+commands with your server's address and a pairing code filled in, each with a copy
+button. Run them in a terminal **on the computer you want to share, not on the
+Partyline server**. After `pair` succeeds the helper prints the full `run` command
+for both forms below. Keep the `run` terminal open and answer `y` to each share prompt.
+
 From a checkout:
 
 ```sh
