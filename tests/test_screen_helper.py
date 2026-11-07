@@ -404,6 +404,16 @@ class PlatformTests(unittest.TestCase):
 
 
 class CliTests(unittest.TestCase):
+    def test_pair_prints_both_full_run_commands(self):
+        out = io.StringIO()
+        with patch.object(cli, "pair"), contextlib.redirect_stdout(out):
+            cli.main(["pair", "https://screen.example", "code"])
+        text = out.getvalue()
+        self.assertIn("uvx --from 'partyline[helper] @ git+https://github.com/High-AiQ/partyline.git' "
+                      "partyline-helper run", text)
+        self.assertIn("uv run --extra helper partyline-helper run", text)
+        self.assertIn("Answer y to each share prompt", text)
+
     def test_commands(self):
         with patch.object(cli, "pair") as pairing:
             cli.main(["pair", "https://screen.example", "code", "--name", "desk"])
