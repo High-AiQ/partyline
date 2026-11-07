@@ -12,8 +12,10 @@ from tests import test_mcp_upload_roundtrip as roundtrip
 
 
 class MCPMultiUploadTests(roundtrip.MCPUploadRoundtripTests):
-    dimensions = [(1800, 1200), (600, 1800), (1800, 1800),
-                  (2400, 900), (1700, 1200), (600, 2000)]
+    # Every long edge exceeds the 1600 px slim bound, so each variant is a real downscale; the
+    # short edges stay small because resize time follows pixel count, not the longest edge.
+    dimensions = [(1800, 240), (180, 1800), (1650, 1650),
+                  (2400, 120), (1700, 300), (150, 2000)]
 
     @classmethod
     def setUpClass(cls):
