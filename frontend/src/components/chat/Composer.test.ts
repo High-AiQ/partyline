@@ -8,11 +8,13 @@ import { draft } from "../../state/draft.svelte.js";
 import { onRoomWireEvent } from "../../state/room-wire-events";
 import type { Attachment } from "../../lib/contracts";
 import { api } from "../../lib/api";
+import { screenApi } from "../../lib/screen-api";
 
 afterEach(() => {
   vi.restoreAllMocks();
   layout.narrow = false;
   room.leave({ clearRoute: false });
+  room.screenShare = null;
   room.notice = null;
   document.body.replaceChildren();
 });
@@ -62,6 +64,34 @@ describe("composer narrow layout", () => {
       expect(document.querySelector<HTMLTextAreaElement>("#input")?.placeholder).toBe(
         "say something… @name to ring an agent",
       );
+    } finally {
+      await unmount(component);
+    }
+  });
+});
+
+describe("composer controls", () => {
+  it("groups the voice, walkthrough, and screen-frame controls above the hint", async () => {
+    room.conversation = conversation;
+    room.screenShare = {
+      share_id: "share",
+      handle: "greg",
+      device_name: "Desk",
+      status: "active",
+      region: { x: 0, y: 0, width: 100, height: 100 },
+    };
+    vi.spyOn(screenApi, "devices").mockResolvedValue({
+      devices: [{ id: "desk", name: "Desk", os: "linux", online: true, monitors: [] }],
+    });
+    const component = mount(Composer, { target: document.body });
+    try {
+      await tick();
+      await tick();
+      const controls = document.querySelector("[data-composer-controls]");
+      expect(controls?.querySelector('[aria-label="hands-free voice"]')).not.toBeNull();
+      expect(controls?.querySelector('[aria-label="Walkthrough"]')?.textContent).toContain("Show me");
+      expect(controls?.textContent).toContain("Attach screen frames");
+      expect(controls?.nextElementSibling?.classList.contains("hint")).toBe(true);
     } finally {
       await unmount(component);
     }

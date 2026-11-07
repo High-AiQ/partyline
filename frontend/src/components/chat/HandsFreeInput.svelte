@@ -128,7 +128,7 @@
   });
 </script>
 
-<div class="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px]">
+<div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px]">
   <button
     type="button"
     class="hands-free flex min-h-9 flex-none items-center gap-2 px-2.5"
