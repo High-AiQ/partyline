@@ -44,18 +44,29 @@ async def serve(host: str, path: str) -> None:
     parent = os.getppid()
     owner = int(os.environ["PARTYLINE_BRIDGE_OWNER"]) if os.environ.get("PARTYLINE_BRIDGE_OWNER") else None
 
+    # A client that has half-closed leaves the selector, and the upstream protocol
+    # holds its reader only by weakref, so while the reply is pending the handler
+    # task, readers and writers are an unrooted cycle: one cyclic GC pass collects
+    # it and StreamWriter.__del__ closes both sockets. Hold the writers here
+    # (docker_relay anchors its clients the same way).
+    clients: set[asyncio.StreamWriter] = set()
+
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        clients.add(writer)
         try:
-            host_reader, host_writer = await asyncio.open_unix_connection(host)
-        except OSError as exc:
-            print(f"docker bridge: cannot connect to {host}: {exc.strerror}", file=sys.stderr, flush=True)
-            writer.close()
-            return
-        try:
-            await asyncio.gather(_pump(reader, host_writer), _pump(host_reader, writer))
+            try:
+                host_reader, host_writer = await asyncio.open_unix_connection(host)
+            except OSError as exc:
+                print(f"docker bridge: cannot connect to {host}: {exc.strerror}", file=sys.stderr, flush=True)
+                writer.close()
+                return
+            try:
+                await asyncio.gather(_pump(reader, host_writer), _pump(host_reader, writer))
+            finally:
+                for stream in (writer, host_writer):
+                    stream.close()
         finally:
-            for stream in (writer, host_writer):
-                stream.close()
+            clients.discard(writer)
 
     directory = os.path.dirname(path)
     os.makedirs(directory, mode=0o700, exist_ok=True)
