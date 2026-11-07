@@ -1941,3 +1941,16 @@ compared the pointer with where it was at the grant, which is where the dialog's
 always moves the mouse after clicking. Takeback now arms on the agent's first injected move and baselines from
 the agent's own point; Ctrl+Alt+Esc works at any time. Tests: `tests/test_helper_dialog.py`,
 `tests/test_helper_windows.py`, `tests/test_screen_control_helper.py`.
+
+## 2026-11-07 — Claim markers in tool output
+
+The false assumption was that a claim marker in a transcript can only have been written by an attachment's own harness.
+After the 2.92.0 restart opus2's speech stopped reaching the chat: it had run `systemctl --user list-units`, whose
+output printed other processes' command lines — briefings and their `[partyline-claim: <other id>/<nonce>]` markers —
+into a tool result. `foreign_claim` saw a stranger's marker and, because a resumed session has no new nonce yet when the
+tail opens, found none of "ours", refused the file, and the tail returned for good. A process can print anything, so
+a stranger's marker proves nothing when the file also carries markers naming this attachment (any prior nonce): such a
+file is a resume, and only this activation's own nonce opens the speech gate. A refusal now keeps watching and recovers
+if this activation's nonce appears. Follow-up: count markers only in the user/prompt records the harness wrote, per
+adapter record vocabulary (claude, codex, opencode and the rest differ); until then, never print other processes'
+command lines into a transcript. Tests: `tests/test_claim_marker_adoption.py`.
