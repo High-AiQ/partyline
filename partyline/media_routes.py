@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 
 from .auth_guard import request_principal
 from .contracts import FileRef, FileUploadResponse, MessageEvent, MessageResponse
-from .hierarchy import stamp_source
+from .hierarchy import ancestors, stamp_source
 from .idempotent_posts import (
     claim_key,
     original_for_key,
@@ -26,6 +26,14 @@ from .asr_presets import shared_registry
 from .asr_settings_routes import asr_settings_router
 from .machine_scope import allows, deny_unless, is_human
 from .upload_scope import UPLOAD_ONLY_CAPTION_REFUSAL
+
+
+def deny_unless_media_read(db, principal, conv_id: str) -> None:
+    """Allow ancestor media without granting access to ancestor messages."""
+    if (principal.kind == "machine" and principal.conv_id
+            and conv_id in ancestors(db, principal.conv_id)):
+        return
+    deny_unless(db, principal, conv_id, "read")
 
 
 def handed_to(db, principal, file_id: str) -> bool:
@@ -226,7 +234,7 @@ def media_router(runtime, store: MediaStore) -> APIRouter:
 
     async def list_files(conv_id: str, request: Request):
         require_line(conv_id, writing=False)
-        deny_unless(runtime.db, request_principal(request), conv_id, "read")
+        deny_unless_media_read(runtime.db, request_principal(request), conv_id)
         return store.list_conversation(conv_id, str(request.base_url).rstrip("/"))
 
     router.add_api_route(
@@ -252,7 +260,7 @@ def media_router(runtime, store: MediaStore) -> APIRouter:
             "SELECT conv_id FROM images WHERE id=?", (file_id,)
         ).fetchone()
         if owned is not None and not handed_to(runtime.db, request_principal(request), file_id):
-            deny_unless(runtime.db, request_principal(request), owned["conv_id"], "read")
+            deny_unless_media_read(runtime.db, request_principal(request), owned["conv_id"])
         located = store.file_for(file_id, variant)
         if located is None:
             raise HTTPException(404)
