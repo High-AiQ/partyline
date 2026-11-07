@@ -1,5 +1,11 @@
 # Lessons: the false-assumptions ledger
 
+## Media named in a task can live on an ancestor line
+
+The false assumption was that a process only needs media from lines whose message
+history it can read. Task goals can name files on any ancestor, so media fetch and
+listing authorize that parent chain separately without opening message history.
+
 ## Voice activity detection does not guarantee speech
 
 The false assumption was that a recognizer's voice activity filter makes its text
