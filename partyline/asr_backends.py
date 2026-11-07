@@ -18,6 +18,7 @@ import tempfile
 import threading
 import urllib.error
 import urllib.request
+import unicodedata
 import uuid
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,21 @@ from typing import Any
 from .transcript import TakeFailed, Transcript, TranscriberUnavailable
 
 _SUFFIX = {"audio/webm": ".webm", "audio/ogg": ".ogg", "audio/mp4": ".m4a", "audio/wav": ".wav"}
+
+# A deliberately small set of common Whisper outputs on silence, matched only for a whole take.
+_SILENCE_PHRASES = {"you", "thank you", "thanks for watching", "bye"}
+
+
+def _silence_phrase(text: str) -> bool:
+    words = "".join(c for c in text.casefold() if not unicodedata.category(c).startswith("P"))
+    return " ".join(words.split()) in _SILENCE_PHRASES
+
+
+def _no_speech(seg: dict) -> bool:
+    try:
+        return _finite(seg["no_speech_prob"]) > 0.6 and _finite(seg["avg_logprob"]) < -1.0
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return False
 
 
 def _finite(value: Any) -> float:
@@ -47,16 +63,26 @@ def parse_payload(payload: Any, fallback_language: str = "") -> Transcript:
     if raw is not None and not isinstance(raw, list):
         raise bad
     segments = []
+    dropped = False
+    ends = []
     try:
         for seg in raw or []:
-            segments.append({"start": round(_finite(seg["start"]), 3), "end": round(_finite(seg["end"]), 3),
-                             "text": str(seg.get("text", "")).strip()})
+            part = {"start": round(_finite(seg["start"]), 3), "end": round(_finite(seg["end"]), 3),
+                    "text": str(seg.get("text", "")).strip()}
+            ends.append(part["end"])
+            if _no_speech(seg):
+                dropped = True
+            else:
+                segments.append(part)
         duration = _finite(payload.get("duration") or 0)
     except (KeyError, TypeError, ValueError, AttributeError, OverflowError):
         raise bad from None
-    duration = duration or (max((s["end"] for s in segments), default=0.0))
+    duration = duration or max(ends, default=0.0)
     language = payload.get("language")
-    return Transcript(payload["text"].strip(), language if isinstance(language, str) else fallback_language,
+    text = " ".join(s["text"] for s in segments).strip() if dropped else payload["text"].strip()
+    if _silence_phrase(text):
+        text, segments = "", []
+    return Transcript(text, language if isinstance(language, str) else fallback_language,
                       round(duration, 2), tuple(segments))
 
 

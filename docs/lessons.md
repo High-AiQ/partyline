@@ -1,5 +1,12 @@
 # Lessons: the false-assumptions ledger
 
+## Voice activity detection does not guarantee speech
+
+The false assumption was that a recognizer's voice activity filter makes its text
+reliable on silence. Whisper can still emit a stock phrase, so filter uncertain
+segments and a small set of whole-take silence phrases across all backends. Fake
+payload and model regressions cover both paths and the silent walkthrough.
+
 ## A screen request cannot outlive its share
 
 The false assumptions were that a send could not fail after its waiter was
