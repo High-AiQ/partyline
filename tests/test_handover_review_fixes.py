@@ -83,11 +83,7 @@ class ReviewFixesTest(unittest.TestCase):
             task = asyncio.create_task(complete_route(self.runtime, None, 'line',
                                                      CompleteIn(handover_id=self.ident)))
             try:
-                for _ in range(100):
-                    if started.is_set():
-                        break
-                    await asyncio.sleep(0.005)
-                self.assertTrue(started.is_set())
+                self.assertTrue(await asyncio.to_thread(started.wait, 2))
                 self.assertFalse(task.done())  # event loop is free while inventory waits
             finally:
                 release.set()

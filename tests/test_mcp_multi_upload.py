@@ -12,6 +12,24 @@ from tests import test_mcp_upload_roundtrip as roundtrip
 
 
 class MCPMultiUploadTests(roundtrip.MCPUploadRoundtripTests):
+    dimensions = [(1800, 1200), (600, 1800), (1800, 1800),
+                  (2400, 900), (1700, 1200), (600, 2000)]
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.image_payloads = []
+        cls.expected_sizes = {}
+        for index, size in enumerate(cls.dimensions):
+            output = BytesIO()
+            Image.new("RGB", size, (index * 40, 60, 100)).save(
+                output, format="JPEG" if index % 2 else "PNG")
+            cls.image_payloads.append(output.getvalue())
+            for bound in (512, 1600, max(size)):
+                expected = Image.new("RGB", size)
+                expected.thumbnail((bound, bound))
+                cls.expected_sizes[size, bound] = expected.size
+
     def paths(self, names, payloads):
         paths = []
         for name, payload in zip(names, payloads, strict=True):
@@ -52,36 +70,31 @@ class MCPMultiUploadTests(roundtrip.MCPUploadRoundtripTests):
         self.assertEqual(self.db._exec("SELECT COUNT(*) FROM images").fetchone()[0], 6)
 
     def test_six_images_and_mixed_files_have_real_variants(self):
-        dimensions = [(1800, 1200), (600, 1800), (1800, 1800),
-                      (2400, 900), (1700, 1200), (600, 2000)]
-        payloads = []
-        for index, size in enumerate(dimensions):
-            output = BytesIO()
-            Image.new("RGB", size, (index * 40, 60, 100)).save(
-                output, format="JPEG" if index % 2 else "PNG")
-            payloads.append(output.getvalue())
         # Misleading suffixes prove the server uses content detection.
-        paths = self.paths([f"image-{i}.txt" for i in range(6)], payloads)
+        paths = self.paths([f"image-{i}.txt" for i in range(6)], self.image_payloads)
         client = self.client()
         result = client.upload_files("line", paths, client_key="six-images")
         self.assertEqual(len(result["files"]), 6)
-        for ref, size, payload in zip(result["files"], dimensions, payloads, strict=True):
+        for ref, size, payload in zip(
+            result["files"], self.dimensions, self.image_payloads, strict=True
+        ):
             self.assertEqual(self.download(client, ref), payload)
             for variant, bound in (("thumb", 512), ("slim", 1600), ("original", max(size))):
                 destination = Path(self.directory.name) / f"{ref['id']}-{variant}"
                 client.download(ref["id"], variant, str(destination))
                 with Image.open(destination) as image:
-                    expected = Image.new("RGB", size)
-                    expected.thumbnail((bound, bound))
-                    self.assertEqual(image.size, expected.size)
+                    self.assertEqual(image.size, self.expected_sizes[size, bound])
                     self.assertLessEqual(max(image.size), bound)
                 if variant == "thumb":
                     self.assertLessEqual(destination.stat().st_size, 256 * 1024)
         text = self.paths(["mixed.txt"], [b"mixed\r\n\x00\n"])[0]
         mixed = client.upload_files("line", [paths[0], text, paths[1]], client_key="mixed")
         self.assertEqual(len(mixed["files"]), 3)
-        for ref, payload in zip(mixed["files"], [payloads[0], b"mixed\r\n\x00\n", payloads[1]],
-                                strict=True):
+        for ref, payload in zip(
+            mixed["files"],
+            [self.image_payloads[0], b"mixed\r\n\x00\n", self.image_payloads[1]],
+            strict=True,
+        ):
             self.assertEqual(self.download(client, ref), payload)
         self.assertEqual(self.count(), 2)
 

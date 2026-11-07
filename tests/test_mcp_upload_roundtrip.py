@@ -1,11 +1,12 @@
 """Exercise MCP's streamed upload against Partyline's actual HTTP parser."""
 
+import asyncio
 import socket
 import tempfile
 import threading
-import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import uvicorn
 from fastapi import FastAPI, Request
@@ -55,21 +56,55 @@ class MCPUploadRoundtripTests(unittest.TestCase):
             auth_tokens.signing_secret(self.db), user["id"])
         self.listener = socket.socket()
         self.listener.bind(("127.0.0.1", 0))
+        self.listener.listen()
         self.port = self.listener.getsockname()[1]
-        self.listener.close()
         self.server = uvicorn.Server(uvicorn.Config(
             self.app, host="127.0.0.1", port=self.port, log_level="error"))
-        self.thread = threading.Thread(target=self.server.run, daemon=True)
+        self.stopping = threading.Event()
+
+        async def main_loop():
+            await asyncio.to_thread(self.stopping.wait)
+
+        self.server.main_loop = main_loop
+        original_shutdown = self.server.shutdown
+        real_sleep = asyncio.sleep
+
+        async def tick(_seconds):
+            await real_sleep(0)
+
+        async def shutdown(sockets=None):
+            # Only this server's shutdown polling becomes zero-duration yields.
+            with patch("uvicorn.server.asyncio.sleep", new=tick):
+                await original_shutdown(sockets=sockets)
+
+        self.server.shutdown = shutdown
+        # Keep the bound socket: closing it for Uvicorn to rebind lets another
+        # parallel test worker claim the port in between.
+        self.thread = threading.Thread(
+            target=self.server.run, kwargs={"sockets": [self.listener]}, daemon=True)
+        startup_finished = threading.Event()
+        original_startup = self.server.startup
+
+        async def startup(sockets=None):
+            await original_startup(sockets=sockets)
+            startup_finished.set()
+
+        self.server.startup = startup
         self.thread.start()
-        deadline = time.monotonic() + 5
-        while not self.server.started and time.monotonic() < deadline:
-            time.sleep(0.01)
-        if not self.server.started:
-            self.fail("isolated upload server did not start")
+        self.assertTrue(startup_finished.wait(5), "isolated upload server did not start")
 
     def tearDown(self):
+        async def close_listeners():
+            for listener in self.server.servers:
+                await listener.wait_closed()
+
+        # Connections are already closed by shutdown(); do not poll their
+        # graceful-drain grace period, but preserve listener/lifespan cleanup.
+        self.server._wait_tasks_to_complete = close_listeners
         self.server.should_exit = True
+        self.stopping.set()
         self.thread.join(timeout=5)
+        self.assertFalse(self.thread.is_alive(), "isolated upload server did not stop")
         self.db.close()
         self.directory.cleanup()
 

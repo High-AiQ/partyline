@@ -33,7 +33,7 @@ through ptys. The pty and transcript-tailing design are load-bearing. Read `READ
 
 ```bash
 uv run --locked ruff check .        # lint (no autoformatter: match surrounding style by hand)
-./scripts/capped-test               # full suite under a 2 GB memory cap
+./scripts/capped-test               # parallel full suite under a 4 GB memory cap
 uv run --locked coverage report     # ≥90% line and branch, nothing omitted
 ./check-code-lines                  # production files ≤300 lines
 cd frontend && npm run verify       # format:check + lint + svelte-check + tests
@@ -48,6 +48,7 @@ not when an assertion failed. The 300-line cap is a context budget, not a style 
 | Run the suite only through `./scripts/capped-test` | Run the test suite uncapped on a developer machine |
 | Clear inherited `PARTYLINE_*`, then set `PARTYLINE_DB=/tmp/<run>.db` for gates | Let imports fall through to `~/.partyline.db`, where another branch's migration can alter the schema |
 | Run tests through `./scripts/capped-test`, which clears inherited Partyline connection variables and sets a fresh temporary database | Let test imports inherit the live service's database, API coordinates, token, or media directory |
+| Tests fake time: inject clocks, patch timeouts, resolve events | Wait out a real timeout, poll, startup delay or sleep in a test |
 | Refuse to run tests unless `memory.max` inside the transient scope or inherited child `RLIMIT_AS` proves the cap; put every Linux attached process in its own verified systemd scope (default 4G, configurable with `PARTYLINE_PROCESS_MEMORY_LIMIT`) | Run a suite or attached CLI when its effective memory cap cannot be verified |
 | Check installed Partyline services for `OOMPolicy=continue` and finite `MemoryMax` below host RAM; for foreground launches, create a scope automatically and verify `memory.max` and `memory.oom.group=0`; verify attached-process scopes by reading `memory.max` | Require a service installation for the documented quick start, or rely on an unverified memory setting |
 | Use a temp `PARTYLINE_DB`, FastAPI `TestClient`, and fixture transcripts | Let a test touch a real database, port, or CLI |

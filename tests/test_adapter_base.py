@@ -46,7 +46,7 @@ async def until(predicate, timeout=10.0, what="condition"):
     while time.monotonic() < deadline:
         if predicate():
             return
-        await asyncio.sleep(0.02)
+        await asyncio.sleep(0)
     raise AssertionError(f"timed out after {timeout}s waiting for {what}")
 
 
@@ -246,7 +246,7 @@ class AdapterLifecycleTest(unittest.IsolatedAsyncioTestCase):
         await adapter.start()
 
         await adapter.stop()
-        await asyncio.sleep(0.3)  # give a stray notice time to appear
+        await asyncio.gather(*adapter._tasks, return_exceptions=True)
 
         self.assertEqual(adapter.posts, [])
         self.assertNotIn("exited", adapter.statuses)
@@ -991,6 +991,15 @@ class ClaimGateTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("[partyline-claim: ", bare.briefing())
 
     async def test_agent_speech_is_gated_until_our_marker_is_observed(self):
+        real_sleep = asyncio.sleep
+
+        async def tick(_seconds):
+            await real_sleep(0)
+
+        # This test observes records and shutdown, not the JSONL poll interval.
+        patcher = patch("partyline.adapters.jsonl_receipts.asyncio.sleep", new=tick)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         adapter = self.make()
         token = adapter._claim_token
         # The process is live while the session is written, so the tail

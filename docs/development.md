@@ -51,13 +51,33 @@ intentionally has no independent version field.
 ### Running the tests
 
 ```bash
-uv run --locked coverage run -m unittest discover -s tests   # the suite
-uv run --locked coverage report                              # fails under 90% line+branch coverage
-uv run --locked ruff check .                                 # lint; must be clean before every commit
+./scripts/capped-test                    # parallel suite + combined coverage, under a 4 GB cap
+./scripts/capped-test --workers 4        # override the default min(8, cores/2) workers
+uv run --locked coverage report          # fails under 90% line+branch coverage
+uv run --locked ruff check .             # lint; must be clean before every commit
 ```
 
-On a developer machine run the suite through `./scripts/capped-test` so a hung test that
-allocates dies at a 2 GB kernel cap instead of taking the host. CI runs the bare command.
+The default runner discovers test modules, balances them across process shards, and combines
+every worker's branch coverage afterward. Each worker must complete exactly the number of tests
+discovered in its shard, and their sum must equal the full discovered total; skips are reported
+without pinning a historical count. Each worker gets its own database, media, and temporary
+directory. The 4 GB cap covers the complete cgroup or Windows job; the verified
+`RLIMIT_AS` fallback is inherited by every process but limits each process individually. CI uses
+the same capped parallel command with two workers.
+
+Every worker records per-test durations. The run prints the ten slowest tests. Any unallowlisted
+test over one second is rerun once, alone in a fresh warm worker, with both durations printed; CI
+fails only if that rerun fails or remains over one second. Genuine workloads can instead carry an
+explicit reason in `scripts/test_time_allowlist.py`. Tests must inject clocks, patch timeout
+constants in the calling module, or resolve events rather than wait out real sleeps, polling,
+startup delays, or stop timeouts. The allowlist is for real work such as concurrency or Git
+integration, never for a delay.
+
+To run a focused test under the same memory guard, pass a command explicitly:
+
+```bash
+./scripts/capped-test -- uv run --locked python -m unittest tests.test_db
+```
 
 The suite never touches a real database, port, or CLI: it uses temp databases, FastAPI's
 `TestClient`, and fixture transcript files. Adapter tests never invoke the vendor tool they

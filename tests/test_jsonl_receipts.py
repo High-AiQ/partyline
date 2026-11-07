@@ -284,7 +284,7 @@ class ClaudeJsonlReceiptTest(unittest.IsolatedAsyncioTestCase):
         while adapter.send_keys.await_count < 2:
             if asyncio.get_running_loop().time() >= deadline:
                 self.fail("unproved Claude paste was not retried after readiness")
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(0)
         adapter.alive = lambda: False
         await asyncio.wait_for(tail, timeout=1)
 
@@ -318,7 +318,7 @@ class ClaudeJsonlReceiptTest(unittest.IsolatedAsyncioTestCase):
         while not self.presence.queue.held_ids("att"):
             if asyncio.get_running_loop().time() >= deadline:
                 self.fail("preclaim retry was not transferred to Presence")
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(0)
         self.assertEqual(adapter.send_keys.await_count, 1)
 
         await adapter._observe_jsonl_paste({

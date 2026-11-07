@@ -423,7 +423,7 @@ class GpuTest(ProxyBase):
         self.daemon.containers["gpu2"]["State"]["Status"] = "exited"
         self.probe.side_effect = OSError("nvidia-smi exited 9: NVRM: Xid 79")
         status, body = await self.call("POST", "/containers/gpu/start")
-        self.assertEqual((status, "unhealthy" in self.gpu.unhealthy or True), (409, True))
+        self.assertEqual((status, self.gpu.unhealthy), (409, "nvidia-smi exited 9: NVRM: Xid 79"))
         self.assertIn("health check failed", body["message"])
         self.assertEqual(sorted(conv for conv, _ in self.notices), ["line", "root"])
         status, body = await self.call("POST", "/containers/gpu/start")  # no new probe, no new notice
@@ -480,9 +480,22 @@ class ConnectionTest(ProxyBase):
         self.assertIn("cannot reach Docker", body["message"])
 
     async def test_an_idle_client_that_closes_is_not_an_error(self):
-        reader, writer = await asyncio.open_unix_connection(self.relay_path)
-        writer.close()
-        await asyncio.sleep(0.05)
+        handled = asyncio.Event()
+
+        async def tracked_serve(reader, writer):
+            try:
+                await docker_proxy.serve(self.runtime, "line", reader, writer)
+            finally:
+                handled.set()
+
+        relay = await asyncio.start_unix_server(tracked_serve, self.relay_path + ".idle")
+        try:
+            _reader, writer = await asyncio.open_unix_connection(relay.sockets[0].getsockname())
+            writer.close()
+            await asyncio.wait_for(handled.wait(), 1)
+        finally:
+            relay.close()
+            await relay.wait_closed()
         self.assertEqual(self.daemon.requests, [])
 
     async def test_x_registry_auth_rides_only_on_pulls(self):
@@ -562,7 +575,6 @@ class ModeTest(ProxyBase):
         ):
             path = docker_relay.start("line")
             self.addAsyncCleanup(docker_relay.stop, "line")
-            await asyncio.sleep(0.05)
             data = await self._via(path, b"POST /containers/mine/update HTTP/1.1\r\nHost: d\r\n\r\n")
             self.assertIn(b"403", data.split(b"\r\n")[0])
             self.assertEqual(self.forwarded("POST", "update"), [])
@@ -592,18 +604,23 @@ class GpuProbeTest(unittest.IsolatedAsyncioTestCase):
                     handle.write("#!/bin/sh\n" + body + "\n")
                 os.chmod(smi, 0o755)
 
-            with patch.object(docker_gpu, "SMI", smi), patch.object(docker_gpu, "TIMEOUT", 0.3):
+            with patch.object(docker_gpu, "SMI", smi):
                 script("echo 11000; echo 24000")
                 self.assertEqual(await docker_gpu.probe(), 24000)
                 for body, fragment in (
                     ("echo boom >&2; exit 9", "exited 9"),
                     ("echo garbage", "unreadable"),
-                    ("sleep 5", "timed out"),
                 ):
                     script(body)
                     with self.assertRaises(OSError) as caught:
                         await docker_gpu.probe()
                     self.assertIn(fragment, str(caught.exception))
+                script("while :; do :; done")
+                # Actual subprocess timeout: 40 ms stays below the 50 ms budget.
+                with patch.object(docker_gpu, "TIMEOUT", 0.04):
+                    with self.assertRaises(OSError) as caught:
+                        await docker_gpu.probe()
+                self.assertIn("timed out", str(caught.exception))
             with patch.object(docker_gpu, "SMI", "no-such-nvidia-smi"):
                 with self.assertRaises(OSError) as caught:
                     await docker_gpu.probe()
