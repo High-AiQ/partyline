@@ -26,9 +26,9 @@ def bounded(value, default, low, high):
 
 class Session:
     def __init__(self, socket, desktop, terminal, name, yes=False, preview_times=None,
-                 clock=time.monotonic, sleep=asyncio.sleep):
+                 clock=time.monotonic, sleep=asyncio.sleep, border=None):
         self.socket, self.desktop, self.terminal = socket, desktop, terminal
-        self.name, self.yes = name, yes
+        self.name, self.yes, self.border = name, yes, border
         self.clock, self.sleep = clock, sleep
         self.lock = asyncio.Lock()
         self.frame_lock = asyncio.Lock()
@@ -66,6 +66,8 @@ class Session:
                 raise
 
     async def stop(self, reason="remote", notify=True):
+        if self.border:
+            self.border.hide()
         worker, self.worker = self.worker, None
         self.pending_id = None
         if worker:
@@ -111,6 +113,8 @@ class Session:
             self.started = self.clock()
             self.previous = self.last_pointer = self.last_frame_at = None
             self.share = request
+            if self.border:
+                self.border.show(request["region"])
             await self.send("share_accepted", share_id=request["share_id"])
             self.accepted = True
             self.terminal.clear()
@@ -132,6 +136,9 @@ class Session:
             print(f"Share ended: {exc}", flush=True)
             await self.send("share_stopped" if accepted else "share_declined",
                             share_id=request.get("share_id"), reason=str(exc))
+        finally:
+            if self.border:
+                self.border.hide()
 
     async def frame(self, request_id=None):
         async with self.frame_lock:
@@ -230,7 +237,7 @@ class Session:
 
 
 async def serve(config, desktop, terminal, yes=False, sleep=asyncio.sleep,
-                clock=time.monotonic, session_sleep=asyncio.sleep):
+                clock=time.monotonic, session_sleep=asyncio.sleep, border=None):
     from .config import server_url
     server = server_url(config["server"])
     url = ("wss" if server.startswith("https:") else "ws") + server[server.index(":"):] + "/api/screen/helper"
@@ -242,7 +249,7 @@ async def serve(config, desktop, terminal, yes=False, sleep=asyncio.sleep,
                                ping_interval=None, max_size=1_000_000) as socket:
                 connected_at = clock()
                 await Session(socket, desktop, terminal, config.get("device_name", "Desktop"),
-                              yes, preview_times, clock, session_sleep).run()
+                              yes, preview_times, clock, session_sleep, border=border).run()
                 if clock() - connected_at >= 45:
                     delay = 1
         except InvalidStatus as exc:

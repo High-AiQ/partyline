@@ -52,7 +52,7 @@ class CertificateReviewTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_run_cli_prints_certificate_diagnostic_and_exits(self):
         message = certificate_failure(bad_certificate(), "https://screen.example")
-        with patch.object(desktop, "Desktop", return_value=Mock()), \
+        with patch.object(desktop, "Desktop", return_value=Mock(scale=1)), \
                 patch.object(cli, "load_config", return_value={}), \
                 patch("partyline_helper.terminal.Terminal"), \
                 patch("partyline_helper.links.claim_run", return_value=True), \
