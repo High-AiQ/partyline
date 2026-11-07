@@ -426,7 +426,8 @@ class CliTests(unittest.TestCase):
         with patch.object(desktop, "Desktop", return_value=obj):
             cli.main(["monitors"])
             obj.close.assert_called_once()
-        with patch.object(desktop, "Desktop", side_effect=RuntimeError("Wayland is not supported yet")):
+        with patch.object(desktop, "Desktop", side_effect=RuntimeError("Wayland is not supported yet")), \
+                patch("partyline_helper.links.claim_run", return_value=True):
             with self.assertRaises(SystemExit):
                 cli.main(["run"])
         with patch.object(cli, "pair", side_effect=ValueError("secret")), \
@@ -487,11 +488,13 @@ class ExtraHelperTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(desktop, "Desktop", return_value=fake), \
                 patch.object(cli, "load_config", return_value={}), \
                 patch("partyline_helper.terminal.Terminal"), \
+                patch("partyline_helper.links.claim_run", return_value=True), \
                 patch("partyline_helper.client.serve", new=AsyncMock()) as serving:
             # CLI owns its own loop, so invoke it outside this test's event loop.
             await asyncio.to_thread(cli.main, ["run", "--yes"])
             self.assertTrue(serving.call_args.args[-1])
-        with patch.object(desktop, "Desktop", side_effect=KeyboardInterrupt):
+        with patch.object(desktop, "Desktop", side_effect=KeyboardInterrupt), \
+                patch("partyline_helper.links.claim_run", return_value=True):
             cli.main(["run"])
 
     async def test_invalid_json_and_unknown_monitor(self):

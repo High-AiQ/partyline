@@ -3,6 +3,7 @@ import argparse
 import asyncio
 import json
 import socket
+from pathlib import Path
 from urllib.error import URLError
 
 from .config import config_path, load_config, pair
@@ -29,7 +30,13 @@ def main(argv=None):
     run = commands.add_parser("run")
     run.add_argument("--yes", action="store_true",
                      help="Auto-accept every request (unsafe on shared servers)")
+    run.add_argument("--log", type=Path, help="Append output to this file (used at login)")
+    run.add_argument("--wait", action="store_true", help=argparse.SUPPRESS)
     commands.add_parser("unpair")
+    commands.add_parser("install", help="Register partyline:// links and start at login (once)")
+    commands.add_parser("uninstall", help="Remove what install registered (keeps pairing)")
+    opener = commands.add_parser("open", help="Handle a partyline:// link (run by the OS)")
+    opener.add_argument("url")
     commands.add_parser("monitors")
     args = parser.parse_args(argv)
     desktop = None
@@ -40,17 +47,25 @@ def main(argv=None):
         elif args.command == "unpair":
             config_path().unlink(missing_ok=True)
             print("Local credential removed. Revoke the device in Partyline to invalidate its token.")
+        elif args.command in ("install", "uninstall", "open"):
+            from .links import dispatch
+            print(dispatch(args))
         else:
+            if args.command == "run":
+                from .links import claim_run
+                if not claim_run(args.log, args.wait):
+                    return print("The helper is already running.")
             from .desktop import Desktop
             desktop = Desktop()
             if args.command == "monitors":
                 print(json.dumps(desktop.monitors(), indent=2))
             else:
                 from .client import serve
+                from .consent_dialog import auto_dialog
                 from .terminal import Terminal
                 if args.yes:
                     print("WARNING: --yes auto-accepts ALL screen share requests without asking locally.")
-                asyncio.run(serve(load_config(), desktop, Terminal(), args.yes))
+                asyncio.run(serve(load_config(), desktop, Terminal(dialog=auto_dialog()), args.yes))
     except KeyboardInterrupt:
         print("Helper stopped.")
     except ImportError:
