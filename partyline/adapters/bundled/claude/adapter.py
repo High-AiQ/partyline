@@ -6,27 +6,27 @@ import json
 import os
 import shlex
 import sys
+import weakref
 
 from partyline.adapters.base import Adapter as BaseAdapter
 from partyline.adapters.bundled.claude.session import ClaudeSession
 from partyline.adapters.compaction import compaction_hooks_declared, is_compaction_record
 from partyline.adapters.session_seed import seed_claude_home
+from partyline.adapters.transcript_scan import scan_lines
 from partyline.mcp_attach import claude_command
-
-# A session that recorded our claim token recorded it near the top, in the
-# briefing or the first wake. Bounding the scan keeps a stranger's
-# multi-megabyte transcript from being read in full on every poll.
-SCAN_BYTES = 512 * 1024
 
 
 class PartylineAdapter(ClaudeSession, BaseAdapter):
     kind = "claude"
     jsonl_paste_receipts = True
 
-    # Transcripts currently being tailed, so two adapters cannot follow one
-    # session. It needs no lock: a claim token names exactly one activation,
-    # so the set is read and written without awaiting in between.
-    _CLAIMED: set[str] = set()
+    # Transcripts currently being tailed, mapped to their claimant, so two
+    # adapters cannot follow one session. No lock: a claim token names one
+    # activation, so it is read and written without awaiting in between.
+    # Claimants are held weakly: a CLI that quit on its own is dropped without
+    # ``stop()``, and must neither block a successor nor be kept alive here.
+    _CLAIMED: "weakref.WeakValueDictionary[str, PartylineAdapter]" = (
+        weakref.WeakValueDictionary())
 
     _transcript: str = ""
 
@@ -42,7 +42,8 @@ class PartylineAdapter(ClaudeSession, BaseAdapter):
         return claude_command(cmd, self.att)
 
     async def stop(self):
-        self._CLAIMED.discard(self._transcript)
+        if self._CLAIMED.get(self._transcript) is self:
+            del self._CLAIMED[self._transcript]
         await super().stop()
 
     def build_command(self) -> list[str]:
@@ -127,26 +128,29 @@ class PartylineAdapter(ClaudeSession, BaseAdapter):
         each, which is what digest text alone could not do.
         """
         try:
-            with open(path, encoding="utf-8", errors="replace") as file:
-                scanned = 0
-                for line in file:
-                    scanned += len(line)
-                    if scanned > SCAN_BYTES:
-                        return False
-                    try:
-                        record = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if record.get("cwd") and record["cwd"] != self.att["cwd"]:
-                        return False
-                    if record.get("type") != "user":
-                        continue
-                    content = (record.get("message") or {}).get("content")
-                    if isinstance(content, str) and self._claim_token in content:
-                        return True
+            for line in scan_lines(path):
+                if self._claim_token not in line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if record.get("type") != "user":
+                    continue
+                content = (record.get("message") or {}).get("content")
+                if isinstance(content, str) and self._claim_token in content:
+                    # The token's own record names the directory; a leftover
+                    # record from another directory earlier in a long
+                    # session says nothing about who wrote the token.
+                    return record.get("cwd") in (None, "", self.att["cwd"])
         except OSError:
             return False
         return False
+
+    def _claimed_by_another(self, path: str) -> bool:
+        """Whether a live adapter other than this one is tailing ``path``."""
+        owner = self._CLAIMED.get(path)
+        return owner is not None and owner is not self and owner.alive()
 
     def _find_transcript(self) -> str | None:
         """The session carrying this activation's token, pinned or not.
@@ -186,7 +190,7 @@ class PartylineAdapter(ClaudeSession, BaseAdapter):
             # adapters can never collide because no two activations share a
             # token.
             if self._recorded_our_token(path):
-                self._CLAIMED.add(path)
+                self._CLAIMED[path] = self
                 self._transcript = path
                 # The token in the file is this activation's proof; speech
                 # may flow. The pinned fallback below cannot prove, so it
@@ -195,9 +199,9 @@ class PartylineAdapter(ClaudeSession, BaseAdapter):
                 return path
         # The one branch with no proof behind it is the only one a claim can
         # usefully guard.
-        if (self.resume and pinned and pinned not in self._CLAIMED
+        if (self.resume and pinned and not self._claimed_by_another(pinned)
                 and self._written_since_spawn(pinned)):
-            self._CLAIMED.add(pinned)
+            self._CLAIMED[pinned] = self
             self._transcript = pinned
             return pinned
         return None

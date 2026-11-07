@@ -1890,3 +1890,14 @@ echo was posted under the process's own handle. Bound what you type into a pty t
 less than its buffer, treat a prefix of recent input as echo, and credit a process with no
 transcript on the completed bounded write rather than on output it may never produce.
 Tests: `tests/test_raw_bounded_delivery.py`, `tests/test_delivery_gate.py`.
+
+## A claim token is written at the end of a resumed transcript, not the start
+
+The false assumption was that a session's claim token lands near the top of its file, so
+scanning the first 512 KB proves ownership. A resumed Claude session appends its new
+activation's token to a transcript already dominated by request blobs; on 2026-11-07 yue2's
+landed at byte 723K of 940K, was never found, and no tail attached — every wake stayed
+uncredited and the agent's replies never posted. The exited first activation's `_CLAIMED`
+entry (it never reached `stop()`) also blocked the pinned-file fallback. Scan the head and
+the tail window, apply the cwd check to the token's own record, and hold claimants weakly and
+only while alive. Tests: `tests/test_transcript_scan.py`, `tests/test_claude_adapter.py`.

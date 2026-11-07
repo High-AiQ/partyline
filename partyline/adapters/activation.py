@@ -13,16 +13,13 @@ from __future__ import annotations
 
 import uuid
 
+from partyline.adapters.transcript_scan import scan_lines
+
 # The marker every transcript adapter pastes with its briefing and each
 # wake until a transcript records it. A session that carries it is this
 # activation's by construction — nothing else writes this pty, and no
 # other activation shares the nonce.
 CLAIM_PREFIX = "[partyline-claim: "
-
-# A claim marker is recorded near the top of a session, in the briefing or
-# the first wake. Bounding the scan keeps a stranger's multi-megabyte
-# transcript from being read in full on every poll.
-SCAN_BYTES = 512 * 1024
 
 
 class Activation:
@@ -102,14 +99,7 @@ class Activation:
         if not self._nonce:
             return False
         try:
-            with open(path, encoding="utf-8", errors="replace") as file:
-                scanned = 0
-                for line in file:
-                    scanned += len(line)
-                    if scanned > SCAN_BYTES:
-                        return False
-                    if self._claim_token in line:
-                        return True
+            return any(self._claim_token in line for line in scan_lines(path))
         except OSError:
             return False
         return False
@@ -131,20 +121,15 @@ class Activation:
             return False
         foreign = ours = False
         try:
-            with open(path, encoding="utf-8", errors="replace") as file:
-                scanned = 0
-                for line in file:
-                    scanned += len(line)
-                    if scanned > SCAN_BYTES:
-                        break
-                    if self._claim_in_line(line):
-                        ours = True
-                    start = 0
-                    while (idx := line.find(CLAIM_PREFIX, start)) != -1:
-                        att_id, sep, _ = line[idx + len(CLAIM_PREFIX):].partition("/")
-                        if sep and att_id and att_id != str(self.att.get("id", "")):
-                            foreign = True
-                        start = idx + 1
+            for line in scan_lines(path):
+                if self._claim_in_line(line):
+                    ours = True
+                start = 0
+                while (idx := line.find(CLAIM_PREFIX, start)) != -1:
+                    att_id, sep, _ = line[idx + len(CLAIM_PREFIX):].partition("/")
+                    if sep and att_id and att_id != str(self.att.get("id", "")):
+                        foreign = True
+                    start = idx + 1
         except OSError:
             return False
         return foreign and not ours
