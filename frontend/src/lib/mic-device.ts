@@ -17,9 +17,12 @@ export function readSavedMic(): string | null {
   }
 }
 
+export const MIC_CHANGED = "partyline-mic-changed";
+
 export function saveMic(deviceId: string): void {
   try {
     localStorage.setItem(MIC_KEY, deviceId);
+    window.dispatchEvent(new Event(MIC_CHANGED));
   } catch {
     // remembering the choice is a convenience only
   }
@@ -29,6 +32,7 @@ export function saveMic(deviceId: string): void {
 export function clearSavedMic(): void {
   try {
     localStorage.removeItem(MIC_KEY);
+    window.dispatchEvent(new Event(MIC_CHANGED));
   } catch {
     // as above
   }
