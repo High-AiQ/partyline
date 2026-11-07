@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { basename, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { vitestMaxWorkers } from "./worker-cap.config.js";
 
 const frontendDir = fileURLToPath(new URL(".", import.meta.url));
 const outDir = fileURLToPath(new URL("../partyline/static", import.meta.url));
@@ -47,6 +48,7 @@ export default defineConfig(({ command }) => ({
   test: {
     environment: "jsdom",
     include: ["src/**/*.test.{js,ts}"],
+    maxWorkers: vitestMaxWorkers(),
   },
 }));
 
