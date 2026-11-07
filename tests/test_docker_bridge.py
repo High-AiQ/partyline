@@ -138,13 +138,22 @@ class BridgeProcessTest(unittest.IsolatedAsyncioTestCase):
 
             server = await asyncio.start_unix_server(daemon, path=host)
             alive = [True]
-            with patch.object(docker_bridge, "POLL_SECONDS", 0.02), \
+            listening, stop_polling = asyncio.Event(), asyncio.Event()
+            real_server = docker_bridge.asyncio.start_unix_server
+
+            async def started(*args, **kwargs):
+                result = await real_server(*args, **kwargs)
+                listening.set()
+                return result
+
+            async def pause(_seconds):
+                await stop_polling.wait()
+
+            with patch.object(docker_bridge.asyncio, "start_unix_server", started), \
+                    patch.object(docker_bridge.asyncio, "sleep", pause), \
                     patch.object(docker_bridge, "owner_alive", lambda *_: alive[0]):
                 task = asyncio.get_running_loop().create_task(docker_bridge.serve(host, path))
-                for _ in range(100):
-                    if os.path.exists(path):
-                        break
-                    await asyncio.sleep(0.02)
+                await asyncio.wait_for(listening.wait(), 1)
                 self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
                 self.assertEqual(stat.S_IMODE(os.stat(os.path.dirname(path)).st_mode), 0o700)
                 reader, writer = await REAL_OPEN(path)
@@ -153,6 +162,7 @@ class BridgeProcessTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(await asyncio.wait_for(reader.read(), 5), b"hi:x")
                 writer.close()
                 alive[0] = False
+                stop_polling.set()
                 await asyncio.wait_for(task, 5)
             self.assertFalse(os.path.exists(path))
             server.close()

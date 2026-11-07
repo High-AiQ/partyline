@@ -3,13 +3,14 @@
 import asyncio
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from partyline import auth_store, auth_tokens
 from partyline.auth_guard import install_auth_guard
-from partyline.bridge_store import WINDOW_LIMIT, attachment_ref, open_bridge_for_line
+from partyline.bridge_store import attachment_ref, open_bridge_for_line
 from partyline.db import Db
 from partyline.bridge_routes import bridge_router
 from partyline.media import MediaStore
@@ -224,12 +225,14 @@ class LineBridgeTest(unittest.TestCase):
 
     def test_the_rate_limit_stops_delivery_and_posts_one_notice(self):
         self.opened()
-        for n in range(WINDOW_LIMIT):
-            self.say("x", "x-amb", f"@[bridge]fable message {n}")
-        self.assertEqual(len(self.adapters["y-amb"].delivered), WINDOW_LIMIT)
-        self.say("x", "x-amb", "@[bridge]fable one too many")
-        self.say("x", "x-amb", "@[bridge]fable and another")
-        self.assertEqual(len(self.adapters["y-amb"].delivered), WINDOW_LIMIT)
+        limit = 2
+        with patch("partyline.bridge_delivery.WINDOW_LIMIT", limit):
+            for n in range(limit):
+                self.say("x", "x-amb", f"@[bridge]fable message {n}")
+            self.assertEqual(len(self.adapters["y-amb"].delivered), limit)
+            self.say("x", "x-amb", "@[bridge]fable one too many")
+            self.say("x", "x-amb", "@[bridge]fable and another")
+            self.assertEqual(len(self.adapters["y-amb"].delivered), limit)
         private = [r for r in self.rows("x") if r["audience_attachment_id"] == "x-amb"
                    and "rate limit" in r["body"]]
         self.assertEqual(len(private), 2)

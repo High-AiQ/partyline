@@ -17,7 +17,7 @@ async def eventually(predicate, what):
     for _ in range(100):
         if predicate():
             return
-        await asyncio.sleep(0.01)
+        await asyncio.sleep(0)
     raise AssertionError(f"timed out waiting for {what}")
 
 

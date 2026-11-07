@@ -128,6 +128,16 @@ class ClaudeStartupPromptTest(unittest.IsolatedAsyncioTestCase):
     fixture = Path(__file__).parent / "fixtures" / "claude_trust_prompt.txt"
     current_fixture = Path(__file__).parent / "fixtures" / "claude_trust_prompt_2026.txt"
 
+    async def asyncSetUp(self):
+        real_sleep = asyncio.sleep
+
+        async def tick(_seconds):
+            await real_sleep(0)
+
+        patcher = patch("partyline.adapters.startup_prompt.asyncio.sleep", tick)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def make_adapter(self, attention: AsyncMock) -> PartylineAdapter:
         async def post(*_args) -> None:
             return None

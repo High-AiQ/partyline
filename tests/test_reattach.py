@@ -91,7 +91,8 @@ class ReplacingDeliveryAdapter(ReadyAdapter):
         await asyncio.to_thread(self.lock_attempted.wait)
         try:
             await asyncio.wait_for(
-                asyncio.to_thread(self.replacement_finished.wait), timeout=0.05
+                # Actual lock-wait bound: 40 ms stays below the 50 ms budget.
+                asyncio.to_thread(self.replacement_finished.wait), timeout=0.04
             )
         except TimeoutError:
             pass
@@ -630,7 +631,7 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         async def unconfirmed_resume(_attachment_id, _pending):
             adapter = ReadyAdapter(self.order, "sol")
             adapter.att["runtime_owner"] = "new-generation"
-            adapter.wait_startup_delivery_received = lambda: asyncio.sleep(30)
+            adapter.wait_startup_delivery_received = lambda: asyncio.Event().wait()
             return ResumedAttachment(adapter, True)
 
         result = await ReattachCoordinator(
@@ -661,7 +662,7 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         async def unconfirmed_resume(_attachment_id, _pending):
             adapter = ReadyAdapter(self.order, "sol")
             adapter.att["runtime_owner"] = "new-generation"
-            adapter.wait_startup_delivery_received = lambda: asyncio.sleep(30)
+            adapter.wait_startup_delivery_received = lambda: asyncio.Event().wait()
             return ResumedAttachment(adapter, True)
 
         result = await ReattachCoordinator(
@@ -694,7 +695,7 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
             self.order.append(f"start:{name}")
             adapter = ReadyAdapter(self.order, name)
             if attachment_id == "one":
-                adapter.wait_ready = lambda: asyncio.sleep(30)
+                adapter.wait_ready = lambda: asyncio.Event().wait()
             adapters[attachment_id] = adapter
             self.runtime.live[attachment_id] = adapter
             return ResumedAttachment(adapter, False)
@@ -721,7 +722,7 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
             name = self.db.get_attachment(attachment_id)["name"]
             adapter = ReadyAdapter(self.order, name)
             if attachment_id == "one":
-                adapter.wait_ready = lambda: asyncio.sleep(30)
+                adapter.wait_ready = lambda: asyncio.Event().wait()
             self.runtime.live[attachment_id] = adapter
             return ResumedAttachment(adapter, False)
 
@@ -841,7 +842,7 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
 
         async def resume(attachment_id, _pending):
             adapter = ReadyAdapter(self.order, "sol")
-            adapter.wait_startup_delivery_received = lambda: asyncio.sleep(30)
+            adapter.wait_startup_delivery_received = lambda: asyncio.Event().wait()
             self.runtime.live[attachment_id] = adapter
             return ResumedAttachment(adapter, True)
 
@@ -883,7 +884,7 @@ class ReattachCoordinatorTest(unittest.IsolatedAsyncioTestCase):
             name = self.db.get_attachment(attachment_id)["name"]
             adapter = ReadyAdapter(self.order, name)
             adapter.att["runtime_owner"] = owner
-            adapter.wait_startup_delivery_received = lambda: asyncio.sleep(30)
+            adapter.wait_startup_delivery_received = lambda: asyncio.Event().wait()
             if attachment_id == "one":
                 self.runtime.live[attachment_id] = adapter
             return ResumedAttachment(adapter, True)
@@ -1015,7 +1016,7 @@ class FleetPlanTest(unittest.IsolatedAsyncioTestCase):
         async def resume(ident, pending):
             adapter = ReadyAdapter(self.order, "sol")
             adapter.alive = lambda: False
-            adapter.wait_ready = lambda: asyncio.sleep(30)
+            adapter.wait_ready = lambda: asyncio.Event().wait()
             self.runtime.live[ident] = adapter
             return ResumedAttachment(adapter, False)
 

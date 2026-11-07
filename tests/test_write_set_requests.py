@@ -59,6 +59,11 @@ class WriteSetRequestTest(unittest.TestCase):
         metadata_patch = patch("partyline.write_set_requests.ADAPTER_METADATA", metadata)
         metadata_patch.start()
         self.addCleanup(metadata_patch.stop)
+        # These routes exercise detach/resume outcomes, not the production
+        # three-second confirmation window for an already-missing adapter.
+        timeout_patch = patch("partyline.line_process_routes.DETACH_CONFIRM_TIMEOUT", 0)
+        timeout_patch.start()
+        self.addCleanup(timeout_patch.stop)
         app = FastAPI()
         install_auth_guard(app, self.db)
         app.include_router(write_set_router(self.runtime))

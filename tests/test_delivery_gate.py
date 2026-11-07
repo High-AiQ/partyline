@@ -241,11 +241,12 @@ class ReadinessDeliveryGateTest(unittest.IsolatedAsyncioTestCase):
         adapter.att["repool_message_ids"] = AsyncMock(return_value=False)
 
         with (
-            patch("partyline.runtime_delivery_credit.CLAIM_RETRY_DIAGNOSTIC_SECONDS", 0.01),
+            patch("partyline.runtime_delivery_credit.CLAIM_RETRY_DIAGNOSTIC_SECONDS", 0),
             self.assertLogs("partyline.runtime_delivery_credit", level="WARNING") as captured,
         ):
             adapter.mark_ready()
-            await asyncio.sleep(0.03)
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
 
         self.assertEqual(self.runtime.uncredited["att"]["ids"], {only})
         self.assertIn("transcript claim retry still uncredited", captured.output[0])
@@ -367,13 +368,14 @@ class ReadinessDeliveryGateTest(unittest.IsolatedAsyncioTestCase):
             "delivery_proof_reason": "test adapter has no structured receipt",
         }
         message_id = self.say("wake without proof")
-        with patch("partyline.runtime_delivery_credit.UNCREDITED_DELIVERY_WARNING_SECONDS", 0.01):
+        with patch("partyline.runtime_delivery_credit.UNCREDITED_DELIVERY_WARNING_SECONDS", 0):
             with self.assertLogs("partyline.runtime", level="WARNING"):
                 self.assertFalse(await self.runtime.deliver_pending(
                     "line", self.attachment(), adapter
                 ))
             with self.assertLogs("partyline.runtime_delivery_credit", level="WARNING"):
-                await asyncio.sleep(0.02)
+                await asyncio.sleep(0)
+                await asyncio.sleep(0)
         self.assertEqual(self.db.get_attachment("att")["last_seen"], 0)
         self.assertIn(message_id, self.runtime.uncredited["att"]["ids"])
         confirm = adapter.att["confirm_delivery_ids"]

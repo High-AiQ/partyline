@@ -49,7 +49,20 @@ def tearDownModule():
 async def wait_for(predicate):
     async with asyncio.timeout(5):
         while not predicate():
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(0)
+
+
+async def inline_io(function, *args):
+    """Serialize fixture reads with writes; partial IO is tested separately."""
+    return function(*args)
+
+
+def write_snapshot(path: Path, content: str, encoding="utf-8") -> None:
+    """Write one snapshot with a distinct fake filesystem timestamp."""
+    previous = path.stat().st_mtime_ns if path.exists() else time.time_ns()
+    Path.write_text(path, content, encoding=encoding)
+    mtime_ns = previous + 1
+    os.utime(path, ns=(mtime_ns, mtime_ns))
 
 
 class Process:
@@ -82,6 +95,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.messages: list[tuple[str, str, str]] = []
         self.statuses: list[str] = []
+        self.exited = asyncio.Event()
         self.sessions: list[str] = []
         PartylineAdapter._CLAIMED.clear()
         self.addCleanup(PartylineAdapter._CLAIMED.clear)
@@ -91,6 +105,8 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
 
     async def status(self, value: str) -> None:
         self.statuses.append(value)
+        if value == "exited":
+            self.exited.set()
 
     def on_cli_session(self, session_id: str) -> None:
         self.sessions.append(session_id)
@@ -530,7 +546,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 + "\n",
                 json.dumps({"type": "turn_ended", "status": "success"}) + "\n",
             ]
-            path.write_text("".join(lines), encoding="utf-8")
+            write_snapshot(path, "".join(lines), encoding="utf-8")
 
             adapter = self.make_adapter(hook_url="http://hook.local")
             adapter.proc = Process()
@@ -543,7 +559,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             with patch(
                 "partyline.adapters.bundled.cursor.adapter.receipt",
                 side_effect=mock_receipt,
-            ):
+            ), patch("partyline.adapters.bundled.cursor.adapter.asyncio.to_thread", new=inline_io):
                 task = asyncio.create_task(adapter._tail_transcript(path))
                 await wait_for(lambda: len(receipts_seen) >= 2 and len(self.messages) >= 1)
                 adapter.proc.stop()
@@ -574,7 +590,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 + "\n",
                 json.dumps({"type": "turn_ended", "status": "success"}) + "\n",
             ]
-            path.write_text("".join(old_lines), encoding="utf-8")
+            write_snapshot(path, "".join(old_lines), encoding="utf-8")
 
             adapter = self.make_adapter(resume=True, cli_session="sess-1")
             adapter.proc = Process()
@@ -589,7 +605,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             with patch(
                 "partyline.adapters.bundled.cursor.adapter.receipt",
                 side_effect=mock_receipt,
-            ):
+            ), patch("partyline.adapters.bundled.cursor.adapter.asyncio.to_thread", new=inline_io):
                 task = asyncio.create_task(adapter._tail_transcript(path))
                 await wait_for(lambda: adapter._ready.is_set())
 
@@ -645,7 +661,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 )
                 + "\n",
             ]
-            path.write_text("".join(initial_lines), encoding="utf-8")
+            write_snapshot(path, "".join(initial_lines), encoding="utf-8")
 
             adapter = self.make_adapter()
             adapter.proc = Process()
@@ -667,7 +683,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 )
                 + "\n"
             ]
-            path.write_text("".join(rewritten_lines), encoding="utf-8")
+            write_snapshot(path, "".join(rewritten_lines), encoding="utf-8")
             await wait_for(lambda: len(self.messages) >= 3)
 
             # msg 1 and msg 2 should not be repeated
@@ -690,7 +706,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 )
                 + "\n"
             ]
-            path.write_text("".join(compacted_lines), encoding="utf-8")
+            write_snapshot(path, "".join(compacted_lines), encoding="utf-8")
             await wait_for(lambda: len(self.messages) >= 4)
 
             adapter.proc.stop()
@@ -722,7 +738,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "f.jsonl"
             lines = ["line 1\n", "line 2\n", "line 3\n"]
-            path.write_text("".join(lines), encoding="utf-8")
+            write_snapshot(path, "".join(lines), encoding="utf-8")
             fps = [fingerprint(line) for line in lines]
 
             # Matching prefix
@@ -731,7 +747,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             # Compaction / front truncation
             comp_path = Path(tmpdir) / "comp.jsonl"
             comp_lines = ["line 2\n", "line 3\n", "line 4\n"]
-            comp_path.write_text("".join(comp_lines), encoding="utf-8")
+            write_snapshot(comp_path, "".join(comp_lines), encoding="utf-8")
             comp_fps = [fingerprint(line) for line in comp_lines]
             self.assertEqual(resync_fingerprints(comp_path, fps), comp_fps[:2])
 
@@ -739,19 +755,19 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             # deliberately uses the positional hatch instead.
             mod_lines = ["line 0\n", "line 2\n", "line 3\n"]
             mod_path = Path(tmpdir) / "mod.jsonl"
-            mod_path.write_text("".join(mod_lines), encoding="utf-8")
+            write_snapshot(mod_path, "".join(mod_lines), encoding="utf-8")
             self.assertEqual(resync_fingerprints(mod_path, fps), fps)
 
             # Subsegment match with front insertion
             sub_lines = ["meta\n", "line 2\n", "line 3\n", "line 4\n"]
             sub_path = Path(tmpdir) / "sub.jsonl"
-            sub_path.write_text("".join(sub_lines), encoding="utf-8")
+            write_snapshot(sub_path, "".join(sub_lines), encoding="utf-8")
             self.assertEqual(resync_fingerprints(sub_path, fps), fps)
 
             # Disjoint file preserves seen_fps unchanged
             dis_lines = ["other 1\n", "other 2\n"]
             dis_path = Path(tmpdir) / "dis.jsonl"
-            dis_path.write_text("".join(dis_lines), encoding="utf-8")
+            write_snapshot(dis_path, "".join(dis_lines), encoding="utf-8")
             self.assertEqual(resync_fingerprints(dis_path, fps), fps)
 
             # Non-existent file returns input
@@ -781,7 +797,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 '{"role":"assistant","message":{"content":[{"type":"text","text":"new reply"}]}}\n',
                 old[-1],
             ]
-            path.write_text("".join(rewritten), encoding="utf-8")
+            write_snapshot(path, "".join(rewritten), encoding="utf-8")
 
             # Compaction makes 7 lines (<= old 6 + 1 slack).  The old
             # membership-blind code accepted the final marker and swallowed
@@ -799,7 +815,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             adapter._find_chat = lambda: None
             adapter.spawn_argv = ["agent", "--api-key", "secret", "--workspace", str(worktree)]
             await adapter.on_output(b"\x1b[31mAuthorization: Bearer leaked\x1b[0m")
-            adapter.DISCOVERY_TIMEOUT = 0.05
+            adapter.DISCOVERY_TIMEOUT = 0.04
             adapter.POLL_SECONDS = 0.01
 
             with patch(
@@ -865,16 +881,14 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 command=["sh", "-c", "trap '' TERM; while :; do sleep 1; done"],
             )
             adapter.INITIAL_DELAY = 0
+            # Actual discovery/termination timing: each delay is 10 ms, below 50 ms.
             adapter.DISCOVERY_TIMEOUT = 0.01
             adapter.POLL_SECONDS = 0.01
             adapter.TERMINATE_GRACE = 0.01
             adapter._find_chat = lambda: None
             await adapter.start()
             try:
-                for _ in range(100):
-                    if "exited" in self.statuses:
-                        break
-                    await asyncio.sleep(0.01)
+                await asyncio.wait_for(self.exited.wait(), 5)
                 self.assertIn("exited", self.statuses)
                 self.assertFalse(await adapter.wait_ready())
                 self.assertIn("exited (code", self.messages[-1][2])
@@ -967,7 +981,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "agent.jsonl"
             lines = ['{"one": 1}\n', '{"two": 2}\n']
-            path.write_text("".join(lines), encoding="utf-8")
+            write_snapshot(path, "".join(lines), encoding="utf-8")
             seen = [fingerprint(line) for line in lines]
 
             # A byte-identical atomic rewrite is a healthy sequential match.
@@ -975,7 +989,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
 
             # Reading a matching record in the tail clears an older failure
             # before a later rewrite can consume the fallback budget.
-            path.write_text("".join(lines + ['{"three": 3}\n']), encoding="utf-8")
+            write_snapshot(path, "".join(lines + ['{"three": 3}\n']), encoding="utf-8")
             self.assertEqual(await adapter._handle_resync(path, seen, 1), (seen, 0))
 
     async def test_resync_counter_ignores_empty_or_partial_rewrite(self):
@@ -985,16 +999,16 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             lines = ['{"one": 1}\n', '{"two": 2}\n']
             seen = [fingerprint(line) for line in lines]
 
-            path.write_text("", encoding="utf-8")
+            write_snapshot(path, "", encoding="utf-8")
             self.assertEqual(await adapter._handle_resync(path, seen, 2), (seen, 2))
 
             # The final record has not reached its JSONL newline yet.
-            path.write_text(lines[0] + '{"two": 2}', encoding="utf-8")
+            write_snapshot(path, lines[0] + '{"two": 2}', encoding="utf-8")
             self.assertEqual(await adapter._handle_resync(path, seen, 2), (seen, 2))
 
             # A shorter rewrite that is complete must still reach the escape
             # hatch eventually, but its distinct snapshot starts a new budget.
-            path.write_text(lines[0], encoding="utf-8")
+            write_snapshot(path, lines[0], encoding="utf-8")
             self.assertEqual(await adapter._handle_resync(path, seen, 1), (seen, 1))
 
     async def test_resync_strikes_require_one_stable_unknown_snapshot(self):
@@ -1006,7 +1020,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
 
             for step in range(3):
                 changing = [f'{{"render":{step},"line":{index}}}\n' for index in range(3)]
-                path.write_text("".join(changing), encoding="utf-8")
+                write_snapshot(path, "".join(changing), encoding="utf-8")
                 self.assertEqual(
                     await adapter._handle_resync(path, seen, 1), (seen, 1)
                 )
@@ -1024,7 +1038,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
         after = (fixtures / "after.jsonl").read_text(encoding="utf-8")
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "live.jsonl"
-            path.write_text(before, encoding="utf-8")
+            write_snapshot(path, before, encoding="utf-8")
             adapter = self.make_adapter(resume=True, cli_session="sess-117")
             adapter.proc = Process()
             adapter._silent_until_wake = False
@@ -1036,10 +1050,10 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             with patch(
                 "partyline.adapters.bundled.cursor.adapter.receipt",
                 side_effect=mock_receipt,
-            ):
+            ), patch("partyline.adapters.bundled.cursor.adapter.asyncio.to_thread", new=inline_io):
                 task = asyncio.create_task(adapter._tail_transcript(path))
                 await wait_for(lambda: adapter._ready.is_set())
-                path.write_text(after, encoding="utf-8")
+                write_snapshot(path, after, encoding="utf-8")
                 await wait_for(lambda: len(receipts_seen) >= 2 and len(self.messages) >= 1)
                 adapter.proc.stop()
                 await task
@@ -1061,7 +1075,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 '{"role":"assistant","content":"reply"}\n',
                 before[-1],
             ]
-            path.write_text("".join(rewritten), encoding="utf-8")
+            write_snapshot(path, "".join(rewritten), encoding="utf-8")
             seen = [fingerprint(line) for line in before]
 
             self.assertEqual(await adapter._handle_resync(path, seen, 0), (seen, 1))
@@ -1073,7 +1087,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             old = ['{"old":1}\n', '{"old":2}\n']
             rewritten = ['{"new":1}\n', '{"new":2}\n', '{"new":3}\n']
             seen = [fingerprint(line) for line in old]
-            path.write_text("".join(rewritten), encoding="utf-8")
+            write_snapshot(path, "".join(rewritten), encoding="utf-8")
 
             current, failures = seen, 0
             for expected in (1, 2):
@@ -1115,7 +1129,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 },
                 {"type": "turn_ended", "status": "success"},
             ]
-            path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+            write_snapshot(path, "".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
 
             adapter = self.make_adapter()
             adapter.proc = Process()
@@ -1128,7 +1142,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             with patch(
                 "partyline.adapters.bundled.cursor.adapter.receipt",
                 side_effect=mock_receipt,
-            ):
+            ), patch("partyline.adapters.bundled.cursor.adapter.asyncio.to_thread", new=inline_io):
                 task = asyncio.create_task(adapter._tail_transcript(path))
                 await wait_for(lambda: len(receipts_seen) >= 2 and len(self.messages) >= 1)
                 adapter.proc.stop()
@@ -1213,7 +1227,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "live.jsonl"
-            path.write_text("\n".join(fixture_lines) + "\n", encoding="utf-8")
+            write_snapshot(path, "\n".join(fixture_lines) + "\n", encoding="utf-8")
 
             adapter = self.make_adapter(resume=True, cli_session="sess-1")
             adapter.proc = Process()
@@ -1227,7 +1241,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             with patch(
                 "partyline.adapters.bundled.cursor.adapter.receipt",
                 side_effect=mock_receipt,
-            ):
+            ), patch("partyline.adapters.bundled.cursor.adapter.asyncio.to_thread", new=inline_io):
                 task = asyncio.create_task(adapter._tail_transcript(path))
                 await wait_for(lambda: adapter._ready.is_set())
 
@@ -1264,7 +1278,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                     [json.dumps(new_user), json.dumps(new_reply), json.dumps(new_turn_end)]
                 )
 
-                path.write_text("\n".join(rewritten_lines) + "\n", encoding="utf-8")
+                write_snapshot(path, "\n".join(rewritten_lines) + "\n", encoding="utf-8")
                 await wait_for(lambda: len(receipts_seen) >= 2 and len(self.messages) >= 1)
 
                 adapter.proc.stop()
@@ -1293,7 +1307,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 + "\n",
                 json.dumps({"type": "turn_ended", "status": "success"}) + "\n",
             ]
-            path.write_text("".join(turn1), encoding="utf-8")
+            write_snapshot(path, "".join(turn1), encoding="utf-8")
 
             adapter = self.make_adapter()
             adapter.proc = Process()
@@ -1306,7 +1320,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             with patch(
                 "partyline.adapters.bundled.cursor.adapter.receipt",
                 side_effect=mock_receipt,
-            ):
+            ), patch("partyline.adapters.bundled.cursor.adapter.asyncio.to_thread", new=inline_io):
                 task = asyncio.create_task(adapter._tail_transcript(path))
                 await wait_for(lambda: len(receipts_seen) >= 2 and len(self.messages) >= 1)
 
@@ -1362,7 +1376,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 + "\n",
                 json.dumps({"type": "turn_ended", "status": "success"}) + "\n",
             ]
-            path.write_text("".join(turn1), encoding="utf-8")
+            write_snapshot(path, "".join(turn1), encoding="utf-8")
 
             adapter = self.make_adapter()
             adapter.proc = Process()
@@ -1375,7 +1389,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             with patch(
                 "partyline.adapters.bundled.cursor.adapter.receipt",
                 side_effect=mock_receipt,
-            ):
+            ), patch("partyline.adapters.bundled.cursor.adapter.asyncio.to_thread", new=inline_io):
                 task = asyncio.create_task(adapter._tail_transcript(path))
                 await wait_for(lambda: len(receipts_seen) >= 2 and len(self.messages) >= 1)
 
@@ -1404,10 +1418,10 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                     + "\n",
                     json.dumps({"type": "turn_ended", "status": "success"}) + "\n",
                 ]
-                path.write_text("".join(rewritten), encoding="utf-8")
+                write_snapshot(path, "".join(rewritten), encoding="utf-8")
                 async with asyncio.timeout(5):
                     while receipts_seen != [BEGAN, ENDED, ENDED, BEGAN, ENDED]:
-                        await asyncio.sleep(0.01)
+                        await asyncio.sleep(0)
 
                 adapter.proc.stop()
                 await task
@@ -1459,7 +1473,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 + "\n",
                 json.dumps({"type": "turn_ended", "status": "success"}) + "\n",
             ]
-            path.write_text("".join(old_turns), encoding="utf-8")
+            write_snapshot(path, "".join(old_turns), encoding="utf-8")
 
             adapter = self.make_adapter(resume=True, cli_session="sess-1")
             adapter.proc = Process()
@@ -1473,7 +1487,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             with patch(
                 "partyline.adapters.bundled.cursor.adapter.receipt",
                 side_effect=mock_receipt,
-            ):
+            ), patch("partyline.adapters.bundled.cursor.adapter.asyncio.to_thread", new=inline_io):
                 task = asyncio.create_task(adapter._tail_transcript(path))
                 await wait_for(lambda: adapter._ready.is_set())
 
@@ -1558,10 +1572,10 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                     + "\n",
                     json.dumps({"type": "turn_ended", "status": "success"}) + "\n",
                 ]
-                path.write_text("".join(rewritten), encoding="utf-8")
+                write_snapshot(path, "".join(rewritten), encoding="utf-8")
                 async with asyncio.timeout(5):
                     while receipts_seen != [ENDED, BEGAN, ENDED]:
-                        await asyncio.sleep(0.01)
+                        await asyncio.sleep(0)
 
                 adapter.proc.stop()
                 await task
@@ -1606,7 +1620,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 + "\n",
                 json.dumps({"type": "turn_ended", "status": "success"}) + "\n",
             ]
-            path.write_text("".join(old_turns), encoding="utf-8")
+            write_snapshot(path, "".join(old_turns), encoding="utf-8")
 
             adapter = self.make_adapter(resume=True, cli_session="sess-1")
             adapter.proc = Process()
@@ -1620,7 +1634,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             with patch(
                 "partyline.adapters.bundled.cursor.adapter.receipt",
                 side_effect=mock_receipt,
-            ):
+            ), patch("partyline.adapters.bundled.cursor.adapter.asyncio.to_thread", new=inline_io):
                 task = asyncio.create_task(adapter._tail_transcript(path))
                 await wait_for(lambda: adapter._ready.is_set())
 
@@ -1658,10 +1672,10 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                     + "\n",
                     json.dumps({"type": "turn_ended", "status": "success"}) + "\n",
                 ]
-                path.write_text("".join(rewritten), encoding="utf-8")
+                write_snapshot(path, "".join(rewritten), encoding="utf-8")
                 async with asyncio.timeout(5):
                     while receipts_seen != [ENDED, BEGAN, ENDED]:
-                        await asyncio.sleep(0.01)
+                        await asyncio.sleep(0)
 
                 adapter.proc.stop()
                 await task
@@ -1685,7 +1699,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
         after = (fixtures / "after.jsonl").read_text(encoding="utf-8")
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "live.jsonl"
-            path.write_text(before, encoding="utf-8")
+            write_snapshot(path, before, encoding="utf-8")
 
             adapter = self.make_adapter(resume=True, cli_session="sess-115")
             adapter.proc = Process()
@@ -1699,12 +1713,12 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
             with patch(
                 "partyline.adapters.bundled.cursor.adapter.receipt",
                 side_effect=mock_receipt,
-            ):
+            ), patch("partyline.adapters.bundled.cursor.adapter.asyncio.to_thread", new=inline_io):
                 task = asyncio.create_task(adapter._tail_transcript(path))
                 await wait_for(lambda: adapter._ready.is_set())
                 self.assertEqual(self.messages, [])
 
-                path.write_text(after, encoding="utf-8")
+                write_snapshot(path, after, encoding="utf-8")
                 await wait_for(lambda: ENDED in receipts_seen and bool(self.messages))
 
                 adapter.proc.stop()
@@ -1737,7 +1751,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 old[1],
                 '{"role":"user","message":{"content":[{"type":"text","text":"q2"}]}}\n',
             ]
-            path.write_text("".join(rewritten), encoding="utf-8")
+            write_snapshot(path, "".join(rewritten), encoding="utf-8")
 
             self.assertEqual(
                 await adapter._handle_resync(path, seen, 0), (seen[:-1], 0)
@@ -1766,7 +1780,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "live.jsonl"
-            path.write_text(stages[0].read_text(encoding="utf-8"), encoding="utf-8")
+            write_snapshot(path, stages[0].read_text(encoding="utf-8"))
 
             adapter = self.make_adapter()
             adapter.proc = Process()
@@ -1777,25 +1791,40 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 receipts_seen.append(event)
 
             parsed = []
+            expected_record = None
+            record_seen = asyncio.Event()
 
             def capture_record(record, name):
                 parsed.append(record)
+                if record == expected_record:
+                    record_seen.set()
                 return parse_record(record, name)
 
             with patch(
                 "partyline.adapters.bundled.cursor.adapter.receipt",
                 side_effect=mock_receipt,
-            ), patch("partyline.adapters.bundled.cursor.adapter.parse_record", side_effect=capture_record):
+            ), patch(
+                "partyline.adapters.bundled.cursor.adapter.parse_record", side_effect=capture_record
+            ), patch("partyline.adapters.bundled.cursor.adapter.asyncio.to_thread", new=inline_io):
+                # Complete snapshots are the behavior under test; do not let a
+                # worker thread observe the truncate/write gap in write_text.
                 task = asyncio.create_task(adapter._tail_transcript(path))
                 await wait_for(lambda: len(receipts_seen) >= 1)
                 for stage in stages[1:]:
                     parsed.clear()
                     content = stage.read_text(encoding="utf-8")
-                    last_record = json.loads(content.splitlines()[-1])
-                    path.write_text(
-                        content, encoding="utf-8"
-                    )
-                    await wait_for(lambda record=last_record: record in parsed)
+                    expected_record = json.loads(content.splitlines()[-1])
+                    record_seen = asyncio.Event()
+                    # Several writes can land in one filesystem timestamp tick.
+                    # Advance a fake mtime so the watcher sees every stage.
+                    write_snapshot(path, content)
+                    try:
+                        await asyncio.wait_for(record_seen.wait(), 5)
+                    except TimeoutError as exc:
+                        frames = [f"{f.f_code.co_name}:{f.f_lineno}" for f in task.get_stack()]
+                        raise AssertionError(
+                            f"tail missed {stage.name}; task={frames}; parsed={parsed}"
+                        ) from exc
                 await wait_for(lambda: len(receipts_seen) >= 4 and len(self.messages) >= 2)
                 adapter.proc.stop()
                 await task
@@ -1830,7 +1859,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 json.dumps(record) + "\n",
                 "half-line",
             ]
-            path.write_text("".join(lines), encoding="utf-8")
+            write_snapshot(path, "".join(lines), encoding="utf-8")
 
             adapter = self.make_adapter()
             adapter.proc = Process()
@@ -1865,6 +1894,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
                 return_value=Path("/tmp/fake-trans"),
             ),
             patch.object(adapter, "_tail_transcript", AsyncMock()),
+            patch("partyline.adapters.bundled.cursor.adapter.asyncio.sleep", new=AsyncMock()),
         ):
             with patch("pathlib.Path.is_file", return_value=True):
                 await adapter._run()
@@ -1876,7 +1906,7 @@ class CursorAdapterTest(unittest.IsolatedAsyncioTestCase):
         adapter.proc = Process()
         adapter.send_keys = AsyncMock()
         adapter._find_chat = lambda: "found-uuid"
-        adapter.DISCOVERY_TIMEOUT = 0.05
+        adapter.DISCOVERY_TIMEOUT = 0.04
         adapter.POLL_SECONDS = 0.01
 
         with patch(

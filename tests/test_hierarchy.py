@@ -3,9 +3,9 @@
 import asyncio
 import tempfile
 import threading
-import time
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -798,13 +798,29 @@ class HierarchyApiTest(unittest.TestCase):
             )
             for i in range(6)
         ]
-        for thread in threads:
-            thread.start()
-        # Let the others pile up behind the held delivery before releasing it.
-        time.sleep(0.4)
-        released.set()
-        for thread in threads:
-            thread.join(timeout=15)
+        all_waiting = threading.Event()
+        claim_lock = threading.Lock()
+        claim_attempts = [0]
+        original_claim = reports._claim_wake
+
+        def counted_claim(*args):
+            wake = original_claim(*args)
+            with claim_lock:
+                claim_attempts[0] += 1
+                if claim_attempts[0] == len(threads) - 1:
+                    all_waiting.set()
+            return wake
+
+        with patch.object(reports, "_claim_wake", counted_claim):
+            for thread in threads:
+                thread.start()
+            try:
+                # Every competing request has reached the held wake claim.
+                self.assertTrue(all_waiting.wait(5))
+            finally:
+                released.set()
+            for thread in threads:
+                thread.join(timeout=15)
 
         self.assertEqual([code for code in results if code != 201], [])
         self.assertEqual(len(deliveries), 1, "the manager was woken once, not once per report")

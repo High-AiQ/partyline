@@ -1,5 +1,5 @@
 import asyncio
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import contextmanager
 import json
 import os
 import tempfile
@@ -120,7 +120,8 @@ class ReplacingDeliveryAdapter(FakeAdapter):
         await asyncio.to_thread(self.lock_attempted.wait)
         try:
             await asyncio.wait_for(
-                asyncio.to_thread(self.replacement_finished.wait), timeout=0.05
+                # Actual lock-wait bound: 40 ms stays below the 50 ms budget.
+                asyncio.to_thread(self.replacement_finished.wait), timeout=0.04
             )
         except TimeoutError:
             pass
@@ -837,18 +838,14 @@ class ServerTest(unittest.TestCase):
         replacement_runtime = ChatRuntime(replacement)
         adapter = FakeAdapter(att={"runtime_owner": "old-generation"})
         server.runtime.live["old"] = adapter
-        lock_attempted = asyncio.Event()
+        lock_blocked = asyncio.Event()
         transition_task = None
         transition_crossed_before_write = False
-        original_async_guard = replacement._runtime_serialized_async
+        real_sleep = asyncio.sleep
 
-        @asynccontextmanager
-        async def signalled_guard():
-            lock_attempted.set()
-            async with original_async_guard():
-                yield
-
-        replacement._runtime_serialized_async = signalled_guard
+        async def contended(_seconds):
+            lock_blocked.set()
+            await real_sleep(0)
 
         async def exit_then_claim():
             await replacement_runtime.status_callback(
@@ -866,8 +863,7 @@ class ServerTest(unittest.TestCase):
         async def deliver(messages):
             nonlocal transition_task, transition_crossed_before_write
             transition_task = asyncio.create_task(exit_then_claim())
-            await lock_attempted.wait()
-            await asyncio.sleep(0.02)
+            await lock_blocked.wait()
             transition_crossed_before_write = transition_task.done()
             adapter.deliveries.append(messages)
 
@@ -881,7 +877,8 @@ class ServerTest(unittest.TestCase):
             await transition_task
 
         try:
-            self.arun(deliver_then_wait_for_transition())
+            with patch("partyline.runtime_lock.asyncio.sleep", new=contended):
+                self.arun(deliver_then_wait_for_transition())
             self.assertFalse(transition_crossed_before_write)
             self.assertEqual(adapter.deliveries, [[message]])
             current = replacement.get_attachment("old")
@@ -906,28 +903,25 @@ class ServerTest(unittest.TestCase):
             )
         )
 
+        lock_blocked = asyncio.Event()
+        real_sleep = asyncio.sleep
+
+        async def contended(_seconds):
+            lock_blocked.set()
+            await real_sleep(0)
+
         async def reserve_then_detach():
             async with server.runtime.db.reserve_attachment_delivery(
                 "old", "old-generation"
             ) as reserved:
                 self.assertTrue(reserved)
-                lock_attempted = asyncio.Event()
-                original_async_guard = server.runtime.db._runtime_serialized_async
-
-                @asynccontextmanager
-                async def signalled_guard():
-                    lock_attempted.set()
-                    async with original_async_guard():
-                        yield
-
-                server.runtime.db._runtime_serialized_async = signalled_guard
                 detaching = asyncio.create_task(server.detach(self.principal_request(), "old"))
-                await lock_attempted.wait()
-                await asyncio.sleep(0.02)
+                await lock_blocked.wait()
                 self.assertFalse(detaching.done())
             await detaching
 
-        self.arun(reserve_then_detach())
+        with patch("partyline.runtime_lock.asyncio.sleep", new=contended):
+            self.arun(reserve_then_detach())
         self.assertEqual(server.runtime.db.get_attachment("old")["status"], "detached")
         self.assertEqual(
             server.runtime.db.list_messages("line")[-1]["body"], "@opus detached"
@@ -957,6 +951,8 @@ class ServerTest(unittest.TestCase):
                                   track_status_attempt), patch(
                     "partyline.line_process_routes.process_group_alive",
                     return_value=False,
+                ), patch("partyline.line_process_routes.DETACH_STOP_TIMEOUT", 0.01), patch(
+                    "partyline.line_process_routes.DETACH_DB_TIMEOUT", 0.01
                 ):
                     with self.assertRaisesRegex(
                         HTTPException, "attachment status update is busy"
@@ -1023,7 +1019,7 @@ class ServerTest(unittest.TestCase):
         async def detach_while_an_archive_stop_lands():
             async def landing_stop():
                 # stop_attachments pops the adapter before its status write.
-                await asyncio.sleep(0.02)
+                await asyncio.sleep(0)
                 self.assertTrue(server.runtime.db.set_attachment_status(
                     "old", "detached", None))
 
@@ -1054,7 +1050,7 @@ class ServerTest(unittest.TestCase):
 
         with patch("partyline.line_process_routes.DETACH_CONFIRM_TIMEOUT", 0.01), patch(
             "partyline.line_process_routes.process_group_alive", return_value=True
-        ):
+        ), patch("partyline.line_process_routes.DETACH_STOP_TIMEOUT", 0.01):
             with self.assertRaisesRegex(HTTPException, "attachment remains live"):
                 self.arun(server.detach(self.principal_request(), "old"))
 
@@ -1075,7 +1071,9 @@ class ServerTest(unittest.TestCase):
         adapter.stop = hangs_forever
         server.runtime.live["old"] = adapter
 
-        with patch("partyline.line_process_routes.DETACH_CONFIRM_TIMEOUT", 0.01):
+        with patch("partyline.line_process_routes.DETACH_CONFIRM_TIMEOUT", 0.01), patch(
+            "partyline.line_process_routes.DETACH_STOP_TIMEOUT", 0.01
+        ):
             with self.assertRaisesRegex(HTTPException, "attachment remains live"):
                 self.arun(server.detach(self.principal_request(), "old"))
 
