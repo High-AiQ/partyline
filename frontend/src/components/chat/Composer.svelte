@@ -251,11 +251,13 @@
       onclick={() => void send()}>{uploading ? "uploading…" : "send"}</button
     >
   </div>
-  {#if !walkthrough.active}<HandsFreeInput />{/if}
-  <WalkthroughControl />
-  {#if room.screenShare?.status === "active" && !room.screenShare.walkthrough}
-    <label><input type="checkbox" bind:checked={includeScreen} /> Attach screen frames</label>
-  {/if}
+  <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5" data-composer-controls>
+    {#if !walkthrough.active}<HandsFreeInput />{/if}
+    <WalkthroughControl />
+    {#if room.screenShare?.status === "active" && !room.screenShare.walkthrough}
+      <label><input type="checkbox" bind:checked={includeScreen} /> Attach screen frames</label>
+    {/if}
+  </div>
   <div class="hint mt-1.5 text-[10px] text-cream-faint" class:blocked={!hasLiveProcess} aria-live="polite">
     {#if !hasLiveProcess}
       attach a process to message this line

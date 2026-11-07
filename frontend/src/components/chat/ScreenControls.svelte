@@ -157,7 +157,7 @@
      is hidden when narrow. A share another device started stays visible as
      status, with its Stop. -->
 {#if room.conversation && (!layout.narrow || room.screenShare)}
-  <div class="flex flex-wrap items-center gap-2 px-4 py-1 text-sm">
+  <div class="flex flex-none flex-wrap items-center gap-2 border-b border-line bg-ink px-4 py-1 text-sm">
     {#if !layout.narrow}<button type="button" onclick={show}>Computers / Share screen</button>{/if}
     {#if room.screenShare}
       <span

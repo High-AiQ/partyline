@@ -39,6 +39,10 @@ describe("screen consent", () => {
     };
     await tick();
     expect(document.body.textContent).toContain("alice is recording a walkthrough on Desk");
+    const row = [...document.querySelectorAll("div")].find((item) =>
+      item.textContent.includes("alice is recording a walkthrough on Desk"),
+    );
+    expect(row?.classList.contains("flex-none")).toBe(true);
     await unmount(component);
   });
 
