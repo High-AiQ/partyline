@@ -48,6 +48,8 @@ class ChatRuntime(DeliveryCreditMixin):
         self.resume_locks: dict[str, asyncio.Lock] = {}
         # A planned process is queued behind its durable cursor, not unreachable.
         self.reattaching: set[str] = set()
+        # Ids of the restart plan being worked, in order; see reattach_queue.
+        self.restart_plan_order: list[str] = []
         # Pasted-but-unproved message ids, keyed per activation. Transcript
         # identity releases these for retry; only a paste-specific receipt
         # may advance the durable cursor.

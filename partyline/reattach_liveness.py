@@ -46,6 +46,7 @@ async def report_reattach_failure(runtime, exc, attachment_id: str, line: str, n
     if await report_live_refusal(runtime, exc, attachment_id, line, name):
         return "ready"
     await abandon(runtime, attachment_id)
+    runtime.reattaching.discard(attachment_id)  # its turn is over: no longer queued
     await runtime.post_message(line, "system", "system", f"⚠ @{name} could not reattach safely: {exc}")
     return "failed"
 

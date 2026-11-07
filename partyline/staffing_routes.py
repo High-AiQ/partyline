@@ -18,6 +18,6 @@ def staffing_router(runtime) -> APIRouter:
     def staffing(request: Request, conv_id: str):
         db = runtime.db
         deny_unless(db, request_principal(request), conv_id, "assign")
-        return staffing_report(db, conv_id)
+        return staffing_report(db, conv_id, runtime=runtime)
 
     return router

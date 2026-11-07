@@ -19,6 +19,7 @@ from .continuation_delivery import deliver_continuation
 from .restart_lease import run_automatic_restart_plan
 from .restart_summary import format_summary
 from .restart_response import restart_plan_response
+from .reattach_queue import post_finish_notices, post_start_notices
 from .reattach_liveness import (mark_unlive_exited, report_live, report_reattach_failure,
                                 report_timeout_exit)
 from .restart_scope import (covered_conversation_ids, planned_conversation_ids,
@@ -214,20 +215,18 @@ class ReattachCoordinator:
         if ensure_owned is not None:
             ensure_owned()
         self.runtime.reattaching.update(attachment_ids)
+        self.runtime.restart_plan_order = list(attachment_ids)
         # A line whose processes are recovering hears about it on that line,
         # even when another line asked for the restart.
         covered = covered_conversation_ids(self.runtime.db, attachment_ids) or [conv_id]
-        restart_notice_ids = {}
         try:
-            for line in covered:
-                notice = await self.runtime.post_message(
-                    line, "system", "system",
-                    f"☏ {start} after the dogfood restart\n\n"
-                    f"Continuation debrief: {debrief}",
-                )
-                restart_notice_ids[line] = notice["id"]
+            restart_notice_ids, queued_lines = await post_start_notices(
+                self.runtime, covered, conv_id,
+                f"☏ {start} after the dogfood restart\n\nContinuation debrief: {debrief}",
+            )
         except BaseException:
             self.runtime.reattaching.difference_update(attachment_ids)
+            self.runtime.restart_plan_order = []
             raise
         ready: list[str] = []
         failed: list[str] = []
@@ -263,7 +262,9 @@ class ReattachCoordinator:
                     cut = turn_marker.was_interrupted(self.runtime.db, attachment_id)
                     await turn_marker.announce_if_interrupted(self.runtime, attachment)
                     await announce_restored(self.runtime, attachment)
-                    notice_ids = (restart_notice_ids[line],) if cut or (
+                    # A captain must learn of the queue even when idle.
+                    captain_queue = attachment.get("is_lead") and line in queued_lines
+                    notice_ids = (restart_notice_ids[line],) if cut or captain_queue or (
                         plan["debrief"].strip() and line == conv_id
                     ) else ()
                     pending = addressed_backlog(self.runtime, attachment, include_message_ids=notice_ids)
@@ -360,6 +361,7 @@ class ReattachCoordinator:
                     f"☏ @{name} is ready after restart; advancing to the next process",
                 )
         finally:
+            self.runtime.restart_plan_order = []
             # Keep unconfirmed processes queued to avoid routing to an unready
             # pty; automatic plans remain durable and retry on restart.
             self.runtime.reattaching.difference_update(
@@ -371,13 +373,9 @@ class ReattachCoordinator:
         await mark_unlive_exited(self.runtime, list(expected_owners), expected_owners)
 
         summary = format_summary(ready, failed, slow, unconfirmed, skipped, failure_details)
-        for line in covered:
-            await self.runtime.post_message(
-                line,
-                "system",
-                "system",
-                f"☏ sequential reattachment finished — {summary}",
-            )
+        await post_finish_notices(
+            self.runtime, covered, queued_lines, f"☏ sequential reattachment finished — {summary}"
+        )
         return ReattachResult(
             tuple(ready), tuple(failed), tuple(slow), tuple(unconfirmed)
         )

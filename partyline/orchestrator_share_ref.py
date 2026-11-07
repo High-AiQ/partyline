@@ -8,6 +8,7 @@ from .git_fence import SHARED_PREFIX, _read_ref, _write_mirror_text, mirror_stor
 from .mention_relay import LIVE
 from .orchestrator_contracts import MessageTaskIn, ShareRefOut
 from .orchestrator_handles import message_task
+from .reattach_queue import no_live_detail
 from .orchestrator_store import require_root, task
 from .line_worktree import rev
 from .review_scope import _named
@@ -50,7 +51,7 @@ async def share_ref(runtime, actor, conv_id: str, body) -> ShareRefOut:
     require_root(db, actor, row["root_id"])
     implementer = db.get_attachment(row["implementer_id"])
     if implementer is None or implementer["status"] not in LIVE:
-        raise HTTPException(409, "this task has no live implementer; call restart_implementer")
+        raise HTTPException(409, no_live_detail(runtime, implementer, "implementer"))
     if not _NAME.fullmatch(body.name) or body.name.startswith(".") or ".." in body.name:
         raise HTTPException(400, "name must match [A-Za-z0-9._-], be at most 64 characters, "
                             "not start with a dot, and not contain '..'")
