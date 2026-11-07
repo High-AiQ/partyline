@@ -222,8 +222,14 @@ line and @mentions the agent that held or last used control.
 `screen_scroll`, `screen_type` and `screen_key` take coordinates in pixels of the
 latest `screen_frame` image ((0, 0) is its top-left corner). The server converts
 them with the frame's region and scale (the inverse of `mark_pointer`), and both
-the server and the helper refuse anything outside the region. Each action returns
-a fresh frame after a 0.3 second settle. Typing and keys are refused until the
+the server and the helper refuse anything outside the region. Actions settle for
+0.3 seconds. The optional `frame` parameter chooses `thumb`
+(the default), `full` (original), or `none`. Responses contain one media URL;
+use its ID and tier with `get_media`. An identical frame returns `unchanged`
+with the previous reference. Coordinates always use the full frame dimensions.
+Frames are stored as line media without a chat post and are visible through the
+line file listing; ordinary line access checks and media retention apply. Typing
+and keys are refused until the
 agent has clicked inside the region, so they cannot land in the helper's own
 terminal. These combos are blocked on both sides: Ctrl+Alt+Delete,
 Ctrl+Alt+Backspace, Ctrl+Alt+F1–F12, Ctrl+Alt+Esc, Win+L (Windows), Super+L and
@@ -231,8 +237,11 @@ Ctrl+Alt+L (Linux), and Ctrl+Cmd+Q, Cmd+Alt+Esc and Cmd+Shift+Q (macOS), includi
 any of them with extra modifiers.
 
 **Audit.** Actions are posted to the line as compact system notes, batched every
-five seconds (or every 20 actions) with repeated pointer moves folded together,
-and flushed when control ends. Typed text appears as its first 40 characters.
+60 seconds (or every 100 actions) with repeated pointer moves folded together,
+and flushed when control ends. Each action is recorded durably before it is
+acknowledged; pending batches are posted after a server restart. Audit entries
+are retained in a hash chain, with the final hash included in each note. Typed
+text appears as its first 40 characters.
 An action that stopped partway is audited as `(interrupted: …)`, and one the
 computer never confirmed as `(unconfirmed)`.
 

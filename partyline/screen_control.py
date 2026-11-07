@@ -7,6 +7,8 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 
+from .contracts import MessageEvent, MessageResponse
+from .screen_audit import publish, record
 from .screen_connections import notice
 from .screen_control_actions import ControlAction, command, describe
 
@@ -15,8 +17,8 @@ CONTROL_MESSAGES = ("control_granted", "control_revoked", "action_result")
 TOO_OLD = "helper too old for control: update partyline-helper on that computer and restart it"
 ACTION_TIMEOUT = 5
 FRAME_TIMEOUT = 3
-AUDIT_DELAY = 5
-AUDIT_BATCH = 20
+AUDIT_DELAY = 60
+AUDIT_BATCH = 100
 
 
 def plain_move(entry: str) -> bool:
@@ -54,6 +56,7 @@ class Grant:
     times: deque = field(default_factory=deque)
     count: int = 0
     audit: list = field(default_factory=list)
+    audit_count: int = 0
     flusher: asyncio.Task | None = None
     last_actor: str | None = None
 
@@ -241,14 +244,16 @@ class ControlHub:
                     future.cancel()
 
     async def _audit(self, grant: Grant, conv_id: str, agent: str, entry: str) -> None:
+        record(self.hub.runtime.db, grant.share_id, conv_id, agent, entry)
         grant.last_actor = agent
+        grant.audit_count += 1
         last = grant.audit[-1] if grant.audit else None
         if last and last[0] == agent and plain_move(last[1]) and plain_move(entry):
             last[1], last[2] = entry, last[2] + 1  # coalesce pointer moves
         else:
             grant.audit.append([agent, entry, 1])
         # Late entries (after a revoke or the share's end) post at once rather than by timer.
-        if len(grant.audit) >= AUDIT_BATCH or self.grants.get(grant.share_id) is not grant \
+        if grant.audit_count >= AUDIT_BATCH or self.grants.get(grant.share_id) is not grant \
                 or grant.status == "revoked":
             await self.flush(grant, conv_id)
         elif grant.flusher is None:
@@ -263,15 +268,16 @@ class ControlHub:
         flusher, grant.flusher = grant.flusher, None
         if flusher and flusher is not asyncio.current_task():
             flusher.cancel()
-        if not grant.audit:
-            return
-        entries, grant.audit = grant.audit, []
-        lines, actor = [], None
-        for agent, entry, count in entries:
-            text = f"{entry} ×{count}" if count > 1 else entry
-            lines.append(f"{agent}: {text}" if agent != actor else text)
-            actor = agent
-        await self._note(conv_id, "Agent control audit — " + " · ".join(lines))
+        try:
+            message = publish(self.hub.runtime.db, grant.share_id)
+        except Exception:
+            if self.grants.get(grant.share_id) is grant and grant.status == "active":
+                grant.flusher = asyncio.create_task(self._flush_later(grant, conv_id))
+            raise
+        if message:
+            grant.audit, grant.audit_count = [], 0
+            await self.hub.runtime.broadcast(
+                conv_id, MessageEvent(message=MessageResponse.model_validate(message)))
 
     async def _note(self, conv_id: str, text: str) -> None:
         # Audit notes inform people; they deliberately wake no process.

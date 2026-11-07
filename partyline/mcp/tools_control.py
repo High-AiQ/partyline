@@ -6,7 +6,8 @@ from .client import ApiError
 from .validation import validate_arguments
 
 FRAME = "integer frame pixel of the latest screen_frame image, (0, 0) at its top left"
-NOTE = (" Returns a fresh frame reference after a short settle; fetch it with get_media. "
+NOTE = (" Returns a frame reference after a short settle; fetch its media ID and tier with get_media. "
+        "Unchanged frames reuse the last reference. Coordinates use full frame pixels, even for thumbs. "
         "Only inside the shared region, after screen_control_request was granted.")
 
 
@@ -15,6 +16,9 @@ def _int(description):
 
 
 def _tool(name, description, properties, required):
+    if name != "screen_control_request":
+        properties = {**properties, "frame": {"type": "string", "enum": ["none", "thumb", "full"],
+                      "description": "Frame tier: none, thumb (default), or full (original)."}}
     return {"name": name, "description": description, "inputSchema": {
         "type": "object", "properties": properties, "required": required,
         "additionalProperties": False}}

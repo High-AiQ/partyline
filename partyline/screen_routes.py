@@ -11,9 +11,10 @@ from PIL import Image, ImageDraw
 from .auth_guard import bearer_token, request_principal
 from .machine_scope import deny_unless, is_human
 from .media import MediaError, MediaStore
+from .screen_audit import recover
 from .screen_connections import revoke as revoke_device
 from .screen_control_routes import control_router
-from .screen_frame_store import store_frame
+from .screen_frame_store import frame_reference
 from .screen_hub import ScreenHub
 from .screen_protocol import PairClaim, Region
 
@@ -26,6 +27,7 @@ class ShareStart(BaseModel):
 
 
 def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
+    recover(runtime.db)
     hub = ScreenHub(runtime)
     app.state.screen_hub = hub
     runtime.screen_hub = hub
@@ -167,14 +169,14 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
             share, frame = await hub.capture(conv_id)
             data = _mark_pointer(frame) if mark_pointer else frame.data
             mime = "image/png" if mark_pointer and pointer_coordinates(frame)["frame"] else frame.mime
-            ref = await store_frame(runtime, store, conv_id, principal.name, data, mime,
-                                    "Screen frame captured with screen_frame.")
+            ref, unchanged = await frame_reference(store, share, principal.name, frame, data, mime,
+                                           marked=mark_pointer)
         except (ValueError, TimeoutError) as exc:
             raise HTTPException(409, str(exc)) from exc
         except MediaError as exc:
             raise HTTPException(exc.status_code, exc.detail) from exc
         return {"file": ref.model_dump(mode="json"), "description": frame_detail(frame),
-                "share_id": share.share_id}
+                "share_id": share.share_id, "unchanged": unchanged}
 
     @app.websocket("/api/screen/helper")
     async def helper_socket(ws: WebSocket):

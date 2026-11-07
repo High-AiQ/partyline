@@ -31,6 +31,8 @@ class ShareBuffer:
     last_message_ts: dict[str, int] = field(default_factory=dict)
     attached: dict[str, set[int]] = field(default_factory=dict)
     locks: dict[str, asyncio.Lock] = field(default_factory=dict)
+    agent_frames: dict = field(default_factory=dict)
+    frame_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     next_sequence: int = 0
 
     def add(self, frame: BufferedFrame) -> None:
