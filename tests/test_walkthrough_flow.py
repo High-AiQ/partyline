@@ -133,6 +133,20 @@ class WalkthroughFlowTest(unittest.TestCase):
         self.assertIn("transcription failed", result.json()["message"]["body"])
         self.assertTrue(result.json()["message"]["files"])
 
+    def test_silent_transcript_sends_frames_without_speech(self):
+        self.backend.transcribe = lambda *_: Transcript("", "en", 16, ())
+        with self.socket() as ws:
+            path, _ = self.start(ws)
+            transcript = self.client.post("/api/conversations/line/transcribe", content=b"audio").json()
+            self.assertEqual(self.client.post(path + "/stop").status_code, 200)
+            self.assertEqual(ws.receive_json()["type"], "stop_share")
+            result = self.client.post(path + "/finish", json={"segments": transcript["segments"]})
+            self.assertEqual(result.status_code, 200, result.text)
+            message = result.json()["message"]
+            self.assertTrue(message["files"])
+            self.assertIn("→ frame", message["body"])
+            self.assertNotIn('""', message["body"])
+
     def test_cancel_discards_and_cannot_finish(self):
         with self.socket() as ws:
             path, share = self.start(ws)
