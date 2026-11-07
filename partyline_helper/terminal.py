@@ -79,3 +79,18 @@ class Terminal:
         print(question, end="", flush=True)
         remaining = max(0, deadline - self.clock())
         return await self.read(remaining) == "y"
+
+    async def ask_box(self, question, timeout=60, dialog=None, box=None):
+        """`ask` plus an optional unchecked box: (said yes, ticked). The box is never ticked without a yes.
+
+        A dialog without a checkbox variant, or no dialog at all and a terminal, asks the box as a second
+        y/N, so a box is only ever ticked by an explicit answer.
+        """
+        with_box = getattr(self.dialog, "with_box", None) if self.dialog and dialog and box else None
+        if with_box:
+            self.attention(dialog[0] + " is waiting for your answer")
+            return await with_box(*dialog, box, timeout=timeout, sleep=self.sleep)
+        if self.dialog and dialog:  # a dialog that cannot show a box: the box stays unticked
+            return await self.ask(question, timeout, dialog), False
+        yes = await self.ask(question, timeout)
+        return yes, bool(yes and box and await self.ask(box + " [y/N] ", timeout))

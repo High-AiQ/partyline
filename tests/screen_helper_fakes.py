@@ -86,6 +86,8 @@ class FakeTerminal:
         self.control_answer = False
         self.asks = asyncio.Queue()
         self.dialogs = []
+        self.box_answer = (False, False)  # what ask_box returns, or a Future of it
+        self.boxes = []
 
     async def _consent(self, request, yes):
         self.prompts.put_nowait(request)
@@ -102,6 +104,14 @@ class FakeTerminal:
         if isinstance(self.control_answer, asyncio.Future):
             return await self.control_answer
         return self.control_answer
+
+    async def ask_box(self, question, timeout=60, dialog=None, box=None):
+        self.asks.put_nowait(question)
+        self.dialogs.append(dialog)
+        self.boxes.append(box)
+        if isinstance(self.box_answer, asyncio.Future):
+            return await self.box_answer
+        return self.box_answer
 
     async def read(self, timeout):
         self.waiting.put_nowait(timeout)

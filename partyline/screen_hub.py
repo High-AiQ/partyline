@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from fastapi import WebSocket, WebSocketDisconnect
 
 from .screen_connections import device_valid, notice
+from .local_tools import TOOL_MESSAGES, LocalTools
 from .screen_control import CONTROL_MESSAGES, ControlHub
 from .screen_frames import BufferedFrame, ShareBuffer
 from .screen_pair_limits import PairLimits
@@ -36,6 +37,7 @@ class ScreenHub:
         self.snap_waiters: dict[str, tuple[ShareBuffer, asyncio.Future]] = {}
         self.preview_waiters: dict[str, tuple[str, str | int, asyncio.Future]] = {}
         self.control = ControlHub(self)
+        self.tools = LocalTools(self)
 
     @staticmethod
     def digest(token: str) -> str:
@@ -77,7 +79,7 @@ class ScreenHub:
                 return
             current = {**device, "socket": ws, "name": hello.device_name,
                        "os": hello.os, "helper_version": hello.helper_version, "control": hello.control,
-                       "monitors": [item.model_dump() for item in hello.monitors],
+                       "tools": hello.tools, "monitors": [item.model_dump() for item in hello.monitors],
                        "last_seen": time.monotonic()}
             old = self.devices.get(ident)
             if old:
@@ -143,6 +145,8 @@ class ScreenHub:
                         await self.stop_share(share.share_id, result.reason)
                 elif kind in CONTROL_MESSAGES:
                     await self.control.from_helper(current, message)
+                elif kind in TOOL_MESSAGES:
+                    await self.tools.from_helper(current, message)
                 elif kind == "error":
                     request_id = message.get("request_id")
                     entry = self.snap_waiters.get(request_id)
@@ -164,6 +168,7 @@ class ScreenHub:
             if self.devices.get(ident, {}).get("socket") is ws:
                 self.devices.pop(ident, None)
                 await self._device_event(device, False)
+                await self.tools.end_device(ident, "the computer disconnected")
                 share = next((item for item in self.shares.values() if item.device_id == ident), None)
                 if share:
                     await self.stop_share(share.share_id, "device disconnected")

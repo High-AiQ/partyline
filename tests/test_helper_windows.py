@@ -300,11 +300,18 @@ FAKE_BACKEND = SimpleNamespace(Icon=FakeIcon, Menu=lambda *items: list(items),
 
 class TrayTests(unittest.TestCase):
     def test_icon_follows_status_and_menu_acts_through_callbacks(self):
-        status, FakeIcon.instances = Status(), []
+        status, FakeIcon.instances, ended = Status(), [], []
         shown = tray.start_tray(status, FAKE_BACKEND)
         icon = FakeIcon.instances[0]
         self.assertTrue(icon.running)
-        label, stop, quit_item = icon.menu
+        label, stop, end_tools, quit_item = icon.menu
+        self.assertEqual(end_tools.text, "End agent session")
+        self.assertFalse(end_tools.enabled(None))
+        status.tools_active, status.stop_tools = True, lambda: ended.append(1)
+        self.assertTrue(end_tools.enabled(None))
+        end_tools.action()
+        status.tools_active = False
+        self.assertEqual(ended, [1])
         self.assertEqual(label.text(None), "Not connected to Partyline")
         self.assertFalse(stop.enabled(None))
         stops, quits = [], []
@@ -326,7 +333,7 @@ class TrayTests(unittest.TestCase):
 
     def test_each_state_has_its_own_colour_and_a_tray_that_cannot_start_is_none(self):
         pixels = {state: tray.draw_icon(state).getpixel((32, 32)) for state in tray.COLORS}
-        self.assertEqual(len(set(pixels.values())), 4)
+        self.assertEqual(len(set(pixels.values())), 5)
 
         def broken(*a, **k):
             raise RuntimeError("no tray on this desktop")

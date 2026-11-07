@@ -123,6 +123,13 @@ class MCPClientTests(unittest.TestCase):
             with self.assertRaisesRegex(ApiError, "MCP limit"):
                 too_large.request("GET", "/api/capabilities")
 
+    def test_a_slow_call_may_raise_the_connection_timeout(self):
+        client, conn = self.client(Response(b"{}"))
+        client.request("GET", "/api/capabilities")
+        self.assertEqual(conn.timeout, 30)
+        client.request("POST", "/api/x", {}, timeout=75)
+        self.assertEqual(conn.timeout, 75)
+
     def test_json_request_surfaces_bounded_http_error(self):
         client, _ = self.client(Response(b'{"detail":"denied"}', 403))
         with self.assertRaisesRegex(ApiError, "HTTP 403: denied"):
