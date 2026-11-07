@@ -32,3 +32,12 @@ export function storeTheme(theme: Theme): void {
     // Storage may be unavailable (private mode, quota) — the in-memory theme still applies.
   }
 }
+
+/** Best-effort, like `storeTheme`. */
+export function clearStoredTheme(): void {
+  try {
+    localStorage.removeItem(THEME_STORAGE_KEY);
+  } catch {
+    // Storage may be unavailable; the in-memory choice is already cleared.
+  }
+}

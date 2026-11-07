@@ -15,6 +15,7 @@ from .retirement_schema import MIGRATIONS as RETIREMENT
 from .captain_handover_schema import MIGRATIONS as HANDOVER
 from .screen_schema import MIGRATIONS as SCREEN
 from .orchestrator_schema import MIGRATIONS as ORCHESTRATOR
+from .asr_schema import MIGRATIONS as ASR
 MIGRATIONS = [
     "ALTER TABLE attachments ADD COLUMN cli_session TEXT",
     "ALTER TABLE conversations ADD COLUMN topic TEXT NOT NULL DEFAULT ''",
@@ -49,9 +50,8 @@ MIGRATIONS = [
     # already resumed the same attachment. Lifecycle writes are conditional on
     # this per-activation owner so the old generation cannot clobber the new.
     "ALTER TABLE attachments ADD COLUMN runtime_owner TEXT",
-    # Human accounts. Handles share the mention namespace with attachment
-    # names, so uniqueness is enforced case-insensitively, matching how
-    # mentions are routed. Emails are stored lowercased.
+    # Human accounts. Handles share the mention namespace with attachment names, so uniqueness is
+    # enforced case-insensitively, matching how mentions are routed. Emails are stored lowercased.
     """CREATE TABLE IF NOT EXISTS users(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         email TEXT NOT NULL,
@@ -61,9 +61,8 @@ MIGRATIONS = [
     )""",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(lower(email))",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_handle ON users(lower(handle))",
-    # One JWT signing secret per instance, generated on first run. Separate
-    # instances have separate databases, so they get distinct secrets for
-    # free; there is deliberately no env fallback.
+    # One JWT signing secret per instance, generated on first run. Separate instances have separate
+    # databases, so they get distinct secrets for free; there is deliberately no env fallback.
     """CREATE TABLE IF NOT EXISTS auth_secret(
         singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
         secret TEXT NOT NULL,
@@ -298,3 +297,4 @@ MIGRATIONS = [
 MIGRATIONS.extend(MEMORY + IDEMPOTENCY + NOTES + COMPACTION + ACCEPT_HISTORY + SCRATCH + LEASE
                   + GATES + AUTO_COMPACT + DOCKER_MODE + BRIDGE + RETIREMENT + ORCHESTRATOR + HANDOVER)
 MIGRATIONS.extend(["ALTER TABLE attachments ADD COLUMN is_successor INTEGER NOT NULL DEFAULT 0"] + SCREEN)
+MIGRATIONS.extend(ASR)

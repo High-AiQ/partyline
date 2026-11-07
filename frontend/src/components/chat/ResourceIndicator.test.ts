@@ -9,7 +9,7 @@ import ResourceIndicator from "./ResourceIndicator.svelte";
 import { onRoomWireEvent } from "../../state/room-wire-events.js";
 import type { RoomWireSink } from "../../state/room-wire-events.js";
 import type { WireContext } from "../../state/wire.svelte.js";
-import SettingsDialog from "../dialogs/SettingsDialog.svelte";
+import { settingsNav } from "../../state/settings-nav.svelte.js";
 
 const topbarActionsCss = readFileSync("src/styles/topbar-actions.css", "utf8");
 
@@ -189,8 +189,10 @@ describe("ResourceIndicator", () => {
         expect(document.querySelector(".resource-trigger")?.textContent).toContain("18/24");
       });
       document.querySelector(".resource-trigger")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      expect(dialogs.stack.at(-1)?.component).toBe(SettingsDialog);
-      expect(dialogs.stack.at(-1)?.props).toEqual({ focusBudget: true });
+      expect(settingsNav.section).toBe("resources");
+      expect(settingsNav.focusTarget).toBe("setting-max-live-processes");
+      expect(location.hash).toBe("#/settings/resources");
+      settingsNav.close();
     } finally {
       await unmount(component);
     }

@@ -1,278 +1,189 @@
-import { mount, unmount } from "svelte";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError } from "../../lib/api";
-import * as settingsApi from "../../lib/settings-api";
-import * as resourceApi from "../../lib/resource-api";
+import { flushSync, mount, tick, unmount } from "svelte";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SettingsDialog from "./SettingsDialog.svelte";
+import SettingsRoute from "../settings/SettingsRoute.svelte";
+import * as settingsApi from "../../lib/settings-api";
+import { aboutApi } from "../../lib/about-api";
+import { SAVED_FLASH_MS } from "../../lib/save-state";
+import { dialogs } from "../../state/dialogs.svelte.js";
+import { settingsNav } from "../../state/settings-nav.svelte.js";
+import { theme } from "../../state/theme.svelte.js";
 
-function openDialog(close = vi.fn()) {
-  const dialog = mount(SettingsDialog, { target: document.body, props: { close } });
-  return { dialog, close };
+async function settle(): Promise<void> {
+  for (let turn = 0; turn < 20; turn++) await tick();
 }
 
-async function readyField(): Promise<HTMLTextAreaElement> {
-  await vi.waitFor(() => {
-    const field = document.querySelector("#globalProse");
-    expect(field).toBeInstanceOf(HTMLTextAreaElement);
-    if (field instanceof HTMLTextAreaElement) expect(field.disabled).toBe(false);
+function go(hash: string): void {
+  history.pushState({}, "", `/${hash}`);
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
+  flushSync();
+}
+
+/** The shown tab's heading; tabs opened earlier stay mounted but hidden. */
+function heading(): string {
+  return document.querySelector("div:not([hidden]) > section h2")?.textContent.trim() ?? "";
+}
+
+function current(): string | null | undefined {
+  return document.querySelector('nav a[aria-current="page"]')?.getAttribute("data-section");
+}
+
+beforeEach(() => {
+  Object.defineProperty(Element.prototype, "scrollIntoView", { value: vi.fn(), configurable: true });
+  Object.defineProperty(Element.prototype, "scrollTo", { value: vi.fn(), configurable: true });
+  vi.spyOn(settingsApi, "getGlobalProse").mockResolvedValue({ value: "be kind" });
+  vi.spyOn(aboutApi, "about").mockResolvedValue({
+    version: "2.81.0",
+    build: "abc",
+    instance_name: "lab",
+    checkout_path: "/srv/partyline",
+    git_head: "0123456789abcdef",
   });
-  const field = document.querySelector("#globalProse");
-  if (!(field instanceof HTMLTextAreaElement)) throw new Error("missing global prose field");
-  return field;
-}
+});
 
-function setField(field: HTMLTextAreaElement, value: string): void {
-  field.value = value;
-  field.dispatchEvent(new InputEvent("input", { bubbles: true }));
-}
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  dialogs.closeAll();
+  settingsNav.close();
+  history.replaceState({}, "", "/");
+  document.body.replaceChildren();
+});
 
-function saveButton(): HTMLButtonElement {
-  const button = document.querySelector('#globalProseForm button[type="submit"]');
-  if (!(button instanceof HTMLButtonElement)) throw new Error("missing save settings button");
-  return button;
-}
-
-describe("SettingsDialog", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-    document.body.replaceChildren();
-  });
-
-  it("loads an existing global prose value", async () => {
-    vi.spyOn(settingsApi, "getGlobalProse").mockResolvedValue({ value: "Existing instructions" });
-    const { dialog } = openDialog();
-
-    try {
-      expect((await readyField()).value).toBe("Existing instructions");
-    } finally {
-      await unmount(dialog);
-    }
-  });
-
-  it("loads and saves the admission reservation separately from the process cap", async () => {
-    vi.spyOn(settingsApi, "getGlobalProse").mockResolvedValue({ value: null });
-    const budget = {
-      max_live_processes: 24,
-      memory_reserve_bytes: 2 * 1024 ** 3,
-      default_process_memory_bytes: 4 * 1024 ** 3,
-      memory_reservation_bytes: 1024 ** 3,
-      memory_warn_percent: 80,
-      memory_captain_ceiling_bytes: 8 * 1024 ** 3,
-      host_ram_bytes: 64 * 1024 ** 3,
-      memory_budget_bytes: 62 * 1024 ** 3,
-      memory_ceiling_bytes: 8 * 1024 ** 3,
-      computed_defaults: {
-        max_live_processes: 24,
-        memory_reserve_bytes: 2 * 1024 ** 3,
-        default_process_memory_bytes: 4 * 1024 ** 3,
-        memory_reservation_bytes: 1024 ** 3,
-        memory_warn_percent: 80,
-        memory_captain_ceiling_bytes: 8 * 1024 ** 3,
-      },
-    };
-    vi.spyOn(resourceApi, "getResourceSettings").mockResolvedValue(budget);
-    vi.spyOn(resourceApi, "getResources").mockResolvedValue({
-      ...budget,
-      live_processes: 0,
-      memory_reserved_bytes: 0,
-      memory_cap_bytes: 0,
-      remaining_processes: 24,
-      remaining_memory_bytes: budget.memory_budget_bytes,
-      busiest_line: null,
-      host_used_bytes: null,
-      host_available_bytes: null,
-      partyline_server_bytes: null,
-      partyline_processes_bytes: null,
-      partyline_used_bytes: null,
-      other_used_bytes: null,
-      sampled_at: null,
-      top_lines: [],
+describe("settings modal", () => {
+  it("opens from a deep link on that tab, follows Back and Forward, and closes when the route leaves", async () => {
+    history.replaceState({}, "", "/#/settings/about");
+    settingsNav.sync();
+    const route = mount(SettingsRoute, { target: document.body });
+    flushSync();
+    expect(dialogs.stack.map((entry) => entry.component)).toEqual([SettingsDialog]);
+    const entry = dialogs.stack[0];
+    if (!entry) throw new Error("no dialog");
+    const dialog = mount(SettingsDialog, {
+      target: document.body,
+      props: { ...entry.props, close: vi.fn() },
     });
-    const save = vi.spyOn(resourceApi, "setResourceSettings").mockResolvedValue(budget);
-    const reset = vi.spyOn(resourceApi, "resetResourceSettings").mockResolvedValue(budget);
-    const { dialog } = openDialog();
-
-    try {
-      await vi.waitFor(() => {
-        expect(document.querySelector<HTMLInputElement>("#memoryReservation")?.value).toBe("1");
-        expect(
-          document.querySelector<HTMLButtonElement>('#resource-budget button[type="submit"]')?.disabled,
-        ).toBe(false);
-      });
-      expect(document.querySelector<HTMLInputElement>("#defaultLease")?.value).toBe("4");
-      const reservation = document.querySelector<HTMLInputElement>("#memoryReservation");
-      if (!reservation) throw new Error("missing reservation input");
-      reservation.value = "0.5";
-      reservation.dispatchEvent(new InputEvent("input", { bubbles: true }));
-      const budgetSave = document.querySelector<HTMLButtonElement>('#resource-budget button[type="submit"]');
-      if (!budgetSave) throw new Error("missing resource budget save button");
-      expect(budgetSave.disabled).toBe(false);
-      budgetSave.click();
-      await vi.waitFor(() => {
-        expect(save).toHaveBeenCalledWith({
-          max_live_processes: 24,
-          memory_reserve_bytes: 2 * 1024 ** 3,
-          default_process_memory_bytes: 4 * 1024 ** 3,
-          memory_reservation_bytes: 512 * 1024 ** 2,
-          memory_warn_percent: 80,
-          memory_captain_ceiling_bytes: 8 * 1024 ** 3,
-        });
-      });
-      await vi.waitFor(() => {
-        expect(
-          document.querySelector<HTMLButtonElement>('#resource-budget button[type="button"]')?.disabled,
-        ).toBe(false);
-      });
-      document.querySelector<HTMLButtonElement>('#resource-budget button[type="button"]')?.click();
-      await vi.waitFor(() => {
-        expect(reset).toHaveBeenCalledTimes(1);
-        expect(document.querySelector<HTMLInputElement>("#memoryReservation")?.value).toBe("1");
-      });
-    } finally {
-      await unmount(dialog);
-    }
+    await settle();
+    expect(heading()).toBe("About");
+    expect(current()).toBe("about");
+    expect(document.querySelector('[data-about="git head"]')?.textContent).toBe("0123456789abcdef");
+    go("#/settings/general");
+    await settle();
+    expect(heading()).toBe("General");
+    expect(document.querySelector<HTMLTextAreaElement>("#globalProse")?.value).toBe("be kind");
+    go("#/c/some-line");
+    expect(settingsNav.section).toBeNull();
+    expect(dialogs.stack).toEqual([]);
+    await unmount(dialog);
+    await unmount(route);
   });
 
-  it("round trips untouched byte settings through two-decimal GB fields", async () => {
-    vi.spyOn(settingsApi, "getGlobalProse").mockResolvedValue({ value: null });
-    const gib = 1024 ** 3;
-    const reserveBytes = 6 * gib + 140_000_000;
-    const capBytes = 4 * gib + 12_345;
-    const reservationBytes = gib + 12_345;
-    const budget = {
-      max_live_processes: 24,
-      memory_reserve_bytes: reserveBytes,
-      default_process_memory_bytes: capBytes,
-      memory_reservation_bytes: reservationBytes,
-      memory_warn_percent: 80,
-      memory_captain_ceiling_bytes: 8 * gib,
-      host_ram_bytes: 64 * gib,
-      memory_budget_bytes: 64 * gib - reserveBytes,
-      memory_ceiling_bytes: 8 * gib,
-      computed_defaults: {
-        max_live_processes: 24,
-        memory_reserve_bytes: Math.floor((64 * gib) / 10),
-        default_process_memory_bytes: 4 * gib,
-        memory_reservation_bytes: gib,
-        memory_warn_percent: 80,
-        memory_captain_ceiling_bytes: 8 * gib,
-      },
-    };
-    vi.spyOn(resourceApi, "getResourceSettings").mockResolvedValue(budget);
-    vi.spyOn(resourceApi, "getResources").mockResolvedValue({
-      ...budget,
-      live_processes: 0,
-      memory_reserved_bytes: 0,
-      memory_cap_bytes: 0,
-      remaining_processes: 24,
-      remaining_memory_bytes: budget.memory_budget_bytes,
-      busiest_line: null,
-      host_used_bytes: null,
-      host_available_bytes: null,
-      partyline_server_bytes: null,
-      partyline_processes_bytes: null,
-      partyline_used_bytes: null,
-      other_used_bytes: null,
-      sampled_at: null,
-      top_lines: [],
+  it("tab links are real links to each section's route", async () => {
+    settingsNav.show("general");
+    const dialog = mount(SettingsDialog, { target: document.body, props: { close: vi.fn() } });
+    await settle();
+    const links = [...document.querySelectorAll<HTMLAnchorElement>("nav a[data-section]")];
+    expect(links.map((link) => link.getAttribute("href"))).toContain("#/settings/voice");
+    expect(links).toHaveLength(9);
+    expect(document.activeElement?.id).toBe("settings-heading-general");
+    await unmount(dialog);
+  });
+
+  it("searches across every tab, counts matches per tab, and lands on the picked row", async () => {
+    settingsNav.show("general");
+    const dialog = mount(SettingsDialog, { target: document.body, props: { close: vi.fn() } });
+    await settle();
+    const search = document.querySelector<HTMLInputElement>("#settingsSearch");
+    if (!search) throw new Error("no search");
+    search.value = "theme";
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+    flushSync();
+    const results = [...document.querySelectorAll<HTMLButtonElement>(".search-result")];
+    expect(results.map((result) => result.textContent)).toEqual([expect.stringContaining("Theme")]);
+    expect(document.querySelector('[data-section="appearance"] [aria-label="1 matching"]')).not.toBeNull();
+    search.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await settle();
+    expect(location.hash).toBe("#/settings/appearance");
+    expect(document.getElementById("setting-theme")?.classList.contains("flash")).toBe(true);
+    expect(document.activeElement?.getAttribute("name")).toBe("theme");
+    expect(search.value).toBe("");
+    search.value = "zzz";
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+    flushSync();
+    expect(document.body.textContent).toContain("no settings match");
+    // Escape in the search box clears it rather than closing settings.
+    const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    const outer = vi.fn();
+    window.addEventListener("keydown", outer);
+    search.dispatchEvent(escape);
+    flushSync();
+    window.removeEventListener("keydown", outer);
+    expect(outer).not.toHaveBeenCalled();
+    expect(search.value).toBe("");
+    // `/` from elsewhere jumps back to search.
+    document.body.focus();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "/", cancelable: true }));
+    expect(document.activeElement).toBe(search);
+    await unmount(dialog);
+  });
+
+  it("closing the modal any way leaves the settings route for the line it covered", async () => {
+    history.replaceState({}, "", "/#/c/line-9");
+    const route = mount(SettingsRoute, { target: document.body });
+    settingsNav.show("about");
+    flushSync();
+    expect(dialogs.stack).toHaveLength(1);
+    const close = vi.fn();
+    const dialog = mount(SettingsDialog, {
+      target: document.body,
+      props: { close, ondismiss: dialogs.stack[0]?.props.ondismiss as () => void },
     });
-    const save = vi.spyOn(resourceApi, "setResourceSettings").mockResolvedValue(budget);
-    const { dialog } = openDialog();
-
-    try {
-      await vi.waitFor(() => {
-        expect(document.querySelector<HTMLInputElement>("#memoryReserve")?.value).toBe("6.13");
-        expect(document.querySelector<HTMLInputElement>("#defaultLease")?.value).toBe("4");
-        expect(document.querySelector<HTMLInputElement>("#memoryReservation")?.value).toBe("1");
-        expect(document.querySelector<HTMLInputElement>("#memoryReserve")?.validity.stepMismatch).toBe(false);
-        expect(
-          document.querySelector<HTMLButtonElement>('#resource-budget button[type="submit"]')?.disabled,
-        ).toBe(false);
-      });
-      const hints = Array.from(document.querySelectorAll("#resource-budget .dialog-note"))
-        .map((hint) => hint.textContent.trim())
-        .flatMap((hint) => {
-          const start = hint.indexOf("default:");
-          return start < 0 ? [] : [hint.slice(start).replace(/\.$/, "")];
-        });
-      expect(hints).toEqual([
-        "default: 24",
-        "default: 6.4 GB",
-        "default: 4 GB",
-        "default: 1 GB",
-        "default: 80%",
-        "default: twice the process cap, up to the host ceiling",
-      ]);
-
-      document.querySelector<HTMLButtonElement>('#resource-budget button[type="submit"]')?.click();
-      await vi.waitFor(() => {
-        expect(save).toHaveBeenCalledWith({
-          max_live_processes: 24,
-          memory_reserve_bytes: reserveBytes,
-          default_process_memory_bytes: capBytes,
-          memory_reservation_bytes: reservationBytes,
-          memory_warn_percent: 80,
-          memory_captain_ceiling_bytes: 8 * gib,
-        });
-      });
-    } finally {
-      await unmount(dialog);
-    }
+    await settle();
+    document.querySelector<HTMLButtonElement>('button[aria-label="close"]')?.click();
+    expect(close).toHaveBeenCalled();
+    await unmount(dialog);
+    flushSync();
+    expect(settingsNav.section).toBeNull();
+    expect(location.hash).toBe("#/c/line-9");
+    await unmount(route);
   });
 
-  it("saves typed text and closes", async () => {
-    vi.spyOn(settingsApi, "getGlobalProse").mockResolvedValue({ value: null });
-    const save = vi.spyOn(settingsApi, "setGlobalProse").mockResolvedValue({
-      value: "Review every setting change.",
-    });
-    const { dialog, close } = openDialog();
-
-    try {
-      const field = await readyField();
-      setField(field, "Review every setting change.");
-      saveButton().click();
-      await vi.waitFor(() => {
-        expect(save).toHaveBeenCalledWith("Review every setting change.");
-        expect(close).toHaveBeenCalledTimes(1);
-      });
-    } finally {
-      await unmount(dialog);
-    }
+  it("saves global prose explicitly and confirms it, then the confirmation fades", async () => {
+    vi.useFakeTimers();
+    const save = vi.spyOn(settingsApi, "setGlobalProse").mockResolvedValue({ value: "be brief" });
+    settingsNav.show("general");
+    const dialog = mount(SettingsDialog, { target: document.body, props: { close: vi.fn() } });
+    await settle();
+    const field = document.querySelector<HTMLTextAreaElement>("#globalProse");
+    if (!field) throw new Error("no prose");
+    field.value = "be brief";
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    flushSync();
+    expect(document.body.textContent).toContain("unsaved changes");
+    document.querySelector<HTMLFormElement>("#globalProseForm")?.requestSubmit();
+    await settle();
+    expect(save).toHaveBeenCalledWith("be brief");
+    expect(document.querySelector("[data-save-phase]")?.textContent).toContain("saved ✓");
+    await vi.advanceTimersByTimeAsync(SAVED_FLASH_MS);
+    expect(document.querySelector("[data-save-phase]")?.getAttribute("data-save-phase")).toBe("idle");
+    await unmount(dialog);
   });
 
-  it("saves empty text to clear the setting", async () => {
-    vi.spyOn(settingsApi, "getGlobalProse").mockResolvedValue({ value: "Old instructions" });
-    const save = vi.spyOn(settingsApi, "setGlobalProse").mockResolvedValue({ value: null });
-    const { dialog, close } = openDialog();
-
-    try {
-      const field = await readyField();
-      setField(field, "");
-      saveButton().click();
-      await vi.waitFor(() => {
-        expect(save).toHaveBeenCalledWith("");
-        expect(close).toHaveBeenCalledTimes(1);
-      });
-    } finally {
-      await unmount(dialog);
-    }
-  });
-
-  it("shows an ApiError message and stays open after a failed save", async () => {
-    vi.spyOn(settingsApi, "getGlobalProse").mockResolvedValue({ value: null });
-    vi.spyOn(settingsApi, "setGlobalProse").mockRejectedValue(new ApiError("write refused", 403));
-    const { dialog, close } = openDialog();
-
-    try {
-      await readyField();
-      saveButton().click();
-      await vi.waitFor(() => {
-        expect(document.body.textContent).toContain("write refused");
-        expect(close).not.toHaveBeenCalled();
-        expect(document.querySelector('[role="dialog"][aria-label="settings"]')).not.toBeNull();
-      });
-    } finally {
-      await unmount(dialog);
-    }
+  it("switches the theme on change, including back to following the system", async () => {
+    settingsNav.show("appearance");
+    const dialog = mount(SettingsDialog, { target: document.body, props: { close: vi.fn() } });
+    await settle();
+    const radio = (value: string) =>
+      document.querySelector<HTMLInputElement>(`input[name="theme"][value="${value}"]`);
+    radio("light")?.click();
+    await settle();
+    expect(theme.current).toBe("light");
+    expect(theme.explicit).toBe(true);
+    radio("system")?.click();
+    await settle();
+    expect(theme.explicit).toBe(false);
+    expect(radio("system")?.checked).toBe(true);
+    expect(document.querySelector("[data-save-phase]")?.textContent).toContain("saved ✓");
+    await unmount(dialog);
   });
 });

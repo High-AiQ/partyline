@@ -10,11 +10,15 @@
   interface Props {
     title: string;
     wide?: boolean;
+    /** A fixed-size workspace (full screen on a phone) whose body lays itself out and scrolls itself. */
+    panel?: boolean;
     close: () => void;
     children: Snippet;
+    /** Controls in the header between the title and the close button (settings search). */
+    tools?: Snippet;
   }
 
-  let { title, wide = false, close, children }: Props = $props();
+  let { title, wide = false, panel = false, close, children, tools }: Props = $props();
 
   /** A click that starts inside the panel and ends on the backdrop is a drag,
    *  not a dismissal — losing a half-typed confirmation to a sloppy text
@@ -34,17 +38,22 @@
          rather than covering it, and `vh` keeps measuring the taller pre-keyboard
          one — which crops exactly the dialogs that ask you to type something. -->
   <div
-    class="modal flex max-h-[82dvh] {wide
-      ? 'w-[min(980px,96vw)]'
-      : 'w-[min(560px,92vw)]'} flex-col rounded-lg border border-line bg-ink-2 shadow-[0_24px_60px_rgb(0_0_0/0.55)]"
+    class="modal flex {panel
+      ? 'h-[min(860px,90dvh)] w-[min(1080px,96vw)] max-[899px]:h-dvh max-[899px]:w-full max-[899px]:rounded-none max-[899px]:border-0'
+      : wide
+        ? 'max-h-[82dvh] w-[min(980px,96vw)]'
+        : 'max-h-[82dvh] w-[min(560px,92vw)]'} flex-col rounded-lg border border-line bg-ink-2 shadow-[0_24px_60px_rgb(0_0_0/0.55)]"
     role="dialog"
     aria-modal="true"
     aria-label={title}
   >
     <header
-      class="flex min-h-[52px] flex-none items-center justify-between border-b border-dashed border-line py-1 pr-2 pl-5"
+      class="flex min-h-[52px] flex-none {tools
+        ? 'flex-wrap gap-x-4'
+        : ''} items-center justify-between border-b border-dashed border-line py-1 pr-2 pl-5"
     >
       <h2 class="font-serif text-[20px] font-normal text-cream italic">{title}</h2>
+      {#if tools}{@render tools()}{/if}
       <button
         class="close size-11 cursor-pointer border-0 bg-transparent p-0 text-[14px] text-cream-faint hover:bg-red hover:text-ink"
         type="button"
@@ -53,7 +62,11 @@
         onclick={close}>✕</button
       >
     </header>
-    <div class="content flex min-h-0 flex-col gap-[10px] overflow-y-auto px-5 pt-[14px] pb-5">
+    <div
+      class="content flex min-h-0 flex-col {panel
+        ? 'flex-1 overflow-hidden'
+        : 'gap-[10px] overflow-y-auto px-5 pt-[14px] pb-5'}"
+    >
       {@render children()}
     </div>
   </div>

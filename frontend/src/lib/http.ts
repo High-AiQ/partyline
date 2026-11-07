@@ -16,6 +16,7 @@ export interface RequestOptions<Output> {
   form?: FormData | Blob;
   fallback?: string;
   skipRefresh?: boolean;
+  signal?: AbortSignal; // aborting rejects with the fallback error
 }
 
 export interface AuthHandlers {
@@ -32,7 +33,6 @@ export interface SocketRecovery {
 
 export class ApiError extends Error {
   readonly status: number;
-
   constructor(message: string, status: number) {
     super(message);
     this.name = "ApiError";
@@ -178,12 +178,12 @@ export async function request<Output>(
   options: RequestOptions<Output>,
   allowRetry = true,
 ): Promise<Output> {
-  const { schema, method = "GET", body, form, fallback, skipRefresh = false } = options;
+  const { schema, method = "GET", body, form, fallback, skipRefresh = false, signal } = options;
   const startedWith = readAccessToken();
   const headers: Record<string, string> = {};
   if (startedWith) headers.Authorization = `Bearer ${startedWith}`;
 
-  const requestInit: RequestInit = { method };
+  const requestInit: RequestInit = signal ? { method, signal } : { method };
   if (form) {
     requestInit.body = form;
   } else if (body !== undefined) {

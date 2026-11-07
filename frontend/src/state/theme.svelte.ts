@@ -1,6 +1,6 @@
 /** Light/dark theme: an explicit choice persists; otherwise the system preference wins live. */
 
-import { readStoredTheme, resolveTheme, storeTheme } from "../lib/theme.js";
+import { clearStoredTheme, readStoredTheme, resolveTheme, storeTheme } from "../lib/theme.js";
 import type { Theme } from "../lib/theme.js";
 
 const LIGHT_QUERY = "(prefers-color-scheme: light)";
@@ -17,7 +17,7 @@ function systemPrefersLight(): boolean {
 export class ThemeStore {
   current = $state<Theme>(resolveTheme(readStoredTheme(), systemPrefersLight()));
   /** True once a choice has been saved — from then on, the system preference no longer applies. */
-  private explicit = readStoredTheme() !== null;
+  explicit = $state(readStoredTheme() !== null);
 
   constructor() {
     if (this.explicit) this.apply();
@@ -41,6 +41,14 @@ export class ThemeStore {
     this.current = theme;
     storeTheme(theme);
     this.apply();
+  }
+
+  /** Forget the explicit choice: the system preference applies again, live. */
+  followSystem(): void {
+    this.explicit = false;
+    clearStoredTheme();
+    if (typeof document !== "undefined") delete document.documentElement.dataset.theme;
+    this.current = systemPrefersLight() ? "light" : "dark";
   }
 
   toggle(): void {

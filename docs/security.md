@@ -39,7 +39,7 @@ subtree, and cannot grant access to an unrelated project.
 Participants may inspect their own line, including its terminal screens, and
 write messages and files. Sending terminal keys,
 attaching or stopping processes, and overriding another participant's claim
-require manager authority. Preset and adapter configuration changes are human-only. The shutdown API is human-only and loopback-only; starting a fresh session, resuming,
+require manager authority. Preset and adapter configuration changes are human-only, and so is every instance setting (global prose, resource budget, task-history cleanup, storage clearing and speech recognizers): a process token gets `403`. Speech-recognizer API keys live only in the server environment; settings names the variable and shows set or unset, and no endpoint accepts, returns or logs a key. The shutdown API is human-only and loopback-only; starting a fresh session, resuming,
 editing a stopped command and removing a stopped record are gated by the `attach`/`close`
 capability, not by where the caller is.
 Fleet restart planning never silently narrows the requested instance scope:
