@@ -1,5 +1,7 @@
 import { mount, unmount } from "svelte";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { tick } from "svelte";
+import { room } from "../../state/room.svelte.js";
 import MentionPopover from "./MentionPopover.svelte";
 import type { MentionCandidate } from "../../lib/mentions";
 
@@ -62,5 +64,32 @@ describe("MentionPopover", () => {
       expect(target.querySelector('[aria-selected="true"]')?.textContent).toContain("gemini-flash");
       stop();
     }
+  });
+});
+
+describe("MentionPopover control badge", () => {
+  afterEach(() => {
+    room.screenShare = null;
+  });
+
+  it("marks the agent that holds control of the shared screen", async () => {
+    Element.prototype.scrollIntoView = () => undefined;
+    const { target, stop } = render(false);
+    room.screenShare = {
+      share_id: "s",
+      handle: "alice",
+      device_name: "DESKTOP-2",
+      status: "active",
+      region: { x: 0, y: 0, width: 10, height: 10 },
+      control: { status: "active", holder: "terra", actions: 4 },
+    };
+    await tick();
+    const badges = [...target.querySelectorAll(".control-badge")];
+    expect(badges).toHaveLength(1);
+    expect(badges[0]?.closest("[role=option]")?.textContent).toContain("@terra");
+    room.screenShare = null;
+    await tick();
+    expect(target.querySelector(".control-badge")).toBeNull();
+    stop();
   });
 });

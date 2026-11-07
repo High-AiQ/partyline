@@ -421,3 +421,60 @@ describe("JackCard bridge badge", () => {
     }
   });
 });
+
+describe("JackCard agent-control badge", () => {
+  const screenShare = (control: NonNullable<typeof room.screenShare>["control"]) => ({
+    share_id: "s",
+    handle: "alice",
+    device_name: "DESKTOP-4",
+    status: "active" as const,
+    region: { x: 0, y: 0, width: 10, height: 10 },
+    control,
+  });
+
+  it("badges only the holder and clears the moment control is revoked or the share ends", async () => {
+    const other: Attachment = { ...attachment, id: "att-other", name: "other" };
+    const props = { resumable: false, overridesBundled: false, onmention: vi.fn() };
+    const holder = mount(JackCard, { target: document.body, props: { attachment, ...props } });
+    const bystander = mount(JackCard, { target: document.body, props: { attachment: other, ...props } });
+    try {
+      room.screenShare = screenShare({ status: "active", holder: "sol", actions: 5 });
+      await tick();
+      const badges = [...document.querySelectorAll(".control-badge")];
+      expect(badges).toHaveLength(1);
+      expect(badges[0]?.closest(".jack")?.textContent).toContain("sol");
+      expect(badges[0]?.getAttribute("aria-label")).toBe("Controlling DESKTOP-4 (5 actions)");
+
+      room.screenShare = screenShare({ status: "revoked", holder: "sol", actions: 5 });
+      await tick();
+      expect(document.querySelectorAll(".control-badge")).toHaveLength(0);
+
+      room.screenShare = screenShare({ status: "active", holder: "sol", actions: 6 });
+      await tick();
+      expect(document.querySelectorAll(".control-badge")).toHaveLength(1);
+      room.screenShare = null;
+      await tick();
+      expect(document.querySelectorAll(".control-badge")).toHaveLength(0);
+    } finally {
+      room.screenShare = null;
+      await unmount(holder);
+      await unmount(bystander);
+    }
+  });
+
+  it("does not badge a stopped process of the same name", async () => {
+    const stopped: Attachment = { ...attachment, status: "exited" };
+    const card = mount(JackCard, {
+      target: document.body,
+      props: { attachment: stopped, resumable: true, overridesBundled: false, onmention: vi.fn() },
+    });
+    try {
+      room.screenShare = screenShare({ status: "active", holder: "sol", actions: 1 });
+      await tick();
+      expect(document.querySelectorAll(".control-badge")).toHaveLength(0);
+    } finally {
+      room.screenShare = null;
+      await unmount(card);
+    }
+  });
+});
