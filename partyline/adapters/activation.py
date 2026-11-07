@@ -113,13 +113,17 @@ class Activation:
         loud rather than relay a stranger's words. Markers naming this
         attachment (a prior activation's nonce, e.g. the session a resume
         reopens) are not foreign: the resume is legitimate, and the speech
-        gate still holds until this activation's own nonce appears. A file
-        with no marker at all is not foreign either — it is simply not
-        proven yet.
+        gate still holds until this activation's own nonce appears, and any
+        such marker outweighs foreign ones: a process can print another
+        attachment's command line into its own tool results, so strangers'
+        markers only condemn a file that carries none of ours. A file with
+        no marker at all is not foreign either — it is simply not proven
+        yet.
         """
         if not self.pastes_claim():
             return False
         foreign = ours = False
+        own_id = str(self.att.get("id", ""))
         try:
             for line in scan_lines(path):
                 if self._claim_in_line(line):
@@ -127,8 +131,11 @@ class Activation:
                 start = 0
                 while (idx := line.find(CLAIM_PREFIX, start)) != -1:
                     att_id, sep, _ = line[idx + len(CLAIM_PREFIX):].partition("/")
-                    if sep and att_id and att_id != str(self.att.get("id", "")):
-                        foreign = True
+                    if sep and att_id:
+                        if att_id == own_id:
+                            ours = True  # any activation's nonce: a legitimate resume
+                        else:
+                            foreign = True
                     start = idx + 1
         except OSError:
             return False

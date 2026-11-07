@@ -186,6 +186,28 @@ def _read_batch(file, pending, path, anchor):
     return lines, bool(chunk), None
 
 
+async def _refuse_until_claimed(adapter, path: str) -> bool:
+    """Post the refusal, then wait for this activation's own nonce to prove it wrong.
+
+    A refusal used to end the tail for good, so a wrong one silenced the
+    process until the next resume. The file is still not adopted — nothing is
+    relayed — but if this activation's token later appears in it, the file is
+    ours by construction: claim it and let the caller tail on. Returns False
+    when the process ends first.
+    """
+    await adapter.post(
+        "system", "system",
+        f"{adapter.att['name']}: not adopting {os.path.basename(path)} — "
+        "it carries another attachment's claim marker",
+    )
+    while adapter.alive():
+        await asyncio.sleep(1.0)
+        if await asyncio.to_thread(adapter.recorded_claim, path):
+            adapter._mark_claim_proven()
+            return True
+    return False
+
+
 async def tail_jsonl(adapter, path: str, handle_line) -> None:
     """Follow a JSONL transcript, scanning existing receipts before ready."""
     adapter._jsonl_tail_path = path
@@ -194,12 +216,8 @@ async def tail_jsonl(adapter, path: str, handle_line) -> None:
         if await asyncio.to_thread(adapter.recorded_claim, path):
             adapter._mark_claim_proven()
         elif await asyncio.to_thread(adapter.foreign_claim, path):
-            await adapter.post(
-                "system", "system",
-                f"{adapter.att['name']}: not adopting {os.path.basename(path)} — "
-                "it carries another attachment's claim marker",
-            )
-            return
+            if not await _refuse_until_claimed(adapter, path):
+                return
         # Consume existing records before opening readiness: the claim
         # callback may immediately repool an unproved paste. A preclaim user
         # record must get its chance to settle first. Keep the file at EOF so
@@ -216,12 +234,8 @@ async def tail_jsonl(adapter, path: str, handle_line) -> None:
                 pending.clear()
                 anchor.clear()
                 if await asyncio.to_thread(adapter.foreign_claim, path):
-                    await adapter.post(
-                        "system", "system",
-                        f"{adapter.att['name']}: not adopting {os.path.basename(path)} — "
-                        "it carries another attachment's claim marker",
-                    )
-                    return
+                    if not await _refuse_until_claimed(adapter, path):
+                        return
                 continue
             if not lines:
                 if read:
