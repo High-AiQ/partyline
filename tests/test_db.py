@@ -1,5 +1,4 @@
 import asyncio
-from contextlib import contextmanager
 import sqlite3
 import tempfile
 import threading
@@ -228,22 +227,30 @@ class DbTest(unittest.TestCase):
         contender = Db(self.db_path)
 
         async def contend_then_cancel():
-            async with self.db.reserve_attachment_delivery(
-                "att", "old-generation"
-            ) as reserved:
-                self.assertTrue(reserved)
+            lock_waiting = asyncio.Event()
+            never = asyncio.Event()
 
-                async def wait_for_same_lock():
-                    async with contender.reserve_attachment_delivery(
-                        "att", "old-generation"
-                    ):
-                        self.fail("a second reservation crossed the held lock")
+            async def contended(_seconds):
+                lock_waiting.set()
+                await never.wait()
 
-                waiting = asyncio.create_task(wait_for_same_lock())
-                await asyncio.sleep(0.02)
-                waiting.cancel()
-                with self.assertRaises(asyncio.CancelledError):
-                    await waiting
+            with patch("partyline.runtime_lock.asyncio.sleep", new=contended):
+                async with self.db.reserve_attachment_delivery(
+                    "att", "old-generation"
+                ) as reserved:
+                    self.assertTrue(reserved)
+
+                    async def wait_for_same_lock():
+                        async with contender.reserve_attachment_delivery(
+                            "att", "old-generation"
+                        ):
+                            self.fail("a second reservation crossed the held lock")
+
+                    waiting = asyncio.create_task(wait_for_same_lock())
+                    await asyncio.wait_for(lock_waiting.wait(), 1)
+                    waiting.cancel()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await waiting
 
         try:
             asyncio.run(contend_then_cancel())
@@ -261,17 +268,8 @@ class DbTest(unittest.TestCase):
             self.db.set_attachment_status("att", "exited", "old-generation")
         )
         contender = Db(self.db_path)
-        lock_attempted = threading.Event()
+        lock_blocked = threading.Event()
         transition_finished = threading.Event()
-        original_guard = contender._runtime_serialized
-
-        @contextmanager
-        def signalled_guard():
-            lock_attempted.set()
-            with original_guard():
-                yield
-
-        contender._runtime_serialized = signalled_guard
 
         def detach_then_claim():
             message = contender.detach_attachment_with_message(
@@ -282,15 +280,16 @@ class DbTest(unittest.TestCase):
             transition_finished.set()
 
         async def reserve_while_detach_starts():
-            async with self.db.reserve_attachment_delivery(
-                "att", "old-generation"
-            ) as reserved:
-                self.assertTrue(reserved)
-                transition = asyncio.create_task(asyncio.to_thread(detach_then_claim))
-                await asyncio.to_thread(lock_attempted.wait)
-                await asyncio.sleep(0.02)
-                self.assertFalse(transition_finished.is_set())
-            await transition
+            with patch("partyline.runtime_lock.time.sleep", side_effect=lambda _: lock_blocked.set()):
+                async with self.db.reserve_attachment_delivery(
+                    "att", "old-generation"
+                ) as reserved:
+                    self.assertTrue(reserved)
+                    transition = asyncio.create_task(asyncio.to_thread(detach_then_claim))
+                    await asyncio.to_thread(lock_blocked.wait)
+                    # The contender really failed the OS lock, not merely started.
+                    self.assertFalse(transition_finished.is_set())
+                await transition
 
         try:
             asyncio.run(reserve_while_detach_starts())

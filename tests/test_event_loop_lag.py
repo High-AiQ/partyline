@@ -18,6 +18,7 @@ class EventLoopLagTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(_setting('TEST_LAG', 0.1, 0), 0.1)
 
     async def test_stall_warns_and_is_rate_limited(self):
+        # Real blocking is the behavior under test; each delay stays below 50 ms.
         settings = {'PARTYLINE_LOOP_LAG_INTERVAL': '0.01',
                     'PARTYLINE_LOOP_LAG_THRESHOLD': '0.005',
                     'PARTYLINE_LOOP_LAG_COOLDOWN': '10'}
@@ -36,6 +37,7 @@ class EventLoopLagTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn('event loop lag', logs.output[0])
 
     async def test_warning_names_slowest_overlapping_tick(self):
+        # Real blocking is the behavior under test; each delay stays below 50 ms.
         from partyline.periodic_timing import tick
 
         settings = {'PARTYLINE_LOOP_LAG_INTERVAL': '0.01',
@@ -72,7 +74,8 @@ class EventLoopLagTest(unittest.IsolatedAsyncioTestCase):
 
         async def deliberately_blocking_coroutine():
             secret_value = 'token-must-not-appear-in-the-log'
-            time.sleep(0.12)
+            # Actual watchdog timing test: 40 ms stays below the 50 ms budget.
+            time.sleep(0.04)
             return secret_value
 
         with patch.dict(os.environ, settings), self.assertLogs(

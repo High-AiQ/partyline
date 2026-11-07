@@ -74,7 +74,7 @@ class IdempotentPostsTest(unittest.TestCase):
                 state = _KEY_CLAIMS.get(identity)
                 if state and state.waiters:
                     return
-            time.sleep(0.005)
+            time.sleep(0)
         self.fail(f"claim waiter did not arrive for {identity}")
 
     # -- client_key idempotency -------------------------------------------
@@ -274,7 +274,7 @@ class IdempotentPostsTest(unittest.TestCase):
                         state = _KEY_CLAIMS.get(identity)
                         if state and state.waiters:
                             break
-                    await asyncio.sleep(0.001)
+                    await asyncio.sleep(0)
                 else:
                     self.fail("claim waiter did not park")
                 waiter.cancel()

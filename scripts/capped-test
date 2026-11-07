@@ -9,20 +9,22 @@ loop was ordinary — a poll whose sleep had been patched in the wrong module,
 plus a writer feeding it — and both times the first symptom a human saw was
 the whole VM going away.
 
-A test that hangs should cost one command, not one machine. The full suite
-peaks around 165 MB, so the default cap here is roughly twelve times what a
-healthy run needs: high enough that no honest test trips it, low enough that
-a runaway dies in seconds.
+A test that hangs should cost one command, not one machine. The serial suite
+peaked around 165 MB; 4 GB leaves parallel workers generous headroom while
+still killing a runaway in seconds rather than letting it take the host.
 
-The cap is applied by the kernel, not by anything the test can talk out of.
-Where a systemd user manager is available the child runs in its own scope
-with `MemoryMax` and swap disabled, which is the stronger guarantee because
-it counts the whole process tree — a test that spawns children cannot escape
-by allocating in one of them. Otherwise the limit is `RLIMIT_AS` on the
-child, which only binds that one process. The chosen mechanism is always
-printed: which guarantee you got is part of the result, and a cap that
-quietly downgraded itself would be the silent fallback `docs/lessons.md`
-keeps warning about.
+The default suite uses process shards, so its 4 GB cap bounds the aggregate
+cgroup or Windows job rather than multiplying a serial suite's old 2 GB cap
+by every worker. The cap is applied by the kernel, not by anything the test
+can talk out of. Where a systemd user manager is available the child runs in
+its own scope with `MemoryMax` and swap disabled, which is the stronger
+guarantee because it counts the whole process tree — a test that spawns
+children cannot escape by allocating in one of them. Otherwise `RLIMIT_AS`
+is inherited by the parent and every worker, but binds each process
+individually rather than their sum. The chosen mechanism is always printed:
+which guarantee you got is part of the result, and a cap that quietly
+downgraded itself would be the silent fallback `docs/lessons.md` keeps
+warning about.
 """
 
 from __future__ import annotations
@@ -35,11 +37,9 @@ import sys
 import tempfile
 import uuid
 
-DEFAULT_COMMAND = [
-    "uv", "run", "--locked", "coverage", "run", "-m", "unittest", "discover",
-    "-s", "tests", "-t", ".",
-]
-DEFAULT_LIMIT = "2G"
+DEFAULT_COMMAND = ["uv", "run", "--locked", "python", "-m", "scripts.parallel_test"]
+DEFAULT_LIMIT = "4G"
+DEFAULT_WORKERS = min(8, max(1, (os.cpu_count() or 2) // 2))
 SUFFIXES = {"K": 1024, "M": 1024**2, "G": 1024**3}
 
 
@@ -211,12 +211,18 @@ def main(argv: list[str] | None = None) -> int:
     if len(argv) >= 4 and argv[0] == "--verify-memory-scope" and argv[2] == "--":
         return verify_scope_and_exec(int(argv[1]), argv[3:])
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--memory", default=DEFAULT_LIMIT, help="cap, e.g. 2G (default: 2G)")
+    parser.add_argument("--memory", default=DEFAULT_LIMIT, help=f"cap, e.g. 4G (default: {DEFAULT_LIMIT})")
+    parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS,
+                        help=f"default-suite workers (default: {DEFAULT_WORKERS})")
     parser.add_argument("command", nargs=argparse.REMAINDER,
-                        help="command to run; defaults to the repository test suite")
+                        help="command to run; defaults to the parallel repository test suite")
     args = parser.parse_args(argv)
+    if args.workers < 1:
+        parser.error("--workers must be positive")
 
-    command = [arg for arg in args.command if arg != "--"] or DEFAULT_COMMAND
+    command = [arg for arg in args.command if arg != "--"]
+    if not command:
+        command = [*DEFAULT_COMMAND, "--workers", str(args.workers)]
     limit = parse_size(args.memory)
     env = os.environ.copy()
     for key in (

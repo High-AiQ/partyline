@@ -329,14 +329,15 @@ class ReviewFindingsTest(WorkloadsBase):
 
     async def test_a_hung_daemon_times_out_instead_of_hanging_the_sampler_or_a_route(self):
         async def hang(*args, **kwargs):
-            await asyncio.sleep(30)
+            await asyncio.Event().wait()
 
         with (
             patch.object(docker_api, "request", hang),
-            patch.object(docker_workloads, "SAMPLE_TIMEOUT", 0.05),
+            # Actual sample timeout: 40 ms stays below the 50 ms budget.
+            patch.object(docker_workloads, "SAMPLE_TIMEOUT", 0.04),
         ):
             await self.inventory.sample(self.runtime)
-        self.assertTrue(self.inventory.view(self.db, None)["error"] or True)
+        self.assertEqual(self.inventory.view(self.db, None)["error"], "TimeoutError")
         self.assertIsNotNone(self.inventory.sampled_at)
 
     async def test_kick_runs_the_sample_in_its_own_task_once_at_a_time(self):

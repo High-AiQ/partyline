@@ -114,13 +114,14 @@ class CwdGitStateTest(unittest.TestCase):
         active = [0]
         maximum = [0]
         lock = threading.Lock()
+        release = threading.Event()
 
         def hang(command, **_kwargs):
             with lock:
                 active[0] += 1
                 maximum[0] = max(maximum[0], active[0])
             try:
-                time.sleep(1.2)
+                release.wait()
                 return subprocess.CompletedProcess(command, 0, "d87b3ae\n", "")
             finally:
                 with lock:
@@ -134,10 +135,16 @@ class CwdGitStateTest(unittest.TestCase):
                 for i in range(64)
             ]
             started = time.monotonic()
-            responses = await asyncio.gather(*(attachment_response(att) for att in attachments))
-            return time.monotonic() - started, responses
+            try:
+                responses = await asyncio.gather(*(attachment_response(att) for att in attachments))
+                return time.monotonic() - started, responses
+            finally:
+                release.set()
 
-        with patch("partyline.attachment_view.subprocess.run", side_effect=hang):
+        # Actual timeout test: 40 ms keeps the intentional bound below 50 ms.
+        with patch("partyline.attachment_view.subprocess.run", side_effect=hang), patch(
+            "partyline.attachment_view.GIT_LOOKUP_TIMEOUT_SECONDS", 0.04
+        ):
             elapsed, responses = asyncio.run(fanout())
 
         self.assertLess(elapsed, 1.0)

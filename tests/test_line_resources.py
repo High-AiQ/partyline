@@ -103,12 +103,13 @@ class LineResourcesTest(TaskFixture):
 
     async def test_queue_bound(self):
         self.acquire()
-        for i in range(leases.MAX_QUEUE):
-            ident = f'q{i}'
-            self.db.add_attachment(ident, 'root', ident, 'fake', ['fake'], self.repo, 'owner')
-            self.db.set_attachment_status(ident, 'running', 'owner')
-            leases.acquire(self.db, 'root', 'gpu', ident)
-        self.assertEqual(self.acquire(self.second).status_code, 409)
+        with patch.object(leases, 'MAX_QUEUE', 2):
+            for i in range(leases.MAX_QUEUE):
+                ident = f'q{i}'
+                self.db.add_attachment(ident, 'root', ident, 'fake', ['fake'], self.repo, 'owner')
+                self.db.set_attachment_status(ident, 'running', 'owner')
+                leases.acquire(self.db, 'root', 'gpu', ident)
+            self.assertEqual(self.acquire(self.second).status_code, 409)
 
     async def test_detach_replacement_archive_and_missing_holder(self):
         for action in ('detach', 'replace', 'archive', 'delete'):
@@ -359,12 +360,18 @@ class ResourceProbeTest(LineResourcesTest):
 
         with patch.dict(os.environ, setting("print('healthy')")):
             self.assertEqual(self.acquire().json()['status'], 'held')
-        for code in ("raise SystemExit(1)", "print('  ')", "import time; time.sleep(5)"):
+        def refused(code):
             with self.subTest(code=code), patch.dict(os.environ, setting(code)):
                 response = self.acquire(self.second)
                 self.assertEqual(response.status_code, 503)
                 self.assertIn('retry', response.json()['detail'])
                 self.assertEqual(self.claims()['queue'], [])
+
+        for code in ("raise SystemExit(1)", "print('  ')"):
+            refused(code)
+        # Actual subprocess timeout: 40 ms stays below the 50 ms budget.
+        with patch("partyline.resource_probe.TIMEOUT", 0.04):
+            refused("import threading; threading.Event().wait()")
         with patch.dict(os.environ, {"PARTYLINE_RESOURCE_PROBES": '{"gpu":["missing-probe-xyz"]}'}):
             self.assertEqual(self.acquire(self.second).json()['status'], 'queued')
 

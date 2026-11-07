@@ -105,7 +105,22 @@ def make_adapter(
         status,
     )
     adapter._silent_until_wake = False
+    adapter._test_polled = asyncio.Event()
+
+    async def fast_poll():
+        # Poll intervals are logical time in these tests; yield without waiting.
+        adapter._test_polled.set()
+        await asyncio.sleep(0)
+
+    adapter._poll = fast_poll
     return adapter
+
+
+async def next_poll(adapter):
+    """Observe a ready tail completing one iteration without wall time."""
+    await asyncio.wait_for(adapter._ready.wait(), 1)
+    adapter._test_polled.clear()
+    await asyncio.wait_for(adapter._test_polled.wait(), 1)
 
 
 class ManifestTest(unittest.TestCase):
@@ -910,10 +925,10 @@ class ResumeWatermarkTest(unittest.IsolatedAsyncioTestCase):
         for _ in range(400):
             if getattr(adapter, attribute) == target:
                 return
-            await asyncio.sleep(0.005)
+            await asyncio.sleep(0)
         self.fail(f"{attribute} never reached {target}")
 
-    async def test_history_arriving_after_the_count_is_not_replayed(self):
+    async def test_history_arriving_during_the_count_is_counted_not_replayed(self):
         posted = []
         running = True
 
@@ -930,7 +945,7 @@ class ResumeWatermarkTest(unittest.IsolatedAsyncioTestCase):
             adapter.alive = lambda: running
             with patch.object(adapter, "_transcript", return_value=transcript):
                 task = asyncio.create_task(adapter._run())
-                await asyncio.sleep(0.02)
+                await asyncio.wait_for(adapter._test_polled.wait(), 1)
                 transcript.write_text(self.history(3), encoding="utf-8")
                 await self.settle(adapter, 3)
                 running = False
@@ -1116,7 +1131,7 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
                 for _ in range(300):
                     if marked:
                         break
-                    await asyncio.sleep(0.01)
+                    await asyncio.sleep(0)
                 first_running = False
                 await asyncio.wait_for(task, timeout=3)
 
@@ -1152,14 +1167,14 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
 
             with patch.object(resumed, "_transcript", return_value=transcript):
                 task = asyncio.create_task(resumed._run())
-                await asyncio.sleep(0.1)
+                await next_poll(resumed)
                 self.assertEqual(second_posted, [])
                 with transcript.open("a", encoding="utf-8") as file:
                     file.write(json.dumps({"type": "assistant", "content": stale}) + "\n")
                 for _ in range(300):
                     if second_posted:
                         break
-                    await asyncio.sleep(0.01)
+                    await asyncio.sleep(0)
                 second_running = False
                 await asyncio.wait_for(task, timeout=3)
 
@@ -1168,9 +1183,15 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
     async def test_a_large_resume_backlog_is_refused_without_muting_new_speech(self):
         posted = []
         running = True
+        backlog_seen = asyncio.Event()
+        new_speech_seen = asyncio.Event()
 
         async def collect(sender, sender_type, body):
             posted.append((sender_type, body))
+            if sender_type == "system":
+                backlog_seen.set()
+            if (sender_type, body) == ("agent", "new speech"):
+                new_speech_seen.set()
 
         with tempfile.TemporaryDirectory() as directory:
             transcript = Path(directory) / "chat_history.jsonl"
@@ -1191,10 +1212,7 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
 
             with patch.object(adapter, "_transcript", return_value=transcript):
                 task = asyncio.create_task(adapter._run())
-                for _ in range(300):
-                    if posted:
-                        break
-                    await asyncio.sleep(0.01)
+                await asyncio.wait_for(backlog_seen.wait(), timeout=1)
                 self.assertEqual(len(posted), 1)
                 self.assertEqual(posted[0], (
                     "system",
@@ -1203,10 +1221,7 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
                 ))
                 with transcript.open("a", encoding="utf-8") as file:
                     file.write(json.dumps({"type": "assistant", "content": "new speech"}) + "\n")
-                for _ in range(300):
-                    if len(posted) == 2:
-                        break
-                    await asyncio.sleep(0.01)
+                await asyncio.wait_for(new_speech_seen.wait(), timeout=1)
                 running = False
                 await asyncio.wait_for(task, timeout=3)
 
@@ -1238,7 +1253,7 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
 
             with patch.object(adapter, "_transcript", return_value=transcript):
                 task = asyncio.create_task(adapter._run())
-                await asyncio.sleep(0.1)
+                await next_poll(adapter)
                 running = False
                 await asyncio.wait_for(task, timeout=3)
 
@@ -1279,7 +1294,7 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
                 with patch.object(Adapter, "start", new=AsyncMock()):
                     await adapter.start()
                 task = asyncio.create_task(adapter._run())
-                await asyncio.sleep(0.05)
+                await next_poll(adapter)
                 restored = Path(directory) / "restored.jsonl"
                 restored.write_text(
                     '{"type":"assistant","content":"missed while muted"}\n'
@@ -1290,13 +1305,13 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
                 for _ in range(300):
                     if "missed while muted" in posted:
                         break
-                    await asyncio.sleep(0.01)
+                    await asyncio.sleep(0)
                 with transcript.open("a", encoding="utf-8") as file:
                     file.write('{"type":"assistant","content":"old reply 1"}\n')
                 for _ in range(300):
                     if posted.count("old reply 1") == 1:
                         break
-                    await asyncio.sleep(0.01)
+                    await asyncio.sleep(0)
                 running = False
                 await asyncio.wait_for(task, timeout=3)
 
@@ -1445,13 +1460,13 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
                 for _ in range(300):
                     if posted:
                         break
-                    await asyncio.sleep(0.01)
+                    await asyncio.sleep(0)
                 with transcript.open("a", encoding="utf-8") as file:
                     file.write('{"type":"assistant","content":"Idle."}\n')
                 for _ in range(300):
                     if ("agent", "Idle.") in posted:
                         break
-                    await asyncio.sleep(0.01)
+                    await asyncio.sleep(0)
                 running = False
                 await asyncio.wait_for(task, timeout=3)
 
@@ -1486,13 +1501,13 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
 
             with patch.object(adapter, "_transcript", return_value=transcript):
                 task = asyncio.create_task(adapter._run())
-                await asyncio.sleep(0.1)
+                await next_poll(adapter)
                 self.assertEqual(posted, [], "suppressed output was counted as delivered")
                 adapter._silent_until_wake = False  # the mention delivery boundary
                 for _ in range(300):
                     if posted:
                         break
-                    await asyncio.sleep(0.01)
+                    await asyncio.sleep(0)
                 running = False
                 await asyncio.wait_for(task, timeout=3)
 
@@ -1547,21 +1562,21 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(adapter._accounted, 3)
 
                 task = asyncio.create_task(adapter._run())
-                await asyncio.sleep(0.05)
+                await next_poll(adapter)
                 # ...then the CLI swaps in an empty file and refills it.
                 empty = Path(directory) / "empty.jsonl"
                 empty.write_text("", encoding="utf-8")
                 empty.replace(transcript)
-                await asyncio.sleep(0.05)
+                await next_poll(adapter)
                 transcript.write_text(self.history(0, 3), encoding="utf-8")
-                await asyncio.sleep(0.2)
+                await next_poll(adapter)
                 # New speech after the restore must still arrive.
                 with transcript.open("a", encoding="utf-8") as file:
                     file.write('{"type":"assistant","content":"live again"}\n')
                 for _ in range(200):
                     if "live again" in posted:
                         break
-                    await asyncio.sleep(0.01)
+                    await asyncio.sleep(0)
                 running = False
                 await asyncio.wait_for(task, timeout=3)
 
@@ -1598,21 +1613,21 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
                     await adapter.start()
                 self.assertEqual(adapter._accounted, 3)
                 task = asyncio.create_task(adapter._run())
-                await asyncio.sleep(0.05)
+                await next_poll(adapter)
                 # The replacement arrives holding only the first old record,
                 # and rests there long past any settle window.
                 partial = Path(directory) / "partial.jsonl"
                 partial.write_text(self.history(0, 1), encoding="utf-8")
                 partial.replace(transcript)
-                await asyncio.sleep(0.2)
+                await next_poll(adapter)
                 transcript.write_text(self.history(0, 3), encoding="utf-8")
-                await asyncio.sleep(0.1)
+                await next_poll(adapter)
                 with transcript.open("a", encoding="utf-8") as file:
                     file.write('{"type":"assistant","content":"live again"}\n')
                 for _ in range(300):
                     if "live again" in posted:
                         break
-                    await asyncio.sleep(0.01)
+                    await asyncio.sleep(0)
                 running = False
                 await asyncio.wait_for(task, timeout=3)
 
@@ -1651,7 +1666,7 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
             transcript.write_text(self.history(0, 3), encoding="utf-8")
             with patch.object(adapter, "_transcript", return_value=transcript):
                 task = asyncio.create_task(adapter._run())
-                await asyncio.sleep(0.15)
+                await next_poll(adapter)
                 self.assertEqual(adapter._accounted, 3)
                 # A real compaction: the tail is dropped, newer speech kept.
                 compacted = Path(directory) / "compacted.jsonl"
@@ -1663,7 +1678,7 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
                 for _ in range(300):
                     if "after compaction" in posted:
                         break
-                    await asyncio.sleep(0.01)
+                    await asyncio.sleep(0)
                 running = False
                 await asyncio.wait_for(task, timeout=3)
 
@@ -1699,13 +1714,13 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
             adapter._assistant_fingerprints = [b"x"] * 9
 
             task = asyncio.create_task(adapter._tail_grok_transcript(transcript, self.relay(posted)))
-            await asyncio.sleep(0.15)
+            await next_poll(adapter)
             with transcript.open("a", encoding="utf-8") as file:
                 file.write('{"type":"assistant","content":"after the mute"}\n')
             for _ in range(400):
                 if "after the mute" in posted:
                     break
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0)
             running = False
             await asyncio.wait_for(task, timeout=3)
 
@@ -1743,12 +1758,12 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
                 task = asyncio.create_task(
                     adapter._tail_grok_transcript(transcript, self.relay(posted))
                 )
-                await asyncio.sleep(0.05)
+                await next_poll(adapter)
                 # The resume swap: same history, new file, refilled at once.
                 swap = Path(directory) / "swap.jsonl"
                 swap.write_text(self.history(0, 3), encoding="utf-8")
                 swap.replace(transcript)
-                await asyncio.sleep(0.15)
+                await next_poll(adapter)
                 self.assertIsNone(adapter._restoring_to, "the refill never registered")
 
                 # A real compaction, before any new speech: keeps the tail.
@@ -1761,7 +1776,7 @@ class ResumeReplacementTest(unittest.IsolatedAsyncioTestCase):
                 for _ in range(400):
                     if "after compaction" in posted:
                         break
-                    await asyncio.sleep(0.01)
+                    await asyncio.sleep(0)
                 running = False
                 await asyncio.wait_for(task, timeout=3)
 
