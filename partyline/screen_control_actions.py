@@ -12,6 +12,7 @@ MAX_SCROLL = 50
 class ControlAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["click", "move", "drag", "scroll", "type", "key"]
+    frame: Literal["none", "thumb", "full"] = "thumb"
     x: StrictInt | None = None
     y: StrictInt | None = None
     x1: StrictInt | None = None

@@ -191,7 +191,7 @@ class ControlFlowTest(unittest.IsolatedAsyncioTestCase):
         response = await self.act(kind="click", x=10, y=20)
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["done"], "click left (-90,20)")
-        self.assertIn("/api/media/", self.bodies()[-1])
+        self.assertIn("/api/media/", response.json()["frame"])
         self.assertIn(("click", "left", 1), self.inputs.calls)
         self.assertEqual(share.frames[-1].pointer, {"x": -90, "y": 20, "visible": True})
         for _ in range(3):
@@ -206,11 +206,12 @@ class ControlFlowTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn(detail, refused.json()["detail"])
         self.assertEqual((await self.act(kind="click", x="1", y=1)).status_code, 422)
         self.assertFalse(any("audit" in body for body in self.bodies()))
-        self.audit_time.advance(5)
+        self.audit_time.advance(60)
         await until(lambda: any("audit" in body for body in self.bodies()))
         audit = next(body for body in self.bodies() if "audit" in body)
-        self.assertEqual(audit, "Agent control audit — person: click left (-90,20) · move (-50,50) ×3 · "
-                                "type `hi 'there'` (10 chars)")
+        self.assertTrue(audit.startswith(
+            "Agent control audit — person: click left (-90,20) · move (-50,50) ×3 · "
+            "type `hi 'there'` (10 chars)"))
         self.desktop.position = (90, 90)  # the person grabs the mouse
         await until(lambda: self.grant().status == "revoked")
         self.assertTrue(any(body.startswith("@person Agent control revoked (the pointer was moved")
@@ -221,6 +222,33 @@ class ControlFlowTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("start a new share", again.json()["detail"])
         await self.client.delete(f"/api/screen/shares/{share.share_id}")
         self.assertEqual(self.hub.control.grants, {})
+
+    async def test_frame_choices_and_deduplication(self):
+        await self.connect()
+        await self.share()
+        self.terminal.control_answer = True
+        await self.client.post("/api/conversations/line/screen-control/request")
+        await until(lambda: self.grant().status == "active")
+        baseline = len(self.bodies())
+        first = await self.act(kind="click", x=10, y=20)
+        self.assertEqual(first.status_code, 200, first.text)
+        url = first.json()["frame"]
+        self.assertTrue(url.endswith("/thumb"))
+        self.assertEqual(len(self.bodies()), baseline)
+        self.assertEqual(self.db._exec("SELECT count(*) FROM images").fetchone()[0], 1)
+        again = await self.act(kind="move", x=11, y=20, frame="full")
+        self.assertTrue(again.json()["unchanged"])
+        self.assertEqual(again.json()["frame"], url.removesuffix("thumb") + "original")
+        self.assertEqual(self.db._exec("SELECT count(*) FROM images").fetchone()[0], 1)
+        none = await self.act(kind="move", x=12, y=20, frame="none")
+        self.assertEqual(set(none.json()), {"done"})
+        self.desktop.image.putpixel((0, 0), (0, 0, 0))
+        changed = await self.act(kind="move", x=13, y=20)
+        self.assertNotIn("unchanged", changed.json())
+        self.assertNotEqual(changed.json()["frame"], url)
+        self.assertEqual(self.db._exec("SELECT count(*) FROM images").fetchone()[0], 2)
+        invalid = await self.act(kind="move", x=13, y=20, frame="large")
+        self.assertEqual(invalid.status_code, 422)
 
     async def test_share_start_control_ends_on_disconnect(self):
         await self.connect()
@@ -430,16 +458,54 @@ class ControlUnitTest(unittest.IsolatedAsyncioTestCase):
     async def test_audit_batches_and_flushes_on_end(self):
         control = self.hub.control
         grant = control.grants["share"] = Grant("share", "a", "a", status="active")
-        for index in range(25):
-            await control._audit(grant, "line", "a" if index < 22 else "b", f"click left ({index},0)")
+        for index in range(105):
+            await control._audit(grant, "line", "a" if index < 102 else "b", f"click left ({index},0)")
         bodies = [row["body"] for row in self.db.list_messages("line")]
         self.assertEqual(len(bodies), 1)
         self.assertTrue(bodies[0].startswith("Agent control audit — a: click left (0,0) · click left (1,0)"))
         self.assertEqual(len(grant.audit), 5)
         await self.hub.stop_share("share", "stopped")
         bodies = [row["body"] for row in self.db.list_messages("line")]
-        self.assertIn("· b: click left (22,0)", bodies[-3])
+        self.assertIn("· b: click left (102,0)", bodies[-3])
         self.assertEqual(bodies[-2], "Agent control ended with the share (stopped).")
+
+    async def test_folded_moves_still_trigger_audit_batch(self):
+        control = self.hub.control
+        grant = control.grants["share"] = Grant("share", "a", "a", status="active")
+        for index in range(100):
+            await control._audit(grant, "line", "a", f"move ({index},0)")
+        self.assertEqual(grant.audit, [])
+        bodies = [row["body"] for row in self.db.list_messages("line")]
+        self.assertTrue(bodies[-1].startswith("Agent control audit — a: move (99,0) ×100"))
+
+    async def test_audit_recovery_and_failed_publish(self):
+        from partyline.screen_audit import recover
+        control = self.hub.control
+        grant = control.grants["share"] = Grant("share", "a", "a", status="active")
+        for index in range(3):
+            await control._audit(grant, "line", "a", f"click left ({index},0)")
+        with unittest.mock.patch("partyline.screen_audit._body", side_effect=RuntimeError("failed")):
+            with self.assertRaisesRegex(RuntimeError, "failed"):
+                await control.flush(grant, "line")
+        self.assertEqual(len(grant.audit), 3)
+        self.assertIsNotNone(grant.flusher)
+        self.assertEqual(self.db._exec("SELECT count(*) FROM screen_control_audit "
+                                       "WHERE message_id IS NULL").fetchone()[0], 3)
+        register_screen_routes(FastAPI(), self.runtime,
+                               MediaStore(self.db, Path(self.tmp.name) / "media"))
+        recover(self.db)  # recovery is idempotent
+        bodies = [row["body"] for row in self.db.list_messages("line")]
+        self.assertEqual(len(bodies), 1)
+        self.assertIn("click left (0,0)", bodies[0])
+        self.assertIn("click left (2,0)", bodies[0])
+        self.assertIn("audit sha256:", bodies[0])
+        entries = self.db._exec("SELECT * FROM screen_control_audit ORDER BY id").fetchall()
+        self.assertEqual(entries[0]["previous_hash"], "")
+        self.assertEqual(entries[1]["previous_hash"], entries[0]["entry_hash"])
+        self.assertEqual(entries[2]["previous_hash"], entries[1]["entry_hash"])
+        self.assertIn(entries[2]["entry_hash"], bodies[0])
+        self.assertEqual(self.db._exec("SELECT count(*) FROM screen_control_audit "
+                                       "WHERE message_id IS NULL").fetchone()[0], 0)
 
     async def test_revoke_paths(self):
         control = self.hub.control

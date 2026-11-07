@@ -6,7 +6,7 @@ from .auth_guard import request_principal
 from .machine_scope import deny_unless, is_human
 from .media import MediaError
 from .screen_control_actions import ControlAction, describe
-from .screen_frame_store import store_frame
+from .screen_frame_store import frame_reference
 
 
 def control_router(runtime, hub, store) -> APIRouter:
@@ -24,22 +24,27 @@ def control_router(runtime, hub, store) -> APIRouter:
 
     @router.post("/api/conversations/{conv_id}/screen-control/action")
     async def act(conv_id: str, body: ControlAction, request: Request):
-        from .screen_routes import frame_detail  # screen_routes includes this router
-
         principal = request_principal(request)
         deny_unless(runtime.db, principal, conv_id, "write")
         try:
             share, frame, cmd, stale = await hub.control.action(conv_id, principal.name, body)
             done = describe(cmd)
-            ref = await store_frame(runtime, store, conv_id, principal.name, frame.data, frame.mime,
-                                    f"Screen after {done}.")
+            ref, unchanged = (None, False)
+            if body.frame != "none":
+                ref, unchanged = await frame_reference(
+                    store, share, principal.name, frame, frame.data, frame.mime)
         except (ValueError, TimeoutError) as exc:
             raise HTTPException(409, str(exc)) from exc
         except MediaError as exc:
             raise HTTPException(exc.status_code, exc.detail) from exc
         note = " The frame may predate the action; call screen_frame." if stale else ""
-        return {"done": done + note, "file": ref.model_dump(mode="json"),
-                "description": frame_detail(frame), "share_id": share.share_id}
+        result = {"done": done + note}
+        if ref:
+            tier = "thumb" if body.frame == "thumb" else "original"
+            result["frame"] = getattr(ref.urls, tier)
+            if unchanged:
+                result["unchanged"] = True
+        return result
 
     @router.delete("/api/screen/shares/{share_id}/control")
     async def revoke_control(share_id: str, request: Request):

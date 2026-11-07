@@ -13,6 +13,7 @@ from .docker_mode_schema import MIGRATIONS as DOCKER_MODE
 from .bridge_schema import MIGRATIONS as BRIDGE
 from .retirement_schema import MIGRATIONS as RETIREMENT
 from .captain_handover_schema import MIGRATIONS as HANDOVER
+from .screen_audit_schema import MIGRATIONS as SCREEN_AUDIT
 from .screen_schema import MIGRATIONS as SCREEN
 from .orchestrator_schema import MIGRATIONS as ORCHESTRATOR
 from .asr_schema import MIGRATIONS as ASR
@@ -158,7 +159,6 @@ MIGRATIONS = [
     # Without it, concurrent escalations all read `notified_at IS NULL` while
     # the first wake was still being delivered, and each woke the manager.
     "ALTER TABLE line_reports ADD COLUMN notifying_at REAL",
-    # Claims existed before hierarchy; normal startup now owns their schema too.
     """CREATE TABLE IF NOT EXISTS claims(
       id TEXT PRIMARY KEY, conv_id TEXT NOT NULL, owner TEXT NOT NULL,
       paths TEXT NOT NULL, created_at REAL NOT NULL, expires_at REAL NOT NULL
@@ -297,4 +297,4 @@ MIGRATIONS = [
 MIGRATIONS.extend(MEMORY + IDEMPOTENCY + NOTES + COMPACTION + ACCEPT_HISTORY + SCRATCH + LEASE
                   + GATES + AUTO_COMPACT + DOCKER_MODE + BRIDGE + RETIREMENT + ORCHESTRATOR + HANDOVER)
 MIGRATIONS.extend(["ALTER TABLE attachments ADD COLUMN is_successor INTEGER NOT NULL DEFAULT 0"] + SCREEN)
-MIGRATIONS.extend(ASR)
+MIGRATIONS.extend(ASR + SCREEN_AUDIT)
