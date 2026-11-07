@@ -43,7 +43,8 @@ def schema(name):
             "Lead attachment id or handle on that line; empty clears lead.", 80)},
             ["conv_id", "attachment_id"]),
         "retirement_preview": obj({**line, "include_children": {"type": "boolean"}}, ["conv_id"]),
-        "retire_child": obj({"conv_id": text("Child id; root captains may target any strict descendant.", 80),
+        "retire_child": obj({"conv_id": text(
+            "Child id; root captains may target any strict descendant.", 120),
             **{key: {"type": "boolean"} for key in
                ("stop_processes", "clear_goal", "include_children", "discard", "force_discard")},
             "preview_token": text("Echo retirement_preview token for force_discard.", 64)}, ["conv_id"]),
@@ -66,8 +67,7 @@ def schema(name):
         "request_restart": obj({**line, "reason": text("Reason for a person to review.", 2000, 1),
             "confirm_no_deploy": {"type": "boolean"}}, ["conv_id", "reason"]),
         "process_overview": obj({**line}, ["conv_id"]),
-        "ack_report": obj({**line, "conv_id": text(
-                "Your line, or a child line you captain; its reports ack on yours.", 80),
+        "ack_report": obj({**line,
             "report_id": {"type": "integer", "minimum": 1},
             "revision": {"type": "integer", "minimum": 1}}, ["conv_id", "report_id", "revision"]),
         "reports": obj({"operation": {"type": "string", "enum": ["list", "get", "post"]},
