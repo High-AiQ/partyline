@@ -3,6 +3,8 @@
   import Modal from "../Modal.svelte";
   import PairingSteps from "../PairingSteps.svelte";
   import { screenStatus } from "../../state/screen-status.svelte.js";
+  import ControlBadge from "./ControlBadge.svelte";
+  import { layout } from "../../state/layout.svelte.js";
   import { room } from "../../state/room.svelte.js";
   import { walkthrough } from "../../state/walkthrough.svelte.js";
   import { walkthroughApi } from "../../lib/walkthrough-api";
@@ -151,9 +153,12 @@
   }
 </script>
 
-{#if room.conversation}
-  <div class="flex items-center gap-2 px-4 py-1 text-sm">
-    <button type="button" onclick={show}>Computers / Share screen</button>
+<!-- A phone can neither run the helper nor share its own screen, so the picker
+     is hidden when narrow. A share another device started stays visible as
+     status, with its Stop. -->
+{#if room.conversation && (!layout.narrow || room.screenShare)}
+  <div class="flex flex-wrap items-center gap-2 px-4 py-1 text-sm">
+    {#if !layout.narrow}<button type="button" onclick={show}>Computers / Share screen</button>{/if}
     {#if room.screenShare}
       <span
         >{room.screenShare.status === "declined"
@@ -164,6 +169,7 @@
               ? `${room.screenShare.handle} is recording a walkthrough on ${room.screenShare.device_name}`
               : `${room.screenShare.handle} is sharing ${room.screenShare.device_name} (${String(room.screenShare.region.x)}, ${String(room.screenShare.region.y)}, ${String(room.screenShare.region.width)} × ${String(room.screenShare.region.height)})`}</span
       >
+      <ControlBadge />
       {#if room.screenShare.status !== "declined"}
         <button
           type="button"

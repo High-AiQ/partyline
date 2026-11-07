@@ -6,6 +6,7 @@ import { voiceApi } from "../../lib/voice-api";
 import { walkthroughApi } from "../../lib/walkthrough-api";
 import type { RecorderSources } from "../../lib/voice-recorder";
 import { FakeAudioContext, fakeAudioContext } from "../../lib/mic-fakes";
+import { layout } from "../../state/layout.svelte.js";
 import { room } from "../../state/room.svelte.js";
 import { draft } from "../../state/draft.svelte.js";
 import { voicePresets } from "../../state/voice-presets.svelte.js";
@@ -74,12 +75,41 @@ function setup(extra: Partial<RecorderSources> = {}) {
 }
 
 afterEach(() => {
+  layout.narrow = false;
   voicePresets.reset();
   vi.restoreAllMocks();
   room.leave({ clearRoute: false });
   walkthrough.last = null;
   draft.text = "";
   document.body.replaceChildren();
+});
+
+describe("walkthrough control on a phone", () => {
+  it("does not offer Show me when narrow, and offers it again when wide", async () => {
+    layout.narrow = true;
+    const component = setup();
+    await settle();
+    expect(button("Show me")).toBeUndefined();
+    expect(document.querySelector('[aria-label="Walkthrough"]')).toBeNull();
+    layout.narrow = false;
+    await settle();
+    expect(button("Show me")).toBeDefined();
+    await unmount(component);
+  });
+
+  it("keeps the controls of a take already under way so it can be cancelled", async () => {
+    const component = setup();
+    await settle();
+    button("Show me")?.click();
+    await settle();
+    layout.narrow = true;
+    await settle();
+    expect(button("Cancel")).toBeDefined();
+    button("Cancel")?.click();
+    await settle();
+    expect(document.querySelector('[aria-label="Walkthrough"]')).toBeNull();
+    await unmount(component);
+  });
 });
 
 describe("walkthrough control", () => {

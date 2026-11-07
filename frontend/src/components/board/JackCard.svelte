@@ -18,6 +18,7 @@
   import { presence } from "../../state/presence.svelte.js";
   import { session } from "../../state/session.svelte.js";
   import WorkingBadge from "./WorkingBadge.svelte";
+  import ControlBadge from "../chat/ControlBadge.svelte";
   import PeekDialog from "../dialogs/PeekDialog.svelte";
   import EditJackDialog from "../dialogs/EditJackDialog.svelte";
   import FreshJackDialog from "../dialogs/FreshJackDialog.svelte";
@@ -122,6 +123,9 @@
     {/if}
     {#if entry}
       <WorkingBadge {entry} />
+    {/if}
+    {#if live}
+      <ControlBadge handle={attachment.name} />
     {/if}
     {#if overridesBundled}
       <span
