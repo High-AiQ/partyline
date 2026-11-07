@@ -9,11 +9,11 @@ from pydantic import BaseModel, ValidationError
 from PIL import Image, ImageDraw
 
 from .auth_guard import bearer_token, request_principal
-from .contracts import MessageEvent, MessageResponse
-from .media_digest import digest_body
 from .machine_scope import deny_unless, is_human
-from .media import MediaError, MediaStore, prepared_files
+from .media import MediaError, MediaStore
 from .screen_connections import revoke as revoke_device
+from .screen_control_routes import control_router
+from .screen_frame_store import store_frame
 from .screen_hub import ScreenHub
 from .screen_protocol import PairClaim, Region
 
@@ -22,6 +22,7 @@ class ShareStart(BaseModel):
     device_id: str
     region: Region
     walkthrough: bool = False
+    control: bool = False
 
 
 def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
@@ -118,9 +119,11 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
         if not row:
             raise HTTPException(403, "computer is not paired to this line")
         try:
+            if body.control and hub.devices.get(body.device_id, {}).get("control", 0) < 1:
+                raise ValueError("helper too old for control: update partyline-helper on that computer")
             share = await hub.start_share(conv_id, principal.user_id, principal.name,
                                           body.device_id, body.region.model_dump(), conv["name"],
-                                          walkthrough=body.walkthrough)
+                                          walkthrough=body.walkthrough, control=body.control)
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
         return {"share_id": share.share_id, "status": share.status}
@@ -164,25 +167,13 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
             share, frame = await hub.capture(conv_id)
             data = _mark_pointer(frame) if mark_pointer else frame.data
             mime = "image/png" if mark_pointer and pointer_coordinates(frame)["frame"] else frame.mime
-            prepared = prepared_files([(data, "screen-frame", mime)])
+            ref = await store_frame(runtime, store, conv_id, principal.name, data, mime,
+                                    "Screen frame captured with screen_frame.")
         except (ValueError, TimeoutError) as exc:
             raise HTTPException(409, str(exc)) from exc
         except MediaError as exc:
             raise HTTPException(exc.status_code, exc.detail) from exc
-        message = runtime.db.add_message(conv_id, principal.name, "agent", "")
-        try:
-            refs = store.store(conv_id, message["id"], prepared, "Screen frame", None)
-        except Exception:
-            runtime.db._exec("DELETE FROM messages WHERE id=?", (message["id"],))
-            raise
-        body = digest_body("Screen frame captured with screen_frame.", refs, "")
-        runtime.db._exec("UPDATE messages SET body=? WHERE id=?", (body, message["id"]))
-        await runtime.broadcast(conv_id, MessageEvent(message=MessageResponse.model_validate(
-            {**message, "body": body, "files": refs})))
-        point = pointer_coordinates(frame)
-        detail = (f"region={frame.region}; output={frame.out_width}x{frame.out_height}; "
-                  f"pointer={point}")
-        return {"file": refs[0].model_dump(mode="json"), "description": detail,
+        return {"file": ref.model_dump(mode="json"), "description": frame_detail(frame),
                 "share_id": share.share_id}
 
     @app.websocket("/api/screen/helper")
@@ -199,6 +190,7 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
         await hub.connect(ws, dict(row))
 
     app.include_router(router)
+    app.include_router(control_router(runtime, hub, store))
     from .walkthrough_routes import walkthrough_router
     app.include_router(walkthrough_router(runtime, hub, store))
     return hub
@@ -215,6 +207,11 @@ def pointer_coordinates(frame):
     fx = min(frame.out_width - 1, int((x - region["x"]) * frame.out_width / region["width"]))
     fy = min(frame.out_height - 1, int((y - region["y"]) * frame.out_height / region["height"]))
     return {"os": {"x": x, "y": y}, "frame": {"x": fx, "y": fy}}
+
+
+def frame_detail(frame) -> str:
+    return (f"region={frame.region}; output={frame.out_width}x{frame.out_height}; "
+            f"pointer={pointer_coordinates(frame)}")
 
 
 def _mark_pointer(frame):

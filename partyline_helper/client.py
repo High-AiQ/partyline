@@ -9,6 +9,7 @@ import time
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidStatus
 
+from .control import CONTROL_VERSION, Control
 from .images import changed, encode, thumbnail
 from .transport import CertificateError, certificate_failure
 
@@ -26,7 +27,8 @@ def bounded(value, default, low, high):
 
 class Session:
     def __init__(self, socket, desktop, terminal, name, yes=False, preview_times=None,
-                 clock=time.monotonic, sleep=asyncio.sleep, border=None):
+                 clock=time.monotonic, sleep=asyncio.sleep, border=None, allow_control=False,
+                 inputs=None):
         self.socket, self.desktop, self.terminal = socket, desktop, terminal
         self.name, self.yes, self.border = name, yes, border
         self.clock, self.sleep = clock, sleep
@@ -40,6 +42,7 @@ class Session:
         self.pending_id = None
         self.last_received = self.clock()
         self.previous = self.last_pointer = None
+        self.control = Control(self, inputs, allow_control)
 
     async def send(self, kind, binary=None, **fields):
         async def write():
@@ -66,6 +69,7 @@ class Session:
                 raise
 
     async def stop(self, reason="remote", notify=True):
+        self.control.end(f"sharing stopped: {reason}")  # before any await: no queued action runs
         if self.border:
             self.border.hide()
         worker, self.worker = self.worker, None
@@ -119,13 +123,19 @@ class Session:
             self.accepted = True
             self.terminal.clear()
             print("SHARING ACTIVE — type s Enter or press Ctrl+C to stop", flush=True)
+            if request.get("control") is True:  # the person asked for agent control with the share
+                await self.control.request(dict(request, type="control_request"))
             while True:
                 await self.frame()
                 end = self.clock() + 1 / request["max_fps"]
                 while self.clock() < end:
-                    if await self.terminal.read(min(.05, end - self.clock())) == "s":
+                    wait = min(.05, end - self.clock())
+                    if self.control.prompting:  # the control prompt owns terminal input
+                        await self.sleep(wait)
+                    elif await self.terminal.read(wait) == "s":
                         self.share = None
                         self.accepted = False
+                        self.control.end("sharing stopped locally")
                         await self.send("share_stopped", share_id=request["share_id"], reason="local")
                         print("Sharing stopped: local", flush=True)
                         return
@@ -137,18 +147,20 @@ class Session:
             await self.send("share_stopped" if accepted else "share_declined",
                             share_id=request.get("share_id"), reason=str(exc))
         finally:
+            self.control.end("share ended")
             if self.border:
                 self.border.hide()
 
-    async def frame(self, request_id=None):
+    async def frame(self, request_id=None, force=False):
         async with self.frame_lock:
-            return await self._frame(request_id)
+            return await self._frame(request_id, force)
 
-    async def _frame(self, request_id):
+    async def _frame(self, request_id, force=False):
         share = self.share
         if not share or not self.accepted:
             return
-        if self.last_frame_at is not None and self.clock() - self.last_frame_at < 1 / share["max_fps"]:
+        if (not force and self.last_frame_at is not None
+                and self.clock() - self.last_frame_at < 1 / share["max_fps"]):
             if request_id is not None:
                 await self.send("error", request_id=request_id,
                                 message="Snap rate limit: wait for the next frame")
@@ -197,8 +209,12 @@ class Session:
             binary, width, height, mime = encode(self.desktop.grab(monitor), edge)
             await self.send("preview", binary, request_id=message["request_id"], monitor_id=monitor["id"],
                             out_width=width, out_height=height, mime=mime)
+        elif kind in ("control_request", "control_revoked", "action"):
+            await self.control.dispatch(message)
         elif kind == "ping":
             await self.send("pong")
+        elif kind not in ("pong", "snap", "error"):
+            await self.send("error", request_id=message.get("request_id"), message=f"unsupported: {kind}")
 
     async def heartbeat(self):
         while True:
@@ -212,7 +228,8 @@ class Session:
         # Read distribution metadata without importing server modules.
         from importlib.metadata import version
         await self.send("hello", protocol=1, device_name=self.name, os=platform.system(),
-                        helper_version=version("partyline"), monitors=self.desktop.monitors())
+                        helper_version=version("partyline"), monitors=self.desktop.monitors(),
+                        control=CONTROL_VERSION)
         heartbeat = asyncio.create_task(self.heartbeat())
         try:
             async for raw in self.socket:
@@ -237,7 +254,8 @@ class Session:
 
 
 async def serve(config, desktop, terminal, yes=False, sleep=asyncio.sleep,
-                clock=time.monotonic, session_sleep=asyncio.sleep, border=None):
+                clock=time.monotonic, session_sleep=asyncio.sleep, border=None, allow_control=False,
+                inputs=None):
     from .config import server_url
     server = server_url(config["server"])
     url = ("wss" if server.startswith("https:") else "ws") + server[server.index(":"):] + "/api/screen/helper"
@@ -249,7 +267,8 @@ async def serve(config, desktop, terminal, yes=False, sleep=asyncio.sleep,
                                ping_interval=None, max_size=1_000_000) as socket:
                 connected_at = clock()
                 await Session(socket, desktop, terminal, config.get("device_name", "Desktop"),
-                              yes, preview_times, clock, session_sleep, border=border).run()
+                              yes, preview_times, clock, session_sleep, border=border,
+                              allow_control=allow_control, inputs=inputs).run()
                 if clock() - connected_at >= 45:
                     delay = 1
         except InvalidStatus as exc:

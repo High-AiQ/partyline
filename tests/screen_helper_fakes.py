@@ -2,11 +2,13 @@
 import asyncio
 import json
 from collections import defaultdict
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from PIL import Image
 
 from partyline_helper.client import serve as native_serve
+from partyline_helper.inputs import key_name
 
 REGION = dict(x=-100, y=0, width=200, height=100)
 MONITOR = dict(id=1, **REGION, scale=1.5, primary=True)
@@ -20,7 +22,7 @@ def request(**kwargs):
 async def checkpoint():
     """Yield through the ready queue without starting a real timer."""
     ready = asyncio.get_running_loop().create_future()
-    asyncio.get_running_loop().call_soon(ready.set_result, None)
+    asyncio.get_running_loop().call_soon(lambda: ready.done() or ready.set_result(None))
     await ready
 
 
@@ -81,6 +83,9 @@ class FakeTerminal:
         self.consent = AsyncMock(side_effect=self._consent)
         self.lines = asyncio.Queue()
         self.waiting = asyncio.Queue()
+        self.control_answer = False
+        self.asks = asyncio.Queue()
+        self.dialogs = []
 
     async def _consent(self, request, yes):
         self.prompts.put_nowait(request)
@@ -90,6 +95,13 @@ class FakeTerminal:
 
     def clear(self):
         pass
+
+    async def ask(self, question, dialog=None):
+        self.asks.put_nowait(question)
+        self.dialogs.append(dialog)
+        if isinstance(self.control_answer, asyncio.Future):
+            return await self.control_answer
+        return self.control_answer
 
     async def read(self, timeout):
         self.waiting.put_nowait(timeout)
@@ -125,3 +137,86 @@ class FakeSocket:
 async def serve(*args, clock=None, **kwargs):
     clock = clock or ManualTime()
     return await native_serve(*args, clock=clock, session_sleep=clock.sleep, **kwargs)
+
+
+class AutoTime(ManualTime):
+    """Every sleep advances virtual time at once: loops progress without real waiting."""
+
+    async def sleep(self, delay):
+        self.now = round(self.now + max(0, delay), 9)
+        await checkpoint()
+
+
+X11_CONTROL_CODES = {"\n": "enter", "\r": "enter", "\t": "tab"}
+
+
+class FakeInputs:
+    """Records injected input and moves the fake pointer like a real controller would."""
+
+    def __init__(self, desktop, fail=None):
+        self.desktop, self.fail = desktop, fail
+        self.calls = []
+        self.on_key = None
+        self.on_type = None  # called with each typed character, e.g. to press a physical key mid-text
+        self.x11 = None  # "notice-first" or "echo-first": replay pynput's X11 listener events
+        self.stopped = False
+
+    def __call__(self, desktop):
+        if self.fail == "init":
+            raise RuntimeError("Agent control needs permission.")
+        return self
+
+    def move(self, x, y):
+        self.calls.append(("move", x, y))
+        self.desktop.position = (x, y)
+
+    def press(self, button):
+        self.calls.append(("press", button))
+
+    def release(self, button):
+        self.calls.append(("release", button))
+
+    def click(self, button, count):
+        self.calls.append(("click", button, count))
+
+    def scroll(self, dx, dy):
+        self.calls.append(("scroll", dx, dy))
+
+    def type(self, text):
+        self.calls.append(("type", text))
+        self.native([X11_CONTROL_CODES.get(text, text)])
+        if self.on_type:
+            self.on_type(text)
+
+    def key(self, names):
+        self.calls.append(("key", names))
+        self.native(list(names))
+
+    def native(self, names):
+        """pynput/keyboard/_xorg.py: each press and release reaches the listener flagged through
+        _on_fake_event; named keys go by XTest, whose RECORD echo also arrives, unflagged;
+        characters go by XSendEvent (flagged, Shift in the event state, no Shift press)."""
+        if not self.x11 or not self.on_key:
+            return
+        for down, order in ((True, names), (False, names[::-1])):
+            for name in order:
+                notice = [(name.lower() if len(name) == 1 else name, True, down)]
+                echo = [(self.echo_name(name, names), False, down)] if len(name) > 1 else []
+                for event in (notice + echo if self.x11 == "notice-first" else echo + notice):
+                    self.on_key(*event)
+
+    def listen(self, on_key):
+        if self.fail == "listen":
+            raise RuntimeError("The kill-switch key listener could not start.")
+        self.on_key = on_key
+
+    @staticmethod
+    def echo_name(name, names):
+        """The RECORD echo is read back through the keymap: shifted Tab is ISO_Left_Tab, an
+        unnamed KeyCode, which inputs.key_name must still call tab."""
+        if name == "tab" and "shift" in names:
+            return key_name(SimpleNamespace(vk=0xFE20, char=None))
+        return name
+
+    def stop(self):
+        self.stopped = True
