@@ -1,6 +1,7 @@
 <script lang="ts">
   /** How to pair and run the native screen helper; shared by the share dialog and Settings. */
   import { copyText } from "../lib/clipboard";
+  import { HELPER_WINDOWS_INSTALLER_URL, onWindows } from "../lib/helper-installer";
 
   let { origin, code }: { origin: string; code: string } = $props();
 
@@ -27,6 +28,7 @@
     },
   ]);
   const status = $state<Record<string, string>>({});
+  const windows = onWindows();
 
   function selectNode(node: HTMLElement | null): void {
     if (!node) return;
@@ -44,6 +46,31 @@
 </script>
 
 <div class="space-y-2 text-sm" data-testid="pairing-steps">
+  {#if windows}
+    <div class="space-y-1" data-testid="windows-installer">
+      <h4 class="font-semibold">Windows: no terminal needed</h4>
+      <p>
+        <a class="link-button primary" href={HELPER_WINDOWS_INSTALLER_URL} data-testid="download-windows"
+          >Download for Windows</a
+        >
+      </p>
+      <ol class="list-decimal pl-5">
+        <li>
+          Open <code>PartylineHelper-Setup.exe</code>. It installs for you only; no administrator rights.
+        </li>
+        <li>
+          While the installer is unsigned, Windows SmartScreen may say “Windows protected your PC”. Click
+          <strong>More info</strong>, then <strong>Run anyway</strong>.
+        </li>
+        <li>
+          Back in Partyline, open “Computers / Share screen”, choose “Pair a computer” and click <strong
+            >Pair with installed helper</strong
+          >, then answer the dialogs. Look for the round icon in the system tray.
+        </li>
+      </ol>
+      <p class="dialog-note">Prefer a terminal, or not on Windows? Use the commands below.</p>
+    </div>
+  {/if}
   <p>
     <strong>Run these commands in a terminal on the computer whose screen you want to share</strong>, not on
     the Partyline server. That computer needs Python 3.11+ and

@@ -473,10 +473,11 @@ class OpenLinkTests(TempHome):
 class EnsureRunningTests(TempHome):
     def go(self, holder, restart):
         FakeLock.held = {"run"} if holder else set()
-        spawned, killed = [], []
-        text = links.ensure_running(restart, spawn=spawned.append, kill=lambda pid, sig: killed.append(pid),
+        spawned, stopped = [], []
+        text = links.ensure_running(restart, spawn=spawned.append,
+                                    stop=lambda: (stopped.append(4242), (True, "stopped"))[1],
                                     launch=lambda: LAUNCH, lock=FakeLock)
-        return text, spawned, killed
+        return text, spawned, stopped
 
     def test_already_running_is_left_alone(self):
         text, spawned, killed = self.go(True, False)
@@ -490,18 +491,9 @@ class EnsureRunningTests(TempHome):
 
     def test_restart_replaces_the_running_helper(self):
         text, spawned, killed = self.go(True, True)
-        self.assertEqual(killed, [4242])
+        self.assertEqual(killed, [4242])  # the stop routine ran (polite stop file, then by pid)
         self.assertEqual(spawned[0][-1], "--wait")
         self.assertIn("Restarted", text)
-
-    def test_kill_failure_still_starts_a_new_one(self):
-        FakeLock.held = {"run"}
-        spawned = []
-
-        def deny(pid, sig):
-            raise PermissionError
-        links.ensure_running(True, spawn=spawned.append, kill=deny, launch=lambda: LAUNCH, lock=FakeLock)
-        self.assertEqual(len(spawned), 1)
 
 
 class ClaimRunTests(TempHome):

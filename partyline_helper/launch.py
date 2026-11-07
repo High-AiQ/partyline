@@ -16,8 +16,15 @@ def record_path():
     return lock_dir() / "install.json"
 
 
+def frozen():
+    """True inside the PyInstaller exe: the executable is the helper, with no Python to launch."""
+    return bool(getattr(sys, "frozen", False))
+
+
 def is_ephemeral(prefix=None, env=None, temp=None):
     """True for `uvx` / `uv run --with` environments, which uv may delete at any time."""
+    if frozen():
+        return False
     prefix = Path(prefix or sys.prefix).resolve()
     env = os.environ if env is None else env
     parts = [part.lower() for part in prefix.parts]
@@ -37,6 +44,8 @@ def windowless(python, windows=None):
 
 
 def current_launch():
+    if frozen():
+        return [sys.executable]
     return [windowless(sys.executable), "-m", "partyline_helper"]
 
 

@@ -6,30 +6,35 @@ prompt is closed rather than left open. The caller races it against an injected 
 import asyncio
 import contextlib
 import importlib.util
-import json
 import os
 import subprocess
 import sys
 import threading
 
+from .dialog_proc import encode_request
+
 PROMPT_DELAY = 1.0
 TIMEOUT = 60
+
+
+def dialog_command(request, frozen=None, executable=None):
+    """Argv for the dialog child. A frozen exe cannot run `-m`, so it re-runs itself with `dialog`."""
+    executable = executable or sys.executable
+    if getattr(sys, "frozen", False) if frozen is None else frozen:
+        return [executable, "dialog", request]
+    return [executable, "-m", "partyline_helper.dialog_proc", request]
 
 
 class ProcessDialog:
     """A dialog in a child process: `wait()` is True only for an explicit Yes; `close()` kills it."""
 
-    def __init__(self, title, message, timeout, popen=subprocess.Popen):
-        options = {"stdin": subprocess.PIPE, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    def __init__(self, title, message, timeout, popen=subprocess.Popen, kind="ask"):
+        options = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
         if os.name == "nt":  # pragma: no cover - Windows flag
             options["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
-        self.proc = popen([sys.executable, "-m", "partyline_helper.dialog_proc"], **options)
-        # The pipe stays open: if this helper dies (e.g. is restarted after re-pairing) the child sees EOF
-        # on stdin and exits, so no dialog outlives its helper.
-        with contextlib.suppress(OSError):
-            self.proc.stdin.write(json.dumps({"title": title, "message": message,
-                                              "timeout": timeout}).encode() + b"\n")
-            self.proc.stdin.flush()
+        # The request travels in argv (no stdin in a windowed process); the child watches our pid and
+        # exits if this helper dies (e.g. is restarted after re-pairing), so no dialog outlives it.
+        self.proc = popen(dialog_command(encode_request(title, message, timeout, kind)), **options)
 
     def wait(self):
         return self.proc.wait() == 0
@@ -38,8 +43,6 @@ class ProcessDialog:
         if self.proc.poll() is None:
             with contextlib.suppress(OSError):
                 self.proc.terminate()
-        with contextlib.suppress(OSError):
-            self.proc.stdin.close()
 
 
 def default_backend():
@@ -49,18 +52,31 @@ def default_backend():
     return None
 
 
-def interactive():
-    """True when a person can answer on a terminal; pythonw and login autostart have no stdin."""
-    stream = sys.stdin
+def windows_console(stream):  # pragma: no cover - Windows only
+    """True only for a real console. NUL (what a detached process gets as stdin) is a character device,
+    so isatty() says True for it; GetConsoleMode succeeds only on a console."""
+    import ctypes
+    import msvcrt
+    mode = ctypes.c_uint32()
+    handle = msvcrt.get_osfhandle(stream.fileno())
+    return bool(ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
+
+
+def interactive(stream=None, windows=None, console=windows_console):
+    """True when a person can answer on a terminal; pythonw, NUL, pipes and login autostart cannot."""
+    stream = sys.stdin if stream is None else stream
     try:
-        return bool(stream and stream.isatty())
+        if not stream or not stream.isatty():
+            return False
+        return bool(console(stream)) if (os.name == "nt" if windows is None else windows) else True
     except (ValueError, OSError):
         return False
 
 
-def auto_dialog():
-    """None on a terminal (keep the y/N prompt); the native dialog when launched without one."""
-    return None if interactive() else confirm
+def auto_dialog(background=False, terminal=None):
+    """None on a terminal (keep the y/N prompt); the native dialog without one. A background run (detached
+    `run --log`, login autostart, the frozen exe) never prompts on a terminal: nobody can read it."""
+    return None if not background and (terminal or interactive)() else confirm
 
 
 async def confirm(title, message, timeout=TIMEOUT, backend=None, sleep=asyncio.sleep):
@@ -100,13 +116,9 @@ async def confirm(title, message, timeout=TIMEOUT, backend=None, sleep=asyncio.s
             handle.close()
 
 
-def notify(title, message, show=None):
-    """Tell a person without a terminal why a link did nothing; never raises."""
-    def tk_show(title, message):
-        from tkinter import Tk, messagebox
-        root = Tk()
-        root.withdraw()
-        messagebox.showinfo(title, message, parent=root)
-        root.destroy()
+def notify(title, message, show=None, timeout=TIMEOUT):
+    """Tell a person without a terminal why something failed (a notice they must dismiss); never raises."""
+    def process_show(title, message):
+        ProcessDialog(title, message, timeout, kind="info").wait()
     with contextlib.suppress(Exception):
-        (show or tk_show)(title, message)
+        (show or process_show)(title, message)
