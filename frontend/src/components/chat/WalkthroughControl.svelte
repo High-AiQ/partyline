@@ -5,7 +5,7 @@
   import { voiceApi, type Transcript } from "../../lib/voice-api";
   import { VoiceRecorder, browserSources, type RecorderSources } from "../../lib/voice-recorder";
   import { stageText, type WalkthroughStage } from "../../lib/walkthrough-status";
-  import { MicReadout } from "../../state/mic-readout.svelte.js";
+  import { WalkthroughMic } from "../../state/walkthrough-mic.svelte.js";
   import MicLevel from "./MicLevel.svelte";
   import { room } from "../../state/room.svelte.js";
   import { draft } from "../../state/draft.svelte.js";
@@ -13,11 +13,10 @@
   import { screenStatus } from "../../state/screen-status.svelte.js";
   import { voicePresets } from "../../state/voice-presets.svelte.js";
   import { walkthrough } from "../../state/walkthrough.svelte.js";
-
   let { sources = browserSources() }: { sources?: RecorderSources } = $props();
   let devices = $state<ScreenDevice[]>([]);
   let stage = $state<WalkthroughStage>("idle");
-  const mic = new MicReadout();
+  const mic = new WalkthroughMic();
   let mark = $state(false);
   let error = $state("");
   let elapsed = $state(0);
@@ -31,9 +30,9 @@
   const recorder = new VoiceRecorder(
     untrack(() => sources),
     {
-      ...mic.hooks,
+      ...mic.takeHooks,
       onphase: (phase) => {
-        if (phase === "starting") mic.reset();
+        if (phase === "starting") mic.resetTake();
         if (phase === "recording") void arm();
       },
       onelapsed: (ms) => {
@@ -57,7 +56,6 @@
     },
     600_000,
   );
-
   onMount(() => {
     voicePresets.ensure();
   });
@@ -137,7 +135,6 @@
   onDestroy(() => {
     void cancel();
   });
-
   async function begin(): Promise<void> {
     const line = room.conversation?.id;
     if (!line || !online || stage !== "idle") return;
@@ -147,6 +144,7 @@
     generation++;
     const id = generation;
     sawShare = false;
+    elapsed = 0;
     walkthrough.active = true;
     walkthrough.line = line;
     stage = "waiting";
@@ -229,6 +227,8 @@
         segments,
         transcription_error: failed,
         mark_pointer: mark,
+        no_input: mic.noInput,
+        duration_ms: Math.min(elapsed, 600_000),
       });
       if (take.id !== generation) return;
       draft.text = "";

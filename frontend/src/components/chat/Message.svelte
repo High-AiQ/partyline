@@ -8,7 +8,7 @@
    */
   import { renderMessage, senderColor } from "../../lib/markdown";
   import { enhanceMarkdown } from "../../lib/message-enhancers";
-  import { visibleMessageBody } from "../../lib/files";
+  import { visibleMessageBody, isWalkthrough, visibleWalkthroughBody } from "../../lib/files";
   import ImageGrid from "./ImageGrid.svelte";
   import FileAttachments from "./FileAttachments.svelte";
   import Reactions from "./Reactions.svelte";
@@ -26,9 +26,10 @@
   let { message }: Props = $props();
 
   const isSystem = $derived(message.sender_type === "system");
+  const walkthrough = $derived(isWalkthrough(message));
   const body = $derived(
     renderMessage(
-      visibleMessageBody(message),
+      walkthrough ? visibleWalkthroughBody(message) : visibleMessageBody(message),
       message.sender_type === "agent" ? true : message.sender_type === "human" ? "human" : false,
     ),
   );
@@ -99,7 +100,7 @@
     />
   {/if}
   {#if images.length}
-    <ImageGrid {images} />
+    <ImageGrid images={walkthrough ? images.slice(0, 1) : images} viewerImages={images} />
   {/if}
   {#if otherFiles.length}
     <FileAttachments files={otherFiles} />

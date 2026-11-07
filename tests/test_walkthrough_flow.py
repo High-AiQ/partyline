@@ -111,6 +111,7 @@ class WalkthroughFlowTest(unittest.TestCase):
             response = self.client.post(path + "/finish", json=payload)
             self.assertEqual(response.status_code, 200, response.text)
             message = response.json()["message"]
+            self.assertIn("Walkthrough ·", message["body"])
             self.assertIn("click gear", message["body"])
             self.assertIn("pointer at -50,50", message["body"])
             self.assertIn("/api/media/", message["body"])
@@ -120,6 +121,9 @@ class WalkthroughFlowTest(unittest.TestCase):
             self.assertLess(message["body"].index("Walkthrough contact sheet"),
                             message["body"].index("Walkthrough frame"))
             self.assertIn("Contact sheet first", message["body"])
+            for item in message["files"]:
+                self.assertIn(item["id"], message["body"])
+                self.assertEqual(self.client.get(item["urls"]["original"]).status_code, 200)
             self.assertNotIn(share, self.hub.walkthroughs.items)
             self.assertEqual(self.client.post(path + "/finish", json=payload).json()["message"]["id"],
                              message["id"])
@@ -151,6 +155,19 @@ class WalkthroughFlowTest(unittest.TestCase):
             self.assertTrue(message["files"])
             self.assertIn("→ frame", message["body"])
             self.assertNotIn('""', message["body"])
+
+    def test_no_input_overrides_transcript_and_keeps_media(self):
+        with self.socket() as ws:
+            path, _ = self.start(ws)
+            result = self.client.post(path + "/finish", json={
+                "no_input": True, "duration_ms": 31000,
+                "segments": [{"start": 0, "end": 1, "text": "imagined speech"}]})
+            self.assertEqual(result.status_code, 200, result.text)
+            message = result.json()["message"]
+            self.assertIn("Walkthrough · 0:31 ·", message["body"])
+            self.assertIn("(no speech detected — check the microphone)", message["body"])
+            self.assertNotIn("imagined speech", message["body"])
+            self.assertTrue(message["files"])
 
     def test_store_rejects_mismatched_titles(self):
         with self.assertRaises(ValueError):
