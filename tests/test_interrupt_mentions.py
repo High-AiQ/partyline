@@ -3,6 +3,7 @@
 import asyncio
 import time
 import unittest
+from unittest.mock import patch
 
 from datetime import UTC, datetime
 
@@ -424,22 +425,29 @@ class AntigravityInterruptTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_turn_closing_after_the_notice_completes_the_confirmation(self):
         pty = FakePty(turn_open=True)
+        real_sleep = asyncio.sleep
+
+        async def tick(_seconds):
+            await real_sleep(0)
 
         async def confirm_then_close():
-            await asyncio.sleep(0)
+            await real_sleep(0)
             pty.tail(notice())
-            await asyncio.sleep(0.05)
+            await real_sleep(0)
             pty._turn_open = False
 
-        asyncio.create_task(confirm_then_close())
-        status = await antigravity_interrupt(pty, timeout=1, settle_timeout=2)
+        with patch(
+            "partyline.adapters.bundled.antigravity.interrupt.asyncio.sleep", new=tick
+        ):
+            asyncio.create_task(confirm_then_close())
+            status = await antigravity_interrupt(pty, timeout=1, settle_timeout=2)
 
         self.assertEqual(status, "interrupted")
 
     async def test_a_keystroke_alone_is_not_a_confirmation(self):
         pty = FakePty()
 
-        status = await antigravity_interrupt(pty, timeout=0.05)
+        status = await antigravity_interrupt(pty, timeout=0.04)
 
         self.assertEqual(status, "unconfirmed")
         self.assertEqual(pty.written, [ESCAPE], "Esc was sent; only the receipt is missing")
@@ -447,14 +455,14 @@ class AntigravityInterruptTest(unittest.IsolatedAsyncioTestCase):
     async def test_a_dead_process_is_not_typed_at(self):
         pty = FakePty(alive=False)
 
-        self.assertEqual(await antigravity_interrupt(pty, timeout=0.05), "unconfirmed")
+        self.assertEqual(await antigravity_interrupt(pty, timeout=0.04), "unconfirmed")
         self.assertEqual(pty.written, [])
 
     async def test_a_stale_confirmation_cannot_satisfy_the_next_interrupt(self):
         pty = FakePty()
         pty.interrupt_confirmed.set()
 
-        status = await antigravity_interrupt(pty, timeout=0.05)
+        status = await antigravity_interrupt(pty, timeout=0.04)
 
         self.assertEqual(status, "unconfirmed", "each interrupt waits for its own record")
 
@@ -496,15 +504,22 @@ class IdleFastPathTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_an_open_turn_still_gets_the_keystroke(self):
         pty = FakePty(turn_open=True)
+        real_sleep = asyncio.sleep
+
+        async def tick(_seconds):
+            await real_sleep(0)
 
         async def confirm_then_close():
-            await asyncio.sleep(0)
+            await real_sleep(0)
             pty.tail(notice())
-            await asyncio.sleep(0.05)
+            await real_sleep(0)
             pty._turn_open = False
 
-        asyncio.create_task(confirm_then_close())
-        status = await antigravity_interrupt(pty, timeout=1, settle_timeout=2)
+        with patch(
+            "partyline.adapters.bundled.antigravity.interrupt.asyncio.sleep", new=tick
+        ):
+            asyncio.create_task(confirm_then_close())
+            status = await antigravity_interrupt(pty, timeout=1, settle_timeout=2)
 
         self.assertEqual(status, "interrupted")
         self.assertEqual(pty.written, [ESCAPE])
@@ -530,7 +545,7 @@ class IdleFastPathTest(unittest.IsolatedAsyncioTestCase):
         # saying "idle".
         pty = NoTurnState()
 
-        status = await antigravity_interrupt(pty, timeout=0.05, settle_timeout=0.05)
+        status = await antigravity_interrupt(pty, timeout=0.04, settle_timeout=0.04)
 
         self.assertEqual(status, "unconfirmed")
         self.assertEqual(pty.written, [ESCAPE])
@@ -540,7 +555,7 @@ class IdleFastPathTest(unittest.IsolatedAsyncioTestCase):
         # about its work, not about its absence.
         pty = FakePty(alive=False, turn_open=False)
 
-        self.assertEqual(await antigravity_interrupt(pty, timeout=0.05), "unconfirmed")
+        self.assertEqual(await antigravity_interrupt(pty, timeout=0.04), "unconfirmed")
         self.assertEqual(pty.written, [])
 
 

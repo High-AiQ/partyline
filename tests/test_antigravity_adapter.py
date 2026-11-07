@@ -938,16 +938,30 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         Path(adapter.log_path()).write_text("", encoding="utf-8")
         await adapter.deliver([{"sender": "greg", "body": "via log"}])
         paste = adapter._outstanding[0][0]
-        tail = asyncio.create_task(adapter._tail_log())
-        await asyncio.sleep(0.1)  # let the tail open the file and seek to EOF
-        with open(adapter.log_path(), "a", encoding="utf-8") as file:
-            file.write(glog_submission(paste, time.time() + 5))
-        for _ in range(30):
+        polling, judged = asyncio.Event(), asyncio.Event()
+        real_sleep = asyncio.sleep
+
+        async def poll(_seconds):
+            polling.set()
+            await real_sleep(0)
+
+        original_note = adapter._note_log_line
+
+        async def note(line):
+            await original_note(line)
             if not adapter._outstanding:
-                break
-            await asyncio.sleep(0.1)
-        adapter.proc.stop()
-        await asyncio.wait_for(tail, 5)
+                judged.set()
+
+        with patch(
+            "partyline.adapters.bundled.antigravity.adapter.asyncio.sleep", new=poll
+        ), patch.object(adapter, "_note_log_line", note):
+            tail = asyncio.create_task(adapter._tail_log())
+            await asyncio.wait_for(polling.wait(), 1)  # opened and sought to EOF
+            with open(adapter.log_path(), "a", encoding="utf-8") as file:
+                file.write(glog_submission(paste, time.time() + 5))
+            await asyncio.wait_for(judged.wait(), 1)
+            adapter.proc.stop()
+            await asyncio.wait_for(tail, 1)
         self.assertEqual(adapter._outstanding, [])
 
     async def test_send_keys_holds_enter_until_the_composer_echoes(self):
@@ -958,10 +972,16 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         adapter.master = 7
         adapter.screen_text = lambda: "input box is empty"
         writes = []
-        adapter._write_all = AsyncMock(side_effect=lambda data: writes.append(data))
+        pasted = asyncio.Event()
+
+        async def write(data):
+            writes.append(data)
+            pasted.set()
+
+        adapter._write_all = AsyncMock(side_effect=write)
         with patch.object(antigravity_module, "PASTE_PACE", 30.0):
             sending = asyncio.create_task(adapter.send_keys("wake eight"))
-            await asyncio.sleep(0.05)
+            await asyncio.wait_for(pasted.wait(), 1)
             self.assertEqual(len(writes), 1)  # paste written, Enter held
             adapter.screen_text = lambda: "> wake eight"
             await adapter.on_output(b"redraw")
@@ -1103,6 +1123,7 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         await adapter.deliver([{"id": 21, "sender": "greg", "body": "wake one"}])
         paste1 = adapter._outstanding[0][0]
         gate = asyncio.Event()
+        first_grace = asyncio.Event()
         graces = {"n": 0}
         real_sleep = asyncio.sleep
 
@@ -1111,10 +1132,11 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
             # including this test's own yields — so delegate everything that
             # is not a grace sleep back to the real sleeper.
             if seconds != wakes_module.REPOOL_GRACE:
-                await real_sleep(min(seconds, 0.05))
+                await real_sleep(0)
                 return
             graces["n"] += 1
             if graces["n"] == 1:
+                first_grace.set()
                 await gate.wait()
 
         with patch(
@@ -1122,7 +1144,7 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
         ):
             adapter._turn_open = False
             adapter._schedule_settle()  # pass one: snapshot has wake one only
-            await asyncio.sleep(0.05)
+            await asyncio.wait_for(first_grace.wait(), 1)
             # wake one settles from its transcript record during the grace…
             await adapter._note_user_input(
                 "<USER_REQUEST>\n" + paste1 + "\n</USER_REQUEST>", later(time.time())
@@ -1132,10 +1154,6 @@ class AntigravityAdapterTest(unittest.IsolatedAsyncioTestCase):
             adapter._turn_open = False
             adapter._schedule_settle()  # queued behind the running pass
             gate.set()
-            for _ in range(50):
-                if adapter.att["repool_message_ids"].await_count:
-                    break
-                await asyncio.sleep(0.02)
             await adapter._settle_task
         self.assertEqual(graces["n"], 2)
         adapter.att["repool_message_ids"].assert_awaited_once_with([22])

@@ -126,7 +126,6 @@ class UpgradeTest(ProxyBase):
         with contextlib.suppress(ConnectionError):  # the proxy has already closed: that is the point
             writer.write(b"GET /containers/json HTTP/1.1\r\nHost: d\r\n\r\n")  # a smuggled second request
             await writer.drain()
-        await asyncio.sleep(0.2)
         self.assertEqual(self.forwarded("GET", "/containers/json"), [])
         writer.close()
 
@@ -136,7 +135,6 @@ class UpgradeTest(ProxyBase):
         self.assertIn(b"500", head.split(b"\r\n")[0])
         await asyncio.wait_for(reader.read(), 5)
         writer.write(b"POST /containers/prune HTTP/1.1\r\nHost: d\r\n\r\n")
-        await asyncio.sleep(0.2)
         self.assertEqual(self.forwarded("POST", "/containers/prune"), [])
         writer.close()
 
@@ -348,27 +346,45 @@ class TreeAndBuildTest(ProxyBase):
 
 class LimitsTest(ProxyBase):
     async def test_too_many_open_connections_on_one_line_are_refused(self):
-        with patch.object(docker_proxy, "MAX_CONNECTIONS", 2):
+        real_handle = docker_proxy._handle
+        both_entered, release = asyncio.Event(), asyncio.Event()
+        entered = 0
+
+        async def held_handle(*args):
+            nonlocal entered
+            entered += 1
+            if entered <= 2:
+                if entered == 2:
+                    both_entered.set()
+                await release.wait()
+            return await real_handle(*args)
+
+        with patch.object(docker_proxy, "MAX_CONNECTIONS", 2), patch.object(
+            docker_proxy, "_handle", held_handle
+        ):
             held = [await asyncio.open_unix_connection(self.relay_path) for _ in range(2)]
-            await asyncio.sleep(0.1)
+            await asyncio.wait_for(both_entered.wait(), 1)
             data = await self.raw(b"GET /_ping HTTP/1.1\r\nHost: d\r\n\r\n")
             self.assertIn(b"429", data.split(b"\r\n")[0])
             for _reader, writer in held:
                 writer.close()
-            await asyncio.sleep(0.2)
+            release.set()
+            for reader, _writer in held:
+                self.assertEqual(await asyncio.wait_for(reader.read(), 1), b"")
             self.assertIn(
                 b"200", (await self.raw(b"GET /_ping HTTP/1.1\r\nHost: d\r\n\r\n")).split(b"\r\n")[0]
             )
         self.assertEqual(docker_proxy._open.get("line", 0), 0)
 
     async def test_a_slow_request_is_cut_off_by_the_overall_deadline(self):
-        with patch.object(docker_proxy, "REQUEST_DEADLINE", 0.3):
+        # Actual overall-deadline test: 40 ms stays below the 50 ms budget.
+        with patch.object(docker_proxy, "REQUEST_DEADLINE", 0.04):
             reader, writer = await asyncio.open_unix_connection(self.relay_path)
-            with self.assertRaises((BrokenPipeError, ConnectionResetError)):
-                for _ in range(40):  # a byte at a time is never idle, but never finishes either
-                    writer.write(b"G")
-                    await writer.drain()
-                    await asyncio.sleep(0.1)
+            for _ in range(40):  # a byte at a time is never idle, but never finishes either
+                writer.write(b"G")
+                await writer.drain()
+                await asyncio.sleep(0)
+            self.assertEqual(await asyncio.wait_for(reader.read(), 1), b"")
             writer.close()
 
     async def test_an_unexpected_error_is_a_500_and_the_connection_closes(self):

@@ -1263,7 +1263,8 @@ class PiAdapterTest(RecordingAdapterTest):
             adapter = self.make(PiAdapter)
             adapter.proc = Process()
             adapter.proc.stop()
-            await adapter._run()
+            with patch("partyline.adapters.bundled.pi.adapter.asyncio.sleep", new=AsyncMock()):
+                await adapter._run()
 
             waiting = self.make(PiAdapter)
             waiting.proc = Process()

@@ -287,7 +287,8 @@ class ForcedRetirementTest(unittest.TestCase):
         self.db.add_attachment("worker", child["id"], "worker", "fake", ["fake"], child["cwd"], "owner")
         self.db.set_attachment_status("worker", "running", "owner")
         self.assertEqual(self.force(child).status_code, 409)
-        response = self.force(child, stop_processes=True)
+        with patch("partyline.line_process_routes.DETACH_CONFIRM_TIMEOUT", 0):
+            response = self.force(child, stop_processes=True)
         self.assertEqual(response.status_code, 409)
         self.assertIn("unconfirmed", response.text)
         self.assertTrue(os.path.isdir(child["cwd"]))

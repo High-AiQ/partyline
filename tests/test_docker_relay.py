@@ -140,13 +140,16 @@ class DockerRelayTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_failed_probe_at_start_posts_a_notice_on_the_line(self):
         await self._close_daemon()
-        with patch("partyline.system_notice.post_system_notice", new_callable=AsyncMock) as post, \
-                patch.object(docker_relay, "_runtime", object()):
+        noticed = asyncio.Event()
+
+        async def notify(*_args):
+            noticed.set()
+
+        with patch("partyline.system_notice.post_system_notice", new=AsyncMock(
+            side_effect=notify
+        )) as post, patch.object(docker_relay, "_runtime", object()):
             docker_relay.start("line")
-            for _ in range(100):
-                if post.await_count:
-                    break
-                await asyncio.sleep(0.02)
+            await asyncio.wait_for(noticed.wait(), 1)
         post.assert_awaited_once()
         self.assertEqual(post.await_args.args[1], "line")
         self.assertIn("cannot connect to", post.await_args.args[2])
@@ -154,21 +157,25 @@ class DockerRelayTest(unittest.IsolatedAsyncioTestCase):
     async def test_a_second_start_reuses_the_one_listener(self):
         path = docker_relay.start("line")
         first, inode = docker_relay._relays["line"], os.stat(path).st_ino
-        await asyncio.sleep(0.05)  # the server task has finished creating the server
         self.assertEqual(docker_relay.start("line"), path)
         self.assertIs(docker_relay._relays["line"], first)
         self.assertEqual(os.stat(path).st_ino, inode)
         self.assertEqual(len(docker_relay._relays), 1)
 
     async def test_a_dead_listener_is_replaced_and_stop_closes_open_connections(self):
-        path = docker_relay.start("line")
-        reader, writer = await asyncio.open_unix_connection(path)
-        for _ in range(100):
-            if docker_relay._relays["line"].clients:
-                break
-            await asyncio.sleep(0.02)
-        self.assertEqual((await docker_relay.status())[0]["connections"], 1)
-        await asyncio.wait_for(docker_relay.stop("line"), 10)  # must not hang on the client
-        self.assertEqual(await asyncio.wait_for(reader.read(), 5), b"")
-        writer.close()
-        self.assertEqual(docker_relay._relays, {})
+        entered = asyncio.Event()
+        real_pump = docker_relay._pump
+
+        async def pump(*args):
+            entered.set()
+            return await real_pump(*args)
+
+        with patch.object(docker_relay, "_pump", pump):
+            path = docker_relay.start("line")
+            reader, writer = await asyncio.open_unix_connection(path)
+            await asyncio.wait_for(entered.wait(), 1)
+            self.assertEqual((await docker_relay.status())[0]["connections"], 1)
+            await asyncio.wait_for(docker_relay.stop("line"), 10)  # must not hang on the client
+            self.assertEqual(await asyncio.wait_for(reader.read(), 5), b"")
+            writer.close()
+            self.assertEqual(docker_relay._relays, {})

@@ -32,6 +32,15 @@ a flex column. It stretched across the dialog, so the drawn selection did not ma
 the image coordinates sent to the helper. Size the overlay container to the image
 and test the dragged rectangle in a browser; `tests/ui/test_screen_picker.py` guards
 the bounds.
+## Real timeouts make a test suite spend its time waiting
+
+The false assumption was that a serial suite's roughly eight minutes was mostly test work.
+Measured per-test durations showed real startup delays, polling intervals, and detach/stop
+timeouts dominating the slowest tests; the same waits still cost wall time when workers run in
+parallel. Inject clocks, patch the module that owns the sleep or timeout, and resolve events
+directly. CI's parallel runner fails any test over one second unless it has an explicit
+workload-related reason in `scripts/test_time_allowlist.py`, so a new real delay cannot quietly
+become normal again.
 
 ## Approval cannot make a missing grant path writable
 

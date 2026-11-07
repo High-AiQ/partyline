@@ -52,32 +52,35 @@ class TailIOTest(unittest.IsolatedAsyncioTestCase):
             observed = []
             loop_thread = threading.get_ident()
             calls = []
+            initial_reads = threading.Event()
+            first_record = asyncio.Event()
+            second_record = asyncio.Event()
             original = jsonl_receipts._read_batch
 
             def read(file, pending, name, anchor):
                 start = file.tell()
                 result = original(file, pending, name, anchor)
                 calls.append((threading.get_ident(), file.tell() - start))
+                if len(calls) >= 4:
+                    initial_reads.set()
                 return result
 
             async def handle(record):
                 observed.append(record)
+                first_record.set()
+                if len(observed) == 2:
+                    second_record.set()
 
             with patch.object(jsonl_receipts, "_read_batch", read):
                 task = asyncio.create_task(jsonl_receipts.tail_jsonl(adapter, str(path), handle))
-                for _ in range(200):
-                    if observed and len(calls) >= 4:
-                        break
-                    await asyncio.sleep(.01)
+                self.assertTrue(await asyncio.to_thread(initial_reads.wait, 2))
+                await asyncio.wait_for(first_record.wait(), 2)
                 self.assertEqual(observed, [{"n": 1}])
                 self.assertTrue(all(t != loop_thread and n <= 65536 for t, n in calls))
                 replacement = path.with_suffix('.new')
                 replacement.write_text(json.dumps({"n": 2}) + '\n')
                 os.replace(replacement, path)
-                for _ in range(200):
-                    if len(observed) == 2:
-                        break
-                    await asyncio.sleep(.01)
+                await asyncio.wait_for(second_record.wait(), 2)
                 adapter.live = False
                 await asyncio.wait_for(task, 2)
                 self.assertEqual(observed, [{"n": 1}, {"n": 2}])

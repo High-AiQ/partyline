@@ -132,7 +132,7 @@ class FileRoutesTest(unittest.TestCase):
                 state = _KEY_CLAIMS.get(identity)
                 if state and state.waiters:
                     return
-            time.sleep(0.005)
+            time.sleep(0)
         self.fail(f"claim waiter did not arrive for {identity}")
 
     def test_briefing_teaches_any_file_type_and_how_to_read_a_pdf(self):
@@ -308,20 +308,17 @@ class FileRoutesTest(unittest.TestCase):
                     for index in range(5)
                 ]
                 batch = asyncio.gather(*requests)
-                for _ in range(500):
-                    if started.is_set():
-                        break
-                    await asyncio.sleep(0.01)
-                else:
+                if not await asyncio.to_thread(started.wait, 5):
                     self.fail("no upload reached preparation")
                 storage_key = "upload:" + hashlib.sha256(b"tiny-pool").hexdigest()
                 identity = (id(self.db), f"user:{self.user['id']}", "line", storage_key)
-                for _ in range(500):
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
                     with _KEY_CLAIMS_GUARD:
                         state = _KEY_CLAIMS.get(identity)
                         if state and state.waiters == 4:
                             break
-                    await asyncio.sleep(0.01)
+                    await asyncio.sleep(0)
                 else:
                     self.fail("all same-key uploads did not wait on the claim")
                 release.set()

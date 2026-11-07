@@ -26,8 +26,15 @@ class MentionFallbackTest(TaskFixture):
     async def in_review(self):
         await self.setUp_task()
         self.runtime.live['captain'].deliver = AsyncMock(return_value=True)
-        await request_review(self.runtime, self.worker, self.conv_id,
-                             ReviewRequestIn(sha=self.commit(), what='feature', where='code'))
+        sha = self.commit()
+        # These tests exercise mention fallback, not physical review checkouts.
+        checkouts = [{
+            'repository': self.repo, 'sha': sha,
+            'path': self.db.get_conversation(self.conv_id)['cwd'],
+        }]
+        with patch('partyline.orchestrator_service.move_task_review_worktrees', return_value=checkouts):
+            await request_review(self.runtime, self.worker, self.conv_id,
+                                 ReviewRequestIn(sha=sha, what='feature', where='code'))
         return self.db.get_attachment(self.row()['reviewer_id'])
 
     async def test_former_root_captain_is_relayed_to_the_current_one(self):
