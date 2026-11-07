@@ -99,3 +99,26 @@ class TaskUploadTests(TaskFixture):
         response = self.client.post('/api/conversations/root/files',
                                     files={'file': ('x.txt', b'x', 'text/plain')})
         self.assertEqual(response.status_code, 409)
+
+    async def test_upload_only_worker_cannot_attach_root_screen(self):
+        from partyline.screen_frames import BufferedFrame, ShareBuffer
+        from partyline.screen_hub import ScreenHub
+
+        await self.create()
+        self.app.include_router(media_router(
+            self.runtime, MediaStore(self.db, Path(self.directory.name) / 'media')))
+        hub = ScreenHub(self.runtime)
+        self.app.state.screen_hub = hub
+        share = ShareBuffer('s', 'root', 'd', 1, 'owner', {}, status='active')
+        share.add(BufferedFrame(b'secret', 1, {}, 1, 1, None, 'image/png'))
+        hub.shares['root'] = share
+        self.actor = self.worker
+        before = self.db._exec('SELECT COUNT(*) FROM messages').fetchone()[0]
+        response = self.client.post('/api/conversations/root/files',
+                                    data={'include_screen': 'true'},
+                                    files={'file': ('notes.txt', b'allowed', 'text/plain')})
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(self.db._exec('SELECT COUNT(*) FROM messages').fetchone()[0], before)
+        ordinary = self.client.post('/api/conversations/root/files',
+                                    files={'file': ('notes.txt', b'allowed', 'text/plain')})
+        self.assertEqual(ordinary.status_code, 200, ordinary.text)

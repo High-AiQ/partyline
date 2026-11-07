@@ -1243,8 +1243,13 @@ or a person messages a task's workers with `message_task(conv_id, text, to)` (`P
 …/task/message`, 409 when that worker is not live) instead of @mentioning a handle. The
 `conv_id` may also be the task's tag, its `impl-`/`review-` handle, or its line name; a name
 matching two tasks is refused with 409. The same names resolve for `resume_work`, `reopen_task`
-and the restart routes, and `detach_worker` and `appoint_lead` accept a process handle such
-as `impl-48da9d` on the target line in place of an attachment id. A
+and the restart routes, and `GET /api/capabilities?conv_id=` resolves them for the captain ops
+(every op but `retire_child`, which stays id-only; an unknown ref is a 404 `no line or task matches '<ref>'`,
+never a "not authorized"). `detach_worker` and `appoint_lead` accept a process handle such
+as `impl-48da9d` on the target line in place of an attachment id. `detach_worker` of a worker no longer
+attached there (an implementer `accept` already detached) is an idempotent success,
+`already_detached: true`, since the captain's goal is met; a ref no attachment on that line carries
+(a typo, or another line's handle) is refused naming the line. A
 root-captain mention in a task line of a process on a different task line is held back with
 a private notice naming this line's handles.
 

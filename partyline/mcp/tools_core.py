@@ -1,22 +1,18 @@
 """Core, named MCP operations backed by fixed Partyline API routes."""
-
 from urllib.parse import quote
-
 from ..upload_scope import UPLOAD_ONLY_CAPTION_REFUSAL
 from .client import ApiError, MAX_UPLOAD, MAX_MODEL_UPLOAD
 from .uploads import validate_uploads
 from .tools_media import model_upload_tool, multi_upload_tool, validate_model_path
+from .tools_screen import screen_frame_tool
 from . import tools_captain, tools_worker
-
 
 def _schema(properties=None, required=None):
     return {"type": "object", "properties": properties or {},
             "required": required or [], "additionalProperties": False}
 
-
 def _prop(kind, description, **extra):
     return {"type": kind, "description": description, **extra}
-
 
 def tool_list(state):
     actions = set(state.get("actions", []))
@@ -37,6 +33,7 @@ def tool_list(state):
     ]
     if "read" in actions:
         tools.extend([
+            screen_frame_tool(),
             {
                 "name": "read_messages",
                 "description": "Read a bounded page, optionally around a message id.",
@@ -138,7 +135,6 @@ def tool_list(state):
         })
     return tools
 
-
 def _target(client, home_state, conv_id, allowed):
     conv_id = conv_id or client.home
     state = home_state if conv_id == client.home else client.capabilities(conv_id)
@@ -205,6 +201,10 @@ def call(client, name: str, args: dict, home_state: dict):
         return client.request(method, path, None if method == "DELETE" else {"emoji": args["emoji"]})
     if name == "get_media":
         return client.download(args["file_id"], args["variant"], args["destination"])
+    if name == "screen_frame":
+        conv, _ = _target(client, home_state, None, ("read",))
+        query = "?mark_pointer=true" if args.get("mark_pointer") else ""
+        return client.request("POST", f"/api/conversations/{quote(conv, safe='')}/screen-frame{query}")
     if name == "upload_files":
         metadata = {key: args.get(key, "") for key in ("title", "description", "body")}
         validate_uploads(args["paths"], client_key=args["client_key"],

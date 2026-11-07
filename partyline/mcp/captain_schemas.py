@@ -12,7 +12,8 @@ def text(description, maximum=2000, minimum=0):
 
 def schema(name):
     """A short, operation-specific argument schema; no route/method fields exist."""
-    line = {"conv_id": text("Authorized target line id.", 80)}
+    line = {"conv_id": text(
+        "Authorized target line: its id, or a task's tag, impl-/review- handle or line name.", 120)}
     specs = {
         "resources": obj({**line, "operation": {"type": "string",
             "enum": ["list", "declare", "remove"]}, "name": text("Resource name.", 64, 1)},
@@ -31,7 +32,8 @@ def schema(name):
                 "after 60 seconds use offer_handover to offer captainship."}},
             ["conv_id", "name", "adapter"]),
         "detach_worker": obj({**line, "attachment_id": text(
-            "Attachment id, or a process handle on that line such as impl-48da9d.", 80)},
+            "Attachment id, or a process handle on that line such as impl-48da9d. A worker already "
+            "detached returns already_detached: true.", 80)},
             ["conv_id", "attachment_id"]),
         "create_child": obj({**line, "name": text("Child line name.", 120),
             "goal": text("Child goal.", 3000), "topic": text("Child context.", 20000),

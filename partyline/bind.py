@@ -13,6 +13,7 @@ import uvicorn
 
 from . import asr_presets, features
 from .log_filter import AccessQueryFilter
+from .screen_protocol import MAX_FRAME_BYTES
 
 
 DEFAULT_HOST = "127.0.0.1"
@@ -201,6 +202,7 @@ def uvicorn_config(app, host: str, port: int, env: Mapping[str, str] | None = No
         host=host,
         port=port,
         log_level="info",
+        ws_max_size=MAX_FRAME_BYTES,
         log_config=log_config,
         proxy_headers=True,
         forwarded_allow_ips=forwarded_allow_ips(os.environ if env is None else env),

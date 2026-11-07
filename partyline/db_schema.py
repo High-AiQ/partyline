@@ -13,6 +13,7 @@ from .docker_mode_schema import MIGRATIONS as DOCKER_MODE
 from .bridge_schema import MIGRATIONS as BRIDGE
 from .retirement_schema import MIGRATIONS as RETIREMENT
 from .captain_handover_schema import MIGRATIONS as HANDOVER
+from .screen_schema import MIGRATIONS as SCREEN
 from .orchestrator_schema import MIGRATIONS as ORCHESTRATOR
 MIGRATIONS = [
     "ALTER TABLE attachments ADD COLUMN cli_session TEXT",
@@ -294,7 +295,6 @@ MIGRATIONS = [
     """CREATE TRIGGER IF NOT EXISTS delete_message_pins AFTER DELETE ON messages
         BEGIN DELETE FROM message_pins WHERE conv_id=OLD.conv_id AND message_id=OLD.id; END""",
 ]
-MIGRATIONS.extend(MEMORY + IDEMPOTENCY + NOTES + COMPACTION + ACCEPT_HISTORY
-                  + SCRATCH + LEASE + GATES + AUTO_COMPACT + DOCKER_MODE + BRIDGE + RETIREMENT + ORCHESTRATOR
-                  + HANDOVER)
-MIGRATIONS.append("ALTER TABLE attachments ADD COLUMN is_successor INTEGER NOT NULL DEFAULT 0")
+MIGRATIONS.extend(MEMORY + IDEMPOTENCY + NOTES + COMPACTION + ACCEPT_HISTORY + SCRATCH + LEASE
+                  + GATES + AUTO_COMPACT + DOCKER_MODE + BRIDGE + RETIREMENT + ORCHESTRATOR + HANDOVER)
+MIGRATIONS.extend(["ALTER TABLE attachments ADD COLUMN is_successor INTEGER NOT NULL DEFAULT 0"] + SCREEN)

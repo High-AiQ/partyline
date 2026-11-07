@@ -15,6 +15,7 @@ import { WriteSetGrantRequestSchema } from "./write-set-contracts";
 import { ReactionResponseSchema } from "./reaction-contracts";
 import { PinsChangedEventSchema } from "./pin-contracts";
 import { ResourceSnapshotSchema } from "./resource-api";
+import { ScreenShareSchema } from "./screen-contracts";
 
 export const HelloEventSchema = z.object({
   type: z.literal("hello"),
@@ -193,6 +194,15 @@ export const ResourcesEventSchema = z.object({
   snapshot: ResourceSnapshotSchema,
 });
 export type ResourcesEvent = z.infer<typeof ResourcesEventSchema>;
+export const ScreenShareEventSchema = z.object({
+  type: z.literal("screen_share"),
+  share: ScreenShareSchema.nullable().default(null),
+});
+export const ScreenDevicesChangedEventSchema = z.object({
+  type: z.literal("screen_devices_changed"),
+  device_id: z.string(),
+  online: z.boolean(),
+});
 export type MemoryRequestEvent = z.infer<typeof MemoryRequestEventSchema>;
 export type ConversationsChangedEvent = z.infer<typeof ConversationsChangedEventSchema>;
 
@@ -220,6 +230,8 @@ const CurrentWireEventSchema = z.discriminatedUnion("type", [
   MemoryRequestEventSchema,
   MemoryUsageEventSchema,
   ResourcesEventSchema,
+  ScreenShareEventSchema,
+  ScreenDevicesChangedEventSchema,
   PinsChangedEventSchema,
 ]);
 

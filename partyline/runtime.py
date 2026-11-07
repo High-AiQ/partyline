@@ -105,6 +105,14 @@ class ChatRuntime(DeliveryCreditMixin):
 
     async def post_message(self, conv_id: str, sender: str, sender_type: str, body: str):
         msg = self.db.add_message(conv_id, sender, sender_type, body)
+        if sender_type == "human":
+            hub = getattr(self, "screen_hub", None)
+            share = hub.shares.get(conv_id) if hub else None
+            if share and share.frames:
+                user = self.db._exec(
+                    "SELECT id FROM users WHERE lower(handle)=lower(?)", (sender,)).fetchone()
+                key = f"user:{user['id']}" if user else sender
+                share.last_message_ts[key] = share.frames[-1].ts_ms
         await self.broadcast(conv_id, MessageEvent(message=MessageResponse.model_validate(msg)))
         await self.route_mentions(conv_id, msg)
         return msg
