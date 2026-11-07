@@ -22,6 +22,9 @@ async def revoke(hub, device_id: str) -> None:
     share = next((s for s in hub.shares.values() if s.device_id == device_id), None)
     if share:
         await hub.stop_share(share.share_id, "computer revoked")
+    for take in list(hub.walkthroughs.items.values()):
+        if take.device_id == device_id:
+            hub.walkthroughs.discard(take.share_id)
 
 
 

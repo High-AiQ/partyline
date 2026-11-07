@@ -148,6 +148,17 @@ before capture. Frames arrive as bounded still images at about one frame per
 second and stay in server memory until attached to a message or requested by
 `screen_frame`. The line composer can attach up to three recent distinct frames.
 
+When a paired computer is online, the composer also offers **Show me**. It
+uses the same computer, monitor, crop, and local consent flow; a subsequent
+take reuses the last selected region on that line while its computer is online.
+After consent, the browser opens the microphone and the line shows a recording
+indicator. Stop transcribes the take and sends one message with timestamped
+speech and selected frames. Notes typed in the composer accompany it; the
+optional pointer marks default off. Cancel or Escape releases the microphone,
+ends the share and discards the take. A disconnected helper ends capture and
+the frames already received can still be sent. A failed recognizer leaves a
+note in the message alongside those frames.
+
 
 Orchestrator controls live in `CaptainStyleSection` (root-line management only)
 and `TaskHistorySetting` (beside the resource budget). Line responses carry derived

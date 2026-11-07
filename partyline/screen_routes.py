@@ -21,6 +21,7 @@ from .screen_protocol import PairClaim, Region
 class ShareStart(BaseModel):
     device_id: str
     region: Region
+    walkthrough: bool = False
 
 
 def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
@@ -118,7 +119,8 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
             raise HTTPException(403, "computer is not paired to this line")
         try:
             share = await hub.start_share(conv_id, principal.user_id, principal.name,
-                                          body.device_id, body.region.model_dump(), conv["name"])
+                                          body.device_id, body.region.model_dump(), conv["name"],
+                                          walkthrough=body.walkthrough)
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
         return {"share_id": share.share_id, "status": share.status}
@@ -155,6 +157,9 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
     async def mcp_frame(conv_id: str, request: Request, mark_pointer: bool = False):
         principal = request_principal(request)
         deny_unless(runtime.db, principal, conv_id, "read")
+        share = hub.shares.get(conv_id)
+        if share and share.share_id in hub.walkthroughs.items:
+            raise HTTPException(409, "screen frames are unavailable while a walkthrough is in progress")
         try:
             share, frame = await hub.capture(conv_id)
             data = _mark_pointer(frame) if mark_pointer else frame.data
@@ -194,6 +199,8 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
         await hub.connect(ws, dict(row))
 
     app.include_router(router)
+    from .walkthrough_routes import walkthrough_router
+    app.include_router(walkthrough_router(runtime, hub, store))
     return hub
 
 
