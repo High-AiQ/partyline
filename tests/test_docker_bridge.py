@@ -131,10 +131,13 @@ class BridgeProcessTest(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmp:
             host, path = os.path.join(tmp, "host.sock"), os.path.join(tmp, "b", "bridge.sock")
 
+            # Do not let the daemon's close race the relay and reset the reply.
+            daemon_writers = []
+
             async def daemon(reader, writer):
+                daemon_writers.append(writer)
                 writer.write(b"hi:" + await reader.read())
                 await writer.drain()
-                writer.close()
 
             server = await asyncio.start_unix_server(daemon, path=host)
             alive = [True]
@@ -159,8 +162,10 @@ class BridgeProcessTest(unittest.IsolatedAsyncioTestCase):
                 reader, writer = await REAL_OPEN(path)
                 writer.write(b"x")
                 writer.write_eof()
-                self.assertEqual(await asyncio.wait_for(reader.read(), 5), b"hi:x")
+                self.assertEqual(await asyncio.wait_for(reader.readexactly(4), 5), b"hi:x")
                 writer.close()
+                for daemon_writer in daemon_writers:
+                    daemon_writer.close()
                 alive[0] = False
                 stop_polling.set()
                 await asyncio.wait_for(task, 5)
