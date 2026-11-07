@@ -9,27 +9,24 @@ import time
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidStatus
 
+from .bounds import bounded, validate_request
 from .control import CONTROL_VERSION, Control
 from .images import changed, encode, thumbnail
+from .status import Status
 from .transport import CertificateError, certificate_failure
+from .version import helper_version
 
 
 class Revoked(Exception):
     """The paired credential is no longer authorized."""
 
 
-def bounded(value, default, low, high):
-    number = float(value if value is not None else default)
-    if not math.isfinite(number) or not low <= number <= high:
-        raise ValueError("Share setting outside supported bounds")
-    return number
-
-
 class Session:
     def __init__(self, socket, desktop, terminal, name, yes=False, preview_times=None,
                  clock=time.monotonic, sleep=asyncio.sleep, border=None, allow_control=False,
-                 inputs=None):
+                 inputs=None, status=None):
         self.socket, self.desktop, self.terminal = socket, desktop, terminal
+        self.status = status or Status()
         self.name, self.yes, self.border = name, yes, border
         self.clock, self.sleep = clock, sleep
         self.lock = asyncio.Lock()
@@ -72,6 +69,7 @@ class Session:
         self.control.end(f"sharing stopped: {reason}")  # before any await: no queued action runs
         if self.border:
             self.border.hide()
+        self.status.set("paired")
         worker, self.worker = self.worker, None
         self.pending_id = None
         if worker:
@@ -86,25 +84,7 @@ class Session:
             print(f"Sharing stopped: {reason}", flush=True)
 
     def validate(self, request):
-        region = request["region"]
-        for key in ("x", "y", "width", "height"):
-            if type(region[key]) is not int:
-                raise ValueError("Region must use integer desktop pixels")
-        if not 0 < region["width"] <= 32768 or not 0 < region["height"] <= 32768:
-            raise ValueError("Invalid region dimensions")
-        # Bound allocation and ensure all pixels belong to the virtual desktop.
-        if region["width"] * region["height"] > 100_000_000:
-            raise ValueError("Region is too large")
-        monitors = self.desktop.monitors()
-        left, top = min(m["x"] for m in monitors), min(m["y"] for m in monitors)
-        right = max(m["x"] + m["width"] for m in monitors)
-        bottom = max(m["y"] + m["height"] for m in monitors)
-        if not (left <= region["x"] and top <= region["y"] and
-                region["x"] + region["width"] <= right and region["y"] + region["height"] <= bottom):
-            raise ValueError("Region is outside the desktop")
-        request["max_fps"] = bounded(request.get("max_fps"), 1, 0.1, 30)
-        request["long_edge"] = int(bounded(request.get("long_edge"), 1280, 1, 4096))
-        request["min_change"] = bounded(request.get("min_change"), .02, 0, 1)
+        validate_request(self.desktop, request)
 
     async def start(self, request):
         try:
@@ -121,6 +101,7 @@ class Session:
                 self.border.show(request["region"])
             await self.send("share_accepted", share_id=request["share_id"])
             self.accepted = True
+            self.status.set("sharing")
             self.terminal.clear()
             print("SHARING ACTIVE — type s Enter or press Ctrl+C to stop", flush=True)
             if request.get("control") is True:  # the person asked for agent control with the share
@@ -150,6 +131,7 @@ class Session:
             self.control.end("share ended")
             if self.border:
                 self.border.hide()
+            self.status.set("paired")
 
     async def frame(self, request_id=None, force=False):
         async with self.frame_lock:
@@ -225,11 +207,13 @@ class Session:
             await self.send("ping")
 
     async def run(self):
-        # Read distribution metadata without importing server modules.
-        from importlib.metadata import version
         await self.send("hello", protocol=1, device_name=self.name, os=platform.system(),
-                        helper_version=version("partyline"), monitors=self.desktop.monitors(),
+                        helper_version=helper_version(), monitors=self.desktop.monitors(),
                         control=CONTROL_VERSION)
+        self.status.set("paired")
+        loop = asyncio.get_running_loop()
+        # The tray's Stop sharing runs on another thread: hand the stop to this loop.
+        self.status.stop_share = lambda: asyncio.run_coroutine_threadsafe(self.stop("local"), loop)
         heartbeat = asyncio.create_task(self.heartbeat())
         try:
             async for raw in self.socket:
@@ -249,13 +233,15 @@ class Session:
                 await heartbeat
             with contextlib.suppress(ConnectionClosed):
                 await self.stop("disconnected")
+            self.status.stop_share = None
+            self.status.set("offline")
         if self.socket.close_code in (1008, 4001, 4003, 4401, 4403):
             raise Revoked
 
 
 async def serve(config, desktop, terminal, yes=False, sleep=asyncio.sleep,
                 clock=time.monotonic, session_sleep=asyncio.sleep, border=None, allow_control=False,
-                inputs=None):
+                inputs=None, status=None):
     from .config import server_url
     server = server_url(config["server"])
     url = ("wss" if server.startswith("https:") else "ws") + server[server.index(":"):] + "/api/screen/helper"
@@ -268,7 +254,7 @@ async def serve(config, desktop, terminal, yes=False, sleep=asyncio.sleep,
                 connected_at = clock()
                 await Session(socket, desktop, terminal, config.get("device_name", "Desktop"),
                               yes, preview_times, clock, session_sleep, border=border,
-                              allow_control=allow_control, inputs=inputs).run()
+                              allow_control=allow_control, inputs=inputs, status=status).run()
                 if clock() - connected_at >= 45:
                     delay = 1
         except InvalidStatus as exc:

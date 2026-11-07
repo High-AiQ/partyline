@@ -16,6 +16,7 @@ WATCH = 0.1          # pointer poll interval for the kill switch
 
 def border_mode(session, mode):
     """Turn the capture-zone border red ("control") while an agent drives, amber ("share") after."""
+    session.status.set({"control": "control", "share": "sharing"}[mode])
     if session.border is not None:
         session.border.set_mode(mode)
 
@@ -91,8 +92,9 @@ class Control(Acting):
         elif not await self.session.terminal.ask("Allow agent control? [y/N] ", dialog=(
                 "Partyline agent control request",
                 f"{agent} asks to control the mouse and keyboard inside the shared region "
-                f"(line: {display_text(message.get('line_name'))}).\n\nMoving the mouse or pressing "
-                "any key takes control back.\n\nAllow agent control?")):
+                f"(line: {display_text(message.get('line_name'))}).\n\nOnce the agent starts "
+                "acting, moving the mouse or pressing any key takes control back (Ctrl+Alt+Esc always "
+                "does).\n\nAllow agent control?")):
             print("Agent control declined.", flush=True)
             await self.answer("control_revoked", reason="Local consent declined or timed out")
             return
@@ -111,10 +113,10 @@ class Control(Acting):
         # Fail closed: no listener means no kill switch, so no control.
         self.inputs.listen(lambda *event: loop.call_soon_threadsafe(self.key_event, *event))
         self.granted, self.agent, self.clicked = True, agent, False
-        self.target = self.session.desktop.pointer()
+        self.target, self.armed = None, False  # armed by the agent's first action (see Acting.move)
         self.watcher = asyncio.create_task(self.watch())
         print(f"AGENT CONTROL ACTIVE — {agent} can use the mouse and keyboard in the shared region.\n"
-              "Move the mouse, press any key or Ctrl+Alt+Esc to take control back; "
+              "Once it acts, move the mouse or press any key to take control back; Ctrl+Alt+Esc always does; "
               "type s Enter to stop sharing.", flush=True)
         border_mode(self.session, "control")
 
@@ -159,11 +161,13 @@ class Control(Acting):
             return
         self.held.add(name)
         if name == "esc" and {"ctrl", "alt"} <= self.held:
-            self.kill("Ctrl+Alt+Esc pressed")
-        elif not self.agent_key(name, injected):
+            self.kill("Ctrl+Alt+Esc pressed")  # at any time, armed or not
+        elif self.armed and not self.agent_key(name, injected):
             self.kill("a key was pressed on the computer")
 
     def drifted(self):
+        if not self.armed:
+            return False
         x, y = self.session.desktop.pointer()
         return math.hypot(x - self.target[0], y - self.target[1]) > DRIFT
 

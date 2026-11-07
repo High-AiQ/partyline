@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request, WebSocket
 from pydantic import BaseModel, ValidationError
 from PIL import Image, ImageDraw
 
+from .helper_release import update_available
 from .auth_guard import bearer_token, request_principal
 from .machine_scope import deny_unless, is_human
 from .media import MediaError, MediaStore
@@ -87,6 +88,8 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
             online = hub.devices.get(item["id"])
             item["online"] = online is not None
             item["monitors"] = online["monitors"] if online else []
+            item["helper_version"] = online["helper_version"] if online else None
+            item["update_available"] = bool(online) and update_available(online["helper_version"])
             result.append(item)
         return {"devices": result}
 

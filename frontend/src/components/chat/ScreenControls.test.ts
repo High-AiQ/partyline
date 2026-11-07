@@ -144,3 +144,73 @@ describe("pairing instructions", () => {
     await unmount(component);
   });
 });
+
+describe("helper update notice", () => {
+  const open = async (devices: Awaited<ReturnType<typeof screenApi.devices>>["devices"]) => {
+    vi.spyOn(screenApi, "current").mockResolvedValue({ share: null });
+    vi.spyOn(screenApi, "devices").mockResolvedValue({ devices });
+    room.conversation = {
+      id: "line",
+      name: "Line",
+      topic: "",
+      created_at: 1,
+      archived_at: null,
+      live_count: 0,
+    };
+    const component = mount(ScreenControls, { target: document.body });
+    await tick();
+    [...document.querySelectorAll("button")]
+      .find((item) => item.textContent.trim() === "Computers / Share screen")
+      ?.click();
+    await settle();
+    return component;
+  };
+
+  it("offers the download for an outdated Windows helper", async () => {
+    const component = await open([
+      {
+        id: "d",
+        name: "Desk",
+        os: "Windows",
+        online: true,
+        monitors: [],
+        helper_version: "2.80.0",
+        update_available: true,
+      },
+    ]);
+    const notice = document.querySelector("[data-testid=helper-update]");
+    expect(notice?.textContent).toContain("Helper update available (running 2.80.0)");
+    const link = document.querySelector<HTMLAnchorElement>("[data-testid=helper-update-download]");
+    expect(link?.href).toContain("/releases/latest/download/PartylineHelper-Setup.exe");
+    await unmount(component);
+  });
+
+  it("points other systems at the install command, and says nothing when the helper is current", async () => {
+    const component = await open([
+      {
+        id: "a",
+        name: "Mac",
+        os: "Darwin",
+        online: true,
+        monitors: [],
+        helper_version: "1",
+        update_available: true,
+      },
+      {
+        id: "b",
+        name: "Fresh",
+        os: "Windows",
+        online: true,
+        monitors: [],
+        helper_version: "9",
+        update_available: false,
+      },
+      { id: "c", name: "Old", os: "Windows", online: false, monitors: [] },
+    ]);
+    const notices = document.querySelectorAll("[data-testid=helper-update]");
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.textContent).toContain("install command");
+    expect(document.querySelector("[data-testid=helper-update-download]")).toBeNull();
+    await unmount(component);
+  });
+});

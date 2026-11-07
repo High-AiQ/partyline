@@ -22,6 +22,10 @@ export const ScreenDeviceSchema = z.object({
   os: z.string(),
   online: z.boolean(),
   monitors: z.array(ScreenMonitorSchema),
+  /** The version the connected helper reported; null while offline. */
+  helper_version: z.string().nullable().optional(),
+  /** True when the server's own (newer) version is ahead of the connected helper. */
+  update_available: z.boolean().optional(),
 });
 export type ScreenDevice = z.infer<typeof ScreenDeviceSchema>;
 

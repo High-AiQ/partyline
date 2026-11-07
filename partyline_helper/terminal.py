@@ -15,8 +15,8 @@ def display_text(value):
 
 
 class Terminal:
-    def __init__(self, clock=time.monotonic, sleep=asyncio.sleep, read_stdin=True, dialog=None):
-        self.clock, self.sleep = clock, sleep
+    def __init__(self, clock=time.monotonic, sleep=asyncio.sleep, read_stdin=True, dialog=None, status=None):
+        self.clock, self.sleep, self.status = clock, sleep, status
         self.lines = queue.Queue()
         # `dialog` (see consent_dialog.auto_dialog) replaces the y/N prompt when there is no terminal.
         self.dialog = dialog
@@ -26,6 +26,11 @@ class Terminal:
     def _read(self):
         for line in sys.stdin:
             self.lines.put(line.strip().lower())
+
+    def attention(self, text):
+        """Ask the tray for a balloon too, in case the dialog opens behind other windows."""
+        if self.status:
+            self.status.attention(text)
 
     def clear(self):
         while not self.lines.empty():
@@ -48,6 +53,7 @@ class Terminal:
         if yes:
             return True
         if self.dialog:
+            self.attention("A screen share request is waiting for your answer")
             region_text = ", ".join(f"{key}={value}" for key, value in region.items())
             return await self.dialog(
                 "Partyline screen share request",
@@ -63,6 +69,7 @@ class Terminal:
         which has the same 1 s guard and timeout.
         """
         if self.dialog and dialog:
+            self.attention(dialog[0] + " is waiting for your answer")
             return await self.dialog(*dialog, timeout=timeout, sleep=self.sleep)
         self.clear()
         deadline = self.clock() + timeout

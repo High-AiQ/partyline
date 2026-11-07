@@ -152,6 +152,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write # dispatch the Windows installer build for a new tag
     steps:
       - uses: actions/checkout@v4
         with:
@@ -166,3 +167,14 @@ jobs:
         run: |
           git fetch --tags origin
           uv run --locked python -m scripts.tag_version --base "$BASE_SHA" --head "$HEAD_SHA"
+      # A tag pushed with GITHUB_TOKEN does not trigger other workflows, so ask for the installer explicitly.
+      - name: build the Windows installer for a new tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(git tag --points-at "$GITHUB_SHA" 'v*' | head -n 1)
+          if [ -n "$tag" ]; then
+            gh workflow run windows-installer.yml --ref main -f tag="$tag"
+          else
+            echo "no version tag on this commit; no installer release needed"
+          fi
