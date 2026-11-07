@@ -192,6 +192,26 @@ class CaptainToolTests(unittest.TestCase):
                 "conv_id": "child", "report_id": 4, "revision": 2}, client.state)
         self.assertEqual(client.calls, [])
 
+    def test_ack_report_accepts_task_refs_up_to_120_characters_and_rejects_121(self):
+        for size in (81, 120):
+            client = Client()
+            ref = "t" * size
+            tools_captain.call(client, "ack_report", {
+                "conv_id": ref, "report_id": 4, "revision": 2}, client.state)
+            self.assertEqual(client.calls, [
+                ("POST", "/api/conversations/home/reports/4/ack", {"revision": 2})])
+        client = Client()
+        seen = []
+        capabilities = client.capabilities
+        client.capabilities = lambda conv_id=None: (seen.append(conv_id), capabilities(conv_id))[1]
+        tools_captain.call(client, "ack_report", {
+            "conv_id": "n" * 120, "report_id": 4, "revision": 2}, client.state)
+        self.assertEqual(seen, ["n" * 120])
+        with self.assertRaisesRegex(ValueError, "conv_id exceeds its allowed length"):
+            tools_captain.call(client, "ack_report", {
+                "conv_id": "t" * 121, "report_id": 4, "revision": 2}, client.state)
+        self.assertEqual(len(client.calls), 1)
+
     def test_validation_errors_name_the_operation_and_fields(self):
         client = Client()
         with self.assertRaisesRegex(
