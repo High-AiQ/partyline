@@ -203,6 +203,7 @@ class ControlHub:
             raise ValueError("no frame yet; call screen_frame first")
         cmd = command(action, share.frames[-1], self.limits.max_text, device.get("os", ""))
         self._spend(grant)
+        await self._changed(share)  # viewers' badges show the live action count
         request_id = str(uuid.uuid4())
         loop = asyncio.get_running_loop()
         result, settled = loop.create_future(), loop.create_future()

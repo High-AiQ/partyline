@@ -196,7 +196,8 @@ disconnect). A new share needs a new grant.
 control and back to amber when control ends (unless the helper runs with
 `--no-border` or the overlay could not be drawn). The
 share API (`GET /api/screen/shares`) and the line's `screen_share` events carry
-`share.control` with its status, holder and action count.
+`share.control` with its status, holder and action count; the event is re-sent after every
+action so the count stays current.
 
 **Kill switch.** Physical input takes control back at once and revokes it for the
 rest of the share, after which actions and new requests are refused:

@@ -250,6 +250,27 @@ class ControlFlowTest(unittest.IsolatedAsyncioTestCase):
         invalid = await self.act(kind="move", x=13, y=20, frame="large")
         self.assertEqual(invalid.status_code, 422)
 
+    async def test_each_action_publishes_the_new_count_to_the_line(self):
+        await self.connect()
+        await self.share()
+        events = []
+        send = self.hub._line_event
+
+        async def record(conv_id, payload):
+            events.append(payload)
+            await send(conv_id, payload)
+
+        self.hub._line_event = record
+        self.terminal.control_answer = True
+        await self.client.post("/api/conversations/line/screen-control/request")
+        await until(lambda: self.grant().status == "active")
+        events.clear()
+        for _ in range(3):
+            self.assertEqual((await self.act(kind="move", x=50, y=50)).status_code, 200)
+        controls = [event["share"]["control"] for event in events if event["type"] == "screen_share"]
+        self.assertEqual([(c["status"], c["actions"]) for c in controls],
+                         [("active", 1), ("active", 2), ("active", 3)])
+
     async def test_share_start_control_ends_on_disconnect(self):
         await self.connect()
         self.terminal.control_answer = True

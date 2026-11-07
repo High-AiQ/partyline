@@ -159,6 +159,16 @@ ends the share and discards the take. A disconnected helper ends capture and
 the frames already received can still be sent. A failed recognizer leaves a
 note in the message alongside those frames.
 
+On a narrow screen (`layout.narrow`, the same breakpoint as the drawers) neither
+**Computers / Share screen** nor **Show me** is offered: a phone cannot run the helper or
+share its own screen. A share another device started still shows as status with its **Stop**,
+and a walkthrough already under way keeps its Cancel. While an agent holds control
+(`share.control.status === "active"`) `ControlBadge` draws a pink pulsing dot and a monitor
+icon, with a "Controlling <computer> (N actions)" tooltip, beside the share status and on the
+holder's process card and mention row. `lib/screen-control.ts` decides when it shows: pending
+or revoked control, another agent's grant, or no share at all draws nothing, and a line-wide
+grant (no named holder) badges the share status only. The pulse stops under
+`prefers-reduced-motion`; the colour is the `--color-pink` token, tuned for both themes.
 
 Orchestrator controls live in `CaptainStyleSection` (root-line management only)
 and `TaskHistorySetting` (beside the resource budget). Line responses carry derived
