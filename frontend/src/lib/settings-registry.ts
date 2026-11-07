@@ -61,6 +61,20 @@ export const SETTINGS: readonly SettingInfo[] = [
     keywords: "dark mode light mode colour color",
   },
   {
+    id: "setting-voice-pause",
+    section: "voice",
+    label: "Hands-free speech pause",
+    description: "Silence before automatically transcribing and sending speech",
+    keywords: "vad hands free hands-free voice pause silence automatic send",
+  },
+  {
+    id: "setting-voice-hidden",
+    section: "voice",
+    label: "Release hidden microphone",
+    description: "How long a hidden tab keeps its hands-free microphone",
+    keywords: "hands free hands-free background privacy timeout microphone",
+  },
+  {
     id: "setting-voice-microphone",
     section: "voice",
     label: "Microphone",

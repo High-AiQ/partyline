@@ -1,5 +1,14 @@
 # Lessons: the false-assumptions ledger
 
+## A detector must be releasable before it starts
+
+The false assumption was that MicVAD's destroy method can release a detector returned
+with startOnLoad disabled. In vad-web 0.0.31 it first requires initialized audio nodes,
+so cancellation before start can throw before releasing the model. The hands-free
+adapter owns its Silero model and worklet separately, serializes recurrent inference,
+and drains an in-flight frame before releasing the model. Fake-model regressions in
+`frontend/src/lib/silero-vad.test.ts` cover pre-start disposal and failed initialization.
+
 ## A pending stream callback does not survive a GC pass after the client half-closes
 
 The false assumption was that a `start_unix_server` handler waiting on its reply stays
