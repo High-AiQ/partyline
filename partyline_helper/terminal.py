@@ -6,7 +6,6 @@ import sys
 import threading
 import time
 
-
 PROMPT_DELAY = 1.0
 ANSI = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-_])")
 
@@ -16,10 +15,12 @@ def display_text(value):
 
 
 class Terminal:
-    def __init__(self, clock=time.monotonic, sleep=asyncio.sleep, read_stdin=True):
+    def __init__(self, clock=time.monotonic, sleep=asyncio.sleep, read_stdin=True, dialog=None):
         self.clock, self.sleep = clock, sleep
         self.lines = queue.Queue()
-        if read_stdin:
+        # `dialog` (see consent_dialog.auto_dialog) replaces the y/N prompt when there is no terminal.
+        self.dialog = dialog
+        if read_stdin and dialog is None:
             threading.Thread(target=self._read, daemon=True).start()
 
     def _read(self):
@@ -46,6 +47,13 @@ class Terminal:
               f"Line: {display_text(request['line_name'])}\nOS region: {region}", flush=True)
         if yes:
             return True
+        if self.dialog:
+            region_text = ", ".join(f"{key}={value}" for key, value in region.items())
+            return await self.dialog(
+                "Partyline screen share request",
+                f"{display_text(request['requested_by'])} asks to share part of your screen "
+                f"(line: {display_text(request['line_name'])}).\n\nRegion: {region_text}\n\n"
+                "Share this region?", timeout=timeout, sleep=self.sleep)
         deadline = self.clock() + timeout
         print("Please wait 1 second; earlier input is ignored.", flush=True)
         await self.sleep(min(PROMPT_DELAY, timeout))
