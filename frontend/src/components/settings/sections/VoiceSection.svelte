@@ -9,6 +9,7 @@
   import SettingsSection from "../SettingsSection.svelte";
   import SettingRow from "../SettingRow.svelte";
   import SaveIndicator from "../SaveIndicator.svelte";
+  import MicrophoneSetting from "../voice/MicrophoneSetting.svelte";
   import VoicePresetCard from "../voice/VoicePresetCard.svelte";
   import VoicePresetForm from "../voice/VoicePresetForm.svelte";
   import { asrApi } from "../../../lib/asr-api";
@@ -130,6 +131,15 @@
 </script>
 
 <SettingsSection id="voice">
+  <SettingRow
+    id="setting-voice-microphone"
+    label="Microphone"
+    control="voiceMicDevice"
+    description="Which microphone the composer and Show me record from in this browser. Test shows its live level."
+  >
+    <MicrophoneSetting />
+  </SettingRow>
+
   <SettingRow
     id="setting-voice-mic"
     label="Use for my mic"

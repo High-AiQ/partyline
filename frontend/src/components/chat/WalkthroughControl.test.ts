@@ -5,6 +5,7 @@ import { screenApi } from "../../lib/screen-api";
 import { voiceApi } from "../../lib/voice-api";
 import { walkthroughApi } from "../../lib/walkthrough-api";
 import type { RecorderSources } from "../../lib/voice-recorder";
+import { FakeAudioContext, fakeAudioContext } from "../../lib/mic-fakes";
 import { room } from "../../state/room.svelte.js";
 import { draft } from "../../state/draft.svelte.js";
 import { voicePresets } from "../../state/voice-presets.svelte.js";
@@ -21,7 +22,7 @@ function button(text: string): HTMLButtonElement | undefined {
   return [...document.querySelectorAll("button")].find((item) => item.textContent.includes(text));
 }
 function sources(): RecorderSources {
-  const stream = { getTracks: () => [{ stop: vi.fn() }] } as unknown as MediaStream;
+  const stream = { getTracks: () => [{ stop: vi.fn(), label: "Headset (Jabra)" }] } as unknown as MediaStream;
   return {
     getUserMedia: () => Promise.resolve(stream),
     isTypeSupported: () => true,
@@ -45,7 +46,7 @@ function sources(): RecorderSources {
     },
   };
 }
-function setup() {
+function setup(extra: Partial<RecorderSources> = {}) {
   room.conversation = line;
   room.screenShare = null;
   draft.openLine(line.id);
@@ -69,7 +70,7 @@ function setup() {
     language: "en",
     segments: [{ start: 0, end: 1, text: "click" }],
   });
-  return mount(WalkthroughControl, { target: document.body, props: { sources: sources() } });
+  return mount(WalkthroughControl, { target: document.body, props: { sources: { ...sources(), ...extra } } });
 }
 
 afterEach(() => {
@@ -82,6 +83,35 @@ afterEach(() => {
 });
 
 describe("walkthrough control", () => {
+  it("shows the mic level, its name and the no-input hint while recording, and frees the audio", async () => {
+    vi.useFakeTimers();
+    try {
+      FakeAudioContext.made = [];
+      const component = setup({ createAudioContext: fakeAudioContext });
+      await settle();
+      button("Show me")?.click();
+      await settle();
+      const context = FakeAudioContext.last();
+      context.analyser.amplitude = 0.05;
+      vi.advanceTimersByTime(100);
+      await tick();
+      const meter = document.querySelector('[role="meter"]');
+      expect(meter?.getAttribute("aria-valuenow")).toBe("30");
+      expect(document.body.textContent).toContain("Mic: Headset (Jabra)");
+      expect(document.querySelector('[role="alert"]')).toBeNull();
+      context.analyser.amplitude = 0;
+      vi.advanceTimersByTime(3000);
+      await tick();
+      expect(document.querySelector('[role="alert"]')?.textContent).toContain("no input detected");
+      button("Cancel")?.click();
+      await settle();
+      expect(context.closed).toBe(true);
+      await unmount(component);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("allows a walkthrough after an ordinary share is declined", async () => {
     const component = setup();
     await settle();
