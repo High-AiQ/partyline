@@ -20,7 +20,9 @@ async function settle(): Promise<void> {
   for (let i = 0; i < 20; i++) await tick();
 }
 function button(text: string): HTMLButtonElement | undefined {
-  return [...document.querySelectorAll("button")].find((item) => item.textContent.includes(text));
+  return [...document.querySelectorAll("button")].find(
+    (item) => item.textContent.includes(text) || item.getAttribute("aria-label")?.startsWith(text),
+  );
 }
 function sources(): RecorderSources {
   const stream = { getTracks: () => [{ stop: vi.fn(), label: "Headset (Jabra)" }] } as unknown as MediaStream;
