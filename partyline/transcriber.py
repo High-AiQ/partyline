@@ -18,6 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from .asr_backends import parse_payload
 from .transcript import TakeFailed, Transcript, TranscriberUnavailable
 
 GPU_MODEL = "large-v3-turbo"
@@ -160,16 +161,16 @@ class Transcriber:
                 try:
                     segments, info = self._model.transcribe(io.BytesIO(data), beam_size=5, vad_filter=True)
                     parts = [
-                        {"start": round(float(p.start), 3), "end": round(float(p.end), 3),
-                         "text": p.text.strip()}
+                        {"start": p.start, "end": p.end, "text": p.text.strip(),
+                         "no_speech_prob": getattr(p, "no_speech_prob", None),
+                         "avg_logprob": getattr(p, "avg_logprob", None)}
                         for p in segments
                     ]
                     text = " ".join(p["text"] for p in parts).strip()
                 except Exception as exc:
                     raise TakeFailed(f"could not transcribe that audio: {exc}") from exc
-                return Transcript(
-                    text, str(info.language or ""), round(float(info.duration), 2), tuple(parts)
-                )
+                return parse_payload({"text": text, "language": str(info.language or ""),
+                                      "duration": info.duration, "segments": parts})
             finally:
                 self._last_used = self._clock()
                 self._arm_timer()

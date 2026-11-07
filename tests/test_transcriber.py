@@ -66,6 +66,15 @@ def engine(**kw):
 
 
 class TranscriberTest(unittest.TestCase):
+    def test_fake_model_silence_and_confidence(self):
+        t, _, model = engine()
+        model.transcribe = lambda *a, **k: (iter([
+            SimpleNamespace(start=0, end=1, text="noise", no_speech_prob=0.9, avg_logprob=-2),
+            SimpleNamespace(start=1, end=2, text="You.", no_speech_prob=0.1, avg_logprob=-0.2),
+        ]), SimpleNamespace(language="en", duration=2))
+        out = t.transcribe(b"fake")
+        self.assertEqual((out.text, out.segments), ("", ()))
+
     def test_cpu_plan_and_result(self):
         t, loads, _ = engine()
         out = t.transcribe(b"x")

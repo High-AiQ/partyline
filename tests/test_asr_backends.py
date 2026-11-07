@@ -144,6 +144,20 @@ class CommandTest(unittest.TestCase):
 
 
 class PayloadTest(unittest.TestCase):
+    def test_silence_and_confidence_filtering(self):
+        for phrase in ("YOU!", "Thank you.", "Thanks for watching!", "Bye."):
+            out = parse_payload({"text": phrase, "segments": [{"start": 0, "end": 2, "text": phrase}]})
+            self.assertEqual((out.text, out.segments), ("", ()))
+        segments = [
+            {"start": 0, "end": 1, "text": "noise", "no_speech_prob": 0.9, "avg_logprob": -1.5},
+            {"start": 1, "end": 2, "text": "thank you for helping", "no_speech_prob": 0.9,
+             "avg_logprob": -0.2},
+        ]
+        out = parse_payload({"text": "noise thank you for helping", "segments": segments})
+        self.assertEqual(out.text, "thank you for helping")
+        self.assertEqual(len(out.segments), 1)
+        self.assertEqual(parse_payload({"text": "Thank you for helping"}).text, "Thank you for helping")
+
     def test_tolerant_parse(self):
         out = parse_payload({"text": "a", "language": 3, "duration": None,
                              "segments": [{"start": 0, "end": 2, "text": " b "}]}, "xx")
