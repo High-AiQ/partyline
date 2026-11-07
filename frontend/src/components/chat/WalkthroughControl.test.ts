@@ -174,6 +174,8 @@ describe("walkthrough control", () => {
       notes: "notes",
       segments: [{ start: 0, end: 1, text: "click" }],
       transcription_error: false,
+      no_input: false,
+      duration_ms: 0,
       mark_pointer: false,
     });
     expect(draft.text).toBe("");
@@ -209,6 +211,8 @@ describe("walkthrough control", () => {
       notes: "",
       segments: [],
       transcription_error: true,
+      no_input: false,
+      duration_ms: 0,
       mark_pointer: false,
     });
     await unmount(component);

@@ -1,8 +1,12 @@
 """Ephemeral walkthrough frame buffering and time-based selection."""
 
 from dataclasses import dataclass, field
+import io
+import re
 
-from .screen_frames import BufferedFrame, pick_distinct
+from PIL import Image, ImageChops, ImageStat
+
+from .screen_frames import BufferedFrame
 
 
 @dataclass
@@ -48,6 +52,7 @@ def select_frames(frames: list[BufferedFrame], segments: list[dict],
     Segment times are seconds relative to the take start. A pause selects the
     latest frame at or before the preceding segment's end, never a future frame.
     """
+    frames = deduplicate_frames(frames)
     if count <= 0 or not frames:
         return []
     if count == 1:
@@ -67,19 +72,87 @@ def select_frames(frames: list[BufferedFrame], segments: list[dict],
         if len(chosen) >= count:
             break
         chosen.add(index)
-    distinct = {id(frame) for frame in pick_distinct(frames, len(frames))}
-    candidates = {i for i, frame in enumerate(frames) if id(frame) in distinct} - chosen
+    candidates = set(range(len(frames))) - chosen
     while candidates and len(chosen) < count:
         # Fill the largest temporal gaps so the whole take remains represented.
         index = max(candidates, key=lambda i: min(abs(frames[i].ts_ms - frames[j].ts_ms)
                                                    for j in chosen))
         chosen.add(index)
         candidates.remove(index)
-    return [frames[i] for i in sorted(chosen)]
+    return deduplicate_frames([frames[i] for i in sorted(chosen)])
+
+
+def deduplicate_frames(frames: list[BufferedFrame]) -> list[BufferedFrame]:
+    """Drop adjacent visually identical frames only when their pointers also agree."""
+    kept = []
+    for frame in frames:
+        if kept and _near_duplicate(kept[-1], frame):
+            continue
+        kept.append(frame)
+    return kept
+
+
+def _near_duplicate(first: BufferedFrame, second: BufferedFrame) -> bool:
+    a, b = first.pointer or {}, second.pointer or {}
+    if bool(a.get("visible")) != bool(b.get("visible")):
+        return False
+    if a.get("visible") and (abs(a["x"] - b["x"]) > 3 or abs(a["y"] - b["y"]) > 3):
+        return False
+    if (first.region != second.region or
+            (first.out_width, first.out_height) != (second.out_width, second.out_height)):
+        return False
+    if first.data == second.data:
+        return True
+    try:
+        with Image.open(io.BytesIO(first.data)) as left, Image.open(io.BytesIO(second.data)) as right:
+            left = left.convert("RGB").resize((128, 128))
+            right = right.convert("RGB").resize((128, 128))
+            diff = ImageStat.Stat(ImageChops.difference(left, right))
+            return max(diff.mean) <= 1.0 and max(high for _, high in diff.extrema) <= 12
+    except (OSError, ValueError):
+        return False
+
+
+_SILENCE_PHRASES = {tuple(phrase.split()) for phrase in (
+    "thank you for watching", "thanks for watching", "thank you",
+    "bye bye", "the end", "you", "thanks", "bye")}
+_SILENCE_MAX_WORDS = max(map(len, _SILENCE_PHRASES))
+
+
+def _only_silence_phrases(segments: list[dict]) -> bool:
+    """Match a sequence of known phrases in linear time, despite overlapping phrases."""
+    words = re.findall(r"\w+", " ".join(part["text"].casefold() for part in segments))
+    if not words:
+        return False
+    reachable = [True] + [False] * len(words)
+    for start in range(len(words)):
+        if reachable[start]:
+            for size in range(1, min(_SILENCE_MAX_WORDS, len(words) - start) + 1):
+                if tuple(words[start:start + size]) in _SILENCE_PHRASES:
+                    reachable[start + size] = True
+    return reachable[-1]
+
+
+def speech_segments(segments: list[dict], no_input: bool) -> list[dict]:
+    """Suppress common silence artifacts and join incomplete adjacent phrases."""
+    nonempty = [segment for segment in segments if segment["text"].strip()]
+    if no_input or _only_silence_phrases(nonempty):
+        return []
+    joined = []
+    for segment in nonempty:
+        part = dict(segment)
+        part["text"] = part["text"].strip()
+        if (joined and not re.search(r'[.!?]["\']?$', joined[-1]["text"])
+                and part["start"] - joined[-1]["end"] <= 2):
+            joined[-1]["text"] += " " + part["text"]
+            joined[-1]["end"] = max(joined[-1]["end"], part["end"])
+        else:
+            joined.append(part)
+    return joined
 
 
 def assemble_message(notes: str, segments: list[dict], frames: list[BufferedFrame],
-                     transcription_error: bool = False) -> str:
+                     transcription_error: bool = False, duration_ms: int = 0) -> str:
     """Interleave transcript and numbered image references in recording order."""
     events = []
     for segment in segments:
@@ -92,7 +165,15 @@ def assemble_message(notes: str, segments: list[dict], frames: list[BufferedFram
                    region["y"] <= pointer["y"] < region["y"] + region["height"])
         location = f" (pointer at {pointer['x']},{pointer['y']})" if visible else ""
         events.append((frame.ts_ms, 1, f"frame {index}{location}"))
-    lines = [notes.strip()] if notes.strip() else []
+    duration_ms = max(duration_ms, *(frame.ts_ms for frame in frames),
+                      *(int(segment["end"] * 1000) for segment in segments), 0)
+    seconds = duration_ms // 1000
+    lines = [f"Walkthrough · {seconds // 60}:{seconds % 60:02d} · {len(frames)} "
+             f"{'frame' if len(frames) == 1 else 'frames'}"]
+    if notes.strip():
+        lines.append(notes.strip())
+    if not segments and not transcription_error:
+        lines.append("(no speech detected — check the microphone)")
     if frames:
         lines.append("Contact sheet first: open it, then fetch only the frames you need "
                      "(thumb ≈ 230 tokens, slim ≈ 1,400).")

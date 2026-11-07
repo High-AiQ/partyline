@@ -9,6 +9,8 @@ export interface WalkthroughResult {
   segments: Transcript["segments"];
   transcription_error: boolean;
   mark_pointer: boolean;
+  no_input: boolean;
+  duration_ms: number;
 }
 
 function path(line: string, share: string): string {

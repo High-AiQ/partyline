@@ -7,9 +7,10 @@
 
   interface Props {
     images: FileRef[];
+    viewerImages?: FileRef[];
   }
 
-  let { images }: Props = $props();
+  let { images, viewerImages = images }: Props = $props();
 
   const count = $derived(images.length);
   const gridCols = $derived(count >= 5 ? "grid-cols-3" : count >= 2 ? "grid-cols-2" : "");
@@ -21,7 +22,7 @@
   );
 
   function view(index: number): void {
-    dialogs.open(ImageViewer, { images, initialIndex: index });
+    dialogs.open(ImageViewer, { images: viewerImages, initialIndex: index });
   }
 </script>
 

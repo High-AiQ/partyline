@@ -13,7 +13,7 @@ from .media_digest import digest_body
 from .media_files import prepared_file
 from .media_images import MediaError
 from .screen_routes import _mark_pointer, pointer_coordinates
-from .walkthrough import assemble_message, select_frames
+from .walkthrough import assemble_message, select_frames, speech_segments
 from .walkthrough_sheet import contact_sheet
 
 
@@ -28,6 +28,8 @@ class Finish(BaseModel):
     segments: list[Segment] = Field(default_factory=list, max_length=5000)
     transcription_error: bool = False
     mark_pointer: bool = False
+    no_input: bool = False
+    duration_ms: int = Field(default=0, ge=0, le=600_000)
 
 
 def walkthrough_router(runtime, hub, store):
@@ -90,9 +92,10 @@ def walkthrough_router(runtime, hub, store):
                        for a in runtime.db.list_attachments(conv_id)):
                 raise HTTPException(409, "attach a process to this line before sending")
             await hub.walkthroughs.stop(take)
-            segments = [segment.model_dump() for segment in body.segments]
-            frames = select_frames(take.buffer.frames, segments)
-            caption = assemble_message(body.notes, segments, frames, body.transcription_error)
+            segments = speech_segments([segment.model_dump() for segment in body.segments], body.no_input)
+            frames = await asyncio.to_thread(select_frames, take.buffer.frames, segments)
+            caption = assemble_message(body.notes, segments, frames,
+                                       body.transcription_error and not body.no_input, body.duration_ms)
             try:
                 def prepare():
                     items = []
