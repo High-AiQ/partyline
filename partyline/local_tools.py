@@ -11,6 +11,7 @@ import uuid
 
 from . import local_tools_audit as audit
 from . import local_tools_media as media
+from . import local_tools_reference as reference
 from .contracts import MessageEvent, MessageResponse
 from .local_tools_state import ToolLimits, ToolSession
 from .screen_connections import notice
@@ -183,16 +184,23 @@ class LocalTools:
         code = args.get("code") if isinstance(args.get("code"), str) else None
         if code is not None and len(code.encode()) > self.limits.max_code:
             raise ValueError(f"code is larger than {self.limits.max_code} bytes")
-        self._spend(item)
+        relay_args = args
+        if op == "render":
+            relay_args = await asyncio.to_thread(reference.prepare, store, conv_id, args)
+        if item.status != "active":
+            raise ValueError("the session was revoked before the call")
         call_id = str(uuid.uuid4())
+        message = {"type": "tool_call", "session_id": item.session_id, "call_id": call_id,
+                   "op": op, "args": relay_args, "timeout": timeout}
+        if op == "render" and "reference" in args:
+            reference.validate_message(message)
+        self._spend(item)
         await self._record(item, "call", op, audit.entry(op, args, code), code)
         future = asyncio.get_running_loop().create_future()
         self.waiters[call_id] = (device["id"], item.session_id, future)
         try:
             async with self.deadline(timeout + GRACE):
-                await device["socket"].send_json({"type": "tool_call", "session_id": item.session_id,
-                                                  "call_id": call_id, "op": op, "args": args,
-                                                  "timeout": timeout})
+                await device["socket"].send_json(message)
                 answer = await future
         except (TimeoutError, asyncio.CancelledError):
             if asyncio.current_task().cancelling():

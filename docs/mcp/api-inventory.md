@@ -384,3 +384,15 @@ grant timestamp, note and FIFO queue. See the
 [contract](../hierarchy.md#captain-declared-exclusive-resources) for bounds and cleanup.
 
 | POST | `/api/conversations/{conv_id}/task/goal` | `task_goal` | H or orchestrator root captain | yes | tool: `set_task_goal`; stores active task direction and messages live participants |
+
+### Blender reference overlays
+
+`blender_render` accepts optional `reference` (an image media id on the caller's line)
+and `overlay_opacity` (0..1, default 0.5). Its returned media is the overlay. The server
+resolves the reference and sends PNG bytes through the helper: source at most 20 MiB,
+PNG at most 700 KiB, dimensions 16..2048 per side. This cap fits installed helpers'
+1,000,000-byte receive limit after base64 encoding and the call envelope; no helper update
+is needed. The server checks the full outgoing message size too. The add-on body limit is
+3 MiB. The transparent render uses that exact resolution; an aspect mismatch beyond 0.5% against the scene or explicit width/height
+is refused. Ordinary clamps and cancel/deadline behavior still apply. See the
+[relay design](../design/blender-python-relay.md#5-mcp-tools-agent-view).

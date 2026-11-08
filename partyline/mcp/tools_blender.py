@@ -63,7 +63,9 @@ def tool_list(state):
               "Render the open scene and store the image as line media: returns a file reference (like "
               "screen_frame; fetch the pixels with get_media) plus the settings actually used. Sizes and "
               "samples are clamped and every clamp is listed in `adjusted`. Workbench is fast; eevee needs "
-              "the person's GPU. A render cannot be interrupted once it is running: a cancel or deadline is "
+              "the person's GPU. With reference, store a transparent render composited over that line image "
+              "at its exact resolution (16..2048 per side); aspect conflicts are refused. A render cannot be "
+              "interrupted once it is running: a cancel or deadline is "
               "honoured when it finishes and the image is then discarded." + NOTE, {
                   "camera": {"type": "string", "maxLength": 200,
                              "description": "Camera object name; default the scene's active camera."},
@@ -75,6 +77,10 @@ def tool_list(state):
                              "description": "workbench (default) or eevee."},
                   "samples": {"type": "integer", "minimum": 1, "maximum": 100000,
                               "description": "EEVEE samples, clamped to 1..64; ignored by workbench."},
+                  "reference": {"type": "string", "minLength": 1, "maxLength": 80,
+                                "description": "Line image id for an overlay; PNG capped at 700 KiB."},
+                  "overlay_opacity": {"type": "number", "minimum": 0, "maximum": 1,
+                                      "description": "Render opacity over reference; default 0.5."},
                   "frame": {"type": "integer", "minimum": -1000000, "maximum": 1000000,
                             "description": "Frame to render, clamped to the scene's range; default current."},
                   "timeout_s": {"type": "integer", "minimum": 1, "maximum": 120,
