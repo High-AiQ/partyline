@@ -14,6 +14,8 @@ from .machine_scope import deny_unless, is_human
 from .media import MediaError, MediaStore
 from .screen_audit import recover
 from .screen_connections import revoke as revoke_device
+from .local_tools_audit import recover as recover_tools
+from .local_tools_routes import tools_router
 from .screen_control_routes import control_router
 from .screen_frame_store import frame_reference
 from .screen_hub import ScreenHub
@@ -29,6 +31,7 @@ class ShareStart(BaseModel):
 
 def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
     recover(runtime.db)
+    recover_tools(runtime.db)
     hub = ScreenHub(runtime)
     app.state.screen_hub = hub
     runtime.screen_hub = hub
@@ -196,6 +199,7 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
 
     app.include_router(router)
     app.include_router(control_router(runtime, hub, store))
+    app.include_router(tools_router(runtime, hub))
     from .walkthrough_routes import walkthrough_router
     app.include_router(walkthrough_router(runtime, hub, store))
     return hub

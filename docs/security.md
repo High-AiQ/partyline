@@ -13,6 +13,14 @@
   in the same directory at the same moment; bundled adapters claim their transcript to prevent
   it, but it's the first thing to check when a new adapter posts someone else's replies.
 
+## Local tools
+
+Agents can ask to use a program on the person's computer through the helper (`docs/local-tools.md`). Every
+session needs a fresh local Yes on that computer; grants live in memory only; the helper, not the server,
+enforces consent, the lease, idle expiry and the kill switches (tray, Ctrl+Alt+Esc, the add-on's own End
+button). The add-on listens on loopback with a per-install secret and refuses any request carrying a browser
+`Origin`. Every script is audited twice, in the helper's own hash-chained file and on the server.
+
 ## Machine API scope
 
 ### Screen helper pairing
