@@ -135,6 +135,15 @@ class ShaCheckTest(TaskFixture):
         self.assertEqual(suspected('colour #ff8800, B007 and abc123'), [])
         self.assertEqual(suspected('colour #deadbee'), ['deadbee'])
 
+    def test_a_decimal_number_is_not_suspected(self):
+        self.assertEqual(suspected('(< installed helpers\' 1000000 limit)'), [])
+        self.assertEqual(suspected('4269000 bytes, 1000000 files'), [])
+        self.assertEqual(suspected(f'4ab749b9 at {FAKE} with 1000000 and 4269000'), ['4ab749b9', FAKE])
+
+    def test_an_all_letter_hex_token_is_still_suspected(self):
+        self.assertEqual(suspected('commit deadbeef'), ['deadbeef'])
+        self.assertEqual(suspected('reviewed at cafebabe'), ['cafebabe'])
+
     async def test_a_blocked_reason_naming_a_hf_revision_is_not_flagged(self):
         await self.create('none')
         row = await blocked(self.runtime, self.worker, self.conv_id,
