@@ -5,7 +5,6 @@
   import { HELPER_WINDOWS_INSTALLER_URL } from "../../lib/helper-installer";
   import { screenStatus } from "../../state/screen-status.svelte.js";
   import ControlBadge from "./ControlBadge.svelte";
-  import { layout } from "../../state/layout.svelte.js";
   import { room } from "../../state/room.svelte.js";
   import { walkthrough } from "../../state/walkthrough.svelte.js";
   import { walkthroughApi } from "../../lib/walkthrough-api";
@@ -18,6 +17,7 @@
   } from "../../lib/screen-api";
 
   let open = $state(false);
+  let pickerRequest = untrack(() => screenStatus.openPicker);
   let devices = $state<ScreenDevice[]>([]);
   let deviceId = $state("");
   let monitorId = $state<string | number>("");
@@ -54,6 +54,12 @@
     if (open) void refresh();
   });
   $effect(() => {
+    if (screenStatus.openPicker !== pickerRequest) {
+      pickerRequest = screenStatus.openPicker;
+      open = true;
+    }
+  });
+  $effect(() => {
     if (walkthrough.choose > 0 && walkthrough.selecting) {
       walkthroughDialog = true;
       open = true;
@@ -69,9 +75,6 @@
     } catch (e) {
       error = e instanceof Error ? e.message : "Could not load computers";
     }
-  }
-  function show(): void {
-    open = true;
   }
   function close(): void {
     open = false;
@@ -154,35 +157,29 @@
   }
 </script>
 
-<!-- A phone can neither run the helper nor share its own screen, so the picker
-     is hidden when narrow. A share another device started stays visible as
-     status, with its Stop. -->
-{#if room.conversation && (!layout.narrow || room.screenShare)}
+{#if room.conversation && room.screenShare}
   <div class="flex flex-none flex-wrap items-center gap-2 border-b border-line bg-ink px-4 py-1 text-sm">
-    {#if !layout.narrow}<button type="button" onclick={show}>Computers / Share screen</button>{/if}
-    {#if room.screenShare}
-      <span
-        >{room.screenShare.status === "declined"
-          ? `Sharing declined: ${room.screenShare.reason ?? "no reason given"}`
-          : room.screenShare.status === "waiting"
-            ? `Waiting for consent on ${room.screenShare.device_name}…`
-            : room.screenShare.recording
-              ? `${room.screenShare.handle} is recording a walkthrough on ${room.screenShare.device_name}`
-              : `${room.screenShare.handle} is sharing ${room.screenShare.device_name} (${String(room.screenShare.region.x)}, ${String(room.screenShare.region.y)}, ${String(room.screenShare.region.width)} × ${String(room.screenShare.region.height)})`}</span
+    <span
+      >{room.screenShare.status === "declined"
+        ? `Sharing declined: ${room.screenShare.reason ?? "no reason given"}`
+        : room.screenShare.status === "waiting"
+          ? `Waiting for consent on ${room.screenShare.device_name}…`
+          : room.screenShare.recording
+            ? `${room.screenShare.handle} is recording a walkthrough on ${room.screenShare.device_name}`
+            : `${room.screenShare.handle} is sharing ${room.screenShare.device_name} (${String(room.screenShare.region.x)}, ${String(room.screenShare.region.y)}, ${String(room.screenShare.region.width)} × ${String(room.screenShare.region.height)})`}</span
+    >
+    <ControlBadge />
+    {#if room.screenShare.status !== "declined"}
+      <button
+        type="button"
+        onclick={() => {
+          const shareId = room.screenShare?.share_id;
+          if (shareId)
+            void screenApi.stop(shareId).catch((e: unknown) => {
+              error = e instanceof Error ? e.message : "Stop failed";
+            });
+        }}>Stop</button
       >
-      <ControlBadge />
-      {#if room.screenShare.status !== "declined"}
-        <button
-          type="button"
-          onclick={() => {
-            const shareId = room.screenShare?.share_id;
-            if (shareId)
-              void screenApi.stop(shareId).catch((e: unknown) => {
-                error = e instanceof Error ? e.message : "Stop failed";
-              });
-          }}>Stop</button
-        >
-      {/if}
     {/if}
   </div>
 {/if}

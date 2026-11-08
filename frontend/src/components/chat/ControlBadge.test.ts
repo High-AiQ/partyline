@@ -103,7 +103,7 @@ describe("share status", () => {
 
     layout.narrow = false;
     await tick();
-    expect(document.body.textContent).toContain("Computers / Share screen");
+    expect(document.body.textContent).not.toContain("Computers / Share screen");
     await unmount(component);
   });
 });

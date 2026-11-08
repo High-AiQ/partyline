@@ -2,6 +2,7 @@ import { mount, tick, unmount } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ScreenControls from "./ScreenControls.svelte";
 import { screenApi } from "../../lib/screen-api";
+import { screenStatus } from "../../state/screen-status.svelte.js";
 import { room } from "../../state/room.svelte.js";
 
 /** Drains the promise chains a click starts; no clock involved. */
@@ -131,7 +132,7 @@ describe("pairing instructions", () => {
       if (!button) throw new Error(`missing ${label}`);
       button.click();
     };
-    click("Computers / Share screen");
+    screenStatus.openPicker++;
     await tick();
     click("Pair a computer");
     await settle();
@@ -159,9 +160,7 @@ describe("helper update notice", () => {
     };
     const component = mount(ScreenControls, { target: document.body });
     await tick();
-    [...document.querySelectorAll("button")]
-      .find((item) => item.textContent.trim() === "Computers / Share screen")
-      ?.click();
+    screenStatus.openPicker++;
     await settle();
     return component;
   };
