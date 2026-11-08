@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from .config import config_path
 
 MAX_REPLY = 1024 * 1024
+MAX_ARTIFACT = 32 * 1024 * 1024  # the most the add-on hands over; the helper re-encodes it under 4 MiB
 ENDED = {"blender": "app", "lease": "lease"}  # the add-on says why a session ended; "app" = its End button
 
 
@@ -24,7 +25,7 @@ class ToolSpec:
 
 
 SPECS = {
-    "blender": ToolSpec("Blender", "blender-relay.json", ("exec", "scene_info"),
+    "blender": ToolSpec("Blender", "blender-relay.json", ("exec", "scene_info", "render", "screenshot"),
                         "no Blender add-on found: enable Partyline Relay in Blender and try again"),
 }
 
@@ -49,8 +50,8 @@ class AddonClient:
             raise AddonError(self.spec.missing)
         return port, secret, data
 
-    def request(self, method, path, body=None, timeout=10):
-        """(status, json) from the add-on; the Host header is always 127.0.0.1:<port>."""
+    def _exchange(self, method, path, body, timeout, limit):
+        """(status, raw bytes) from the add-on; the Host header is always 127.0.0.1:<port>."""
         port, secret, _ = self._discover()
         payload = None if body is None else json.dumps(body).encode()
         headers = {"Authorization": "Bearer " + secret}
@@ -60,17 +61,40 @@ class AddonClient:
         try:
             connection.request(method, path, body=payload, headers=headers)
             response = connection.getresponse()
-            raw = response.read(MAX_REPLY + 1)
-            if len(raw) > MAX_REPLY:
+            raw = response.read(limit + 1)
+            if len(raw) > limit:
                 raise AddonError("the add-on's reply was too large")
-            return response.status, (json.loads(raw) if raw else {})
-        except (OSError, http.client.HTTPException, ValueError) as exc:
+            return response.status, raw
+        except (OSError, http.client.HTTPException) as exc:
             raise AddonError(f"{self.spec.label} is not reachable ({exc.__class__.__name__})") from None
         finally:
             connection.close()
 
+    def request(self, method, path, body=None, timeout=10):
+        """(status, json) from the add-on."""
+        status, raw = self._exchange(method, path, body, timeout, MAX_REPLY)
+        try:
+            return status, (json.loads(raw) if raw else {})
+        except ValueError:
+            raise AddonError(f"{self.spec.label} is not reachable (ValueError)") from None
+
+    def fetch(self, session_id, artifact_id):
+        """The bytes of one image the add-on made, which it hands over once."""
+        status, raw = self._exchange("POST", "/artifact", {"session": session_id, "id": artifact_id}, 30,
+                                     MAX_ARTIFACT)
+        if status != 200:
+            try:
+                reason = json.loads(raw).get("error")
+            except (ValueError, AttributeError):
+                reason = None
+            raise AddonError(str(reason or f"{self.spec.label} answered HTTP {status}")[:200])
+        return raw
+
     async def ask(self, method, path, body=None, timeout=10):
         return await asyncio.to_thread(self.request, method, path, body, timeout)
+
+    async def artifact(self, session_id, artifact_id):
+        return await asyncio.to_thread(self.fetch, session_id, artifact_id)
 
     async def info(self):
         status, data = await self.ask("GET", "/status")

@@ -5,7 +5,6 @@ calls to it while a session is active, limits them and keeps the audit. Sessions
 """
 
 import asyncio
-import hashlib
 import os
 import re
 import time
@@ -14,6 +13,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from . import local_tools_audit as audit
+from . import local_tools_media as media
 from .contracts import MessageEvent, MessageResponse
 from .screen_connections import notice
 
@@ -61,6 +61,7 @@ class ToolSession:
     times: deque = field(default_factory=deque)
     count: int = 0
     audit_count: int = 0
+    media_bytes: int = 0
     flusher: asyncio.Task | None = None
 
 
@@ -126,9 +127,10 @@ class LocalTools:
     async def from_helper(self, device: dict, message: dict) -> None:
         kind = message.get("type")
         if kind == "tool_result":
+            data = await media.read(device, message)
             entry = self.waiters.get(message.get("call_id"))
             if entry and entry[0] == device["id"] and not entry[2].done():
-                entry[2].set_result(message)
+                entry[2].set_result(message if data is None else {**message, "data": data})
             return
         item = next((s for s in self.sessions.values() if s.session_id == message.get("session_id")
                      and s.device_id == device["id"]), None)
@@ -203,7 +205,7 @@ class LocalTools:
         item.times.append(now)
         item.count += 1
 
-    async def call(self, conv_id: str, agent: str, op: str, args: dict, timeout: float) -> dict:
+    async def call(self, conv_id: str, agent: str, op: str, args: dict, timeout: float, store=None) -> dict:
         item = self.sessions.get(conv_id)
         if not item or item.status != "active":
             why = f" ({item.reason})" if item and item.reason else ""
@@ -219,10 +221,7 @@ class LocalTools:
             raise ValueError(f"code is larger than {self.limits.max_code} bytes")
         self._spend(item)
         call_id = str(uuid.uuid4())
-        entry = op if code is None else (
-            f"{op} {len(code.encode())} bytes sha {hashlib.sha256(code.encode()).hexdigest()[:8]}: "
-            f"{audit.first_line(code)}")
-        await self._record(item, "call", op, entry, code)
+        await self._record(item, "call", op, audit.entry(op, args, code), code)
         future = asyncio.get_running_loop().create_future()
         self.waiters[call_id] = (device["id"], item.session_id, future)
         try:
@@ -254,7 +253,12 @@ class LocalTools:
             raise ValueError(f"the computer refused the call: {error}")
         failure = result.get("error")
         outcome = "ok" if result.get("ok", True) else f"script error: {(failure or {}).get('type', '?')}"
-        await self._record(item, "result", op, outcome)
+        try:
+            result = await media.attach(store, item, op, result, answer)
+        except ValueError as exc:
+            await self._record(item, "result", op, f"refused: {exc}")
+            raise
+        await self._record(item, "result", op, outcome + media.note(result))
         return result
 
     async def _event(self, item: ToolSession, text: str) -> None:

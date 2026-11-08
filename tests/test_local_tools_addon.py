@@ -40,7 +40,8 @@ class Addon(BaseHTTPRequestHandler):
             status, data = 401, {"error": "bad secret"}
         else:
             status, data = Addon.replies.get(self.path, (200, {"ok": True}))
-        raw = b"x" * (2 * 1024 * 1024) if data == "huge" else json.dumps(data).encode()
+        raw = (b"x" * (2 * 1024 * 1024) if data == "huge" else data if isinstance(data, bytes)
+               else json.dumps(data).encode())
         self.send_response(status)
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
@@ -107,6 +108,23 @@ class AddonClientTests(unittest.IsolatedAsyncioTestCase):
         await client.cancel("s", "c")
         await client.close_session("s")
         self.assertEqual(Addon.seen[-1][1], "/session/close")
+
+    async def test_an_artifact_is_fetched_as_raw_bytes_and_errors_are_plain(self):
+        client = self.client()
+        Addon.replies["/artifact"] = (200, b"\x89PNG-bytes")
+        self.assertEqual(await client.artifact("s", "a1"), b"\x89PNG-bytes")
+        self.assertEqual(Addon.seen[-1][:3], ("POST", "/artifact", {"session": "s", "id": "a1"}))
+        self.assertEqual(Addon.seen[-1][3]["Authorization"], "Bearer " + SECRET)
+        Addon.replies["/artifact"] = (404, {"error": "unknown artifact"})
+        with self.assertRaisesRegex(AddonError, "unknown artifact"):
+            await client.artifact("s", "a1")
+        Addon.replies["/artifact"] = (500, b"<html>")
+        with self.assertRaisesRegex(AddonError, "answered HTTP 500"):
+            await client.artifact("s", "a1")
+        Addon.replies["/artifact"] = (200, b"x" * 100)
+        with patch("partyline_helper.tools_addon.MAX_ARTIFACT", 10), \
+                self.assertRaisesRegex(AddonError, "too large"):
+            await client.artifact("s", "a1")
 
     async def test_missing_unreachable_and_oversized_are_clean_errors(self):
         empty = AddonClient(self.spec, self.dir / "nowhere")

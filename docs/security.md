@@ -19,7 +19,10 @@ Agents can ask to use a program on the person's computer through the helper (`do
 session needs a fresh local Yes on that computer; grants live in memory only; the helper, not the server,
 enforces consent, the lease, idle expiry and the kill switches (tray, Ctrl+Alt+Esc, the add-on's own End
 button). The add-on listens on loopback with a per-install secret and refuses any request carrying a browser
-`Origin`. Every script is audited twice, in the helper's own hash-chained file and on the server.
+`Origin`. Every script is audited twice, in the helper's own hash-chained file and on the server. Images a tool
+makes (renders, viewport screenshots) never travel as the add-on wrote them: the helper fetches each one by id
+(single use, same secret), decodes and re-encodes it under 4 MiB, and the server stores it as line-scoped
+media, capped at 256 MiB per session.
 
 ## Machine API scope
 
