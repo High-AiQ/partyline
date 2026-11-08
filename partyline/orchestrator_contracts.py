@@ -20,6 +20,12 @@ class TaskIn(BaseModel):
     implementer: str = Field(min_length=1, max_length=120)
     review: str | None = Field(default=None, min_length=1, max_length=120)
     base: Literal['head', 'upstream'] = 'head'
+    mode: Literal['full', 'light', 'express'] = Field(
+        default='full',
+        description='full (default): the review cycle. light: the review cycle with gates scaled to the '
+                    'diff (partyline/task_gates.py). express: no reviewer or review cycle (mockups, '
+                    'explorations, assets, one-off investigations); the implementer ends with '
+                    'deliver(what, where). Fixed at creation.')
     memory_limit: str | None = Field(default=None, pattern=r'^[1-9][0-9]{0,5}[KMG]$')
 
 
@@ -50,6 +56,14 @@ class ReviewRequestIn(BaseModel):
         if len(set(names)) != len(names):
             raise ValueError('each repository may appear once')
         return self
+
+
+class DeliverIn(BaseModel):
+    """An express task's report: what was done and where it is. No commit is named."""
+
+    model_config = ConfigDict(extra='forbid')
+    what: str = Field(min_length=1, max_length=1000)
+    where: str = Field(min_length=1, max_length=500)
 
 
 class BlockedIn(BaseModel):
@@ -104,6 +118,7 @@ class TaskReview(BaseModel):
     implementer_id: str
     implementer_preset: str
     policy: str
+    mode: Literal['full', 'light', 'express'] = 'full'
     reviewer_id: str | None = None
     status: Literal['implementing', 'idle', 'in_review', 'approved', 'done', 'blocked']
     round: int

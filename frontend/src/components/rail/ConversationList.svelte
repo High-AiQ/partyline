@@ -9,6 +9,7 @@
    */
   import { SvelteSet } from "svelte/reactivity";
   import TaskStatusChip from "./TaskStatusChip.svelte";
+  import TaskModeIcon from "./TaskModeIcon.svelte";
   import LineMenu from "./LineMenu.svelte";
   import { lineTree, readExpandedLines, storeExpandedLines } from "../../lib/line-tree";
   import { toggleSelection } from "../../lib/bulk-select";
@@ -130,7 +131,11 @@
           {/if}
         </span>
         <span class="min-w-0 flex flex-col items-start gap-1">
-          <span class="conv-name w-full min-w-0 truncate">{conversation.name}</span>
+          <span class="conv-name flex w-full min-w-0 items-center gap-1"
+            ><TaskModeIcon line={conversation} /><span class="min-w-0 flex-1 truncate"
+              >{conversation.name}</span
+            ></span
+          >
           <TaskStatusChip status={conversation.task_status} round={conversation.task_round} />
         </span>
       </button>

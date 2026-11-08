@@ -116,6 +116,8 @@ def quoted(db, conv_id: str, *texts: str) -> list[str]:
 
 def flagged(db, row) -> list[str]:
     """Missing SHAs to print with a terminal report: the hand-off's, then the round's."""
+    if row.get("mode") == "express":
+        return []  # an express task names no commits, so there is nothing to verify
     texts = [row.get("what"), row.get("findings"), row.get("previous_findings")]
     return quoted(db, row["conv_id"], *(text for text in texts if text))
 
@@ -154,6 +156,10 @@ def report_text(db, row) -> str:
     behind that marker rather than stored over the cap and refused.
     """
     status = "stalled" if row["stall_stage"] == 3 else row["status"]
+    if row.get("mode") == "express":
+        return clip(f"Task {row['conv_id']}: express {status}; {row['what'] or ''} — "
+                    f"{row['location'] or ''}\n{row['findings'] or ''}".rstrip(),
+                    reports.MAX_BODY, TRUNCATED)
     repos = row["repositories"]
     where = (' ' + '; '.join(f"{item['repository']} {item['sha']}" for item in repos)
              if len(repos) > 1 else '')
@@ -189,7 +195,7 @@ async def flag(runtime, row, text) -> None:
     Raised after the structured attempt has been recorded, so the call itself
     succeeds: the flag is a finding for the captain, never a rejection.
     """
-    missing = quoted(runtime.db, row["conv_id"], text)
+    missing = [] if row.get("mode") == "express" else quoted(runtime.db, row["conv_id"], text)
     if not missing:
         return
     captain = lead_attachment(runtime.db, row["root_id"])

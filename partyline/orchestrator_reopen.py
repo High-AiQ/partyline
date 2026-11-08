@@ -8,7 +8,7 @@ from .mention_relay import LIVE, live_manager
 from .orchestrator_notices import tell
 from .orchestrator_revive import task_lock
 from .orchestrator_staff import restart
-from .orchestrator_store import require_root, task
+from .orchestrator_store import EXPRESS_BRIEF, require_root, task
 
 
 async def reopen_task(runtime, actor, conv_id, body):
@@ -37,9 +37,10 @@ async def reopen_task(runtime, actor, conv_id, body):
         att = db.get_attachment(row['implementer_id'])
         if att and att['status'] not in LIVE:
             await restart(runtime, att)
+    ending = (EXPRESS_BRIEF if row['mode'] == 'express' else
+              "Commit on this line's branch; never push. Call request_review(sha, what, where) when ready.")
     await tell(runtime, row['implementer_id'],
-               f'New work on this task, reopened by the root captain: {goal}. Commit on this '
-               "line's branch; never push. Call request_review(sha, what, where) when ready.")
+               f'New work on this task, reopened by the root captain: {goal}. {ending}')
     await runtime.broadcast_all(ConversationsChangedEvent())
     return task(db, conv_id)
 

@@ -8,6 +8,10 @@ from .task_workspaces import workspaces
 from .workspace_visibility import workspace_visibility
 
 
+EXPRESS_NO_REVIEW = 'express task: no review — report results with deliver(what, where)'
+EXPRESS_BRIEF = 'Express task: no review. Call deliver(what, where) with the results when done.'
+
+
 def _handle(db, ident):
     att = db.get_attachment(ident) if ident and hasattr(db, 'get_attachment') else None
     return att['name'] if att else None
@@ -156,6 +160,8 @@ def task_actions(db, actor, conv_id):
     actions = set()
     if actor.attachment_id == row['implementer_id']:
         actions.update(('request_review', 'blocked', 'resume_work', 'waiting'))
+        if row['mode'] == 'express':
+            actions.add('deliver')
     if actor.attachment_id == row['reviewer_id']:
         actions.add('review_verdict')
     if row['policy'] == 'captain' and actor.is_lead and actor.conv_id == row['root_id']:
