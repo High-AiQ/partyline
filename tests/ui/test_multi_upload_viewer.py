@@ -1,18 +1,19 @@
 """Real multi-upload viewer geometry, original downloads and gallery regression.
 
-Set PARTYLINE_VIEWER_EVIDENCE to a durable directory to retain captures/downloads.
+Captures and downloads go to PARTYLINE_VIEWER_EVIDENCE, default /var/tmp/partyline-viewer-evidence —
+never into the repo; upload any you need to show to the line (upload_files).
 Run through scripts/capped-test; the browser needs a process-tree memory cap.
 """
 
 import hashlib
 import os
 from pathlib import Path
-import tempfile
 import unittest
 
 from partyline.mcp.client import PartylineClient
 from scripts.uishot import ui_session
 
+EVIDENCE_DEFAULT = "/var/tmp/partyline-viewer-evidence"
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "multi_upload"
 
 
@@ -48,59 +49,59 @@ class MultiUploadViewerTest(unittest.TestCase):
         return box, dimensions
 
     def test_real_uploads_fit_and_download_at_desktop_and_narrow_sizes(self):
-        with tempfile.TemporaryDirectory() as temp:
-            out = Path(os.environ.get("PARTYLINE_VIEWER_EVIDENCE", temp))
-            with ui_session(["viewer regression"], out_dir=out, freeze_animations=True) as ui:
-                page = ui.page
-                page.set_default_timeout(5000)
-                with page.expect_response(lambda r: "/api/conversations/" in r.url
-                                          and r.request.method == "GET"):
-                    page.locator(".conv-row .conv").first.click()
-                conv_id = page.evaluate("() => window.partyline.room.conversation.id")
-                client = PartylineClient.__new__(PartylineClient)
-                client.connection = {"api": ui.base_url, "conversation_id": conv_id,
-                                     "token": ui.auth_headers["Authorization"].removeprefix("Bearer ")}
-                images = sorted(FIXTURES.glob("*-card.*"))
-                client.upload_files(conv_id, [str(p) for p in images], client_key="viewer-images")
-                page.wait_for_selector(".tile:nth-child(6)")
-                self.assertEqual(page.locator(".tile").count(), 6)
-                # The host's sandbox preflight warning is unrelated to this test.
-                page.locator("#fenceUnavailable").evaluate_all("nodes => nodes.forEach(n => n.remove())")
-                page.wait_for_function("() => [...document.querySelectorAll('.tile img')]"
-                                       ".every(i => i.complete && i.naturalWidth > 0)")
-                ui.shot("05-fitted-six-image-gallery")
-                for name, viewport in (("desktop", {"width": 1280, "height": 800}),
-                                       ("narrow", {"width": 390, "height": 844})):
-                    page.set_viewport_size(viewport)
-                    for index, orientation in ((3, "landscape"), (5, "portrait")):
-                        page.locator(".tile").nth(index).click()
-                        box, natural = self.assert_geometry(page, viewport)
-                        self.assertEqual(page.locator(".position").inner_text(), f"{index + 1} / 6")
-                        ui.shot(f"06-{name}-{orientation}-fitted")
-                        with page.expect_download() as pending:
-                            page.locator(".modal .download").click()
-                        download = pending.value
-                        self.assertEqual(download.suggested_filename, images[index].name)
-                        destination = out / f"downloaded-{name}-{images[index].name}"
-                        download.save_as(destination)
-                        self.assertEqual(destination.read_bytes(), images[index].read_bytes())
-                        print(name, orientation, "rendered", box, "natural", natural,
-                              "download SHA256", hashlib.sha256(destination.read_bytes()).hexdigest())
-                        page.locator(".next").click()
-                        self.assertEqual(page.locator(".position").inner_text(), f"{(index + 1) % 6 + 1} / 6")
-                        page.locator(".previous").click()
-                        self.assertEqual(page.locator(".position").inner_text(), f"{index + 1} / 6")
-                        page.locator(".modal .close").click()
-                        page.locator(".modal").wait_for(state="detached")
-                page.set_viewport_size({"width": 1280, "height": 800})
-                texts = sorted(FIXTURES.glob("*.txt"))
-                client.upload_files(conv_id, [str(p) for p in texts], client_key="viewer-texts")
-                page.wait_for_selector(".card:nth-child(6)")
-                self.assertEqual(page.locator(".card").count(), 6)
-                self.assertEqual(page.locator(".tile").count(), 6)
-                for path in texts:
-                    self.assertTrue(page.get_by_role("button", name=f"download {path.name}").is_visible())
-                ui.shot("07-fitted-six-text-attachments")
+        out = Path(os.environ.get("PARTYLINE_VIEWER_EVIDENCE", EVIDENCE_DEFAULT))
+        out.mkdir(parents=True, exist_ok=True)
+        with ui_session(["viewer regression"], out_dir=out, freeze_animations=True) as ui:
+            page = ui.page
+            page.set_default_timeout(5000)
+            with page.expect_response(lambda r: "/api/conversations/" in r.url
+                                      and r.request.method == "GET"):
+                page.locator(".conv-row .conv").first.click()
+            conv_id = page.evaluate("() => window.partyline.room.conversation.id")
+            client = PartylineClient.__new__(PartylineClient)
+            client.connection = {"api": ui.base_url, "conversation_id": conv_id,
+                                 "token": ui.auth_headers["Authorization"].removeprefix("Bearer ")}
+            images = sorted(FIXTURES.glob("*-card.*"))
+            client.upload_files(conv_id, [str(p) for p in images], client_key="viewer-images")
+            page.wait_for_selector(".tile:nth-child(6)")
+            self.assertEqual(page.locator(".tile").count(), 6)
+            # The host's sandbox preflight warning is unrelated to this test.
+            page.locator("#fenceUnavailable").evaluate_all("nodes => nodes.forEach(n => n.remove())")
+            page.wait_for_function("() => [...document.querySelectorAll('.tile img')]"
+                                   ".every(i => i.complete && i.naturalWidth > 0)")
+            ui.shot("05-fitted-six-image-gallery")
+            for name, viewport in (("desktop", {"width": 1280, "height": 800}),
+                                   ("narrow", {"width": 390, "height": 844})):
+                page.set_viewport_size(viewport)
+                for index, orientation in ((3, "landscape"), (5, "portrait")):
+                    page.locator(".tile").nth(index).click()
+                    box, natural = self.assert_geometry(page, viewport)
+                    self.assertEqual(page.locator(".position").inner_text(), f"{index + 1} / 6")
+                    ui.shot(f"06-{name}-{orientation}-fitted")
+                    with page.expect_download() as pending:
+                        page.locator(".modal .download").click()
+                    download = pending.value
+                    self.assertEqual(download.suggested_filename, images[index].name)
+                    destination = out / f"downloaded-{name}-{images[index].name}"
+                    download.save_as(destination)
+                    self.assertEqual(destination.read_bytes(), images[index].read_bytes())
+                    print(name, orientation, "rendered", box, "natural", natural,
+                          "download SHA256", hashlib.sha256(destination.read_bytes()).hexdigest())
+                    page.locator(".next").click()
+                    self.assertEqual(page.locator(".position").inner_text(), f"{(index + 1) % 6 + 1} / 6")
+                    page.locator(".previous").click()
+                    self.assertEqual(page.locator(".position").inner_text(), f"{index + 1} / 6")
+                    page.locator(".modal .close").click()
+                    page.locator(".modal").wait_for(state="detached")
+            page.set_viewport_size({"width": 1280, "height": 800})
+            texts = sorted(FIXTURES.glob("*.txt"))
+            client.upload_files(conv_id, [str(p) for p in texts], client_key="viewer-texts")
+            page.wait_for_selector(".card:nth-child(6)")
+            self.assertEqual(page.locator(".card").count(), 6)
+            self.assertEqual(page.locator(".tile").count(), 6)
+            for path in texts:
+                self.assertTrue(page.get_by_role("button", name=f"download {path.name}").is_visible())
+            ui.shot("07-fitted-six-text-attachments")
 
 
 if __name__ == "__main__":

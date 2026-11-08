@@ -36,6 +36,7 @@ uv run --locked ruff check .        # lint (no autoformatter: match surrounding 
 ./scripts/capped-test               # parallel full suite under a 4 GB memory cap
 uv run --locked coverage report     # ≥90% line and branch, nothing omitted
 ./check-code-lines                  # production files ≤300 lines
+./scripts/check-no-media            # no screenshots, renders or binary assets in any new commit
 cd frontend && npm run verify       # format:check + lint + svelte-check + tests
 ```
 
@@ -57,6 +58,7 @@ Vitest automatically sizes its workers for the cgroup memory limit and a 4 GiB b
 | Mark a genuinely uncoverable line `# pragma: no cover` with a reason | Omit files from coverage |
 | Prefer a plain unit test | Write a browser test (`tests/ui/`) except for layout, hit-testing, or two-sided protocols |
 | Split files along functional boundaries at the 300-line cap | Grow `line-length-exceptions.txt` — it is frozen debt |
+| Upload screenshots, mockups and renders to the line (`upload_file`/`upload_files`) or keep them in `/var/tmp` | Commit them (`.png`, video, `.pdf`, archives, anything over 1 MB) — `scripts/check-no-media` and the `no-media` CI job fail any commit that adds one, even if a later commit deletes it; only `media/` and `tests/fixtures/` are allowed |
 | Look at every visual change; prove invisible ones with `skills/verify-visual-change/SKILL.md` | Claim a visual change is verified from reading code |
 
 ## Frontend

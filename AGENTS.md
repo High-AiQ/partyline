@@ -10,10 +10,11 @@ from structured transcripts, never screen scrapes; `partyline/static/` is built,
 | DO | DO NOT |
 | --- | --- |
 | Post media and service links as host-relative paths (`/api/media/<id>/slim`) or the LAN host | Post `0.0.0.0`, `127.0.0.1`, or `localhost` URLs; people reach this over LAN or HTTPS |
+| Upload screenshots, mockups and renders to the line (or `/var/tmp`) | Commit them to the repo — CI rejects it |
 
 **Gates before every commit** (`docs/agent-rules.md`, Gates): `uv run --locked ruff check .`,
 `./scripts/capped-test` (never the suite uncapped), coverage ≥90%, `./check-code-lines`
-(≤300 lines per production file), `cd frontend && npm run verify && npm run build` and commit
+(≤300 lines per production file), `./scripts/check-no-media` (no screenshots, renders or binaries in any commit), `cd frontend && npm run verify && npm run build` and commit
 the bundle. Tests get their own database automatically; never point one at a real database.
 
 **Ship:** one-line Conventional Commit, semver bump in `partyline/__init__.py` in the same

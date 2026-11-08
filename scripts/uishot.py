@@ -13,7 +13,7 @@ Use as a library:
         ui.shot("menu-open")
 Or from the command line, which captures a standard set of states:
 
-    uv run python -m scripts.uishot                 # writes to /tmp/partyline-ui/
+    uv run python -m scripts.uishot                 # writes to /var/tmp/partyline-ui/
     uv run python -m scripts.uishot --out ./shots   # somewhere else
 
 Never point this at a real database: `PARTYLINE_DB` is always a temp file, and
@@ -182,7 +182,7 @@ SETTLE_ANIMATIONS = """
 
 
 @contextlib.contextmanager
-def ui_session(lines=(), *, out_dir="/tmp/partyline-ui", headless=True, viewport=None,
+def ui_session(lines=(), *, out_dir="/var/tmp/partyline-ui", headless=True, viewport=None,
                handle="screenshot", freeze_animations=False, is_mobile=False, has_touch=False):
     """Start a throwaway partyline, open it in a browser, yield a UiSession.
 
@@ -317,7 +317,7 @@ def seed_room(page):
     page.evaluate("() => document.fonts.ready")
 
 
-def capture_all(out_dir="/tmp/partyline-ui", *, freeze_animations=False) -> list[Path]:
+def capture_all(out_dir="/var/tmp/partyline-ui", *, freeze_animations=False) -> list[Path]:
     """Capture the states a sidebar change should always be checked against."""
     with ui_session(LINES, out_dir=out_dir, freeze_animations=freeze_animations) as ui:
         page = ui.page
@@ -449,7 +449,7 @@ def capture_all(out_dir="/tmp/partyline-ui", *, freeze_animations=False) -> list
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    out = "/tmp/partyline-ui"
+    out = "/var/tmp/partyline-ui"
     if "--out" in argv:
         out = argv[argv.index("--out") + 1]
     shots = capture_all(out)

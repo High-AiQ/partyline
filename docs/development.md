@@ -97,7 +97,7 @@ OS-assigned port with a temp database, signs in through the handle gate, and han
 Playwright page — so a frontend change can be looked at instead of guessed at:
 
 ```bash
-uv run --locked python -m scripts.uishot --out /tmp/partyline-ui   # capture the standard state set
+uv run --locked python -m scripts.uishot --out /var/tmp/partyline-ui   # capture the standard state set
 ```
 
 ```python

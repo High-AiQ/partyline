@@ -13,7 +13,7 @@ by its scroll container.
 
 ```bash
 uv run --locked playwright install chromium                        # once per machine
-uv run --locked python -m scripts.uishot --out /tmp/partyline-ui   # the standard state set
+uv run --locked python -m scripts.uishot --out /var/tmp/partyline-ui   # the standard state set
 ```
 
 `scripts/uishot.py` starts a throwaway server and drives the real page in headless Chromium.
@@ -21,6 +21,10 @@ uv run --locked python -m scripts.uishot --out /tmp/partyline-ui   # the standar
 | DO | DO NOT |
 | --- | --- |
 | Capture the state you changed and open the image with whatever image-viewing capability your harness has | Describe a visual change as verified when you have only checked that it parses |
+| Keep captures in `/var/tmp` and show them by sending them to the line with `upload_file` / `upload_files` | Commit screenshots, mockups, renders or any other generated media into the tree — `scripts/check-no-media` and the `no-media` CI job reject any commit that adds one, even if a later commit deletes it |
+
+Evidence is the *report*, not a file in the repo: say what you looked at and what you saw in
+your handoff message, and upload the images it rests on to the line so a reviewer can open them.
 
 ## Prove an invisible change is invisible
 
