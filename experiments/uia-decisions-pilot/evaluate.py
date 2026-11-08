@@ -111,10 +111,12 @@ def report(dataset, responses, gate):
             'missing_heldout_cases': sorted(CASES - present),
             'verification': {'pairs': len(verification), 'non_success': len(negatives),
                              'false_success': false,
-                             'false_success_upper_95': upper_error(false, len(negatives)),
-                             'successes': sum(p['label'] == 'success' for p in verification),
-                             'detected_successes': sum(verified(p) for p in verification
-                                                       if p['label'] == 'success')},
+                             'independent_error_upper_95': None,
+                             'predicate_labeled_successes': sum(
+                                 p['label'] == 'success' for p in verification),
+                             'predicate_transitions': sum(verified(p) for p in verification),
+                             'warning': 'Circular labels and pre-dispatch refusal controls; '
+                                        'zero false success is constructed, not robustness or recall'},
             'live_pilot_justified': False,
             'limitation': 'Small literal-intent corpus; task-level binomial bounds assume independence. '
                           'Controls in one application are correlated. '

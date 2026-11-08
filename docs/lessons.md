@@ -20,6 +20,18 @@ Also, `Render Result.size` can remain zero after a successful render; report ove
 dimensions from the generated image instead. The relay regression keeps Render
 Result empty while checking the returned dimensions.
 
+## A nonempty UIA recording can still be incomplete
+
+The false assumption was that a nonempty element list made the hosted Windows
+corpus complete. Run 42484211467 was green although all eight common-dialog
+snapshots had `truncated:true`. The experiment collector now fails incomplete
+recordings, and replay excludes an app with any incomplete read before spending.
+The regression is `PreflightTests.test_truncated_apps_excluded_before_model_scoring`
+in `experiments/uia-decisions-pilot/test_protocol.py`. Preserve raw recordings:
+provider offscreen flags and Value support also do not establish visibility or
+writeability, and a predicate used to label success cannot independently validate
+that same verifier.
+
 ## Overlapping phrases can make a regex stall the event loop
 
 The false assumption was that repeating a small list of silence phrases in a regex

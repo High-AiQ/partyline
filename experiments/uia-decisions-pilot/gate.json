@@ -1,0 +1,97 @@
+{
+  "schema": 1,
+  "threshold": 0,
+  "dev_rows_hash": "efd395777615041fced0b910d6e11059e9d9013049cacaf891a45edc8aac329c",
+  "dev_responses_hash": "b3a9b977f002011bf40f499baaae4ff66e88746afec0e9d9e5fd8fdf0a7ae7e2",
+  "rule": "max coverage, zero dev errors, minimum 10 accepts; else reject all",
+  "dev_curve": [
+    {
+      "threshold": 0,
+      "total": 42,
+      "responses": 42,
+      "accepted": 25,
+      "errors": 0,
+      "vetoed": 0,
+      "coverage": 0.5952380952380952,
+      "selective_accuracy": 1.0,
+      "error_upper_95": 0.11292814500684323
+    },
+    {
+      "threshold": 0.5,
+      "total": 42,
+      "responses": 42,
+      "accepted": 25,
+      "errors": 0,
+      "vetoed": 0,
+      "coverage": 0.5952380952380952,
+      "selective_accuracy": 1.0,
+      "error_upper_95": 0.11292814500684323
+    },
+    {
+      "threshold": 0.7,
+      "total": 42,
+      "responses": 42,
+      "accepted": 25,
+      "errors": 0,
+      "vetoed": 0,
+      "coverage": 0.5952380952380952,
+      "selective_accuracy": 1.0,
+      "error_upper_95": 0.11292814500684323
+    },
+    {
+      "threshold": 0.8,
+      "total": 42,
+      "responses": 42,
+      "accepted": 25,
+      "errors": 0,
+      "vetoed": 0,
+      "coverage": 0.5952380952380952,
+      "selective_accuracy": 1.0,
+      "error_upper_95": 0.11292814500684323
+    },
+    {
+      "threshold": 0.9,
+      "total": 42,
+      "responses": 42,
+      "accepted": 25,
+      "errors": 0,
+      "vetoed": 0,
+      "coverage": 0.5952380952380952,
+      "selective_accuracy": 1.0,
+      "error_upper_95": 0.11292814500684323
+    },
+    {
+      "threshold": 0.95,
+      "total": 42,
+      "responses": 42,
+      "accepted": 25,
+      "errors": 0,
+      "vetoed": 0,
+      "coverage": 0.5952380952380952,
+      "selective_accuracy": 1.0,
+      "error_upper_95": 0.11292814500684323
+    },
+    {
+      "threshold": 0.99,
+      "total": 42,
+      "responses": 42,
+      "accepted": 22,
+      "errors": 0,
+      "vetoed": 0,
+      "coverage": 0.5238095238095238,
+      "selective_accuracy": 1.0,
+      "error_upper_95": 0.12730543165483876
+    },
+    {
+      "threshold": 1.01,
+      "total": 42,
+      "responses": 42,
+      "accepted": 0,
+      "errors": 0,
+      "vetoed": 0,
+      "coverage": 0.0,
+      "selective_accuracy": null,
+      "error_upper_95": 1.0
+    }
+  ]
+}
