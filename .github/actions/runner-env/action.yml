@@ -1,0 +1,12 @@
+name: runner-env
+description: Keep package caches inside RUNNER_TEMP, which the runner empties between jobs.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        {
+          echo "UV_CACHE_DIR=$RUNNER_TEMP/uv-cache"
+          echo "UV_PYTHON_INSTALL_DIR=$RUNNER_TEMP/uv-python"
+          echo "npm_config_cache=$RUNNER_TEMP/npm-cache"
+        } >> "$GITHUB_ENV"

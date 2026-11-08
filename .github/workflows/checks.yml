@@ -5,23 +5,35 @@ on:
     branches: [main]
   pull_request:
 
+# A newer push to a pull request cancels that pull request's older run. Pushes
+# to main are never cancelled: tag-version must see every one.
+concurrency:
+  group: checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   backend:
     name: backend
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, partyline]
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/runner-env
       - uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
       # The ffmpeg rescue path for uploads (AVIF and friends) needs a build
-      # that can decode the format; when CI's test errored with an opaque
-      # None the log did not say why. Installing distro ffmpeg guarantees an
-      # AV1-capable decoder so the real rescue runs; where decoding still is
-      # not possible the test skips with its logged reason and the stub
-      # ffmpeg tests carry the coverage instead.
-      - name: system tools for backend tests
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg bubblewrap
+      # that can decode the format, and the sandbox tests need bubblewrap. The
+      # runner is persistent and cannot install packages, so fail with the
+      # package name instead of an opaque test error when one is missing.
+      - name: system tools for backend tests are installed
+        run: |
+          missing=0
+          for pair in ffmpeg:ffmpeg bwrap:bubblewrap; do
+            tool=${pair%%:*}; package=${pair##*:}
+            if ! command -v "$tool" >/dev/null; then
+              echo "::error::$tool is not installed on this runner; install the '$package' package"
+              missing=1
+            fi
+          done
+          exit "$missing"
       - name: lint
         run: uv run --locked ruff check .
       - name: test with coverage
@@ -53,26 +65,70 @@ jobs:
           tests.test_windows_startup
           tests.test_windows_uia
 
-  frontend:
-    name: frontend
-    runs-on: ubuntu-latest
+  # The frontend check is four jobs so the slow type-aware ESLint run overlaps
+  # the quick ones instead of queueing behind them. Branch protection requires
+  # the name "frontend", so that name is the aggregate at the end.
+  frontend-lint:
+    name: frontend-lint
+    runs-on: [self-hosted, linux, partyline]
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/runner-env
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
       - run: npm ci
         working-directory: frontend
-      # The same command a person runs locally, so CI can never be stricter or
-      # laxer than the checkout: format, lint, svelte-check, unit tests.
-      - name: verify
-        run: npm run verify
+      # Type-aware linting spends minutes building the TypeScript model, then
+      # milliseconds per file. The content-keyed cache lets a branch re-lint
+      # only files whose content changed. A stale lint of an untouched file
+      # that depends on a changed type is still caught: svelte-check type-checks
+      # everything on every run in frontend-checks. A new key per run saves
+      # each result; the prefix keys restore the most recent one.
+      - uses: actions/cache@v4
+        with:
+          path: frontend/.eslintcache
+          key: eslint-${{ hashFiles('frontend/package-lock.json', 'frontend/eslint.config.js', 'frontend/tsconfig.json') }}-${{ github.sha }}
+          restore-keys: |
+            eslint-${{ hashFiles('frontend/package-lock.json', 'frontend/eslint.config.js', 'frontend/tsconfig.json') }}-
+            eslint-
+      - name: lint
+        run: npm run lint:ci
         working-directory: frontend
-      # partyline/static/ is committed so the app installs without Node, which
-      # only works if it is actually the current build. Rebuilding and finding
-      # a diff means someone changed the source and shipped the old bundle.
+
+  # Format, svelte-check and unit tests: the rest of `npm run verify`.
+  frontend-checks:
+    name: frontend-checks
+    runs-on: [self-hosted, linux, partyline]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/runner-env
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run format:check
+        working-directory: frontend
+      - run: npm run check
+        working-directory: frontend
+      - run: npm test
+        working-directory: frontend
+
+  # partyline/static/ is committed so the app installs without Node, which
+  # only works if it is actually the current build. Rebuilding and finding
+  # a diff means someone changed the source and shipped the old bundle.
+  frontend-bundle:
+    name: frontend-bundle
+    runs-on: [self-hosted, linux, partyline]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/runner-env
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+        working-directory: frontend
       - name: the committed build matches the source
         run: |
           npm run build --prefix frontend
@@ -81,9 +137,26 @@ jobs:
             exit 1
           fi
 
+  # The required check name. It passes only when every frontend job passed, so
+  # a skipped or cancelled job cannot read as success.
+  frontend:
+    name: frontend
+    if: always()
+    needs: [frontend-lint, frontend-checks, frontend-bundle]
+    runs-on: ubuntu-latest
+    steps:
+      - name: every frontend job passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "frontend job results: $RESULTS"
+          for result in $RESULTS; do
+            [ "$result" = success ] || exit 1
+          done
+
   code-line-limits:
     name: code-line-limits
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, partyline]
     steps:
       - uses: actions/checkout@v4
       - name: production source files stay within their line limits
@@ -91,7 +164,7 @@ jobs:
 
   no-media:
     name: no-media
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, partyline]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -117,7 +190,7 @@ jobs:
 
   conventional-commits:
     name: conventional-commits
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, partyline]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -158,14 +231,13 @@ jobs:
 
   version-policy:
     name: version-policy
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, partyline]
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - uses: ./.github/actions/runner-env
       - uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
       - name: require the release version implied by this change set
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}

@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "lint": "eslint .",
+    "lint:ci": "eslint . --concurrency 2 --cache --cache-strategy content --cache-location .eslintcache",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"src/**/*.{js,ts,svelte,css}\" \"*.{js,ts,json}\"",
     "format:check": "prettier --check \"src/**/*.{js,ts,svelte,css}\" \"*.{js,ts,json}\"",
