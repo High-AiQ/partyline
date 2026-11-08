@@ -1,6 +1,8 @@
 """Request validation shared by the session: numeric bounds and region-on-desktop checks."""
 import math
 
+MAX_MESSAGE_BYTES = 1_000_000  # server reference calls must fit helpers installed with this limit
+
 
 def bounded(value, default, low, high):
     number = float(value if value is not None else default)

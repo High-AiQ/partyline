@@ -9,7 +9,7 @@ import time
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidStatus
 
-from .bounds import bounded, validate_request
+from .bounds import MAX_MESSAGE_BYTES, bounded, validate_request
 from .control import CONTROL_VERSION, Control
 from .images import changed, encode, thumbnail
 from .status import Status
@@ -274,7 +274,7 @@ async def serve(config, desktop, terminal, yes=False, sleep=asyncio.sleep,
     while True:
         try:
             async with connect(url, additional_headers={"Authorization": "Bearer " + config["token"]},
-                               ping_interval=None, max_size=1_000_000) as socket:
+                               ping_interval=None, max_size=MAX_MESSAGE_BYTES) as socket:
                 connected_at = clock()
                 await Session(socket, desktop, terminal, config.get("device_name", "Desktop"),
                               yes, preview_times, clock, session_sleep, border=border,

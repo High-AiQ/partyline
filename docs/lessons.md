@@ -1,5 +1,25 @@
 # Lessons: the false-assumptions ledger
 
+## Message limits apply in both directions
+
+The false assumption was that the server's 4 MiB receive limit also bounded messages
+sent to the helper. Installed helpers accept only 1,000,000 bytes; base64 expands
+reference PNGs, so a permitted reference could close the helper connection. Reference
+PNGs are now capped at 700 KiB and the full outgoing envelope is checked before
+sending. No-wait serialization tests check both helper and add-on limits. Camera
+aspect checks also use the original frame before per-axis resolution clamps.
+
+## Blender property arrays are live views
+
+The false assumption was that saving `getattr(object, "color")` preserves the old
+colour for a temporary render override. Blender returns a live `bpy_prop_array`;
+assigning a new colour mutates that saved view too. The add-on snapshots array
+values before assignment. Its live-array regression and a real Blender overlay
+render verify that colours and render settings return to their previous values.
+Also, `Render Result.size` can remain zero after a successful render; report overlay
+dimensions from the generated image instead. The relay regression keeps Render
+Result empty while checking the returned dimensions.
+
 ## Overlapping phrases can make a regex stall the event loop
 
 The false assumption was that repeating a small list of silence phrases in a regex

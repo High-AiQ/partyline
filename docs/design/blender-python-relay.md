@@ -154,10 +154,27 @@ server enforces grants, the tool list does not hide them.
 | `blender_request` | `checker?` (default false) | pending; @mention on answer. Asks for a session, or, on a live one, only for the extra scope |
 | `blender_exec` | `code`, `timeout_s?` | `{ok, stdout, result?, error{type,message,traceback}, truncated, undo}`. Namespace persists for the session; the last expression value is returned. |
 | `blender_scene_info` | `detail?` (`summary` \| `objects` \| `object` + `name`), `project_to_camera?` | compact JSON: units, frame, camera, objects with name, type, parent, collection, world bbox, and (opt.) camera-space bbox and `in_frame` |
-| `blender_render` | `camera?`, `width`, `height`, `engine?` (`workbench` default, `eevee`), `samples?`, `frame?` | media reference (same shape as `screen_frame`; fetch with `get_media`) plus the settings actually used (clamps are reported, never silent) |
+| `blender_render` | `camera?`, `width`, `height`, `engine?` (`workbench` default, `eevee`), `samples?`, `frame?`, `reference?` (line media id), `overlay_opacity?` (0..1, default 0.5) | media reference (same shape as `screen_frame`; fetch with `get_media`) plus the settings actually used (clamps are reported, never silent) |
 | `blender_screenshot` | `max_size?` | media of the 3D viewport via offscreen capture; for the whole window use `screen_frame` |
 | `blender_cancel` | none | cooperative cancel result |
 | `render_check` (phase c) | see section 6 | verdicts, flagged media only |
+
+**Reference overlay.** `blender_render(reference="<line media id>", overlay_opacity=0.5)`
+stores the composited overlay as its returned media. The server resolves only media on that
+line, reads at most 20 MiB, converts to PNG and sends `reference: {id, png_base64}` through
+the existing helper transport (at most 700 KiB decoded). Base64 plus the call envelope must
+fit the helper's 1,000,000-byte receive limit and the add-on's 3 MiB HTTP body limit; the full message is checked before sending.
+This conservative cap supports installed helpers with the 1 MB limit without an update.
+Each reference side must be 16..2048 pixels; oversized references are refused, never resized.
+The add-on renders with transparent film at the reference's exact dimensions, with square
+pixels and no render border. The scene's camera-frame aspect, or explicit width/height,
+must match within 0.5%; otherwise it refuses. The default frame uses the unclamped scene
+resolution, percentage and pixel aspect; explicit dimensions describe square pixels. All
+overrides are temporary. Samples/frame
+clamps, cancellation, deadlines and discarded late artifacts retain the ordinary render path.
+The reusable add-on `overlay.render_overlay` also works in background scripts; its optional
+`proxies` selection draws flat translucent colours and outlines and restores visibility and
+colours afterwards. Composition uses bpy images and numpy, with no Pillow dependency in Blender.
 
 Errors are plain strings the agent can act on ("not granted; call blender_request", "Blender is busy").
 
