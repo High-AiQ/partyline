@@ -5,10 +5,9 @@ tree would make these tests a statement about that file rather than about the
 code, and a thumbnail test needs a specific size on purpose.
 """
 
+import importlib.util
 import os
 import sqlite3
-import subprocess
-import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -21,6 +20,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from partyline import server
 from partyline import auth_store, auth_tokens, media_files as files, media_images as images
 from partyline.auth_guard import Principal, install_auth_guard
 from partyline.db import Db
@@ -542,28 +542,33 @@ class ImageApiTest(unittest.TestCase):
 class DotenvOrderingTest(unittest.TestCase):
     """A .env-only media directory must win, and the proof cannot be faked.
 
-    ``runtime``, ``media``, and the router all bind at import, so this is a
-    question about import order that an in-process test cannot honestly ask —
-    the module is already imported by then. Each case runs a fresh interpreter
-    in a directory holding a real .env and reports where the store landed.
+    ``runtime``, ``media``, and the router all bind while ``server.py`` runs
+    its body, so this is a question about statement order inside that body. A
+    fresh interpreter answered it honestly but paid half a second of imports
+    per case (a full second on a busy CI runner). The imports are already
+    cached here, so each case executes the module body again as a throwaway
+    module, in a directory holding a real .env, and reads where the store
+    landed. The body is what binds, so a regression that moved ``load_dotenv``
+    below ``media`` fails exactly as it did in a subprocess.
     """
 
     def resolved_root(self, directory: str, dotenv: str | None) -> str:
         if dotenv is not None:
             Path(directory, ".env").write_text(dotenv, encoding="utf-8")
-        finished = subprocess.run(
-            [sys.executable, "-c", "import partyline.server as s; print(s.media.root)"],
-            cwd=directory,
-            capture_output=True,
-            text=True,
-            env={
-                **os.environ,
-                "PARTYLINE_DB": f"{directory}/chat.db",
-                "PYTHONPATH": str(Path(__file__).resolve().parent.parent),
-            },
-        )
-        self.assertEqual(finished.returncode, 0, finished.stderr)
-        return finished.stdout.strip()
+        spec = importlib.util.spec_from_file_location("partyline._dotenv_probe", server.__file__)
+        probe = importlib.util.module_from_spec(spec)
+        probe.__package__ = "partyline"
+        previous = os.getcwd()
+        with mock.patch.dict(os.environ):
+            os.environ.pop("PARTYLINE_MEDIA_DIR", None)
+            os.environ["PARTYLINE_DB"] = f"{directory}/chat.db"
+            os.chdir(directory)
+            try:
+                spec.loader.exec_module(probe)
+            finally:
+                os.chdir(previous)
+        probe.runtime.db.close()
+        return str(probe.media.root)
 
     def test_a_dotenv_media_directory_is_honoured(self):
         # The failing control for grok's QA finding: before .env was merged
