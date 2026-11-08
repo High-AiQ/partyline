@@ -23,7 +23,8 @@ def screen_elements_tool():
     return {"name": "screen_elements", "description": (
         "Read the UI Automation snapshot of one locally consented Windows window, even in the background. "
         "The person chooses and can revoke the window in the helper tray, independent of pixel sharing. "
-        "Element IDs are action targets only for the latest snapshot. "
+        "Element IDs are action targets only for the latest snapshot; each element lists its UIA "
+        "patterns and the screen_element_action `actions` it supports. "
         "Returns elements_unavailable when unavailable."),
         "inputSchema": {"type": "object", "properties": {"device": {"type": "string",
         "description": "Paired computer name when more than one is online."}},

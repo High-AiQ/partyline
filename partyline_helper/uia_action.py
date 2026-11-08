@@ -1,5 +1,7 @@
 """Validate a snapshot target in the selected window before invoking a UIA pattern."""
 from .uia_identity import element_id
+from .uia_patterns import (PATTERN, WINDOW_ACTIONS, ActionRefused, check_argument, refuse_state,
+                           refuse_unsupported)
 from .uia_snapshot import MAX_DEPTH, MAX_ELEMENTS
 
 
@@ -20,22 +22,21 @@ def find(provider, target):
     return None
 
 
-def prepare(provider, target, action, value=None):
-    if action not in ("invoke", "toggle", "set_value"):
-        raise ValueError("unsupported action")
-    if action == "set_value" and not isinstance(value, str):
-        raise ValueError("set_value requires a text value")
+def prepare(provider, target, action, arg=None):
+    check_argument(action, arg)
     node = find(provider, target)
     if node is None or not provider.current():
-        raise ValueError("stale or unknown element")
+        raise ActionRefused("stale or unknown element")
     props = provider.properties(node)
+    provider.state(node, props)
     if not props.get("enabled"):
-        raise ValueError("element is disabled")
-    pattern = {"invoke": "Invoke", "toggle": "Toggle", "set_value": "Value"}[action]
-    if pattern not in props.get("patterns", []):
-        raise ValueError("element does not support this action")
+        raise ActionRefused("element is disabled")
+    is_window = target == element_id(provider, provider.root(), [])
+    if PATTERN[action] not in props.get("patterns", []) or (action in WINDOW_ACTIONS and not is_window):
+        refuse_unsupported(action, props, is_window)
     if action == "set_value" and provider.password(node):
-        raise ValueError("password fields cannot be set")
+        raise ActionRefused("password fields cannot be set")
     if action == "set_value" and provider.read_only(node):
-        raise ValueError("element is read-only")
+        raise ActionRefused("element is read-only")
+    refuse_state(action, props, arg)
     return node, props

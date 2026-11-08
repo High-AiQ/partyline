@@ -36,6 +36,9 @@ class Provider:
     def children(self, node):
         return self.nodes[node].get("children", [])
 
+    def state(self, node, props):
+        """Pattern state is read for an action target only; fakes put it in properties()."""
+
     def properties(self, node):
         self.reads.append(node)
         n = self.nodes[node]

@@ -254,17 +254,41 @@ COM interfaces; it is not installed on other platforms.
 ### Act on elements in the chosen window
 
 With both window access and agent control granted on the same computer, an agent can call
-`screen_element_action` with an ID from the latest `screen_elements` snapshot. The supported
-actions are `invoke`, `toggle` and `set_value`, using the corresponding UI Automation pattern.
+`screen_element_action` with an ID from the latest `screen_elements` snapshot, using the matching
+UI Automation pattern. Each snapshot element lists its `patterns` and the `actions` it supports; the
+helper reads pattern state (range, scroll axes, window abilities) only for the action's target.
+
+| Action | Pattern | Parameters |
+| --- | --- | --- |
+| `invoke`, `toggle` | Invoke, Toggle | none |
+| `set_value` | Value | `value` (text) |
+| `select`, `add_to_selection`, `remove_from_selection` | SelectionItem | none |
+| `expand`, `collapse` | ExpandCollapse | none |
+| `scroll` | Scroll | `direction` (`up`, `down`, `left`, `right`), `amount` (`small`, `large`) |
+| `set_scroll_percent` | Scroll | `horizontal_percent` and/or `vertical_percent`, 0 to 100 |
+| `scroll_into_view` | ScrollItem | none |
+| `set_range_value` | RangeValue | `number`, within the element's minimum and maximum |
+| `window_close`, `window_minimize`, `window_maximize`, `window_restore` | Window | none |
+| `window_move`, `window_resize` | Transform | `x`, `y` (screen pixels) / `width`, `height` |
+
 The helper rechecks the window, element identity, containment, enabled state and supported pattern
-before dispatch. Password fields and read-only values cannot be set. The response includes the
-element's updated name, role, enabled and value or toggle state when available. Partyline does
+before dispatch, and refuses an element that lacks the pattern with an error naming the actions
+it does support. Password fields and read-only values or ranges cannot be set, a range value outside
+the element's minimum and maximum is refused, scrolling needs a scrollable axis and expand/collapse
+a node that can expand. Window actions apply only to the element that is the shared window itself
+(the first snapshot element), never to a child or another window, and honour its minimize, maximize,
+move and resize capabilities. Dragging stays on the pixel path (`screen_drag`).
+`window_close` asks the window to close. If the window is gone when the call returns the result
+says `window_closed` and the grant ends; if the app keeps it open (an unsaved-changes prompt) the
+result says `close_requested`, the grant stays, and it ends as soon as the window disappears. The
+response includes the element's updated name, role, enabled and value, toggle, selection, expand,
+range, scroll or window state when available (and the new bounds after a move or resize). Partyline does
 not synthesize mouse or keyboard input, move the cursor, or call an activation API for these
 actions. The target application can nevertheless bring itself forward in response; classic
-Win32 buttons and checkboxes can do so on Invoke or Toggle, and other apps may activate or
-open dialogs. The response and local audit include `foreground_changed` and `target_came_forward`
-after the pattern call and the element re-read. A timeout or refusal before dispatch cannot
-report those observations.
+Win32 buttons and checkboxes can do so on Invoke or Toggle, restoring a minimized window usually
+activates it, and other apps may activate or open dialogs. The response and local audit include
+`foreground_changed` and `target_came_forward` after the pattern call and the element re-read. A
+timeout or refusal before dispatch cannot report those observations.
 
 Element actions alone do not arm physical mouse or ordinary-key takeback. Press Ctrl+Alt+Esc,
 stop reading the window, stop sharing or revoke agent control to stop further actions. Lock and
@@ -276,7 +300,9 @@ may therefore have application-specific effects.
 
 Each action is recorded in the helper's local hash-chained audit with the requesting agent,
 process, role, name, action and outcome. For `set_value` the audit records the value's length,
-not the submitted text.
+not the submitted text; numeric and enumerated parameters (direction, amount, percentages, number,
+coordinates, size) are recorded as given. Every action uses the same transport, agent-control grant,
+dispatch gate, rate limit, audit and revocation as `invoke`.
 
 ## Platforms and troubleshooting
 
