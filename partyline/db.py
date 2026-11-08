@@ -132,9 +132,9 @@ class Db:
             yield row is not None
 
     # -- conversations -----------------------------------------------------
-    def create_conversation(self, conv_id, name):
-        ts = time.time()
-        self._exec("INSERT INTO conversations(id,name,created_at) VALUES(?,?,?)", (conv_id, name, ts))
+    def create_conversation(self, conv_id, name, captain_mode="orchestrator"):
+        self._exec("INSERT INTO conversations(id,name,created_at,captain_mode) VALUES(?,?,?,?)",
+                   (conv_id, name, time.time(), captain_mode))
         return self.get_conversation(conv_id)
 
     def list_conversations(self, archived=False):

@@ -62,7 +62,7 @@ class HeartbeatFixture(unittest.IsolatedAsyncioTestCase):
         self.runtime = ChatRuntime(self.db)
         self.runtime.broadcast = AsyncMock()
         self.runtime.route_mentions = AsyncMock()
-        self.db.create_conversation(ROOT, "Root")
+        self.db.create_conversation(ROOT, "Root", captain_mode="manager_tree")
         self.db.add_attachment(
             OWNER, ROOT, "astra", "raw", ["sh"], self.directory.name, "owner"
         )
@@ -680,7 +680,7 @@ class RootRevalidationTest(HeartbeatFixture):
     async def test_a_line_that_gains_a_parent_stops_being_eligible(self):
         """Root is a runtime fact: a line can be linked under another later."""
         self.enable()
-        self.db.create_conversation("new-parent", "Parent")
+        self.db.create_conversation("new-parent", "Parent", captain_mode="manager_tree")
         set_parent(self.db, ROOT, "new-parent")
 
         self.assertIsNone(await self.tick(heartbeat.DEFAULT_INTERVAL * 3))
@@ -695,7 +695,7 @@ class TwoRootLinesTest(HeartbeatFixture):
 
     def setUp(self):
         super().setUp()
-        self.db.create_conversation("other-root", "Other Root")
+        self.db.create_conversation("other-root", "Other Root", captain_mode="manager_tree")
         self.db.add_attachment(
             "other-lead", "other-root", "sol", "raw", ["sh"],
             self.directory.name, "owner",
@@ -1242,7 +1242,7 @@ class SnapshotHashTest(HeartbeatFixture):
         with a JSON payload attached.
         """
         first = heartbeat_snapshot.build(self.db, ROOT, 0)
-        self.db.create_conversation("elsewhere", "Unrelated")
+        self.db.create_conversation("elsewhere", "Unrelated", captain_mode="manager_tree")
         self.db.add_message("elsewhere", "greg", "human", "not this tree")
         second = heartbeat_snapshot.build(self.db, ROOT, 0)
 

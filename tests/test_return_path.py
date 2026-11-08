@@ -86,7 +86,7 @@ class Tree(unittest.IsolatedAsyncioTestCase):
         self.clock = FakeClock()
         self.runtime.returns.clock = self.clock.monotonic
         self.runtime.returns.sleep = self.clock.sleep
-        self.db.create_conversation("parent", "Parent")
+        self.db.create_conversation("parent", "Parent", captain_mode="manager_tree")
         create_child_conversation(self.db, "parent", "child", "Child")
         self.speakers = {}
         self.adapters = {}
@@ -846,7 +846,7 @@ class ReturnPathTest(Tree):
         """2026-09-23 write-fence-audit: sol rings terra, terra delegates, the
         worker reports, terra says nothing. sol gets one notice, and it says
         terra said nothing."""
-        self.db.create_conversation("write-fence", "write-fence")
+        self.db.create_conversation("write-fence", "write-fence", captain_mode="manager_tree")
         create_child_conversation(self.db, "write-fence", "write-fence-audit", "write-fence-audit")
         for att_id, line in (
             ("sol", "write-fence"),

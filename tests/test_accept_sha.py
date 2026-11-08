@@ -76,7 +76,7 @@ class AcceptShaTest(unittest.TestCase):
         self.addCleanup(self.client.close)
         self.addCleanup(setattr, server, "runtime", server.runtime)
         server.runtime = self.runtime
-        self.db.create_conversation("root", "Root")
+        self.db.create_conversation("root", "Root", captain_mode="manager_tree")
         self.db.add_attachment("root-lead", "root", "terra", "fake", ["fake"], self.repo)
         self.db._exec("UPDATE attachments SET is_lead=1, status='running' WHERE id='root-lead'")
         user = auth_store.create_user(
@@ -238,7 +238,7 @@ class AcceptShaTest(unittest.TestCase):
         self.assertEqual(handoff_rider(self.db, "root"), "")
 
     def test_the_rider_omits_absent_values(self):
-        self.db.create_conversation("loose", "loose")
+        self.db.create_conversation("loose", "loose", captain_mode="manager_tree")
         self.db._exec(
             "UPDATE conversations SET parent_id='root', accepted_sha=? WHERE id='loose'",
             ("a" * 40,),
@@ -472,7 +472,7 @@ class AcceptShaTest(unittest.TestCase):
 
     def test_tip_of_an_unplaced_or_unknown_line(self):
         # no placed worktree: nothing to read, all nulls, never a crash
-        self.db.create_conversation("det", "det")
+        self.db.create_conversation("det", "det", captain_mode="manager_tree")
         self.db._exec("UPDATE conversations SET parent_id='root', cwd=? WHERE id='det'",
                       (self.repo,))
         seen = self.tip("det")
@@ -716,7 +716,7 @@ class AcceptShaTest(unittest.TestCase):
 
     def test_a_line_outside_a_repository_is_refused(self):
         # a plain directory is neither a placed worktree nor a repository
-        self.db.create_conversation("loose", "loose")
+        self.db.create_conversation("loose", "loose", captain_mode="manager_tree")
         self.db._exec("UPDATE conversations SET parent_id='root', cwd=? WHERE id='loose'",
                       (self.directory.name,))
         response = self.accept(self.commit_detached("work"), conv_id="loose")
@@ -724,12 +724,12 @@ class AcceptShaTest(unittest.TestCase):
         self.assertIn("placed line worktree", response.json()["detail"])
 
     def test_a_line_whose_directory_is_gone_is_refused(self):
-        self.db.create_conversation("ghost", "ghost")
+        self.db.create_conversation("ghost", "ghost", captain_mode="manager_tree")
         self.db._exec(
             "UPDATE conversations SET parent_id='root', cwd=? WHERE id='ghost'",
             ("/nonexistent/repo/.partyline-worktrees/ghost",),
         )
-        self.db.create_conversation("gone", "gone")
+        self.db.create_conversation("gone", "gone", captain_mode="manager_tree")
         self.db._exec("UPDATE conversations SET parent_id='root', cwd=? WHERE id='gone'",
                       ("/nonexistent/plain",))
         sha = "abcdef0123456789"
@@ -768,7 +768,7 @@ class AcceptShaTest(unittest.TestCase):
     def test_accept_is_confined_to_placed_line_worktrees(self):
         # S1: a shared checkout's branch belongs to the person; partyline
         # never fast-forwards it.
-        self.db.create_conversation("det", "det")
+        self.db.create_conversation("det", "det", captain_mode="manager_tree")
         self.db._exec("UPDATE conversations SET parent_id='root', cwd=? WHERE id='det'",
                       (self.repo,))
         main_before = _git("rev-parse", "main", cwd=self.repo).stdout.strip()

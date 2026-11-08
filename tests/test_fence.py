@@ -500,10 +500,10 @@ class ProtectListTest(unittest.TestCase):
         self.addCleanup(self.db.close)
 
     def test_active_lines_protect_each_repo_once_and_archived_lines_drop_out(self):
-        self.db.create_conversation("root", "root")
-        self.db.create_conversation("child", "child")
-        self.db.create_conversation("cwd-only", "cwd only")
-        self.db.create_conversation("archived", "archived")
+        self.db.create_conversation("root", "root", captain_mode="manager_tree")
+        self.db.create_conversation("child", "child", captain_mode="manager_tree")
+        self.db.create_conversation("cwd-only", "cwd only", captain_mode="manager_tree")
+        self.db.create_conversation("archived", "archived", captain_mode="manager_tree")
         self.db.add_attachment("root-att", "root", "root", "fake", ["fake"], self.fix["repo"])
         self.db.add_attachment("child-att", "child", "child", "fake", ["fake"],
                                self.fix["line_wt"])
@@ -849,8 +849,8 @@ class FenceIntegrationTest(unittest.TestCase):
     def test_recorded_review_worktree_gets_its_own_git_metadata_bind(self):
         db = Db(os.path.join(self.directory.name, "review-lines.db"))
         self.addCleanup(db.close)
-        db.create_conversation("conv-int", "line")
-        db.create_conversation("conv-sibling", "sibling")
+        db.create_conversation("conv-int", "line", captain_mode="manager_tree")
+        db.create_conversation("conv-sibling", "sibling", captain_mode="manager_tree")
         db.add_attachment("line-worker", "conv-int", "worker", "fake", ["fake"],
                           self.fix["line_wt"])
         db.add_attachment("sibling-worker", "conv-sibling", "worker", "fake", ["fake"],
@@ -966,7 +966,7 @@ class WriteSetGrantApiTest(unittest.TestCase):
         self.addCleanup(self.client.close)
         self.addCleanup(setattr, server, "runtime", server.runtime)
         server.runtime = self.runtime
-        self.db.create_conversation("root", "Root")
+        self.db.create_conversation("root", "Root", captain_mode="manager_tree")
         self.db.add_attachment("root-lead", "root", "terra", "fake", ["fake"], self.repo)
         self.db._exec("UPDATE attachments SET is_lead=1, status='running' WHERE id='root-lead'")
         user = auth_store.create_user(
@@ -1042,7 +1042,7 @@ class WriteSetGrantApiTest(unittest.TestCase):
             json={"path": second}, headers=headers).status_code, 409)
 
     def test_an_unrelated_machine_cannot_file_a_request(self):
-        self.db.create_conversation("stranger", "Stranger")
+        self.db.create_conversation("stranger", "Stranger", captain_mode="manager_tree")
         self.db.add_attachment("stranger-lead", "stranger", "other", "fake",
                                ["fake"], self.directory.name)
         self.db._exec("UPDATE attachments SET is_lead=1, status='running' WHERE id='stranger-lead'")

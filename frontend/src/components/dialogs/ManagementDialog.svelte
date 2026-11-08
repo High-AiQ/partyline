@@ -18,7 +18,7 @@
   let parentId = $state("");
   let captainId = $state("");
   let appointedId = $state("");
-  let mode = $state<CaptainStyle["captain_mode"]>("manager_tree");
+  let mode = $state<CaptainStyle["captain_mode"]>("orchestrator");
   let review = $state("captain");
   let appointing = $state(false);
   let loading = $state(true);
@@ -43,7 +43,7 @@
         if (cancelled) return;
         managed = detail.conversation;
         parentId = detail.conversation.parent_id ?? "";
-        mode = detail.conversation.captain_mode ?? "manager_tree";
+        mode = detail.conversation.captain_mode ?? "orchestrator";
         review = detail.conversation.default_review_policy ?? "captain";
         return hierarchyApi.lead(conversation.id);
       })
@@ -89,7 +89,7 @@
 
   async function updateStyle(updated: Conversation): Promise<void> {
     managed = updated;
-    mode = updated.captain_mode ?? "manager_tree";
+    mode = updated.captain_mode ?? "orchestrator";
     review = updated.default_review_policy ?? "captain";
     if (room.conversation?.id === updated.id) room.conversation = updated;
     await room.loadConversations();

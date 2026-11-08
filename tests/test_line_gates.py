@@ -54,7 +54,7 @@ class LineGatesTest(unittest.TestCase):
         )
         self.client = TestClient(app)
         self.addCleanup(self.client.close)
-        self.db.create_conversation("root", "Root")
+        self.db.create_conversation("root", "Root", captain_mode="manager_tree")
         self.db.add_attachment("root-lead", "root", "terra", "fake", ["fake"], self.repo)
         self.db._exec("UPDATE attachments SET is_lead=1, status='running' WHERE id='root-lead'")
         self.captain = {"Authorization": "Bearer " + auth_store.ensure_api_token(

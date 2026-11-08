@@ -61,7 +61,7 @@ class ScratchWorktreesTest(unittest.TestCase):
         self.addCleanup(self.client.close)
         self.addCleanup(setattr, server, "runtime", server.runtime)
         server.runtime = self.runtime
-        self.db.create_conversation("root", "Root")
+        self.db.create_conversation("root", "Root", captain_mode="manager_tree")
         self.db.add_attachment("root-lead", "root", "terra", "fake", ["fake"], self.repo)
         self.db._exec("UPDATE attachments SET is_lead=1, status='running' WHERE id='root-lead'")
         user = auth_store.create_user(
@@ -135,7 +135,7 @@ class ScratchWorktreesTest(unittest.TestCase):
         _git("init", "-q", "-b", "main", cwd=other)
         port = os.path.join(other, ".partyline-worktrees", "port")
         os.makedirs(port)
-        self.db.create_conversation("port", "Port")
+        self.db.create_conversation("port", "Port", captain_mode="manager_tree")
         self.db._exec("UPDATE conversations SET parent_id=?, cwd=? WHERE id='port'",
                       (self.kid["id"], port))
         with open(os.path.join(other, "f.txt"), "w") as fh:

@@ -90,7 +90,7 @@ describe("Board captain status", () => {
       document.querySelector<HTMLButtonElement>("#appointCaptain")?.click();
       await vi.waitFor(() => {
         expect(appoint).toHaveBeenCalledWith("line", attachment.id, {
-          captain_mode: "manager_tree",
+          captain_mode: "orchestrator",
           default_review_policy: "captain",
         });
         expect(document.querySelector(".captain-badge")).not.toBeNull();

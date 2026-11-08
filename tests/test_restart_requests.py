@@ -46,7 +46,7 @@ class RestartRequestTest(unittest.TestCase):
             lambda: self.exits.append(True))
         self.client = TestClient(app)
         self.addCleanup(self.client.close)
-        self.db.create_conversation("line", "Line")
+        self.db.create_conversation("line", "Line", captain_mode="manager_tree")
         self.db.add_attachment("cap", "line", "astra", "fake", ["fake"], "/tmp")
         self.db._exec("UPDATE attachments SET is_lead=1, status='running' WHERE id='cap'")
         self.db.add_attachment("wrk", "line", "luna", "fake", ["fake"], "/tmp")
@@ -204,7 +204,7 @@ class RestartRequestTest(unittest.TestCase):
 
     def file_on_child(self):
         # A captain may file on a descendant line; the requester still lives at home.
-        self.db.create_conversation("child", "Child")
+        self.db.create_conversation("child", "Child", captain_mode="manager_tree")
         self.db._exec("UPDATE conversations SET parent_id='line' WHERE id='child'")
         filed = self.client.post("/api/conversations/child/restart-request",
                                  json={"reason": "deploy to the child"}, headers=self.captain)

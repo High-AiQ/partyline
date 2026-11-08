@@ -68,7 +68,7 @@ class WorktreeLifecycleTest(unittest.TestCase):
         self.addCleanup(setattr, server, "_start_attachment", server._start_attachment)
         server.runtime = self.runtime
         server._start_attachment = fake_start
-        self.db.create_conversation("root", "Root")
+        self.db.create_conversation("root", "Root", captain_mode="manager_tree")
         self.db.add_attachment("root-lead", "root", "terra", "fake", ["fake"], self.directory.name)
         self.db._exec("UPDATE attachments SET is_lead=1, status='running' WHERE id='root-lead'")
         user = auth_store.create_user(
@@ -108,7 +108,8 @@ class WorktreeLifecycleTest(unittest.TestCase):
     def test_merged_and_clean_worktree_is_removed(self):
         repo = self._repo()
         self._root_on(repo)
-        placed = place_child(self.db, "root", self.db.create_conversation("kid", "kid")["id"])
+        placed = place_child(self.db, "root", self.db.create_conversation("kid", "kid",
+            captain_mode="manager_tree")["id"])
         self.assertIsNone(worktree_removal_reason(self.db, self.db.get_conversation("kid")))
         self.assertEqual(archive_worktree_if_safe(self.db, "kid"), (True, None))
         self.assertFalse(os.path.exists(placed["cwd"]))
@@ -117,7 +118,8 @@ class WorktreeLifecycleTest(unittest.TestCase):
     def test_unmerged_commits_keep_the_worktree(self):
         repo = self._repo()
         self._root_on(repo)
-        placed = place_child(self.db, "root", self.db.create_conversation("kid", "kid")["id"])
+        placed = place_child(self.db, "root", self.db.create_conversation("kid", "kid",
+            captain_mode="manager_tree")["id"])
         _git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q",
              "--allow-empty", "-m", "unmerged work", cwd=placed["cwd"])
         reason = worktree_removal_reason(self.db, self.db.get_conversation("kid"))
@@ -128,7 +130,8 @@ class WorktreeLifecycleTest(unittest.TestCase):
     def test_uncommitted_changes_are_snapshotted(self):
         repo = self._repo()
         self._root_on(repo)
-        placed = place_child(self.db, "root", self.db.create_conversation("kid", "kid")["id"])
+        placed = place_child(self.db, "root", self.db.create_conversation("kid", "kid",
+            captain_mode="manager_tree")["id"])
         with open(os.path.join(placed["cwd"], "scratch.txt"), "w") as fh:
             fh.write("wip")
         reason = worktree_removal_reason(self.db, self.db.get_conversation("kid"))
@@ -139,7 +142,8 @@ class WorktreeLifecycleTest(unittest.TestCase):
     def test_a_git_failure_reads_as_unmerged_never_as_safe(self):
         repo = self._repo()
         self._root_on(repo)
-        place_child(self.db, "root", self.db.create_conversation("kid", "kid")["id"])
+        place_child(self.db, "root", self.db.create_conversation("kid", "kid",
+            captain_mode="manager_tree")["id"])
         original = worktree_lifecycle._git
 
         def flaky(*args, cwd):
@@ -164,7 +168,8 @@ class WorktreeLifecycleTest(unittest.TestCase):
         _git("push", "-q", "-u", "origin", "main", cwd=repo)
         _git("remote", "set-head", "origin", "-a", cwd=repo)  # what a real clone sets
         self._root_on(repo)
-        placed = place_child(self.db, "root", self.db.create_conversation("kid", "kid")["id"])
+        placed = place_child(self.db, "root", self.db.create_conversation("kid", "kid",
+            captain_mode="manager_tree")["id"])
         _git("-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q",
              "--allow-empty", "-m", "kid work", cwd=placed["cwd"])
         _git("push", "-q", "origin", "line/kid:main", cwd=placed["cwd"])
@@ -177,7 +182,7 @@ class WorktreeLifecycleTest(unittest.TestCase):
 
     def test_a_line_with_no_worktree_of_its_own_is_trivially_safe(self):
         # An inherited, non-git, or shared directory has nothing to keep.
-        self.db.create_conversation("shares", "shares")
+        self.db.create_conversation("shares", "shares", captain_mode="manager_tree")
         self.db._exec("UPDATE conversations SET parent_id='root', cwd=? WHERE id='shares'",
                       (self.directory.name,))
         self.assertIsNone(worktree_removal_reason(self.db, self.db.get_conversation("shares")))
@@ -302,10 +307,13 @@ class WorktreeLifecycleTest(unittest.TestCase):
     def test_startup_sweep_removes_clean_orphans_and_keeps_dirty_ones(self):
         repo = self._repo()
         self._root_on(repo)
-        kid = place_child(self.db, "root", self.db.create_conversation("kid", "kid")["id"])
-        ghost = place_child(self.db, "root", self.db.create_conversation("ghost", "ghost")["id"])
+        kid = place_child(self.db, "root", self.db.create_conversation("kid", "kid",
+            captain_mode="manager_tree")["id"])
+        ghost = place_child(self.db, "root", self.db.create_conversation("ghost", "ghost",
+            captain_mode="manager_tree")["id"])
         dirty_ghost = place_child(
-            self.db, "root", self.db.create_conversation("dirty-ghost", "dirty ghost")["id"])
+            self.db, "root", self.db.create_conversation("dirty-ghost", "dirty ghost",
+                captain_mode="manager_tree")["id"])
         with open(os.path.join(dirty_ghost["cwd"], "scratch.txt"), "w") as fh:
             fh.write("wip")
         # These rows are gone — by hand-editing or a purge interrupted before
@@ -321,7 +329,8 @@ class WorktreeLifecycleTest(unittest.TestCase):
     def test_startup_sweep_never_touches_an_archived_lines_worktree(self):
         repo = self._repo()
         self._root_on(repo)
-        placed = place_child(self.db, "root", self.db.create_conversation("kid", "kid")["id"])
+        placed = place_child(self.db, "root", self.db.create_conversation("kid", "kid",
+            captain_mode="manager_tree")["id"])
         self.db.archive_conversation("kid")
 
         sweep_orphaned_worktrees(self.db)
@@ -334,7 +343,8 @@ class WorktreeLifecycleTest(unittest.TestCase):
         # attachment cwd — the root's conversation row never carries one.
         repo = self._repo()
         self._root_on(repo)
-        ghost = place_child(self.db, "root", self.db.create_conversation("ghost", "ghost")["id"])
+        ghost = place_child(self.db, "root", self.db.create_conversation("ghost", "ghost",
+            captain_mode="manager_tree")["id"])
         self.db._exec("DELETE FROM conversations WHERE id='ghost'")
 
         sweep_orphaned_worktrees(self.db)

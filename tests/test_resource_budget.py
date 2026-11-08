@@ -28,8 +28,8 @@ class ResourceBudgetTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.db = Db(f"{self.tmp.name}/partyline.db")
-        self.db.create_conversation("root", "root line")
-        self.db.create_conversation("child", "child line")
+        self.db.create_conversation("root", "root line", captain_mode="manager_tree")
+        self.db.create_conversation("child", "child line", captain_mode="manager_tree")
         self.db._exec("UPDATE conversations SET parent_id='root' WHERE id='child'")
         self.host = Host(cpus=10, ram_bytes=8 * GIB)
         self.patch_host = patch("partyline.resource_budget.host_resources", return_value=self.host)
@@ -145,14 +145,14 @@ class ResourceBudgetTest(unittest.IsolatedAsyncioTestCase):
         self.attach("captain-b", "root")
         for index in range(3):
             line = f"sub{index}"
-            self.db.create_conversation(line, f"sub line {index}")
+            self.db.create_conversation(line, f"sub line {index}", captain_mode="manager_tree")
             self.db._exec("UPDATE conversations SET parent_id='root' WHERE id=?", (line,))
             self.attach(f"{line}-a", line)
             self.attach(f"{line}-b", line)
-        self.db.create_conversation("grandchild", "grandchild line")
+        self.db.create_conversation("grandchild", "grandchild line", captain_mode="manager_tree")
         self.db._exec("UPDATE conversations SET parent_id='sub0' WHERE id='grandchild'")
         self.attach("deep", "grandchild")
-        self.db.create_conversation("solo", "solo line")
+        self.db.create_conversation("solo", "solo line", captain_mode="manager_tree")
         for index in range(4):
             self.attach(f"solo-{index}", "solo")
         self.assertEqual(snapshot(self.db, self.host)["busiest_line"], "root line")
@@ -301,7 +301,7 @@ class ResourceBudgetTest(unittest.IsolatedAsyncioTestCase):
 
     def test_top_lines_rank_families_by_real_usage(self):
         for line in ("small", "large"):
-            self.db.create_conversation(line, f"{line} line")
+            self.db.create_conversation(line, f"{line} line", captain_mode="manager_tree")
             self.attach(f"{line}-a", line)
             self.attach(f"{line}-b", line)
         runtime = SimpleNamespace(memory_usage={

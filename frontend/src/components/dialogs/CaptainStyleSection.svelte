@@ -16,7 +16,7 @@
   }
   let {
     conversation,
-    mode = $bindable("manager_tree"),
+    mode = $bindable("orchestrator"),
     review = $bindable("captain"),
     showSave,
     onupdate,

@@ -100,7 +100,7 @@ class RetirementAssetsTest(unittest.TestCase):
         self.assertTrue(Path(child["cwd"], "asset").is_file())
 
     def test_shared_checkout_is_never_removed(self):
-        self.db.create_conversation("shared", "Shared")
+        self.db.create_conversation("shared", "Shared", captain_mode="manager_tree")
         self.db._exec("UPDATE conversations SET parent_id='root',cwd=? WHERE id='shared'", (self.repo,))
         child = self.db.get_conversation("shared")
         Path(self.repo, "asset").write_bytes(b"keep")

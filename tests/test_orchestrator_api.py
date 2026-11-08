@@ -24,6 +24,25 @@ class ApiTest(TaskFixture):
                                      MediaStore(self.db, self.directory.name + '/media'),
                                      None, {}, {}, self.start)
 
+    async def test_new_root_defaults_and_existing_style_can_switch(self):
+        from partyline.role_delivery import current_role, _instructions
+
+        self.db.create_conversation('new-root', 'New root')
+        self.db.add_attachment('new-captain', 'new-root', 'new-captain', 'fake',
+                               ['fake'], self.repo, 'owner')
+        self.db._exec("UPDATE attachments SET is_lead=1,status='running' WHERE id='new-captain'")
+        self.assertEqual(self.db.get_conversation('new-root')['captain_mode'], 'orchestrator')
+        self.assertIn('approval IS acceptance', _instructions(current_role(self.db, 'new-captain'), self.db))
+        self.db._exec("UPDATE conversations SET captain_mode='manager_tree' WHERE id='root'")
+        self.db.create_conversation('another', 'Another')
+        self.assertEqual(self.db.get_conversation('root')['captain_mode'], 'manager_tree')
+        route = '/api/conversations/root/captain-style'
+        for mode in ('orchestrator', 'manager_tree'):
+            response = self.client.put(route, json={'captain_mode': mode})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()['captain_mode'], mode)
+            self.assertEqual(self.db.get_conversation('root')['captain_mode'], mode)
+
     async def test_style_and_setting_human_only_root_only_default_captain(self):
         route = '/api/conversations/root/captain-style'
         self.actor = self.captain

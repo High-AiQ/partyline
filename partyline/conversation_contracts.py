@@ -31,7 +31,7 @@ class BlockedArchiveResponse(BaseModel):
 
 
 class ConversationResponse(BaseModel):
-    captain_mode: Literal["manager_tree", "orchestrator"] = "manager_tree"
+    captain_mode: Literal["manager_tree", "orchestrator"] = "orchestrator"
     default_review_policy: str = "captain"
     task_status: Literal["implementing", "idle", "in_review", "approved", "done", "blocked"] | None = None
     task_round: int | None = None

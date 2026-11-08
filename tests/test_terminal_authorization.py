@@ -41,7 +41,7 @@ class TerminalAuthorizationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(adapter.detached), 1)
 
     async def test_unrelated_machine_gets_no_geometry_snapshot_or_viewer(self):
-        self.db.create_conversation("other", "Other")
+        self.db.create_conversation("other", "Other", captain_mode="manager_tree")
         self.db.add_attachment("stranger", "other", "stranger", "fake", ["fake"], "/tmp")
         adapter, ws, task, _ = await self.start_socket(ensure_api_token(self.db, "stranger"))
         await asyncio.wait_for(task, 2)
@@ -118,7 +118,7 @@ class TerminalAuthorizationTest(unittest.IsolatedAsyncioTestCase):
         user = create_user(self.db, "human@example.test", "human", "unused")
         adapter, ws, task, _ = await self.start_socket(
             create_access_token(signing_secret(self.db), user["id"]))
-        self.db.create_conversation("other", "Other")
+        self.db.create_conversation("other", "Other", captain_mode="manager_tree")
         self.change("UPDATE attachments SET conv_id='other' WHERE id='att-1'")
         ws.incoming.put_nowait("denied")
         await self.assert_refused(ws, task, adapter)
@@ -141,7 +141,7 @@ class TerminalAuthorizationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(adapter.detached), 1)
 
     async def test_idle_demotion_revokes_descendant_read(self):
-        self.db.create_conversation("child", "Child")
+        self.db.create_conversation("child", "Child", captain_mode="manager_tree")
         self.change("UPDATE conversations SET parent_id='line' WHERE id='child'")
         self.db.add_attachment("target", "child", "target", "fake", ["fake"], "/tmp")
         with patch("partyline.terminal_stream.AUTH_CHECK_INTERVAL", 0.01):

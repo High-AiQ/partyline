@@ -29,8 +29,8 @@ class LifecycleTest(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.db = Db(f"{self.directory.name}/test.db")
         self.runtime = ChatRuntime(self.db)
-        self.db.create_conversation("line", "Line")
-        self.db.create_conversation("other", "Other")
+        self.db.create_conversation("line", "Line", captain_mode="manager_tree")
+        self.db.create_conversation("other", "Other", captain_mode="manager_tree")
         self.runtime.broadcast = AsyncMock()
         self.runtime.route_mentions = AsyncMock()
         self.spawn_failure = False
@@ -226,7 +226,7 @@ class LifecycleTest(unittest.TestCase):
         self.assertEqual(self.fresh({"checkpoint": "docs/state.md", "after_message_id": 0}).status_code, 422)
 
     def test_fresh_refuses_a_live_handle_on_a_related_line(self):
-        self.db.create_conversation("kid", "Kid")
+        self.db.create_conversation("kid", "Kid", captain_mode="manager_tree")
         self.db._exec("UPDATE conversations SET parent_id='line' WHERE id='kid'")
         self.db.add_attachment(
             "kid-worker", "kid", "worker", "raw", ["sh"], self.directory.name
@@ -373,8 +373,8 @@ class RemoteRecordRemovalTest(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.db = Db(f"{self.directory.name}/test.db")
         self.runtime = ChatRuntime(self.db)
-        self.db.create_conversation("line", "Line")
-        self.db.create_conversation("other", "Other")
+        self.db.create_conversation("line", "Line", captain_mode="manager_tree")
+        self.db.create_conversation("other", "Other", captain_mode="manager_tree")
         self.runtime.broadcast = AsyncMock()
         app = FastAPI()
         install_auth_guard(app, self.db)

@@ -25,7 +25,7 @@ class StaffingApiTest(unittest.TestCase):
         app.include_router(hierarchy_router(self.runtime))
         app.include_router(staffing_router(self.runtime))
         self.client = TestClient(app)
-        self.db.create_conversation("parent", "Parent")
+        self.db.create_conversation("parent", "Parent", captain_mode="manager_tree")
         self.db.add_attachment("lead-att", "parent", "astra", "fake", ["run"], "/tmp")
         self.db.add_attachment("impl-att", "parent", "grok", "fake", ["run"], "/tmp")
         # Not live: a line carrying a live worker is assigned, not split.
@@ -127,9 +127,9 @@ class StaffingLineTest(unittest.TestCase):
         db = Db(f"{directory.name}/partyline.db")
         self.addCleanup(db.close)
         self.assertEqual(staffing_line(db, "root"), "")  # no presets: nothing to say
-        db.create_conversation("root", "Root")
-        db.create_conversation("kid", "Kid")
-        db.create_conversation("other", "Other")
+        db.create_conversation("root", "Root", captain_mode="manager_tree")
+        db.create_conversation("kid", "Kid", captain_mode="manager_tree")
+        db.create_conversation("other", "Other", captain_mode="manager_tree")
         db._exec("UPDATE conversations SET parent_id=? WHERE id=?", ("root", "kid"))
         for name, adapter, traits in (
             ("opus", "claude", {"can_manage": True, "implements": False}),
@@ -166,9 +166,9 @@ class CaptainInstancesTest(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.db = Db(os.path.join(self.directory.name, "partyline.db"))
         self.addCleanup(self.db.close)
-        self.db.create_conversation("root", "Root")
-        self.db.create_conversation("a", "Alpha")
-        self.db.create_conversation("b", "Beta")
+        self.db.create_conversation("root", "Root", captain_mode="manager_tree")
+        self.db.create_conversation("a", "Alpha", captain_mode="manager_tree")
+        self.db.create_conversation("b", "Beta", captain_mode="manager_tree")
         self.db._exec("UPDATE conversations SET parent_id='root' WHERE id IN ('a','b')")
         self.db.save_preset("astra", "Astra", "astra", "raw", "raw --x",
                             can_manage=True, implements=False, max_instances=3)

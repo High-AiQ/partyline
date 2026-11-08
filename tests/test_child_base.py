@@ -65,7 +65,7 @@ class ChildBaseTest(unittest.TestCase):
         self.addCleanup(self.client.close)
         self.addCleanup(setattr, server, "runtime", server.runtime)
         server.runtime = self.runtime
-        self.db.create_conversation("root", "Root")
+        self.db.create_conversation("root", "Root", captain_mode="manager_tree")
         self.db.add_attachment("root-lead", "root", "terra", "fake", ["fake"], self.repo)
         self.db._exec("UPDATE attachments SET is_lead=1, status='running' WHERE id='root-lead'")
         user = auth_store.create_user(
@@ -214,7 +214,7 @@ class ChildBaseTest(unittest.TestCase):
 
     def test_the_upstream_base_rides_the_birth_notice_of_placed_records(self):
         placed = place_child(self.db, "root",
-                             self.db.create_conversation("kid", "kid")["id"])
+                             self.db.create_conversation("kid", "kid", captain_mode="manager_tree")["id"])
         self.assertNotIn("cut from", placed.get("base") or "")
         self.assertIsNone(placed["base"])
 
