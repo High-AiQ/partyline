@@ -34,6 +34,7 @@ class FakeAddon:
         self.info_error = self.open_error = None
         self.release = None  # a Future a call waits on
         self.reply = {"result": {"ok": True, "stdout": "hi\n", "result": None}}
+        self.artifacts, self.fetched = {}, []  # image bytes by artifact id; ids asked for
 
     async def info(self):
         if self.info_error:
@@ -60,6 +61,12 @@ class FakeAddon:
         if self.release:
             await self.release
         return self.reply
+
+    async def artifact(self, session_id, artifact_id):
+        self.fetched.append((session_id, artifact_id))
+        if artifact_id not in self.artifacts:
+            raise AddonError("unknown artifact")
+        return self.artifacts.pop(artifact_id)
 
     async def cancel(self, session_id, call_id):
         self.cancelled.append(call_id)

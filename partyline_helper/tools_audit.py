@@ -9,6 +9,14 @@ from .config import config_path
 MAX_CODE = 65536
 
 
+def entry(op, args, code=None):
+    """One audit line per call: a script by size (its hash is its own field), anything else by arguments."""
+    if code is not None:
+        return f"{op} {len(code.encode())} bytes"
+    shown = json.dumps(args, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return f"{op} {shown[:200]}" if args else op
+
+
 class ToolAudit:
     """Appended before a script is sent; an unwritable log refuses the call (fail closed)."""
 
