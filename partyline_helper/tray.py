@@ -46,8 +46,11 @@ class Tray:
             item(lambda _: self.status.label, None, enabled=False),
             item("Stop sharing", lambda *_: self.status.request_stop_share(),
                  enabled=lambda _: self.sharing()),
-            item("Allow agents to read a window…", lambda *_: self.status.request_choose_window()),
-            item("Stop reading window", lambda *_: self.status.request_stop_window(),
+            item("Share a window…", lambda *_: self.status.request_choose_window()),
+            *(item(label, self.backend.Menu(item("Stop", lambda *_, key=ident:
+                  self.status.request_stop_window_grant(key))))
+              for ident, label in self.status.window_grants.items()),
+            item("Stop all window sharing", lambda *_: self.status.request_stop_window(),
                  enabled=lambda _: bool(self.status.window_title)),
             item("End agent session", lambda *_: self.status.request_stop_tools(),
                  enabled=lambda _: self.tools()),
@@ -76,6 +79,7 @@ class Tray:
                 with contextlib.suppress(Exception):  # a broken tray must never break the helper
                     self.icon.icon = draw_icon(self.status.state)
                     self.icon.title = f"{TITLE}: {self.status.label}"
+                    self.icon.menu = self.menu()
                     self.icon.update_menu()
 
     def notify(self, text):

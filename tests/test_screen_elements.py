@@ -3,7 +3,7 @@ import asyncio
 import json
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 from partyline.screen_elements import ElementsHub
 from partyline_helper.uia_access import WindowAccess
@@ -22,26 +22,29 @@ class ElementsTests(unittest.IsolatedAsyncioTestCase):
         socket = Socket()
         devices = {"d": {"id": "d", "conv_id": "line", "name": "PC", "socket": socket}}
         hub = ElementsHub(SimpleNamespace(devices=devices))
-        with patch("partyline.screen_elements.line_devices", return_value=[devices["d"]]) as visible:
-            task = asyncio.create_task(hub.read("line"))
-            request = await socket.messages.get()
-            response = {"request_id": request["request_id"], "snapshot_id": "s", "window_title": "Editor",
-                        "process_name": "app.exe", "elements": [{"id": 1, "name": "one\ntwo"}],
-                        "truncated": True, "truncation": "time budget; page content not reached"}
-            hub.receive({"id": "wrong"}, response)
-            self.assertFalse(task.done())
-            hub.receive({"id": "d"}, response)
-            result = await task
-            self.assertEqual("s", result["snapshot_id"])
-            self.assertEqual("one\ntwo", json.loads(result["elements"])["name"])
-            self.assertEqual(1, len(result["elements"].splitlines()))
-            self.assertEqual("time budget; page content not reached", result["truncation"])
-            self.assertEqual({}, hub.waiters)
-            visible.return_value = []
-            self.assertIn("elements_unavailable", await hub.read("elsewhere"))
-            devices["other"] = {**devices["d"], "id": "other"}
-            visible.return_value = list(devices.values())
-            self.assertIn("multiple", (await hub.read("line"))["elements_unavailable"])
+        principal = SimpleNamespace(kind="machine", attachment_id="a")
+        grant = {"id": "g", "title": "Editor", "process": "app.exe"}
+        from unittest.mock import patch
+        resolved = patch("partyline.screen_elements.resolve_window", return_value=(grant, devices["d"]))
+        required = patch("partyline.screen_elements.require_window")
+        resolved.start()
+        required.start()
+        self.addCleanup(resolved.stop)
+        self.addCleanup(required.stop)
+        task = asyncio.create_task(hub.read(principal))
+        request = await socket.messages.get()
+        response = {"request_id": request["request_id"], "snapshot_id": "s", "window_title": "Editor",
+                    "process_name": "app.exe", "elements": [{"id": 1, "name": "one\ntwo"}],
+                    "truncated": True, "truncation": "time budget; page content not reached"}
+        hub.receive({"id": "wrong"}, response)
+        self.assertFalse(task.done())
+        hub.receive({"id": "d"}, response)
+        result = await task
+        self.assertEqual("s", result["snapshot_id"])
+        self.assertEqual("one\ntwo", json.loads(result["elements"])["name"])
+        self.assertEqual(1, len(result["elements"].splitlines()))
+        self.assertEqual("time budget; page content not reached", result["truncation"])
+        self.assertEqual({}, hub.waiters)
 
     async def test_revocation_during_read_discards_result(self):
         import threading
@@ -108,16 +111,16 @@ class ElementActionTransportTests(unittest.IsolatedAsyncioTestCase):
         from fastapi import HTTPException
         from partyline.screen_element_actions import ElementAction, element_action
         socket = Socket()
-        share = SimpleNamespace(share_id="share")
         device = {"id": "pc", "socket": socket}
-        grant = SimpleNamespace(status="active", holder="agent")
-        control = SimpleNamespace(target=lambda _: (share, device), grants={"share": grant}, _spend=Mock())
         elements = ElementsHub(SimpleNamespace(devices={}))
-        hub = SimpleNamespace(control=control, elements=elements)
-        principal = SimpleNamespace(name="agent")
+        hub = SimpleNamespace(elements=elements, window_grants=SimpleNamespace(spend=Mock()))
+        grant = {"id": "g"}
+        principal = SimpleNamespace(name="agent", kind="machine", attachment_id="a")
         body = ElementAction(element_id="target", action="toggle")
         with patch("partyline.screen_element_actions.request_principal", return_value=principal), \
-             patch("partyline.screen_element_actions.deny_unless"):
+             patch("partyline.screen_element_actions.deny_unless"), \
+             patch("partyline.screen_element_actions.resolve_window", return_value=(grant, device)), \
+             patch("partyline.screen_elements.require_window"):
             task = asyncio.create_task(element_action(SimpleNamespace(db=None), hub, "line", body, None))
             request = await socket.messages.get()
             self.assertEqual("window_element_action", request["type"])
@@ -128,10 +131,10 @@ class ElementActionTransportTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual({"status": "completed", "foreground_changed": True,
                               "target_came_forward": True}, await task)
             self.assertFalse(elements.waiters)
-            grant.status = "revoked"
+            body.value = "foreign parameter"
             with self.assertRaises(HTTPException) as error:
                 await element_action(SimpleNamespace(db=None), hub, "line", body, None)
-            self.assertIn("not granted", error.exception.detail)
+            self.assertIn("does not take", error.exception.detail)
 
 
 class WindowIdentityTests(unittest.IsolatedAsyncioTestCase):

@@ -35,7 +35,8 @@ def available_windows(platform=sys.platform):
 
 class WindowAccess:
     def __init__(self, session, picker=select_window, list_windows=available_windows, reader=read,
-                 platform=sys.platform):
+                 platform=sys.platform, on_revoke=None):
+        self.on_revoke = on_revoke
         self.session, self.picker, self.list_windows, self.reader = session, picker, list_windows, reader
         self.platform, self.grant, self.generation = platform, None, 0
         self.unavailable = "not consented"
@@ -69,6 +70,8 @@ class WindowAccess:
             if grant.get("marker"):
                 unmark(grant)
             self.session.status.changed()
+            if self.on_revoke:
+                self.on_revoke(reason)
             try:
                 self.session.tools.audit.append("event", "window", "local", "window_read",
                                                 f"revoked ({reason}): {grant['title']} ({grant['process']})")

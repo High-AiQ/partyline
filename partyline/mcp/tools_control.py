@@ -21,6 +21,8 @@ ELEMENT_ACTION_NOTE = (
     "No input is synthesized and the pointer never moves; the app may still bring itself forward and the "
     "result reports foreground_changed / target_came_forward. For dragging use screen_drag.")
 ELEMENT_ACTION_PROPERTIES = {
+    "window": {"type": "string",
+               "description": "Window grant id or title when several windows are shared with you."},
     "element_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "action": {"type": "string", "enum": [
         "invoke", "toggle", "set_value", "select", "add_to_selection", "remove_from_selection", "expand",

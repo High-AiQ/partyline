@@ -97,13 +97,25 @@ class ScreenTest(unittest.TestCase):
 
     def test_new_account_device_can_read_window_from_another_line(self):
         self.db.create_conversation("other", "Other")
+        self.db.add_attachment("reader", "other", "reader", "raw", ["shell"], "/tmp", "private-activation")
+        machine = {"Authorization": "Bearer " + auth_store.ensure_api_token(self.db, "reader")}
         device = self.pair()
         headers = {"Authorization": "Bearer " + device["token"]}
         with self.client.websocket_connect("/api/screen/helper", headers=headers) as ws:
             self.hello(ws)
-            future = self.executor.submit(self.client.post, "/api/conversations/other/screen-elements")
+            self.assertEqual(403, self.client.post(
+                "/api/conversations/other/screen-elements", headers=machine).status_code)
+            ws.send_json({"type": "list_share_targets", "request_id": "targets"})
+            self.assertEqual("reader", ws.receive_json()["lines"][0]["processes"][0]["attachment_id"])
+            ws.send_json({"type": "window_grant", "request_id": "grant", "targets_request_id": "targets",
+                          "grant_id": "window", "attachment_id": "reader", "hwnd": 10,
+                          "title": "Editor", "process": "app.exe"})
+            self.assertTrue(ws.receive_json()["ok"])
+            future = self.executor.submit(self.client.post, "/api/conversations/other/screen-elements",
+                                          headers=machine)
             command = ws.receive_json()
             self.assertEqual(command["type"], "read_window_elements")
+            self.assertEqual("window", command["grant_id"])
             ws.send_json({"type": "window_elements", "request_id": command["request_id"],
                           "snapshot_id": "s", "window_title": "Editor", "elements": [{"name": "Hello"}]})
             response = future.result()

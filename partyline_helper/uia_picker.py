@@ -11,8 +11,8 @@ def main(path):  # pragma: no cover - native Windows dialog, exercised by Window
     options = windows(exclude=(os.getppid(),)) or []
     root = tk.Tk()
     root.title("Partyline window access")
-    tk.Label(root, text="Choose a window to let agents read. With separate agent control consent, "
-                       "they can also act on its elements. No window is selected by default.",
+    tk.Label(root, text="Choose a window, then choose the one process allowed to read and act on it. "
+                       "No window is shared until both choices are confirmed.",
              wraplength=500).pack()
     listing = tk.Listbox(root, width=80, height=min(20, max(3, len(options))))
     for item in options:
@@ -25,8 +25,8 @@ def main(path):  # pragma: no cover - native Windows dialog, exercised by Window
         choice = listing.curselection()
         if choice:
             item = options[choice[0]]
-            detail.set(f"Let agents read {item['title']} ({item['process']}); "
-                       "separate agent control consent also permits element actions.")
+            detail.set(f"Choose {item['title']} ({item['process']}); "
+                       "next, choose the process to share it with.")
 
     def grant():
         choice = listing.curselection()
@@ -42,7 +42,7 @@ def main(path):  # pragma: no cover - native Windows dialog, exercised by Window
         root.destroy()
 
     listing.bind("<<ListboxSelect>>", selected)
-    tk.Button(root, text="Allow selected window", command=grant).pack(side="left", padx=12, pady=12)
+    tk.Button(root, text="Next: choose process", command=grant).pack(side="left", padx=12, pady=12)
     tk.Button(root, text="Cancel", command=root.destroy).pack(side="right", padx=12, pady=12)
     root.after(60000, root.destroy)
     root.mainloop()

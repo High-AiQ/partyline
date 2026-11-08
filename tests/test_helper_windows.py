@@ -351,6 +351,23 @@ class TrayTests(unittest.TestCase):
         self.assertTrue(icon.stopped)
         shown.stop()  # idempotent
 
+    def test_each_window_menu_stops_only_its_own_grant(self):
+        status = Status()
+        status.window_grants = {"first": "Editor → @builder «Dev»", "second": "Browser → @designer «Design»"}
+        stopped = []
+        status.stop_window_grant = stopped.append
+        shown = tray.start_tray(status, FAKE_BACKEND)
+        menu = shown.icon.menu
+        windows = [item for item in menu if "→" in str(item.text)]
+        self.assertEqual(2, len(windows))
+        windows[0].action[0].action()
+        windows[1].action[0].action()
+        self.assertEqual(["first", "second"], stopped)
+        status.window_grants = {"second": status.window_grants["second"]}
+        status.changed()
+        self.assertEqual(1, len([item for item in shown.icon.menu if "→" in str(item.text)]))
+        shown.stop()
+
     def test_each_state_has_its_own_colour_and_a_tray_that_cannot_start_is_none(self):
         pixels = {state: tray.draw_icon(state).getpixel((32, 32)) for state in tray.COLORS}
         self.assertEqual(len(set(pixels.values())), 5)

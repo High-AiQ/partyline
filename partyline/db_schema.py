@@ -17,6 +17,7 @@ from .local_tools_schema import MIGRATIONS as LOCAL_TOOLS_AUDIT
 from .screen_audit_schema import MIGRATIONS as SCREEN_AUDIT
 from .screen_schema import MIGRATIONS as SCREEN
 from .screen_account_schema import MIGRATIONS as SCREEN_ACCOUNT
+from .screen_grant_schema import MIGRATIONS as SCREEN_GRANTS
 from .orchestrator_schema import MIGRATIONS as ORCHESTRATOR
 from .asr_schema import MIGRATIONS as ASR
 MIGRATIONS = [
@@ -254,8 +255,7 @@ MIGRATIONS = [
         granted_at REAL NOT NULL,
         PRIMARY KEY (conv_id, path)
     )""",
-    # One pending write-set request per line; approval moves the path into
-    # conversation_write_grants and clears this row.
+    # Approval moves a pending write-set request into conversation_write_grants.
     """CREATE TABLE IF NOT EXISTS conversation_write_grant_requests(
         conv_id TEXT NOT NULL PRIMARY KEY,
         id TEXT NOT NULL,
@@ -264,7 +264,6 @@ MIGRATIONS = [
         requester_attachment_id TEXT,
         created_at REAL NOT NULL
     )""",
-    # The live activation start differs from attachment creation after Resume.
     "ALTER TABLE attachments ADD COLUMN runtime_started_at REAL",
     """CREATE TABLE IF NOT EXISTS operator_restart_approvals(
         request_id TEXT PRIMARY KEY, token_hash TEXT NOT NULL, expires_at REAL NOT NULL)""",
@@ -298,3 +297,4 @@ MIGRATIONS.extend(MEMORY + IDEMPOTENCY + NOTES + COMPACTION + ACCEPT_HISTORY + S
                   + GATES + AUTO_COMPACT + DOCKER_MODE + BRIDGE + RETIREMENT + ORCHESTRATOR + HANDOVER)
 MIGRATIONS.extend(["ALTER TABLE attachments ADD COLUMN is_successor INTEGER NOT NULL DEFAULT 0"] + SCREEN
                   + ASR + SCREEN_AUDIT + LOCAL_TOOLS_AUDIT + SCREEN_ACCOUNT)
+MIGRATIONS.extend(SCREEN_GRANTS)

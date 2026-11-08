@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
+  import WindowGrantList from "./WindowGrantList.svelte";
   import Modal from "../Modal.svelte";
   import PairingSteps from "../PairingSteps.svelte";
   import { HELPER_WINDOWS_INSTALLER_URL } from "../../lib/helper-installer";
@@ -224,6 +225,7 @@
           >
         {/if}
       </div>
+      <WindowGrantList grants={item.window_grants ?? []} {refresh} />
     {/each}
     {#if device}
       <h3>Choose a monitor</h3>

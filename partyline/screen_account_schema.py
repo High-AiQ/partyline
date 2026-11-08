@@ -2,7 +2,7 @@
 
 
 # Every boot copies and swaps the table, even after migration; this is data-safe:
-# no foreign keys reference screen_devices, and the old and new column orders match.
+# column orders match; referencing window grants are ephemeral and end on app startup.
 MIGRATIONS = [
     """CREATE TABLE IF NOT EXISTS screen_devices_account(
         id TEXT PRIMARY KEY, owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

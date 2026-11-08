@@ -68,7 +68,9 @@ class ScreenRequestTest(unittest.IsolatedAsyncioTestCase):
                           return_value={"elements_unavailable": "not consented"}) as read:
             response = await self.client.post("/api/conversations/line/screen-elements?device=PC")
         self.assertEqual(response.json(), {"elements_unavailable": "not consented"})
-        read.assert_awaited_once_with("line", "PC")
+        read.assert_awaited_once()
+        principal, device, window = read.await_args.args
+        self.assertEqual(("user", "person", "PC", None), (principal.kind, principal.name, device, window))
 
     async def test_failed_sends_clean_both_waiter_maps(self):
         from fastapi import WebSocketDisconnect

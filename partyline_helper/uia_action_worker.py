@@ -174,9 +174,9 @@ class ActionWorker:
             result = {"status": "failed", "error": "previous action still running in the app"}
         elif not grant or not props:
             result = {"status": "failed", "error": "stale or unknown element"}
-        elif (not self.session.accepted or not self.session.share or not self.session.control.granted
-              or message.get("share_id") != self.session.share.get("share_id")
-              or access.gate.revoked.is_set()):
+        elif (access.gate.revoked.is_set() or (not getattr(self.session, "window_grant_id", None) and
+              (not self.session.accepted or not self.session.share or not self.session.control.granted
+               or message.get("share_id") != self.session.share.get("share_id")))):
             result = {"status": "failed", "error": "revoked"}
         else:
             generation = access.gate.generation

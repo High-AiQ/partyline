@@ -32,7 +32,15 @@ def screen_elements_tool():
         "A browser page's Document is read before the toolbars. When truncated is true, the truncation "
         "line says what was left unread (for example page content not reached): retry rather than "
         "assume the page is empty. "
+        "With several windows, pass window by grant id or title from the ambiguity list. "
         "Returns elements_unavailable when unavailable."),
         "inputSchema": {"type": "object", "properties": {"device": {"type": "string",
-        "description": "Paired computer name when more than one is online."}},
+        "description": "Computer name when more than one is online."}, "window": {"type": "string",
+        "description": "Window grant id or title; required when several windows are shared with you."}},
         "required": [], "additionalProperties": False}}
+
+
+def elements_query(args):
+    from urllib.parse import quote
+    query = "&".join(key + "=" + quote(args[key], safe="") for key in ("device", "window") if args.get(key))
+    return "?" + query if query else ""

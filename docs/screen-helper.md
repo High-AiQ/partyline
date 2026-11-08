@@ -250,13 +250,38 @@ require a new request and fresh consent. Backoff reaches at most 60 seconds.
 
 ### Read a Windows window's UI elements
 
-In the helper tray, choose **Allow agents to read a window**, select one visible
-window by title and executable, and explicitly allow it. No window is selected by
-default. The grant is separate from screen sharing: either can be used alone.
-The tray shows the selected window and **Stop reading window** revokes access.
-Closing the window or disconnecting the helper ends the grant. Grants and revocations
-are recorded in the helper's local audit log. Access pauses on the secure desktop and
-resumes when the normal desktop returns, provided the window is still open.
+In the helper tray, choose **Share a window…**, select a visible window by title and
+executable, then choose exactly one attached process in **Share this window with which
+process?** The second picker groups live processes by line and shows their handle and
+preset. Only lines visible to the paired computer's owner appear, and empty lines are
+omitted. Nothing is selected by default; cancelling either picker grants no access.
+The selected process can be on any line the computer's owner can open.
+
+You can share several windows with the same process, or different windows with different
+processes. The tray lists each as **window → @process «line»**, with its own **Stop**;
+**Stop all window sharing** ends every grant. The web computer list also shows each
+target and offers **Stop sharing window**. Your sidebar marks each target line with
+a computer icon; its tooltip names the shared windows and their processes. Closing a window, detaching or ending its
+process, disconnecting the helper, or restarting the server ends that grant. Ending one
+grant leaves other windows and processes alone. Resuming the same handle or attachment
+requires fresh consent. Grants and revocations are recorded in the helper's local audit.
+
+Window grants cover `screen_elements` and `screen_element_action`. With one window the
+target is unambiguous. With several, pass `window` as the grant ID or title; an ambiguous
+call lists the choices, and each snapshot returns its grant ID as `window`. Snapshots,
+element caches and dispatch gates are independent per grant. Other processes are refused;
+asking for another process's window names its holder so the caller can ask the person.
+These grants are independent of line-based pixel sharing and mouse/keyboard control:
+`screen_frame`, `screen_click`, `screen_type`, `screen_key`, `screen_scroll`, `screen_drag`
+and `screen_move` keep their existing pixel-share permissions.
+
+The server stores live grants in `screen_window_grants` so database lifecycle triggers
+can revoke atomically on detach, exit, deletion or a replacement activation. Rows are
+cleared on startup and helper disconnection; they never restore consent after a restart.
+The helper reports a grant only after both native choices, and the server revalidates the
+target against the owner's visible live processes. Machine credentials cannot create or
+revoke grants, and a different human cannot revoke the owner's grants. Access pauses on
+the secure desktop and resumes only while the same window and grant are still live.
 
 `screen_elements` reads that window's UI Automation tree without bringing it to the
 front or sending input. It returns one compact line per element, a snapshot ID,
@@ -287,7 +312,7 @@ COM interfaces; it is not installed on other platforms.
 
 ### Act on elements in the chosen window
 
-With both window access and agent control granted on the same computer, an agent can call
+With a window granted to its attachment, an agent can call
 `screen_element_action` with an ID from the latest `screen_elements` snapshot, using the matching
 UI Automation pattern. Each snapshot element lists its `patterns` and the `actions` it supports; the
 helper reads pattern state (range, scroll axes, window abilities) only for the action's target.
@@ -324,9 +349,9 @@ activates it, and other apps may activate or open dialogs. The response and loca
 `foreground_changed` and `target_came_forward` after the pattern call and the element re-read. A
 timeout or refusal before dispatch cannot report those observations.
 
-Element actions alone do not arm physical mouse or ordinary-key takeback. Press Ctrl+Alt+Esc,
-stop reading the window, stop sharing or revoke agent control to stop further actions. Lock and
-UAC pause actions; closing or replacing the selected window ends its grant. A pattern call already
+Window actions do not arm physical mouse or ordinary-key takeback. Stop that window grant
+in the tray or web computer list, or choose Stop all window sharing, to stop further actions.
+Lock and UAC pause actions; closing or replacing the selected window ends its grant. A pattern call already
 dispatched when consent is revoked can still complete: the result says `revoked_during`, and no
 further action can start from that grant. The deadline covers the operation; a timed-out call is
 abandoned and never retried automatically. UIA providers execute in the target application and
@@ -335,8 +360,8 @@ may therefore have application-specific effects.
 Each action is recorded in the helper's local hash-chained audit with the requesting agent,
 process, role, name, action and outcome. For `set_value` the audit records the value's length,
 not the submitted text; numeric and enumerated parameters (direction, amount, percentages, number,
-coordinates, size) are recorded as given. Every action uses the same transport, agent-control grant,
-dispatch gate, rate limit, audit and revocation as `invoke`.
+coordinates, size) are recorded as given. Every action uses its window grant,
+dispatch gate, rate limit, local audit and revocation, independently of pointer control.
 
 ## Platforms and troubleshooting
 
@@ -401,9 +426,8 @@ action so the count stays current.
 
 **Kill switch.** Physical input takes control back and revokes it for the rest of the share
 once mouse or keyboard control has armed the switch (the baseline is the agent's own injected
-point). Element actions alone do not arm it: moving the mouse or pressing an ordinary key does
-not stop them unless mouse or keyboard control has already armed the switch. Ctrl+Alt+Esc
-always revokes; stopping sharing or revoking control also stops further element actions:
+point). Window element actions have separate grants and Stop controls. Ctrl+Alt+Esc
+always revokes pixel control:
 
 - moving the pointer more than 8 pixels from where the agent last put it
   (checked ten times a second and before every action);

@@ -16,12 +16,22 @@ export const ScreenMonitorSchema = z.object({
 });
 export type ScreenMonitor = z.infer<typeof ScreenMonitorSchema>;
 
+export const ScreenWindowGrantSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  holder: z.string(),
+  line_name: z.string(),
+  conv_id: z.string(),
+});
+export type ScreenWindowGrant = z.infer<typeof ScreenWindowGrantSchema>;
+
 export const ScreenDeviceSchema = z.object({
   id: z.string(),
   name: z.string(),
   os: z.string(),
   online: z.boolean(),
   monitors: z.array(ScreenMonitorSchema),
+  window_grants: z.array(ScreenWindowGrantSchema).optional(),
   /** The version the connected helper reported; null while offline. */
   helper_version: z.string().nullable().optional(),
   /** True when the server's own (newer) version is ahead of the connected helper. */
@@ -82,6 +92,11 @@ export const screenApi = {
     }),
   revoke: (deviceId: string) =>
     request("/api/screen/devices/" + encodeURIComponent(deviceId), {
+      schema: z.object({ ok: z.literal(true) }),
+      method: "DELETE",
+    }),
+  revokeWindow: (grantId: string) =>
+    request("/api/screen/window-grants/" + encodeURIComponent(grantId), {
       schema: z.object({ ok: z.literal(true) }),
       method: "DELETE",
     }),

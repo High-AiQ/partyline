@@ -4,7 +4,7 @@ from ..upload_scope import UPLOAD_ONLY_CAPTION_REFUSAL
 from .client import ApiError, MAX_UPLOAD, MAX_MODEL_UPLOAD
 from .uploads import validate_uploads
 from .tools_media import GET_MEDIA_DESCRIPTION, model_upload_tool, multi_upload_tool, validate_model_path
-from .tools_screen import screen_elements_tool, screen_frame_tool
+from .tools_screen import elements_query, screen_elements_tool, screen_frame_tool
 from . import tools_captain, tools_worker
 def _schema(properties=None, required=None):
     return {"type": "object", "properties": properties or {},
@@ -198,7 +198,7 @@ def call(client, name: str, args: dict, home_state: dict):
         return client.download(args["file_id"], args["variant"], args["destination"])
     if name == "screen_elements":
         conv, _ = _target(client, home_state, None, ("read",))
-        query = "?device=" + quote(args["device"], safe="") if args.get("device") else ""
+        query = elements_query(args)
         path = f"/api/conversations/{quote(conv, safe='')}/screen-elements{query}"
         return client.request("POST", path, timeout=40)
     if name == "screen_frame":

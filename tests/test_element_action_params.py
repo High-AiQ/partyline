@@ -50,15 +50,16 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
     async def test_parameters_reach_the_helper_and_invalid_ones_are_not_charged(self):
         sent = asyncio.Queue()
         socket = SimpleNamespace(send_json=lambda message: sent.put(message))
-        share, device = SimpleNamespace(share_id="share"), {"id": "pc", "socket": socket}
-        grant = SimpleNamespace(status="active", holder="agent")
+        device = {"id": "pc", "socket": socket}
+        grant = {"id": "g"}
         spend = Mock()
-        control = SimpleNamespace(target=lambda _: (share, device), grants={"share": grant}, _spend=spend)
         elements = ElementsHub(SimpleNamespace(devices={}))
-        hub = SimpleNamespace(control=control, elements=elements)
+        hub = SimpleNamespace(elements=elements, window_grants=SimpleNamespace(spend=spend))
         with patch("partyline.screen_element_actions.request_principal",
                    return_value=SimpleNamespace(name="agent")), \
-             patch("partyline.screen_element_actions.deny_unless"):
+             patch("partyline.screen_element_actions.deny_unless"), \
+             patch("partyline.screen_element_actions.resolve_window", return_value=(grant, device)), \
+             patch("partyline.screen_elements.require_window"):
             with self.assertRaises(HTTPException) as error:
                 await element_action(SimpleNamespace(db=None), hub, "line", body("scroll"), None)
             self.assertEqual(409, error.exception.status_code)

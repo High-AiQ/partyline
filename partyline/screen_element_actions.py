@@ -1,6 +1,4 @@
-"""Route consented window actions to the computer holding agent control."""
-import asyncio
-import uuid
+"""Route element actions to the window granted to the calling attachment."""
 from typing import Literal
 
 from fastapi import HTTPException, Request
@@ -8,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .auth_guard import request_principal
 from .machine_scope import deny_unless
+from .screen_grants import resolve_window
 
 
 ACTIONS = Literal["invoke", "toggle", "set_value", "select", "add_to_selection", "remove_from_selection",
@@ -25,6 +24,7 @@ class ElementAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
     element_id: str = Field(min_length=1, max_length=128)
     action: ACTIONS
+    window: str | None = Field(default=None, min_length=1, max_length=500)
     value: str | None = Field(default=None, max_length=500)
     direction: Literal["up", "down", "left", "right"] | None = None
     amount: Literal["small", "large"] | None = None
@@ -48,34 +48,21 @@ class ElementAction(BaseModel):
             raise ValueError(f"{self.action} requires {', '.join(missing)}")
         if extra := sorted(given - wanted):
             raise ValueError(f"{self.action} does not take {', '.join(extra)}")
-        return self.model_dump(exclude_none=True)
+        return self.model_dump(exclude_none=True, exclude={"window"})
 
 
 async def element_action(runtime, hub, conv_id: str, body: ElementAction, request: Request):
     principal = request_principal(request)
     deny_unless(runtime.db, principal, conv_id, "write")
     try:
-        share, device = hub.control.target(conv_id)
-        grant = hub.control.grants.get(share.share_id)
-        if not grant or grant.status != "active":
-            raise ValueError("agent control is not granted")
-        if grant.holder not in (None, principal.name):
-            raise ValueError(f"agent control was granted to {grant.holder}")
+        grant, device = resolve_window(hub, principal, body.window)
         message = body.parameters()
-        hub.control._spend(grant)
-        ident = str(uuid.uuid4())
-        future = asyncio.get_running_loop().create_future()
-        hub.elements.waiters[ident] = (device["id"], future)
-        try:
-            async with asyncio.timeout(35):
-                await device["socket"].send_json({"type": "window_element_action", "request_id": ident,
-                                                 "share_id": share.share_id, "agent": principal.name,
-                                                 **message})
-                response = await future
-            return {key: value for key, value in response.items() if key not in ("type", "request_id")}
-        finally:
-            hub.elements.waiters.pop(ident, None)
-            if not future.done():
-                future.cancel()
-    except (ValueError, TimeoutError, OSError, RuntimeError) as exc:
-        raise HTTPException(409, str(exc) or "helper did not respond") from exc
+        hub.window_grants.spend(grant)
+        response = await hub.elements.exchange(principal, grant, device, "window_element_action",
+                                               agent=principal.name, **message)
+        return {key: value for key, value in response.items() if key not in ("type", "request_id")}
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except (TimeoutError, OSError, RuntimeError):
+        return {"status": "unconfirmed", "note": "The helper did not confirm the action; "
+                "it may have run. Do not retry automatically."}
