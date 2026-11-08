@@ -1116,9 +1116,9 @@ full contract is `docs/contracts/line-bridge.md`; the code is
 
 ## Orchestrator captains and task lines
 
-A person can choose `captain_mode: "orchestrator"` on a root line using
-`PUT /api/conversations/<root>/captain-style`. The existing `manager_tree` mode
-remains the default. A child cannot be an orchestrator, and style cannot change
+New root lines default to `captain_mode: "orchestrator"`; existing lines keep their
+stored mode. A person can switch a root line between `orchestrator` and `manager_tree`
+using `PUT /api/conversations/<root>/captain-style`. A child cannot be an orchestrator, and style cannot change
 while children exist. The root's `default_review_policy` defaults to `captain`;
 it may also be `none` or an exact reviewer preset name. A task's mode (full, light or
 express) is chosen separately at creation (see Task modes below).

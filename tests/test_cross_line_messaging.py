@@ -30,10 +30,10 @@ class CrossLineMessagingTest(unittest.TestCase):
         self.client = TestClient(app)
         self.addCleanup(self.client.close)
         # root → {alpha, beta}; alpha → grandchild. Cousins never qualify.
-        self.db.create_conversation("root", "Root")
+        self.db.create_conversation("root", "Root", captain_mode="manager_tree")
         for conv, name, parent in (("alpha", "Alpha", "root"), ("beta", "Beta", "root"),
                                    ("grand", "Grand", "alpha")):
-            self.db.create_conversation(conv, name)
+            self.db.create_conversation(conv, name, captain_mode="manager_tree")
             self.db._exec("UPDATE conversations SET parent_id=? WHERE id=?", (parent, conv))
         for att_id, name, conv in (("alpha-cap", "sol", "alpha"),
                                    ("alpha-worker", "gem", "alpha"),
@@ -86,8 +86,8 @@ class ForwardTest(unittest.TestCase):
         app.include_router(forward_router(self.runtime))
         self.client = TestClient(app)
         self.addCleanup(self.client.close)
-        self.db.create_conversation("root", "Root")
-        self.db.create_conversation("kid", "Kid")
+        self.db.create_conversation("root", "Root", captain_mode="manager_tree")
+        self.db.create_conversation("kid", "Kid", captain_mode="manager_tree")
         self.db._exec("UPDATE conversations SET parent_id='root' WHERE id='kid'")
         self.db.add_message("kid", "gem", "agent", "@lead the suite is green, 61 of 61")
         self.db.add_attachment("root-cap", "root", "sol", "raw", ["raw"], "/tmp", "rc")

@@ -96,7 +96,7 @@ class ForcedRetirementTest(unittest.TestCase):
         self.assertEqual(self.force(grand, headers=headers).status_code, 403)
 
     def test_self_and_cross_tree_are_denied(self):
-        self.db.create_conversation("outside", "Outside")
+        self.db.create_conversation("outside", "Outside", captain_mode="manager_tree")
         for target in ("root", "outside"):
             self.assertEqual(self.retire(target, force_discard=True).status_code, 403)
             self.assertEqual(self.preview({"id": target}).status_code, 403)
@@ -179,7 +179,7 @@ class ForcedRetirementTest(unittest.TestCase):
     def test_root_authority_is_rechecked_after_preview(self):
         child = self.child()
         token = self.preview(child).json()["preview_token"]
-        self.db.create_conversation("new-root", "New root")
+        self.db.create_conversation("new-root", "New root", captain_mode="manager_tree")
         self.db._exec("UPDATE conversations SET parent_id='new-root' WHERE id='root'")
         response = self.retire(child["id"], force_discard=True, preview_token=token)
         self.assertEqual(response.status_code, 403)

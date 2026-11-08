@@ -70,7 +70,7 @@ class RoleDeliveryTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         db = Db(os.path.join(directory.name, "partyline.db"))
         self.addCleanup(db.close)
-        db.create_conversation("line", "Line")
+        db.create_conversation("line", "Line", captain_mode="manager_tree")
         db.set_setting("docs_reminder_every_messages", "2")
         captain = RoleState("lead", "line", None, ("assign", "create_child"))
         worker = RoleState("implementer", "line", None, ("read", "write"), captained=True)

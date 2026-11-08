@@ -41,9 +41,9 @@ class CleanupTest(unittest.TestCase):
         git(self.root, "worktree", "add", "-b", "line/kid", str(self.path))
         self.db = Db(Path(self.temp.name) / "test.db")
         self.addCleanup(self.db.close)
-        self.db.create_conversation("root", "root")
+        self.db.create_conversation("root", "root", captain_mode="manager_tree")
         self.db.add_attachment("lead", "root", "lead", "raw", ["sh"], str(self.root))
-        self.db.create_conversation("kid", "kid")
+        self.db.create_conversation("kid", "kid", captain_mode="manager_tree")
         self.db._exec("UPDATE conversations SET cwd=?, parent_id='root' WHERE id='kid'", (str(self.path),))
 
     def run_cleanup(self, merged=True, **kwargs):

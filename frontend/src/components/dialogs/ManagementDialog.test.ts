@@ -60,7 +60,7 @@ describe("management dialog captain control", () => {
       button.click();
       await vi.waitFor(() => {
         expect(appoint).toHaveBeenCalledWith("child", "att-1", {
-          captain_mode: "manager_tree",
+          captain_mode: "orchestrator",
           default_review_policy: "captain",
         });
       });
@@ -100,7 +100,7 @@ describe("management dialog captain control", () => {
       });
       expect(document.body.textContent).not.toContain("save captain style");
       const choices: [string, string][] = [
-        ["#captainStyle", "orchestrator"],
+        ["#captainStyle", "manager_tree"],
         ["#captain", "att-1"],
       ];
       for (const [id, value] of choices) {
@@ -112,7 +112,7 @@ describe("management dialog captain control", () => {
       document.querySelector<HTMLButtonElement>("#appointCaptain")?.click();
       await vi.waitFor(() => {
         expect(appoint).toHaveBeenCalledWith("child", "att-1", {
-          captain_mode: "orchestrator",
+          captain_mode: "manager_tree",
           default_review_policy: "captain",
         });
       });

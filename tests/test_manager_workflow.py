@@ -44,7 +44,7 @@ class ManagerWorkflowTest(unittest.TestCase):
             app, self.runtime, self.media, None, {}, {}, fake_start
         )
         self.client = TestClient(app)
-        self.db.create_conversation("root", "Root")
+        self.db.create_conversation("root", "Root", captain_mode="manager_tree")
         self.db.add_attachment("root-mgr", "root", "astra", "fake", ["fake"], "/tmp")
         self.db.add_attachment("root-impl", "root", "grok", "fake", ["fake"], "/tmp")
         # Not live: a line carrying a live worker is assigned, not split.

@@ -17,9 +17,9 @@ from tests.orchestrator_fixture import TaskFixture
 class TaskUploadTests(TaskFixture):
     async def test_task_upload_destinations_and_other_operations(self):
         await self.create()
-        self.db.create_conversation('sibling', 'Sibling')
+        self.db.create_conversation('sibling', 'Sibling', captain_mode="manager_tree")
         self.db._exec("UPDATE conversations SET parent_id='root' WHERE id='sibling'")
-        self.db.create_conversation('unrelated', 'Unrelated')
+        self.db.create_conversation('unrelated', 'Unrelated', captain_mode="manager_tree")
         self.app.include_router(media_router(
             self.runtime, MediaStore(self.db, Path(self.directory.name) / 'media')))
         self.actor = self.worker

@@ -363,7 +363,7 @@ class ServerTest(unittest.TestCase):
         server.make_adapter = lambda _, att, __, on_status, **kwargs: FakeAdapter(
             on_status=on_status, att=att
         )
-        self.conv = server.runtime.db.create_conversation("line", "Line")
+        self.conv = server.runtime.db.create_conversation("line", "Line", captain_mode="manager_tree")
 
     def tearDown(self):
         server.runtime.db.close()
@@ -1341,7 +1341,7 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(second["name"], "TERRA-2")
 
     def test_attach_suffixes_a_live_handle_from_a_related_line(self):
-        server.runtime.db.create_conversation("kid", "Kid")
+        server.runtime.db.create_conversation("kid", "Kid", captain_mode="manager_tree")
         server.runtime.db._exec(
             "UPDATE conversations SET parent_id='line' WHERE id='kid'")
         self.add_attachment("line-jack", "terra")
@@ -1354,7 +1354,7 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(attached["name"], "TERRA-2")
 
     def test_resume_refuses_a_live_handle_on_a_related_line(self):
-        server.runtime.db.create_conversation("kid", "Kid")
+        server.runtime.db.create_conversation("kid", "Kid", captain_mode="manager_tree")
         server.runtime.db._exec(
             "UPDATE conversations SET parent_id='line' WHERE id='kid'")
         server.runtime.db.add_attachment(
@@ -2065,7 +2065,7 @@ class ShutdownTest(ServerTest):
             )
         )
         self.assertEqual(from_machine.conversation_id, "line")
-        server.runtime.db.create_conversation("other", "Other")
+        server.runtime.db.create_conversation("other", "Other", captain_mode="manager_tree")
         self.assert_http(
             403,
             server.plan_restart(
@@ -2105,7 +2105,7 @@ class ShutdownTest(ServerTest):
 
         db = server.runtime.db
         self.add_attachment("a1", "worker")
-        db.create_conversation("far", "Far")
+        db.create_conversation("far", "Far", captain_mode="manager_tree")
         db.add_attachment("f1", "far", "pal", "fake", ["fake"], self.directory.name, None)
         db.set_attachment_status("f1", "running", None)
         bridge = bridge_store.create(
@@ -2133,7 +2133,7 @@ class ShutdownTest(ServerTest):
         planned = server.save_restart_plan(
             server.RestartPlanRequest(conversation_id="line", debrief="Continue.")
         )
-        server.runtime.db.create_conversation("other", "Other")
+        server.runtime.db.create_conversation("other", "Other", captain_mode="manager_tree")
         socket = StreamWebSocket(
             {"type": "hello", "client_id": "browser"},
             {"type": "reattach", "token": planned.token, "action": "accept"},

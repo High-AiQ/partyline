@@ -105,7 +105,7 @@ class ConcurrentAccessTest(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.db = Db(Path(self.directory.name) / "partyline.db")
-        self.db.create_conversation("c1", "line")
+        self.db.create_conversation("c1", "line", captain_mode="manager_tree")
         self.db._exec(
             "UPDATE conversations SET parent_id=? WHERE id=?", ("p1", "c1")
         )

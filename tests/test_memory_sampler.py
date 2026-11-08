@@ -25,7 +25,7 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.temp.cleanup)
         self.db = Db(f"{self.temp.name}/partyline.db")
         self.addCleanup(self.db.close)
-        self.db.create_conversation("line", "Line")
+        self.db.create_conversation("line", "Line", captain_mode="manager_tree")
         self.db.add_attachment("worker", "line", "worker", "fake", ["fake"], self.temp.name)
         self.db._exec("UPDATE attachments SET status='running',memory_limit='1G' WHERE id='worker'")
         self.runtime = SimpleNamespace(db=self.db, live={"worker": object()}, memory_usage={})
@@ -483,7 +483,7 @@ class MemorySamplerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(private.await_args.args[1], "line")
 
     async def test_captain_warning_rings_itself_and_the_parent_captain(self):
-        self.db.create_conversation("parent", "Parent")
+        self.db.create_conversation("parent", "Parent", captain_mode="manager_tree")
         self.db._exec("UPDATE conversations SET parent_id='parent' WHERE id='line'")
         self.db.add_attachment("parent-captain", "parent", "boss", "fake", ["fake"], self.temp.name)
         self.db._exec("UPDATE attachments SET status='running',is_lead=1 WHERE id='parent-captain'")

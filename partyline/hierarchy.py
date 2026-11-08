@@ -174,7 +174,12 @@ def _set_parent(db: Db, conv_id: str, parent_id: str | None) -> dict:
             raise HierarchyError(
                 409, f"linking would put two live processes named {quoted} in one tree"
             )
-    db._exec("UPDATE conversations SET parent_id=? WHERE id=?", (parent_id, conv_id))
+    if parent_id:
+        # Child rows carry the schema placeholder; their root determines the style.
+        db._exec("UPDATE conversations SET parent_id=?, captain_mode='manager_tree' WHERE id=?",
+                 (parent_id, conv_id))
+    else:
+        db._exec("UPDATE conversations SET parent_id=NULL WHERE id=?", (conv_id,))
     return db.get_conversation(conv_id)
 
 

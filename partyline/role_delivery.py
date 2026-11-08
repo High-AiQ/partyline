@@ -64,7 +64,7 @@ def current_role(db, attachment_id: str) -> RoleState:
                      line_depth(db, att["conv_id"]),
                      staffed_split_reason(db, att["conv_id"]) is not None,
                      has_captain(db, att["conv_id"]),
-                     db.get_conversation(att["conv_id"]).get("captain_mode", "manager_tree"))
+                     db.get_conversation(att["conv_id"]).get("captain_mode", "orchestrator"))
 
 
 def _instructions(state: RoleState, db=None) -> str:

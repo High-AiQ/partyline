@@ -31,7 +31,7 @@ class ContractTest(unittest.TestCase):
         self.assertEqual(
             conversation.model_dump(),
             {
-                "captain_mode": "manager_tree",
+                "captain_mode": "orchestrator",
                 "default_review_policy": "captain",
                 "task_status": None,
                 "task_round": None,

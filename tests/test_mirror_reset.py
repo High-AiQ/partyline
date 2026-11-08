@@ -63,7 +63,7 @@ class MirrorResetTest(unittest.TestCase):
     def test_reviewer_write_set_loads_and_passes_primary_line_branch(self):
         db = Db(str(self.root / 'test.db'))
         self.addCleanup(db.close)
-        db.create_conversation('conv', 'line')
+        db.create_conversation('conv', 'line', captain_mode="manager_tree")
         db._exec('UPDATE conversations SET cwd=? WHERE id=?', (self.primary, 'conv'))
         att = {'cwd': self.review, 'conv_id': 'conv'}
         fence_workspaces.load(db, att)
@@ -132,8 +132,8 @@ class MirrorResetTest(unittest.TestCase):
 
         db = Db(str(self.root / 'decision.db'))
         self.addCleanup(db.close)
-        db.create_conversation('conv', 'captain')
-        db.create_conversation('child', 'child')
+        db.create_conversation('conv', 'captain', captain_mode="manager_tree")
+        db.create_conversation('child', 'child', captain_mode="manager_tree")
         db._exec('UPDATE conversations SET cwd=? WHERE id=?', (self.primary, 'conv'))
         db._exec('UPDATE conversations SET parent_id=? WHERE id=?', ('conv', 'child'))
         db.add_attachment('lead', 'conv', 'captain', 'fake', ['fake'], self.review)
@@ -150,8 +150,8 @@ class MirrorResetTest(unittest.TestCase):
     def test_missing_line_cwd_does_not_protect_parent_or_attachment_branch(self):
         db = Db(str(self.root / 'unplaced.db'))
         self.addCleanup(db.close)
-        db.create_conversation('parent', 'parent')
-        db.create_conversation('child', 'child')
+        db.create_conversation('parent', 'parent', captain_mode="manager_tree")
+        db.create_conversation('child', 'child', captain_mode="manager_tree")
         db._exec('UPDATE conversations SET cwd=? WHERE id=?', (self.primary, 'parent'))
         db._exec('UPDATE conversations SET parent_id=? WHERE id=?', ('parent', 'child'))
         for source in ('parent', 'attachment'):

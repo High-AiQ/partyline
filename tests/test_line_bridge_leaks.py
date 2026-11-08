@@ -95,7 +95,7 @@ class BridgeLeakTest(unittest.TestCase):
         with self.assertRaises(HierarchyError) as caught:
             set_parent(self.db, "y", "kid")
         self.assertEqual(caught.exception.status_code, 409)
-        self.db.create_conversation("z", "elsewhere")
+        self.db.create_conversation("z", "elsewhere", captain_mode="manager_tree")
         self.assertFalse(bridged_across(self.db, "z", "kid"))
 
     def test_unread_counts_ignore_bridge_rows(self):

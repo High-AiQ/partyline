@@ -70,7 +70,7 @@ class WriteSetRequestTest(unittest.TestCase):
         register_write_set_request_routes(app, self.runtime, self._resume)
         self.client = TestClient(app)
         self.addCleanup(self.client.close)
-        self.db.create_conversation("line", "Line")
+        self.db.create_conversation("line", "Line", captain_mode="manager_tree")
         # The line works in a real repository, so filings are grantable under
         # the 2.18 rule (a path must sit inside a protected repository root).
         self.repo = os.path.join(self.directory.name, "repo")
@@ -156,7 +156,7 @@ class WriteSetRequestTest(unittest.TestCase):
             self.assertIn(path, [row["path"] for row in response.json()])
 
     def test_a_worker_files_a_request_a_stranger_cannot_and_the_line_hears_it(self):
-        self.db.create_conversation("stranger", "Stranger")
+        self.db.create_conversation("stranger", "Stranger", captain_mode="manager_tree")
         self.db.add_attachment("other", "stranger", "other", "fake", ["fake"], "/tmp")
         self.db._exec("UPDATE attachments SET is_lead=1, status='running' WHERE id='other'")
         stranger = {"Authorization": "Bearer " + auth_store.ensure_api_token(self.db, "other")}
@@ -314,7 +314,7 @@ class WriteSetRequestTest(unittest.TestCase):
         self.assertEqual(len(ringed), 1)
 
     def file_on_child(self):
-        self.db.create_conversation("child", "Child")
+        self.db.create_conversation("child", "Child", captain_mode="manager_tree")
         self.db._exec("UPDATE conversations SET parent_id='line' WHERE id='child'")
         return self.client.post(
             "/api/conversations/child/write-set",
@@ -343,7 +343,7 @@ class WriteSetRequestTest(unittest.TestCase):
         _identity("commit", "-q", "--allow-empty", "-m", "root", cwd=repo)
         port = os.path.join(repo, ".partyline-worktrees", "port")
         os.makedirs(port)
-        self.db.create_conversation("port", "Port")
+        self.db.create_conversation("port", "Port", captain_mode="manager_tree")
         self.db._exec("UPDATE conversations SET parent_id='line', cwd=? WHERE id='port'",
                       (port,))
         with open(os.path.join(repo, "f.txt"), "w") as fh:
@@ -400,7 +400,7 @@ class WriteSetRequestTest(unittest.TestCase):
 
     def _seed_subtree(self):
         """line (captain) -> kid (worker files there); a shared dir on disk."""
-        self.db.create_conversation("kid", "Kid")
+        self.db.create_conversation("kid", "Kid", captain_mode="manager_tree")
         self.db._exec("UPDATE conversations SET parent_id='line' WHERE id='kid'")
         self.db.add_attachment("kid-worker", "kid", "digger", "fake", ["fake"], "/tmp")
         self.db._exec("UPDATE attachments SET status='running' WHERE id='kid-worker'")
@@ -618,7 +618,7 @@ class WriteSetRequestTest(unittest.TestCase):
     def test_a_captain_two_levels_up_can_approve_inside_its_grant(self):
         # mid sits between line and the filer: the line's captain is two
         # strict-ancestor levels above the request, and still decides it
-        self.db.create_conversation("mid", "Mid")
+        self.db.create_conversation("mid", "Mid", captain_mode="manager_tree")
         self.db._exec("UPDATE conversations SET parent_id='line' WHERE id='mid'")
         self.db.add_attachment("mid-worker", "mid", "leafy", "fake", ["fake"], "/tmp")
         self.db._exec(

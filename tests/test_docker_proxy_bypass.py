@@ -273,7 +273,7 @@ class VolumeAndRuntimeTest(ProxyBase):
 class TreeAndBuildTest(ProxyBase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
-        self.db.create_conversation("sib", "sib")
+        self.db.create_conversation("sib", "sib", captain_mode="manager_tree")
         self.db._exec("UPDATE conversations SET parent_id='root' WHERE id='sib'")
         self.daemon.containers["sibling"] = container("sibling", "exited", "sib", 4 * GB)
         self.daemon.containers["sibling"]["Labels"]["partyline.tree"] = "root"
