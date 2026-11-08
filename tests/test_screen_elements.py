@@ -58,3 +58,92 @@ class ElementsTests(unittest.IsolatedAsyncioTestCase):
         access.revoke()
         resume.set()
         self.assertEqual("consent revoked", (await task)["elements_unavailable"])
+
+
+class WindowTaskTests(unittest.IsolatedAsyncioTestCase):
+    async def test_read_does_not_block_commands_and_rejects_overlap(self):
+        from partyline_helper.uia_task import WindowTask
+        entered, finish = asyncio.Event(), asyncio.Event()
+        sent = []
+
+        async def snapshot():
+            entered.set()
+            await finish.wait()
+            return {"elements": []}
+
+        async def send(kind, **fields):
+            sent.append((kind, fields))
+
+        worker = WindowTask(SimpleNamespace(window=SimpleNamespace(snapshot=snapshot), send=send))
+        await worker.submit("first")
+        await entered.wait()
+        await worker.submit("second")
+        self.assertEqual("window read already in progress", sent[0][1]["elements_unavailable"])
+        finish.set()
+        await worker.task
+        self.assertEqual("first", sent[1][1]["request_id"])
+        await worker.close()
+
+    async def test_close_cancels_inflight_read(self):
+        from partyline_helper.uia_task import WindowTask
+        entered = asyncio.Event()
+        async def snapshot():
+            entered.set()
+            await asyncio.Event().wait()
+        send = unittest.mock.AsyncMock()
+        worker = WindowTask(SimpleNamespace(window=SimpleNamespace(snapshot=snapshot), send=send))
+        await worker.submit("first")
+        await entered.wait()
+        await worker.close()
+        send.assert_not_awaited()
+
+
+class ElementActionTransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_control_consent_and_device_correlation(self):
+        from unittest.mock import patch
+        from fastapi import HTTPException
+        from partyline.screen_element_actions import ElementAction, element_action
+        socket = Socket()
+        share = SimpleNamespace(share_id="share")
+        device = {"id": "pc", "socket": socket}
+        grant = SimpleNamespace(status="active", holder="agent")
+        control = SimpleNamespace(target=lambda _: (share, device), grants={"share": grant}, _spend=Mock())
+        elements = ElementsHub(SimpleNamespace(devices={}))
+        hub = SimpleNamespace(control=control, elements=elements)
+        principal = SimpleNamespace(name="agent")
+        body = ElementAction(element_id="target", action="toggle")
+        with patch("partyline.screen_element_actions.request_principal", return_value=principal), \
+             patch("partyline.screen_element_actions.deny_unless"):
+            task = asyncio.create_task(element_action(SimpleNamespace(db=None), hub, "line", body, None))
+            request = await socket.messages.get()
+            self.assertEqual("window_element_action", request["type"])
+            elements.receive({"id": "other"}, {"request_id": request["request_id"]})
+            self.assertFalse(task.done())
+            elements.receive(device, {"request_id": request["request_id"], "status": "completed",
+                                      "foreground_changed": True, "target_came_forward": True})
+            self.assertEqual({"status": "completed", "foreground_changed": True,
+                              "target_came_forward": True}, await task)
+            self.assertFalse(elements.waiters)
+            grant.status = "revoked"
+            with self.assertRaises(HTTPException) as error:
+                await element_action(SimpleNamespace(db=None), hub, "line", body, None)
+            self.assertIn("not granted", error.exception.detail)
+
+
+class WindowIdentityTests(unittest.IsolatedAsyncioTestCase):
+    async def test_recycled_handle_does_not_inherit_grant(self):
+        from unittest.mock import patch
+        grant = {"hwnd": 10, "pid": 42, "title": "Target", "process": "app", "marker": "unique"}
+        session = SimpleNamespace(status=SimpleNamespace(window_title=None, changed=Mock()),
+                                  tools=SimpleNamespace(audit=SimpleNamespace(append=Mock())),
+                                  share=None, accepted=False, last_uia_frame=None)
+        access = WindowAccess(session, picker=lambda: grant, list_windows=lambda: [grant], platform="win32")
+        with patch("partyline_helper.uia_access.live", return_value=True), \
+             patch("partyline_helper.uia_access.unmark") as unmark:
+            await access.choose()
+            self.assertIs(access.grant, grant)
+            with patch("partyline_helper.uia_access.live", return_value=False):
+                result = await access.snapshot()
+            self.assertEqual("window closed", result["elements_unavailable"])
+            self.assertIsNone(access.grant)
+            unmark.assert_called_once_with(grant)

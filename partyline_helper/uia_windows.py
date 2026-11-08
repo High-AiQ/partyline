@@ -24,13 +24,20 @@ class WindowsProvider:  # pragma: no cover - exercised in the Windows foundation
         self.user32.GetAncestor.argtypes = [ctypes.c_void_p, ctypes.c_uint]
         self.user32.GetAncestor.restype = ctypes.c_void_p
         self.user32.IsWindow.argtypes = [ctypes.c_void_p]
+        self.user32.GetForegroundWindow.restype = ctypes.c_void_p
         self.hwnd = hwnd
         if not self.hwnd:
             raise RuntimeError("no window")
         self.walker = self.automation.ControlViewWalker
 
+    def foreground(self):
+        return self.user32.GetForegroundWindow()
+
     def root(self):
         return self.automation.ElementFromHandle(self.hwnd)
+
+    def runtime_id(self, node):
+        return node.GetRuntimeId()
 
     def same_window(self, node):
         handle = node.CurrentNativeWindowHandle
@@ -41,6 +48,22 @@ class WindowsProvider:  # pragma: no cover - exercised in the Windows foundation
 
     def password(self, node):
         return bool(node.CurrentIsPassword)
+
+    def read_only(self, node):
+        pattern = node.GetCurrentPattern(10002).QueryInterface(self.uia.IUIAutomationValuePattern)
+        return bool(pattern.CurrentIsReadOnly)
+
+    def action_call(self, node, action, value=None):
+        if action == "invoke":
+            pattern = node.GetCurrentPattern(10000).QueryInterface(self.uia.IUIAutomationInvokePattern)
+            return pattern.Invoke
+        if action == "toggle":
+            pattern = node.GetCurrentPattern(10015).QueryInterface(self.uia.IUIAutomationTogglePattern)
+            return pattern.Toggle
+        if action == "set_value":
+            pattern = node.GetCurrentPattern(10002).QueryInterface(self.uia.IUIAutomationValuePattern)
+            return lambda: pattern.SetValue(value)
+        raise ValueError("unsupported action")
 
     def current(self):
         return bool(self.user32.IsWindow(self.hwnd))

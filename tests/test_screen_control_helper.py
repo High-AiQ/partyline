@@ -294,11 +294,12 @@ class ControlSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(revoked["reason"], "Ctrl+Alt+Esc pressed")
         self.assertFalse(self.session.control.granted)
 
-    async def test_the_consent_text_says_takeback_starts_when_the_agent_acts(self):
+    async def test_consent_distinguishes_element_actions_from_mouse_takeback(self):
         await self.share()
         await self.grant(armed=False)
         message = self.terminal.dialogs[0][1]
-        self.assertIn("Once the agent starts acting", message)
+        self.assertIn("After mouse or keyboard control starts", message)
+        self.assertIn("Element actions alone do not arm that takeback", message)
         self.assertIn("Ctrl+Alt+Esc", message)
 
     async def test_drift_is_checked_before_each_action(self):

@@ -242,15 +242,41 @@ resumes when the normal desktop returns, provided the window is still open.
 front or sending input. It returns one compact line per element, a snapshot ID,
 the window title and executable, control types, names, safe values, states, supported
 pattern names, and screen-coordinate bounds. When a current pixel share overlaps an
-element it also includes frame-pixel bounds. Element numbers apply only to that
-snapshot; they are not action targets. Password values and other windows' elements
+element it also includes frame-pixel bounds. Element IDs are stable for the same runtime identity and tree path, and only IDs from the latest
+snapshot are accepted as action targets. Password values and other windows' elements
 are excluded and text is capped. Element metadata may include offscreen text from
 the selected window. Count, depth and time bounds limit traversal; an isolated child
 process is killed if a provider hangs. Errors, denied consent, closed windows and
-unsupported platforms return an unavailable reason. UIA actions, settle/wait,
-macOS AX and Linux AT-SPI are planned.
+unsupported platforms return an unavailable reason. Settle/wait, macOS AX and Linux AT-SPI are planned.
 The Windows-only helper dependency `comtypes` supplies the typed UI Automation
 COM interfaces; it is not installed on other platforms.
+
+### Act on elements in the chosen window
+
+With both window access and agent control granted on the same computer, an agent can call
+`screen_element_action` with an ID from the latest `screen_elements` snapshot. The supported
+actions are `invoke`, `toggle` and `set_value`, using the corresponding UI Automation pattern.
+The helper rechecks the window, element identity, containment, enabled state and supported pattern
+before dispatch. Password fields and read-only values cannot be set. The response includes the
+element's updated name, role, enabled and value or toggle state when available. Partyline does
+not synthesize mouse or keyboard input, move the cursor, or call an activation API for these
+actions. The target application can nevertheless bring itself forward in response; classic
+Win32 buttons and checkboxes can do so on Invoke or Toggle, and other apps may activate or
+open dialogs. The response and local audit include `foreground_changed` and `target_came_forward`
+after the pattern call and the element re-read. A timeout or refusal before dispatch cannot
+report those observations.
+
+Element actions alone do not arm physical mouse or ordinary-key takeback. Press Ctrl+Alt+Esc,
+stop reading the window, stop sharing or revoke agent control to stop further actions. Lock and
+UAC pause actions; closing or replacing the selected window ends its grant. A pattern call already
+dispatched when consent is revoked can still complete: the result says `revoked_during`, and no
+further action can start from that grant. The deadline covers the operation; a timed-out call is
+abandoned and never retried automatically. UIA providers execute in the target application and
+may therefore have application-specific effects.
+
+Each action is recorded in the helper's local hash-chained audit with the requesting agent,
+process, role, name, action and outcome. For `set_value` the audit records the value's length,
+not the submitted text.
 
 ## Platforms and troubleshooting
 
@@ -313,10 +339,11 @@ share API (`GET /api/screen/shares`) and the line's `screen_share` events carry
 `share.control` with its status, holder and action count; the event is re-sent after every
 action so the count stays current.
 
-**Kill switch.** Physical input takes control back at once and revokes it for the
-rest of the share, after which actions and new requests are refused. It is armed by the agent's first
-action (the baseline is the agent's own injected point), so the person can move the mouse or type right after
-answering the consent dialog; only Ctrl+Alt+Esc works before that:
+**Kill switch.** Physical input takes control back and revokes it for the rest of the share
+once mouse or keyboard control has armed the switch (the baseline is the agent's own injected
+point). Element actions alone do not arm it: moving the mouse or pressing an ordinary key does
+not stop them unless mouse or keyboard control has already armed the switch. Ctrl+Alt+Esc
+always revokes; stopping sharing or revoking control also stops further element actions:
 
 - moving the pointer more than 8 pixels from where the agent last put it
   (checked ten times a second and before every action);

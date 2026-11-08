@@ -7,6 +7,8 @@ import tempfile
 from pathlib import Path
 
 from .uia_process import read
+from .uia_gate import DispatchGate
+from .uia_window_identity import live, unmark
 
 
 def select_window(platform=sys.platform, run=subprocess.run):
@@ -18,7 +20,8 @@ def select_window(platform=sys.platform, run=subprocess.run):
                    [sys.executable, "-m", "partyline_helper.uia_picker", path])
         try:
             run(command, timeout=65, check=True, creationflags=0x08000000)
-            return json.loads(Path(path).read_text(encoding="utf-8"))
+            selection = json.loads(Path(path).read_text(encoding="utf-8"))
+            return selection if selection.get("marker") else None
         except (OSError, ValueError, subprocess.SubprocessError):
             return None
 
@@ -37,21 +40,33 @@ class WindowAccess:
         self.platform, self.grant, self.generation = platform, None, 0
         self.unavailable = "not consented"
         self.picking = False
+        self.gate = DispatchGate()
+        self.elements = {}
 
     async def check(self, grant):
         windows = await asyncio.to_thread(self.list_windows)
         if windows is None:
             return "secure desktop active"
-        return (None if any(item["hwnd"] == grant["hwnd"] and item["pid"] == grant["pid"]
-                            for item in windows) else "window closed")
+        found = any(item["hwnd"] == grant["hwnd"] and item["pid"] == grant["pid"] for item in windows)
+        if found and grant.get("marker"):
+            found = await asyncio.to_thread(live, grant)
+        return None if found else "window closed"
+
+    def abandon_read(self):
+        self.generation += 1
+        self.elements = {}
 
     def revoke(self, reason="not consented"):
         grant = self.grant
+        self.gate.invalidate()
+        self.elements = {}
         self.generation += 1
         self.grant = None
         self.unavailable = reason
         self.session.status.window_title = None
         if grant:
+            if grant.get("marker"):
+                unmark(grant)
             self.session.status.changed()
             try:
                 self.session.tools.audit.append("event", "window", "local", "window_read",
@@ -79,6 +94,8 @@ class WindowAccess:
                 return
             self.generation += 1
             self.grant = selected
+            if getattr(self.session, "control", None) and self.session.control.granted:
+                self.gate.grant()
             self.unavailable = "not consented"
             self.session.status.window_title = selected["title"]
             self.session.status.changed()
@@ -89,12 +106,15 @@ class WindowAccess:
         if self.platform != "win32":
             return {"elements_unavailable": "not Windows"}
         grant, generation = self.grant, self.generation
+        self.elements = {}
         if not grant:
             return {"elements_unavailable": self.unavailable}
         reason = await self.check(grant)
         if generation != self.generation or self.grant is not grant:
             return {"elements_unavailable": "consent revoked"}
         if reason:
+            if reason == "secure desktop active":
+                self.gate.invalidate()
             if reason == "window closed":
                 self.revoke(reason)
             return {"elements_unavailable": reason}
@@ -109,6 +129,8 @@ class WindowAccess:
         if generation != self.generation or self.grant is not grant:
             return {"elements_unavailable": "consent revoked"}
         if reason:
+            if reason == "secure desktop active":
+                self.gate.invalidate()
             if reason == "window closed":
                 self.revoke(reason)
             return {"elements_unavailable": reason}
@@ -117,6 +139,7 @@ class WindowAccess:
                     or frame != self.session.last_uia_frame):
                 for element in result["elements"]:
                     element.pop("frame_bounds", None)
+            self.elements = {item["id"]: item for item in result["elements"] if "id" in item}
             result.update(window_title=grant["title"], process_name=grant["process"])
         return result
 
@@ -124,5 +147,12 @@ class WindowAccess:
         while True:
             await sleep(1)
             grant = self.grant
-            if grant and await self.check(grant) == "window closed" and self.grant is grant:
-                self.revoke("window closed")
+            if grant:
+                reason = await self.check(grant)
+                if reason == "window closed" and self.grant is grant:
+                    self.revoke(reason)
+                elif reason == "secure desktop active":
+                    self.gate.invalidate()
+                elif not reason and self.gate.revoked.is_set() and getattr(self.session, "control", None):
+                    if self.session.control.granted:
+                        self.gate.grant()

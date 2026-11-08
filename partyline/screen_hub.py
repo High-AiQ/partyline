@@ -145,7 +145,7 @@ class ScreenHub:
                     share = self._share(result.share_id, ident)
                     if share:
                         await self.stop_share(share.share_id, result.reason)
-                elif kind == "window_elements":
+                elif kind in ("window_elements", "window_element_result"):
                     self.elements.receive(current, message)
                 elif kind in CONTROL_MESSAGES:
                     await self.control.from_helper(current, message)
