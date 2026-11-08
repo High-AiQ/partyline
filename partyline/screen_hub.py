@@ -16,6 +16,7 @@ from .local_tools import TOOL_MESSAGES, LocalTools
 from .screen_control import CONTROL_MESSAGES, ControlHub
 from .screen_frames import BufferedFrame, ShareBuffer
 from .screen_elements import ElementsHub
+from .screen_window_grants import MESSAGES as WINDOW_MESSAGES, WindowGrants
 from .screen_pair_limits import PairLimits
 from .screen_requests import capture, end_share, preview
 from .walkthrough_takes import Takes
@@ -38,6 +39,7 @@ class ScreenHub:
         self.snap_waiters: dict[str, tuple[ShareBuffer, asyncio.Future]] = {}
         self.preview_waiters: dict[str, tuple[str, str | int, asyncio.Future]] = {}
         self.elements = ElementsHub(self)
+        self.window_grants = WindowGrants(self)
         self.control = ControlHub(self)
         self.tools = LocalTools(self)
 
@@ -86,6 +88,7 @@ class ScreenHub:
             old = self.devices.get(ident)
             if old:
                 await old["socket"].close(code=4409, reason="reconnected")
+                await self.window_grants.disconnected(ident)
                 share = next((v for v in self.shares.values() if v.device_id == ident), None)
                 if share:
                     await self.stop_share(share.share_id, "device reconnected")
@@ -112,6 +115,7 @@ class ScreenHub:
                 message = json.loads(raw)
                 kind = message.get("type")
                 if kind == "ping":
+                    await self.window_grants.expire()
                     await ws.send_json({"type": "pong"})
                     continue
                 if kind == "pong":
@@ -145,6 +149,8 @@ class ScreenHub:
                     share = self._share(result.share_id, ident)
                     if share:
                         await self.stop_share(share.share_id, result.reason)
+                elif kind in WINDOW_MESSAGES:
+                    await self.window_grants.from_helper(current, message)
                 elif kind in ("window_elements", "window_element_result"):
                     self.elements.receive(current, message)
                 elif kind in CONTROL_MESSAGES:
@@ -171,6 +177,7 @@ class ScreenHub:
                     self.pending_sockets.pop(ident, None)
             if self.devices.get(ident, {}).get("socket") is ws:
                 self.devices.pop(ident, None)
+                await self.window_grants.disconnected(ident)
                 await self._device_event(device, False)
                 await self.tools.end_device(ident, "the computer disconnected")
                 share = next((item for item in self.shares.values() if item.device_id == ident), None)

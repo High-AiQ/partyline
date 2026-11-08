@@ -51,6 +51,8 @@ def main(argv=None):
     uia.add_argument("request")
     picker = commands.add_parser("uia-picker", help=argparse.SUPPRESS)
     picker.add_argument("path")
+    target = commands.add_parser("window-target-picker", help=argparse.SUPPRESS)
+    target.add_argument("path")
     commands.add_parser("install", help="Register partyline:// links and start at login (once)")
     commands.add_parser("uninstall", help="Remove what install registered (keeps pairing)")
     opener = commands.add_parser("open", help="Handle a partyline:// link (run by the OS)")
@@ -83,6 +85,9 @@ def main(argv=None):
         elif args.command == "uia-picker":  # pragma: no cover - frozen Windows helper child
             from .uia_picker import main as picker_main
             picker_main(args.path)
+        elif args.command == "window-target-picker":  # pragma: no cover - native helper child
+            from .window_target_picker import main as target_main
+            target_main(args.path)
         elif args.command == "uia-snapshot":  # pragma: no cover - frozen Windows helper child
             from .uia_process import main as uia_main
             uia_main(args.request)

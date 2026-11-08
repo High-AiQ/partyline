@@ -299,7 +299,7 @@ class ControlSessionTests(unittest.IsolatedAsyncioTestCase):
         await self.grant(armed=False)
         message = self.terminal.dialogs[0][1]
         self.assertIn("After mouse or keyboard control starts", message)
-        self.assertIn("Element actions alone do not arm that takeback", message)
+        self.assertIn("Window grants have separate Stop controls", message)
         self.assertIn("Ctrl+Alt+Esc", message)
 
     async def test_drift_is_checked_before_each_action(self):

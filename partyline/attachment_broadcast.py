@@ -6,6 +6,9 @@ from .contracts import AttachmentEvent, CaptainChangedEvent, LineLiveEvent
 
 async def broadcast_attachment_state(runtime, conv_id: str, att_id: str) -> None:
     """Emit the jack update and its line's derived live count together."""
+    hub = getattr(runtime, "screen_hub", None)
+    if hub:
+        await hub.window_grants.expire()
     attachment = runtime.db.get_attachment(att_id)
     if attachment is None:
         return

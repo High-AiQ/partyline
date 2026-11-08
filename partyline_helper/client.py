@@ -19,12 +19,14 @@ from .transport import CertificateError, certificate_failure
 from .version import helper_version
 from .uia_access import WindowAccess
 from .uia_task import WindowTask
+from .session_transport import SessionTransport
+from .window_shares import MESSAGES as WINDOW_MESSAGES, WindowShares
 
 class Revoked(Exception):
     """The paired credential is no longer authorized."""
 
 
-class Session:
+class Session(SessionTransport):
     def __init__(self, socket, desktop, terminal, name, yes=False, preview_times=None,
                  clock=time.monotonic, sleep=asyncio.sleep, border=None, allow_control=False,
                  inputs=None, status=None):
@@ -46,31 +48,8 @@ class Session:
         self.tools = Tools(self)
         self.window = WindowAccess(self)
         self.window_task = WindowTask(self)
+        self.windows = WindowShares(self)
         self.last_uia_frame = None
-
-    async def send(self, kind, binary=None, **fields):
-        async def write():
-            await self.socket.send(json.dumps(dict(type=kind, **fields)))
-            if binary is not None:
-                await self.socket.send(binary)
-
-        async with self.lock:
-            if binary is None:
-                await write()
-                return
-            # Cancellation must not insert share_stopped between metadata and bytes.
-            writing = asyncio.create_task(write())
-            try:
-                await asyncio.shield(writing)
-            except asyncio.CancelledError:
-                try:
-                    await asyncio.wait_for(asyncio.shield(writing), 5)
-                except (TimeoutError, ConnectionClosed):
-                    await self.socket.close()
-                    writing.cancel()
-                    with contextlib.suppress(asyncio.CancelledError, ConnectionClosed):
-                        await writing
-                raise
 
     async def stop(self, reason="remote", notify=True):
         self.control.end(f"sharing stopped: {reason}")  # before any await: no queued action runs
@@ -202,6 +181,10 @@ class Session:
             await self.control.dispatch(message)
         elif kind in TOOL_MESSAGES:
             await self.tools.dispatch(message)
+        elif kind in WINDOW_MESSAGES:
+            await self.windows.receive(message)
+        elif kind in ("read_window_elements", "window_element_action") and "grant_id" in message:
+            await self.windows.dispatch(message)
         elif kind == "read_window_elements":
             await self.window_task.submit(message["request_id"])
         elif kind == "window_element_action":
@@ -227,10 +210,11 @@ class Session:
         loop = asyncio.get_running_loop()
         # The tray's Stop sharing runs on another thread: hand the stop to this loop.
         self.status.stop_share = lambda: asyncio.run_coroutine_threadsafe(self.stop("local"), loop)
-        self.status.choose_window = lambda: asyncio.run_coroutine_threadsafe(self.window.choose(), loop)
-        self.status.stop_window = lambda: loop.call_soon_threadsafe(self.window.revoke)
+        self.status.choose_window = lambda: asyncio.run_coroutine_threadsafe(self.windows.choose(), loop)
+        self.status.stop_window = lambda: loop.call_soon_threadsafe(self.windows.revoke_all)
         heartbeat = asyncio.create_task(self.heartbeat())
-        window_watch = asyncio.create_task(self.window.watch())
+        self.status.stop_window_grant = lambda ident: loop.call_soon_threadsafe(self.windows.revoke, ident)
+        window_watch = asyncio.create_task(self.windows.watch())
         try:
             async for raw in self.socket:
                 self.last_received = self.clock()
@@ -257,6 +241,8 @@ class Session:
             self.status.choose_window = self.status.stop_window = None
             self.window.revoke()
             await self.window_task.close()
+            await self.windows.close()
+            self.status.stop_window_grant = None
             self.status.set("offline")
         if self.socket.close_code in (1008, 4001, 4003, 4401, 4403):
             raise Revoked

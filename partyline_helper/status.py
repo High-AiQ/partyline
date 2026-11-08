@@ -18,6 +18,8 @@ class Status:
         self.stop_share = self.quit = self.stop_tools = None
         self.tools_active = False
         self.window_title = None
+        self.window_grants = {}
+        self.stop_window_grant = None
         self.choose_window = self.stop_window = None
         self.checks_active, self.stop_checks = False, None
 
@@ -58,6 +60,10 @@ class Status:
     def request_stop_window(self):
         if self.stop_window:
             self.stop_window()
+
+    def request_stop_window_grant(self, ident):
+        if self.stop_window_grant:
+            self.stop_window_grant(ident)
 
     def request_stop_checks(self):
         if self.stop_checks:

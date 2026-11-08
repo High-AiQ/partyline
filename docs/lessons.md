@@ -1,5 +1,14 @@
 # Lessons: the false-assumptions ledger
 
+## Attachment activation identifiers can be credentials
+
+The false assumption was that `runtime_owner` was safe picker metadata. It is also
+the hook URL secret, so exposing it would let a caller forge process hook events.
+Window picker requests now keep attachment-to-activation mappings only on the server;
+public responses and picker files use explicit field lists. Regression tests scan
+picker responses, grant results, device lists and native picker files for both the
+field and secret values. The leak was caught in review before the change shipped.
+
 ## A stationary cursor does not establish mouse capture
 
 The false assumption was that a fixed pointer over changing pixels identifies a game
@@ -7,6 +16,15 @@ capturing the mouse. Wheel scrolling, typing and video playback produce the same
 pattern. Stationary detection now adds a hint while preserving coordinates and markers;
 only the helper's explicit captured flag selects the view centre. Regressions in
 `tests/test_screen_pointer.py` and the helper transport tests cover both paths.
+
+## Frontend builds and backend verification share the bundle manifest
+
+The false assumption was that rebuilding the frontend and running backend tests were
+independent jobs. A Vite build changed `static/build.json` while a test worker held the
+previous imported build ID, so the websocket build-ID assertions failed even though
+both bundles were valid. Finish one job before starting the other. The existing
+`test_websocket_stamps_the_credential_handle_and_ignores_client_senders` assertions
+caught the mismatch; the Gates table now makes this sequencing explicit.
 
 ## Message limits apply in both directions
 

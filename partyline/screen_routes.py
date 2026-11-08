@@ -21,6 +21,7 @@ from .render_check_routes import render_check_router
 from .screen_control_routes import control_router
 from .screen_frame_store import frame_reference
 from .screen_hub import ScreenHub
+from .screen_grants import device_grants, grant_router, window_share_indicators
 from .screen_protocol import PairClaim, Region
 from .screen_pointer import captured_pointer, annotate_stationary_pointers
 
@@ -33,6 +34,7 @@ class ShareStart(BaseModel):
 
 
 def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
+    runtime.db._exec("DELETE FROM screen_window_grants")
     recover(runtime.db)
     recover_tools(runtime.db)
     hub = ScreenHub(runtime)
@@ -92,6 +94,7 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
         for row in rows:
             item = dict(row)
             online = hub.devices.get(item["id"])
+            item["window_grants"] = device_grants(runtime.db, item["id"])
             item["online"] = online is not None
             item["monitors"] = online["monitors"] if online else []
             item["helper_version"] = online["helper_version"] if online else None
@@ -111,6 +114,7 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
                 name = device["name"]
                 items.append({"conv_id": share.conv_id, "device_name": name,
                               "kind": "screen", "label": f"{name} screen share"})
+        items.extend(window_share_indicators(runtime.db, principal.user_id))
         return {"indicators": items}
 
     @router.delete("/api/screen/devices/{device_id}")
@@ -218,6 +222,7 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
 
     from .screen_elements import elements_router
     app.include_router(elements_router(runtime, hub))
+    app.include_router(grant_router(runtime, hub))
     app.include_router(router)
     app.include_router(control_router(runtime, hub, store))
     app.include_router(tools_router(runtime, hub, store))
