@@ -1,5 +1,6 @@
 """The composer's icon controls and their floating notes stay inside a phone."""
 
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -27,7 +28,9 @@ class ComposerIconsTest(unittest.TestCase):
             seed_room(page)
             self.assertEqual(page.locator("[data-composer-controls]").count(), 0)
             page.evaluate(DENY_MIC)
-            page.locator("button.hands-free").click()
+            # On a phone the hands-free toggle lives in the composer's one menu.
+            page.locator("[data-composer-more]").click()
+            page.get_by_role("menuitemcheckbox", name=re.compile("Hands-free")).click()
             bubble = page.locator("[data-composer-bubble]")
             bubble.wait_for(state="visible")
             page.evaluate(

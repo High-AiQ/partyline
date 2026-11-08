@@ -309,4 +309,98 @@ describe("VoiceInput", () => {
     expect(button?.getAttribute("aria-pressed")).toBe("false");
     void unmount(comp);
   });
+
+  it("collapsed on a phone it stays out of the row until a take is live, and dictate() starts the same take", async () => {
+    secure(true);
+    room.conversation = conversation;
+    vi.spyOn(voiceApi, "presets").mockResolvedValue({
+      default: "a",
+      presets: [{ name: "a", kind: "command", available: true }],
+    });
+    vi.spyOn(voiceApi, "transcribe").mockResolvedValue({
+      text: "hi",
+      language: "en",
+      duration: 1,
+      segments: [],
+    });
+    const onstatus = vi.fn();
+    const target = document.body.appendChild(document.createElement("div"));
+    const comp = mount(VoiceInput, {
+      target,
+      props: {
+        box: null,
+        oninserted: () => undefined,
+        sources: sourcesWithTake(),
+        collapsed: true,
+        onstatus,
+      },
+    });
+    await settle();
+    expect(target.querySelector("button.voice")).toBeNull();
+    const idle = onstatus.mock.lastCall?.[0] as { busy: boolean; blocked: boolean; label: string };
+    expect(idle).toMatchObject({ busy: false, blocked: false });
+    expect(idle.label).toContain("record a voice message");
+    const control = comp as { dictate: () => void };
+    control.dictate();
+    await settle();
+    const button = target.querySelector<HTMLButtonElement>("button.voice");
+    expect(button?.getAttribute("aria-pressed")).toBe("true");
+    expect(onstatus).toHaveBeenLastCalledWith(expect.objectContaining({ busy: true }));
+    button?.click();
+    await settle();
+    expect(onstatus).toHaveBeenLastCalledWith(expect.objectContaining({ busy: false }));
+    void unmount(comp);
+  });
+
+  it("collapsed and blocked, dictate() does nothing", async () => {
+    secure(true);
+    room.conversation = null;
+    const onstatus = vi.fn();
+    const target = document.body.appendChild(document.createElement("div"));
+    const comp = mount(VoiceInput, {
+      target,
+      props: {
+        box: null,
+        oninserted: () => undefined,
+        sources: sourcesWithTake(),
+        collapsed: true,
+        onstatus,
+      },
+    });
+    await settle();
+    expect(onstatus.mock.lastCall?.[0]).toMatchObject({ blocked: true });
+    (comp as { dictate: () => void }).dictate();
+    await settle();
+    expect(target.querySelector("button.voice")).toBeNull();
+    void unmount(comp);
+  });
+});
+
+describe("VoiceInput teardown", () => {
+  it("reports an idle mic when unmounted mid-take, so the phone menu is never left hidden", async () => {
+    secure(true);
+    room.conversation = conversation;
+    vi.spyOn(voiceApi, "presets").mockResolvedValue({
+      default: "a",
+      presets: [{ name: "a", kind: "command", available: true }],
+    });
+    const onstatus = vi.fn();
+    const target = document.body.appendChild(document.createElement("div"));
+    const comp = mount(VoiceInput, {
+      target,
+      props: {
+        box: null,
+        oninserted: () => undefined,
+        sources: sourcesWithTake(),
+        collapsed: true,
+        onstatus,
+      },
+    });
+    await settle();
+    (comp as { dictate: () => void }).dictate();
+    await settle();
+    expect(onstatus.mock.lastCall?.[0]).toMatchObject({ busy: true });
+    await unmount(comp);
+    expect(onstatus.mock.lastCall?.[0]).toMatchObject({ busy: false });
+  });
 });

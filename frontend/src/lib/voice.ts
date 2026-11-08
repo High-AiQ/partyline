@@ -113,3 +113,10 @@ export function clearSavedPreset(): void {
     // as above
   }
 }
+
+/** What the composer's mic reports: a take in progress, and whether Dictate can start now. */
+export interface VoiceStatus {
+  busy: boolean;
+  blocked: boolean;
+  label: string;
+}

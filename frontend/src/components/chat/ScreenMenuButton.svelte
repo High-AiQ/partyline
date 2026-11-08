@@ -1,15 +1,12 @@
 <script lang="ts">
-  import { tick } from "svelte";
   import { room } from "../../state/room.svelte.js";
   import { screenStatus } from "../../state/screen-status.svelte.js";
   import { tooltip } from "../../lib/tooltip";
+  import { PopupMenu } from "../../lib/popup-menu.svelte";
   import ComposerBubble from "./ComposerBubble.svelte";
 
   let { error, online, onbegin }: { error: string; online: boolean; onbegin: () => void } = $props();
-  let open = $state(false);
-  let anchor: HTMLButtonElement;
-  let container: HTMLDivElement;
-  let menu = $state<HTMLDivElement | null>(null);
+  const popup = new PopupMenu();
   const blocked = $derived(Boolean(room.screenShare && room.screenShare.status !== "declined"));
   const reason = $derived(
     blocked
@@ -19,58 +16,19 @@
         : "",
   );
   const label = "Screen: share live or record a walkthrough";
-
-  function close(): void {
-    open = false;
-    anchor.focus();
-  }
-  async function show(): Promise<void> {
-    open = true;
-    await tick();
-    menu?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
-  }
-  function keydown(event: KeyboardEvent): void {
-    if (!open) {
-      if (document.activeElement === anchor && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
-        event.preventDefault();
-        void show();
-      }
-      return;
-    }
-    if (event.key === "Tab") {
-      open = false;
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      close();
-    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      const items = [...(menu?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [])];
-      const index = items.indexOf(document.activeElement as HTMLButtonElement);
-      items[(index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
-    }
-  }
 </script>
 
-<svelte:window
-  onkeydown={keydown}
-  onpointerdown={(event: PointerEvent) => {
-    if (open && event.target instanceof Node && !container.contains(event.target)) close();
-  }}
-/>
-<div class="relative flex flex-none" bind:this={container}>
+<svelte:window onkeydown={popup.keydown} onpointerdown={popup.pointerdown} />
+<div class="relative flex flex-none" bind:this={popup.container}>
   <button
-    bind:this={anchor}
+    bind:this={popup.anchor}
     type="button"
     class="screen-menu grid size-11 flex-none place-items-center p-0"
     aria-label={label}
     aria-haspopup="menu"
-    aria-expanded={open}
+    aria-expanded={popup.open}
     use:tooltip={{ label }}
-    onclick={() => {
-      if (open) close();
-      else void show();
-    }}
+    onclick={popup.toggle}
   >
     <svg
       class="size-[18px] fill-none stroke-current stroke-[1.8] [stroke-linecap:round] [stroke-linejoin:round]"
@@ -82,9 +40,9 @@
       <circle cx="12" cy="10" r="2.5" class="fill-current stroke-none" />
     </svg>
   </button>
-  {#if open}
+  {#if popup.open}
     <div
-      bind:this={menu}
+      bind:this={popup.menu}
       role="menu"
       aria-label="Screen"
       class="absolute bottom-full left-0 z-60 mb-1 flex min-w-max flex-col rounded-md border border-panel-line bg-panel p-1"
@@ -94,7 +52,7 @@
         role="menuitem"
         class="border-0 bg-transparent p-2 text-left hover:bg-copper hover:text-ink focus-visible:bg-copper focus-visible:text-ink"
         onclick={() => {
-          close();
+          popup.close();
           screenStatus.openPicker++;
         }}>Share live…</button
       >
@@ -108,7 +66,7 @@
           : 'hover:bg-copper hover:text-ink'} focus-visible:bg-copper focus-visible:text-ink"
         onclick={() => {
           if (!reason) {
-            close();
+            popup.close();
             onbegin();
           }
         }}>Record a walkthrough</button
