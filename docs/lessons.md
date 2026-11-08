@@ -1,5 +1,13 @@
 # Lessons: the false-assumptions ledger
 
+## A stationary cursor does not establish mouse capture
+
+The false assumption was that a fixed pointer over changing pixels identifies a game
+capturing the mouse. Wheel scrolling, typing and video playback produce the same
+pattern. Stationary detection now adds a hint while preserving coordinates and markers;
+only the helper's explicit captured flag selects the view centre. Regressions in
+`tests/test_screen_pointer.py` and the helper transport tests cover both paths.
+
 ## Message limits apply in both directions
 
 The false assumption was that the server's 4 MiB receive limit also bounded messages

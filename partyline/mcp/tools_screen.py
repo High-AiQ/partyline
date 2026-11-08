@@ -6,13 +6,17 @@ def screen_frame_tool():
         "name": "screen_frame",
         "description": (
             "Inspect the active screen share; stores line-scoped media without a chat post. "
-            "Use get_media to fetch it; mark_pointer labels the reported pointer. Unavailable during "
+            "Use get_media to fetch it; mark_pointer labels the pointer or draws a view-centre "
+            "crosshair only when the helper reports captured/hidden. Stationary visible pointers retain "
+            "their coordinates and marker. Unavailable during "
             "a Show me recording; use the completed walkthrough's image references."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {"mark_pointer": {"type": "boolean",
-                                           "description": "Overlay the reported pointer."}},
+                                           "description": ("Overlay the pointer, or a centre crosshair for a "
+                                                           "helper-reported hidden/captured cursor. "
+                                                           "Stationary pointers keep their position.")}},
             "required": [],
             "additionalProperties": False,
         },
