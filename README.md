@@ -51,6 +51,13 @@ Image formats are detected from the bytes, not the filename. A browser can send 
 
 > An account is a gate, not a sandbox. Anyone you let in can attach processes as you. Bind to localhost (or a network you trust). See [Security](docs/security.md).
 
+## Add-ons
+
+[partyline-addons](https://github.com/High-AiQ/partyline-addons) contains the Blender relay extension,
+built by CI as the `partyline_relay-extension` artifact (install the ZIP using Blender's **Install from Disk**),
+and the [blender-scene-decomposition skill](https://github.com/High-AiQ/partyline-addons/blob/main/blender/skills/blender-scene-decomposition/SKILL.md)
+under `blender/skills/`. See [local tools](docs/local-tools.md) for setup.
+
 ## Dig deeper
 
 | Topic | Doc |
