@@ -30,6 +30,14 @@ export const ScreenDeviceSchema = z.object({
 export type ScreenDevice = z.infer<typeof ScreenDeviceSchema>;
 
 const DevicesSchema = z.object({ devices: z.array(ScreenDeviceSchema) });
+const IndicatorSchema = z.object({
+  conv_id: z.string(),
+  device_name: z.string(),
+  kind: z.string(),
+  label: z.string(),
+});
+export type ShareIndicator = z.infer<typeof IndicatorSchema>;
+const IndicatorsSchema = z.object({ indicators: z.array(IndicatorSchema) });
 const PairCodeSchema = z.object({ code: z.string(), expires_in: z.number() });
 const PairClaimSchema = z.object({ device_id: z.string(), token: z.string() });
 const StartSchema = z.object({ share_id: z.string(), status: z.string() });
@@ -56,10 +64,13 @@ export const screenApi = {
     request("/api/screen/shares?conv_id=" + encodeURIComponent(convId), {
       schema: z.object({ share: ScreenShareSchema.nullable() }),
     }),
-  devices: (convId: string) =>
-    request("/api/screen/devices?conv_id=" + encodeURIComponent(convId), { schema: DevicesSchema }),
-  pair: (convId: string) =>
-    request("/api/screen/pair?conv_id=" + encodeURIComponent(convId), {
+  devices: (convId?: string) =>
+    request("/api/screen/devices" + (convId ? "?conv_id=" + encodeURIComponent(convId) : ""), {
+      schema: DevicesSchema,
+    }),
+  indicators: () => request("/api/screen/active-indicators", { schema: IndicatorsSchema }),
+  pair: (convId?: string) =>
+    request("/api/screen/pair" + (convId ? "?conv_id=" + encodeURIComponent(convId) : ""), {
       schema: PairCodeSchema,
       method: "POST",
     }),

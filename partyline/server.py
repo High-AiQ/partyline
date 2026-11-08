@@ -575,8 +575,8 @@ async def ws_endpoint(ws: WebSocket, conv_id: str):
         return
     # A handle is fixed for the socket's lifetime: when it changes, every one
     # of the user's sockets is force-closed (below) and each tab reconnects
-    # and re-authenticates under the new name — deterministic for every tab,
-    # with no per-message database lookup.
+    # and re-authenticates under the new name without a per-message database lookup.
+    ws.screen_owner_id = principal.user_id
     user_sockets.add(principal.user_id, ws)
     try:
         await _serve_socket(ws, conv_id, principal.name)

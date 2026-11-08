@@ -15,6 +15,7 @@ from . import local_tools_reference as reference
 from .contracts import MessageEvent, MessageResponse
 from .local_tools_state import ToolLimits, ToolSession
 from .screen_connections import notice
+from .screen_device_access import line_devices
 
 TOOLS_VERSION = 1
 TOOL_MESSAGES = ("tools_granted", "tools_revoked", "tool_result")
@@ -42,10 +43,9 @@ class LocalTools:
                 "reason": item.reason, "calls": item.count, "info": item.info}
 
     def device(self, conv_id: str, name: str | None = None) -> dict:
-        online = [d for d in self.hub.devices.values()
-                  if d["conv_id"] == conv_id and (name is None or d["name"] == name)]
+        online = line_devices(self.hub, conv_id, name)
         if not online:
-            raise ValueError("no paired computer is online on this line")
+            raise ValueError("no paired computer of this line's people is online")
         if len(online) > 1:
             names = ", ".join(sorted(d["name"] for d in online))
             raise ValueError(f"several computers are online; pass the computer's name ({names})")

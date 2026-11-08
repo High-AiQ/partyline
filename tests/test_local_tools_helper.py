@@ -109,7 +109,7 @@ class ToolsHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((granted["checker"], granted["info"]["file"]), (False, "scene.blend"))
         self.assertEqual(self.addon.opened, [("s1", "agent-x", False)])
         title, message = self.terminal.dialogs[0]
-        self.assertIn("allow agent-x to run Python in Blender", title)
+        self.assertIn("allow @agent-x to run Python in Blender", title)
         self.assertIn("A backup copy of the open file", message)
         self.assertIn("Each session asks again", message)
         self.assertEqual(self.terminal.boxes, [None])  # no checkbox unless the agent asked for it

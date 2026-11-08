@@ -3,7 +3,7 @@ import asyncio
 import json
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from partyline.screen_elements import ElementsHub
 from partyline_helper.uia_access import WindowAccess
@@ -22,23 +22,26 @@ class ElementsTests(unittest.IsolatedAsyncioTestCase):
         socket = Socket()
         devices = {"d": {"id": "d", "conv_id": "line", "name": "PC", "socket": socket}}
         hub = ElementsHub(SimpleNamespace(devices=devices))
-        task = asyncio.create_task(hub.read("line"))
-        request = await socket.messages.get()
-        response = {"request_id": request["request_id"], "snapshot_id": "s", "window_title": "Editor",
-                    "process_name": "app.exe", "elements": [{"id": 1, "name": "one\ntwo"}],
-                    "truncated": True, "truncation": "time budget; page content not reached"}
-        hub.receive({"id": "wrong"}, response)
-        self.assertFalse(task.done())
-        hub.receive({"id": "d"}, response)
-        result = await task
-        self.assertEqual("s", result["snapshot_id"])
-        self.assertEqual("one\ntwo", json.loads(result["elements"])["name"])
-        self.assertEqual(1, len(result["elements"].splitlines()))
-        self.assertEqual("time budget; page content not reached", result["truncation"])
-        self.assertEqual({}, hub.waiters)
-        self.assertIn("elements_unavailable", await hub.read("elsewhere"))
-        devices["other"] = {**devices["d"], "id": "other"}
-        self.assertIn("multiple", (await hub.read("line"))["elements_unavailable"])
+        with patch("partyline.screen_elements.line_devices", return_value=[devices["d"]]) as visible:
+            task = asyncio.create_task(hub.read("line"))
+            request = await socket.messages.get()
+            response = {"request_id": request["request_id"], "snapshot_id": "s", "window_title": "Editor",
+                        "process_name": "app.exe", "elements": [{"id": 1, "name": "one\ntwo"}],
+                        "truncated": True, "truncation": "time budget; page content not reached"}
+            hub.receive({"id": "wrong"}, response)
+            self.assertFalse(task.done())
+            hub.receive({"id": "d"}, response)
+            result = await task
+            self.assertEqual("s", result["snapshot_id"])
+            self.assertEqual("one\ntwo", json.loads(result["elements"])["name"])
+            self.assertEqual(1, len(result["elements"].splitlines()))
+            self.assertEqual("time budget; page content not reached", result["truncation"])
+            self.assertEqual({}, hub.waiters)
+            visible.return_value = []
+            self.assertIn("elements_unavailable", await hub.read("elsewhere"))
+            devices["other"] = {**devices["d"], "id": "other"}
+            visible.return_value = list(devices.values())
+            self.assertIn("multiple", (await hub.read("line"))["elements_unavailable"])
 
     async def test_revocation_during_read_discards_result(self):
         import threading

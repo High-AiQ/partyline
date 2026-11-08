@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { onMount, untrack } from "svelte";
   import Modal from "../Modal.svelte";
   import PairingSteps from "../PairingSteps.svelte";
   import { HELPER_WINDOWS_INSTALLER_URL } from "../../lib/helper-installer";
@@ -48,6 +48,14 @@
         .catch((e: unknown) => {
           error = e instanceof Error ? e.message : "Could not load sharing status";
         });
+  });
+  onMount(() => {
+    const timer = setInterval(() => {
+      if (open) void refresh();
+    }, 15_000);
+    return () => {
+      clearInterval(timer);
+    };
   });
   $effect(() => {
     void screenStatus.revision;
@@ -185,7 +193,7 @@
 {/if}
 {#if open}
   <Modal title="Computers and screen sharing" {close} wide>
-    <button type="button" onclick={() => void pair()}>Pair a computer</button>
+    <button type="button" onclick={() => void pair()}>Pair this computer with Partyline</button>
     {#if code}<p>Code: <strong>{code}</strong> (expires in 5 minutes)</p>
       <PairingSteps origin={window.location.origin} {code} />{/if}
     <button type="button" onclick={() => void refresh()}>Refresh</button>
@@ -211,7 +219,7 @@
                 >Download the new installer</a
               > on that computer and run it.
             {:else}
-              Run the install command from “Pair a computer” on that computer again.
+              Run the install command from “Pair this computer with Partyline” on that computer again.
             {/if}</span
           >
         {/if}

@@ -134,7 +134,7 @@ describe("pairing instructions", () => {
     };
     screenStatus.openPicker++;
     await tick();
-    click("Pair a computer");
+    click("Pair this computer with Partyline");
     await settle();
     expect(document.body.textContent).toContain("XYZ-789");
 

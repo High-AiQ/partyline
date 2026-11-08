@@ -36,6 +36,7 @@ export function onRoomWireEvent(room: RoomWireSink, event: WireEvent, context: W
       room.absorb(event.message);
       break;
     case "screen_share":
+      screenStatus.revision++;
       room.screenShare = event.share;
       break;
     case "screen_devices_changed":

@@ -34,7 +34,7 @@ class ScreenHub:
         self.limits = PairLimits()
         self.shares: dict[str, ShareBuffer] = {}
         self.walkthroughs = Takes(self)
-        self.pending_codes: dict[str, tuple[int, str, float]] = {}
+        self.pending_codes: dict[str, tuple[int, float]] = {}
         self.snap_waiters: dict[str, tuple[ShareBuffer, asyncio.Future]] = {}
         self.preview_waiters: dict[str, tuple[str, str | int, asyncio.Future]] = {}
         self.elements = ElementsHub(self)
@@ -45,26 +45,26 @@ class ScreenHub:
     def digest(token: str) -> str:
         return hashlib.sha256(token.encode()).hexdigest()
 
-    def issue_pair_code(self, owner_id: int, conv_id: str) -> str:
+    def issue_pair_code(self, owner_id: int, conv_id: str | None = None) -> str:
         code = secrets.token_hex(4).upper()
-        self.pending_codes = {k: v for k, v in self.pending_codes.items() if v[2] > time.time()}
+        self.pending_codes = {k: v for k, v in self.pending_codes.items() if v[1] > time.time()}
         while code in self.pending_codes:
             code = secrets.token_hex(4).upper()
-        self.pending_codes[code] = (owner_id, conv_id, time.time() + 300)
+        self.pending_codes[code] = (owner_id, time.time() + 300)
         return code
 
-    def claim_pair_code(self, code: str, name: str, os_name: str) -> tuple[str, str, int, str] | None:
+    def claim_pair_code(self, code: str, name: str, os_name: str) -> tuple[str, str, int, None] | None:
         row = self.pending_codes.pop(code.upper(), None)
-        if not row or row[2] <= time.time():
+        if not row or row[1] <= time.time():
             return None
-        owner_id, conv_id, _ = row
+        owner_id, _ = row
         device_id, token = str(uuid.uuid4()), secrets.token_urlsafe(32)
         self.runtime.db._exec(
             "INSERT INTO screen_devices(id,owner_id,conv_id,name,os,token_hash,created_at) "
             "VALUES(?,?,?,?,?,?,?)",
-            (device_id, owner_id, conv_id, name[:120], os_name[:40], self.digest(token), time.time()),
+            (device_id, owner_id, None, name[:120], os_name[:40], self.digest(token), time.time()),
         )
-        return device_id, token, owner_id, conv_id
+        return device_id, token, owner_id, None
 
     async def connect(self, ws: WebSocket, device: dict) -> None:
         ident = device["id"]
@@ -270,7 +270,14 @@ class ScreenHub:
     async def _device_event(self, device: dict, online: bool) -> None:
         payload = {"type": "screen_devices_changed", "device_id": device["id"],
                    "online": online}
-        await self._line_event(device["conv_id"], payload)
+        for sockets in list(self.runtime.sockets.values()):
+            for ws in list(sockets):
+                if getattr(ws, "screen_owner_id", None) != device["owner_id"]:
+                    continue
+                try:
+                    await ws.send_json(payload)
+                except Exception:
+                    pass
 
     def _share_view(self, share: ShareBuffer, device: dict) -> dict:
         take = self.walkthroughs.items.get(share.share_id)
