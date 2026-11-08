@@ -46,6 +46,8 @@ class Tray:
                  enabled=lambda _: self.sharing()),
             item("End agent session", lambda *_: self.status.request_stop_tools(),
                  enabled=lambda _: self.tools()),
+            item("Stop render checks", lambda *_: self.status.request_stop_checks(),
+                 enabled=lambda _: self.status.checks_active),
             item("Quit Partyline Helper", lambda *_: self.status.request_quit()))
 
     def start(self):

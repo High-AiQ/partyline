@@ -304,9 +304,17 @@ class TrayTests(unittest.TestCase):
         shown = tray.start_tray(status, FAKE_BACKEND)
         icon = FakeIcon.instances[0]
         self.assertTrue(icon.running)
-        label, stop, end_tools, quit_item = icon.menu
+        label, stop, end_tools, end_checks, quit_item = icon.menu
         self.assertEqual(end_tools.text, "End agent session")
         self.assertFalse(end_tools.enabled(None))
+        self.assertEqual(end_checks.text, "Stop render checks")
+        self.assertFalse(end_checks.enabled(None))
+        status.checks_active, status.stop_checks = True, lambda: ended.append("checks")
+        self.assertTrue(end_checks.enabled(None))
+        end_checks.action()
+        status.checks_active = False
+        self.assertEqual(ended, ["checks"])
+        ended.clear()
         status.tools_active, status.stop_tools = True, lambda: ended.append(1)
         self.assertTrue(end_tools.enabled(None))
         end_tools.action()

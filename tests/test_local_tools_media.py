@@ -35,7 +35,9 @@ RESULT = {"ok": True, "artifact": {"id": "a1", "mime": "image/png", "bytes": 1},
                        "samples": None, "frame": 1}, "adjusted": ["width 5000 -> 2048"], "elapsed": 0.4}
 
 
-class MediaFlow(FlowCase):
+class RenderHelpers:
+    """Drive a render or screenshot through the fake add-on (mixed into the flow cases)."""
+
     async def render(self, op="render", args=None, artifact=None, timeout_s=5):
         self.addon.reply = {"result": dict(RESULT)}
         self.addon.artifacts["a1"] = artifact if artifact is not None else png()
@@ -44,6 +46,9 @@ class MediaFlow(FlowCase):
     def helper_rows(self):
         text = (Path(self.tmp.name) / "helper-audit.jsonl").read_text()
         return [json.loads(line) for line in text.splitlines()]
+
+
+class MediaFlow(RenderHelpers, FlowCase):
 
     async def test_a_render_is_stored_and_returned_as_a_media_reference(self):
         await self.connect()
@@ -277,7 +282,9 @@ class HelperMediaTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(has("render", None))
 
     async def test_nothing_is_sent_if_the_session_ended_while_the_image_was_prepared(self):
-        sent, grant = [], {"id": "s", "addon": SimpleNamespace(artifact=lambda *a: self.async_value(png()))}
+        sent = []
+        addon = SimpleNamespace(artifact=lambda *a: self.async_value(png()))
+        grant = {"id": "s", "checker": False, "addon": addon}
         tools = SimpleNamespace(grant=None, log=lambda *a: sent.append(a),
                                 send=lambda *a, **k: self.async_value(sent.append(("send", k))))
         await tools_media.deliver(tools, grant, "c", "render", RESULT)
@@ -287,6 +294,23 @@ class HelperMediaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([entry[0] for entry in sent], ["result", "send"])
         self.assertTrue(sent[1][1]["media"] and sent[1][1]["ok"])
 
+    async def test_only_a_render_under_a_grant_with_render_checks_is_marked_checkable(self):
+        sent = []
+        addon = SimpleNamespace(artifact=lambda *a: self.async_value(png()))
+        grant = {"id": "s", "checker": False, "addon": addon}
+        tools = SimpleNamespace(grant=grant, log=lambda *a: sent.append(a),
+                                send=lambda *a, **k: self.async_value(sent.append(("send", k))))
+        for op, checker, expected in (("render", True, True), ("render", False, False),
+                                      ("screenshot", True, False)):
+            sent.clear()
+            grant["checker"] = checker
+            await tools_media.deliver(tools, grant, "c", op, RESULT)
+            self.assertIs(sent[1][1]["checkable"], expected, (op, checker))
+            self.assertEqual(", checkable" in sent[0][2], expected)
+        grant["checker"] = False  # the scope is read when the image is returned, not when it was asked for
+        await tools_media.deliver(tools, grant, "c", "render", RESULT)
+        self.assertIs(sent[-1][1]["checkable"], False)
+
     async def test_an_add_on_error_while_fetching_is_reported_to_the_server(self):
         async def broken(*args):
             raise AddonError("Blender is not reachable (OSError)")
@@ -294,7 +318,7 @@ class HelperMediaTests(unittest.IsolatedAsyncioTestCase):
         sent = []
         tools = SimpleNamespace(grant=None, log=lambda *a: None,
                                 send=lambda *a, **k: self.async_value(sent.append((a, k))))
-        grant = {"id": "s", "addon": SimpleNamespace(artifact=broken)}
+        grant = {"id": "s", "checker": False, "addon": SimpleNamespace(artifact=broken)}
         tools.grant = grant
         await tools_media.deliver(tools, grant, "c", "render", RESULT)
         self.assertEqual(sent, [(("tool_result",), {"call_id": "c", "ok": False,

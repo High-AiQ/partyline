@@ -24,6 +24,13 @@ makes (renders, viewport screenshots) never travel as the add-on wrote them: the
 (single use, same secret), decodes and re-encodes it under 4 MiB, and the server stores it as line-scoped
 media, capped at 256 MiB per session.
 
+**Render checks send images off the host.** The decision model is a hosted service, so a render goes there
+only when the person ticked the separate render-check box (or answered the later dialog that asks for only
+that) and has not withdrawn it (tray "Stop render checks"). The server sends only that session's own renders,
+never screenshots, uploads or an earlier session's images, and re-checks the permission before every request.
+The key (`PARTYLINE_DECISIONS_KEY`, else `OPENAI_API_KEY`) stays in the server's environment: it is in no
+answer, no audit row and nothing the helper receives. Each check is audited with the images it sent.
+
 ## Machine API scope
 
 ### Screen helper pairing

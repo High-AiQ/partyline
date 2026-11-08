@@ -16,6 +16,7 @@ from .screen_audit import recover
 from .screen_connections import revoke as revoke_device
 from .local_tools_audit import recover as recover_tools
 from .local_tools_routes import tools_router
+from .render_check_routes import render_check_router
 from .screen_control_routes import control_router
 from .screen_frame_store import frame_reference
 from .screen_hub import ScreenHub
@@ -200,6 +201,7 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
     app.include_router(router)
     app.include_router(control_router(runtime, hub, store))
     app.include_router(tools_router(runtime, hub, store))
+    app.include_router(render_check_router(runtime, hub, store))
     from .walkthrough_routes import walkthrough_router
     app.include_router(walkthrough_router(runtime, hub, store))
     return hub

@@ -65,13 +65,70 @@ both copies show what was rendered and what came back.
 - **4 MiB ceiling.** See above. Noisy or very large renders can exceed it; the answer is a smaller size, not a
   silent downscale. A larger limit would mean raising `MAX_FRAME_BYTES` for every socket.
 
+## Render checks (`render_check`)
+
+A decision model (OpenAI Decisions, `gpt-6-luna`) answers bounded questions about renders so the agent can skip
+the look at the ones that are fine. It is a filter, never a verdict: only a clean, confident answer can skip a
+look.
+
+**Asking.** `render_check(media, questions, compare?, reference?, evidence?)`. `media` are ids returned by
+`blender_render` in this session (at most 12). Each question is a **problem statement in plain words** ("The
+lamp is floating above the table."), so yes is a problem; the server adds a fixed instruction to say so rather
+than guess. `compare` picks the best among 2 to 6 of the images; `reference` is an image to match; `evidence`
+is up to 16 KB of scene facts, for example the `projection` from `blender_scene_info`. Images are cut to 1024 px
+and sent to OpenAI; nothing else leaves.
+
+**Verdicts per image.** Predicate probability `p`: `flag` at 0.2 or more, `pass` at 0.05 or less, otherwise
+`uncertain`. Choice: `uncertain` on abstain, a refusal, a value not offered, or confidence under 0.7.
+`unchecked` on an API error, no key, an exhausted budget or a withdrawn permission, for that image and every
+later one (earlier answers are kept). `look` lists what to view: everything that is not a `pass`, and for
+`compare` the chosen image or, when nothing was chosen, all the variants.
+
+**Consent, enforced on the server for every call** (each refusal states its reason):
+
+- the session is live and held by the caller, and its `checker` scope is on. An exec-only session is refused
+  and told to ask with `blender_request(checker=true)`; a declined later dialog changes nothing;
+- every id (and the reference) is a render this session produced: screenshots, uploads, other sessions' media
+  and ids evicted from the last 200 are refused;
+- the helper marked it `checkable` when it delivered it, i.e. the permission existed at that moment; a render
+  from before an accepted escalation is refused with "render it again";
+- the permission is re-checked before each request to the model, so the tray item "Stop render checks" (or
+  killing the session) ends a run in progress. The helper reports it with `tools_granted` and
+  `checker=false`; the server only ever honours "off" from that message.
+
+**Budget and key.** `PARTYLINE_RENDER_CHECK_MAX` requests per session, default 200 (a request costs about one
+thousand tokens an image, around $0.0001 at the current price; `cost_usd` is reported). The key is
+`PARTYLINE_DECISIONS_KEY`, else `OPENAI_API_KEY`, read only by `partyline/render_check.py` from the server's
+environment. Without a key every image is `unchecked`. Every check writes an audit row listing the images sent.
+
+**From a server-side harness** (no session, no helper; the caller owns the consent question):
+
+```python
+from partyline import render_check
+result = render_check.check_sync([("a.png", open("a.png", "rb").read())], ["The lamp is floating."],
+                                 evidence=None)       # or: await render_check.check(...)
+```
+
+or `python -m partyline.render_check a.png --question "..." [--compare "..."] [--reference r.png]
+[--evidence scene.json]`. Pass `decisions=Decisions(key, post=fake)` to fake the HTTP in a test.
+
+**Geometry evidence.** `blender_scene_info(project_to_camera=true)` adds a `projection` computed in the
+application (add-on `geometry.py`): per mesh the camera-space box and frame margins (`inside`, `tight`, `cut`,
+`outside`), pairs that clip (`intersecting` with a penetration depth, `contained`, or `clear`), and for objects
+named in `supports` a downward ray test (`supported` or `floating` with the gap). Tolerances and assumptions are
+reported in the result. Anything it cannot decide (open meshes, instances, particles, node modifiers, resting
+contact, leaning supports, more than 40 objects or 50,000 triangles a mesh) is `unsupported`, never a pass.
+Checked once in the real application, version 5.2.2: 20 of 20 cases, including the counterexamples (resting
+contact, an off-centre support, a leaning plank, an open shell nested in a box).
+
 ## Consent and the kill switch
 
 - **Every session asks again**, on the person's computer: a native Yes/No dialog with a one-second guard and a
   60 s timeout. Silence declines. There is no flag that grants without a prompt; the helper refuses any
   `tool_call` unless it holds a live local grant, so a compromised server cannot forge one.
-- The dialog has a checkbox for render checks, **unticked by default**. Phase (a) only records the choice in the
-  grant (`tools_granted.checker`); nothing uses it yet. Adding it to a live session needs a fresh dialog.
+- The dialog has a checkbox for render checks, **unticked by default**; the choice is the grant's `checker`
+  scope (`tools_granted.checker`) and gates `render_check` (below). Adding it to a live session needs a later
+  dialog that asks for only that.
 - Grants live in memory only. A server restart, a helper restart, a lost connection or the add-on's restart
   ends them. The session is not tied to a screen share.
 - The grant is bound to the requesting agent and one session.
@@ -81,7 +138,8 @@ both copies show what was rendered and what came back.
   owner, and the agent's own `blender_end`.
 - After a **local** kill (tray, hotkey, End button) the agent may not re-ask for 10 minutes. 15 minutes
   without a call ends the session. Both are enforced by the helper.
-- The tray icon turns violet (`tools`) while a session is live, only if the helper was otherwise idle.
+- The tray icon turns violet (`tools`) while a session is live, only if the helper was otherwise idle. The tray
+  item "Stop render checks" withdraws only that scope; Python keeps working.
 
 ## Audit
 
@@ -96,7 +154,7 @@ Every script is recorded in two places, so neither side can edit the other's cop
 ## Limits
 
 Code 64 KB; images 4 MiB each and 256 MiB a session; one call in flight; 60 calls a minute and 500 a session (`PARTYLINE_TOOLS_RATE`,
-`PARTYLINE_TOOLS_SESSION_CALLS`); `exec` default 20 s, `blender_render` default 60 s, both at most 120 s; output cut to 16 KB (head 12 KB, tail
+`PARTYLINE_TOOLS_SESSION_CALLS`); render checks are budgeted separately (`PARTYLINE_RENDER_CHECK_MAX`); `exec` default 20 s, `blender_render` default 60 s, both at most 120 s; output cut to 16 KB (head 12 KB, tail
 4 KB, `truncated`); tracebacks 4 KB. The server waits `timeout + 5 s`, then sends `tool_cancel`.
 Cancel is cooperative: a Python loop stops within about a second; a call stuck inside native code cannot be
 stopped, so the session stays busy until the add-on is free again. A script that catches every exception in a
@@ -109,6 +167,9 @@ loop can also outlive its deadline; closing the application is then the remedy.
 loopback client against a real local HTTP server, the dialog checkbox) and `test_local_tools_media.py` (images
 stored and returned as media, the 4 MiB refusal, no grant, cancel, kill switch, both audit copies). The add-on's own tests, including the
 wrong-secret, browser-origin and runaway-loop cases, run against a fake `bpy` in `partyline-addons`.
+
+`tests/test_render_check.py` covers the checker: thresholds, abstain, errors, budget, every refusal path and the
+scope changing mid-run, with the model's HTTP faked.
 
 ## Windows live acceptance (Greg runs this)
 
@@ -136,3 +197,8 @@ wrong-secret, browser-origin and runaway-loop cases, run against a fake `bpy` in
   frame, no image arrives and the next call works once it is free. Pressing Ctrl+Alt+Esc during a render ends the
   session at once, and no image is delivered.
 - [ ] Both audit copies show the render request and its outcome.
+- [ ] Phase (c), reinstall the 0.3.0 zip: the dialog's render-check box ticked; `blender_render` then
+  `render_check` returns verdicts. With the box unticked `render_check` is refused naming the permission. Tray
+  "Stop render checks" refuses the next check while `blender_exec` still works.
+- [ ] `blender_scene_info(project_to_camera=true)` on a real scene returns a `projection`; record the time it
+  takes on a large scene.

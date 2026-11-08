@@ -2,7 +2,8 @@
 
 The helper sends `tool_result{media: true}` followed by one binary message, as it does for screen frames. The
 image is stored with `store_frame` and the agent gets the same reference shape as `screen_frame` (`file`), so
-it fetches the pixels with `get_media`; nothing is posted to the chat.
+it fetches the pixels with `get_media`; nothing is posted to the chat. A render is also remembered on the
+session, with whether it was `checkable` (rendered while the person had allowed render checks).
 """
 import asyncio
 from io import BytesIO
@@ -15,6 +16,7 @@ from .screen_protocol import HEARTBEAT_TIMEOUT, MAX_FRAME_BYTES
 
 MIMES = ("image/webp", "image/jpeg", "image/png")
 SESSION_BYTES = 256 * 1024 * 1024  # media one session may store; a loop of renders cannot fill the disk
+KEEP_RENDERS = 200                 # renders a session remembers for render checks; older ones are forgotten
 
 
 async def read(device, message):
@@ -50,7 +52,16 @@ async def attach(store, item, op, result, answer):
     except MediaError as exc:
         raise ValueError(f"the image was rejected: {exc.detail}") from exc
     item.media_bytes += len(data)
-    return {**result, "file": ref.model_dump(mode="json")}
+    file = ref.model_dump(mode="json")
+    if op != "render":
+        return {**result, "file": file}
+    # The helper marks a render checkable from its grant at that moment; the server only ever trusts "yes"
+    # together with the session's own current scope (render_check_routes).
+    checkable = answer.get("checkable") is True
+    item.renders[file["id"]] = checkable
+    while len(item.renders) > KEEP_RENDERS:
+        del item.renders[next(iter(item.renders))]
+    return {**result, "file": file, "checkable": checkable}
 
 
 def note(result):

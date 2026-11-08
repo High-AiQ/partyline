@@ -239,6 +239,7 @@ machine, render cancel, 4 MiB ceiling. Built; the risks are tracked in `docs/loc
 **(c) Decision-model checker.** `partyline/render_check.py` (Decisions client, thresholds, budget, about 200),
 `render_check_routes.py`, `mcp/tools_check.py`; add-on `geometry.py` (camera-space bbox, overlap, support
 ray cast, about 120). Uses the pilot's client conventions from `experiments/decisions-pilot/run.py`.
+Built (partyline 2.98.0, add-on 0.3.0); how it behaves and what is still open: `docs/local-tools.md`.
 
 **(d) Evaluation** (`experiments/blender-eval/`, not shipped). 18 tasks in six families of three: placement on a
 surface, clipping, framing, material and lighting plausibility, variant selection against a reference, and

@@ -13,7 +13,7 @@ from .tools_addon import AddonError
 
 MAX_MEDIA = 4 * 1024 * 1024
 MAX_PIXELS = 16 * 1024 * 1024   # the add-on clamps far below this; a bigger image is not what was asked
-MEDIA_OPS = ("render", "screenshot")
+MEDIA_OPS = ("render", "screenshot")  # only a render can be `checkable`
 QUALITIES = (85, 70, 50)
 
 
@@ -66,6 +66,8 @@ async def deliver(tools, grant, call_id, op, result):
         return
     shown = {key: value for key, value in result.items() if key != "artifact"}
     shown["media"] = {"mime": mime, "bytes": len(binary), "width": width, "height": height}
-    tools.log("result", op, f"ok ({mime}, {len(binary)} bytes, {width}x{height})")
+    checkable = op == "render" and bool(grant["checker"])  # the grant as it is now, not when it was asked
+    tools.log("result", op, f"ok ({mime}, {len(binary)} bytes, {width}x{height}"
+              f"{', checkable' if checkable else ''})")
     await tools.send("tool_result", binary=binary, call_id=call_id, ok=True, result=shown, media=True,
-                     mime=mime)
+                     mime=mime, checkable=checkable)

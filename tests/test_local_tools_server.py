@@ -301,6 +301,10 @@ class ToolsLimitsAndMcpTest(unittest.TestCase):
         self.assertEqual(ToolLimits.from_env({}).per_session, 500)
         with self.assertRaises(ValueError):
             ToolLimits.from_env({"PARTYLINE_TOOLS_RATE": "0"})
+        self.assertEqual(ToolLimits.from_env({}).render_checks, 200)
+        self.assertEqual(ToolLimits.from_env({"PARTYLINE_RENDER_CHECK_MAX": "7"}).render_checks, 7)
+        with self.assertRaises(ValueError):
+            ToolLimits.from_env({"PARTYLINE_RENDER_CHECK_MAX": "many"})
 
     def test_audit_recover_publishes_pending_batches(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -325,18 +329,23 @@ class ToolsLimitsAndMcpTest(unittest.TestCase):
         tools_blender.call(client, "blender_request", {"checker": True}, state)
         tools_blender.call(client, "blender_exec", {"code": "1", "timeout_s": 60}, state)
         tools_blender.call(client, "blender_scene_info", {"detail": "object", "name": "Cube"}, state)
+        projection = {"detail": "object", "project_to_camera": True, "camera": "Side", "margin": 0.05,
+                      "supports": {"Lamp": "Table"}}
         tools_blender.call(client, "blender_end", {}, state)
+        tools_blender.call(client, "blender_scene_info", projection, state)
         tools_blender.call(client, "blender_render",
                            {"camera": "Side", "width": 640, "engine": "eevee"}, state)
         tools_blender.call(client, "blender_render", {"timeout_s": 90}, state)
         tools_blender.call(client, "blender_screenshot", {"max_size": 800}, state)
-        self.assertEqual(calls[4:], [
+        self.assertEqual(calls[5:], [
             (("POST", base + "/call", {"op": "render", "timeout_s": 60,
                                        "args": {"camera": "Side", "width": 640, "engine": "eevee"}}),
              {"timeout": 75}),
             (("POST", base + "/call", {"op": "render", "timeout_s": 90, "args": {}}), {"timeout": 105}),
             (("POST", base + "/call", {"op": "screenshot", "timeout_s": 20, "args": {"max_size": 800}}),
              {"timeout": 35})])
+        self.assertEqual(calls[4], (("POST", base + "/call", {"op": "scene_info", "args": projection}),
+                                    {"timeout": 35}))
         self.assertEqual(calls[:4], [
             (("POST", base + "/request", {"tool": "blender", "checker": True}), {}),
             (("POST", base + "/call", {"op": "exec", "args": {"code": "1"}, "timeout_s": 60}),
