@@ -15,25 +15,38 @@ import time
 from . import foreground
 
 
-def encode_request(title, message, timeout, kind="ask", parent=None):
+def encode_request(title, message, timeout, kind="ask", parent=None, box=None):
     data = {"title": title, "message": message, "timeout": timeout, "kind": kind,
             "parent": os.getpid() if parent is None else parent}
+    if box:
+        data["box"] = box  # an unchecked checkbox beside Yes/No; ticked only counts with a Yes
     return base64.urlsafe_b64encode(json.dumps(data).encode()).decode()
 
 
-def tk_ask(title, message, timeout, kind="ask"):
-    """tkinter yes/no (or a single OK); in front of other windows; closes itself after `timeout`."""
+def tk_ask(title, message, timeout, kind="ask", box=None, ticked=None):
+    """tkinter yes/no (or a single OK); in front of other windows; closes itself after `timeout`.
+
+    With `box`, an unchecked checkbox is shown and its value is appended to `ticked` on Yes."""
     import tkinter
     foreground.make_dpi_aware()
     root = tkinter.Tk()
     root.title(title)
     answer = []
     tkinter.Label(root, text=message, justify="left", wraplength=420, padx=16, pady=12).pack()
+    ticks = tkinter.BooleanVar(value=False) if box and kind != "info" else None
+    if ticks is not None:
+        tkinter.Checkbutton(root, text=box, variable=ticks, justify="left", wraplength=420).pack(padx=16)
     buttons = tkinter.Frame(root)
     buttons.pack(pady=(0, 12))
+
+    def choose(value):
+        answer.append(value)
+        if value and ticks is not None and ticked is not None:
+            ticked.append(bool(ticks.get()))
+        root.destroy()
+
     for text, value in (("OK", True),) if kind == "info" else (("Yes", True), ("No", False)):
-        tkinter.Button(buttons, text=text, width=10,
-                       command=lambda value=value: (answer.append(value), root.destroy())).pack(
+        tkinter.Button(buttons, text=text, width=10, command=lambda value=value: choose(value)).pack(
             side="left", padx=6)
     root.protocol("WM_DELETE_WINDOW", root.destroy)
     root.after(int(timeout * 1000), root.destroy)
@@ -50,12 +63,12 @@ def message_box(title, message, kind):  # pragma: no cover - Windows-only ctypes
     return ctypes.windll.user32.MessageBoxW(None, message, title, flags) in (1, 6)
 
 
-def ask(title, message, timeout, kind="ask"):
+def ask(title, message, timeout, kind="ask", box=None, ticked=None):
     try:
         import tkinter  # noqa: F401
-    except ImportError:
+    except ImportError:  # no checkbox without Tk: the box stays unticked
         return message_box(title, message, kind) if os.name == "nt" else False
-    return tk_ask(title, message, timeout, kind)
+    return tk_ask(title, message, timeout, kind, box, ticked)
 
 
 def process_gone(pid, sleep=time.sleep):
@@ -95,7 +108,9 @@ def main(argv=None, watch=watch_parent):
         data = json.loads(base64.urlsafe_b64decode((sys.argv[1:] if argv is None else argv)[0]))
         watch(int(data["parent"]))
         kind = "info" if data.get("kind") == "info" else "ask"
-        return 0 if ask(str(data["title"]), str(data["message"]), float(data["timeout"]), kind) else 1
+        box, ticked = (str(data["box"]) if data.get("box") else None), []
+        yes = ask(str(data["title"]), str(data["message"]), float(data["timeout"]), kind, box, ticked)
+        return (4 if ticked == [True] else 0) if yes else 1  # 4: Yes with the box ticked
     except Exception:  # noqa: BLE001 - any failure must decline, never crash into an accept
         return 2
 

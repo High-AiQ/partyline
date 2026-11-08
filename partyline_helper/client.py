@@ -13,6 +13,7 @@ from .bounds import bounded, validate_request
 from .control import CONTROL_VERSION, Control
 from .images import changed, encode, thumbnail
 from .status import Status
+from .tools import MESSAGES as TOOL_MESSAGES, TOOLS_VERSION, Tools
 from .transport import CertificateError, certificate_failure
 from .version import helper_version
 
@@ -40,6 +41,7 @@ class Session:
         self.last_received = self.clock()
         self.previous = self.last_pointer = None
         self.control = Control(self, inputs, allow_control)
+        self.tools = Tools(self)
 
     async def send(self, kind, binary=None, **fields):
         async def write():
@@ -193,6 +195,8 @@ class Session:
                             out_width=width, out_height=height, mime=mime)
         elif kind in ("control_request", "control_revoked", "action"):
             await self.control.dispatch(message)
+        elif kind in TOOL_MESSAGES:
+            await self.tools.dispatch(message)
         elif kind == "ping":
             await self.send("pong")
         elif kind not in ("pong", "snap", "error"):
@@ -209,7 +213,7 @@ class Session:
     async def run(self):
         await self.send("hello", protocol=1, device_name=self.name, os=platform.system(),
                         helper_version=helper_version(), monitors=self.desktop.monitors(),
-                        control=CONTROL_VERSION)
+                        control=CONTROL_VERSION, tools=TOOLS_VERSION)
         self.status.set("paired")
         loop = asyncio.get_running_loop()
         # The tray's Stop sharing runs on another thread: hand the stop to this loop.
@@ -233,6 +237,7 @@ class Session:
                 await heartbeat
             with contextlib.suppress(ConnectionClosed):
                 await self.stop("disconnected")
+            await self.tools.end("disconnected")
             self.status.stop_share = None
             self.status.set("offline")
         if self.socket.close_code in (1008, 4001, 4003, 4401, 4403):

@@ -13,6 +13,7 @@ from .docker_mode_schema import MIGRATIONS as DOCKER_MODE
 from .bridge_schema import MIGRATIONS as BRIDGE
 from .retirement_schema import MIGRATIONS as RETIREMENT
 from .captain_handover_schema import MIGRATIONS as HANDOVER
+from .local_tools_schema import MIGRATIONS as LOCAL_TOOLS_AUDIT
 from .screen_audit_schema import MIGRATIONS as SCREEN_AUDIT
 from .screen_schema import MIGRATIONS as SCREEN
 from .orchestrator_schema import MIGRATIONS as ORCHESTRATOR
@@ -35,8 +36,7 @@ MIGRATIONS = [
         debrief TEXT NOT NULL,
         created_at REAL NOT NULL
     )""",
-    # A plan token binds a browser's accept click to the exact offer it saw.
-    # Pre-token plans were never offered by a server route, so discard them.
+    # A plan token binds a browser's accept click to its offer; pre-token plans were never offered.
     "ALTER TABLE restart_plan ADD COLUMN token TEXT",
     "DELETE FROM restart_plan WHERE token IS NULL",
     # Automatic plans are hands-off recovery; UI plans stay manual offers.
@@ -296,5 +296,5 @@ MIGRATIONS = [
 ]
 MIGRATIONS.extend(MEMORY + IDEMPOTENCY + NOTES + COMPACTION + ACCEPT_HISTORY + SCRATCH + LEASE
                   + GATES + AUTO_COMPACT + DOCKER_MODE + BRIDGE + RETIREMENT + ORCHESTRATOR + HANDOVER)
-MIGRATIONS.extend(["ALTER TABLE attachments ADD COLUMN is_successor INTEGER NOT NULL DEFAULT 0"] + SCREEN)
-MIGRATIONS.extend(ASR + SCREEN_AUDIT)
+MIGRATIONS.extend(["ALTER TABLE attachments ADD COLUMN is_successor INTEGER NOT NULL DEFAULT 0"] + SCREEN
+                  + ASR + SCREEN_AUDIT + LOCAL_TOOLS_AUDIT)
