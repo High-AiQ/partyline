@@ -54,11 +54,20 @@ def start_helper(paired, ensure, tell=None):
 CHECKED = ("partyline_helper.client", "partyline_helper.desktop", "partyline_helper.inputs",
            "partyline_helper.border", "partyline_helper.tray", "partyline_helper.dialog_proc",
            "websockets.asyncio.client", "mss", "pynput.keyboard", "pynput.mouse", "pystray", "PIL.ImageDraw")
+WINDOWS_CHECKED = ("comtypes.client", "comtypes.gen.UIAutomationClient")
 
 
-def selfcheck(modules=CHECKED, load=importlib.import_module):
+def selfcheck(modules=CHECKED, load=importlib.import_module, windows=None, initialize=None):
     """Problems that would break a frozen build: missing modules, Tcl/Tk files, WebP. [] when all is well."""
     problems = []
+    if modules is CHECKED and (os.name == "nt" if windows is None else windows):
+        try:
+            if initialize is None:
+                from .uia_process import initialize
+            initialize()
+        except Exception as exc:  # noqa: BLE001 - report broken type library generation
+            problems.append(f"UIAutomationClient: {exc.__class__.__name__}: {exc}")
+        modules += WINDOWS_CHECKED
     for name in modules:
         try:
             load(name)

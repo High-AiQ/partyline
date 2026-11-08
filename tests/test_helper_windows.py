@@ -304,7 +304,17 @@ class TrayTests(unittest.TestCase):
         shown = tray.start_tray(status, FAKE_BACKEND)
         icon = FakeIcon.instances[0]
         self.assertTrue(icon.running)
-        label, stop, end_tools, end_checks, quit_item = icon.menu
+        label, stop, choose_window, stop_window, end_tools, end_checks, quit_item = icon.menu
+        picked, revoked = [], []
+        status.choose_window, status.stop_window = lambda: picked.append(1), lambda: revoked.append(1)
+        choose_window.action()
+        self.assertEqual(picked, [1])
+        self.assertFalse(stop_window.enabled(None))
+        status.window_title = "Editor"
+        self.assertTrue(stop_window.enabled(None))
+        stop_window.action()
+        self.assertEqual(revoked, [1])
+        status.window_title = None
         self.assertEqual(end_tools.text, "End agent session")
         self.assertFalse(end_tools.enabled(None))
         self.assertEqual(end_checks.text, "Stop render checks")
@@ -451,6 +461,14 @@ class FrozenLaunchTests(unittest.TestCase):
 
 
 class SelfCheckTests(unittest.TestCase):
+    def test_windows_checks_comtypes_and_generated_uia(self):
+        loaded = []
+        init = Mock()
+        runtime.selfcheck(load=loaded.append, windows=True, initialize=init)
+        init.assert_called_once()
+        self.assertIn("comtypes.client", loaded)
+        self.assertIn("comtypes.gen.UIAutomationClient", loaded)
+
     def test_reports_each_module_that_fails_to_import(self):
         def load(name):
             if name == "pystray":

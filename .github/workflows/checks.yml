@@ -39,7 +39,7 @@ jobs:
       - name: native locks and memory limits under a verified Job Object cap
         run: >-
           uv run --locked python scripts/capped-test --
-          uv run --locked python -m unittest
+          uv run --locked --extra helper python -m unittest
           tests.test_runtime_lock tests.test_windows_memory tests.test_windows_console
           tests.test_db tests.test_db_concurrency
           tests.test_windows_runtime tests.test_windows_restriction tests.test_windows_private
@@ -51,6 +51,7 @@ jobs:
           tests.test_windows_volumes
           tests.test_windows_platform
           tests.test_windows_startup
+          tests.test_windows_uia
 
   frontend:
     name: frontend

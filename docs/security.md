@@ -48,6 +48,15 @@ only when attached to a message or fetched through `screen_frame`, where normal 
 records provide the audit trail. Revocation or socket loss ends the share and drops
 its buffered frames.
 
+Windows window element access is a separate local, default-off grant, independent
+of pixel sharing. From the helper tray a person selects one visible window by title
+and process name and explicitly allows agents to read it. The helper records grants
+and revocations in its local audit log, and the tray can revoke access. Access ends
+when the window closes or the helper disconnects. UI Automation can expose text and
+values from that window, including content not currently visible; password values
+are excluded. Access pauses while a secure desktop is active and resumes when the
+normal desktop returns. No input or window activation is performed by the reader.
+
 Walkthroughs use the same per-share local consent. While recording, a line-wide
 indicator identifies the person recording. Candidate frames and microphone
 audio stay in memory: only the final message and selected image uploads are

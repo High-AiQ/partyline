@@ -228,6 +228,30 @@ refused with an error containing the request ID; retry after that interval. Imag
 use WebP, falling back to JPEG, and each binary message is at most 4 MB. Disconnects end sharing; reconnects
 require a new request and fresh consent. Backoff reaches at most 60 seconds.
 
+### Read a Windows window's UI elements
+
+In the helper tray, choose **Allow agents to read a window**, select one visible
+window by title and executable, and explicitly allow it. No window is selected by
+default. The grant is separate from screen sharing: either can be used alone.
+The tray shows the selected window and **Stop reading window** revokes access.
+Closing the window or disconnecting the helper ends the grant. Grants and revocations
+are recorded in the helper's local audit log. Access pauses on the secure desktop and
+resumes when the normal desktop returns, provided the window is still open.
+
+`screen_elements` reads that window's UI Automation tree without bringing it to the
+front or sending input. It returns one compact line per element, a snapshot ID,
+the window title and executable, control types, names, safe values, states, supported
+pattern names, and screen-coordinate bounds. When a current pixel share overlaps an
+element it also includes frame-pixel bounds. Element numbers apply only to that
+snapshot; they are not action targets. Password values and other windows' elements
+are excluded and text is capped. Element metadata may include offscreen text from
+the selected window. Count, depth and time bounds limit traversal; an isolated child
+process is killed if a provider hangs. Errors, denied consent, closed windows and
+unsupported platforms return an unavailable reason. UIA actions, settle/wait,
+macOS AX and Linux AT-SPI are planned.
+The Windows-only helper dependency `comtypes` supplies the typed UI Automation
+COM interfaces; it is not installed on other platforms.
+
 ## Platforms and troubleshooting
 
 - **Windows:** no administrator access required. Per-monitor DPI awareness is set

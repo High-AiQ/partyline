@@ -16,6 +16,7 @@ from .status import Status
 from .tools import MESSAGES as TOOL_MESSAGES, TOOLS_VERSION, Tools
 from .transport import CertificateError, certificate_failure
 from .version import helper_version
+from .uia_access import WindowAccess
 
 
 class Revoked(Exception):
@@ -42,6 +43,8 @@ class Session:
         self.previous = self.last_pointer = None
         self.control = Control(self, inputs, allow_control)
         self.tools = Tools(self)
+        self.window = WindowAccess(self)
+        self.last_uia_frame = None
 
     async def send(self, kind, binary=None, **fields):
         async def write():
@@ -80,6 +83,7 @@ class Session:
                 await worker
         share, self.share = self.share, None
         self.accepted = False
+        self.last_uia_frame = None
         if share and notify:
             await self.send("share_stopped", share_id=share["share_id"], reason=reason)
         if share:
@@ -162,6 +166,7 @@ class Session:
         await self.send("frame", binary, share_id=share["share_id"], request_id=request_id,
                         ts_ms=int((self.clock() - self.started) * 1000), region=region,
                         out_width=width, out_height=height, pointer=pointer, mime=mime)
+        self.last_uia_frame = (dict(region), width, height)
         self.previous, self.last_pointer = thumb, pointer
         self.last_frame_at = self.clock()
 
@@ -197,6 +202,9 @@ class Session:
             await self.control.dispatch(message)
         elif kind in TOOL_MESSAGES:
             await self.tools.dispatch(message)
+        elif kind == "read_window_elements":
+            result = await self.window.snapshot()
+            await self.send("window_elements", request_id=message["request_id"], **result)
         elif kind == "ping":
             await self.send("pong")
         elif kind not in ("pong", "snap", "error"):
@@ -218,7 +226,10 @@ class Session:
         loop = asyncio.get_running_loop()
         # The tray's Stop sharing runs on another thread: hand the stop to this loop.
         self.status.stop_share = lambda: asyncio.run_coroutine_threadsafe(self.stop("local"), loop)
+        self.status.choose_window = lambda: asyncio.run_coroutine_threadsafe(self.window.choose(), loop)
+        self.status.stop_window = lambda: loop.call_soon_threadsafe(self.window.revoke)
         heartbeat = asyncio.create_task(self.heartbeat())
+        window_watch = asyncio.create_task(self.window.watch())
         try:
             async for raw in self.socket:
                 self.last_received = self.clock()
@@ -233,12 +244,17 @@ class Session:
                                     message="Invalid request or capture failed; see local terminal")
         finally:
             heartbeat.cancel()
+            window_watch.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await window_watch
             with contextlib.suppress(asyncio.CancelledError):
                 await heartbeat
             with contextlib.suppress(ConnectionClosed):
                 await self.stop("disconnected")
             await self.tools.end("disconnected")
             self.status.stop_share = None
+            self.status.choose_window = self.status.stop_window = None
+            self.window.revoke()
             self.status.set("offline")
         if self.socket.close_code in (1008, 4001, 4003, 4401, 4403):
             raise Revoked

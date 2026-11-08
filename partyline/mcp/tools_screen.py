@@ -17,3 +17,13 @@ def screen_frame_tool():
             "additionalProperties": False,
         },
     }
+
+
+def screen_elements_tool():
+    return {"name": "screen_elements", "description": (
+        "Read the UI Automation snapshot of one locally consented Windows window, even in the background. "
+        "The person chooses and can revoke the window in the helper tray, independent of pixel sharing. "
+        "Element IDs apply only to this snapshot. Returns elements_unavailable when unavailable."),
+        "inputSchema": {"type": "object", "properties": {"device": {"type": "string",
+        "description": "Paired computer name when more than one is online."}},
+        "required": [], "additionalProperties": False}}
