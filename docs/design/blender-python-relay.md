@@ -223,8 +223,8 @@ is synthetic UI, not 3D scenes, so this design assumes **nothing** about accurac
 - choice: `abstain`, a refusal, or confidence below 0.7 is `uncertain`;
 - an API error or budget exhaustion returns `unchecked` for every frame: the agent looks at them all.
 
-Only confident passes are skipped, so the checker saves looks at the risk of a *wrong skip*; phase (d)
-tunes the thresholds first.
+Only confident passes are skipped, so the checker saves looks at the risk of a *wrong skip*; phase (d),
+which would have tuned the thresholds, is dropped (section 7).
 
 ## 7. Phased build
 
@@ -258,19 +258,9 @@ machine, render cancel, 4 MiB ceiling. Built; the risks are tracked in `docs/loc
 ray cast, about 120). Uses the pilot's client conventions from `experiments/decisions-pilot/run.py`.
 Built (partyline 2.98.0, add-on 0.3.0); how it behaves and what is still open: `docs/local-tools.md`.
 
-**(d) Evaluation** (`experiments/blender-eval/`, not shipped). 18 tasks in six families of three: placement on a
-surface, clipping, framing, material and lighting plausibility, variant selection against a reference, and
-multi-step edits. Labels are independent of the checker, per family:
-- *placement, clipping, framing*: the fault is seeded by construction (a known offset or rotation) with a clean
-  control per fault, so the label is the injection, not a later measurement;
-- *material and lighting, variant selection*: no geometry label exists, so two humans label each render pair
-  against a written rubric first (disagreements dropped); variants have one reference with a known answer.
-
-Every rendered pair is eyeballed before any run. Arms: Python only versus Python plus `render_check`, same
-model, 3 repeats, fixed budget. Two separate scores, so the checker is never graded by its own output:
-*task correctness* (the final scene against the label, judged blind to the arm) and *detection* (flags
-against the label: caught faults, false alarms on clean controls, wrong skips). Also wall time, tokens (from
-transcripts) and checker cost. Report with intervals; at 18 tasks, differences under about 15 points are noise.
+**(d) Evaluation — dropped (Greg, 2026-11-08).** Decision models will not judge whether Blender scenes look
+correct, so no `experiments/blender-eval/` harness is built. It would have measured task correctness and checker
+detection (flags against seeded labels) across 18 tasks, with and without `render_check`.
 
 ## 8. Decisions (Greg, 2026-11-07)
 
@@ -281,4 +271,4 @@ transcripts) and checker cost. Report with intervals; at 18 tasks, differences u
 4. The add-on lives in the public `partyline-addons` repo as a Blender extension zip built by CI. A first
    test on Windows with Blender 5.x only is enough.
 5. The add-on saves a backup copy of the open file at session start.
-6. Phase (d) budget approved: about $5 of checker calls plus agent tokens (18 tasks x 2 arms x 3 repeats).
+6. Phase (d) budget (about $5 of checker calls plus agent tokens) is withdrawn, Greg, 2026-11-08: phase (d) is dropped.
