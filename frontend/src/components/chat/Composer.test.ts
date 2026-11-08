@@ -93,8 +93,8 @@ describe("composer controls", () => {
       expect(handsFree?.getAttribute("aria-label")).toMatch(/^Hands-free: off — /);
       expect(handsFree?.getAttribute("aria-pressed")).toBe("false");
       expect(handsFree?.textContent.trim()).toBe("");
-      const showMe = box?.querySelector('[aria-label="Walkthrough"] button');
-      expect(showMe?.getAttribute("aria-label")).toBe("Show me: record a narrated walkthrough");
+      const showMe = box?.querySelector('button[aria-haspopup="menu"]');
+      expect(showMe?.getAttribute("aria-label")).toBe("Screen: share live or record a walkthrough");
       expect(showMe?.textContent.trim()).toBe("");
       const frames = box?.querySelector<HTMLButtonElement>('button[aria-label="Attach screen frames"]');
       expect(frames?.getAttribute("aria-pressed")).toBe("true");
@@ -112,7 +112,7 @@ describe("composer controls", () => {
       await tick();
       const box = document.querySelector(".box");
       expect(box?.querySelector('button[aria-label="Attach screen frames"]')).toBeNull();
-      expect(box?.querySelector('[aria-label="Walkthrough"]')).toBeNull();
+      expect(box?.querySelector('button[aria-haspopup="menu"]')).not.toBeNull();
       expect(box?.querySelector("button.hands-free")).not.toBeNull();
     } finally {
       await unmount(component);

@@ -13,7 +13,7 @@
   import { screenStatus } from "../../state/screen-status.svelte.js";
   import { voicePresets } from "../../state/voice-presets.svelte.js";
   import { walkthrough } from "../../state/walkthrough.svelte.js";
-  import ShowMeButton from "./ShowMeButton.svelte";
+  import ScreenMenuButton from "./ScreenMenuButton.svelte";
   let { sources = browserSources() }: { sources?: RecorderSources } = $props();
   let devices = $state<ScreenDevice[]>([]);
   let stage = $state<WalkthroughStage>("idle");
@@ -274,8 +274,8 @@
 </script>
 
 <svelte:window onkeydown={keydown} />
-{#if stage === "idle" && online && !layout.narrow}
-  <ShowMeButton {error} onbegin={() => void begin()} />
+{#if stage === "idle" && room.conversation && !layout.narrow}
+  <ScreenMenuButton {error} {online} onbegin={() => void begin()} />
 {:else if stage !== "idle"}
   <div
     class="order-last flex basis-full flex-wrap items-center gap-2 border-t border-line pt-2 text-sm"
