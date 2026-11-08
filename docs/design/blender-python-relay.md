@@ -234,7 +234,7 @@ add-on's tests fake `bpy`.
 `screenshot.py` (offscreen, about 80); helper `tools_media.py` (fetch artifact by id, re-encode, send binary,
 about 80); server stores via `screen_frame_store.store_frame` and returns the `screen_frame` reference shape;
 `tools_blender.py` gains `blender_render` and `blender_screenshot`. Open risks: GPU offscreen on Greg's
-machine, render cancel, 4 MiB ceiling.
+machine, render cancel, 4 MiB ceiling. Built; the risks are tracked in `docs/local-tools.md`.
 
 **(c) Decision-model checker.** `partyline/render_check.py` (Decisions client, thresholds, budget, about 200),
 `render_check_routes.py`, `mcp/tools_check.py`; add-on `geometry.py` (camera-space bbox, overlap, support

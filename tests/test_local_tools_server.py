@@ -31,7 +31,9 @@ REQUEST = "/api/conversations/line/local-tools/request"
 CALL = "/api/conversations/line/local-tools/call"
 
 
-class ToolsFlowTest(unittest.IsolatedAsyncioTestCase):
+class FlowCase(unittest.IsolatedAsyncioTestCase):
+    """A real hub and a real helper session over an in-memory pipe, with a fake add-on."""
+
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.db = Db(f"{self.tmp.name}/test.db")
@@ -39,8 +41,8 @@ class ToolsFlowTest(unittest.IsolatedAsyncioTestCase):
         self.runtime = ChatRuntime(self.db)
         app = FastAPI()
         install_auth_guard(app, self.db)
-        self.hub = register_screen_routes(app, self.runtime,
-                                          MediaStore(self.db, Path(self.tmp.name) / "media"))
+        self.store = MediaStore(self.db, Path(self.tmp.name) / "media")
+        self.hub = register_screen_routes(app, self.runtime, self.store)
         self.server_time = SmallStepTime()
         self.hub.tools.sleep = self.server_time.sleep
         self.user = auth_store.create_user(
@@ -96,6 +98,8 @@ class ToolsFlowTest(unittest.IsolatedAsyncioTestCase):
     def bodies(self):
         return [row["body"] for row in self.db.list_messages("line")]
 
+
+class ToolsFlowTest(FlowCase):
     async def test_request_grant_exec_audit_and_end(self):
         await self.connect()
         self.assertEqual(self.hub.devices[self.device_id]["tools"], 1)
@@ -312,7 +316,8 @@ class ToolsLimitsAndMcpTest(unittest.TestCase):
     def test_tools_gate_validate_and_route(self):
         self.assertEqual(tools_blender.tool_list({"actions": ["read"]}), [])
         names = [t["name"] for t in tools_blender.tool_list({"actions": ["write"]})]
-        self.assertEqual(names, ["blender_request", "blender_exec", "blender_scene_info", "blender_end"])
+        self.assertEqual(names, ["blender_request", "blender_exec", "blender_scene_info", "blender_render",
+                                 "blender_screenshot", "blender_end"])
         calls = []
         client = SimpleNamespace(home="line/1", request=lambda *a, **k: calls.append((a, k)) or {"ok": 1})
         state = {"actions": ["write"]}
@@ -321,14 +326,28 @@ class ToolsLimitsAndMcpTest(unittest.TestCase):
         tools_blender.call(client, "blender_exec", {"code": "1", "timeout_s": 60}, state)
         tools_blender.call(client, "blender_scene_info", {"detail": "object", "name": "Cube"}, state)
         tools_blender.call(client, "blender_end", {}, state)
-        self.assertEqual(calls, [
+        tools_blender.call(client, "blender_render",
+                           {"camera": "Side", "width": 640, "engine": "eevee"}, state)
+        tools_blender.call(client, "blender_render", {"timeout_s": 90}, state)
+        tools_blender.call(client, "blender_screenshot", {"max_size": 800}, state)
+        self.assertEqual(calls[4:], [
+            (("POST", base + "/call", {"op": "render", "timeout_s": 60,
+                                       "args": {"camera": "Side", "width": 640, "engine": "eevee"}}),
+             {"timeout": 75}),
+            (("POST", base + "/call", {"op": "render", "timeout_s": 90, "args": {}}), {"timeout": 105}),
+            (("POST", base + "/call", {"op": "screenshot", "timeout_s": 20, "args": {"max_size": 800}}),
+             {"timeout": 35})])
+        self.assertEqual(calls[:4], [
             (("POST", base + "/request", {"tool": "blender", "checker": True}), {}),
             (("POST", base + "/call", {"op": "exec", "args": {"code": "1"}, "timeout_s": 60}),
              {"timeout": 75}),
             (("POST", base + "/call", {"op": "scene_info", "args": {"detail": "object", "name": "Cube"}}),
              {"timeout": 35}),
             (("POST", base + "/end"), {})])
-        for name, args in (("blender_exec", {"code": ""}), ("blender_exec", {"code": "1", "timeout_s": 500}),
+        for name, args in (("blender_render", {"engine": "cycles"}), ("blender_render", {"width": "big"}),
+                           ("blender_render", {"timeout_s": 500}), ("blender_screenshot", {"max_size": 0}),
+                           ("blender_render", {"extra": 1}), ("blender_exec", {"code": ""}),
+                           ("blender_exec", {"code": "1", "timeout_s": 500}),
                            ("blender_scene_info", {"detail": "all"}), ("blender_end", {"x": 1})):
             with self.assertRaises(ValueError):
                 tools_blender.call(client, name, args, state)

@@ -6,11 +6,12 @@ import uuid
 from .media import prepared_files
 
 
-async def store_frame(store, conv_id: str, data: bytes, mime: str):
+async def store_frame(store, conv_id: str, data: bytes, mime: str, name: str = "screen-frame",
+                      title: str = "Screen frame"):
     """Use a private negative media group, outside the positive chat message IDs."""
-    prepared = await asyncio.to_thread(prepared_files, [(data, "screen-frame", mime)])
+    prepared = await asyncio.to_thread(prepared_files, [(data, name, mime)])
     group = -(uuid.uuid4().int % (2**63 - 1)) - 1
-    refs = await asyncio.to_thread(store.store, conv_id, group, prepared, "Screen frame", None)
+    refs = await asyncio.to_thread(store.store, conv_id, group, prepared, title, None)
     return refs[0]
 
 

@@ -199,7 +199,7 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
 
     app.include_router(router)
     app.include_router(control_router(runtime, hub, store))
-    app.include_router(tools_router(runtime, hub))
+    app.include_router(tools_router(runtime, hub, store))
     from .walkthrough_routes import walkthrough_router
     app.include_router(walkthrough_router(runtime, hub, store))
     return hub
