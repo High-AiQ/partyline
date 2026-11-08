@@ -35,6 +35,8 @@ _DESCRIBE = {
                     'implementer. Its goal is stored on the task line and sent to the implementer '
                     'at birth and on wakes until delivery is proven, then on change or restart. '
                     'Goals allow 20000 characters. '
+                    'Media on your root line (a walkthrough\'s frames, uploads) is readable by the '
+                    'task\'s workers with get_media: put the media ids in the goal, never stage files. '
                     'Optional memory_limit (e.g. "8G") starts a heavy line with a bigger budget, '
                     'within the host ceiling and, for a captain, the captain approval ceiling '
                     '(above it: 403, file a memory request for a person). '

@@ -3,7 +3,7 @@ from urllib.parse import quote
 from ..upload_scope import UPLOAD_ONLY_CAPTION_REFUSAL
 from .client import ApiError, MAX_UPLOAD, MAX_MODEL_UPLOAD
 from .uploads import validate_uploads
-from .tools_media import model_upload_tool, multi_upload_tool, validate_model_path
+from .tools_media import GET_MEDIA_DESCRIPTION, model_upload_tool, multi_upload_tool, validate_model_path
 from .tools_screen import screen_elements_tool, screen_frame_tool
 from . import tools_captain, tools_worker
 def _schema(properties=None, required=None):
@@ -95,7 +95,7 @@ def tool_list(state):
         tools.extend([
             {
                 "name": "get_media",
-                "description": "Download a media variant to a new file with a hard size bound.",
+                "description": GET_MEDIA_DESCRIPTION,
                 "inputSchema": _schema({
                     "file_id": _prop("string", "Media id from a Partyline file reference."),
                     "variant": _prop("string", "Media variant.",
