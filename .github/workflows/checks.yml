@@ -88,6 +88,32 @@ jobs:
       - name: production source files stay within their line limits
         run: ./check-code-lines
 
+  no-media:
+    name: no-media
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Screenshots, mockups and renders never enter this public repo: git keeps
+      # every commit, so a file added and then deleted still bloats every clone.
+      # Check each commit in the change set, not only the final tree.
+      - name: no media or binary assets in any commit
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "pull_request" ]; then
+            base="$PR_BASE"
+          elif [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            base="$BEFORE"
+          else
+            base="HEAD^"   # forced push or new branch: check the tip (and what it merged) only
+          fi
+          ./scripts/check-no-media --base "$base" --head HEAD
+
   conventional-commits:
     name: conventional-commits
     runs-on: ubuntu-latest
@@ -148,7 +174,7 @@ jobs:
   tag-version:
     name: tag-version
     if: github.event_name == 'push'
-    needs: [backend, windows-foundations, frontend, code-line-limits, conventional-commits, version-policy]
+    needs: [backend, windows-foundations, frontend, code-line-limits, no-media, conventional-commits, version-policy]
     runs-on: ubuntu-latest
     permissions:
       contents: write

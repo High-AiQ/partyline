@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+"""Fail when a commit adds or modifies generated media or a binary asset.
+
+Screenshots, mockups, renders and other generated media never belong in this
+public repository: git keeps every commit, so a file added and later deleted
+still bloats every clone forever (126 screenshots once took the pack from
+17 MB to 57 MB and had to be purged from history). This checks every commit in
+a range, not just the final tree, so "added then deleted" is still caught.
+
+    scripts/check-no-media --base <rev> --head <rev>   # CI: every commit in base..head
+    scripts/check-no-media                             # local gate: origin/main..HEAD + staged files
+
+Allowed: `media/` (marketing media and icons) and `tests/fixtures/` (small test
+inputs), each capped at 5 MB a file. `partyline/static/` is the committed build
+output; it may hold a bundled model or wasm but never media, and no file in it
+may exceed 16 MB. Anywhere else a file over 1 MB fails whatever its extension.
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+MEDIA_EXTENSIONS = {
+    # images
+    "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff", "heic", "avif", "psd", "exr", "hdr",
+    # video and audio
+    "mp4", "mov", "webm", "mkv", "avi", "mp3", "wav", "ogg", "flac", "m4a",
+    # 3D
+    "blend", "glb", "gltf", "fbx", "obj",
+    # archives and documents
+    "pdf", "zip", "7z", "tgz", "tbz2", "txz",
+}
+MEDIA_PATTERN = re.compile(r"\.(usd[a-z]?|tar(\.[a-z0-9]+)?)$", re.IGNORECASE)
+
+ALLOWED_PREFIXES = ("media/", "tests/fixtures/")
+ALLOWED_CAP = 5 * 1024 * 1024
+BUILD_PREFIX = "partyline/static/"
+BUILD_CAP = 16 * 1024 * 1024
+SIZE_LIMIT = 1024 * 1024
+
+HINT = ("fix: upload screenshots, mockups and renders to the line (upload_file) or keep "
+        "them in /var/tmp; never commit them. Rewrite the commit so the file is gone from it.")
+
+
+def git(args: list[str], *, cwd: Path | None = None) -> bytes:
+    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True)
+    if result.returncode != 0:
+        print(f"check-no-media: git {' '.join(args)} failed: "
+              f"{result.stderr.decode(errors='replace').strip()}", file=sys.stderr)
+        raise SystemExit(2)  # distinct from 1, which means media was found
+    return result.stdout
+
+
+def is_media(path: str) -> bool:
+    name = path.rsplit("/", 1)[-1].lower()
+    extension = name.rpartition(".")[2] if "." in name else ""
+    return extension in MEDIA_EXTENSIONS or bool(MEDIA_PATTERN.search(name))
+
+
+def verdict(path: str, size: int) -> str | None:
+    """Why this added or modified file is rejected, or None when it is fine."""
+    if path.startswith(ALLOWED_PREFIXES):
+        return f"is {size} bytes, over the {ALLOWED_CAP}-byte cap for allowlisted files" if size > ALLOWED_CAP else None
+    if is_media(path):
+        return "is a media or binary-asset file outside media/ and tests/fixtures/"
+    if path.startswith(BUILD_PREFIX):
+        return f"is {size} bytes, over the {BUILD_CAP}-byte cap for the committed build" if size > BUILD_CAP else None
+    if size > SIZE_LIMIT:
+        return f"is {size} bytes, over the {SIZE_LIMIT}-byte limit for a committed file"
+    return None
+
+
+def object_sizes(specs: list[str]) -> list[int]:
+    """Blob sizes for `rev:path` specs; a path absent from its commit counts as 0."""
+    if not specs:
+        return []
+    out = subprocess.run(["git", "cat-file", "--batch-check"], input="".join(f"{s}\n" for s in specs).encode(),
+                         capture_output=True, check=True).stdout.decode().splitlines()
+    return [int(line.split()[2]) if len(line.split()) == 3 and line.split()[1] == "blob" else 0 for line in out]
+
+
+def commit_entries(rng: str) -> list[tuple[str, str]]:
+    """(commit, path) for every file added or modified by any commit in `rng`."""
+    raw = git(["log", "--diff-filter=AM", "--name-only", "--no-renames", "-z", "--format=%x01%H", rng])
+    entries: list[tuple[str, str]] = []
+    commit = ""
+    for field in raw.split(b"\0"):
+        text = field.decode(errors="surrogateescape").strip("\n")
+        if text.startswith("\x01"):  # a commit header; its paths follow as separate fields
+            commit = text[1:]
+        elif text:
+            entries.append((commit, text))
+    return entries
+
+
+def staged_entries() -> list[tuple[str, str]]:
+    raw = git(["diff", "--cached", "--diff-filter=AM", "--name-only", "--no-renames", "-z"])
+    return [("staged", p.decode(errors="surrogateescape")) for p in raw.split(b"\0") if p]
+
+
+def default_range(head: str) -> str:
+    """origin/main..head, or all of head's history when there is no origin/main."""
+    probe = subprocess.run(["git", "rev-parse", "--verify", "--quiet", "origin/main"], capture_output=True)
+    return f"origin/main..{head}" if probe.returncode == 0 else head
+
+
+def check(base: str | None, head: str | None) -> list[str]:
+    local = base is None and head is None
+    entries: list[tuple[str, str]] = []
+    rng = f"{base}..{head or 'HEAD'}" if base else default_range(head or "HEAD")
+    entries.extend(commit_entries(rng))
+    if local:
+        entries.extend(staged_entries())
+    sizes = object_sizes([f":{p}" if c == "staged" else f"{c}:{p}" for c, p in entries])
+    problems = []
+    for (commit, path), size in zip(entries, sizes):
+        reason = verdict(path, size)
+        if reason:
+            problems.append(f"{path} (commit {commit[:12]}) {reason}")
+    return problems
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--base", help="exclusive start of the commit range (default: origin/main)")
+    parser.add_argument("--head", help="inclusive end of the commit range (default: HEAD)")
+    args = parser.parse_args(argv)
+    problems = check(args.base, args.head)
+    for problem in problems:
+        print(f"FAIL {problem}")
+    if problems:
+        print(HINT)
+        return 1
+    print("no media or binary assets added or modified")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

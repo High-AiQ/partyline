@@ -24,3 +24,10 @@ node_modules/
 
 # Per-attachment machine credentials beside the configured database.
 *.agent-connections/
+
+# Screenshots, mockups and renders never enter this public repo (CI rejects them,
+# scripts/check-no-media). Upload them to the line, or keep them in /var/tmp.
+tests/evidence/
+skills/verify-visual-change/*.png
+skills/verify-visual-change/*.jpg
+skills/verify-visual-change/screenshots/
