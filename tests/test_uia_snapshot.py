@@ -6,8 +6,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from partyline_helper.uia_access import WindowAccess
-from partyline_helper.uia_process import read
-from partyline_helper.uia_snapshot import snapshot
+from partyline_helper.uia_process import KILL_SLACK, read
+from partyline_helper.uia_snapshot import BUDGET, snapshot
 
 
 class Provider:
@@ -74,7 +74,7 @@ class SnapshotTests(unittest.TestCase):
                          {"rect": (0, 0, 10, 10)}])
         self.assertTrue(snapshot(tree, clock=lambda: 0, limit=1)["truncated"])
         self.assertTrue(snapshot(tree, clock=lambda: 0, depth_limit=1)["truncated"])
-        clock = iter([0, 0, 1])
+        clock = iter([0, 0, 2])
         self.assertTrue(snapshot(tree, clock=lambda: next(clock))["truncated"])
 
     def test_unavailable_timeout_and_failure(self):
@@ -106,8 +106,8 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual("timeout", answer["elements_unavailable"])
         self.assertTrue(answer["truncated"])
         self.assertEqual(1, len(killed))
-        self.assertGreaterEqual(killed[0], 5)
-        self.assertLess(killed[0], 5.1)
+        self.assertGreaterEqual(killed[0], 3 + BUDGET + KILL_SLACK)
+        self.assertLess(killed[0], 3.1 + BUDGET + KILL_SLACK)
 
     def test_initialization_timeout_kills_worker(self):
         ticks = iter([0, 31])

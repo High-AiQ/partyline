@@ -6,6 +6,11 @@ import tempfile
 import time
 from pathlib import Path
 
+from .uia_snapshot import BUDGET
+
+KILL_SLACK = 2.2  # the walk may overrun its budget by one slow provider call before the kill
+START_LIMIT = 25
+
 
 def command(payload):
     if getattr(sys, "frozen", False):
@@ -24,10 +29,10 @@ def read(hwnd, frame=None, popen=subprocess.Popen, platform=sys.platform, clock=
         try:
             process = popen(command(payload), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                             creationflags=0x08000000)
-            deadline, started = clock() + 30, False
+            deadline, started = clock() + START_LIMIT, False
             while process.poll() is None:
                 if not started and ready.exists():
-                    started, deadline = True, clock() + 2
+                    started, deadline = True, clock() + BUDGET + KILL_SLACK
                 if clock() >= deadline:
                     process.kill()
                     process.wait()
@@ -55,7 +60,7 @@ def main(request=None):  # pragma: no cover - isolated Windows child process
     from .uia_snapshot import snapshot
     from .uia_windows import WindowsProvider
     hwnd, frame, path, ready = json.loads(request or sys.argv[1])
-    provider = WindowsProvider(hwnd)
+    provider = WindowsProvider(hwnd, cached=True)
     Path(ready).touch()
     result = snapshot(provider, frame)
     Path(path).write_text(json.dumps(result), encoding="utf-8")
