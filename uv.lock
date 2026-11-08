@@ -94,6 +94,15 @@ wheels = [
 ]
 
 [[package]]
+name = "comtypes"
+version = "1.4.17"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/0e/ff/c7836bd0d78fc615281016f154f514e9d523d7cb9ab9e8b4d344adc5f5e7/comtypes-1.4.17.tar.gz", hash = "sha256:3d9c1e92ad8daf7600d371e76ee16161a627a5fb70c3144f6e52e78af6034363", size = 262743, upload-time = "2026-09-21T08:08:07.687Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/89/9c/d0bc1fb69ad22a04bdc01dd9b5613a2ebc4d02ba1ec24b02127dc93791ba/comtypes-1.4.17-py3-none-any.whl", hash = "sha256:4e0a221dde2c589b82977bed802efd71cd5eb67a380347b732e02735e597f586", size = 298743, upload-time = "2026-09-21T08:08:06.461Z" },
+]
+
+[[package]]
 name = "coverage"
 version = "7.15.4"
 source = { registry = "https://pypi.org/simple" }
@@ -831,6 +840,7 @@ dependencies = [
 
 [package.optional-dependencies]
 helper = [
+    { name = "comtypes", marker = "sys_platform == 'win32'" },
     { name = "mss" },
     { name = "pillow" },
     { name = "pynput" },
@@ -858,6 +868,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "av", marker = "extra == 'voice'", specifier = "<19" },
+    { name = "comtypes", marker = "sys_platform == 'win32' and extra == 'helper'", specifier = ">=1.4" },
     { name = "fastapi", specifier = ">=0.110" },
     { name = "faster-whisper", marker = "extra == 'voice'", specifier = ">=1.1" },
     { name = "h11", specifier = ">=0.14" },

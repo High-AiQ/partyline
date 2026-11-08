@@ -261,11 +261,17 @@ class ScreenTest(unittest.TestCase):
 
         names = {item["name"] for item in tools_core.tool_list({"actions": ["read"]})}
         self.assertIn("screen_frame", names)
+        self.assertIn("screen_elements", names)
         client = Mock()
         with patch.object(tools_core, "_target", return_value=("line", {})):
             tools_core.call(client, "screen_frame", {"mark_pointer": True}, {})
         client.request.assert_called_once_with(
             "POST", "/api/conversations/line/screen-frame?mark_pointer=true")
+        client.request.reset_mock()
+        with patch.object(tools_core, "_target", return_value=("line", {})):
+            tools_core.call(client, "screen_elements", {"device": "My PC"}, {})
+        client.request.assert_called_once_with(
+            "POST", "/api/conversations/line/screen-elements?device=My%20PC", timeout=40)
 
     def test_devices_report_the_helper_version_and_flag_an_outdated_helper(self):
         from partyline import __version__

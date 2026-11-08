@@ -397,15 +397,15 @@ already has separate share/control consent, a shared rectangle, physical-input
 revocation, a kill switch, frame scaling, limits and audit records. Actions return
 a fresh frame after a 0.3-second settle; capture defaults to at most 1 FPS and
 1280 pixels on the long edge. A model wrapper alone cannot remove these existing
-protocol costs. Batching, delta summaries, settle/wait and Windows UI Automation
-are **planned capabilities from the brief**, not features assumed present in this
-checkout.
+protocol costs. A separately consented, read-only Windows UI Automation snapshot of
+one selected window is available independently of pixel sharing. UIA actions,
+batching, delta summaries, settle/wait, macOS AX and Linux AT-SPI remain planned.
 
 ```mermaid
 flowchart TD
     CLI[Real CLI agent in a pty: intent and recovery]
     TOOL[Bounded screen subtask tool]
-    SNAP[Helper observation: region frame and optional UIA elements]
+    SNAP[Helper observation: region frame or consented window UIA snapshot]
     LOCAL[Local candidate grounding or deterministic selection]
     PAID[Decisions or Jev: bounded choice or predicate]
     GATE[Helper revalidates consent, snapshot, region, focus and limits]
@@ -427,15 +427,14 @@ The following are proposed contracts, not new tool names implemented by this doc
   postcondition, action budget and deadline. It owns planning and prose. The
   specialist chooses a **complete candidate action**, not independent verb/target
   fields that could form an invalid combination. It can always abstain.
-- Each candidate is tied to `share_id`, region, frame/tree snapshot, time and
-  device scale. A future UIA element number is snapshot-local, not a permanent
+- Each candidate is tied to its consent, frame/tree snapshot, time and
+  device scale. A UIA element number is snapshot-local, not a permanent
   identity. The helper re-resolves it and verifies visibility, enabled state,
   bounds and focus just before execution. Reject stale responses after a resize,
   popup, human input or a new share; do not reuse coordinates across screenshots.
 - Windows UIA enumeration and action-pattern support belong on the **helper**.
-  Number only permitted visible elements within the shared region; redact/filter
-  unrelated tree content before sending it. Password values, hidden windows and
-  off-region metadata must not leak through a richer tree. Pixel fallback handles
+  Number only elements in the separately consented window and redact password
+  values before sending the snapshot. Pixel fallback handles
   canvases and inaccessible applications. An element action still obeys the
   region and control grant; native accessibility access must not become a way
   around those limits.
@@ -524,7 +523,7 @@ live capture based on the 4090 alone.
    from synthetic settings/forms/dialog tasks with authorized recordings, including
    absent targets, duplicate labels, stale layouts, popups and irrelevant text.
    Keep a frame, timestamp, allowed candidates and expected postcondition. A
-   manually labeled element list is sufficient until UIA exists. Split by task
+   manually labeled element list can supplement UIA snapshots. Split by task
    template/application/layout: 100 development, 100 held out, not adjacent frames
    from the same trajectory on both sides. This sizes an exploratory test, not a
    benchmark-quality safety claim.
@@ -603,7 +602,7 @@ one hour uses **0.15–0.45 kWh**; at an illustrative **$0.20/kWh** that is
 **$0.03–$0.09/hour**, excluding idle host power, capital and engineering. This is
 an energy scenario, not this host's measured inference consumption or tariff.
 Allow one to two engineering days for replay/instrumentation once observations
-and access exist; helper/UIA/protocol implementation is additional work. Train
+and access exist; future action and verification implementation is additional work. Train
 nothing initially. If recurring labels later justify it, distill a small local
 ranker/verifier with human-checked labels and keep an untouched application split.
 

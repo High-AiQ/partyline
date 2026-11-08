@@ -198,6 +198,8 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
             return
         await hub.connect(ws, dict(row))
 
+    from .screen_elements import elements_router
+    app.include_router(elements_router(runtime, hub))
     app.include_router(router)
     app.include_router(control_router(runtime, hub, store))
     app.include_router(tools_router(runtime, hub, store))

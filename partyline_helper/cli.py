@@ -47,6 +47,10 @@ def main(argv=None):
     commands.add_parser("selfcheck", help="Check that every module the helper needs is present")
     dialog = commands.add_parser("dialog", help=argparse.SUPPRESS)  # the frozen exe's dialog child process
     dialog.add_argument("request")
+    uia = commands.add_parser("uia-snapshot", help=argparse.SUPPRESS)
+    uia.add_argument("request")
+    picker = commands.add_parser("uia-picker", help=argparse.SUPPRESS)
+    picker.add_argument("path")
     commands.add_parser("install", help="Register partyline:// links and start at login (once)")
     commands.add_parser("uninstall", help="Remove what install registered (keeps pairing)")
     opener = commands.add_parser("open", help="Handle a partyline:// link (run by the OS)")
@@ -76,6 +80,12 @@ def main(argv=None):
         elif args.command == "dialog":
             from .dialog_proc import main as dialog_main
             raise SystemExit(dialog_main([args.request]))
+        elif args.command == "uia-picker":  # pragma: no cover - frozen Windows helper child
+            from .uia_picker import main as picker_main
+            picker_main(args.path)
+        elif args.command == "uia-snapshot":  # pragma: no cover - frozen Windows helper child
+            from .uia_process import main as uia_main
+            uia_main(args.request)
         else:
             if args.command == "run":
                 from .links import claim_run

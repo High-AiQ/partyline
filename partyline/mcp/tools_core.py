@@ -4,16 +4,13 @@ from ..upload_scope import UPLOAD_ONLY_CAPTION_REFUSAL
 from .client import ApiError, MAX_UPLOAD, MAX_MODEL_UPLOAD
 from .uploads import validate_uploads
 from .tools_media import model_upload_tool, multi_upload_tool, validate_model_path
-from .tools_screen import screen_frame_tool
+from .tools_screen import screen_elements_tool, screen_frame_tool
 from . import tools_captain, tools_worker
-
 def _schema(properties=None, required=None):
     return {"type": "object", "properties": properties or {},
             "required": required or [], "additionalProperties": False}
-
 def _prop(kind, description, **extra):
     return {"type": kind, "description": description, **extra}
-
 def tool_list(state):
     actions = set(state.get("actions", []))
     tools = [
@@ -33,7 +30,7 @@ def tool_list(state):
     ]
     if "read" in actions:
         tools.extend([
-            screen_frame_tool(),
+            screen_frame_tool(), screen_elements_tool(),
             {
                 "name": "read_messages",
                 "description": "Read a bounded page, optionally around a message id.",
@@ -142,8 +139,6 @@ def _target(client, home_state, conv_id, allowed):
     if not any(action in actions for action in allowed):
         raise ApiError("current attachment is not authorized for that line operation")
     return conv_id, state
-
-
 def call(client, name: str, args: dict, home_state: dict):
     if name == "whoami":
         return _whoami(client, home_state)
@@ -201,6 +196,11 @@ def call(client, name: str, args: dict, home_state: dict):
         return client.request(method, path, None if method == "DELETE" else {"emoji": args["emoji"]})
     if name == "get_media":
         return client.download(args["file_id"], args["variant"], args["destination"])
+    if name == "screen_elements":
+        conv, _ = _target(client, home_state, None, ("read",))
+        query = "?device=" + quote(args["device"], safe="") if args.get("device") else ""
+        path = f"/api/conversations/{quote(conv, safe='')}/screen-elements{query}"
+        return client.request("POST", path, timeout=40)
     if name == "screen_frame":
         conv, _ = _target(client, home_state, None, ("read",))
         query = "?mark_pointer=true" if args.get("mark_pointer") else ""

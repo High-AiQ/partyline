@@ -17,11 +17,14 @@ class Status:
         self.listeners, self.attention_listeners = [], []
         self.stop_share = self.quit = self.stop_tools = None
         self.tools_active = False
+        self.window_title = None
+        self.choose_window = self.stop_window = None
         self.checks_active, self.stop_checks = False, None
 
     @property
     def label(self):
-        return LABELS[self.state]
+        label = LABELS[self.state]
+        return label + f"; reading {self.window_title}" if self.window_title else label
 
     def set(self, state):
         if state != self.state:
@@ -47,6 +50,14 @@ class Status:
     def request_stop_tools(self):
         if self.stop_tools:
             self.stop_tools()
+
+    def request_choose_window(self):
+        if self.choose_window:
+            self.choose_window()
+
+    def request_stop_window(self):
+        if self.stop_window:
+            self.stop_window()
 
     def request_stop_checks(self):
         if self.stop_checks:

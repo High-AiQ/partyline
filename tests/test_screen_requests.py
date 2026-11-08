@@ -63,6 +63,13 @@ class ScreenRequestTest(unittest.IsolatedAsyncioTestCase):
         self.hub.devices["device"] = {"id": "device", "owner_id": self.share.owner_id,
                                       "socket": socket, "monitors": [{"id": 1}]}
 
+    async def test_screen_elements_route(self):
+        with patch.object(self.hub.elements, "read",
+                          return_value={"elements_unavailable": "not consented"}) as read:
+            response = await self.client.post("/api/conversations/line/screen-elements?device=PC")
+        self.assertEqual(response.json(), {"elements_unavailable": "not consented"})
+        read.assert_awaited_once_with("line", "PC")
+
     async def test_failed_sends_clean_both_waiter_maps(self):
         from fastapi import WebSocketDisconnect
 

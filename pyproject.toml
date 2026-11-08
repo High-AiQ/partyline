@@ -23,7 +23,7 @@ voice-gpu = [
     "nvidia-cublas-cu12>=12,<13 ; sys_platform == 'linux'",
     "nvidia-cudnn-cu12>=9,<10 ; sys_platform == 'linux'",
 ]
-helper = ["mss>=10", "pynput>=1.8,<1.9", "websockets>=14", "pillow>=10.8", "pystray>=0.19"]
+helper = ["mss>=10", "pynput>=1.8,<1.9", "websockets>=14", "pillow>=10.8", "pystray>=0.19", "comtypes>=1.4; sys_platform == 'win32'"]
 
 [project.scripts]
 partyline = "partyline.launch:main"

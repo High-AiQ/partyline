@@ -15,6 +15,7 @@ from .screen_connections import device_valid, notice
 from .local_tools import TOOL_MESSAGES, LocalTools
 from .screen_control import CONTROL_MESSAGES, ControlHub
 from .screen_frames import BufferedFrame, ShareBuffer
+from .screen_elements import ElementsHub
 from .screen_pair_limits import PairLimits
 from .screen_requests import capture, end_share, preview
 from .walkthrough_takes import Takes
@@ -36,6 +37,7 @@ class ScreenHub:
         self.pending_codes: dict[str, tuple[int, str, float]] = {}
         self.snap_waiters: dict[str, tuple[ShareBuffer, asyncio.Future]] = {}
         self.preview_waiters: dict[str, tuple[str, str | int, asyncio.Future]] = {}
+        self.elements = ElementsHub(self)
         self.control = ControlHub(self)
         self.tools = LocalTools(self)
 
@@ -143,6 +145,8 @@ class ScreenHub:
                     share = self._share(result.share_id, ident)
                     if share:
                         await self.stop_share(share.share_id, result.reason)
+                elif kind == "window_elements":
+                    self.elements.receive(current, message)
                 elif kind in CONTROL_MESSAGES:
                     await self.control.from_helper(current, message)
                 elif kind in TOOL_MESSAGES:
