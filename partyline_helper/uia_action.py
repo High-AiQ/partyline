@@ -5,7 +5,24 @@ from .uia_patterns import (PATTERN, WINDOW_ACTIONS, ActionRefused, check_argumen
 from .uia_snapshot import MAX_DEPTH, MAX_ELEMENTS
 
 
-def find(provider, target):
+def by_path(provider, target, path):
+    """Walk the recorded child indices; the node must still carry the target identity."""
+    node = provider.root()
+    for index in path:
+        if not provider.same_window(node):
+            return None
+        children = provider.children(node)
+        if index >= len(children):
+            return None
+        node = children[index]
+    if provider.same_window(node) and element_id(provider, node, path) == target:
+        return node
+    return None
+
+
+def find(provider, target, path=None):
+    if path is not None and (node := by_path(provider, target, path)) is not None:
+        return node
     stack = [(provider.root(), 0, [])]
     visited = 0
     while stack and visited < MAX_ELEMENTS:
@@ -22,9 +39,9 @@ def find(provider, target):
     return None
 
 
-def prepare(provider, target, action, arg=None):
+def prepare(provider, target, action, arg=None, path=None):
     check_argument(action, arg)
-    node = find(provider, target)
+    node = find(provider, target, path)
     if node is None or not provider.current():
         raise ActionRefused("stale or unknown element")
     props = provider.properties(node)

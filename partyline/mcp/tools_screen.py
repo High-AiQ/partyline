@@ -25,6 +25,9 @@ def screen_elements_tool():
         "The person chooses and can revoke the window in the helper tray, independent of pixel sharing. "
         "Element IDs are action targets only for the latest snapshot; each element lists its UIA "
         "patterns and the screen_element_action `actions` it supports. "
+        "A browser page's Document is read before the toolbars. When truncated is true, the truncation "
+        "line says what was left unread (for example page content not reached): retry rather than "
+        "assume the page is empty. "
         "Returns elements_unavailable when unavailable."),
         "inputSchema": {"type": "object", "properties": {"device": {"type": "string",
         "description": "Paired computer name when more than one is online."}},

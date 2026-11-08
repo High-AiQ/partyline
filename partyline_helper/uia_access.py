@@ -42,6 +42,7 @@ class WindowAccess:
         self.picking = False
         self.gate = DispatchGate()
         self.elements = {}
+        self.paths = {}
 
     async def check(self, grant):
         windows = await asyncio.to_thread(self.list_windows)
@@ -54,12 +55,12 @@ class WindowAccess:
 
     def abandon_read(self):
         self.generation += 1
-        self.elements = {}
+        self.elements, self.paths = {}, {}
 
     def revoke(self, reason="not consented"):
         grant = self.grant
         self.gate.invalidate()
-        self.elements = {}
+        self.elements, self.paths = {}, {}
         self.generation += 1
         self.grant = None
         self.unavailable = reason
@@ -106,7 +107,7 @@ class WindowAccess:
         if self.platform != "win32":
             return {"elements_unavailable": "not Windows"}
         grant, generation = self.grant, self.generation
-        self.elements = {}
+        self.elements, self.paths = {}, {}
         if not grant:
             return {"elements_unavailable": self.unavailable}
         reason = await self.check(grant)
@@ -140,6 +141,7 @@ class WindowAccess:
                 for element in result["elements"]:
                     element.pop("frame_bounds", None)
             self.elements = {item["id"]: item for item in result["elements"] if "id" in item}
+            self.paths = result.pop("paths", {})
             result.update(window_title=grant["title"], process_name=grant["process"])
         return result
 

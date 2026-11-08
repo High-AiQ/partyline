@@ -38,6 +38,8 @@ class ElementsHub:
             return {"snapshot_id": response.get("snapshot_id"), "window_title": response.get("window_title"),
                     "process_name": response.get("process_name"),
                     "truncated": bool(response.get("truncated")),
+                    **({"truncation": str(response["truncation"])[:300]}
+                       if response.get("truncation") else {}),
                     "elements": "\n".join(lines)}
         except (TimeoutError, OSError, RuntimeError):
             return {"elements_unavailable": "helper did not respond"}

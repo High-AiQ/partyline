@@ -245,8 +245,22 @@ pattern names, and screen-coordinate bounds. When a current pixel share overlaps
 element it also includes frame-pixel bounds. Element IDs are stable for the same runtime identity and tree path, and only IDs from the latest
 snapshot are accepted as action targets. Password values and other windows' elements
 are excluded and text is capped. Element metadata may include offscreen text from
-the selected window. Count, depth and time bounds limit traversal; an isolated child
-process is killed if a provider hangs. Errors, denied consent, closed windows and
+the selected window. Count (200 elements), depth (20) and time (1.8 s) bounds limit
+traversal; an isolated child process is killed if a provider hangs (about 2 s after
+the budget).
+
+The walk is best-first rather than top-down: a `Document` subtree (a browser's web page)
+is read before the window frame, toolbars, menu bars, tab strips and title bars are read
+last, and unnamed, patternless `Pane`/`Group`/`Custom` wrappers are walked but not listed,
+so they cost no element budget. The page takes at most 150 of the 200 elements while
+anything else is waiting; spare room goes back to it. Properties are fetched with each
+node (one UI Automation cache request) instead of one round trip per property. Elements
+come back in tree order, the window first. When `truncated` is true the response also has a
+`truncation` line saying why it stopped (`element limit`, `time budget` or `depth limit`),
+whether `page content not reached`, `partly read` or `read`, and how many unread subtrees
+remain (web page, browser chrome, other). An agent that sees `page content not reached`
+should retry rather than treat the page as empty. Element actions locate their target by the
+path recorded with the latest snapshot, so page elements deep in the tree stay actionable. Errors, denied consent, closed windows and
 unsupported platforms return an unavailable reason. Settle/wait, macOS AX and Linux AT-SPI are planned.
 The Windows-only helper dependency `comtypes` supplies the typed UI Automation
 COM interfaces; it is not installed on other platforms.

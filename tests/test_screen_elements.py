@@ -26,7 +26,7 @@ class ElementsTests(unittest.IsolatedAsyncioTestCase):
         request = await socket.messages.get()
         response = {"request_id": request["request_id"], "snapshot_id": "s", "window_title": "Editor",
                     "process_name": "app.exe", "elements": [{"id": 1, "name": "one\ntwo"}],
-                    "truncated": False}
+                    "truncated": True, "truncation": "time budget; page content not reached"}
         hub.receive({"id": "wrong"}, response)
         self.assertFalse(task.done())
         hub.receive({"id": "d"}, response)
@@ -34,6 +34,7 @@ class ElementsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("s", result["snapshot_id"])
         self.assertEqual("one\ntwo", json.loads(result["elements"])["name"])
         self.assertEqual(1, len(result["elements"].splitlines()))
+        self.assertEqual("time budget; page content not reached", result["truncation"])
         self.assertEqual({}, hub.waiters)
         self.assertIn("elements_unavailable", await hub.read("elsewhere"))
         devices["other"] = {**devices["d"], "id": "other"}

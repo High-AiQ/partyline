@@ -25,7 +25,8 @@ def run_action(access, grant, generation, message, factory=provider_factory):
     try:
         provider = factory(grant["hwnd"])
         arg = argument(message)
-        node, _ = prepare(provider, message["element_id"], message["action"], arg)
+        path = getattr(access, "paths", {}).get(message["element_id"])
+        node, _ = prepare(provider, message["element_id"], message["action"], arg, path)
 
         windows = access.list_windows()
         if windows is None:
@@ -34,7 +35,7 @@ def run_action(access, grant, generation, message, factory=provider_factory):
             raise ValueError("window closed")
         if grant.get("marker") and not live(grant):
             raise ValueError("window closed")
-        fresh, _ = prepare(provider, message["element_id"], message["action"], arg)
+        fresh, _ = prepare(provider, message["element_id"], message["action"], arg, path)
         call = provider.action_call(fresh, message["action"], arg)
         windows = access.list_windows()
         if windows is None:

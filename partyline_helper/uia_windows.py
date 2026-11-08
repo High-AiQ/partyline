@@ -10,6 +10,10 @@ PATTERNS = {10000: "Invoke", 10015: "Toggle", 10002: "Value", 10010: "SelectionI
 # UIA_Is<Pattern>PatternAvailablePropertyId, fetched for every node in one cached round trip.
 AVAILABLE = {10000: 30031, 10015: 30041, 10002: 30043, 10010: 30036, 10005: 30028, 10003: 30033,
              10004: 30034, 10017: 30035, 10009: 30044, 10016: 30042}
+# Properties a snapshot reads for every node, fetched with it so each node costs no further round trips.
+CACHED = {"BoundingRectangle": 30001, "ControlType": 30003, "Name": 30005, "HasKeyboardFocus": 30008,
+          "IsEnabled": 30010, "AutomationId": 30011, "IsPassword": 30019, "NativeWindowHandle": 30020,
+          "IsOffscreen": 30022}
 EXPAND_STATES = {0: "collapsed", 1: "expanded", 2: "partial", 3: "leaf"}
 WINDOW_STATES = {0: "normal", 1: "maximized", 2: "minimized"}
 SCROLL_AMOUNT = {("up", "small"): (2, 1), ("up", "large"): (2, 0), ("down", "small"): (2, 4),
@@ -21,11 +25,12 @@ TYPES = {50000: "Button", 50002: "CheckBox", 50003: "ComboBox", 50004: "Edit", 5
          50012: "ProgressBar", 50013: "RadioButton", 50014: "ScrollBar", 50015: "Slider",
          50018: "Tab", 50019: "TabItem", 50020: "Text", 50021: "ToolBar", 50023: "Tree",
          50024: "TreeItem", 50025: "Custom", 50026: "Group", 50028: "DataGrid", 50029: "DataItem",
-         50030: "Document", 50032: "Window", 50033: "Pane", 50034: "Header", 50036: "Table"}
+         50030: "Document", 50032: "Window", 50033: "Pane", 50034: "Header", 50036: "Table",
+         50037: "TitleBar"}
 
 
 class WindowsProvider:  # pragma: no cover - exercised in the Windows foundations job
-    def __init__(self, hwnd):
+    def __init__(self, hwnd, cached=False):
         import comtypes.client
         ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
         comtypes.client.GetModule("UIAutomationCore.dll")
@@ -42,8 +47,17 @@ class WindowsProvider:  # pragma: no cover - exercised in the Windows foundation
             raise RuntimeError("no window")
         self.walker = self.automation.ControlViewWalker
         self.cache = self.automation.CreateCacheRequest()
-        for prop in AVAILABLE.values():
+        for prop in (*AVAILABLE.values(), *CACHED.values()):
             self.cache.AddProperty(prop)
+        self.cached = cached  # snapshots read the cache; action rechecks always read live state
+
+    def prop(self, node, name):
+        if self.cached:
+            try:
+                return getattr(node, f"Cached{name}")
+            except Exception:  # not a cached element: ask the provider directly
+                pass
+        return getattr(node, f"Current{name}")
 
     def foreground(self):
         return self.user32.GetForegroundWindow()
@@ -55,14 +69,14 @@ class WindowsProvider:  # pragma: no cover - exercised in the Windows foundation
         return node.GetRuntimeId()
 
     def same_window(self, node):
-        handle = node.CurrentNativeWindowHandle
+        handle = self.prop(node, "NativeWindowHandle")
         return not handle or self.user32.GetAncestor(handle, 2) == self.hwnd
 
     def offscreen(self, node):
-        return bool(node.CurrentIsOffscreen)
+        return bool(self.prop(node, "IsOffscreen"))
 
     def password(self, node):
-        return bool(node.CurrentIsPassword)
+        return bool(self.prop(node, "IsPassword"))
 
     def read_only(self, node):
         pattern = node.GetCurrentPattern(10002).QueryInterface(self.uia.IUIAutomationValuePattern)
@@ -104,7 +118,7 @@ class WindowsProvider:  # pragma: no cover - exercised in the Windows foundation
         return bool(self.user32.IsWindow(self.hwnd))
 
     def bounds(self, node):
-        rect = node.CurrentBoundingRectangle
+        rect = self.prop(node, "BoundingRectangle")
         return rect.left, rect.top, rect.right, rect.bottom
 
     def children(self, node):
@@ -117,12 +131,14 @@ class WindowsProvider:  # pragma: no cover - exercised in the Windows foundation
 
     def properties(self, node):
         patterns = [name for ident, name in PATTERNS.items() if self.available(node, ident)]
-        result = {"control_type": TYPES.get(node.CurrentControlType, str(node.CurrentControlType)),
-                  "name": node.CurrentName,
-                  "automation_id": node.CurrentAutomationId,
-                  "enabled": bool(node.CurrentIsEnabled), "focused": bool(node.CurrentHasKeyboardFocus),
-                  "offscreen": bool(node.CurrentIsOffscreen), "patterns": patterns}
-        if "Value" in patterns and not node.CurrentIsPassword:
+        control = self.prop(node, "ControlType")
+        result = {"control_type": TYPES.get(control, str(control)),
+                  "name": self.prop(node, "Name"),
+                  "automation_id": self.prop(node, "AutomationId"),
+                  "enabled": bool(self.prop(node, "IsEnabled")),
+                  "focused": bool(self.prop(node, "HasKeyboardFocus")),
+                  "offscreen": bool(self.prop(node, "IsOffscreen")), "patterns": patterns}
+        if "Value" in patterns and not self.prop(node, "IsPassword"):
             pattern = node.GetCurrentPattern(10002).QueryInterface(self.uia.IUIAutomationValuePattern)
             result["value"] = pattern.CurrentValue
         if "Toggle" in patterns:
