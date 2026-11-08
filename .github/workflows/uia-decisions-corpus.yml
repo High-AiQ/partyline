@@ -1,0 +1,30 @@
+name: manual UIA Decisions corpus
+on:
+  workflow_dispatch:
+    inputs:
+      acknowledge_ephemeral_runner:
+        description: 'Record text UIA only on an ephemeral hosted Windows runner'
+        type: boolean
+        required: true
+        default: false
+permissions:
+  contents: read
+jobs:
+  record:
+    if: inputs.acknowledge_ephemeral_runner
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Record isolated stock applications and UIA verification pairs
+        run: uv run --locked --extra helper python experiments/uia-decisions-pilot/record.py --ephemeral-runner --output corpus
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: uia-decisions-corpus-${{ github.run_id }}
+          path: |
+            corpus/*.json
+            corpus/*.jsonl
+          if-no-files-found: error
+          retention-days: 30
