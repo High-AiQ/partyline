@@ -30,6 +30,11 @@ class ToolAudit:
         path.parent.mkdir(parents=True, exist_ok=True)
         return path
 
+    def ensure_writable(self):
+        with self.lock:
+            with self._file().open("a", encoding="utf-8"):
+                pass
+
     def _tail(self, path):
         try:
             lines = path.read_text(encoding="utf-8").splitlines()

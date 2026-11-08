@@ -595,8 +595,8 @@ class McpControlToolsTest(unittest.TestCase):
     def test_tools_gate_validate_and_route(self):
         self.assertEqual(tools_control.tool_list({"actions": ["read"]}), [])
         names = [tool["name"] for tool in tools_control.tool_list({"actions": ["write"]})]
-        self.assertEqual(names, ["screen_control_request", "screen_click", "screen_move", "screen_drag",
-                                 "screen_scroll", "screen_type", "screen_key"])
+        self.assertEqual(names, ["screen_element_action", "screen_control_request", "screen_click",
+                                 "screen_move", "screen_drag", "screen_scroll", "screen_type", "screen_key"])
         calls = []
         client = SimpleNamespace(home="line/1", request=lambda *args: calls.append(args) or {"ok": 1})
         state = {"actions": ["write"]}
@@ -612,3 +612,18 @@ class McpControlToolsTest(unittest.TestCase):
             tools_control.call(client, "screen_move", {"x": 1, "y": 2, "z": 3}, state)
         with self.assertRaises(ApiError):
             tools_control.call(client, "screen_move", {"x": 1, "y": 2}, {"actions": ["read"]})
+
+    def test_element_action_mcp_routes_value_and_requires_write(self):
+        calls = []
+        def request(*args, **kwargs):
+            calls.append((args, kwargs))
+            return {"status": "completed"}
+        client = SimpleNamespace(home="line", request=request)
+        action = {"element_id": "abc", "action": "set_value", "value": "text"}
+        result = tools_control.call(client, "screen_element_action", action, {"actions": ["write"]})
+        self.assertEqual("completed", result["status"])
+        self.assertEqual(("POST", "/api/conversations/line/screen-control/element-action", action),
+                         calls[0][0])
+        self.assertEqual({"timeout": 40}, calls[0][1])
+        with self.assertRaises(ApiError):
+            tools_control.call(client, "screen_element_action", action, {"actions": ["read"]})

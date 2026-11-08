@@ -7,10 +7,13 @@ import sys
 def main(path):  # pragma: no cover - native Windows dialog, exercised by Windows CI
     import tkinter as tk
     from .uia_window_list import windows
+    from .uia_window_identity import mark, unmark
     options = windows(exclude=(os.getppid(),)) or []
     root = tk.Tk()
     root.title("Partyline window access")
-    tk.Label(root, text="Choose one window to let agents read. No window is selected by default.").pack()
+    tk.Label(root, text="Choose a window to let agents read. With separate agent control consent, "
+                       "they can also act on its elements. No window is selected by default.",
+             wraplength=500).pack()
     listing = tk.Listbox(root, width=80, height=min(20, max(3, len(options))))
     for item in options:
         listing.insert("end", f"{item['title']} ({item['process']})")
@@ -22,13 +25,20 @@ def main(path):  # pragma: no cover - native Windows dialog, exercised by Window
         choice = listing.curselection()
         if choice:
             item = options[choice[0]]
-            detail.set(f"Let agents read {item['title']} ({item['process']})")
+            detail.set(f"Let agents read {item['title']} ({item['process']}); "
+                       "separate agent control consent also permits element actions.")
 
     def grant():
         choice = listing.curselection()
         if choice:
-            with open(path, "w", encoding="utf-8") as stream:
-                json.dump(options[choice[0]], stream)
+            selected = dict(options[choice[0]])
+            selected["marker"] = mark(selected["hwnd"])
+            if selected["marker"]:
+                try:
+                    with open(path, "w", encoding="utf-8") as stream:
+                        json.dump(selected, stream)
+                except OSError:
+                    unmark(selected)
         root.destroy()
 
     listing.bind("<<ListboxSelect>>", selected)

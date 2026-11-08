@@ -17,7 +17,7 @@ from .tools import MESSAGES as TOOL_MESSAGES, TOOLS_VERSION, Tools
 from .transport import CertificateError, certificate_failure
 from .version import helper_version
 from .uia_access import WindowAccess
-
+from .uia_task import WindowTask
 
 class Revoked(Exception):
     """The paired credential is no longer authorized."""
@@ -44,6 +44,7 @@ class Session:
         self.control = Control(self, inputs, allow_control)
         self.tools = Tools(self)
         self.window = WindowAccess(self)
+        self.window_task = WindowTask(self)
         self.last_uia_frame = None
 
     async def send(self, kind, binary=None, **fields):
@@ -203,8 +204,9 @@ class Session:
         elif kind in TOOL_MESSAGES:
             await self.tools.dispatch(message)
         elif kind == "read_window_elements":
-            result = await self.window.snapshot()
-            await self.send("window_elements", request_id=message["request_id"], **result)
+            await self.window_task.submit(message["request_id"])
+        elif kind == "window_element_action":
+            await self.window_task.submit_action(message)
         elif kind == "ping":
             await self.send("pong")
         elif kind not in ("pong", "snap", "error"):
@@ -255,6 +257,7 @@ class Session:
             self.status.stop_share = None
             self.status.choose_window = self.status.stop_window = None
             self.window.revoke()
+            await self.window_task.close()
             self.status.set("offline")
         if self.socket.close_code in (1008, 4001, 4003, 4401, 4403):
             raise Revoked

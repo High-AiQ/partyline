@@ -18,6 +18,9 @@ class Provider:
     def root(self):
         return 0
 
+    def runtime_id(self, node):
+        return [node]
+
     def same_window(self, node):
         return self.nodes[node].get("same", True)
 
@@ -53,7 +56,8 @@ class SnapshotTests(unittest.TestCase):
         result = snapshot(tree, frame, clock=lambda: 0)
         elements = result["elements"]
         self.assertFalse(result["truncated"])
-        self.assertEqual([1, 2, 3], [e["id"] for e in elements])
+        self.assertEqual(3, len({e["id"] for e in elements}))
+        self.assertTrue(all(len(e["id"]) == 64 for e in elements))
         self.assertEqual([110, 60, 150, 80], elements[1]["bounds"])
         self.assertEqual([20, 10, 100, 30], elements[1]["frame_bounds"])
         self.assertNotIn("value", elements[1])

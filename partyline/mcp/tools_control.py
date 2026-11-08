@@ -16,7 +16,7 @@ def _int(description):
 
 
 def _tool(name, description, properties, required):
-    if name != "screen_control_request":
+    if name not in ("screen_control_request", "screen_element_action"):
         properties = {**properties, "frame": {"type": "string", "enum": ["none", "thumb", "full"],
                       "description": "Frame tier: none, thumb (default), or full (original)."}}
     return {"name": name, "description": description, "inputSchema": {
@@ -29,6 +29,12 @@ def tool_list(state):
         return []
     point = {"x": _int("X, " + FRAME + "."), "y": _int("Y, " + FRAME + ".")}
     return [
+        _tool("screen_element_action",
+              "Use a UIA pattern on an element from the latest consented window snapshot. "
+              "The app may activate itself; the result reports observed foreground changes.",
+              {"element_id": {"type": "string", "minLength": 1, "maxLength": 128},
+               "action": {"type": "string", "enum": ["invoke", "toggle", "set_value"]},
+               "value": {"type": "string", "maxLength": 500}}, ["element_id", "action"]),
         _tool("screen_control_request",
               "Ask the person sharing their screen to let you drive its mouse and keyboard. "
               "Returns at once; you are @mentioned when they answer on their computer.", {}, []),
@@ -68,4 +74,6 @@ def call(client, name, args, state):
     base = f"/api/conversations/{quote(client.home, safe='')}/screen-control"
     if name == "screen_control_request":
         return client.request("POST", base + "/request")
+    if name == "screen_element_action":
+        return client.request("POST", base + "/element-action", args, timeout=40)
     return client.request("POST", base + "/action", {"kind": name.removeprefix("screen_"), **args})

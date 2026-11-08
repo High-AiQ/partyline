@@ -85,16 +85,19 @@ class Control(Acting):
         agent = display_text(message.get("requested_by"))
         print(f"\nAGENT CONTROL REQUEST\nRequested by: {agent}\n"
               f"Line: {display_text(message.get('line_name'))}\n"
-              "The agent could move the mouse, click, scroll and type inside the shared region.",
+              "The agent could move the mouse, click, scroll and type inside the shared region, "
+              "and use element actions in a separately selected window.",
               flush=True)
         if self.without_prompt:
             print("WARNING: --allow-control-without-prompt GRANTED AGENT CONTROL WITHOUT ASKING.", flush=True)
         elif not await self.session.terminal.ask("Allow agent control? [y/N] ", dialog=(
                 "Partyline agent control request",
                 f"{agent} asks to control the mouse and keyboard inside the shared region "
-                f"(line: {display_text(message.get('line_name'))}).\n\nOnce the agent starts "
-                "acting, moving the mouse or pressing any key takes control back (Ctrl+Alt+Esc always "
-                "does).\n\nAllow agent control?")):
+                f"(line: {display_text(message.get('line_name'))}). With separate window access, "
+                "they can also act on that window's elements.\n\nAfter mouse or keyboard control starts, "
+                "moving the mouse or pressing a key takes control back. Element actions alone do not "
+                "arm that takeback. Press Ctrl+Alt+Esc, stop sharing, or revoke control to stop them."
+                "\n\nAllow agent control?")):
             print("Agent control declined.", flush=True)
             await self.answer("control_revoked", reason="Local consent declined or timed out")
             return
@@ -113,14 +116,19 @@ class Control(Acting):
         # Fail closed: no listener means no kill switch, so no control.
         self.inputs.listen(lambda *event: loop.call_soon_threadsafe(self.key_event, *event))
         self.granted, self.agent, self.clicked = True, agent, False
+        if getattr(self.session, "window", None) and self.session.window.grant:
+            self.session.window.gate.grant()
         self.target, self.armed = None, False  # armed by the agent's first action (see Acting.move)
         self.watcher = asyncio.create_task(self.watch())
         print(f"AGENT CONTROL ACTIVE — {agent} can use the mouse and keyboard in the shared region.\n"
-              "Once it acts, move the mouse or press any key to take control back; Ctrl+Alt+Esc always does; "
-              "type s Enter to stop sharing.", flush=True)
+              "After mouse or keyboard control starts, move the mouse or press a key to take control back. "
+              "Element actions alone do not arm that takeback; Ctrl+Alt+Esc, stopping sharing, or revoking "
+              "control stops them. Type s Enter to stop sharing.", flush=True)
         border_mode(self.session, "control")
 
     def release(self, reason="agent control ended"):
+        if getattr(self.session, "window", None):
+            self.session.window.gate.invalidate()
         self.discard(reason)
         inputs, self.inputs = self.inputs, None
         if inputs:

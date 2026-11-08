@@ -7,6 +7,7 @@ from fastapi import APIRouter, Request
 
 from .auth_guard import request_principal
 from .machine_scope import deny_unless
+from .screen_element_actions import ElementAction, element_action
 
 
 class ElementsHub:
@@ -58,5 +59,9 @@ def elements_router(runtime, hub):
     async def elements(conv_id: str, request: Request, device: str | None = None):
         deny_unless(runtime.db, request_principal(request), conv_id, "read")
         return await hub.elements.read(conv_id, device)
+
+    @router.post("/api/conversations/{conv_id}/screen-control/element-action")
+    async def act(conv_id: str, body: ElementAction, request: Request):
+        return await element_action(runtime, hub, conv_id, body, request)
 
     return router

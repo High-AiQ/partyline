@@ -2,6 +2,8 @@
 import time
 import uuid
 
+from .uia_identity import element_id
+
 MAX_ELEMENTS = 200
 MAX_DEPTH = 20
 MAX_TEXT = 160
@@ -25,12 +27,12 @@ def snapshot(provider, frame=None, clock=time.monotonic, limit=MAX_ELEMENTS,
              depth_limit=MAX_DEPTH, budget=BUDGET):
     deadline = clock() + budget
     result, truncated, visited = [], False, 0
-    stack = [(provider.root(), 0)]
+    stack = [(provider.root(), 0, [])]
     while stack:
         if visited >= limit or clock() >= deadline:
             truncated = True
             break
-        node, depth = stack.pop()
+        node, depth, path = stack.pop()
         visited += 1
         if not provider.same_window(node):
             continue
@@ -41,7 +43,7 @@ def snapshot(provider, frame=None, clock=time.monotonic, limit=MAX_ELEMENTS,
         for key in ("name", "automation_id", "value"):
             if key in props:
                 props[key] = str(props[key] or "")[:MAX_TEXT]
-        props["id"] = len(result) + 1
+        props["id"] = element_id(provider, node, path)
         props["bounds"] = list(rect)
         if pixels := frame_bounds(rect, frame):
             props["frame_bounds"] = pixels
@@ -50,7 +52,8 @@ def snapshot(provider, frame=None, clock=time.monotonic, limit=MAX_ELEMENTS,
             truncated = True
             continue
         children = provider.children(node)
-        stack.extend((child, depth + 1) for child in reversed(children))
+        stack.extend((child, depth + 1, [*path, index])
+                     for index, child in reversed(list(enumerate(children))))
     if not provider.current():
         return {"elements_unavailable": "window closed"}
     return {"elements": result, "truncated": truncated, "snapshot_id": str(uuid.uuid4())}
