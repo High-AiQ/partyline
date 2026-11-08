@@ -52,6 +52,7 @@ class Pointer(BaseModel):
     x: int
     y: int
     visible: bool
+    captured: bool = False  # hidden/captured OS cursor; visible still denotes region membership
 
 
 class HelperMessage(BaseModel):

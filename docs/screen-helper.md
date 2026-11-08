@@ -212,12 +212,28 @@ while you want these previews to be available.
 
 Frames contain compressed screen pixels, the selected rectangle, elapsed time,
 and the exact global pointer position with a flag indicating whether it lies in
-the region. Monitor layout, device name, OS and helper version are also sent.
+the region. On Windows, a successful `GetCursorInfo` query also reports
+`pointer.captured: true` when the OS cursor is hidden. Helpers without that hint
+cannot confirm capture. Monitor layout, device name, OS and helper version are also sent.
 No audio is collected. The helper moves the pointer or types only while you have
 granted agent control (below); while control is active it watches your keyboard
 for the kill switch but sends no keystrokes to Partyline.
 Pixels remain in memory; no screenshots are stored locally. The server may retain
 received images according to its own policy. Credentials persist until unpaired.
+
+Walkthroughs annotate a pointer as stationary when at least three consecutive frames
+keep the visible pointer within a 3-pixel bounding box while image content changes.
+Region or output-size changes break the run. Detection uses the buffered recording
+before frame selection, so duplicates cannot erase the evidence. Stationary frames
+say `(pointer at x,y, stationary)` and keep the marker at the reported position.
+Scrolling, typing and video playback can all produce this pattern; stationarity alone
+never means capture. `screen_frame` uses recent share frames for the same additive hint.
+
+Only a helper-reported `pointer.captured: true` produces `(view centre; pointer captured)`
+and a centre crosshair with `mark_pointer`. The centre is a view-direction reference.
+Deduplication compares pixels in both cases and skips pointer-position comparison only
+for confirmed captured frames. Normal and stationary visible pointers retain their
+reported desktop coordinates and markers.
 
 Frames default to at most one per second and 1280 pixels on the long edge. Small
 changes are suppressed by comparison with the last sent grayscale thumbnail;

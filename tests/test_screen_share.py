@@ -132,6 +132,36 @@ class ScreenTest(unittest.TestCase):
             saved = self.client.get(f"/api/media/{file_id}/original")
             self.assertEqual(saved.status_code, 200)
             self.assertNotEqual(saved.content, png())
+            # A resting visible cursor during scrolling keeps its real marker and coordinates.
+            frame["pointer"] = {"x": -75, "y": 25, "visible": True}
+            for color in ("blue", "green"):
+                frame["request_id"] = None
+                ws.send_json(frame)
+                ws.send_bytes(png(color))
+                self.sync(ws)
+            for hidden in (False, True):
+                if hidden:
+                    frame["pointer"] = {"x": -500, "y": 50, "visible": False, "captured": True}
+                snap = self.executor.submit(
+                    self.client.post, "/api/conversations/line/screen-frame?mark_pointer=true")
+                frame["request_id"] = ws.receive_json()["request_id"]
+                ws.send_json(frame)
+                ws.send_bytes(png())
+                captured = snap.result()
+                self.assertEqual(captured.status_code, 200, captured.text)
+                description = captured.json()["description"]
+                if hidden:
+                    self.assertIn("view centre; pointer captured", description)
+                    self.assertIn("'os': None", description)
+                else:
+                    self.assertIn("pointer stationary", description)
+                    self.assertIn("'os': {'x': -75, 'y': 25}", description)
+                    self.assertNotIn("view centre", description)
+                content = self.client.get(captured.json()["file"]["urls"]["original"]).content
+                with Image.open(io.BytesIO(content)) as image:
+                    self.assertEqual(image.getpixel((16, 12) if hidden else (8, 6)), (255, 255, 255))
+                    if not hidden:
+                        self.assertEqual(image.getpixel((16, 12)), (255, 0, 0))
             self.assertEqual(self.client.delete("/api/screen/shares/" + share_id).status_code, 200)
             self.assertEqual(ws.receive_json()["type"], "stop_share")
         self.assertEqual(self.client.delete("/api/screen/devices/" + device["device_id"]).status_code, 200)

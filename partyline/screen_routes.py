@@ -1,5 +1,6 @@
 """Pairing, user controls, helper WebSocket, and MCP frame persistence."""
 
+import asyncio
 import base64
 import io
 import time
@@ -21,6 +22,7 @@ from .screen_control_routes import control_router
 from .screen_frame_store import frame_reference
 from .screen_hub import ScreenHub
 from .screen_protocol import PairClaim, Region
+from .screen_pointer import captured_pointer, annotate_stationary_pointers
 
 
 class ShareStart(BaseModel):
@@ -174,6 +176,8 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
             raise HTTPException(409, "screen frames are unavailable while a walkthrough is in progress")
         try:
             share, frame = await hub.capture(conv_id)
+            history = [item for item in share.frames if item.sequence < frame.sequence] + [frame]
+            frame = (await asyncio.to_thread(annotate_stationary_pointers, history))[-1]
             data = _mark_pointer(frame) if mark_pointer else frame.data
             mime = "image/png" if mark_pointer and pointer_coordinates(frame)["frame"] else frame.mime
             ref, unchanged = await frame_reference(store, share, principal.name, frame, data, mime,
@@ -211,6 +215,8 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
 
 def pointer_coordinates(frame):
     pointer, region = frame.pointer, frame.region
+    if captured_pointer(frame):
+        return {"os": None, "frame": {"x": frame.out_width // 2, "y": frame.out_height // 2}}
     if not pointer or not pointer.get("visible"):
         return {"os": None, "frame": None}
     x, y = pointer["x"], pointer["y"]
@@ -224,7 +230,9 @@ def pointer_coordinates(frame):
 
 def frame_detail(frame) -> str:
     return (f"region={frame.region}; output={frame.out_width}x{frame.out_height}; "
-            f"pointer={pointer_coordinates(frame)}")
+            f"pointer={pointer_coordinates(frame)}" +
+            (" (view centre; pointer captured)" if captured_pointer(frame) else
+             " (pointer stationary)" if frame.pointer and frame.pointer.get("stationary") else ""))
 
 
 def _mark_pointer(frame):
@@ -239,7 +247,9 @@ def _mark_pointer(frame):
     for width, color in ((5, "black"), (2, "white")):
         draw.line((x - 24, y, x + 24, y), fill=color, width=width)
         draw.line((x, y - 24, x, y + 24), fill=color, width=width)
-    draw.text((x + 20, y + 20), f"{frame.pointer['x']},{frame.pointer['y']}", fill="yellow",
+    label = ("view centre" if captured_pointer(frame) else
+             f"{frame.pointer['x']},{frame.pointer['y']}")
+    draw.text((x + 20, y + 20), label, fill="yellow",
               stroke_width=2, stroke_fill="black")
     output = io.BytesIO()
     image.save(output, format="PNG")

@@ -187,7 +187,8 @@ class ScreenHub:
             return
         frame = BufferedFrame(data, meta.ts_ms, meta.region.model_dump(),
                               meta.out_width, meta.out_height,
-                              meta.pointer.model_dump() if meta.pointer else None, meta.mime)
+                              meta.pointer.model_dump(exclude_defaults=True) if meta.pointer else None,
+                              meta.mime)
         share.add(frame)
         self.walkthroughs.add(share, frame)
         if meta.request_id:

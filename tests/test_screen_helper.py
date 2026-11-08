@@ -122,6 +122,19 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.desktop.grabs), count)
         self.assertEqual(self.socket.sent[-1]["type"], "share_stopped")
 
+    async def test_hidden_cursor_hint_is_sent_without_pixel_or_position_changes(self):
+        await self.accepted()
+        await self.session.stop(notify=False)
+        self.session.share = request()
+        self.session.accepted = True
+        self.session.last_frame_at = None
+        self.session.validate(self.session.share)
+        self.socket.sent.clear()
+        with patch("partyline_helper.desktop.cursor_hidden", return_value=True):
+            await self.session.frame()
+        self.assertTrue(self.socket.sent[0]["pointer"]["captured"])
+        self.assertEqual(self.socket.sent[0]["pointer"]["x"], -20)
+
     async def test_decline_and_pending_cancel(self):
         self.terminal.answer = False
         await self.session.start(request())

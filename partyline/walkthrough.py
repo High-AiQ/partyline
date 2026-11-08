@@ -1,12 +1,10 @@
 """Ephemeral walkthrough frame buffering and time-based selection."""
 
 from dataclasses import dataclass, field
-import io
 import re
 
-from PIL import Image, ImageChops, ImageStat
-
 from .screen_frames import BufferedFrame
+from .screen_pointer import captured_pointer, annotate_stationary_pointers, visually_identical
 
 
 @dataclass
@@ -52,7 +50,7 @@ def select_frames(frames: list[BufferedFrame], segments: list[dict],
     Segment times are seconds relative to the take start. A pause selects the
     latest frame at or before the preceding segment's end, never a future frame.
     """
-    frames = deduplicate_frames(frames)
+    frames = deduplicate_frames(annotate_stationary_pointers(frames))
     if count <= 0 or not frames:
         return []
     if count == 1:
@@ -83,7 +81,7 @@ def select_frames(frames: list[BufferedFrame], segments: list[dict],
 
 
 def deduplicate_frames(frames: list[BufferedFrame]) -> list[BufferedFrame]:
-    """Drop adjacent visually identical frames only when their pointers also agree."""
+    """Drop adjacent identical views, comparing positions only for ordinary pointers."""
     kept = []
     for frame in frames:
         if kept and _near_duplicate(kept[-1], frame):
@@ -94,23 +92,15 @@ def deduplicate_frames(frames: list[BufferedFrame]) -> list[BufferedFrame]:
 
 def _near_duplicate(first: BufferedFrame, second: BufferedFrame) -> bool:
     a, b = first.pointer or {}, second.pointer or {}
+    if captured_pointer(first) != captured_pointer(second):
+        return False
+    if captured_pointer(first):
+        return visually_identical(first, second)
     if bool(a.get("visible")) != bool(b.get("visible")):
         return False
     if a.get("visible") and (abs(a["x"] - b["x"]) > 3 or abs(a["y"] - b["y"]) > 3):
         return False
-    if (first.region != second.region or
-            (first.out_width, first.out_height) != (second.out_width, second.out_height)):
-        return False
-    if first.data == second.data:
-        return True
-    try:
-        with Image.open(io.BytesIO(first.data)) as left, Image.open(io.BytesIO(second.data)) as right:
-            left = left.convert("RGB").resize((128, 128))
-            right = right.convert("RGB").resize((128, 128))
-            diff = ImageStat.Stat(ImageChops.difference(left, right))
-            return max(diff.mean) <= 1.0 and max(high for _, high in diff.extrema) <= 12
-    except (OSError, ValueError):
-        return False
+    return visually_identical(first, second)
 
 
 _SILENCE_PHRASES = {tuple(phrase.split()) for phrase in (
@@ -163,7 +153,10 @@ def assemble_message(notes: str, segments: list[dict], frames: list[BufferedFram
         visible = (pointer and pointer.get("visible") and
                    region["x"] <= pointer["x"] < region["x"] + region["width"] and
                    region["y"] <= pointer["y"] < region["y"] + region["height"])
-        location = f" (pointer at {pointer['x']},{pointer['y']})" if visible else ""
+        stationary = ", stationary" if pointer and pointer.get("stationary") else ""
+        location = f" (pointer at {pointer['x']},{pointer['y']}{stationary})" if visible else ""
+        if captured_pointer(frame):
+            location = " (view centre; pointer captured)"
         events.append((frame.ts_ms, 1, f"frame {index}{location}"))
     duration_ms = max(duration_ms, *(frame.ts_ms for frame in frames),
                       *(int(segment["end"] * 1000) for segment in segments), 0)

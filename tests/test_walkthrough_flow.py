@@ -1,4 +1,5 @@
 """Scripted helper and recognizer exercise the in-memory take through upload."""
+import io
 import tempfile
 import threading
 import unittest
@@ -7,6 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from unittest.mock import patch
+
+from PIL import Image
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -66,7 +69,7 @@ class WalkthroughFlowTest(unittest.TestCase):
         ws.send_json({"type": "ping"})
         self.assertEqual(ws.receive_json()["type"], "pong")
 
-    def start(self, ws):
+    def start(self, ws, captured=False):
         ws.send_json({"type": "hello", "protocol": 1, "device_name": "desk", "os": "test",
                       "helper_version": "1", "monitors": FakeDesktop().monitors()})
         self.sync(ws)
@@ -90,7 +93,8 @@ class WalkthroughFlowTest(unittest.TestCase):
             self.now = i
             ws.send_json({"type": "frame", "share_id": share, "request_id": None,
                           "ts_ms": i, "region": region, "out_width": 32, "out_height": 24,
-                          "pointer": {"x": -50, "y": 50, "visible": True}, "mime": "image/png"})
+                          "pointer": {"x": -50, "y": 50, "visible": True, "captured": captured},
+                          "mime": "image/png"})
             ws.send_bytes(png("red" if i % 2 else "blue"))
             self.sync(ws)
         self.assertEqual(len(self.hub.walkthroughs.items[share].buffer.frames), 25)
@@ -102,7 +106,7 @@ class WalkthroughFlowTest(unittest.TestCase):
 
     def test_transcribe_stop_upload_and_retry(self):
         with self.socket() as ws:
-            path, share = self.start(ws)
+            path, share = self.start(ws, captured=True)
             result = self.client.post("/api/conversations/line/transcribe", content=b"audio")
             self.assertEqual(result.status_code, 200, result.text)
             self.assertEqual(self.client.post(path + "/stop").status_code, 200)
@@ -113,7 +117,8 @@ class WalkthroughFlowTest(unittest.TestCase):
             message = response.json()["message"]
             self.assertIn("Walkthrough ·", message["body"])
             self.assertIn("click gear", message["body"])
-            self.assertIn("pointer at -50,50", message["body"])
+            self.assertIn("view centre; pointer captured", message["body"])
+            self.assertNotIn("pointer at -50,50", message["body"])
             self.assertIn("/api/media/", message["body"])
             self.assertGreaterEqual(len(message["files"]), 2)
             self.assertEqual(message["files"][0]["title"], "Walkthrough contact sheet")
@@ -124,6 +129,9 @@ class WalkthroughFlowTest(unittest.TestCase):
             for item in message["files"]:
                 self.assertIn(item["id"], message["body"])
                 self.assertEqual(self.client.get(item["urls"]["original"]).status_code, 200)
+            marked = self.client.get(message["files"][1]["urls"]["original"])
+            with Image.open(io.BytesIO(marked.content)) as image:
+                self.assertEqual(image.getpixel((image.width // 2, image.height // 2)), (255, 255, 255))
             self.assertNotIn(share, self.hub.walkthroughs.items)
             self.assertEqual(self.client.post(path + "/finish", json=payload).json()["message"]["id"],
                              message["id"])

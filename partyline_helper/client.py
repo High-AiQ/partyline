@@ -11,6 +11,7 @@ from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidSta
 
 from .bounds import MAX_MESSAGE_BYTES, bounded, validate_request
 from .control import CONTROL_VERSION, Control
+from .desktop import pointer_state
 from .images import changed, encode, thumbnail
 from .status import Status
 from .tools import MESSAGES as TOOL_MESSAGES, TOOLS_VERSION, Tools
@@ -157,9 +158,7 @@ class Session:
         region = share["region"]
         image = self.desktop.grab(region)
         thumb = thumbnail(image)
-        x, y = self.desktop.pointer()
-        pointer = dict(x=x, y=y, visible=(region["x"] <= x < region["x"] + region["width"] and
-                                       region["y"] <= y < region["y"] + region["height"]))
+        pointer = pointer_state(self.desktop, region)
         if (request_id is None and not changed(self.previous, thumb, share["min_change"])
                 and pointer == self.last_pointer):
             return

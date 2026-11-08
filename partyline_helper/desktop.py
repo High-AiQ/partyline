@@ -1,5 +1,6 @@
 """Physical desktop coordinates and platform permission guards."""
 import ctypes
+from ctypes import wintypes
 import os
 import sys
 
@@ -90,3 +91,26 @@ class Desktop:
 
     def close(self):
         self.capture.close()
+
+
+class CursorInfo(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("flags", wintypes.DWORD),
+                ("hCursor", wintypes.HANDLE), ("ptScreenPos", wintypes.POINT)]
+
+
+def cursor_hidden():
+    """Cheap Windows cursor visibility hint; failed queries leave capture unknown."""
+    if sys.platform != "win32":
+        return False
+    info = CursorInfo()
+    info.cbSize = ctypes.sizeof(info)
+    return bool(ctypes.windll.user32.GetCursorInfo(ctypes.byref(info)) and not info.flags & 1)
+
+
+def pointer_state(desktop, region):
+    x, y = desktop.pointer()
+    pointer = dict(x=x, y=y, visible=(region["x"] <= x < region["x"] + region["width"] and
+                                    region["y"] <= y < region["y"] + region["height"]))
+    if cursor_hidden():
+        pointer["captured"] = True
+    return pointer
