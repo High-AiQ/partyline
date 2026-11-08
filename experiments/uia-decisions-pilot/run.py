@@ -6,7 +6,9 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 
-from evaluate import check_dataset, choose_gate, report
+from audit import inspect
+from corpus import load
+from evaluate import check_dataset, choose_gate, report, score
 from protocol import digest, options
 
 ROOT = Path(__file__).resolve().parent
@@ -29,6 +31,27 @@ def historical_harness():
 
     module.urllib = SimpleNamespace(request=SimpleNamespace(
         Request=original_request.Request, urlopen=durable_open))
+    original_records = module.records
+
+    def records():
+        # Publish the complete combined seed atomically. A crash during an
+        # append-based seed could otherwise lose completed keys and repeat them.
+        study = ROOT / 'responses.jsonl'
+        if not module.LOG.exists() and study.exists():
+            lines = ((module.ROOT / 'responses.jsonl').read_text(encoding='utf-8').splitlines() +
+                     study.read_text(encoding='utf-8').splitlines())
+            entries = [json.loads(line) for line in lines]
+            if len({r['key'] for r in entries}) != len(entries):
+                raise ValueError('duplicate committed spending entry')
+            seed = STATE / 'ledger-seed.tmp'
+            with seed.open('x', encoding='utf-8') as stream:
+                stream.write('\n'.join(lines) + '\n')
+                stream.flush()
+                os.fsync(stream.fileno())
+            seed.replace(module.LOG)
+        return original_records()
+
+    module.records = records
     # ROOT remains the historical experiment: records() seeds from its committed
     # ledger, including the reserved cost of the unresolved historical request.
     return module
@@ -60,8 +83,38 @@ def save_exclusive(path, value):
         os.fsync(stream.fileno())
 
 
+def checkpoint(dataset, phase, harness, gate, status, error=None):
+    records = harness.records()
+    predictions = responses(records)
+    pending = (STATE / 'pending.json').exists()
+    exposure = harness.MAX_REQUEST_RESERVE if pending else 0
+    partial = {'phase': phase, 'status': status, 'error': error,
+               'pending_request': pending, 'pending_reserve_dollars': exposure,
+               'maximum_exposure_dollars': harness.PROBE_COST + exposure +
+               sum(r['conservative_cost'] for r in records),
+               'corpus_sha256': digest(dataset),
+               'conservative_total_dollars': harness.PROBE_COST +
+               sum(r['conservative_cost'] for r in records), 'gate': gate,
+               'splits': {split: {
+                   'raw': score([r for r in dataset['choices'] if r['split'] == split],
+                                predictions, veto=False),
+                   'validator_only': score([r for r in dataset['choices'] if r['split'] == split],
+                                           predictions),
+                   'gated': score([r for r in dataset['choices'] if r['split'] == split],
+                                  predictions, gate['threshold']) if gate else None}
+                          for split in ('dev', 'heldout')}}
+    temporary = STATE / 'partial.tmp'
+    with temporary.open('w', encoding='utf-8') as stream:
+        json.dump(partial, stream, indent=2)
+        stream.flush()
+        os.fsync(stream.fileno())
+    temporary.replace(STATE / 'partial.json')
+
+
 def execute(dataset, phase, harness):
     check_dataset(dataset)
+    dataset, preflight = inspect(dataset, request)
+    (STATE / 'preflight.json').write_text(json.dumps(preflight, indent=2))
     corpus_hash = digest(dataset)
     identity = STATE / 'corpus.json'
     if identity.exists():
@@ -73,44 +126,66 @@ def execute(dataset, phase, harness):
     gate_path = STATE / 'gate.json'
     entries = harness.records()
     predictions = responses(entries)
+    gate = None
     if phase == 'heldout':
         if not gate_path.exists():
             raise ValueError('run dev first to freeze the threshold')
         gate = json.loads(gate_path.read_text())
         if gate != choose_gate(rows, predictions):
             raise ValueError('development evidence or frozen gate changed')
-    elif gate_path.exists():
+    elif phase == 'dev' and gate_path.exists():
         raise ValueError('development gate already frozen; proceed to heldout')
     # Never send another request with an unresolved journal entry, even when all
     # rows appear complete. All failures leave pending.json for reconciliation.
     if (STATE / 'pending.json').exists():
         raise RuntimeError('uncertain previous call; never retry')
+    spent = harness.PROBE_COST + sum(r['conservative_cost'] for r in entries)
+    if phase == 'audit':
+        print(json.dumps({**preflight, 'conservative_spent_dollars': spent,
+                          'planning_plus_reserve_dollars': spent + preflight['planning_cost_dollars'] +
+                          harness.MAX_REQUEST_RESERVE}, indent=2))
+        return
+    if preflight['splits']['dev']['maximum_correct_accepts'] < 10:
+        checkpoint(dataset, phase, harness, None, 'blocked', 'development cannot reach ten correct accepts')
+        raise ValueError('development cannot reach ten correct accepts; no paid calls')
+    remaining = [r for r in rows if 'uia:' + r['id'] not in {e['key'] for e in entries}]
+    estimate = sum((2 * len(json.dumps(request(r)).encode()) + 4096) * .25 / 1_000_000
+                   for r in remaining)
+    if spent + estimate + harness.MAX_REQUEST_RESERVE >= harness.STOP:
+        checkpoint(dataset, phase, harness, None, 'blocked', 'whole-study planning budget exceeded')
+        raise RuntimeError('whole-study planning budget exceeded; no paid calls')
     done = {r['key'] for r in entries}
-    for row in rows:
-        key = 'uia:' + row['id']
-        if row['split'] == phase and key not in done:
-            body = request(row)
-            evidence = body['input'][0]['content'][0]['data']
-            if len(json.dumps(evidence).encode()) > 250_000:
-                raise ValueError('evidence exceeds input_json size bound')
-            harness.call(key, body)
-    predictions = responses(harness.records())
-    if phase == 'dev':
-        save_exclusive(gate_path, choose_gate(rows, predictions))
-    else:
-        summary = report(dataset, predictions, gate)
-        summary['corpus_sha256'] = corpus_hash
-        summary['gate'] = gate
-        summary['conservative_total_dollars'] = harness.PROBE_COST + sum(
-            r['conservative_cost'] for r in harness.records())
-        (STATE / 'results.json').write_text(json.dumps(summary, indent=2))
-        print(json.dumps(summary, indent=2))
+    checkpoint(dataset, phase, harness, gate, 'running')
+    try:
+        for row in rows:
+            key = 'uia:' + row['id']
+            if row['split'] == phase and key not in done:
+                body = request(row)
+                evidence = body['input'][0]['content'][0]['data']
+                if len(json.dumps(evidence).encode()) > 250_000:
+                    raise ValueError('evidence exceeds input_json size bound')
+                harness.call(key, body)
+        predictions = responses(harness.records())
+        if phase == 'dev':
+            save_exclusive(gate_path, choose_gate(rows, predictions))
+        else:
+            summary = report(dataset, predictions, gate)
+            summary['corpus_sha256'] = corpus_hash
+            summary['gate'] = gate
+            summary['conservative_total_dollars'] = harness.PROBE_COST + sum(
+                r['conservative_cost'] for r in harness.records())
+            (STATE / 'results.json').write_text(json.dumps(summary, indent=2))
+            print(json.dumps(summary, indent=2))
+        checkpoint(dataset, phase, harness, json.loads(gate_path.read_text()), 'complete')
+    except BaseException as exc:
+        checkpoint(dataset, phase, harness, gate, 'stopped', type(exc).__name__ + ': ' + str(exc))
+        raise
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--corpus', required=True, type=Path)
-    parser.add_argument('--phase', required=True, choices=('dev', 'heldout'))
+    parser.add_argument('--phase', required=True, choices=('audit', 'dev', 'heldout'))
     args = parser.parse_args()
     STATE.mkdir(exist_ok=True)
     # Exclusive creation serializes processes. A crash leaves the lock: inspect
@@ -121,7 +196,7 @@ def main():
         stream.flush()
         os.fsync(stream.fileno())
     try:
-        dataset = json.loads(args.corpus.read_text(encoding='utf-8'))
+        dataset = load(args.corpus)
         execute(dataset, args.phase, historical_harness())
     finally:
         lock.unlink()

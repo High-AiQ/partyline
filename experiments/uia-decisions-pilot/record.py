@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+from audit import complete, snapshots
 from protocol import SPLITS, digest, predicate, tasks
 
 ROOT = Path(__file__).resolve().parent
@@ -60,7 +61,7 @@ async def capture(grant, application, output):
     await access.choose()
     try:
         before = await access.snapshot()
-        if not before.get('elements'):
+        if not complete(before):
             return {'application': application, 'before': before, 'verification': []}
         pairs = []
         field = next((e for e in before['elements'] if 'set_value' in e.get('actions', []) and
@@ -166,7 +167,7 @@ def main():
             record_data = {'application': application, 'unavailable': str(exc)}
         manifest['applications'].append(record_data)
         before = record_data.get('before', {})
-        if before.get('elements'):
+        if complete(before):
             manifest['choices'].extend(tasks(application, before))
             after = record_data.get('after')
             if after and digest(after.get('elements')) != digest(before['elements']):
@@ -178,8 +179,9 @@ def main():
             manifest['verification'].append(pair)
         write(output / 'dataset.json', manifest)
     # A failed collection still uploads diagnostics, but never looks like a full corpus.
-    if any(not r.get('before', {}).get('elements') for r in manifest['applications']):
-        raise SystemExit('Incomplete corpus: inspect per-application availability before evaluation')
+    if any(not complete(r.get('before', {})) or any(not complete(s) for s in snapshots(r).values())
+           for r in manifest['applications']):
+        raise SystemExit('Incomplete corpus: unavailable, empty or truncated snapshot; inspect artifacts')
 
 
 if __name__ == '__main__':

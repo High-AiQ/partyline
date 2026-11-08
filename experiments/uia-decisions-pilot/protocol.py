@@ -10,6 +10,8 @@ SPLITS = {'notepad': 'dev', 'calculator': 'dev', 'tk': 'dev', 'charmap': 'heldou
 # Dialogs and fixtures share a host/toolkit; keep the entire family held out.
 FAMILIES = {'open-dialog': 'winforms', 'save-dialog': 'winforms'}
 CASES = {'normal', 'absent', 'duplicate', 'disabled', 'offscreen', 'wrong-pattern', 'stale'}
+CASE_LIMITS = {case: 12 if case == 'normal' else 4 if case in ('disabled', 'offscreen') else 1
+               for case in sorted(CASES)}
 
 
 def digest(value):
@@ -31,6 +33,8 @@ def tasks(application, before, current=None):
     rows = []
 
     def add(case, intent, action, target=None):
+        if sum(r['case'] == case for r in rows) >= CASE_LIMITS[case]:
+            return
         row = {'application': application, 'family': FAMILIES.get(application, application),
                'split': SPLITS[application], 'case': case, 'intent': intent,
                'snapshot': before, 'current': current if case == 'stale' else before,

@@ -1,0 +1,283 @@
+{
+  "raw": {
+    "total": 27,
+    "responses": 27,
+    "accepted": 16,
+    "errors": 0,
+    "vetoed": 0,
+    "coverage": 0.5925925925925926,
+    "selective_accuracy": 1.0,
+    "error_upper_95": 0.17074972298248092
+  },
+  "validator_only": {
+    "total": 27,
+    "responses": 27,
+    "accepted": 16,
+    "errors": 0,
+    "vetoed": 0,
+    "coverage": 0.5925925925925926,
+    "selective_accuracy": 1.0,
+    "error_upper_95": 0.17074972298248092
+  },
+  "gated": {
+    "total": 27,
+    "responses": 27,
+    "accepted": 16,
+    "errors": 0,
+    "vetoed": 0,
+    "coverage": 0.5925925925925926,
+    "selective_accuracy": 1.0,
+    "error_upper_95": 0.17074972298248092
+  },
+  "per_application": {
+    "charmap": {
+      "total": 16,
+      "responses": 16,
+      "accepted": 11,
+      "errors": 0,
+      "vetoed": 0,
+      "coverage": 0.6875,
+      "selective_accuracy": 1.0,
+      "error_upper_95": 0.2384041903808527
+    },
+    "winforms": {
+      "total": 11,
+      "responses": 11,
+      "accepted": 5,
+      "errors": 0,
+      "vetoed": 0,
+      "coverage": 0.45454545454545453,
+      "selective_accuracy": 1.0,
+      "error_upper_95": 0.4507197283469412
+    },
+    "open-dialog": {
+      "total": 0,
+      "responses": 0,
+      "accepted": 0,
+      "errors": 0,
+      "vetoed": 0,
+      "coverage": 0,
+      "selective_accuracy": null,
+      "error_upper_95": 1.0
+    },
+    "save-dialog": {
+      "total": 0,
+      "responses": 0,
+      "accepted": 0,
+      "errors": 0,
+      "vetoed": 0,
+      "coverage": 0,
+      "selective_accuracy": null,
+      "error_upper_95": 1.0
+    }
+  },
+  "per_case": {
+    "absent": {
+      "total": 2,
+      "responses": 2,
+      "accepted": 0,
+      "errors": 0,
+      "vetoed": 0,
+      "coverage": 0.0,
+      "selective_accuracy": null,
+      "error_upper_95": 1.0
+    },
+    "disabled": {
+      "total": 3,
+      "responses": 3,
+      "accepted": 0,
+      "errors": 0,
+      "vetoed": 0,
+      "coverage": 0.0,
+      "selective_accuracy": null,
+      "error_upper_95": 1.0
+    },
+    "duplicate": {
+      "total": 1,
+      "responses": 1,
+      "accepted": 0,
+      "errors": 0,
+      "vetoed": 0,
+      "coverage": 0.0,
+      "selective_accuracy": null,
+      "error_upper_95": 1.0
+    },
+    "normal": {
+      "total": 17,
+      "responses": 17,
+      "accepted": 16,
+      "errors": 0,
+      "vetoed": 0,
+      "coverage": 0.9411764705882353,
+      "selective_accuracy": 1.0,
+      "error_upper_95": 0.17074972298248092
+    },
+    "offscreen": {
+      "total": 0,
+      "responses": 0,
+      "accepted": 0,
+      "errors": 0,
+      "vetoed": 0,
+      "coverage": 0,
+      "selective_accuracy": null,
+      "error_upper_95": 1.0
+    },
+    "stale": {
+      "total": 2,
+      "responses": 2,
+      "accepted": 0,
+      "errors": 0,
+      "vetoed": 0,
+      "coverage": 0.0,
+      "selective_accuracy": null,
+      "error_upper_95": 1.0
+    },
+    "wrong-pattern": {
+      "total": 2,
+      "responses": 2,
+      "accepted": 0,
+      "errors": 0,
+      "vetoed": 0,
+      "coverage": 0.0,
+      "selective_accuracy": null,
+      "error_upper_95": 1.0
+    }
+  },
+  "missing_heldout_cases": [
+    "offscreen"
+  ],
+  "verification": {
+    "pairs": 6,
+    "non_success": 5,
+    "false_success": 0,
+    "independent_error_upper_95": null,
+    "predicate_labeled_successes": 1,
+    "predicate_transitions": 1,
+    "warning": "Circular labels and pre-dispatch refusal controls; zero false success is constructed, not robustness or recall"
+  },
+  "live_pilot_justified": false,
+  "limitation": "Small literal-intent corpus; task-level binomial bounds assume independence. Controls in one application are correlated. No application-level safety guarantee.",
+  "corpus_sha256": "8472306089b932252163b1404d06faa372abf600068dbea38f145e93c0657996",
+  "gate": {
+    "schema": 1,
+    "threshold": 0,
+    "dev_rows_hash": "efd395777615041fced0b910d6e11059e9d9013049cacaf891a45edc8aac329c",
+    "dev_responses_hash": "b3a9b977f002011bf40f499baaae4ff66e88746afec0e9d9e5fd8fdf0a7ae7e2",
+    "rule": "max coverage, zero dev errors, minimum 10 accepts; else reject all",
+    "dev_curve": [
+      {
+        "threshold": 0,
+        "total": 42,
+        "responses": 42,
+        "accepted": 25,
+        "errors": 0,
+        "vetoed": 0,
+        "coverage": 0.5952380952380952,
+        "selective_accuracy": 1.0,
+        "error_upper_95": 0.11292814500684323
+      },
+      {
+        "threshold": 0.5,
+        "total": 42,
+        "responses": 42,
+        "accepted": 25,
+        "errors": 0,
+        "vetoed": 0,
+        "coverage": 0.5952380952380952,
+        "selective_accuracy": 1.0,
+        "error_upper_95": 0.11292814500684323
+      },
+      {
+        "threshold": 0.7,
+        "total": 42,
+        "responses": 42,
+        "accepted": 25,
+        "errors": 0,
+        "vetoed": 0,
+        "coverage": 0.5952380952380952,
+        "selective_accuracy": 1.0,
+        "error_upper_95": 0.11292814500684323
+      },
+      {
+        "threshold": 0.8,
+        "total": 42,
+        "responses": 42,
+        "accepted": 25,
+        "errors": 0,
+        "vetoed": 0,
+        "coverage": 0.5952380952380952,
+        "selective_accuracy": 1.0,
+        "error_upper_95": 0.11292814500684323
+      },
+      {
+        "threshold": 0.9,
+        "total": 42,
+        "responses": 42,
+        "accepted": 25,
+        "errors": 0,
+        "vetoed": 0,
+        "coverage": 0.5952380952380952,
+        "selective_accuracy": 1.0,
+        "error_upper_95": 0.11292814500684323
+      },
+      {
+        "threshold": 0.95,
+        "total": 42,
+        "responses": 42,
+        "accepted": 25,
+        "errors": 0,
+        "vetoed": 0,
+        "coverage": 0.5952380952380952,
+        "selective_accuracy": 1.0,
+        "error_upper_95": 0.11292814500684323
+      },
+      {
+        "threshold": 0.99,
+        "total": 42,
+        "responses": 42,
+        "accepted": 22,
+        "errors": 0,
+        "vetoed": 0,
+        "coverage": 0.5238095238095238,
+        "selective_accuracy": 1.0,
+        "error_upper_95": 0.12730543165483876
+      },
+      {
+        "threshold": 1.01,
+        "total": 42,
+        "responses": 42,
+        "accepted": 0,
+        "errors": 0,
+        "vetoed": 0,
+        "coverage": 0.0,
+        "selective_accuracy": null,
+        "error_upper_95": 1.0
+      }
+    ]
+  },
+  "gate_file_sha256": "ee0b6f7277342a20195f348644ee373e44fd57d239891f92cafc7b5d1b1806b4",
+  "conservative_total_dollars": 0.742361,
+  "usage": {
+    "responses": 69,
+    "historical_records": 1040,
+    "input_tokens": 345022,
+    "cache_write_tokens": 168511,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "new_conservative_dollars": 0.0862555,
+    "historical_conservative_dollars": 0.6561055,
+    "models": [
+      "gpt-6-luna"
+    ]
+  },
+  "latency_ms": {
+    "dev": {
+      "p50": 289.9413730483502,
+      "p95": 474.78356095962226
+    },
+    "heldout": {
+      "p50": 271.0062959231436,
+      "p95": 519.6911540115252
+    }
+  }
+}

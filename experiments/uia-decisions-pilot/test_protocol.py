@@ -1,10 +1,13 @@
 """No-network research integrity tests. Run through scripts/capped-test."""
 import copy
+import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import audit
+import corpus
 import evaluate
 import protocol
 import run
@@ -152,9 +155,21 @@ class ProtocolTests(unittest.TestCase):
             second = run.historical_harness()
             self.assertEqual(initial, sum(r['conservative_cost'] for r in second.records()))
 
+    def test_fresh_checkout_retains_committed_study_spending_and_keys(self):
+        study = [json.loads(line) for line in (run.ROOT / 'responses.jsonl').read_text().splitlines()]
+        with tempfile.TemporaryDirectory() as directory, patch.object(run, 'STATE', Path(directory)):
+            harness = run.historical_harness()
+            first = harness.records()
+            second = harness.records()
+            self.assertEqual(first, second)
+            self.assertEqual({r['key'] for r in study},
+                             {r['key'] for r in first if r['key'].startswith('uia:')})
+            self.assertEqual(len({r['key'] for r in first}), len(first))
+
     def test_phase_order_and_corpus_binding(self):
         dataset = {'source': 'recorded-windows-uia', 'choices': protocol.tasks('notepad', snapshot()),
-                   'verification': []}
+                   'verification': [], 'applications': [
+                       {'application': 'notepad', 'before': snapshot(), 'verification': []}]}
         with tempfile.TemporaryDirectory() as directory, patch.object(run, 'STATE', Path(directory)):
             harness = run.historical_harness()
             with self.assertRaisesRegex(ValueError, 'run dev first'):
@@ -178,6 +193,79 @@ class ProtocolTests(unittest.TestCase):
         changed['choices'][-1]['expected'] = 'corrupt-gold'
         with self.assertRaisesRegex(ValueError, 'task digest'):
             evaluate.check_dataset(changed)
+
+
+class PreflightTests(unittest.TestCase):
+    def dataset(self, count=12):
+        before = snapshot([element(f'e{i}', f'Button {i}') for i in range(count)])
+        return {'source': 'recorded-windows-uia', 'choices': protocol.tasks('notepad', before),
+                'applications': [{'application': 'notepad', 'before': before, 'verification': []}],
+                'verification': []}
+
+    def test_truncated_apps_excluded_before_model_scoring(self):
+        dataset = self.dataset()
+        bad = snapshot(ident='truncated')
+        bad['truncated'] = True
+        dataset['applications'].append({'application': 'open-dialog', 'before': bad, 'verification': []})
+        dataset['choices'].extend(protocol.tasks('open-dialog', bad))
+        original = copy.deepcopy(dataset)
+        selected, summary = audit.inspect(dataset, run.request)
+        self.assertEqual(summary['excluded_applications'], ['open-dialog'])
+        self.assertTrue(all(r['application'] != 'open-dialog' for r in selected['choices']))
+        self.assertEqual(summary['splits']['dev']['maximum_correct_accepts'], 12)
+        self.assertEqual(original, dataset)
+        self.assertFalse(audit.complete(bad))
+
+    def test_every_case_has_a_finite_per_application_cap(self):
+        before = snapshot([element(f'e{i}', f'Disabled {i}', enabled=False) for i in range(100)] +
+                          [element(f'o{i}', f'Outside {i}', offscreen=True) for i in range(100)])
+        rows = protocol.tasks('winforms', before)
+        self.assertEqual(sum(r['case'] == 'disabled' for r in rows), 4)
+        self.assertEqual(sum(r['case'] == 'offscreen' for r in rows), 4)
+        self.assertEqual(len(audit.cap_rows(rows * 2)), len(rows))
+
+    def test_inadequate_dev_capacity_never_calls_model(self):
+        dataset = self.dataset(3)
+        with tempfile.TemporaryDirectory() as directory, patch.object(run, 'STATE', Path(directory)):
+            harness = run.historical_harness()
+            with patch.object(harness, 'call') as call:
+                with self.assertRaisesRegex(ValueError, 'cannot reach ten'):
+                    run.execute(dataset, 'dev', harness)
+                call.assert_not_called()
+            self.assertEqual(json.loads((Path(directory) / 'partial.json').read_text())['status'], 'blocked')
+
+    def test_budget_stop_preserves_completed_partial_scores(self):
+        dataset = self.dataset()
+        with tempfile.TemporaryDirectory() as directory, patch.object(run, 'STATE', Path(directory)):
+            harness = run.historical_harness()
+            count = 0
+
+            def stop(key, body):
+                nonlocal count
+                count += 1
+                if count == 2:
+                    raise RuntimeError('Budget reserve reached')
+                record = {**response('abstain'), 'key': key, 'conservative_cost': .001}
+                with harness.LOG.open('a') as stream:
+                    stream.write(json.dumps(record) + '\n')
+            with patch.object(harness, 'call', side_effect=stop):
+                with self.assertRaisesRegex(RuntimeError, 'Budget reserve reached'):
+                    run.execute(dataset, 'dev', harness)
+            partial = json.loads((Path(directory) / 'partial.json').read_text())
+            self.assertEqual(partial['status'], 'stopped')
+            self.assertEqual(partial['splits']['dev']['raw']['responses'], 1)
+            self.assertIsNone(partial['gate'])
+            self.assertFalse((Path(directory) / 'gate.json').exists())
+
+    def test_corpus_compaction_is_lossless_and_never_imports_data(self):
+        dataset = self.dataset()
+        compact = corpus.pack(dataset)
+        self.assertEqual(len(compact['snapshots']), 1)
+        self.assertEqual(corpus.unpack(compact), dataset)
+        self.assertEqual(protocol.digest(corpus.unpack(compact)), protocol.digest(dataset))
+        compact['snapshots']['s1']['snapshot_id'] = 'different'
+        with self.assertRaisesRegex(ValueError, 'reference mismatch'):
+            corpus.unpack(compact)
 
 
 if __name__ == '__main__':

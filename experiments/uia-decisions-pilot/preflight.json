@@ -1,0 +1,310 @@
+{
+  "source_dataset_digest": "5fdc7d7a3f78ede9521ad9750fb803e424f4eafcf23703d465ec172d6604d604",
+  "selected_dataset_digest": "8472306089b932252163b1404d06faa372abf600068dbea38f145e93c0657996",
+  "applications": [
+    {
+      "application": "notepad",
+      "split": "dev",
+      "snapshots": 4,
+      "elements_per_snapshot": [
+        27,
+        27,
+        27,
+        27
+      ],
+      "truncated_snapshots": 0,
+      "incomplete": false,
+      "edit_actions": [
+        {
+          "label": "success",
+          "result": {
+            "status": "completed",
+            "revoked_during": false,
+            "element": {
+              "name": "Text Editor",
+              "value": "uia-corpus-complete",
+              "enabled": true,
+              "h_scroll_percent": 0.0,
+              "v_scroll_percent": 0.0,
+              "role": "Edit"
+            },
+            "foreground_changed": false,
+            "target_came_forward": false
+          },
+          "predicate": {
+            "element_id": "25a7afd71bae8b9b3e325a215b842951b80a9d45134891c57b2234ffa94b1ad4",
+            "equals": {
+              "value": "uia-corpus-complete"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "application": "calculator",
+      "split": "dev",
+      "snapshots": 4,
+      "elements_per_snapshot": [
+        45,
+        45,
+        45,
+        45
+      ],
+      "truncated_snapshots": 0,
+      "incomplete": false,
+      "edit_actions": [
+        {
+          "label": "unknown",
+          "result": {
+            "status": "failed",
+            "error": "element is read-only"
+          },
+          "predicate": {
+            "element_id": "625116d3f499d9330e65b706109dbdeded8e629ce5250294d19fe53fe0d5d37a",
+            "equals": {
+              "value": "uia-corpus-complete"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "application": "tk",
+      "split": "dev",
+      "snapshots": 4,
+      "elements_per_snapshot": [
+        14,
+        14,
+        14,
+        14
+      ],
+      "truncated_snapshots": 0,
+      "incomplete": false,
+      "edit_actions": [
+        {
+          "label": "success",
+          "result": {
+            "status": "completed",
+            "revoked_during": false,
+            "element": {
+              "name": "",
+              "value": "uia-corpus-complete",
+              "enabled": true,
+              "role": "Edit"
+            },
+            "foreground_changed": false,
+            "target_came_forward": false
+          },
+          "predicate": {
+            "element_id": "3ba748298fe6c82d070ea594450969a245129392b2a5c20ae48bec0048283f03",
+            "equals": {
+              "value": "uia-corpus-complete"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "application": "charmap",
+      "split": "heldout",
+      "snapshots": 4,
+      "elements_per_snapshot": [
+        26,
+        26,
+        26,
+        26
+      ],
+      "truncated_snapshots": 0,
+      "incomplete": false,
+      "edit_actions": [
+        {
+          "label": "unknown",
+          "result": {
+            "status": "completed",
+            "revoked_during": false,
+            "element": {
+              "name": "Characters to copy :",
+              "value": "uia-corpus-complete\r",
+              "enabled": true,
+              "role": "Edit"
+            },
+            "foreground_changed": false,
+            "target_came_forward": false
+          },
+          "predicate": {
+            "element_id": "774d2a9d272bdbcf012bb190a59681165d5680dec1e4a8698d3ce737edd88f33",
+            "equals": {
+              "value": "uia-corpus-complete"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "application": "winforms",
+      "split": "heldout",
+      "snapshots": 4,
+      "elements_per_snapshot": [
+        13,
+        13,
+        13,
+        13
+      ],
+      "truncated_snapshots": 0,
+      "incomplete": false,
+      "edit_actions": [
+        {
+          "label": "success",
+          "result": {
+            "status": "completed",
+            "revoked_during": false,
+            "element": {
+              "name": "Corpus value",
+              "value": "uia-corpus-complete",
+              "enabled": true,
+              "role": "Edit"
+            },
+            "foreground_changed": false,
+            "target_came_forward": false
+          },
+          "predicate": {
+            "element_id": "e1f4f2c4755c27a79b6625310d5f110dfeb5802e3c7cf9c678f423fadfe19737",
+            "equals": {
+              "value": "uia-corpus-complete"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "application": "open-dialog",
+      "split": "heldout",
+      "snapshots": 4,
+      "elements_per_snapshot": [
+        31,
+        56,
+        66,
+        61
+      ],
+      "truncated_snapshots": 4,
+      "incomplete": true,
+      "edit_actions": [
+        {
+          "label": "unknown",
+          "result": {
+            "status": "failed",
+            "error": "element is read-only"
+          },
+          "predicate": {
+            "element_id": "35a1c8ad1903e9ad01160a309a0e51947320aa9ec054fc409db49380a4f89241",
+            "equals": {
+              "value": "uia-corpus-complete"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "application": "save-dialog",
+      "split": "heldout",
+      "snapshots": 4,
+      "elements_per_snapshot": [
+        45,
+        59,
+        49,
+        52
+      ],
+      "truncated_snapshots": 4,
+      "incomplete": true,
+      "edit_actions": [
+        {
+          "label": "unknown",
+          "result": {
+            "status": "failed",
+            "error": "element is read-only"
+          },
+          "predicate": {
+            "element_id": "85940053bfbc569456cb1d5616a88b1edd39f436c42fa8b1be35cda40ba65ffe",
+            "equals": {
+              "value": "uia-corpus-complete"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "excluded_applications": [
+    "open-dialog",
+    "save-dialog"
+  ],
+  "case_limits_per_application": {
+    "absent": 1,
+    "disabled": 4,
+    "duplicate": 1,
+    "normal": 12,
+    "offscreen": 4,
+    "stale": 1,
+    "wrong-pattern": 1
+  },
+  "splits": {
+    "dev": {
+      "original_rows": 42,
+      "original_cases": {
+        "absent": 3,
+        "wrong-pattern": 3,
+        "disabled": 6,
+        "normal": 27,
+        "stale": 2,
+        "duplicate": 1
+      },
+      "selected_rows": 42,
+      "selected_cases": {
+        "absent": 3,
+        "wrong-pattern": 3,
+        "disabled": 6,
+        "normal": 27,
+        "stale": 2,
+        "duplicate": 1
+      },
+      "missing_cases": [
+        "offscreen"
+      ],
+      "maximum_correct_accepts": 27,
+      "serialized_request_bytes": 663866,
+      "maximum_request_bytes": 23099,
+      "planning_input_tokens": 1499764,
+      "planning_cost_dollars": 0.37494099999999997
+    },
+    "heldout": {
+      "original_rows": 68,
+      "original_cases": {
+        "absent": 4,
+        "wrong-pattern": 4,
+        "normal": 41,
+        "disabled": 3,
+        "stale": 4,
+        "duplicate": 2,
+        "offscreen": 10
+      },
+      "selected_rows": 27,
+      "selected_cases": {
+        "absent": 2,
+        "wrong-pattern": 2,
+        "normal": 17,
+        "disabled": 3,
+        "stale": 2,
+        "duplicate": 1
+      },
+      "missing_cases": [
+        "offscreen"
+      ],
+      "maximum_correct_accepts": 17,
+      "serialized_request_bytes": 302341,
+      "maximum_request_bytes": 13772,
+      "planning_input_tokens": 715274,
+      "planning_cost_dollars": 0.1788185
+    }
+  },
+  "planning_cost_dollars": 0.5537595,
+  "verification_warning": "Labels reuse the scored predicate; refused unknown ids never reach UIA. Zero false success is constructed, not independent validation."
+}
