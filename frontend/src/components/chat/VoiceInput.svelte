@@ -13,9 +13,11 @@
   import { voicePresets } from "../../state/voice-presets.svelte.js";
   import { MicReadout } from "../../state/mic-readout.svelte.js";
   import MicLevel from "./MicLevel.svelte";
+  import ComposerIcon from "./ComposerIcon.svelte";
   import { tooltip } from "../../lib/tooltip";
   import { voiceApi } from "../../lib/voice-api";
   import { formatElapsed, insertAtCursor, voiceUnsupported } from "../../lib/voice";
+  import type { VoiceStatus } from "../../lib/voice";
   import type { RecorderPhase, RecorderSources } from "../../lib/voice-recorder";
   import { VoiceRecorder, browserSources } from "../../lib/voice-recorder";
 
@@ -23,10 +25,16 @@
     box,
     oninserted,
     sources = browserSources(),
+    collapsed = false,
+    onstatus,
   }: {
     box: HTMLTextAreaElement | null;
     oninserted: () => void;
     sources?: RecorderSources;
+    /** On a phone the mic lives in the composer menu; only a take in progress shows here. */
+    collapsed?: boolean;
+    /** What the composer menu needs to show the mic's state and whether Dictate can start. */
+    onstatus?: (status: VoiceStatus) => void;
   } = $props();
 
   let phase = $state<RecorderPhase>("idle");
@@ -61,6 +69,7 @@
   // A live (or opening) mic can always be stopped: nothing below may disable the button then.
   const live = $derived(phase !== "idle");
   const busy = $derived(live || transcribing);
+  const blocked = $derived(!live && (!room.conversation || Boolean(reason) || transcribing));
   const label = $derived(
     live
       ? recording
@@ -99,6 +108,9 @@
   onMount(() => {
     if (!unsupported) voicePresets.ensure();
   });
+  $effect(() => {
+    onstatus?.({ busy, blocked, label });
+  });
   function dropTake(): void {
     takeId++;
     takeLine = null;
@@ -114,7 +126,11 @@
       if (takeLine !== null && takeLine !== line) dropTake();
     });
   });
-  onDestroy(dropTake);
+  // Unmounting with a take live (hands-free, walkthrough) must not leave the phone menu hidden.
+  onDestroy(() => {
+    dropTake();
+    onstatus?.({ busy: false, blocked: true, label: "" });
+  });
 
   function cancel(): void {
     failure = null;
@@ -123,7 +139,8 @@
 
   // Escape anywhere in the composer cancels a take, before it can close a drawer or dialog behind.
   $effect(() => {
-    const composer = box?.parentElement;
+    // The whole row, so Escape also reaches the live mic or cancel button, not just the textarea.
+    const composer = box?.closest<HTMLElement>(".box") ?? box?.parentElement;
     if (!composer) return;
     const onKey = (event: KeyboardEvent): void => {
       if (event.key !== "Escape" || event.defaultPrevented || !busy) return;
@@ -190,52 +207,52 @@
     }
     void recorder.toggle();
   }
+
+  /** The composer menu's Dictate item: exactly what the mic button does, called in the same tap. */
+  export function dictate(): void {
+    if (!blocked) click();
+  }
 </script>
 
-{#if busy}
+{#if !collapsed || busy}
+  {#if busy}
+    <button
+      class="voice-cancel flex h-11 flex-none items-center justify-center px-2.5 text-[11px]"
+      type="button"
+      aria-label="cancel voice message"
+      use:tooltip={{ label: "discard this take (Esc)" }}
+      onclick={cancel}
+    >
+      <span aria-hidden="true" class="min-[480px]:hidden">✕</span>
+      <span class="max-[479px]:hidden">cancel</span>
+    </button>
+  {/if}
   <button
-    class="voice-cancel flex h-11 flex-none items-center justify-center px-2.5 text-[11px]"
+    class="voice relative flex h-11 flex-none items-center justify-center gap-1.5 px-3 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-line disabled:hover:bg-ink-3 disabled:hover:text-cream-dim"
+    class:recording
     type="button"
-    aria-label="cancel voice message"
-    use:tooltip={{ label: "discard this take (Esc)" }}
-    onclick={cancel}
+    aria-label={recording ? "stop recording" : "record voice message"}
+    aria-pressed={recording}
+    use:tooltip={{ label }}
+    disabled={blocked}
+    onclick={click}
   >
-    <span aria-hidden="true" class="min-[480px]:hidden">✕</span>
-    <span class="max-[479px]:hidden">cancel</span>
+    {#if loadFailed}<span class="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-red" aria-hidden="true"
+      ></span>{/if}
+    {#if transcribing}
+      <span class="text-[11px]">transcribing…</span>
+    {:else if recording}
+      <MicLevel level={mic.level} label={mic.label} />
+      <span class="text-[11px] tabular-nums">{formatElapsed(elapsed)}</span>
+      {#if mic.silent}
+        <span
+          class="mic-silent absolute right-0 bottom-full mb-1 rounded border border-line bg-ink-2 px-2 py-1 text-[10.5px] whitespace-nowrap text-red"
+          aria-hidden="true">no input detected — is the mic muted?</span
+        >
+      {/if}
+    {:else}
+      <ComposerIcon name="mic" />
+    {/if}
   </button>
 {/if}
-<button
-  class="voice relative flex h-11 flex-none items-center justify-center gap-1.5 px-3 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-line disabled:hover:bg-ink-3 disabled:hover:text-cream-dim"
-  class:recording
-  type="button"
-  aria-label={recording ? "stop recording" : "record voice message"}
-  aria-pressed={recording}
-  use:tooltip={{ label }}
-  disabled={!live && (!room.conversation || Boolean(reason) || transcribing)}
-  onclick={click}
->
-  {#if loadFailed}<span class="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-red" aria-hidden="true"
-    ></span>{/if}
-  {#if transcribing}
-    <span class="text-[11px]">transcribing…</span>
-  {:else if recording}
-    <MicLevel level={mic.level} label={mic.label} />
-    <span class="text-[11px] tabular-nums">{formatElapsed(elapsed)}</span>
-    {#if mic.silent}
-      <span
-        class="mic-silent absolute right-0 bottom-full mb-1 rounded border border-line bg-ink-2 px-2 py-1 text-[10.5px] whitespace-nowrap text-red"
-        aria-hidden="true">no input detected — is the mic muted?</span
-      >
-    {/if}
-  {:else}
-    <svg
-      class="size-[18px] fill-none stroke-current stroke-[1.8] [stroke-linecap:round] [stroke-linejoin:round]"
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
-      <rect x="9" y="3" width="6" height="11" rx="3" />
-      <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
-    </svg>
-  {/if}
-</button>
 <span class="sr-only" role="status">{recording && mic.silent ? "no input detected" : ""}</span>

@@ -13,6 +13,9 @@
   import ComposerDropZone from "./ComposerDropZone.svelte";
   import VoiceInput from "./VoiceInput.svelte";
   import HandsFreeInput from "./HandsFreeInput.svelte";
+  import ComposerMoreMenu from "./ComposerMoreMenu.svelte";
+  import AttachButton from "./AttachButton.svelte";
+  import type { VoiceStatus } from "../../lib/voice";
   import { handsFree } from "../../state/hands-free.svelte.js";
   import ScreenFramesToggle from "./ScreenFramesToggle.svelte";
   import WalkthroughControl from "./WalkthroughControl.svelte";
@@ -27,7 +30,7 @@
   import { applyMention, mentionCandidates, mentionToken } from "../../lib/mentions";
   import type { MentionToken, MentionCandidate } from "../../lib/mentions";
   import { isLive } from "../../lib/attachments";
-  import { tooltip } from "../../lib/tooltip";
+  import { settleFocus } from "../../lib/phone-focus";
 
   let box = $state<HTMLTextAreaElement | null>(null);
   let token = $state<MentionToken | null>(null);
@@ -37,6 +40,17 @@
   let openPicker = $state(0);
   let fileIntake = $state<FileIntake>({ generation: 0, files: [] });
   let uploading = $state(false);
+  /** The mic's state for the phone menu, and the handle its Dictate item calls. */
+  let voice = $state<VoiceStatus>({ busy: false, blocked: true, label: "" });
+  let voiceControl = $state<{ dictate: () => void }>();
+  let row = $state<HTMLDivElement | null>(null);
+  let wasLive = false;
+  $effect(() => {
+    const live = layout.narrow && (voice.busy || handsFree.value.enabled);
+    if (live === wasLive) return;
+    wasLive = live;
+    settleFocus(row, live, handsFree.value.enabled);
+  });
   let includeScreen = $state(true);
   $effect(() => {
     if (room.screenShare?.share_id) includeScreen = true;
@@ -202,31 +216,31 @@
   {/key}
 
   <div
+    bind:this={row}
     class="box flex flex-wrap items-end gap-x-2 gap-y-2 rounded-md border border-line bg-ink-2 px-3 py-2.5 transition-colors focus-within:border-copper min-[900px]:gap-x-3"
     aria-busy={uploading}
   >
-    <button
-      class="attach grid size-11 flex-none place-items-center p-0 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-line disabled:hover:bg-ink-3 disabled:hover:text-cream-dim"
-      type="button"
-      aria-label="attach files"
-      use:tooltip={{ label: "attach up to 6 files" }}
-      disabled={!room.conversation || uploading}
-      onclick={() => {
-        openPicker++;
-      }}
-    >
-      <svg
-        class="size-[18px] fill-none stroke-current stroke-[1.8] [stroke-linecap:round] [stroke-linejoin:round]"
-        viewBox="0 0 24 24"
-        aria-hidden="true"
-      >
-        <path
-          d="M21.4 11.6 12 21a6 6 0 0 1-8.5-8.5l10-10a4 4 0 1 1 5.7 5.7l-10 10a2 2 0 0 1-2.9-2.8l9.3-9.3"
-        />
-      </svg>
-    </button>
-    {#if !walkthrough.active && !handsFree.value.enabled}<VoiceInput {box} oninserted={resize} />{/if}
-    {#if !walkthrough.active}<HandsFreeInput />{/if}
+    {#if !layout.narrow}<AttachButton
+        disabled={!room.conversation || uploading}
+        onclick={() => openPicker++}
+      />{/if}
+    {#if !walkthrough.active && !handsFree.value.enabled}<VoiceInput
+        bind:this={voiceControl}
+        {box}
+        collapsed={layout.narrow}
+        onstatus={(status: VoiceStatus) => (voice = status)}
+        oninserted={resize}
+      />{/if}
+    {#if !walkthrough.active && (!layout.narrow || handsFree.value.enabled)}<HandsFreeInput />{/if}
+    {#if layout.narrow && !voice.busy && !handsFree.value.enabled}
+      <ComposerMoreMenu
+        attachDisabled={!room.conversation || uploading}
+        dictateBlocked={voice.blocked}
+        dictateLabel={voice.label}
+        onattach={() => openPicker++}
+        ondictate={() => voiceControl?.dictate()}
+      />
+    {/if}
     <WalkthroughControl />
     {#if room.screenShare?.status === "active" && !room.screenShare.walkthrough}
       <ScreenFramesToggle bind:pressed={includeScreen} />

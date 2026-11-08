@@ -10,7 +10,9 @@
   import { HandsFreeQueue } from "../../lib/hands-free-queue";
   import { isLive } from "../../lib/attachments";
   import { tooltip } from "../../lib/tooltip";
+  import { handsFreeReason } from "../../lib/hands-free-reason";
   import ComposerBubble from "./ComposerBubble.svelte";
+  import ComposerIcon from "./ComposerIcon.svelte";
 
   let { sources = browserListenerSources() }: { sources?: ListenerSources } = $props();
   let phase = $state<ListeningPhase>("off");
@@ -20,18 +22,7 @@
   let lastSent = $state("");
   let failure = $state("");
   let hiddenTimer: ReturnType<typeof setTimeout> | null = null;
-  const secure = typeof window !== "undefined" && window.isSecureContext && Boolean(navigator.mediaDevices);
-  const reason = $derived(
-    !secure
-      ? "Hands-free voice needs HTTPS and microphone access."
-      : !voicePresets.listing
-        ? (voicePresets.error ?? "Checking speech recognizers…")
-        : !voicePresets.active
-          ? "No speech recognizer is available."
-          : !room.attachments.some(isLive)
-            ? "Attach a process to use hands-free voice."
-            : "",
-  );
+  const reason = $derived(handsFreeReason(voicePresets, room.attachments.some(isLive)));
   const enabled = $derived(handsFree.value.enabled);
   /** The compact word beside the icon; the full sentence lives in the status text and tooltip. */
   const badge = $derived(
@@ -177,14 +168,7 @@
       handsFree.update({ enabled: !enabled });
     }}
   >
-    <svg
-      class="size-[18px] fill-none stroke-current stroke-[1.8] [stroke-linecap:round] [stroke-linejoin:round]"
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
-      <path d="M6 8.5a6.5 6.5 0 1 1 13 0c0 6-6 6-6 10a3.5 3.5 0 1 1-7 0" />
-      <path d="M15 8.5a2.5 2.5 0 0 0-5 0v1a2 2 0 1 1 0 4" />
-    </svg>
+    <ComposerIcon name="ear" />
     {#if enabled}
       <span
         aria-hidden="true"

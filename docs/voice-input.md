@@ -9,6 +9,9 @@ While a take records or transcribes, a **cancel** button sits beside the mic, an
 composer does the same: the take is discarded, nothing is uploaded or inserted, an upload in
 flight is aborted (a late answer is ignored), and the microphone is released at once.
 
+On a phone (narrow screens) the mic and hands-free live in the composer's **+** menu. While either
+is on, its own button replaces that menu, so one tap stops it, and focus moves onto it.
+
 ## Hands-free mode
 
 Click **hands-free off** below the composer once to turn it on; the same toggle turns it off.
