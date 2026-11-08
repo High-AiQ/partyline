@@ -17,6 +17,7 @@ class Status:
         self.listeners, self.attention_listeners = [], []
         self.stop_share = self.quit = self.stop_tools = None
         self.tools_active = False
+        self.checks_active, self.stop_checks = False, None
 
     @property
     def label(self):
@@ -25,9 +26,13 @@ class Status:
     def set(self, state):
         if state != self.state:
             self.state = state
-            for listener in list(self.listeners):
-                with contextlib.suppress(Exception):  # a broken tray must never end a share
-                    listener(state)
+            self.changed()
+
+    def changed(self):
+        """Tell the tray to redraw (also when only a menu item's availability changed)."""
+        for listener in list(self.listeners):
+            with contextlib.suppress(Exception):  # a broken tray must never end a share
+                listener(self.state)
 
     def attention(self, text):
         """A prompt needs an answer: the tray can raise a balloon if the dialog is hidden."""
@@ -42,6 +47,10 @@ class Status:
     def request_stop_tools(self):
         if self.stop_tools:
             self.stop_tools()
+
+    def request_stop_checks(self):
+        if self.stop_checks:
+            self.stop_checks()
 
     def request_quit(self):
         if self.quit:

@@ -344,6 +344,14 @@ class StatusTests(unittest.TestCase):
         status.stop_tools = lambda: calls.append(1)
         status.request_stop_tools()
         self.assertEqual(calls, [1])
+        status.request_stop_checks()  # nothing registered: nothing happens
+        status.stop_checks = lambda: calls.append("checks")
+        status.request_stop_checks()
+        self.assertEqual(calls, [1, "checks"])
+        redrawn = []
+        status.listeners.append(redrawn.append)
+        status.changed()  # a menu item's availability changed, not the state
+        self.assertEqual(redrawn, ["offline"])
         status.set("tools")
         self.assertIn("local tool", status.label)
         with contextlib.redirect_stdout(io.StringIO()):

@@ -10,7 +10,7 @@ import threading
 from .. import __version__
 from .client import ApiError, PartylineClient
 from .render import render
-from . import tools_blender, tools_captain, tools_control, tools_core, tools_tasks
+from . import tools_blender, tools_captain, tools_check, tools_control, tools_core, tools_tasks
 from . import tools_resources, tools_handover
 from .captain_schemas import ACK_HINT
 from .validation import validate_arguments
@@ -86,7 +86,7 @@ class MCPServer:
                 tools = (tools_core.tool_list(state) + tools_captain.tool_list(state)
                          + tools_tasks.tool_list(state) + tools_resources.tool_list(state)
                          + tools_handover.tool_list(state) + tools_control.tool_list(state)
-                         + tools_blender.tool_list(state))
+                         + tools_blender.tool_list(state) + tools_check.tool_list(state))
                 return self.response(ident, {"tools": tools})
             except ApiError as exc:
                 self._revoked = self._revoked or "HTTP 401" in str(exc)
@@ -120,6 +120,8 @@ class MCPServer:
             blender_names = {tool['name'] for tool in tools_blender.tool_list(state)}
             if name in blender_names:
                 value = tools_blender.call(self.client, name, args, state)
+            elif name in {tool['name'] for tool in tools_check.tool_list(state)}:
+                value = tools_check.call(self.client, name, args, state)
             elif name in control_names:
                 value = tools_control.call(self.client, name, args, state)
             elif name in handover_names:

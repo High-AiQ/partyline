@@ -35,11 +35,30 @@ def tool_list(state):
                   "timeout_s": {"type": "integer", "minimum": 1, "maximum": 120,
                                 "description": "Deadline in seconds; default 20."}}, ["code"]),
         _tool("blender_scene_info",
-              "Compact JSON about the open scene: objects, types, transforms, camera." + NOTE, {
+              "Compact JSON about the open scene: objects, types, transforms, camera. With project_to_camera "
+              "it adds a `projection` of geometry checks (framing margins per mesh, clipping between "
+              "objects, floating above a named support), reported with the tolerance used; cases it "
+              "cannot judge say "
+              "`unsupported` (never a pass), and are for you to look at in a render. Pass the report to "
+              "render_check as evidence." + NOTE, {
                   "detail": {"type": "string", "enum": ["summary", "objects", "object"],
                              "description": "summary (default), objects, or one object by name."},
                   "name": {"type": "string", "maxLength": 200,
-                           "description": "Object name for detail=object."}}, []),
+                           "description": "Object name for detail=object."},
+                  "project_to_camera": {"type": "boolean", "description": "Add the geometry `projection`."},
+                  "camera": {"type": "string", "maxLength": 200,
+                             "description": "Camera to project through; default the active camera."},
+                  "width": {"type": "integer", "minimum": 1, "maximum": 100000,
+                            "description": "Render width the projection assumes; default the scene's."},
+                  "height": {"type": "integer", "minimum": 1, "maximum": 100000,
+                             "description": "Render height the projection assumes; default the scene's."},
+                  "margin": {"type": "number", "minimum": 0.001, "maximum": 0.5,
+                             "description": "Frame margin as a fraction of the frame; default 0.02."},
+                  "tolerance": {"type": "number", "minimum": 0.000001, "maximum": 1000,
+                                "description": "Contact tolerance in scene units; default 0.005."},
+                  "supports": {"type": "object", "additionalProperties": {"type": "string"},
+                               "description": "Object name -> name of the object it should rest on, for the "
+                                              "floating check (gravity is -Z)."}}, []),
         _tool("blender_render",
               "Render the open scene and store the image as line media: returns a file reference (like "
               "screen_frame; fetch the pixels with get_media) plus the settings actually used. Sizes and "
@@ -86,5 +105,5 @@ def call(client, name, args, state):
         body = {"op": name.removeprefix("blender_"), "timeout_s": timeout,
                 "args": {k: v for k, v in args.items() if k != "timeout_s"}}
     else:
-        body = {"op": "scene_info", "args": {k: v for k, v in args.items() if k in ("detail", "name")}}
+        body = {"op": "scene_info", "args": args}
     return client.request("POST", base + "/call", body, timeout=timeout + 15)

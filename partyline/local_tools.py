@@ -5,16 +5,14 @@ calls to it while a session is active, limits them and keeps the audit. Sessions
 """
 
 import asyncio
-import os
 import re
 import time
 import uuid
-from collections import deque
-from dataclasses import dataclass, field
 
 from . import local_tools_audit as audit
 from . import local_tools_media as media
 from .contracts import MessageEvent, MessageResponse
+from .local_tools_state import ToolLimits, ToolSession
 from .screen_connections import notice
 
 TOOLS_VERSION = 1
@@ -24,45 +22,6 @@ NAME = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 GRACE = 5            # seconds the server waits beyond a call's own timeout
 AUDIT_DELAY = 60
 AUDIT_BATCH = 25
-
-
-@dataclass(frozen=True)
-class ToolLimits:
-    per_minute: int = 60
-    per_session: int = 500
-    max_code: int = audit.MAX_CODE
-
-    @classmethod
-    def from_env(cls, env=os.environ) -> "ToolLimits":
-        def read(name: str, default: int) -> int:
-            raw = env.get(name, "").strip()
-            if not raw:
-                return default
-            if not raw.isdigit() or int(raw) < 1:
-                raise ValueError(f"{name} must be a positive integer, not {raw!r}")
-            return int(raw)
-
-        return cls(read("PARTYLINE_TOOLS_RATE", cls.per_minute),
-                   read("PARTYLINE_TOOLS_SESSION_CALLS", cls.per_session))
-
-
-@dataclass
-class ToolSession:
-    session_id: str
-    conv_id: str
-    device_id: str
-    tool: str
-    agent: str
-    status: str = "pending"  # pending -> active -> revoked
-    checker: bool = False    # the person ticked the render-check box; recorded only, used by later phases
-    scope_pending: bool = False
-    reason: str = ""
-    info: dict = field(default_factory=dict)
-    times: deque = field(default_factory=deque)
-    count: int = 0
-    audit_count: int = 0
-    media_bytes: int = 0
-    flusher: asyncio.Task | None = None
 
 
 class LocalTools:
@@ -148,6 +107,11 @@ class LocalTools:
             await notice(self.hub, item.conv_id, f"{who}{item.tool} tools on {device['name']} "
                          f"{'granted' if first else 'now include render checks'} "
                          f"({'render checks allowed' if item.checker else 'no render checks'}).")
+        elif kind == "tools_granted" and item.status == "active" and item.checker \
+                and not message.get("checker"):
+            item.checker = False  # the person withdrew render checks on their computer; only "off" counts
+            await self._event(item, "render checks withdrawn on the computer")
+            await notice(self.hub, item.conv_id, f"{who}Render checks were switched off on {device['name']}.")
         elif kind == "tools_revoked" and item.status == "pending":
             self.sessions.pop(item.conv_id, None)
             await notice(self.hub, item.conv_id, f"{who}{item.tool} tools were not granted ({reason}).")
@@ -260,6 +224,10 @@ class LocalTools:
             raise
         await self._record(item, "result", op, outcome + media.note(result))
         return result
+
+    async def note(self, item: ToolSession, op: str, text: str) -> None:
+        """An audit row for something done with the session besides a call (a render check)."""
+        await self._record(item, "check", op, text)
 
     async def _event(self, item: ToolSession, text: str) -> None:
         await self._record(item, "event", "session", text)

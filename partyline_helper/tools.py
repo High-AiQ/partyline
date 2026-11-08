@@ -10,7 +10,7 @@ import math
 
 from websockets.exceptions import ConnectionClosed
 
-from . import tools_consent, tools_media
+from . import tools_checks, tools_consent, tools_media
 from .terminal import display_text
 from .tools_addon import AddonClient, AddonError, spec_for
 from .tools_audit import ToolAudit, entry
@@ -125,6 +125,7 @@ class Tools:
         if scope_only:
             self.grant["checker"] = self.grant["checker"] or ticked
             self.log("event", "session", f"render checks {'allowed' if ticked else 'not allowed'}")
+            tools_checks.sync(self)
             return await self.send("tools_granted", session_id=session_id, checker=self.grant["checker"])
         await self.open(session_id, agent, spec, addon, ticked, info)
 
@@ -147,6 +148,7 @@ class Tools:
         status = self.session.status
         status.stop_tools = lambda: loop.call_soon_threadsafe(self.kill, "ended from the tray menu")
         status.tools_active = True
+        tools_checks.sync(self)
         if status.state == "paired":
             status.set("tools")
         self.spawn(self.renew_loop(grant))
@@ -203,6 +205,7 @@ class Tools:
             await grant["addon"].close_session(grant["id"])
         status = self.session.status
         status.tools_active, status.stop_tools = False, None
+        tools_checks.sync(self)
         if status.state == "tools":
             status.set("paired")
         with contextlib.suppress(OSError):
