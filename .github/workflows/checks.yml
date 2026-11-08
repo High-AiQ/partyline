@@ -12,28 +12,25 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # backend stays on a hosted runner: its real-pty, fence and user-systemd
+  # tests need a runner session with /dev/pts output, a user D-Bus and overlay
+  # support that the self-hosted service does not provide yet.
   backend:
     name: backend
-    runs-on: [self-hosted, linux, partyline]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/runner-env
       - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
       # The ffmpeg rescue path for uploads (AVIF and friends) needs a build
-      # that can decode the format, and the sandbox tests need bubblewrap. The
-      # runner is persistent and cannot install packages, so fail with the
-      # package name instead of an opaque test error when one is missing.
-      - name: system tools for backend tests are installed
-        run: |
-          missing=0
-          for pair in ffmpeg:ffmpeg bwrap:bubblewrap; do
-            tool=${pair%%:*}; package=${pair##*:}
-            if ! command -v "$tool" >/dev/null; then
-              echo "::error::$tool is not installed on this runner; install the '$package' package"
-              missing=1
-            fi
-          done
-          exit "$missing"
+      # that can decode the format; when CI's test errored with an opaque
+      # None the log did not say why. Installing distro ffmpeg guarantees an
+      # AV1-capable decoder so the real rescue runs; where decoding still is
+      # not possible the test skips with its logged reason and the stub
+      # ffmpeg tests carry the coverage instead.
+      - name: system tools for backend tests
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg bubblewrap
       - name: lint
         run: uv run --locked ruff check .
       - name: test with coverage
