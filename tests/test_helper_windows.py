@@ -280,8 +280,10 @@ class FakeIcon:
         self.notified, self.updates, self.running, self.stopped = [], 0, False, False
         FakeIcon.instances.append(self)
 
-    def run_detached(self):
+    def run_detached(self, setup=None):
         self.running = True
+        if setup:
+            setup(self)
 
     def update_menu(self):
         self.updates += 1
@@ -426,14 +428,55 @@ class StartupRaceTests(unittest.TestCase):
                     return
                 super().__setattr__(name, value)
 
-            def run_detached(self):
+            def run_detached(self, setup=None):
                 status.set("paired")  # pairs just before pystray is ready: this redraw is dropped
                 self.ready = True
-                super().run_detached()
+                super().run_detached(setup)
 
         shown = tray.start_tray(status, self.backend(NotReadyIcon))
         self.assertIsNotNone(shown)
         self.assert_paired(FakeIcon.instances[-1])
+
+    def test_a_pairing_while_the_icon_is_being_shown_is_drawn_once_it_is_visible(self):
+        status = Status()
+        FakeIcon.instances = []
+
+        class ShowingIcon(FakeIcon):
+            """pystray on Windows: showing adds the handle built from the image at that moment, a pairing
+            can land inside that window, and only a visible icon redraws on an image change."""
+
+            def __init__(self, *args):
+                self.shown, self.image, self.drawn, self.setup = False, None, None, None
+                super().__init__(*args)
+
+            icon = property(lambda self: self.image, lambda self, image: self.set_image(image))
+
+            def set_image(self, image):
+                self.image = image
+                if self.shown:
+                    self.drawn = image
+
+            visible = property(lambda self: self.shown, lambda self, value: self.show())
+
+            def show(self):
+                self.drawn = self.image
+                status.set("paired")  # stored but not drawn: the icon is not visible yet
+                self.shown = True
+
+            def run_detached(self, setup=None):
+                self.setup = setup  # pystray runs it on its own thread, later
+
+        shown = tray.start_tray(status, self.backend(ShowingIcon))
+        icon = FakeIcon.instances[-1]
+        status.set("sharing")  # between construction and setup
+        self.assertIsNone(icon.drawn)
+        icon.setup(icon)
+        colour = lambda image: image.getpixel((32, 32))  # noqa: E731
+        self.assertEqual(colour(icon.drawn), colour(tray.draw_icon("paired")))
+        shown.refresh("offline")  # a stale argument: the latest state wins
+        self.assertEqual(colour(icon.drawn), colour(tray.draw_icon("paired")))
+        status.set("control")
+        self.assertEqual(colour(icon.drawn), colour(tray.draw_icon("control")))
 
     def test_the_normal_ordering_still_pairs_the_icon(self):
         status = Status()

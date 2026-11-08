@@ -4,6 +4,7 @@ The icon and its menu live on pystray's own thread; every action goes through th
 which hand off to the helper's event loop thread-safely. `icon_type` is injectable so tests need no desktop.
 """
 import contextlib
+import threading
 
 from PIL import Image, ImageDraw
 
@@ -31,6 +32,7 @@ class Tray:
         self.status = status
         self.backend = backend or default_icon_type()
         self.icon = None
+        self.drawing = threading.Lock()
 
     def sharing(self, item=None):
         return self.status.state in ("sharing", "control")
@@ -58,15 +60,23 @@ class Tray:
         self.status.listeners.append(self.refresh)
         self.status.attention_listeners.append(self.notify)
         self.icon = self.backend.Icon("partyline-helper", draw_icon(self.status.state), TITLE, self.menu())
-        self.icon.run_detached()
-        self.refresh(self.status.state)  # draw the current state once the tray is ready
+        self.icon.run_detached(setup=self.show)
 
-    def refresh(self, state):
-        if self.icon:
-            with contextlib.suppress(Exception):  # a broken tray must never break the helper
-                self.icon.icon = draw_icon(state)
-                self.icon.title = f"{TITLE}: {self.status.label}"
-                self.icon.update_menu()
+    def show(self, icon):
+        """pystray's setup hook: show the icon, then draw. A draw before it is visible can be lost,
+        because showing it adds the icon handle built from the image it had before that draw."""
+        with contextlib.suppress(Exception):  # a broken tray must never break the helper
+            icon.visible = True
+        self.refresh()
+
+    def refresh(self, state=None):
+        """Draw the current state; serialised, and read inside the lock so no older state lands on top."""
+        with self.drawing:
+            if self.icon:
+                with contextlib.suppress(Exception):  # a broken tray must never break the helper
+                    self.icon.icon = draw_icon(self.status.state)
+                    self.icon.title = f"{TITLE}: {self.status.label}"
+                    self.icon.update_menu()
 
     def notify(self, text):
         """A balloon in case the dialog is still hidden; best effort."""
