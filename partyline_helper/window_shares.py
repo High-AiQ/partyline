@@ -54,9 +54,9 @@ class WindowShares:
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
 
-    async def send_revoked(self, ident):
+    async def send_revoked(self, ident, reason="revoked by the person"):
         with contextlib.suppress(ConnectionClosed, OSError):
-            await self.session.send("window_revoked", grant_id=ident)
+            await self.session.send("window_revoked", grant_id=ident, reason=reason)
 
     def changed(self):
         labels = {ident: f"{entry['title']} → @{entry['target']['name']} «{entry['target']['line_name']}»"
@@ -80,7 +80,7 @@ class WindowShares:
                 return
             ident = uuid.uuid4().hex
             access_session = WindowSession(self.session, ident, self.changed)
-            access = WindowAccess(access_session, on_revoke=lambda _: self.revoke(ident))
+            access = WindowAccess(access_session, on_revoke=lambda reason: self.revoke(ident, reason=reason))
             access_session.window = access
             if await access.check(selected) or generation != self.generation:
                 return
@@ -113,13 +113,15 @@ class WindowShares:
                 unmark(selected)
             self.picking = False
 
-    def revoke(self, ident, notify=True):
+    def revoke(self, ident, notify=True, *, reason="revoked by the person"):
         entry = self.grants.pop(ident, None)
         if entry:
             entry["access"].revoke()
             self.spawn(entry["worker"].close())
             if notify:
-                self.spawn(self.send_revoked(ident))
+                reason = {"window closed": "window closed", "replaced": "replaced by another grant"}.get(
+                    reason, "revoked by the person")
+                self.spawn(self.send_revoked(ident, reason))
             self.changed()
 
     def revoke_all(self, notify=True):

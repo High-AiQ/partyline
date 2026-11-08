@@ -256,6 +256,9 @@ process?** The second picker groups live processes by line and shows their handl
 preset. Only lines visible to the paired computer's owner appear, and empty lines are
 omitted. Nothing is selected by default; cancelling either picker grants no access.
 The selected process can be on any line the computer's owner can open.
+The target receives a private terminal notice with the window ID and usage instructions
+when access is granted, and a reason when it ends (except on detach or exit), while its
+line sees one brief sharing message.
 
 You can share several windows with the same process, or different windows with different
 processes. The tray lists each as **window → @process «line»**, with its own **Stop**;

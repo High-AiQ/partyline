@@ -77,6 +77,8 @@ class WindowSharesTests(unittest.IsolatedAsyncioTestCase):
         self.manager.revoke_all()
         self.assertFalse(self.manager.grants)
         self.assertIsNone(self.session.status.window_title)
+        await self.manager.close()
+        self.assertEqual("revoked by the person", (await self.socket.next("window_revoked"))["reason"])
 
     async def test_local_close_ends_only_its_grant_and_action_needs_that_window_snapshot(self):
         await self.manager.choose()
@@ -95,7 +97,9 @@ class WindowSharesTests(unittest.IsolatedAsyncioTestCase):
         response = await self.socket.next("window_elements")
         self.assertEqual("consent revoked", response["elements_unavailable"])
         await self.manager.close()
-        self.assertEqual(ident, (await self.socket.next("window_revoked"))["grant_id"])
+        revoked = await self.socket.next("window_revoked")
+        self.assertEqual(ident, revoked["grant_id"])
+        self.assertEqual("window closed", revoked["reason"])
 
     async def test_pending_picker_stop_all_prevents_late_consent(self):
         selected, finish = asyncio.Event(), asyncio.Event()
@@ -148,6 +152,7 @@ class WindowSharesTests(unittest.IsolatedAsyncioTestCase):
             await entered.get()
             self.assertEqual(revoked, access.gate.revoked.is_set())
         self.assertNotIn(ident, self.manager.grants)
+        self.assertEqual("window closed", (await self.socket.next("window_revoked"))["reason"])
         watch.cancel()
         with self.assertRaises(asyncio.CancelledError):
             await watch
