@@ -9,10 +9,46 @@ import tkinter as tk
 from ctypes import wintypes
 
 
+def rect_of(user32, hwnd):
+    rect = wintypes.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(rect))
+    return [rect.left, rect.top, rect.right, rect.bottom]
+
+
+def add_pattern_controls(user32, parent):
+    """A scrollable list box, a combo box that expands and a trackbar, all native Win32 controls."""
+    class CommonControls(ctypes.Structure):
+        _fields_ = [("size", wintypes.DWORD), ("classes", wintypes.DWORD)]
+    ctypes.windll.comctl32.InitCommonControlsEx(ctypes.byref(CommonControls(8, 0x4)))  # trackbar class
+    child, vscroll = 0x50000000, 0x00200000
+
+    def create(klass, style, x, y, width, height):
+        hwnd = user32.CreateWindowExW(0, klass, "", child | style, x, y, width, height, parent,
+                                      None, None, None)
+        if not hwnd:
+            raise RuntimeError(f"could not create {klass}")
+        return hwnd
+
+    def text(hwnd, message, value):
+        buffer = ctypes.create_unicode_buffer(value)
+        user32.SendMessageW(hwnd, message, 0, ctypes.cast(buffer, ctypes.c_void_p).value)
+    listbox = create("ListBox", 0x1 | vscroll | 0x00800000, 170, 10, 200, 90)  # LBS_NOTIFY
+    combo = create("ComboBox", 0x3 | vscroll, 170, 110, 200, 150)  # CBS_DROPDOWNLIST
+    trackbar = create("msctls_trackbar32", 0, 170, 150, 200, 30)
+    for number in range(40):
+        text(listbox, 0x0180, f"Item {number}")  # LB_ADDSTRING
+    for number in range(4):
+        text(combo, 0x0143, f"Choice {number}")  # CB_ADDSTRING
+    user32.SendMessageW(combo, 0x014E, 0, 0)  # CB_SETCURSEL
+    user32.SendMessageW(trackbar, 0x0406, 1, 100 << 16)  # TBM_SETRANGE 0..100
+    user32.SendMessageW(trackbar, 0x0405, 1, 10)  # TBM_SETPOS
+    return {"listbox": listbox, "combo": combo, "trackbar": trackbar}
+
+
 def main():
     root = tk.Tk()
     root.title("Partyline UIA target")
-    root.geometry("400x200+100+100")
+    root.geometry("640x320+100+100")
     root.update()
     user32 = ctypes.windll.user32
     user32.CreateWindowExW.argtypes = [wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR,
@@ -53,8 +89,10 @@ def main():
     user32.SendMessageW.restype = ctypes.c_ssize_t
     user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
     target = user32.GetAncestor(root.winfo_id(), 2)
+    extra = add_pattern_controls(user32, root.winfo_id())
     print(json.dumps({"hwnd": target, "pid": os.getpid(),
-                      "bounds": [(r.left, r.top, r.right, r.bottom) for r in rects]}), flush=True)
+                      "bounds": [(r.left, r.top, r.right, r.bottom) for r in rects],
+                      "extra": {name: rect_of(user32, hwnd) for name, hwnd in extra.items()}}), flush=True)
     requests = queue.Queue()
     threading.Thread(target=lambda: [requests.put(line) for line in sys.stdin], daemon=True).start()
     def report():
@@ -63,7 +101,12 @@ def main():
             value = ctypes.create_unicode_buffer(501)
             user32.GetWindowTextW(controls[1], value, len(value))
             print(json.dumps({"clicked": clicked[0], "value": value.value,
-                              "checked": user32.SendMessageW(controls[2], 0x00F0, 0, 0)}), flush=True)
+                              "checked": user32.SendMessageW(controls[2], 0x00F0, 0, 0),
+                              "listbox_selected": user32.SendMessageW(extra["listbox"], 0x0188, 0, 0),
+                              "listbox_top": user32.SendMessageW(extra["listbox"], 0x018E, 0, 0),
+                              "combo_dropped": user32.SendMessageW(extra["combo"], 0x0157, 0, 0),
+                              "trackbar": user32.SendMessageW(extra["trackbar"], 0x0400, 0, 0)}),
+                  flush=True)
         root.after(10, report)
     root.after(10, report)
     root.mainloop()

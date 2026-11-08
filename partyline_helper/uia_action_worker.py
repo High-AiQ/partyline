@@ -4,8 +4,13 @@ import json
 import threading
 
 from .uia_action import prepare
+from .uia_patterns import ActionRefused, argument, number
 from .uia_snapshot import MAX_TEXT
 from .uia_window_identity import live
+
+
+STATE_KEYS = ("name", "value", "toggle", "enabled", "selected", "expand_state", "range_value",
+              "h_scroll_percent", "v_scroll_percent", "window_state")
 
 
 def provider_factory(hwnd):  # pragma: no cover - Windows COM provider
@@ -19,7 +24,8 @@ def run_action(access, grant, generation, message, factory=provider_factory):
     observed, foreground_samples = {}, []
     try:
         provider = factory(grant["hwnd"])
-        node, _ = prepare(provider, message["element_id"], message["action"], message.get("value"))
+        arg = argument(message)
+        node, _ = prepare(provider, message["element_id"], message["action"], arg)
 
         windows = access.list_windows()
         if windows is None:
@@ -28,8 +34,8 @@ def run_action(access, grant, generation, message, factory=provider_factory):
             raise ValueError("window closed")
         if grant.get("marker") and not live(grant):
             raise ValueError("window closed")
-        fresh, _ = prepare(provider, message["element_id"], message["action"], message.get("value"))
-        call = provider.action_call(fresh, message["action"], message.get("value"))
+        fresh, _ = prepare(provider, message["element_id"], message["action"], arg)
+        call = provider.action_call(fresh, message["action"], arg)
         windows = access.list_windows()
         if windows is None:
             raise ValueError("secure desktop active")
@@ -61,11 +67,17 @@ def run_action(access, grant, generation, message, factory=provider_factory):
         if revoked_during or access.gate.revoked.is_set() or access.gate.generation != generation:
             return {"status": "completed", "revoked_during": True, "state_unavailable": "consent revoked",
                     **observed}
+        if message["action"] == "window_close":
+            return {"status": "completed", "revoked_during": False, "close_requested": True,
+                    "window_closed": not provider.current(), **observed}
         try:
             state = provider.properties(node)
+            provider.state(node, state)
             if provider.password(node):
                 state.pop("value", None)
-            element = {key: state[key] for key in ("name", "value", "toggle", "enabled") if key in state}
+            element = {key: state[key] for key in STATE_KEYS if key in state}
+            if message["action"] in ("window_move", "window_resize"):
+                element["bounds"] = list(provider.bounds(node))
             for key in ("name", "value"):
                 if key in element:
                     element[key] = str(element[key] or "")[:MAX_TEXT]
@@ -87,12 +99,9 @@ def run_action(access, grant, generation, message, factory=provider_factory):
                     "state_unavailable": "could not re-read element", **observed}
     except ValueError as exc:
         reason = str(exc)
-        allowed = ("revoked", "secure desktop active", "window closed", "stale or unknown element",
-                   "element is disabled", "element does not support this action",
-                   "password fields cannot be set", "element is read-only", "unsupported action",
-                   "set_value requires a text value")
-        return {"status": "failed", "error": reason if reason in allowed else "UI Automation failed",
-                **observed}
+        allowed = ("revoked", "secure desktop active", "window closed")
+        known = isinstance(exc, ActionRefused) or reason in allowed
+        return {"status": "failed", "error": reason if known else "UI Automation failed", **observed}
     except Exception:
         return {"status": "failed", "error": "UI Automation failed", **observed}
     finally:
@@ -107,6 +116,13 @@ def audit(session, grant, message, props, result):
             "result": result.get("status"), "revoked_during": result.get("revoked_during", False),
             "foreground_changed": result.get("foreground_changed"),
             "target_came_forward": result.get("target_came_forward")}
+    params = {} if message.get("action") == "set_value" else {
+        key: value for key, value in argument(message).items()
+        if number(value) or (isinstance(value, str) and len(value) <= 16)}
+    if params:
+        info["params"] = params
+    if result.get("close_requested"):
+        info["window_closed"] = bool(result.get("window_closed"))
     if message.get("action") == "set_value":
         value = message.get("value")
         info["value_length"] = len(value) if isinstance(value, str) else 0
@@ -187,7 +203,7 @@ class ActionWorker:
                 except OSError:
                     pass
                 raise
-        if result.get("error") == "window closed" and access.grant is grant:
+        if (result.get("error") == "window closed" or result.get("window_closed")) and access.grant is grant:
             access.revoke("window closed")
         elif result.get("error") == "secure desktop active":
             access.gate.invalidate()

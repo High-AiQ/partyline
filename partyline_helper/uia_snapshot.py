@@ -3,6 +3,7 @@ import time
 import uuid
 
 from .uia_identity import element_id
+from .uia_patterns import supported
 
 MAX_ELEMENTS = 200
 MAX_DEPTH = 20
@@ -44,6 +45,8 @@ def snapshot(provider, frame=None, clock=time.monotonic, limit=MAX_ELEMENTS,
             if key in props:
                 props[key] = str(props[key] or "")[:MAX_TEXT]
         props["id"] = element_id(provider, node, path)
+        if actions := supported(props, not path):
+            props["actions"] = actions
         props["bounds"] = list(rect)
         if pixels := frame_bounds(rect, frame):
             props["frame_bounds"] = pixels

@@ -11,6 +11,36 @@ NOTE = (" Returns a frame reference after a short settle; fetch its media ID and
         "Only inside the shared region, after screen_control_request was granted.")
 
 
+ELEMENT_ACTION_NOTE = (
+    "Use a UIA pattern on an element from the latest consented window snapshot; the element's `actions` "
+    "list names what it supports. invoke, toggle, set_value(value); select, add_to_selection, "
+    "remove_from_selection; expand, collapse; scroll(direction, amount), set_scroll_percent("
+    "horizontal_percent and/or vertical_percent), scroll_into_view; set_range_value(number, refused outside "
+    "the element's range); window_close, window_minimize, window_maximize, window_restore, "
+    "window_move(x, y), window_resize(width, height) only on the shared window itself (the first element). "
+    "No input is synthesized and the pointer never moves; the app may still bring itself forward and the "
+    "result reports foreground_changed / target_came_forward. For dragging use screen_drag.")
+ELEMENT_ACTION_PROPERTIES = {
+    "element_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "action": {"type": "string", "enum": [
+        "invoke", "toggle", "set_value", "select", "add_to_selection", "remove_from_selection", "expand",
+        "collapse", "scroll", "set_scroll_percent", "scroll_into_view", "set_range_value", "window_close",
+        "window_minimize", "window_maximize", "window_restore", "window_move", "window_resize"]},
+    "value": {"type": "string", "maxLength": 500, "description": "Text for set_value."},
+    "direction": {"type": "string", "enum": ["up", "down", "left", "right"], "description": "For scroll."},
+    "amount": {"type": "string", "enum": ["small", "large"], "description": "For scroll."},
+    "horizontal_percent": {"type": "number", "minimum": 0, "maximum": 100,
+                           "description": "For set_scroll_percent."},
+    "vertical_percent": {"type": "number", "minimum": 0, "maximum": 100,
+                         "description": "For set_scroll_percent."},
+    "number": {"type": "number", "description": "For set_range_value."},
+    "x": {"type": "integer", "minimum": -32768, "maximum": 32767, "description": "Screen X for window_move."},
+    "y": {"type": "integer", "minimum": -32768, "maximum": 32767, "description": "Screen Y for window_move."},
+    "width": {"type": "integer", "minimum": 1, "maximum": 16384, "description": "For window_resize."},
+    "height": {"type": "integer", "minimum": 1, "maximum": 16384, "description": "For window_resize."},
+}
+
+
 def _int(description):
     return {"type": "integer", "description": description}
 
@@ -29,12 +59,8 @@ def tool_list(state):
         return []
     point = {"x": _int("X, " + FRAME + "."), "y": _int("Y, " + FRAME + ".")}
     return [
-        _tool("screen_element_action",
-              "Use a UIA pattern on an element from the latest consented window snapshot. "
-              "The app may activate itself; the result reports observed foreground changes.",
-              {"element_id": {"type": "string", "minLength": 1, "maxLength": 128},
-               "action": {"type": "string", "enum": ["invoke", "toggle", "set_value"]},
-               "value": {"type": "string", "maxLength": 500}}, ["element_id", "action"]),
+        _tool("screen_element_action", ELEMENT_ACTION_NOTE, ELEMENT_ACTION_PROPERTIES,
+              ["element_id", "action"]),
         _tool("screen_control_request",
               "Ask the person sharing their screen to let you drive its mouse and keyboard. "
               "Returns at once; you are @mentioned when they answer on their computer.", {}, []),

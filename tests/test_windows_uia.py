@@ -123,7 +123,10 @@ class WindowsUIATests(unittest.TestCase):
             process.stdin.write("report\n")
             process.stdin.flush()
             report = json.loads(lines.get(timeout=20))
-            self.assertEqual({"clicked": 1, "value": "new value", "checked": 1}, report)
+            self.assertEqual({"clicked": 1, "value": "new value", "checked": 1},
+                             {key: report[key] for key in ("clicked", "value", "checked")})
+            from tests.windows_uia_patterns import Driver
+            asyncio.run(Driver(self, worker, access, window, process, lines).run())
             access.revoke()
         finally:
             for child in (foreground_process, process):
