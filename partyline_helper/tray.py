@@ -54,16 +54,19 @@ class Tray:
             item("Quit Partyline Helper", lambda *_: self.status.request_quit()))
 
     def start(self):
-        self.icon = self.backend.Icon("partyline-helper", draw_icon(self.status.state), TITLE, self.menu())
+        # Listen first: the session may pair in the middle of building the icon.
         self.status.listeners.append(self.refresh)
         self.status.attention_listeners.append(self.notify)
+        self.icon = self.backend.Icon("partyline-helper", draw_icon(self.status.state), TITLE, self.menu())
         self.icon.run_detached()
+        self.refresh(self.status.state)  # draw the current state once the tray is ready
 
     def refresh(self, state):
         if self.icon:
-            self.icon.icon = draw_icon(state)
-            self.icon.title = f"{TITLE}: {self.status.label}"
-            self.icon.update_menu()
+            with contextlib.suppress(Exception):  # a broken tray must never break the helper
+                self.icon.icon = draw_icon(state)
+                self.icon.title = f"{TITLE}: {self.status.label}"
+                self.icon.update_menu()
 
     def notify(self, text):
         """A balloon in case the dialog is still hidden; best effort."""

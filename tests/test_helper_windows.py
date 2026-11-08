@@ -342,7 +342,7 @@ class TrayTests(unittest.TestCase):
         stop.action()
         quit_item.action()
         self.assertEqual((stops, quits), ([1], [1]))
-        self.assertEqual(icon.updates, 2)
+        self.assertEqual(icon.updates, 3)  # the post-start redraw, then paired and sharing
         status.attention("Answer me")
         self.assertEqual(icon.notified, [("Answer me", "Partyline Helper")])
         shown.stop()
@@ -376,6 +376,74 @@ class TrayTests(unittest.TestCase):
         shown.icon.stop = Mock(side_effect=RuntimeError)
         shown.notify("x")
         shown.stop()
+
+
+class StartupRaceTests(unittest.TestCase):
+    """Greg's Windows 11 report: the helper paired but the tray stayed grey.
+
+    A session thread calls `status.set("paired")` while the tray is still starting. These tests race it
+    deliberately, with a fake pystray backend and an in-memory Status; no real time passes.
+    """
+
+    def backend(self, icon_type):
+        return SimpleNamespace(Icon=icon_type, Menu=lambda *items: list(items),
+                               MenuItem=lambda text, action, enabled=True: SimpleNamespace(
+                                   text=text, action=action, enabled=enabled))
+
+    def assert_paired(self, icon):
+        self.assertEqual(icon.icon.getpixel((32, 32)), tray.draw_icon("paired").getpixel((32, 32)))
+        self.assertEqual(icon.title, "Partyline Helper: Paired with Partyline")
+
+    def test_pairing_while_the_icon_is_built_is_not_lost(self):
+        status = Status()
+        FakeIcon.instances = []
+
+        class PairingIcon(FakeIcon):
+            """The session pairs after the icon read its state but before the listener was listening."""
+
+            def __init__(self, *args):
+                super().__init__(*args)
+                status.set("paired")
+
+        shown = tray.start_tray(status, self.backend(PairingIcon))
+        self.assertIsNotNone(shown)
+        self.assert_paired(FakeIcon.instances[-1])
+
+    def test_an_update_dropped_before_run_detached_is_redrawn(self):
+        status = Status()
+        FakeIcon.instances = []
+
+        class NotReadyIcon(FakeIcon):
+            """pystray on Windows drops icon and title updates until run_detached has set up the tray."""
+
+            def __init__(self, *args):
+                super().__init__(*args)
+                self.ready = False
+
+            def __setattr__(self, name, value):
+                if (name in ("icon", "title") and "ready" in self.__dict__
+                        and not self.ready):
+                    return
+                super().__setattr__(name, value)
+
+            def run_detached(self):
+                status.set("paired")  # pairs just before pystray is ready: this redraw is dropped
+                self.ready = True
+                super().run_detached()
+
+        shown = tray.start_tray(status, self.backend(NotReadyIcon))
+        self.assertIsNotNone(shown)
+        self.assert_paired(FakeIcon.instances[-1])
+
+    def test_the_normal_ordering_still_pairs_the_icon(self):
+        status = Status()
+        FakeIcon.instances = []
+        shown = tray.start_tray(status, self.backend(FakeIcon))
+        self.assertEqual(FakeIcon.instances[-1].icon.getpixel((32, 32)),
+                         tray.draw_icon("offline").getpixel((32, 32)))
+        status.set("paired")
+        self.assert_paired(FakeIcon.instances[-1])
+        self.assertEqual(shown.status.state, "paired")
 
 
 class VersionTests(unittest.TestCase):
