@@ -41,13 +41,13 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
     router = APIRouter()
 
     @router.post("/api/screen/pair")
-    async def pair(request: Request, conv_id: str):
+    async def pair(request: Request, conv_id: str | None = None):
         principal = request_principal(request)
-        if not is_human(principal) or not runtime.db.get_conversation(conv_id):
-            raise HTTPException(403, "screen helper pairing is available to people on a line")
+        if not is_human(principal):
+            raise HTTPException(403, "screen helper pairing is available to people")
         if not hub.limits.issue(principal.user_id):
             raise HTTPException(429, "too many pairing codes; try again later")
-        code = hub.issue_pair_code(principal.user_id, conv_id)
+        code = hub.issue_pair_code(principal.user_id)
         return {"code": code, "expires_in": 300}
 
     @router.post("/api/screen/pair/claim")
@@ -80,13 +80,13 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
         return {"device_id": device_id, "token": token}
 
     @router.get("/api/screen/devices")
-    async def devices(request: Request, conv_id: str):
+    async def devices(request: Request, conv_id: str | None = None):
         principal = request_principal(request)
         if not is_human(principal):
             raise HTTPException(403, "screen devices are visible to their owner")
         rows = runtime.db._exec(
-            "SELECT id,name,os,created_at FROM screen_devices WHERE owner_id=? AND conv_id=? "
-            "AND revoked_at IS NULL ORDER BY created_at", (principal.user_id, conv_id)
+            "SELECT id,name,os,created_at FROM screen_devices WHERE owner_id=? "
+            "AND revoked_at IS NULL ORDER BY created_at", (principal.user_id,)
         ).fetchall()
         result = []
         for row in rows:
@@ -98,6 +98,20 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
             item["update_available"] = bool(online) and update_available(online["helper_version"])
             result.append(item)
         return {"devices": result}
+
+    @router.get("/api/screen/active-indicators")
+    async def active_indicators(request: Request):
+        principal = request_principal(request)
+        if not is_human(principal):
+            raise HTTPException(403, "screen shares are visible to their owner")
+        items = []
+        for share in hub.shares.values():
+            device = hub.devices.get(share.device_id)
+            if share.owner_id == principal.user_id and share.status == "active" and device:
+                name = device["name"]
+                items.append({"conv_id": share.conv_id, "device_name": name,
+                              "kind": "screen", "label": f"{name} screen share"})
+        return {"indicators": items}
 
     @router.delete("/api/screen/devices/{device_id}")
     async def revoke(device_id: str, request: Request):
@@ -124,11 +138,11 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
         if not conv:
             raise HTTPException(404, "line not found")
         row = runtime.db._exec(
-            "SELECT 1 FROM screen_devices WHERE id=? AND owner_id=? AND conv_id=? AND revoked_at IS NULL",
-            (body.device_id, principal.user_id, conv_id),
+            "SELECT 1 FROM screen_devices WHERE id=? AND owner_id=? AND revoked_at IS NULL",
+            (body.device_id, principal.user_id),
         ).fetchone()
         if not row:
-            raise HTTPException(403, "computer is not paired to this line")
+            raise HTTPException(403, "computer is not paired to your account")
         try:
             if body.control and hub.devices.get(body.device_id, {}).get("control", 0) < 1:
                 raise ValueError("helper too old for control: update partyline-helper on that computer")

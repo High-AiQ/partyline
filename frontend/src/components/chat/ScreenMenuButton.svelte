@@ -54,7 +54,7 @@
         onclick={() => {
           popup.close();
           screenStatus.openPicker++;
-        }}>Share live…</button
+        }}>Share to «{room.conversation?.name}»</button
       >
       <button
         type="button"

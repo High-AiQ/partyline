@@ -16,6 +16,7 @@ from .captain_handover_schema import MIGRATIONS as HANDOVER
 from .local_tools_schema import MIGRATIONS as LOCAL_TOOLS_AUDIT
 from .screen_audit_schema import MIGRATIONS as SCREEN_AUDIT
 from .screen_schema import MIGRATIONS as SCREEN
+from .screen_account_schema import MIGRATIONS as SCREEN_ACCOUNT
 from .orchestrator_schema import MIGRATIONS as ORCHESTRATOR
 from .asr_schema import MIGRATIONS as ASR
 MIGRATIONS = [
@@ -207,8 +208,7 @@ MIGRATIONS = [
       updated_at REAL NOT NULL
     )""",
     "CREATE INDEX IF NOT EXISTS idx_tasks_conv ON tasks(conv_id, status, id)",
-    # The task board and path claims are gone: after the goal, the child
-    # brief, the return path and per-line worktrees, no process used either.
+    # The task board and path claims are gone; no process used either.
     "DROP INDEX IF EXISTS idx_tasks_conv",
     "DROP TABLE IF EXISTS tasks",
     "DROP INDEX IF EXISTS idx_claims_conv",
@@ -297,4 +297,4 @@ MIGRATIONS = [
 MIGRATIONS.extend(MEMORY + IDEMPOTENCY + NOTES + COMPACTION + ACCEPT_HISTORY + SCRATCH + LEASE
                   + GATES + AUTO_COMPACT + DOCKER_MODE + BRIDGE + RETIREMENT + ORCHESTRATOR + HANDOVER)
 MIGRATIONS.extend(["ALTER TABLE attachments ADD COLUMN is_successor INTEGER NOT NULL DEFAULT 0"] + SCREEN
-                  + ASR + SCREEN_AUDIT + LOCAL_TOOLS_AUDIT)
+                  + ASR + SCREEN_AUDIT + LOCAL_TOOLS_AUDIT + SCREEN_ACCOUNT)

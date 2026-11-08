@@ -7,6 +7,10 @@
    * actions lit, so the ⋯ does not vanish out from under the pointer on the way
    * down to the menu.
    */
+  import { onMount } from "svelte";
+  import { screenApi, type ShareIndicator } from "../../lib/screen-api";
+  import { screenStatus } from "../../state/screen-status.svelte";
+  import ShareIcon from "./ShareIcon.svelte";
   import { SvelteSet } from "svelte/reactivity";
   import TaskStatusChip from "./TaskStatusChip.svelte";
   import TaskModeIcon from "./TaskModeIcon.svelte";
@@ -32,6 +36,28 @@
 
   let { onrename, onmanagement, oncloseprocesses, ondelete, onarchivemany }: Props = $props();
 
+  let indicators = $state<ShareIndicator[]>([]);
+  let generation = 0;
+  async function refreshIndicators(): Promise<void> {
+    const current = ++generation;
+    try {
+      const result = await screenApi.indicators();
+      if (current === generation) indicators = result.indicators;
+    } catch {
+      // Keep the last known state during transient connection failures.
+    }
+  }
+  onMount(() => {
+    const timer = setInterval(() => void refreshIndicators(), 15_000);
+    return () => {
+      clearInterval(timer);
+      generation++;
+    };
+  });
+  $effect(() => {
+    void screenStatus.revision;
+    void refreshIndicators();
+  });
   let expanded = $state<Set<string>>(readExpandedLines());
   const rows = $derived(lineTree(room.conversations, expanded, room.conversation?.id));
 
@@ -105,7 +131,6 @@
         class:active={room.conversation?.id === conversation.id}
         style:padding-right="{descendants > 0 ? 120 : 54}px"
         style:padding-left="{20 + Math.min(depth, 4) * 16}px"
-        use:tooltip={{ label: conversation.name }}
         aria-pressed={selecting ? selected.has(conversation.id) : undefined}
         onclick={() => {
           if (selecting) selected = toggleSelection(selected, conversation.id, room.conversations);
@@ -132,7 +157,9 @@
         </span>
         <span class="min-w-0 flex flex-col items-start gap-1">
           <span class="conv-name flex w-full min-w-0 items-center gap-1"
-            ><TaskModeIcon line={conversation} /><span class="min-w-0 flex-1 truncate"
+            ><TaskModeIcon line={conversation} /><ShareIcon
+              indicators={indicators.filter((item) => item.conv_id === conversation.id)}
+            /><span class="min-w-0 flex-1 truncate" use:tooltip={{ label: conversation.name }}
               >{conversation.name}</span
             ></span
           >

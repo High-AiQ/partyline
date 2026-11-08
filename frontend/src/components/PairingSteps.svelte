@@ -63,7 +63,7 @@
           <strong>More info</strong>, then <strong>Run anyway</strong>.
         </li>
         <li>
-          Back in Partyline, open “Screen → Share live…”, choose “Pair a computer” and click <strong
+          Back in Partyline, open Settings → Computers, choose “Pair this computer with Partyline” and click <strong
             >Pair with installed helper</strong
           >, then answer the dialogs. Look for the round icon in the system tray.
         </li>
@@ -107,7 +107,7 @@
   {#each options as option (option.key)}
     <div class="space-y-1">
       <h4 class="font-semibold">{option.title}</h4>
-      {#each [{ id: "pair", step: "1. Pair this computer:", text: option.pair }, { id: "run", step: "2. Then start the helper:", text: option.run }] as item (item.id)}
+      {#each [{ id: "pair", step: "1. Pair this computer with Partyline:", text: option.pair }, { id: "run", step: "2. Then start the helper:", text: option.run }] as item (item.id)}
         <p>{item.step}</p>
         <div class="flex items-start gap-2">
           <code class="min-w-0 flex-1 break-all select-all">{item.text}</code>

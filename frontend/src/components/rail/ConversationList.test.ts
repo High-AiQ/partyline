@@ -1,6 +1,9 @@
 import { mount, unmount } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ConversationList from "./ConversationList.svelte";
+import { screenApi } from "../../lib/screen-api";
+import { screenStatus } from "../../state/screen-status.svelte";
+import { tick } from "svelte";
 import { room } from "../../state/room.svelte.js";
 
 afterEach(() => {
@@ -162,6 +165,43 @@ describe("conversation rail task mode marker", () => {
       expect(plain?.querySelector(".task-mode")).toBeNull();
     } finally {
       await unmount(list);
+    }
+  });
+});
+
+describe("active share indicators", () => {
+  it("shows a single labelled icon only on lines with an active share", async () => {
+    const base = { topic: "", created_at: 1, archived_at: null, live_count: 0 };
+    room.conversations = [
+      { ...base, id: "a", name: "A" },
+      { ...base, id: "b", name: "B" },
+    ];
+    const fetch = vi.spyOn(screenApi, "indicators").mockResolvedValue({
+      indicators: [
+        { conv_id: "a", device_name: "Desk", kind: "screen", label: "Desk screen share" },
+        { conv_id: "a", device_name: "Desk", kind: "window", label: "reading Editor for @bot" },
+      ],
+    });
+    const list = mount(ConversationList, {
+      target: document.body,
+      props: { onmanagement: vi.fn(), onrename: vi.fn(), oncloseprocesses: vi.fn(), ondelete: vi.fn() },
+    });
+    try {
+      await tick();
+      await Promise.resolve();
+      await tick();
+      const icons = document.querySelectorAll(".share-icon");
+      expect(icons).toHaveLength(1);
+      expect(icons[0]?.getAttribute("aria-label")).toBe("Desk screen share; reading Editor for @bot");
+      fetch.mockResolvedValue({ indicators: [] });
+      screenStatus.revision++;
+      await tick();
+      await Promise.resolve();
+      await tick();
+      expect(document.querySelectorAll(".share-icon")).toHaveLength(0);
+    } finally {
+      await unmount(list);
+      vi.restoreAllMocks();
     }
   });
 });

@@ -7,7 +7,7 @@ CHECKER_BOX = ("Also let Partyline send renders from this session to OpenAI to c
 
 def session_text(spec, request, info):
     """(terminal question, dialog title, dialog message) for a new session."""
-    agent = display_text(request.get("requested_by"))
+    agent = "@" + display_text(request.get("requested_by")).lstrip("@")
     line = display_text(request.get("line_name"))
     where = f" ({display_text(info['file'])})" if info.get("file") else ""
     backup = ("A backup copy of the open file is saved when the session starts."
@@ -17,7 +17,7 @@ def session_text(spec, request, info):
                f"every open scene and run any Python with your account's rights, including files and the "
                f"network. Save your work first. {backup}\n\nCtrl+Alt+Esc, the tray menu or the End button in "
                f"{spec.label} ends it at any time. Each session asks again.\n\nAllow?")
-    return f"Allow {agent} to run Python in {spec.label}? [y/N] ", title, message
+    return f"Allow {agent} on {line} to run Python in {spec.label}? [y/N] ", title, message
 
 
 async def ask(terminal, spec, request, info):

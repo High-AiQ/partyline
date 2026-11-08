@@ -6,7 +6,11 @@ capture extension. Windows 11 is the primary target; macOS and Linux X11 need th
 permissions described below. On Windows the installer below needs nothing else; on Linux and
 macOS Python 3.11+ and uv are required.
 
-The Partyline dialog ("Computers / Share screen" → "Pair a computer") shows these
+Pair a computer once with your Partyline account; it can then be shared from any line. A screen share
+belongs to the line where you start it, and only that line receives its frames and control. The sidebar
+icon marks lines with active shares.
+
+The Partyline Computers dialog shows these
 commands with your server's address and a pairing code filled in, each with a copy
 button. Run them in a terminal **on the computer you want to share, not on the
 Partyline server**. After `pair` succeeds the helper prints the full `run` command
@@ -15,7 +19,7 @@ for both forms below. Keep the `run` terminal open and answer `y` to each share 
 ## Windows installer (prototype)
 
 For a person who should never open a terminal: one download, one double-click, then only native dialogs.
-In Partyline's **Pair a computer** dialog, a visitor on Windows sees **Download for Windows**
+In Partyline's **Computers** dialog, a visitor on Windows sees **Download for Windows**
 (`https://github.com/High-AiQ/partyline/releases/latest/download/PartylineHelper-Setup.exe`; the
 release asset has a fixed name so that link stays valid). Linux and macOS visitors keep the `uvx`
 commands described below.

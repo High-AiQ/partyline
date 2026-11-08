@@ -175,6 +175,9 @@ class AuditAndConsentTests(unittest.IsolatedAsyncioTestCase):
         request = {"requested_by": "agent\x1b[2J", "line_name": "L", "checker": True}
         question, title, message = tools_consent.session_text(spec, request, {"file": "a.blend"})
         self.assertNotIn("\x1b", message + title)
+        self.assertIn("@agent", message)
+        self.assertIn("line: L", message)
+        self.assertIn("on L", question)
         self.assertIn("a.blend", message)
         self.assertIn("Ctrl+Alt+Esc", message)
         self.assertIn("backup", message)

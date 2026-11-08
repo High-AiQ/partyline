@@ -1,10 +1,12 @@
 """Native screen helper integration and bounded frame behavior."""
+import asyncio
 import io
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -71,8 +73,134 @@ class ScreenTest(unittest.TestCase):
                       "helper_version": "1", "monitors": FakeDesktop().monitors()})
         self.sync(ws)
 
+    def test_account_computer_is_available_for_local_tools_on_accessible_lines(self):
+        self.db.create_conversation("other", "Other")
+        device = self.pair()
+        result = self.db._exec("SELECT * FROM screen_devices WHERE id=?", (device["device_id"],)).fetchone()
+        row = dict(result)
+        row.update(socket=SimpleNamespace(send_json=AsyncMock()), tools=1)
+        self.hub.devices[row["id"]] = row
+        for line in ("line", "other"):
+            result = asyncio.run(self.hub.tools.request(line, "worker", line.title(), "blender"))
+            self.assertEqual(result["status"], "pending")
+            self.assertEqual(self.hub.tools.sessions[line].device_id, row["id"])
+            command = row["socket"].send_json.await_args.args[0]
+            self.assertEqual((command["line_name"], command["requested_by"]), (line.title(), "worker"))
+        with patch("partyline.screen_device_access.allows", return_value=False):
+            with self.assertRaisesRegex(ValueError, "no paired computer of this line's people is online"):
+                self.hub.tools.device("other")
+        second = {**row, "id": "second", "name": "laptop"}
+        self.hub.devices["second"] = second
+        with self.assertRaisesRegex(ValueError, "several computers are online"):
+            self.hub.tools.device("line")
+        self.assertEqual(self.hub.tools.device("line", "laptop")["id"], "second")
+
+    def test_new_account_device_can_read_window_from_another_line(self):
+        self.db.create_conversation("other", "Other")
+        device = self.pair()
+        headers = {"Authorization": "Bearer " + device["token"]}
+        with self.client.websocket_connect("/api/screen/helper", headers=headers) as ws:
+            self.hello(ws)
+            future = self.executor.submit(self.client.post, "/api/conversations/other/screen-elements")
+            command = ws.receive_json()
+            self.assertEqual(command["type"], "read_window_elements")
+            ws.send_json({"type": "window_elements", "request_id": command["request_id"],
+                          "snapshot_id": "s", "window_title": "Editor", "elements": [{"name": "Hello"}]})
+            response = future.result()
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["window_title"], "Editor")
+            self.assertIn("Hello", response.json()["elements"])
+
+    def test_device_change_reaches_only_the_owners_sockets_across_lines(self):
+        own = SimpleNamespace(screen_owner_id=1, send_json=AsyncMock())
+        other = SimpleNamespace(screen_owner_id=2, send_json=AsyncMock())
+        self.runtime.sockets = {"line": [own], "other": [other]}
+        asyncio.run(self.hub._device_event({"id": "pc", "owner_id": 1}, True))
+        own.send_json.assert_awaited_once_with({"type": "screen_devices_changed", "device_id": "pc",
+                                               "online": True})
+        other.send_json.assert_not_awaited()
+
+    def test_account_pairing_shares_to_each_line_and_limits_indicators_to_owner(self):
+        from partyline.auth_guard import Principal
+
+        self.db.create_conversation("other", "Other")
+        device = self.pair()
+        ident = device["device_id"]
+        row = self.db._exec("SELECT conv_id FROM screen_devices WHERE id=?", (ident,)).fetchone()
+        self.assertIsNone(row[0])
+        headers = {"Authorization": "Bearer " + device["token"]}
+        with self.client.websocket_connect("/api/screen/helper", headers=headers) as ws:
+            self.hello(ws)
+            self.assertEqual(len(self.client.get("/api/screen/devices?conv_id=other").json()["devices"]), 1)
+            for line in ("line", "other"):
+                self.assertEqual(self.client.get("/api/screen/active-indicators").json()["indicators"], [])
+                response = self.client.post("/api/screen/shares?conv_id=" + line, json={
+                    "device_id": ident, "region": {"x": -100, "y": 0, "width": 100, "height": 100}})
+                self.assertEqual(response.status_code, 200, response.text)
+                command = ws.receive_json()
+                self.assertEqual(command["conv_id"], line)
+                share_id = command["share_id"]
+                ws.send_json({"type": "share_accepted", "share_id": share_id})
+                self.sync(ws)
+                frame = {"type": "frame", "share_id": share_id, "request_id": None, "ts_ms": 1,
+                         "region": {"x": -100, "y": 0, "width": 100, "height": 100},
+                         "out_width": 32, "out_height": 24, "mime": "image/png"}
+                ws.send_json(frame)
+                ws.send_bytes(png())
+                self.sync(ws)
+                self.assertEqual(list(self.hub.shares), [line])
+                self.assertTrue(self.hub.shares[line].frames)
+                unrelated = "other" if line == "line" else "line"
+                self.assertIsNone(self.client.get("/api/screen/shares?conv_id=" + unrelated).json()["share"])
+                self.assertEqual(self.client.post(
+                    f"/api/conversations/{unrelated}/screen-frame").status_code, 409)
+                items = self.client.get("/api/screen/active-indicators").json()["indicators"]
+                self.assertEqual(items, [{"conv_id": line, "device_name": "desk", "kind": "screen",
+                                          "label": "desk screen share"}])
+                other = Principal(kind="user", name="bob", user_id=999)
+                with patch("partyline.screen_routes.request_principal", return_value=other):
+                    indicators = self.client.get("/api/screen/active-indicators").json()["indicators"]
+                    self.assertEqual(indicators, [])
+                    self.assertEqual(self.client.get("/api/screen/devices").json()["devices"], [])
+                    self.assertEqual(self.client.post("/api/screen/shares?conv_id=other", json={
+                        "device_id": ident, "region": frame["region"]}).status_code, 403)
+                machine = Principal(kind="machine", name="bot")
+                with patch("partyline.screen_routes.request_principal", return_value=machine):
+                    self.assertEqual(self.client.get("/api/screen/active-indicators").status_code, 403)
+                self.client.delete("/api/screen/shares/" + share_id)
+                self.assertEqual(ws.receive_json()["type"], "stop_share")
+
+    def test_pairing_survives_line_removal_and_database_reopen(self):
+        device = self.pair()
+        ident = device["device_id"]
+        self.db._exec("UPDATE screen_devices SET conv_id='line' WHERE id=?", (ident,))
+        self.db._exec("""CREATE TABLE screen_devices_legacy(
+            id TEXT PRIMARY KEY, owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            conv_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, name TEXT NOT NULL,
+            os TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, created_at REAL NOT NULL, revoked_at REAL)""")
+        self.db._exec("INSERT INTO screen_devices_legacy SELECT * FROM screen_devices")
+        self.db._exec("DROP TABLE screen_devices")
+        self.db._exec("ALTER TABLE screen_devices_legacy RENAME TO screen_devices")
+        reopened = Db(self.db.path)
+        try:
+            reopened._exec("PRAGMA foreign_keys=ON")
+            reopened._exec("DELETE FROM conversations WHERE id='line'")
+            row = reopened._exec("SELECT id FROM screen_devices WHERE id=?", (ident,)).fetchone()
+            self.assertIsNotNone(row)
+        finally:
+            reopened.close()
+        reopened = Db(self.db.path)
+        try:
+            row = reopened._exec("SELECT id FROM screen_devices WHERE id=?", (ident,)).fetchone()
+            self.assertIsNotNone(row)
+        finally:
+            reopened.close()
+
     def test_full_flow(self):
         device = self.pair()
+        # A legacy row paired on another line can share on this one.
+        self.db.create_conversation("legacy", "Legacy")
+        self.db._exec("UPDATE screen_devices SET conv_id='legacy' WHERE id=?", (device["device_id"],))
         with self.client.websocket_connect("/api/screen/helper", headers={
                 "Authorization": "Bearer " + device["token"]}) as ws:
             self.hello(ws)

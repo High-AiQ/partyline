@@ -8,6 +8,7 @@ from fastapi import APIRouter, Request
 from .auth_guard import request_principal
 from .machine_scope import deny_unless
 from .screen_element_actions import ElementAction, element_action
+from .screen_device_access import line_devices
 
 
 class ElementsHub:
@@ -16,8 +17,7 @@ class ElementsHub:
         self.waiters = {}
 
     async def read(self, conv_id, device_name=None):
-        devices = [device for device in self.hub.devices.values() if device["conv_id"] == conv_id
-                   and (device_name is None or device["name"] == device_name)]
+        devices = line_devices(self.hub, conv_id, device_name)
         if not devices:
             return {"elements_unavailable": "no paired computer online"}
         if len(devices) != 1:
