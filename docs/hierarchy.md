@@ -1394,3 +1394,11 @@ On POSIX, detach currently signals the attachment's original process group with
 TERM then KILL, and confirms that group exited. It does not stop the entire systemd
 memory scope. A child that starts a separate session/process group can survive;
 this handover change does not alter those kill semantics.
+
+When an implementer requests review of different commits while a review is open,
+Partyline moves the review checkouts and records the old and new SHAs. After this
+re-pin, a verdict must explicitly identify the current SHA using `sha`, or, for
+multiple repositories, list every current `{repository, sha}` in `repositories`.
+A stale or missing identification is rejected with the current SHA; the reviewer
+must review the new commits before retrying. Explicit SHA identifications are
+checked even when the review has not been re-pinned.

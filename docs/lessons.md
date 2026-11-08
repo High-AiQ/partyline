@@ -9,6 +9,14 @@ public responses and picker files use explicit field lists. Regression tests sca
 picker responses, grant results, device lists and native picker files for both the
 field and secret values. The leak was caught in review before the change shipped.
 
+## An open review can change its commit
+
+The false assumption was that another request during review only needed to revive
+its reviewer. It can carry a new commit, and accepting a verdict without identifying
+that commit can approve stale work. Re-pin the managed checkout and require a
+verdict to identify the current commits after a re-pin. The regression is in
+`tests/test_orchestrator_repin.py` and the multi-repository review tests.
+
 ## A stationary cursor does not establish mouse capture
 
 The false assumption was that a fixed pointer over changing pixels identifies a game

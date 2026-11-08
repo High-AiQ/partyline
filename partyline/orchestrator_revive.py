@@ -53,7 +53,8 @@ async def brief_reviewer(runtime, row, reviewer):
             if row['round'] > 1 and row['previous_findings'] else '')
     await tell(runtime, reviewer['id'],
                where + f"{row['what']} — {row['location']}. "
-               'Call review_verdict(approve|changes, findings). Never push or implement. '
+               'Call review_verdict(approve|changes, findings, sha=SHA); for multiple repositories, '
+               'pass repositories with every repository and SHA. Never push or implement. '
                'Your approval is acceptance; the root captain merges.' + note,
                source=(row['implementer_id'], row['conv_id']))
 
