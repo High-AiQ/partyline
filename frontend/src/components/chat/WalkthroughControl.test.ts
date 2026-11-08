@@ -24,6 +24,11 @@ function button(text: string): HTMLButtonElement | undefined {
     (item) => item.textContent.includes(text) || item.getAttribute("aria-label")?.startsWith(text),
   );
 }
+async function startWalkthrough(): Promise<void> {
+  button("Screen:")?.click();
+  await tick();
+  button("Record a walkthrough")?.click();
+}
 function sources(): RecorderSources {
   const stream = { getTracks: () => [{ stop: vi.fn(), label: "Headset (Jabra)" }] } as unknown as MediaStream;
   return {
@@ -91,18 +96,18 @@ describe("walkthrough control on a phone", () => {
     layout.narrow = true;
     const component = setup();
     await settle();
-    expect(button("Show me")).toBeUndefined();
+    expect(button("Screen:")).toBeUndefined();
     expect(document.querySelector('[aria-label="Walkthrough"]')).toBeNull();
     layout.narrow = false;
     await settle();
-    expect(button("Show me")).toBeDefined();
+    expect(button("Screen:")).toBeDefined();
     await unmount(component);
   });
 
   it("keeps the controls of a take already under way so it can be cancelled", async () => {
     const component = setup();
     await settle();
-    button("Show me")?.click();
+    await startWalkthrough();
     await settle();
     layout.narrow = true;
     await settle();
@@ -121,7 +126,7 @@ describe("walkthrough control", () => {
       FakeAudioContext.made = [];
       const component = setup({ createAudioContext: fakeAudioContext });
       await settle();
-      button("Show me")?.click();
+      await startWalkthrough();
       await settle();
       const context = FakeAudioContext.last();
       context.analyser.amplitude = 0.05;
@@ -149,11 +154,13 @@ describe("walkthrough control", () => {
     await settle();
     room.screenShare = { ...share, share_id: "previous", status: "waiting" };
     await tick();
-    expect(button("Show me")?.disabled).toBe(true);
+    button("Screen:")?.click();
+    await tick();
+    expect(button("Record a walkthrough")?.getAttribute("aria-disabled")).toBe("true");
     room.screenShare = { ...share, share_id: "previous", status: "declined" };
     await tick();
-    expect(button("Show me")?.disabled).toBe(false);
-    button("Show me")?.click();
+    expect(button("Record a walkthrough")?.getAttribute("aria-disabled")).toBe("false");
+    button("Record a walkthrough")?.click();
     await settle();
     expect(screenApi.start).toHaveBeenCalledWith("l", "d", region, true);
     expect(button("Stop and send")).toBeDefined();
@@ -164,7 +171,7 @@ describe("walkthrough control", () => {
     const finish = vi.spyOn(walkthroughApi, "finish").mockResolvedValue({ message: { id: 1 } });
     const component = setup();
     await settle();
-    button("Show me")?.click();
+    await startWalkthrough();
     await settle();
     expect(button("Stop and send")).toBeDefined();
     expect(screenApi.start).toHaveBeenCalledWith("l", "d", region, true);
@@ -189,7 +196,7 @@ describe("walkthrough control", () => {
     const component = setup();
     await settle();
     draft.text = "existing";
-    button("Show me")?.click();
+    await startWalkthrough();
     await settle();
     draft.text = "private notes";
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
@@ -205,7 +212,7 @@ describe("walkthrough control", () => {
     const component = setup();
     vi.mocked(voiceApi.transcribe).mockRejectedValue(new Error("recognizer failed"));
     await settle();
-    button("Show me")?.click();
+    await startWalkthrough();
     await settle();
     button("Stop and send")?.click();
     await settle();
@@ -224,7 +231,7 @@ describe("walkthrough control", () => {
     const component = setup();
     vi.mocked(screenApi.current).mockResolvedValue({ share: null });
     await settle();
-    button("Show me")?.click();
+    await startWalkthrough();
     await settle();
     expect(walkthroughApi.cancel).toHaveBeenCalledWith("l", "s");
     expect(document.body.textContent).toContain("Screen sharing ended before recording began.");

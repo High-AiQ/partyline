@@ -63,7 +63,7 @@
           <strong>More info</strong>, then <strong>Run anyway</strong>.
         </li>
         <li>
-          Back in Partyline, open “Computers / Share screen”, choose “Pair a computer” and click <strong
+          Back in Partyline, open “Screen → Share live…”, choose “Pair a computer” and click <strong
             >Pair with installed helper</strong
           >, then answer the dialogs. Look for the round icon in the system tray.
         </li>
