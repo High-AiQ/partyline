@@ -4,7 +4,7 @@
 
 | Goal decision | MCP operation |
 | --- | --- |
-| New task | `create_task(name, goal, implementer, review)` |
+| New task | `create_task(name, goal, implementer, review, mode)` (`mode=light`: scaled gates; `mode=express`: no review, ends with `deliver`) |
 | Change active task direction | `set_task_goal(conv_id, goal)` |
 | New work on an approved or done task | `reopen_task(conv_id, goal)` |
 | New sub-captain | `create_child(parent_conv_id, name, goal)`; later `set_goal(child_conv_id, goal)` |

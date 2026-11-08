@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, get_args
 
 from fastapi import HTTPException
 
@@ -28,25 +28,10 @@ Capability = Literal[
     "archive", "link_parent",
     "create_task", "tasks", "restart_reviewer", "restart_implementer", "reopen_task",
     "message_task", "set_task_goal",
-    "resume_work", "request_review", "review_verdict", "blocked", "waiting",
+    "resume_work", "request_review", "review_verdict", "blocked", "waiting", "deliver",
 ]
 
-ALL_CAPABILITIES: tuple[Capability, ...] = (
-    "read", "write", "upload",
-    "assign",
-    "attach",
-    "close",
-    "accept",
-    "create_child",
-    "report",
-    "notify",
-    "read_reports",
-    "appoint_lead",
-    "archive", "link_parent",
-    "create_task", "tasks", "restart_reviewer", "restart_implementer", "reopen_task",
-    "message_task", "set_task_goal",
-    "resume_work", "request_review", "review_verdict", "blocked", "waiting",
-)
+ALL_CAPABILITIES: tuple[Capability, ...] = get_args(Capability)
 
 
 def is_human(principal: Principal) -> bool:
@@ -96,7 +81,7 @@ def allows(db: Db, principal: Principal, conv_id: str, capability: Capability) -
         return False
     from .orchestrator_store import task, task_actions
     task_row = task(db, conv_id)
-    if capability in ("request_review", "review_verdict", "blocked", "waiting"):
+    if capability in ("request_review", "review_verdict", "blocked", "waiting", "deliver"):
         if (capability == "review_verdict" and conv_id == home and principal.is_lead
                 and conv.get('captain_mode', 'manager_tree') == 'orchestrator'):
             return True

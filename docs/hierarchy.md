@@ -1120,7 +1120,8 @@ A person can choose `captain_mode: "orchestrator"` on a root line using
 `PUT /api/conversations/<root>/captain-style`. The existing `manager_tree` mode
 remains the default. A child cannot be an orchestrator, and style cannot change
 while children exist. The root's `default_review_policy` defaults to `captain`;
-it may also be `none` or an exact reviewer preset name.
+it may also be `none` or an exact reviewer preset name. A task's mode (full, light or
+express) is chosen separately at creation (see Task modes below).
 
 An orchestrator creates tasks through `create_task(name, goal, implementer, review)`.
 The task goal is capped at 20,000 characters; longer briefs live in a committed file
@@ -1290,6 +1291,32 @@ either. The wait only defers the check: when it runs out the task owes a hand-of
 again and gets the same single reminder, never a skipped straight to a stall
 report. A wait is a structured statement, never prose: a chat message saying
 "still waiting" waits for nothing.
+
+## Task modes: full, light and express
+
+`create_task(..., mode="full"|"light"|"express")` picks how much process a task carries. The
+mode is fixed at creation (`reopen_task` keeps it) and shows as `mode` in `tasks()`, on the
+task row and as `task_mode` in the conversation payload, which the rail and the task header
+render as a colour-coded icon with a tooltip (bolt for express, feather for light, shield for
+full); lines that are not tasks show none.
+
+- **full** (default) is the review cycle described above, with every gate in `AGENTS.md`.
+- **light** is the same review cycle and the policy as given, but gates scale with the diff.
+  The one mapping from changed paths to gate commands is `partyline/task_gates.py`
+  (`uv run --locked python -m partyline.task_gates [path ...]`, default: the diff against
+  main): docs, markdown and skills only run none; Python runs ruff plus the tests that
+  touch the changed modules; `frontend/` runs `npm run verify && npm run build`; a path or
+  module the table cannot place falls back to the full gates. CI and the required checks on
+  main are unchanged. The light task pack points the implementer at this helper.
+- **express** has no reviewer and no review cycle, for mockups, explorations, assets and
+  one-off investigations. Its policy is forced to `none`; `create_task` refuses any other
+  `review` with 422. The implementer ends with `deliver(what, where)`
+  (`POST /api/conversations/<task>/deliver`): text only, no SHA. That posts the terminal
+  report to the root captain and marks the task `done`; no SHA is read, so the
+  unverified-SHA warning never fires. `request_review` on an express task is refused with
+  409 (`express task: no review — report results with deliver(what, where)`), and `deliver`
+  on any other task with 409. `blocked`, `waiting` and `resume_work` work as before.
+  Merging an express task's commits is not supported: use light or full for that.
 
 ## Captain handover
 

@@ -125,3 +125,6 @@ MIGRATIONS += LINE_RESOURCES
 MIGRATIONS += RESTART
 
 MIGRATIONS += RAW_COUNT
+
+# A task's mode, chosen once at creation: `full`, `light` (scaled gates) or `express` (no review).
+MIGRATIONS += ["ALTER TABLE task_reviews ADD COLUMN mode TEXT NOT NULL DEFAULT 'full'"]

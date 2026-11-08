@@ -49,6 +49,8 @@ def working(runtime, att_id):
 
 
 GENERIC = 'This task has no hand-off. Call request_review or blocked(reason).'
+EXPRESS_GENERIC = ('This express task has no hand-off. Call deliver(what, where) with the '
+                   'results, or blocked(reason).')
 STATUS_BOUND = 4096   # bytes of `git status --porcelain` we ever look at
 STATUS_TIMEOUT = 10   # seconds one workspace status read may take
 
@@ -73,6 +75,8 @@ def _named(path):
 def reminder(db, att):
     """What this line's state owes next, or GENERIC when no workspace state could be read."""
     conv_id = att['conv_id']
+    if (task(db, conv_id) or {}).get('mode') == 'express':
+        return EXPRESS_GENERIC
     try:
         spaces = workspaces(db, conv_id)
         if spaces:
@@ -140,8 +144,9 @@ async def settle(runtime, att):
         await runtime.broadcast(att['conv_id'], MessageEvent(message=MessageResponse.model_validate(notice)))
         await runtime.route_mentions(att['conv_id'], notice, force=True)
     else:
+        handoff = 'deliver' if (task(db, att['conv_id']) or {}).get('mode') == 'express' else 'request_review'
         db._exec("UPDATE task_reviews SET stall_stage=3,findings=?,overridden_by=NULL WHERE conv_id=?",
-                 ('stalled: implementer returned again without request_review or blocked(reason)',
+                 (f'stalled: implementer returned again without {handoff} or blocked(reason)',
                   att['conv_id']))
         row = task(db, att['conv_id'])
         await report(runtime, row)

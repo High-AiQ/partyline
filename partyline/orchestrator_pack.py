@@ -20,7 +20,7 @@ def _handles(row, role):
     own = row['reviewer_handle'] if role == 'reviewer' else row['implementer_handle']
     other_role = 'implementer' if role == 'reviewer' else 'reviewer'
     other = row['implementer_handle'] if role == 'reviewer' else (
-        row['reviewer_handle'] or (f'review-{tag}' if tag else None))
+        row['reviewer_handle'] or (f'review-{tag}' if tag and row['mode'] != 'express' else None))
     text = f'Your handle is {own}. ' if own else ''
     if other:
         text += f'The {other_role} of this task is {other}. '
@@ -38,12 +38,51 @@ def _workspace_sentence(db, conv_id, role):
             'request_review() with no arguments reviews every repository whose branch moved. ')
 
 
+EXPRESS = (
+    'Express task: do the assignment and report results with deliver. No tests, no test suite, '
+    'no gates, no commits or review required unless the goal explicitly asks. '
+    'deliver(what, where) takes text only, posts your report to the root captain and finishes the task. ')
+RESOURCES = (
+    'Before starting a job needing a captain-declared resource, call acquire_resource(name, note). '
+    'If queued, wait for the private grant; release_resource(name) when done. Leases are advisory. ')
+UPKEEP = (
+    'If blocked, call blocked(reason); the server notifies the root. '
+    'While a long command runs, call waiting(reason, seconds); the server will not call you '
+    'stalled while that wait is live. '
+    'If you were blocked and resume work, call resume_work(note) — your task state must '
+    'always reflect what you are doing. '
+    'Never send acknowledgment-only replies to the root captain or anyone else: reply only '
+    'with results, questions or a status change, or react instead. ')
+
+
+def _express_pack(db, conv_id, role, row):
+    return (
+        '\n\n## Task line pack\n'
+        f"You are the {role}. Your task line id is {conv_id}; its root line id is {row['root_id']}. "
+        f"{_handles(row, role)}"
+        f"{_root_sentence(db, conv_id, row['root_id'])}"
+        f'{EXPRESS}{RESOURCES}{UPKEEP}'
+        'New work on a done task arrives only through the root captain\'s reopen_task. '
+        'Never archive or retire this task line. Processes detach after work ships. '
+        f"Task goal: {row['goal']}\n"
+        f"Current state: {row['status']}. Full current task state: GET /api/conversations/{conv_id}/task."
+    )
+
+
+LIGHT = (
+    'Light task: gates scale with the diff and the full suite is not required. Run '
+    '`uv run --locked python -m partyline.task_gates` for the gates your changed paths need '
+    '(docs, markdown and skills only: none). ')
+
+
 def task_pack(db, conv_id, role):
     if db is None or not hasattr(db, '_exec'):
         return ''
     row = task(db, conv_id)
     if not row:
         return ''
+    if row['mode'] == 'express':
+        return _express_pack(db, conv_id, role, row)
     return (
         '\n\n## Task line pack\n'
         f"You are the {role}. Your task line id is {conv_id}; its root line id is {row['root_id']}. "
@@ -51,19 +90,12 @@ def task_pack(db, conv_id, role):
         f"{_handles(row, role)}"
         f"{_root_sentence(db, conv_id, row['root_id'])}"
         f"{_workspace_sentence(db, conv_id, role)}"
-        'Before starting a job needing a captain-declared resource, call acquire_resource(name, note). '
-        'If queued, wait for the private grant; release_resource(name) when done. Leases are advisory. '
+        f'{RESOURCES}'
         'The implementer follows the assigned goal and calls request_review(sha, what, where). '
         'request_review is the hand-off: the server staffs the reviewer and notifies it — '
         'never @mention review-<tag>/impl-<tag> handles, your task, or its line name, '
         'because a handle with no live process reaches nobody. '
-        'If blocked, call blocked(reason); the server notifies the root. '
-        'While a long command runs, call waiting(reason, seconds); the server will not call you '
-        'stalled while that wait is live. '
-        'If you were blocked and resume work, call resume_work(note) — your task state must '
-        'always reflect what you are doing. '
-        'Never send acknowledgment-only replies to the root captain or anyone else: reply only '
-        'with results, questions or a status change, or react instead. '
+        f'{UPKEEP}'
         'Without a structured call or peer, one reminder precedes a stalled report. '
         'The server selects and reuses the reviewer; workers cannot attach one. '
         'A reviewer works only in the managed review checkout at the exact requested SHA, '
@@ -75,6 +107,7 @@ def task_pack(db, conv_id, role):
         'While reviewing, hand off only between the implementer and reviewer. '
         'The root captain receives one terminal report and always merges and pushes. '
         'Never archive or retire this task line. Processes detach after work ships. '
+        f"{LIGHT if row['mode'] == 'light' else ''}"
         f"Task goal: {row['goal']}\n"
         f"Current state: {row['status']}, round {row['round']}, SHA {row['sha']}, "
         f"review checkout {row['review_worktree']}. "

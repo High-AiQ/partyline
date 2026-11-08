@@ -35,6 +35,7 @@ class ContractTest(unittest.TestCase):
                 "default_review_policy": "captain",
                 "task_status": None,
                 "task_round": None,
+                "task_mode": None,
                 "task_root_name": None,
                 "task_implementer_name": None,
                 "task_reviewer_name": None,

@@ -3,15 +3,17 @@
 from urllib.parse import quote
 
 from ..orchestrator_contracts import (
-    BlockedIn, MessageTaskIn, ReopenIn, ResumeIn, ReviewRequestIn, TaskIn, VerdictIn, WaitingIn)
+    BlockedIn, DeliverIn, MessageTaskIn, ReopenIn, ResumeIn, ReviewRequestIn, TaskIn, VerdictIn, WaitingIn)
 from .client import ApiError
 from .validation import validate_arguments
 
-_MODELS = {'blocked': BlockedIn, 'create_task': TaskIn, 'request_review': ReviewRequestIn,
+_MODELS = {'blocked': BlockedIn, 'deliver': DeliverIn, 'create_task': TaskIn,
+           'request_review': ReviewRequestIn,
            'review_verdict': VerdictIn,
            'resume_work': ResumeIn, 'reopen_task': ReopenIn, 'message_task': MessageTaskIn,
            'waiting': WaitingIn, 'set_task_goal': ReopenIn}
-_PATHS = {'blocked': ('POST', 'blocked'), 'create_task': ('POST', 'tasks'), 'tasks': ('GET', 'tasks'),
+_PATHS = {'blocked': ('POST', 'blocked'), 'deliver': ('POST', 'deliver'),
+          'create_task': ('POST', 'tasks'), 'tasks': ('GET', 'tasks'),
           'request_review': ('POST', 'request-review'), 'review_verdict': ('POST', 'review-verdict'),
           'restart_reviewer': ('POST', 'task/reviewer'),
           'restart_implementer': ('POST', 'task/implementer'), 'resume_work': ('POST', 'task/resume'),
@@ -20,7 +22,8 @@ _PATHS = {'blocked': ('POST', 'blocked'), 'create_task': ('POST', 'tasks'), 'tas
 OPERATIONS = tuple(_PATHS)
 
 
-_WHO = {'resume_work': "the task's implementer and the root captain",
+_WHO = {'deliver': 'the implementer of an express task',
+        'resume_work': "the task's implementer and the root captain",
         'blocked': "the task's implementer", 'request_review': "the task's implementer",
         'review_verdict': "the task's reviewer, or the root captain under captain review "
                           'or with an explicit override',
@@ -35,9 +38,15 @@ _DESCRIBE = {
                     'Optional memory_limit (e.g. "8G") starts a heavy line with a bigger budget, '
                     'within the host ceiling and, for a captain, the captain approval ceiling '
                     '(above it: 403, file a memory request for a person). '
+                    'mode is full (default), light (review cycle, gates scaled to the diff) or express '
+                    '(no reviewer, no review; the implementer ends with deliver; review omitted or '
+                    'none); it cannot change later. '
                     'Retry with the same name and assignment to recover the existing task; '
                     'conflicting names are refused. '
                     'A creation_error means the task exists but staffing or notification needs attention.'),
+    'deliver': ('END an express task: report results as text (what, where), no SHA. Posts the report '
+                'to the root captain and marks the task done. Express tasks have no review.'),
+    'request_review': 'Hand a full task to review (sha, what, where). Refused (409) on an express task.',
     'set_task_goal': ('CHANGE the direction of an EXISTING active task. conv_id is the task line id (from '
                       'create_task or tasks), never your root id. Does not start work or create anything; '
                       'refused for approved or done tasks (use reopen_task).'),

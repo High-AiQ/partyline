@@ -19,6 +19,7 @@
   --color-green: #7fb069; /* live-line LED */
   --color-red: #c96f5a;
   --color-pink: #ff6fb5; /* agent-control badge */
+  --color-sky: #6aa7d9; /* full-review task mode */
 
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
   --font-serif: "Instrument Serif", Georgia, serif;
@@ -52,6 +53,7 @@
     --color-green: #326f2d;
     --color-red: #9b3e2e;
     --color-pink: #b0286e;
+    --color-sky: #1f5f95;
     --grain-opacity: 0.025;
   }
 }
@@ -75,6 +77,7 @@
   --color-green: #326f2d;
   --color-red: #9b3e2e;
   --color-pink: #b0286e;
+  --color-sky: #1f5f95;
   --grain-opacity: 0.025;
 }
 
@@ -94,6 +97,7 @@
   --color-green: #7fb069;
   --color-red: #c96f5a;
   --color-pink: #ff6fb5;
+  --color-sky: #6aa7d9;
   --grain-opacity: 0.05;
 }
 

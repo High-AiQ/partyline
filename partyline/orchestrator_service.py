@@ -26,7 +26,8 @@ from .orchestrator_handles import pick_tag
 from .memory_live_raise import check_task_memory
 from .orchestrator_staff import ensure_reviewer, restart, spawn
 from .orchestrator_store import (
-    preset, require_override, require_root, require_task, task, validate_policy)
+    EXPRESS_BRIEF, EXPRESS_NO_REVIEW, preset, require_override, require_root, require_task, task,
+    validate_policy)
 
 
 logger = logging.getLogger(__name__)
@@ -43,14 +44,20 @@ async def _create_task(runtime, actor, root_id, body):
     root = require_root(db, actor, root_id)
     preset(db, body.implementer)
     check_task_memory(db, actor, body.memory_limit)
-    policy = validate_policy(db, body.review or root['default_review_policy'])
+    if body.mode == 'express':
+        if body.review not in (None, 'none'):
+            raise HTTPException(422, "an express task has no review: omit review or pass 'none'")
+        policy = 'none'
+    else:
+        policy = validate_policy(db, body.review or root['default_review_policy'])
     existing_line = db._exec(
         'SELECT id FROM conversations WHERE parent_id=? AND name=? AND archived_at IS NULL',
         (root_id, body.name.strip())).fetchone()
     pending = task(db, existing_line['id']) if existing_line else None
     if existing_line:
         if (not pending or pending['goal'] != body.goal.strip()
-                or pending['implementer_preset'] != body.implementer or pending['policy'] != policy):
+                or pending['implementer_preset'] != body.implementer or pending['policy'] != policy
+                or pending['mode'] != body.mode):
             raise HTTPException(409, f"line {existing_line['id']} already uses this task name; "
                                 'inspect it or choose a different name for new work')
         att = db.get_attachment(pending['implementer_id'])
@@ -69,8 +76,9 @@ async def _create_task(runtime, actor, root_id, body):
             conv_id = conv['id']
             db._exec(
                 'INSERT INTO task_reviews(conv_id,root_id,implementer_id,implementer_preset,policy,tag,'
-                'created_at) VALUES(?,?,?,?,?,?,?)',
-                (conv_id, root_id, ident, body.implementer, policy, pick_tag(db, conv_id), time.time()))
+                'created_at,mode) VALUES(?,?,?,?,?,?,?,?)',
+                (conv_id, root_id, ident, body.implementer, policy, pick_tag(db, conv_id), time.time(),
+                 body.mode))
 
         try:
             await create_child(runtime, actor, root_id,
@@ -105,10 +113,10 @@ async def _create_task(runtime, actor, root_id, body):
             logger.exception('task creation refusal notice failed for %s', conv_id)
     if not spawn_failed:
         try:
-            await tell(runtime, ident,
-                       f"Implement this task: {body.goal}. Commit on this line's branch "
-                       '(in each repository folder you change); never push. '
-                       'Call request_review(sha, what, where) when ready. The server owns review staffing.')
+            await tell(runtime, ident, f'Implement this task: {body.goal}. ' + (
+                EXPRESS_BRIEF if body.mode == 'express' else
+                "Commit on this line's branch (in each repository folder you change); never push. "
+                'Call request_review(sha, what, where) when ready. The server owns review staffing.'))
             await runtime.broadcast_all(ConversationsChangedEvent())
         except (HTTPException, ValueError, OSError) as exc:
             creation_error = str(getattr(exc, 'detail', exc))
@@ -127,6 +135,8 @@ async def _create_task(runtime, actor, root_id, body):
 async def request_review(runtime, actor, conv_id, body):
     db = runtime.db
     row = require_task(db, actor, conv_id)
+    if row['mode'] == 'express':
+        raise HTTPException(409, EXPRESS_NO_REVIEW)
     # A task lock spans worktree creation, admission and notification: duplicate
     # calls cannot spawn two reviewers or produce two terminal reports.
     async with task_lock(runtime, conv_id):

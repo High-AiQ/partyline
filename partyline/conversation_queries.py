@@ -1,7 +1,7 @@
 """Conversation reads with the rail's derived live-process count."""
 
 LIVE_JOIN = (
-    "SELECT c.*,COUNT(a.id) live_count,t.status task_status,t.round task_round,"
+    "SELECT c.*,COUNT(a.id) live_count,t.status task_status,t.round task_round,t.mode task_mode,"
     "t.repositories task_repositories,"
     "r.name task_root_name,COALESCE(i.name,t.implementer_preset) task_implementer_name,"
     "CASE WHEN t.policy='none' THEN 'none' WHEN t.policy='captain' THEN "

@@ -348,12 +348,13 @@ These entries extend both inventory sets above. Registration handlers are in
 | Method | Path | Handler | Caller | Agent-reachable | MCP disposition |
 | --- | --- | --- | --- | --- | --- |
 | PUT | `/api/conversations/{conv_id}/captain-style` | `captain_style` | H, root line only | no | excluded: human chooses captain style and default review policy |
-| POST | `/api/conversations/{conv_id}/tasks` | `create` | H or orchestrator root captain | yes | tool: `create_task` |
+| POST | `/api/conversations/{conv_id}/tasks` | `create` | H or orchestrator root captain | yes | tool: `create_task`; `mode` `full` (default), `light` (review, gates scaled by `partyline/task_gates.py`) or `express` (no review, policy forced `none`, 422 with any other `review`), fixed at creation |
 | GET | `/api/conversations/{conv_id}/tasks` | `listing` | H or orchestrator root captain | yes | tool: `tasks`; includes bounded per-workspace real/mirror tips and unaccepted commits |
 | GET | `/api/conversations/{conv_id}/task` | `detail` | M with `read` | yes | guide: current structured task state, including after compaction |
 | POST | `/api/conversations/{conv_id}/blocked` | `block` | exact task implementer | yes | tool: `blocked` |
 | POST | `/api/conversations/{conv_id}/waiting` | `waiting` | exact task implementer | yes | tool: `waiting`; declares a long wait (`reason`, `seconds` 60–3600) that defers the stall reminder and the stall report |
 | POST | `/api/conversations/{conv_id}/request-review` | `review` | exact task implementer | yes | tool: `request_review`; `sha` or `repositories: [{repository, sha}]` (1–8, not both) |
+| POST | `/api/conversations/{conv_id}/deliver` | `deliver` | exact implementer of an express task | yes | tool: `deliver`; `what`, `where`, no SHA; posts the terminal report and marks the task done (409 on a full task); `request_review` on an express task is refused with 409 |
 | POST | `/api/conversations/{conv_id}/review-verdict` | `verdict` | exact task reviewer, or root captain with `override=true` (staffed reviews) or under captain policy | yes | tool: `review_verdict`; override supersedes the reviewer (told once), records `overridden_by`, refused with 409 when no review is open or the task is settled |
 | POST | `/api/conversations/{conv_id}/task/reopen` | `reopen` | H, or root captain | yes | tool: `reopen_task`; returns an approved/done task to implementing (409 otherwise) |
 | POST | `/api/conversations/{conv_id}/task/message` | `message` | H, or root captain | yes | tool: `message_task`; private wake-up message to the task's live implementer or reviewer (409 otherwise) |

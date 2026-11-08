@@ -6,7 +6,7 @@ from .auth_guard import request_principal
 from .contracts import ConversationEvent, ConversationResponse, ConversationsChangedEvent
 from .machine_scope import deny_unless
 from .orchestrator_contracts import (
-    BlockedIn, CaptainStyleIn, MessageTaskIn, ReopenIn, ResumeIn, ReviewRequestIn, ShareRefIn,
+    BlockedIn, CaptainStyleIn, DeliverIn, MessageTaskIn, ReopenIn, ResumeIn, ReviewRequestIn, ShareRefIn,
     ShareRefOut, TaskIn, TaskReview, VerdictIn, WaitingIn)
 from .orchestrator_handles import message_task, task_line
 from .orchestrator_stall import blocked, resume_work
@@ -15,6 +15,7 @@ from .orchestrator_reopen import reopen_task
 from .orchestrator_revive import restart_implementer, restart_reviewer
 from .orchestrator_service import create_task, request_review, review_verdict
 from .orchestrator_share_ref import share_ref as publish_shared_ref
+from .orchestrator_express import deliver as deliver_task
 from .orchestrator_store import require_root, task, tasks, write_captain_style
 
 
@@ -51,6 +52,10 @@ def orchestrator_router(runtime):
     @router.post('/api/conversations/{conv_id}/request-review', response_model=TaskReview)
     async def review(request: Request, conv_id: str, body: ReviewRequestIn):
         return await request_review(runtime, request_principal(request), conv_id, body)
+
+    @router.post('/api/conversations/{conv_id}/deliver', response_model=TaskReview)
+    async def deliver(request: Request, conv_id: str, body: DeliverIn):
+        return await deliver_task(runtime, request_principal(request), conv_id, body)
 
     @router.post('/api/conversations/{conv_id}/task/reviewer', response_model=TaskReview)
     async def reviewer(request: Request, conv_id: str):

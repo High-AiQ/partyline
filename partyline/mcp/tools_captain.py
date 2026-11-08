@@ -32,7 +32,8 @@ def permitted(state):
 
 def guide(state):
     return {"goal_decisions": [
-                {"need": "New task", "operation": "create_task(name, goal, implementer, review)"},
+                {"need": "New task",
+                 "operation": "create_task(name, goal, implementer, review, mode=full|light|express)"},
                 {"need": "Change active task goal", "operation": "set_task_goal(conv_id, goal)"},
                 {"need": "New work on approved/done task", "operation": "reopen_task(conv_id, goal)"},
                 {"need": "Sub-captain line", "operation": "create_child(parent_conv_id, name, goal); "

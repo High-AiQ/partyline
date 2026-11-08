@@ -128,3 +128,40 @@ describe("conversation rail bulk select", () => {
     }
   });
 });
+
+describe("conversation rail task mode marker", () => {
+  it("marks each task line with its mode and leaves other lines bare", async () => {
+    const base = { topic: "", created_at: 1, archived_at: null, live_count: 0 };
+    room.conversations = [
+      { ...base, id: "e", name: "mock", task_status: "implementing", task_mode: "express" },
+      { ...base, id: "l", name: "typo", task_status: "in_review", task_mode: "light" },
+      { ...base, id: "f", name: "feature", task_status: "done", task_mode: "full" },
+      { ...base, id: "p", name: "plain" },
+    ];
+    const list = mount(ConversationList, {
+      target: document.body,
+      props: {
+        onmanagement: vi.fn(),
+        onrename: vi.fn(),
+        oncloseprocesses: vi.fn(),
+        ondelete: vi.fn(),
+      },
+    });
+    try {
+      const labels = [...document.querySelectorAll(".task-mode")].map((item) =>
+        item.getAttribute("aria-label"),
+      );
+      expect(labels.sort()).toEqual([
+        "Express task: no review, no gates",
+        "Full task: review and every gate",
+        "Light task: review, gates scale with the diff",
+      ]);
+      const plain = [...document.querySelectorAll(".conv-row")].find((row) =>
+        row.textContent.includes("plain"),
+      );
+      expect(plain?.querySelector(".task-mode")).toBeNull();
+    } finally {
+      await unmount(list);
+    }
+  });
+});
