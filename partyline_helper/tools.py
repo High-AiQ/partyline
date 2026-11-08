@@ -10,10 +10,10 @@ import math
 
 from websockets.exceptions import ConnectionClosed
 
-from . import tools_consent
+from . import tools_consent, tools_media
 from .terminal import display_text
 from .tools_addon import AddonClient, AddonError, spec_for
-from .tools_audit import ToolAudit
+from .tools_audit import ToolAudit, entry
 
 TOOLS_VERSION = 1
 MESSAGES = ("tools_request", "tool_call", "tool_cancel", "tools_revoked")
@@ -265,8 +265,7 @@ class Tools:
         self.last_activity = self.session.clock()
         code = args.get("code") if isinstance(args.get("code"), str) else None
         try:
-            self.audit.append("call", grant["id"], grant["agent"], op,
-                              op if code is None else f"{op} {len(code.encode())} bytes", code)
+            self.audit.append("call", grant["id"], grant["agent"], op, entry(op, args, code), code)
         except OSError as exc:  # fail closed: a script that cannot be logged is not run
             self.calls.pop(call_id, None)
             return await self.send("tool_result", call_id=call_id, ok=False,
@@ -284,6 +283,8 @@ class Tools:
         result = answer.get("result")
         if result is not None and len(json.dumps(result)) > MAX_RESULT:
             result, answer = None, {"error": "the result is too large"}
+        if tools_media.has_image(op, result):
+            return await tools_media.deliver(self, grant, call_id, op, result)
         self.log("result", op, "ok" if result is not None else f"failed: {answer.get('error')}")
         if result is None:
             return await self.send("tool_result", call_id=call_id, ok=False, error=str(answer.get("error")),

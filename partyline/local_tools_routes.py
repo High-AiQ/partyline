@@ -23,7 +23,7 @@ class ToolCall(BaseModel):
     timeout_s: float = Field(default=20, ge=1, le=MAX_TIMEOUT)
 
 
-def tools_router(runtime, hub) -> APIRouter:
+def tools_router(runtime, hub, store) -> APIRouter:
     router = APIRouter()
     base = "/api/conversations/{conv_id}/local-tools"
 
@@ -48,7 +48,7 @@ def tools_router(runtime, hub) -> APIRouter:
         principal = request_principal(request)
         deny_unless(runtime.db, principal, conv_id, "write")
         try:
-            return await hub.tools.call(conv_id, principal.name, body.op, body.args, body.timeout_s)
+            return await hub.tools.call(conv_id, principal.name, body.op, body.args, body.timeout_s, store)
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
 

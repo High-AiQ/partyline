@@ -14,6 +14,15 @@ def first_line(code: str, width: int = 60) -> str:
     return line[:width] + ("…" if len(line) > width else "")
 
 
+def entry(op: str, args: dict, code: str | None = None) -> str:
+    """The audit line of a call: a script by size, hash and first line; anything else by its arguments."""
+    if code is not None:
+        return (f"{op} {len(code.encode())} bytes sha {hashlib.sha256(code.encode()).hexdigest()[:8]}: "
+                f"{first_line(code)}")
+    shown = json.dumps(args, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return f"{op} {shown[:200]}" if args else op
+
+
 def record(db, session_id, conv_id, agent, kind, op, entry, code=None):
     """Append one row: kind is call (before sending), result (the outcome) or event (grant, revoke)."""
     sha = hashlib.sha256(code.encode()).hexdigest() if code is not None else None
