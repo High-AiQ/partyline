@@ -24,7 +24,10 @@ from .mention_relay import live_manager, post_private
 from .task_workspaces import workspaces
 
 # 7-40 hex characters, not letter-prefixed: git hashes are bare hex, and a
-# style token like B007 must not be read as a claimed commit.
+# style token like B007 must not be read as a claimed commit. A token made only
+# of decimal digits ("1000000", a byte limit or a count) is not a commit claim
+# either: suspected() skips it. The cost is a missed warning for an all-digit
+# short SHA, which is rare; a real full SHA is still checked.
 TOKEN = re.compile(r"(?<![0-9A-Za-z])[0-9a-f]{7,40}(?![0-9A-Za-z])")
 # Words that name another kind of hash or version when they come just before a
 # token: a model revision, a weights checksum, a file digest — and the ids
@@ -54,13 +57,14 @@ def suspected(text: str) -> list[str]:
     """Bare hex tokens that may be a commit hash, in order, unique.
 
     A token is skipped when another kind of hash is named just before it —
-    including a request or hand-over id — or when it sits inside a URL or path.
+    including a request or hand-over id — when it sits inside a URL or path,
+    or when it is made only of decimal digits (see TOKEN).
     """
     text = text or ""
     found = []
     for match in TOKEN.finditer(text):
         token = match.group()
-        if token in found or _named_other(text, match.start()):
+        if token.isdecimal() or token in found or _named_other(text, match.start()):
             continue
         if _in_url_or_path(text, match.start(), match.end()):
             continue
