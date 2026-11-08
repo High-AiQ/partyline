@@ -5,6 +5,12 @@ from pathlib import Path
 
 MODEL_EXTENSIONS = frozenset({".glb", ".gltf"})
 
+GET_MEDIA_DESCRIPTION = (
+    "Download a media variant to a new file with a hard size bound. Works for media on your line "
+    "and on every line above it (a task worker can fetch its root line's files and walkthrough "
+    "frames by id); not for sibling or unrelated lines, and the messages above stay unreadable."
+)
+
 
 def validate_model_path(path: str) -> None:
     if Path(path).suffix.lower() not in MODEL_EXTENSIONS:
