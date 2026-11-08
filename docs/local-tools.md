@@ -4,7 +4,8 @@ An agent on a line can ask to use a **local tool** on the person's own computer:
 Partyline's helper can reach through a small add-on. The wire format, consent and audit are generic; the first
 tool is exposed to agents as the `blender_*` MCP tools (`partyline/mcp/tools_blender.py`) and the helper's
 adapter registry (`partyline_helper/tools_addon.py`). Design and decisions: `docs/design/blender-python-relay.md`.
-The add-on lives in the `partyline-addons` repository.
+The [partyline-addons repository](https://github.com/High-AiQ/partyline-addons) contains the extension and the
+[blender-scene-decomposition skill](https://github.com/High-AiQ/partyline-addons/blob/main/blender/skills/blender-scene-decomposition/SKILL.md).
 
 ## Path of a call
 
