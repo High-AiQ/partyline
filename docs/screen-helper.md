@@ -35,8 +35,9 @@ commands described below.
    system tray.
 
 **Tray icon.** Grey: not connected; green: paired; amber: sharing; red: an agent controls the mouse and keyboard
-(the capture border changes colour the same way). The menu has the status, **Stop sharing** and **Quit Partyline
-Helper**. Quit ends any share cleanly (the server is told) and the helper returns at the next login.
+(the capture border changes colour the same way). The menu has the status, **Stop screen sharing**, **Stop all sharing** (screen share and
+every window grant; enabled while anything is shared), a **Stop** submenu per shared window, and **Quit Partyline
+Helper**. The tooltip is cut to Windows' 127-character limit; a tray update that pystray rejects is logged once in the helper's log. Quit ends any share cleanly (the server is told) and the helper returns at the next login.
 `run --no-tray` turns the icon off; it is on by default on Windows only.
 
 **Every prompt is a native window**, since the installed program has no console: pairing, share consent, agent
@@ -262,7 +263,8 @@ line sees one brief sharing message.
 
 You can share several windows with the same process, or different windows with different
 processes. The tray lists each as **window → @process «line»**, with its own **Stop**;
-**Stop all window sharing** ends every grant. The web computer list also shows each
+**Stop all sharing** ends every grant and the screen share. An item appears when its grant starts and disappears when
+it ends, including when the web or the server revokes it. The web computer list also shows each
 target and offers **Stop sharing window**. Your sidebar marks each target line with
 a computer icon; its tooltip names the shared windows and their processes. Closing a window, detaching or ending its
 process, disconnecting the helper, or restarting the server ends that grant. Ending one
@@ -375,7 +377,7 @@ activates it, and other apps may activate or open dialogs. The response and loca
 timeout or refusal before dispatch cannot report those observations.
 
 Window actions do not arm physical mouse or ordinary-key takeback. Stop that window grant
-in the tray or web computer list, or choose Stop all window sharing, to stop further actions.
+in the tray or web computer list, or choose Stop all sharing, to stop further actions.
 Lock and UAC pause actions; closing or replacing the selected window ends its grant. A pattern call already
 dispatched when consent is revoked can still complete: the result says `revoked_during`, and no
 further action can start from that grant. The deadline covers the operation; a timed-out call is
