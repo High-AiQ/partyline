@@ -286,37 +286,59 @@ target against the owner's visible live processes. Machine credentials cannot cr
 revoke grants, and a different human cannot revoke the owner's grants. Access pauses on
 the secure desktop and resumes only while the same window and grant are still live.
 
-`screen_elements` reads that window's UI Automation tree without bringing it to the
-front or sending input. It returns one compact line per element, a snapshot ID,
-the window title and executable, control types, names, safe values, states, supported
-pattern names, and screen-coordinate bounds. When a current pixel share overlaps an
-element it also includes frame-pixel bounds. Element IDs are stable for the same runtime identity and tree path, and only IDs from the latest
-snapshot are accepted as action targets. Password values and other windows' elements
-are excluded and text is capped. Element metadata may include offscreen text from
-the selected window. Count (200 elements), depth (20) and time (1.8 s) bounds limit
-traversal; an isolated child process is killed if a provider hangs (about 2 s after
-the budget).
+`screen_elements` captures that window's whole UI Automation tree without bringing the window to the
+front or sending input, and the server keeps it. No page is too big, but an agent never receives it
+all at once; each answer stays near 4 KB (about 3.4 KB of lines). A call with no arguments returns a
+summary: window title, element count, counts by control type, and an outline of the main regions
+with child counts (a web page's `Document` is opened two levels deeper, skipping single-child wrapper
+chains). From there the agent explores the stored tree like a filesystem, with no new read:
 
-The walk is best-first rather than top-down: a `Document` subtree (a browser's web page)
-is read before the window frame, toolbars, menu bars, tab strips and title bars are read
-last, and unnamed, patternless `Pane`/`Group`/`Custom` wrappers are walked but not listed,
-so they cost no element budget. The page takes at most 150 of the 200 elements while
-anything else is waiting; spare room goes back to it. Properties are fetched with each
-node (one UI Automation cache request) instead of one round trip per property. Elements
-come back in tree order, the window first. When `truncated` is true the response also has a
-`truncation` line saying why it stopped (`element limit`, `time budget` or `depth limit`),
-whether `page content not reached`, `partly read` or `read`, and how many unread subtrees
-remain (web page, browser chrome, other). An agent that sees `page content not reached`
-should retry rather than treat the page as empty. Element actions locate their target by the
-path recorded with the latest snapshot, so page elements deep in the tree stay actionable. Errors, denied consent, closed windows and
-unsupported platforms return an unavailable reason. Settle/wait, macOS AX and Linux AT-SPI are planned.
-The Windows-only helper dependency `comtypes` supplies the typed UI Automation
-COM interfaces; it is not installed on other platforms.
+| Question | Arguments |
+| --- | --- |
+| `ls` | `root=<id>`, `depth` 1 to 3: the children, each with its child count |
+| `find` | `query` (case-insensitive substring of name or value, `a|b` for either) and/or `control_type`; `root` limits it to a subtree. Each match shows its ancestor path (`in: Document > List Pagination`) |
+| `text` | `text=true`: leaf and `Text` names in reading order; `query` greps it with `context` lines around each hit; `root` scopes it (default: the first `Document`) |
+| paging | a long answer ends with `more` and `next_offset`; pass `offset` to continue |
+| `refresh` | `refresh=true` takes a new snapshot; ids of the old one may then be stale |
+
+There is no regex search: a backtracking pattern over tens of thousands of names could stall the server, so `find` and `text` take plain substrings and `a|b` alternatives only.
+
+Lines read `id Type "name" ="value" [actions] flags`; `bounds=true` adds screen and frame-pixel
+rectangles. Text is capped per field and stripped to one line; password values and other windows'
+elements are excluded. Element metadata may include offscreen text from the selected window. Every id
+in the stored snapshot is a `screen_element_action` target until the next snapshot, so a deep element
+found by `find` can be acted on directly.
+
+How the capture works. The helper walks the tree depth-first in tree order, in parts of at most 2,000
+elements, 10,000 visited nodes or 3 s, whichever comes first. A part that stops early returns a
+`next_cursor`; the server follows cursors until the window is done, for up to 20 s per call and 60,000
+nodes. A larger window comes back marked `partial` and `more=true` continues it from the same cursor, so
+no cap is a dead end (there is no depth limit, since the walk is iterative). The helper keeps each
+part's ids and paths, merged, until the next plain snapshot; a cursor from an earlier snapshot is
+refused as expired. The server keeps at most 16 trees, each for 10 minutes. A cursor remembers, for each unread section, which element it hangs under and how many children that element had; if the page changed when a part resumes, those sections are dropped rather than read from shifted positions, and every answer carries a `changed` note telling the agent to `refresh`. Stored trees total at most 300,000 nodes (120,000 in one), go when their grant ends or a refresh starts, and answers are measured in UTF-8 bytes (4,096 at most, title and hint included), so CJK pages fit. An older helper sends a flat list: summary and `ls` work on it, with a note to update the helper. The first part's whole-tree prefetch runs under the start limit, not the part's 3 s budget. Every part runs in the
+isolated child process (killed about 12 s after its budget); the unread frontier travels to the child in
+a file, because it can be far longer than a command line. Unnamed, patternless
+`Pane`/`Group`/`Custom` wrappers are walked but not listed.
+
+Speed. The Windows provider asks UI Automation for a cache request (control view; the properties and
+pattern-availability flags, plus the Value and Toggle state) so a node costs no further cross-process
+calls. The first part prefetches the whole tree with one TreeScope_Subtree request; later parts, and the
+action recheck, fetch a node and its children (TreeScope_Element | Children) once per parent. If the
+one-call prefetch ever outruns its budget, the helper switches to per-parent reads for later snapshots.
+The cached-children path and these timings were written without a Windows machine to run them on, so
+they are unmeasured: the fake-provider tests pin the behaviour (a 5,000-node page is reached through
+cursors, every node once) but not real Chrome timings. Measure `screen_elements` on a large page
+once a Windows box is available and tune `MAX_ELEMENTS`, `BUDGET` and `KILL_SLACK` in
+`partyline_helper/uia_snapshot.py` and `uia_process.py` if needed.
+
+Errors, denied consent, closed windows and unsupported platforms return an unavailable reason.
+Settle/wait, macOS AX and Linux AT-SPI are planned. The Windows-only helper dependency `comtypes`
+supplies the typed UI Automation COM interfaces; it is not installed on other platforms.
 
 ### Act on elements in the chosen window
 
 With a window granted to its attachment, an agent can call
-`screen_element_action` with an ID from the latest `screen_elements` snapshot, using the matching
+`screen_element_action` with an ID from the current `screen_elements` snapshot (any part), using the matching
 UI Automation pattern. Each snapshot element lists its `patterns` and the `actions` it supports; the
 helper reads pattern state (range, scroll axes, window abilities) only for the action's target.
 

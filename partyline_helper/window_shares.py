@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from websockets.exceptions import ConnectionClosed
 
 from .uia_access import WindowAccess, select_window
-from .uia_task import WindowTask
+from .uia_task import WindowTask, read_options
 from .uia_window_identity import unmark
 from .window_target_picker import select_target
 
@@ -137,7 +137,7 @@ class WindowShares:
                                     elements_unavailable="consent revoked",
                                     status="failed", error="consent revoked")
         elif message["type"] == "read_window_elements":
-            await entry["worker"].submit(message["request_id"])
+            await entry["worker"].submit(message["request_id"], read_options(message))
         else:
             await entry["worker"].submit_action(message)
 

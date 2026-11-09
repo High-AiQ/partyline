@@ -1,6 +1,5 @@
 """Window snapshot transport and local consent races."""
 import asyncio
-import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -18,33 +17,38 @@ class Socket:
 
 
 class ElementsTests(unittest.IsolatedAsyncioTestCase):
-    async def test_transport_correlates_device_and_formats_one_line_per_element(self):
+    async def test_capture_reads_every_part_and_answers_a_summary(self):
         socket = Socket()
         devices = {"d": {"id": "d", "conv_id": "line", "name": "PC", "socket": socket}}
         hub = ElementsHub(SimpleNamespace(devices=devices))
         principal = SimpleNamespace(kind="machine", attachment_id="a")
         grant = {"id": "g", "title": "Editor", "process": "app.exe"}
         from unittest.mock import patch
-        resolved = patch("partyline.screen_elements.resolve_window", return_value=(grant, devices["d"]))
-        required = patch("partyline.screen_elements.require_window")
-        resolved.start()
-        required.start()
-        self.addCleanup(resolved.stop)
-        self.addCleanup(required.stop)
-        task = asyncio.create_task(hub.read(principal))
-        request = await socket.messages.get()
-        response = {"request_id": request["request_id"], "snapshot_id": "s", "window_title": "Editor",
-                    "process_name": "app.exe", "elements": [{"id": 1, "name": "one\ntwo"}],
-                    "truncated": True, "truncation": "time budget; page content not reached"}
-        hub.receive({"id": "wrong"}, response)
-        self.assertFalse(task.done())
-        hub.receive({"id": "d"}, response)
-        result = await task
-        self.assertEqual("s", result["snapshot_id"])
-        self.assertEqual("one\ntwo", json.loads(result["elements"])["name"])
-        self.assertEqual(1, len(result["elements"].splitlines()))
-        self.assertEqual("time budget; page content not reached", result["truncation"])
-        self.assertEqual({}, hub.waiters)
+        with patch("partyline.screen_elements.resolve_window", return_value=(grant, devices["d"])), \
+             patch("partyline.screen_elements.require_window"):
+            task = asyncio.create_task(hub.read(principal))
+            request = await socket.messages.get()
+            self.assertNotIn("cursor", request)
+            first = {"request_id": request["request_id"], "snapshot_id": "s", "truncated": True,
+                     "next_cursor": "c1",
+                     "elements": [{"id": "w", "control_type": "Window", "name": "Editor"}]}
+            hub.receive({"id": "wrong"}, first)
+            self.assertFalse(task.done())
+            hub.receive({"id": "d"}, first)
+            request = await socket.messages.get()
+            self.assertEqual("c1", request["cursor"])
+            hub.receive({"id": "d"}, {"request_id": request["request_id"], "elements": [
+                {"id": "b", "parent": "w", "control_type": "Button", "name": "OK", "actions": ["invoke"]}]})
+            result = await task
+            self.assertEqual({}, hub.waiters)
+            self.assertEqual("s", result["snapshot_id"])
+            self.assertEqual(2, result["nodes"])
+            self.assertEqual("Editor", result["window_title"])
+            self.assertNotIn("partial", result)
+            # Later questions use the stored tree: no message reaches the helper.
+            found = await hub.read(principal, options={"query": "ok"})
+            self.assertIn('b Button "OK" [invoke] in: Window Editor', found["lines"])
+            self.assertTrue(socket.messages.empty())
 
     async def test_revocation_during_read_discards_result(self):
         import threading
@@ -73,7 +77,7 @@ class WindowTaskTests(unittest.IsolatedAsyncioTestCase):
         entered, finish = asyncio.Event(), asyncio.Event()
         sent = []
 
-        async def snapshot():
+        async def snapshot(options=None):
             entered.set()
             await finish.wait()
             return {"elements": []}
@@ -94,7 +98,7 @@ class WindowTaskTests(unittest.IsolatedAsyncioTestCase):
     async def test_close_cancels_inflight_read(self):
         from partyline_helper.uia_task import WindowTask
         entered = asyncio.Event()
-        async def snapshot():
+        async def snapshot(options=None):
             entered.set()
             await asyncio.Event().wait()
         send = unittest.mock.AsyncMock()

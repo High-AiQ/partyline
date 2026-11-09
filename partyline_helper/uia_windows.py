@@ -14,6 +14,10 @@ AVAILABLE = {10000: 30031, 10015: 30041, 10002: 30043, 10010: 30036, 10005: 3002
 CACHED = {"BoundingRectangle": 30001, "ControlType": 30003, "Name": 30005, "HasKeyboardFocus": 30008,
           "IsEnabled": 30010, "AutomationId": 30011, "IsPassword": 30019, "NativeWindowHandle": 30020,
           "IsOffscreen": 30022}
+# Cached too, so a Value or Toggle element costs no live pattern call: ValueValue, ToggleToggleState.
+PATTERN_STATE = {"value": 30045, "toggle": 30086}
+SUBTREE, SHALLOW = 7, 3  # TreeScope_Subtree; TreeScope_Element | TreeScope_Children
+MAX_CHILDREN = 20000  # runaway guard for one node's children; far beyond any real list
 EXPAND_STATES = {0: "collapsed", 1: "expanded", 2: "partial", 3: "leaf"}
 WINDOW_STATES = {0: "normal", 1: "maximized", 2: "minimized"}
 SCROLL_AMOUNT = {("up", "small"): (2, 1), ("up", "large"): (2, 0), ("down", "small"): (2, 4),
@@ -30,7 +34,7 @@ TYPES = {50000: "Button", 50002: "CheckBox", 50003: "ComboBox", 50004: "Edit", 5
 
 
 class WindowsProvider:  # pragma: no cover - exercised in the Windows foundations job
-    def __init__(self, hwnd, cached=False):
+    def __init__(self, hwnd, cached=False, deep=False):
         import comtypes.client
         ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
         comtypes.client.GetModule("UIAutomationCore.dll")
@@ -43,13 +47,23 @@ class WindowsProvider:  # pragma: no cover - exercised in the Windows foundation
         self.user32.IsWindow.argtypes = [ctypes.c_void_p]
         self.user32.GetForegroundWindow.restype = ctypes.c_void_p
         self.hwnd = hwnd
+        self.top = None
         if not self.hwnd:
             raise RuntimeError("no window")
         self.walker = self.automation.ControlViewWalker
-        self.cache = self.automation.CreateCacheRequest()
-        for prop in (*AVAILABLE.values(), *CACHED.values()):
-            self.cache.AddProperty(prop)
+        # Both requests follow the control view, so cached child indices match the live walker's.
+        self.cache = self.request(SUBTREE)  # the whole tree under a node in one cross-process call
+        self.shallow = self.request(SHALLOW)  # a node and its direct children, one call per parent
+        self.deep = deep  # a first snapshot part prefetches the window's whole tree
         self.cached = cached  # snapshots read the cache; action rechecks always read live state
+
+    def request(self, scope):
+        cache = self.automation.CreateCacheRequest()
+        for prop in (*AVAILABLE.values(), *CACHED.values(), *PATTERN_STATE.values()):
+            cache.AddProperty(prop)
+        cache.TreeScope = scope
+        cache.TreeFilter = self.automation.ControlViewCondition
+        return cache
 
     def prop(self, node, name):
         if self.cached:
@@ -63,7 +77,11 @@ class WindowsProvider:  # pragma: no cover - exercised in the Windows foundation
         return self.user32.GetForegroundWindow()
 
     def root(self):
-        return self.automation.ElementFromHandleBuildCache(self.hwnd, self.cache)
+        """The window element; the first call fetches the cache, so a deep prefetch happens once."""
+        if self.top is None:
+            cache = self.cache if self.deep else self.shallow
+            self.top = self.automation.ElementFromHandleBuildCache(self.hwnd, cache)
+        return self.top
 
     def runtime_id(self, node):
         return node.GetRuntimeId()
@@ -122,12 +140,13 @@ class WindowsProvider:  # pragma: no cover - exercised in the Windows foundation
         return rect.left, rect.top, rect.right, rect.bottom
 
     def children(self, node):
-        result = []
-        child = self.walker.GetFirstChildElementBuildCache(node, self.cache)
-        while child and len(result) < 200:
-            result.append(child)
-            child = self.walker.GetNextSiblingElementBuildCache(child, self.cache)
-        return result
+        """Control-view children by index; the snapshot and the action recheck both use this."""
+        if not self.deep:  # a node's own children are cached only by asking for them: one call per parent
+            node = node.BuildUpdatedCache(self.shallow)
+        found = node.GetCachedChildren()  # deep mode: the Subtree request already cached every level
+        if not found:
+            return []
+        return [found.GetElement(index) for index in range(min(found.Length, MAX_CHILDREN))]
 
     def properties(self, node):
         patterns = [name for ident, name in PATTERNS.items() if self.available(node, ident)]
@@ -139,12 +158,18 @@ class WindowsProvider:  # pragma: no cover - exercised in the Windows foundation
                   "focused": bool(self.prop(node, "HasKeyboardFocus")),
                   "offscreen": bool(self.prop(node, "IsOffscreen")), "patterns": patterns}
         if "Value" in patterns and not self.prop(node, "IsPassword"):
-            pattern = node.GetCurrentPattern(10002).QueryInterface(self.uia.IUIAutomationValuePattern)
-            result["value"] = pattern.CurrentValue
+            result["value"] = self.state_value(node, "value", 10002, "Value", "CurrentValue")
         if "Toggle" in patterns:
-            pattern = node.GetCurrentPattern(10015).QueryInterface(self.uia.IUIAutomationTogglePattern)
-            result["toggle"] = int(pattern.CurrentToggleState)
+            result["toggle"] = int(self.state_value(node, "toggle", 10015, "Toggle", "CurrentToggleState"))
         return result
+
+    def state_value(self, node, key, ident, name, attribute):
+        if self.cached:
+            try:
+                return node.GetCachedPropertyValue(PATTERN_STATE[key])
+            except Exception:  # not cached on this element: ask the pattern
+                pass
+        return getattr(self.pattern(node, ident, name), attribute)
 
     def available(self, node, ident):
         try:

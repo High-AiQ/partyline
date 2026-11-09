@@ -1,13 +1,13 @@
-"""A browser-shaped window: slow chrome walked first, the page deep inside; fake clock throughout."""
+"""A browser-shaped window read in parts: every node reachable, the page deep inside; fake clock."""
 import unittest
 from types import SimpleNamespace
 
 from partyline_helper.uia_access import WindowAccess
 from partyline_helper.uia_action import by_path, find
 from partyline_helper.uia_identity import element_id
-from partyline_helper.uia_snapshot import BUDGET, MAX_ELEMENTS, PAGE_SHARE, snapshot
+from partyline_helper.uia_snapshot import snapshot
 
-CALL = .012  # seconds one Chrome UIA call takes: an unprioritised depth-first walk reads ~12 nodes in .3 s
+CALL = .012  # seconds one Chrome UIA call takes
 
 
 class Browser:
@@ -80,35 +80,28 @@ def names(result):
     return [item["name"] for item in result["elements"]]
 
 
+def read_all(browser, **caps):
+    """Follow state from part to part, the way the cursor does; return every part."""
+    parts, state = [], None
+    while True:
+        parts.append(snapshot(browser, clock=browser.clock, state=state, **caps))
+        state = parts[-1].get("state")
+        if not state:
+            return parts
+
+
 class PageContentTests(unittest.TestCase):
-    def test_slow_chrome_does_not_hide_the_page(self):
-        browser = Browser(links=30)
-        result = snapshot(browser, clock=browser.clock)
-        found = names(result)
-        self.assertIn("Page", found)
-        self.assertEqual(30, sum(name.startswith("Link ") for name in found))
-        self.assertEqual(3, sum(name.startswith("Heading ") for name in found))
-        self.assertLessEqual(browser.now, BUDGET + 2 * CALL)
-        self.assertTrue(result["truncated"])
-        self.assertIn("time budget", result["truncation"])
-        self.assertIn("page content read", result["truncation"])
-        self.assertIn("unread browser chrome subtrees", result["truncation"])
-        self.assertNotIn("not reached", result["truncation"])
-
-    def test_a_short_budget_spends_itself_on_the_page_not_the_toolbar(self):
-        browser = Browser()
-        result = snapshot(browser, clock=browser.clock, budget=.6)
-        self.assertIn("Page", names(result))
-        self.assertIn("Section 0", names(result))
-        self.assertLess(sum(name.startswith("Chrome button") for name in names(result)), 5)
-
-    def test_output_is_in_tree_order_with_window_first(self):
+    def test_tree_order_with_window_first_and_parent_links(self):
         browser = Browser(chrome=3, links=3)
         result = snapshot(browser, clock=browser.clock)
         self.assertEqual("Browser", names(result)[0])
         order = [result["paths"][item["id"]] for item in result["elements"]]
         self.assertEqual(sorted(order), order)
         self.assertLess(names(result).index("Address"), names(result).index("Page"))
+        by_name = {item["name"]: item for item in result["elements"]}
+        self.assertNotIn("parent", by_name["Browser"])
+        self.assertEqual(by_name["Browser"]["id"], by_name["Title"]["parent"])
+        self.assertEqual(by_name["Page"]["id"], by_name["Section 0"]["parent"])
 
     def test_unnamed_empty_wrappers_cost_no_elements_but_keep_their_paths(self):
         browser = Browser(links=2, chrome=1, wrappers=4)
@@ -118,54 +111,53 @@ class PageContentTests(unittest.TestCase):
         document = next(item for item in result["elements"] if item["name"] == "Page")
         self.assertGreater(len(result["paths"][document["id"]]), 8)
 
-    def test_not_reaching_the_page_is_reported(self):
-        browser = Browser()
-        result = snapshot(browser, clock=browser.clock, budget=4 * CALL)
-        self.assertTrue(result["truncated"])
-        self.assertIn("page content not reached", result["truncation"])
-        self.assertNotIn("Page", names(result))
+    def test_a_walk_in_parts_reaches_every_node_once_and_the_page_is_not_cut_off(self):
+        browser = Browser(links=500, chrome=300, latency=0)
+        parts = read_all(browser, limit=100)
+        found = [item["id"] for part in parts for item in part["elements"]]
+        self.assertEqual(len(found), len(set(found)))
+        whole = snapshot(browser, clock=browser.clock, limit=10_000)
+        self.assertEqual([item["id"] for item in whole["elements"]], found)
+        self.assertGreater(len(parts), 8)
+        self.assertIn("Link 499", [item["name"] for part in parts for item in part["elements"]])
+        self.assertFalse(parts[-1]["truncated"])
+        self.assertTrue(all(part["truncated"] for part in parts[:-1]))
 
-    def test_caps_hold_and_the_page_leaves_room_for_the_frame(self):
-        browser = Browser(links=500, chrome=20, latency=0)
-        result = snapshot(browser, clock=browser.clock)
-        found = names(result)
-        self.assertEqual(MAX_ELEMENTS, len(found))
-        self.assertIn("element limit", result["truncation"])
-        self.assertIn("Chrome button 19", found)  # spare room goes back to the page, not to waste
-        big = Browser(links=500, chrome=300, latency=0)
-        found = names(snapshot(big, clock=big.clock))
-        self.assertEqual(PAGE_SHARE, len(found) - 1 - found.index("Page"))
-        self.assertIn("Chrome button 40", found)
-
-    def test_depth_limit_is_reported_and_text_is_capped(self):
+    def test_every_cap_continues_and_text_is_capped(self):
         browser = Browser(links=1, chrome=1, latency=0)
         browser.nodes[browser.document]["name"] = "x" * 500
-        result = snapshot(browser, clock=browser.clock, depth_limit=4)
-        self.assertTrue(result["truncated"])
-        self.assertIn("depth limit", result["truncation"])
-        self.assertIn("page content not reached", result["truncation"])
+        result = snapshot(browser, clock=browser.clock)
         self.assertTrue(all(len(item["name"]) <= 160 for item in result["elements"]))
-
-    def test_visit_cap_stops_a_tree_of_empty_wrappers(self):
-        browser = Browser(links=0, chrome=0, latency=0)
+        tall = Browser(links=0, chrome=0, latency=0)
         node = 0
         for _ in range(1200):
-            node = browser.add("Pane", "", node, patterns=[])
-        result = snapshot(browser, clock=browser.clock, depth_limit=5000)
-        self.assertTrue(result["truncated"])
-        self.assertLessEqual(len(browser.reads), 1000)
+            node = tall.add("Pane", "", node, patterns=[])
+        tall.add("Button", "Deep button", node)
+        parts = read_all(tall, max_visits=500)
+        self.assertGreater(len(parts), 2)
+        self.assertLessEqual(max(len(tall.reads) for _ in parts), 3000)
+        self.assertIn("Deep button", [item["name"] for part in parts for item in part["elements"]])
 
-    def test_a_complete_small_window_is_not_truncated(self):
+    def test_a_small_window_is_one_untruncated_part(self):
         browser = Browser(links=2, chrome=2, latency=0)
         result = snapshot(browser, clock=browser.clock)
         self.assertFalse(result["truncated"])
         self.assertNotIn("truncation", result)
+        self.assertNotIn("state", result)
+
+    def test_a_changed_tree_between_parts_skips_what_is_gone(self):
+        browser = Browser(links=20, chrome=2, latency=0)
+        first = snapshot(browser, clock=browser.clock, limit=10)
+        browser.nodes[browser.document]["children"] = []
+        rest = snapshot(browser, clock=browser.clock, state=first["state"])
+        self.assertFalse(rest["truncated"])
+        self.assertNotIn("Link 19", names(rest))
 
 
 class PathTargetTests(unittest.TestCase):
     def test_page_elements_are_found_by_path_beyond_the_search_cap(self):
-        browser = Browser(chrome=300)
-        result = snapshot(browser, clock=browser.clock)
+        browser = Browser(chrome=1500, latency=0)
+        result = snapshot(browser, clock=browser.clock, limit=10_000)
         link = next(item for item in result["elements"] if item["name"] == "Link 5")
         path = result["paths"][link["id"]]
         node = by_path(browser, link["id"], path)
