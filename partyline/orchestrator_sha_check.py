@@ -184,6 +184,9 @@ def report_text(db, row) -> str:
     parts = [f"{head}{what} — {location}"]
     if warning:
         parts.append(warning)
+    repins = db._exec('SELECT old,new FROM task_review_repins WHERE conv_id=? ORDER BY rowid',
+                      (row['conv_id'],)).fetchall()
+    parts.extend(f"Review re-pinned from {item['old']} to {item['new']}" for item in repins)
     parts.append(findings)
     result = '\n'.join(parts)
     if len(result) > reports.MAX_BODY:

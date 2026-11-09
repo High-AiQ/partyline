@@ -77,9 +77,11 @@ class WindowBoundaryTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
         self.runtime.sockets = {"alpha": {owner, other}, "beta": {second_tab}}
         await self.grant("a")
         for socket in (owner, second_tab):
-            socket.send_json.assert_awaited_once()
-            self.assertEqual(self.device["id"], socket.send_json.await_args.args[0]["device_id"])
-        other.send_json.assert_not_awaited()
+            changes = [call.args[0] for call in socket.send_json.await_args_list
+                       if call.args[0]["type"] == "screen_devices_changed"]
+            self.assertEqual([self.device["id"]], [event["device_id"] for event in changes])
+        self.assertFalse(any(call.args[0]["type"] == "screen_devices_changed"
+                             for call in other.send_json.await_args_list))
 
     async def test_disconnected_and_replaced_sockets_cannot_register_grants(self):
         await self.offer()

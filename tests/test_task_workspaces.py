@@ -86,6 +86,21 @@ class PlainFolderTest(WorkspaceFixture):
         for item in self.row()['repositories']:
             self.assertEqual(git(item['path'], 'rev-parse', 'HEAD'), item['sha'])
 
+    async def test_open_review_discovers_new_workspace_tips(self):
+        self.umbrella(False)
+        await self.create('captain')
+        first = self.work('argon-backend')
+        await self.review()
+        second = self.work('argon-backend', 'second')
+        frontend = self.work('argon-frontend')
+        updated = await self.review()
+        found = {os.path.basename(item['repository']): item for item in updated['repositories']}
+        self.assertEqual({name: item['sha'] for name, item in found.items()},
+                         {'argon-backend': second, 'argon-frontend': frontend})
+        self.assertNotEqual(first, second)
+        for item in found.values():
+            self.assertEqual(git(item['path'], 'rev-parse', 'HEAD'), item['sha'])
+
     async def test_a_sha_in_any_clone_is_admitted_by_sha_alone(self):
         self.umbrella(False)
         await self.create('captain')

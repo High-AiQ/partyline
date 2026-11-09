@@ -19,7 +19,7 @@ async def revoke(hub, device_id: str) -> None:
             await ws.close(code=4403, reason="device revoked")
         except (RuntimeError, WebSocketDisconnect, OSError):
             pass
-    await hub.window_grants.disconnected(device_id)
+    await hub.window_grants.disconnected(device_id, reason="revoked by the person")
     await hub.tools.end_device(device_id, "computer revoked")
     share = next((s for s in hub.shares.values() if s.device_id == device_id), None)
     if share:

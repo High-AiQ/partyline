@@ -128,3 +128,10 @@ MIGRATIONS += RAW_COUNT
 
 # A task's mode, chosen once at creation: `full`, `light` (scaled gates) or `express` (no review).
 MIGRATIONS += ["ALTER TABLE task_reviews ADD COLUMN mode TEXT NOT NULL DEFAULT 'full'"]
+
+# Require explicit commit identification after an open review is re-pinned.
+MIGRATIONS += [
+    "ALTER TABLE task_reviews ADD COLUMN repin_required INTEGER NOT NULL DEFAULT 0",
+    "CREATE TABLE IF NOT EXISTS task_review_repins(conv_id TEXT NOT NULL, old TEXT NOT NULL, "
+    "new TEXT NOT NULL, created_at REAL NOT NULL)",
+]

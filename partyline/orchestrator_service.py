@@ -3,7 +3,6 @@
 import asyncio
 import json
 import logging
-import os
 import time
 import uuid
 
@@ -12,16 +11,14 @@ from fastapi import HTTPException
 from .child_create import create_child
 from .contracts import ConversationsChangedEvent
 from .hierarchy_contracts import TaskChildIn
-from .line_worktree import line_cwd, rev
-from .git_fence import mirror_branch_ref
-from .task_workspaces import anchor, moved, tip, workspaces
-from .worktree_paths import branch_name
+from .task_workspaces import anchor, workspaces
 from .review_worktrees import ReviewError
 from .task_review_checkout import move_task_review_worktrees
 from .orchestrator_notices import handed_to, report, spawn_refused, tell
 from .orchestrator_sha_check import flag
 from .orchestrator_revive import (
     brief_reviewer, reviewer_is_live, revive_reviewer, staffed_by_preset, task_lock)
+from .orchestrator_repin import repin, review_entries, verdict_matches
 from .orchestrator_handles import pick_tag
 from .memory_live_raise import check_task_memory
 from .orchestrator_staff import ensure_reviewer, restart, spawn
@@ -145,6 +142,9 @@ async def request_review(runtime, actor, conv_id, body):
             await report(runtime, row)
             return task(db, conv_id, visibility=True)
         if row['status'] == 'in_review':
+            entries = await asyncio.to_thread(review_entries, db, conv_id, row, body)
+            if await repin(runtime, row, body, entries):
+                return task(db, conv_id, visibility=True)
             # Asking again revives a reviewer that died after admission.
             if staffed_by_preset(row) and not reviewer_is_live(db, row):
                 db._exec('UPDATE task_reviews SET reviewer_restarts=0 WHERE conv_id=?', (conv_id,))
@@ -156,23 +156,8 @@ async def request_review(runtime, actor, conv_id, body):
             return task(db, conv_id, visibility=True)
         from .orchestrator_stall import resume
         await asyncio.to_thread(resume, db, conv_id)
-        cwd = line_cwd(db, conv_id)
-        entries = [(item.repository, item.sha) for item in body.repositories or []]
+        entries = await asyncio.to_thread(review_entries, db, conv_id, row, body)
         primary = (row['repositories'] or [{}])[0].get('repository')
-        if not entries and not body.sha and workspaces(db, conv_id):
-            # Every repository whose task branch moved, and the one reviewed before.
-            entries = [(repo, head) for repo, head in moved(db, conv_id)]
-            real = {os.path.realpath(repo) for repo, _head in entries}
-            for space in workspaces(db, conv_id) if entries else ():
-                if primary and os.path.realpath(space['repository']) == os.path.realpath(primary) \
-                        and os.path.realpath(primary) not in real:
-                    entries.append((primary, tip(space, conv_id)))
-        if not entries:
-            single = mirror_branch_ref(cwd or "", conv_id, branch_name(cwd or ""))
-            sha = body.sha or single or rev(cwd or '', 'rev-parse', 'HEAD')
-            if not sha:
-                raise HTTPException(409, 'task has no commit to review')
-            entries = [('', sha)]
         try:
             checkouts = await asyncio.to_thread(
                 move_task_review_worktrees, db, conv_id, entries, primary)
@@ -206,12 +191,20 @@ async def request_review(runtime, actor, conv_id, body):
 
 
 async def review_verdict(runtime, actor, conv_id, body):
+    async with task_lock(runtime, conv_id):
+        return await _review_verdict(runtime, actor, conv_id, body)
+
+
+async def _review_verdict(runtime, actor, conv_id, body):
     db = runtime.db
     captain = None
     if body.override:
         row, captain = require_override(db, actor, conv_id)
     else:
         row = require_task(db, actor, conv_id, reviewer=True)
+    if row['status'] == 'in_review' and not verdict_matches(row, body):
+        raise HTTPException(409, f"stale or missing review SHA; review current SHA {row['sha']} "
+                            'and name all current repository SHAs in the verdict')
     approved = body.verdict == 'approve'
     changed = db._exec(
         'UPDATE task_reviews SET status=?,findings=?,previous_findings=CASE WHEN ? THEN previous_findings '

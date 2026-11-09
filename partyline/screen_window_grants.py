@@ -1,5 +1,6 @@
 """The authenticated helper asks for live owner-visible targets and reports local consent."""
 from collections import deque
+import json
 from types import SimpleNamespace
 from typing import Literal
 
@@ -10,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .auth_guard import Principal
 from .auth_store import user_by_id
 from .machine_scope import visible_conversation_ids
+from .mention_relay import post_private
 from .preset_traits import match_preset
 from .screen_grants import GRANTS
 from .screen_grant_store import replace_grant
@@ -27,6 +29,8 @@ class WindowRevoked(BaseModel):
     model_config = ConfigDict(extra="forbid")
     type: Literal["window_revoked"]
     grant_id: str = Field(min_length=1, max_length=128)
+    reason: Literal["revoked by the person", "window closed", "replaced by another grant"] = Field(
+        default="revoked by the person")
 
 
 class WindowGrantMessage(BaseModel):
@@ -106,11 +110,12 @@ class WindowGrants:
             return
         if kind == "window_revoked":
             try:
-                grant_id = WindowRevoked.model_validate(message).grant_id
+                revoked = WindowRevoked.model_validate(message)
             except ValidationError:
                 return
-            if self.known.get(grant_id) == device["id"]:
-                await self.revoke(grant_id, tell_helper=False)
+            entry = self.known.get(revoked.grant_id)
+            if entry and entry["device_id"] == device["id"]:
+                await self.revoke(revoked.grant_id, tell_helper=False, reason=revoked.reason)
             return
         response = {"type": "window_grant_result", "request_id": ident, "ok": False}
         try:
@@ -126,21 +131,54 @@ class WindowGrants:
             line, att = matches[0]
             old = replace_grant(self.hub.runtime.db, device["id"], body, offer[2][body.attachment_id])
             self.offers.pop(device["id"], None)
-            self.known[body.grant_id] = device["id"]
+            user = user_by_id(self.hub.runtime.db, device["owner_id"])
+            entry = {"device_id": device["id"], "device_name": device["name"],
+                     "holder": {"id": body.attachment_id, "name": att["name"],
+                                "conv_id": line["line_id"], "runtime_owner": offer[2][body.attachment_id]},
+                     "title": body.title, "shared_by": user["handle"]}
+            self.known[body.grant_id] = entry
             response.update(ok=True, target={**att, "line_id": line["line_id"],
                                              "line_name": line["line_name"]})
             for grant_id in old:
-                await self.revoke(grant_id)
+                await self.revoke(grant_id, reason="replaced by another grant")
             await self.changed(device["id"])
         except (ValidationError, ValueError):
             response["error"] = "the selected process is unavailable; choose a live attached process"
         if self.connected(device):
             await device["socket"].send_json(response)
+            if response["ok"] and self.known.get(body.grant_id) is entry:
+                # Let the helper activate its worker before the process can use the grant.
+                await self.notify(body.grant_id, entry)
 
-    async def revoke(self, grant_id, tell_helper=True):
+    async def notify(self, grant_id, entry, reason=None):
+        runtime = self.hub.runtime
+        holder = entry["holder"]
+        current = runtime.db.get_attachment(holder["id"])
+        if (not current or current["status"] not in ("starting", "running") or
+                current["runtime_owner"] != holder["runtime_owner"]):
+            return  # A detached, exited or superseded activation needs no notice.
+        title = " ".join(entry["title"].split())
+        window = json.dumps(grant_id, ensure_ascii=False)
+        if reason:
+            text = f"Window «{title}» (window={window}) is no longer shared: {reason}."
+        else:
+            computer = " ".join(entry["device_name"].split())
+            text = (f"Window access granted: {entry['shared_by']} shared «{title}» "
+                    f"(window={window}) on {computer}.\n"
+                    f"screen_elements(window={window}) to read; screen_element_action to act.")
+        await post_private(runtime, holder["conv_id"], "system", "system",
+                           f"@{holder['name']} {text}", audience=holder["id"], private=True)
+        if not reason:
+            await runtime.post_message(holder["conv_id"], "system", "system",
+                f"🪟 {entry['shared_by']} shared «{title}» with @{holder['name']}")
+
+    async def revoke(self, grant_id, tell_helper=True, *, reason="revoked by the person"):
         self.actions.pop(grant_id, None)
-        device_id = self.known.pop(grant_id, None)
+        entry = self.known.pop(grant_id, None)
+        device_id = entry["device_id"] if entry else None
         self.hub.runtime.db._exec("DELETE FROM screen_window_grants WHERE id=?", (grant_id,))
+        if entry:
+            await self.notify(grant_id, entry, reason)
         device = self.hub.devices.get(device_id)
         if device and tell_helper:
             try:
@@ -156,8 +194,8 @@ class WindowGrants:
             if grant_id not in active:
                 await self.revoke(grant_id)
 
-    async def disconnected(self, device_id):
+    async def disconnected(self, device_id, *, reason="helper disconnected"):
         self.offers.pop(device_id, None)
-        for grant_id, owner in list(self.known.items()):
-            if owner == device_id:
-                await self.revoke(grant_id, tell_helper=False)
+        for grant_id, entry in list(self.known.items()):
+            if entry["device_id"] == device_id:
+                await self.revoke(grant_id, tell_helper=False, reason=reason)

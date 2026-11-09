@@ -67,6 +67,24 @@ class MultiRepositoryReviewTest(TaskFixture):
         self.assertEqual((att['cwd'], att['cli_session']), (paths[0], 'kept'))
         self.assertEqual(git(paths[1], 'status', '--porcelain'), '')
 
+    async def test_repin_secondary_requires_all_current_shas(self):
+        await self.setup_task()
+        own, other = self.commit_in(self.line_dir, 'a1'), self.commit_in(self.sibling, 'b1')
+        first = await self.review(own, other)
+        new = self.commit_in(self.sibling, 'b2')
+        updated = await self.review(own, new)
+        self.assertEqual([item['sha'] for item in updated['repositories']], [own, new])
+        self.assertEqual(git(updated['repositories'][1]['path'], 'rev-parse', 'HEAD'), new)
+        reviewer = self.principal(first['reviewer_id'])
+        with self.assertRaises(HTTPException):
+            await review_verdict(self.runtime, reviewer, self.conv_id,
+                                 VerdictIn(verdict='approve', findings='ok', sha=own))
+        verdict = VerdictIn(verdict='approve', findings='ok', repositories=[
+            RepositoryShaIn(repository=self.repo, sha=own),
+            RepositoryShaIn(repository=self.sibling, sha=new)])
+        self.assertEqual((await review_verdict(self.runtime, reviewer, self.conv_id, verdict))['status'],
+                         'approved')
+
     async def test_a_sibling_repository_can_be_primary(self):
         await self.setup_task()
         row = await request_review(

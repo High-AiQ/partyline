@@ -92,6 +92,8 @@ class ReopenIn(BaseModel):
 class VerdictIn(BaseModel):
     model_config = ConfigDict(extra='forbid')
     verdict: Literal['approve', 'changes']
+    sha: str | None = Field(default=None, pattern=r'^[0-9a-f]{4,64}$')
+    repositories: list[RepositoryShaIn] | None = Field(default=None, min_length=1, max_length=8)
     findings: str = Field(min_length=1, max_length=1500)
     # Explicit captain override of a staffed review; an ordinary call keeps the
     # reviewer-of-record authorization unchanged.

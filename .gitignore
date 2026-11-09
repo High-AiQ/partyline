@@ -31,3 +31,4 @@ tests/evidence/
 skills/verify-visual-change/*.png
 skills/verify-visual-change/*.jpg
 skills/verify-visual-change/screenshots/
+frontend/.eslintcache
