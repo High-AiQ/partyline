@@ -421,14 +421,13 @@ class Db:
         with self._runtime_serialized():
             return self._detach_attachment_with_message(att_id, runtime_owner, body)
 
-    async def detach_attachment_with_message_async(
-        self, att_id: str, runtime_owner: str | None, body: str) -> MessageRow | None:
+    async def detach_attachment_with_message_async(self, att_id: str, runtime_owner: str | None, body: str, *,
+        self_detach: bool = False) -> MessageRow | None:
         async with self._runtime_serialized_async():
-            return self._detach_attachment_with_message(att_id, runtime_owner, body)
+            return self._detach_attachment_with_message(att_id, runtime_owner, body, self_detach)
 
-    def _detach_attachment_with_message(
-        self, att_id: str, runtime_owner: str | None, body: str
-    ) -> MessageRow | None:
+    def _detach_attachment_with_message(self, att_id: str, runtime_owner: str | None,
+                                        body: str, self_detach: bool = False) -> MessageRow | None:
         with self.lock:
             try:
                 attachment = self.conn.execute(
@@ -437,9 +436,10 @@ class Db:
                 if attachment is None:
                     return None
                 changed = self.conn.execute(
-                    "UPDATE attachments SET status='detached',runtime_started_at=NULL "
+                    "UPDATE attachments SET status='detached',runtime_started_at=NULL, "
+                    "turn_open=CASE WHEN ? THEN 0 ELSE turn_open END "
                     "WHERE id=? AND status NOT IN ('starting','running') AND runtime_owner IS ?",
-                    (att_id, runtime_owner),
+                    (self_detach, att_id, runtime_owner),
                 )
                 if changed.rowcount != 1:
                     self.conn.commit()

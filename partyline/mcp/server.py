@@ -29,6 +29,11 @@ class MCPServer:
         self._write_lock = threading.Lock()
         self._state_signature = None
         self._revoked = False
+        self._dynamic_screen_tools = None
+        self._capability_version = None
+        self._watch_ready = threading.Event()
+        self._poll_stop = threading.Event()
+        self._poll_thread = None
 
     def send(self, message: dict):
         raw = json.dumps(message, ensure_ascii=False, separators=(",", ":"))
@@ -51,9 +56,50 @@ class MCPServer:
 
     @staticmethod
     def _signature(state):
+        screen_state = ((bool(state.get("screen_read")), bool(state.get("screen_control")),
+                         bool(state.get("screen_windows")))
+                        if state.get("dynamic_screen_tools") else ())
         return (state.get("kind"), state.get("role"), state.get("conv_id"),
                 state.get("attachment_id"), bool(state.get("is_lead")),
-                tuple(sorted(state.get("actions", []))))
+                tuple(sorted(state.get("actions", []))), screen_state)
+
+    def _refresh_signature(self):
+        """Fetch capabilities after the server reports a version change."""
+        try:
+            state = self._state()
+        except (ApiError, OSError) as exc:
+            self._revoked = self._revoked or "HTTP 401" in str(exc)
+            return False
+        signature = self._signature(state)
+        if self._state_signature is not None and signature != self._state_signature:
+            self.send({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
+        self._state_signature = signature
+        self._capability_version = state.get("capability_version", self._capability_version)
+        return True
+
+    def _watch_step(self, version):
+        try:
+            current = self.client.capability_version(version, timeout=65)
+            if current != version and not self._refresh_signature():
+                return version, False
+            return current, True
+        except Exception:
+            logger.warning("MCP capability watcher request failed; it will retry", exc_info=True)
+            return version, False
+
+    def _poll_capabilities(self):
+        delay = 0.5
+        while not self._poll_stop.is_set():
+            if not self._watch_ready.wait(0.2):
+                continue
+            version, recovered = self._watch_step(self._capability_version)
+            if recovered:
+                self._capability_version = version
+                delay = 0.5
+            elif self._poll_stop.wait(delay):
+                return
+            else:
+                delay = min(delay * 2, 10)
 
     def handle(self, message: dict):
         if not isinstance(message, dict):
@@ -82,7 +128,11 @@ class MCPServer:
         if method == "tools/list":
             try:
                 state = self._state()
+                self._dynamic_screen_tools = bool(state.get("dynamic_screen_tools"))
                 self._state_signature = self._signature(state)
+                self._capability_version = state.get("capability_version")
+                if self._dynamic_screen_tools:
+                    self._watch_ready.set()
                 tools = (tools_core.tool_list(state) + tools_captain.tool_list(state)
                          + tools_tasks.tool_list(state) + tools_resources.tool_list(state)
                          + tools_handover.tool_list(state) + tools_control.tool_list(state)
@@ -106,6 +156,9 @@ class MCPServer:
         try:
             state = self._state()  # Each call checks the live attachment capability.
             signature = self._signature(state)
+            self._dynamic_screen_tools = bool(state.get("dynamic_screen_tools"))
+            if self._dynamic_screen_tools:
+                self._watch_ready.set()
             if signature != self._state_signature:
                 changed = self._state_signature is not None
                 self._state_signature = signature
@@ -138,6 +191,10 @@ class MCPServer:
             elif name in captain_names:
                 value = tools_captain.call(self.client, name, args, state)
             else:
+                if name in {"screen_frame", "screen_elements", "screen_element_action",
+                            "screen_control_request", "screen_click", "screen_move",
+                            "screen_drag", "screen_scroll", "screen_type", "screen_key"}:
+                    raise ApiError("no screen shared with you")
                 raise ValueError("tool is not currently available to this attachment")
             text = render(value, self.client.connection["api"].rstrip("/"))
             return self.response(ident, {"content": [{"type": "text", "text": text}]})
@@ -161,27 +218,40 @@ class MCPServer:
 
     def run(self, input_stream=None):
         stream = input_stream or sys.stdin
-        while True:
-            line = stream.readline(MAX_LINE + 1)
-            if not line:
-                break
-            if len(line) > MAX_LINE:
-                self.response(None, error={"code": -32700, "message": "request exceeds MCP input limit"})
-                break
-            if nesting_depth(line) > MAX_NESTING:
-                self.response(None, error={
-                    "code": -32700, "message": "request nesting exceeds parser limit"})
-                continue
-            try:
-                message = json.loads(line)
-            except RecursionError:  # pragma: no cover - older parsers, kept as a backstop
-                self.response(None, error={
-                    "code": -32700, "message": "request nesting exceeds parser limit"})
-                continue
-            except ValueError:
-                self.response(None, error={"code": -32700, "message": "parse error"})
-                continue
-            self.handle(message)
+        self._poll_thread = threading.Thread(target=self._poll_capabilities, daemon=True)
+        self._poll_thread.start()
+        try:
+            while True:
+                line = stream.readline(MAX_LINE + 1)
+                if not line:
+                    break
+                if len(line) > MAX_LINE:
+                    self.response(None, error={"code": -32700, "message": "request exceeds MCP input limit"})
+                    break
+                if nesting_depth(line) > MAX_NESTING:
+                    self.response(None, error={
+                        "code": -32700, "message": "request nesting exceeds parser limit"})
+                    continue
+                try:
+                    message = json.loads(line)
+                except RecursionError:  # pragma: no cover - older parsers, kept as a backstop
+                    self.response(None, error={
+                        "code": -32700, "message": "request nesting exceeds parser limit"})
+                    continue
+                except ValueError:
+                    self.response(None, error={"code": -32700, "message": "parse error"})
+                    continue
+                self.handle(message)
+        finally:
+            self._poll_stop.set()
+            interrupt = getattr(self.client, "interrupt", None)
+            if interrupt:
+                try:
+                    interrupt()
+                except OSError:
+                    logger.debug("MCP client connection close was already complete", exc_info=True)
+            if self._poll_thread:
+                self._poll_thread.join(timeout=1)
 
 
 def nesting_depth(text: str) -> int:

@@ -927,6 +927,19 @@ class ServerTest(unittest.TestCase):
             server.runtime.db.list_messages("line")[-1]["body"], "@opus detached"
         )
 
+    def test_detach_route_identifies_only_the_callers_own_attachment(self):
+        self.add_attachment("old", "opus", "exited")
+        for principal, expected in (
+            (Principal(kind="machine", name="opus", conv_id="line", attachment_id="old"), True),
+            (Principal(kind="machine", name="other", conv_id="line", attachment_id="other"), False),
+            (Principal(kind="user", name="greg"), False),
+        ):
+            request = SimpleNamespace(state=SimpleNamespace(principal=principal))
+            with patch("partyline.server.deny_unless_attachment"), \
+                 patch("partyline.server.close_attachment", new_callable=AsyncMock) as close:
+                self.arun(server.detach(request, "old"))
+            close.assert_awaited_once_with(server.runtime, "old", self_detach=expected)
+
     def test_detach_timeout_keeps_unconfirmed_running_row_tracked(self):
         self.add_attachment("old", status="running")
         adapter = FakeAdapter(att={"runtime_owner": None})
@@ -1113,7 +1126,7 @@ class ServerTest(unittest.TestCase):
         )
         server.runtime.live["old"] = adapter
 
-        async def stalled_transaction(*_args):
+        async def stalled_transaction(*_args, **_kwargs):
             await asyncio.Event().wait()
 
         async def detach_with_stalled_transaction():

@@ -1,5 +1,13 @@
 # Lessons: the false-assumptions ledger
 
+## Self-detach ends the requested work
+
+The false assumption was that every stopped process with an open turn needed to
+continue it. A self-detach stops the CLI before its end receipt; preserving its
+turn mark prompted Claude to repeat the self-detach on resume. The successful
+self-detach transaction now consumes that mark, while an external interruption
+keeps it. Resume regression tests cover both cases.
+
 ## Attachment activation identifiers can be credentials
 
 The false assumption was that `runtime_owner` was safe picker metadata. It is also

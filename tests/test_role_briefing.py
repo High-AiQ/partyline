@@ -256,6 +256,10 @@ class RoleBriefingTests(unittest.TestCase):
                 # Both halves of the duty: detach the idle, retire the finished child.
                 self.assertIn("attachments/close", text)
                 self.assertIn("?stop_processes=true", text)
+                # The end-of-work rule: every process goes, the captain last.
+                self.assertIn("Once every task is merged and released", text)
+                self.assertIn("detach yourself last", text)
+                self.assertIn('no process stays attached "standing by"', text)
                 # The read that says what is still live, then the peek before a detach.
                 self.assertIn("/process-overview", text)
                 self.assertIn("/screen?lines=40", text)

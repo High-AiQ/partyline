@@ -15,6 +15,11 @@ from tests.test_uia_page_content import Browser
 GRANT = {"hwnd": 10, "pid": 42, "title": "KDP Bookshelf", "process": "chrome.exe"}
 
 
+def rows(lines):
+    """The element lines of an answer, without the `in:` ancestor lines between them."""
+    return [line for line in lines.split("\n") if not line.startswith("in: ")]
+
+
 class Page(Browser):
     """A browser fake that can also be acted on; links hang off a deep section, a pager beside them."""
 
@@ -111,14 +116,14 @@ class NavigationTests(PageCase):
     async def test_ls_find_and_text_use_the_stored_snapshot_without_another_helper_read(self):
         summary = await self.ask()
         reads = len(self.parts)
-        pager = (await self.ask(query="Pagination"))["lines"].split(" ")[0]
+        pager = rows((await self.ask(query="Pagination"))["lines"])[0].split(" ")[0]
         listing = await self.ask(root=pager, depth=2)
         self.assertEqual(6, listing["total"])
         self.assertIn('Hyperlink "2"', listing["lines"])
         self.assertIn("(1 children, 1 in all)", listing["lines"])
         found = await self.ask(query="2", control_type="Hyperlink", root=pager)
         self.assertEqual(1, found["total"])
-        self.assertTrue(found["lines"].endswith("> List Pagination > ListItem Page 2"))
+        self.assertIn("> List Pagination > ListItem Page 2\n", found["lines"])
         text = await self.ask(text=True, query="showing", context=0)
         self.assertEqual(["Showing 10 of 4,982 books"],
                          [line.split(": ", 1)[1] for line in text["lines"].split("\n")])
@@ -130,17 +135,27 @@ class NavigationTests(PageCase):
         await self.ask()
         found = await self.ask(query="Link 4321", control_type="Hyperlink", bounds=True)
         self.assertEqual(1, found["total"])
-        ident = found["lines"].split(" ")[0]
-        self.assertNotIn(ident, self.first_ids)  # it came from a later cursor part
+        ident = rows(found["lines"])[0].split(" ")[0]
+        helper = self.hub.snapshots["g"].nodes[ident].helper
+        self.assertNotIn(helper, self.first_ids)  # it came from a later cursor part
         self.assertIn("[invoke]", found["lines"])
         self.assertIn("@0,0,10,10", found["lines"])
-        self.assertTrue(found["lines"].endswith("in: Group Section 5 > Group Section 6 > Group Section 7"))
+        self.assertIn("in: Group Section 5 > Group Section 6 > Group Section 7\n", found["lines"])
         generation = self.access.gate.grant()
         access = SimpleNamespace(gate=self.access.gate, list_windows=lambda: [GRANT], paths=self.access.paths)
-        result = run_action(access, GRANT, generation, {"element_id": ident, "action": "invoke"},
+        result = run_action(access, GRANT, generation, {"element_id": helper, "action": "invoke"},
                             factory=lambda _: self.page)
         self.assertEqual("completed", result["status"])
         self.assertEqual([("Link 4321", "invoke")], self.page.calls)
+
+    async def test_a_long_name_travels_through_the_real_helper_and_id_reads_it_whole(self):
+        self.page.add("ListItem", "Title " + "z" * 700, self.page.pager, patterns=[])
+        await self.ask()
+        found = await self.ask(query="^Title z")
+        ident = rows(found["lines"])[0].split(" ")[0]
+        self.assertIn("…", found["lines"])
+        whole = await self.ask(id=ident)
+        self.assertIn("Title " + "z" * 700 + '"', whole["lines"])
 
     async def test_text_reads_in_order_and_pages(self):
         await self.ask()
@@ -198,11 +213,11 @@ class PagingTests(PageCase):
         seen, offset, answers = [], 0, 0
         while True:
             answer = await self.ask(query="Link", offset=offset)
-            seen += [line.split(" ")[0] for line in answer["lines"].split("\n")]
+            seen += [line.split(" ")[0] for line in rows(answer["lines"])]
             answers += 1
             if "more" not in answer:
                 break
-            self.assertEqual(answer["total"] - offset - len(answer["lines"].split("\n")), answer["more"])
+            self.assertEqual(answer["total"] - offset - len(rows(answer["lines"])), answer["more"])
             offset = answer["next_offset"]
         self.assertEqual(1200, len(set(seen)))
         self.assertEqual(1200, answer["total"])

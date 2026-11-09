@@ -3,11 +3,14 @@
 import asyncio
 import tempfile
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from partyline.db import Db
 from partyline.reattach import ResumedAttachment
 from partyline.resume_continuation import drain, resume_with_backlog
 from partyline.runtime import ChatRuntime
+from partyline.line_process_routes import detach_attachment
+from partyline.presence import Presence
 
 
 class StagingAdapter:
@@ -84,6 +87,48 @@ class ResumeContinuationTest(unittest.IsolatedAsyncioTestCase):
         await resume_with_backlog(self.runtime, "one", resume)
         await drain()
         self.assertEqual([m["body"] for m in seen["pending"]], ["@luna finish the adapter"])
+
+    async def test_self_detach_is_consumed_before_resume_and_next_turn(self):
+        self.db.set_last_seen("one", 10**6, "owner-1")
+        self.db.set_attachment_status("one", "running", "owner-1")
+        Presence(self.runtime)
+        await self.runtime.presence.started("line", "one", "owner-1")
+        adapter = StagingAdapter("owner-1")
+
+        async def stop():
+            self.db.set_attachment_status("one", "detached", "owner-1")
+
+        adapter.stop = stop
+        self.runtime.live["one"] = adapter
+        with patch("partyline.tmp_owners.record"), \
+             patch("partyline.line_process_routes.remove_config"), \
+             patch("partyline.line_process_routes.announce_survivors", new_callable=AsyncMock):
+            await detach_attachment(self.runtime, "one", self_detach=True)
+        self.assertEqual(self.db.get_attachment("one")["turn_open"], 0)
+        await self.runtime.presence.finished("line", "one")
+
+        resumed = StagingAdapter("owner-1")
+        resume, seen = self._resume(resumed, staged=True)
+        await resume_with_backlog(self.runtime, "one", resume)
+        self.assertFalse(any("restarted in the middle" in m["body"] for m in seen["pending"]))
+        self.db.set_attachment_status("one", "running", "owner-1")
+        self.runtime.live["one"] = resumed
+        await self.runtime.presence.started("line", "one", "owner-1")
+        with patch.object(self.runtime.presence.returns, "turn_ended", new_callable=AsyncMock), \
+             patch.object(self.runtime.presence.queue, "flush", new_callable=AsyncMock), \
+             patch.object(self.runtime.presence.goal_stall, "check_tree", new_callable=AsyncMock):
+            await self.runtime.presence.ended("line", "one", "owner-1")
+        self.assertEqual(self.db.get_attachment("one")["status"], "running")
+        self.assertIs(self.runtime.live["one"], resumed)
+
+    async def test_external_detach_preserves_interrupted_turn_notice(self):
+        self.db._exec("UPDATE attachments SET turn_open=1 WHERE id='one'")
+        await self.db.detach_attachment_with_message_async("one", "owner-1", "detached")
+        adapter = StagingAdapter("owner-1")
+        resume, seen = self._resume(adapter, staged=True)
+        await resume_with_backlog(self.runtime, "one", resume)
+        await drain()
+        self.assertTrue(any("restarted in the middle" in m["body"] for m in seen["pending"]))
 
     async def test_nothing_pending_means_nothing_to_settle(self):
         self.db.set_last_seen("one", 10**6, "owner-1")

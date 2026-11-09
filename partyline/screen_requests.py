@@ -15,6 +15,8 @@ def active(hub, share) -> bool:
 
 def end_share(hub, share) -> None:
     """Forget the share before yielding, and cancel its outstanding captures."""
+    from .capability_versions import bump_runtime
+    bump_runtime(hub.runtime)
     hub.shares.pop(share.conv_id, None)
     share.status = "stopped"
     share.frames.clear()

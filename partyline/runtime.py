@@ -12,6 +12,7 @@ from .attachment_broadcast import broadcast_attachment_state
 from .bridge_delivery import stamp_outbound
 from .bridge_service import close_for_attachment
 from .contracts import ErrorEvent, Event, MessageEvent, MessageResponse
+from .capability_versions import CapabilityVersions
 from .handshake import hello_payload
 from .db import Db
 from .delivery_hooks import delivery_hooks
@@ -40,6 +41,7 @@ class ChatRuntime(DeliveryCreditMixin):
 
     def __init__(self, db: Db):
         self.db = db
+        self.capability_versions = CapabilityVersions(db)
         self.sockets: dict[str, set] = {}
         self.human_handles: dict[str, dict[WebSocket, tuple[str, str]]] = {}
         self.live: dict[str, Adapter] = {}

@@ -521,11 +521,11 @@ async def edit_attachment(
 
 @app.delete("/api/attachments/{att_id}", response_model=OkResponse)
 async def detach(request: Request, att_id: str):
-    deny_unless_attachment(runtime.db, request_principal(request), att_id, "close")
-    return await close_attachment(runtime, att_id)
+    principal = request_principal(request)
+    deny_unless_attachment(runtime.db, principal, att_id, "close")
+    return await close_attachment(runtime, att_id, self_detach=(principal.kind == "machine"
+                                  and principal.attachment_id == att_id))
 
-
-# -- attachment introspection ----------------------------------------------
 def _hook_url(att_id: str, bind: BindConfig | None = None, token: str = "") -> str:
     return hook_url(att_id, bind or app.state.bind, token)
 

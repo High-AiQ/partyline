@@ -51,17 +51,16 @@ from .reports import (
     list_for_parent,
     mark_notified,
     release_wake_claim,
+    response_model as _report_model,
     wake_message,
 )
 from .system_notice import post_system_notice
+from .screen_capabilities import for_request
+from .capability_version_routes import router_for as capability_version_router
 
 
 def _http(exc: HierarchyError | ReportError) -> HTTPException:
     return HTTPException(exc.status_code, exc.detail)
-
-
-def _report_model(row: dict) -> dict:
-    return {**row, "notify": bool(row.get("notify")), "revision": int(row.get("revision") or 1)}
 
 
 def hierarchy_router(runtime) -> APIRouter:
@@ -69,10 +68,11 @@ def hierarchy_router(runtime) -> APIRouter:
     db = runtime.db
     from .captain_handover_completion import router_for
     router.include_router(router_for(runtime))
+    router.include_router(capability_version_router(runtime))
 
     @router.get("/api/capabilities", response_model=CapabilityState)
     def get_capabilities(request: Request, conv_id: str | None = Query(default=None)):
-        return capabilities_for(db, request_principal(request), conv_id)
+        return for_request(runtime, db, request, conv_id, capabilities_for)
 
     @router.get("/api/conversations/{conv_id}/briefing")
     def get_briefing(request: Request, conv_id: str):

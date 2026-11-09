@@ -1,9 +1,8 @@
-"""System-tray icon: status colour, tooltip, Stop sharing and Quit (pystray; Windows by default).
+"""System-tray icon: status colour, tooltip, the Stop items and Quit (pystray; Windows by default).
 
 The icon and its menu live on pystray's own thread; every action goes through the `Status` callbacks,
 which hand off to the helper's event loop thread-safely. `icon_type` is injectable so tests need no desktop.
 """
-import contextlib
 import threading
 
 from PIL import Image, ImageDraw
@@ -11,6 +10,7 @@ from PIL import Image, ImageDraw
 COLORS = {"offline": (128, 128, 128), "paired": (46, 160, 67), "sharing": (240, 165, 0),
           "control": (215, 58, 73), "tools": (130, 80, 220)}
 TITLE = "Partyline Helper"
+TIP_LIMIT = 127  # szTip holds 127 UTF-16 units and a terminator; pystray raises on more
 
 
 def draw_icon(state, size=64):
@@ -20,6 +20,24 @@ def draw_icon(state, size=64):
     ImageDraw.Draw(image).ellipse((pad, pad, size - pad, size - pad), fill=COLORS[state] + (255,),
                                   outline=(255, 255, 255, 255), width=max(2, size // 16))
     return image
+
+
+def units(text):
+    """Length in UTF-16 code units, which is what Windows' WCHAR arrays count (an emoji is two)."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+def tooltip(text):
+    """The tooltip text, cut to what the Windows tray accepts (a longer one raises inside pystray)."""
+    if units(text) <= TIP_LIMIT:
+        return text
+    kept, used = [], 1  # one unit for the ellipsis
+    for char in text:
+        used += units(char)
+        if used > TIP_LIMIT:
+            break
+        kept.append(char)
+    return "".join(kept) + "…"
 
 
 def default_icon_type():  # pragma: no cover - needs a desktop
@@ -33,9 +51,13 @@ class Tray:
         self.backend = backend or default_icon_type()
         self.icon = None
         self.drawing = threading.Lock()
+        self.reported = set()
 
     def sharing(self, item=None):
         return self.status.state in ("sharing", "control")
+
+    def shared(self, item=None):
+        return self.sharing() or bool(self.status.window_grants or self.status.window_title)
 
     def tools(self, item=None):
         return self.status.tools_active
@@ -44,14 +66,14 @@ class Tray:
         item = self.backend.MenuItem
         return self.backend.Menu(
             item(lambda _: self.status.label, None, enabled=False),
-            item("Stop sharing", lambda *_: self.status.request_stop_share(),
+            item("Stop screen sharing", lambda *_: self.status.request_stop_share(),
                  enabled=lambda _: self.sharing()),
+            item("Stop all sharing", lambda *_: self.status.request_stop_all(),
+                 enabled=lambda _: self.shared()),
             item("Share a window…", lambda *_: self.status.request_choose_window()),
             *(item(label, self.backend.Menu(item("Stop", lambda *_, key=ident:
                   self.status.request_stop_window_grant(key))))
               for ident, label in self.status.window_grants.items()),
-            item("Stop all window sharing", lambda *_: self.status.request_stop_window(),
-                 enabled=lambda _: bool(self.status.window_title)),
             item("End agent session", lambda *_: self.status.request_stop_tools(),
                  enabled=lambda _: self.tools()),
             item("Stop render checks", lambda *_: self.status.request_stop_checks(),
@@ -68,31 +90,44 @@ class Tray:
     def show(self, icon):
         """pystray's setup hook: show the icon, then draw. A draw before it is visible can be lost,
         because showing it adds the icon handle built from the image it had before that draw."""
-        with contextlib.suppress(Exception):  # a broken tray must never break the helper
-            icon.visible = True
+        self.apply("show", lambda: setattr(icon, "visible", True))
         self.refresh()
 
     def refresh(self, state=None):
-        """Draw the current state; serialised, and read inside the lock so no older state lands on top."""
+        """Draw the current state; serialised, and read inside the lock so no older state lands on top.
+
+        The menu goes first and each step stands alone: a step pystray rejects (an over-long tooltip
+        raised for a shared window's title, which left the menu without its Stop item) must not skip the
+        rest, and is logged once so a broken tray can be diagnosed.
+        """
         with self.drawing:
-            if self.icon:
-                with contextlib.suppress(Exception):  # a broken tray must never break the helper
-                    self.icon.icon = draw_icon(self.status.state)
-                    self.icon.title = f"{TITLE}: {self.status.label}"
-                    self.icon.menu = self.menu()
-                    self.icon.update_menu()
+            icon = self.icon
+            if icon:
+                self.apply("menu", lambda: self.set_menu(icon))
+                self.apply("icon", lambda: setattr(icon, "icon", draw_icon(self.status.state)))
+                self.apply("title", lambda: setattr(icon, "title", tooltip(f"{TITLE}: {self.status.label}")))
+
+    def set_menu(self, icon):
+        icon.menu = self.menu()
+        icon.update_menu()
+
+    def apply(self, step, action):
+        try:
+            action()
+        except Exception as exc:  # noqa: BLE001 - a broken tray must never break the helper
+            if step not in self.reported:
+                self.reported.add(step)
+                print(f"Tray {step} update failed: {exc!r}", flush=True)
 
     def notify(self, text):
         """A balloon in case the dialog is still hidden; best effort."""
         if self.icon:
-            with contextlib.suppress(Exception):
-                self.icon.notify(text, TITLE)
+            self.apply("notify", lambda: self.icon.notify(text, TITLE))
 
     def stop(self):
         icon, self.icon = self.icon, None
         if icon:
-            with contextlib.suppress(Exception):
-                icon.stop()
+            self.apply("stop", icon.stop)
 
 
 def start_tray(status, backend=None):
@@ -100,6 +135,7 @@ def start_tray(status, backend=None):
     try:
         tray = Tray(status, backend)
         tray.start()
-    except Exception:  # noqa: BLE001 - the helper works without a tray icon
+    except Exception as exc:  # noqa: BLE001 - the helper works without a tray icon
+        print(f"Tray start failed, running without a tray icon: {exc!r}", flush=True)
         return None
     return tray

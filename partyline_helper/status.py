@@ -65,6 +65,11 @@ class Status:
         if self.stop_window_grant:
             self.stop_window_grant(ident)
 
+    def request_stop_all(self):
+        """End the screen share and every window grant."""
+        self.request_stop_share()
+        self.request_stop_window()
+
     def request_stop_checks(self):
         if self.stop_checks:
             self.stop_checks()

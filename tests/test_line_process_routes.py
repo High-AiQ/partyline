@@ -1,9 +1,10 @@
+import asyncio
 import io
 import json
 import os
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
@@ -13,11 +14,14 @@ from partyline.auth_guard import install_auth_guard
 from partyline.agent_connection import connection_directory, provision_connection
 from partyline.auth_store import rotate_api_token
 from partyline.db import Db
-from partyline.hierarchy import set_parent
+from partyline.hierarchy import set_lead, set_parent
 from partyline.hierarchy_routes import hierarchy_router
 from partyline.machine_scope import deny_unless_attachment
 from partyline.line_process_routes import close_attachment, register_line_process_routes
 from partyline.runtime import ChatRuntime
+from partyline.presence import Presence
+from partyline.reattach import ResumedAttachment
+from partyline.resume_continuation import drain, resume_with_backlog
 from partyline.mcp.client import ApiError
 from partyline.mcp.server import MCPServer
 
@@ -234,6 +238,42 @@ class CloseLineProcessesTest(unittest.TestCase):
         self.assertEqual(global_events[-1], {
             "type": "line_live", "conversation_id": "line", "live_count": 0,
         })
+
+    def test_captain_bulk_self_close_consumes_only_its_own_turn(self):
+        self.add_live("captain", "captain")
+        self.add_live("worker", "worker")
+        set_lead(self.db, "line", "captain")
+        token = auth_store.ensure_api_token(self.db, "captain")
+        self.db._exec("UPDATE attachments SET turn_open=1 WHERE id IN ('captain','worker')")
+        response = self.client.post("/api/conversations/line/attachments/close",
+                                    headers={"Authorization": "Bearer " + token})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.db.get_attachment("captain")["turn_open"], 0)
+        self.assertEqual(self.db.get_attachment("worker")["turn_open"], 1)
+
+        async def check_resumes():
+            backlogs = {}
+            async def resume(ident, pending):
+                backlogs[ident] = pending
+                adapter = Adapter({"runtime_owner": f"owner-{ident}"}, AsyncMock())
+                adapter.wait_startup_delivery_received = AsyncMock(return_value=True)
+                self.db.set_attachment_status(ident, "running", f"owner-{ident}")
+                self.runtime.live[ident] = adapter
+                return ResumedAttachment(adapter, True)
+            await resume_with_backlog(self.runtime, "captain", resume)
+            await resume_with_backlog(self.runtime, "worker", resume)
+            await drain()
+            self.assertFalse(any("restarted in the middle" in m["body"] for m in backlogs["captain"]))
+            self.assertTrue(any("restarted in the middle" in m["body"] for m in backlogs["worker"]))
+            presence = Presence(self.runtime)
+            await presence.started("line", "captain", "owner-captain")
+            with patch.object(presence.returns, "turn_ended", new_callable=AsyncMock), \
+                 patch.object(presence.queue, "flush", new_callable=AsyncMock), \
+                 patch.object(presence.goal_stall, "check_tree", new_callable=AsyncMock):
+                await presence.ended("line", "captain", "owner-captain")
+            self.assertEqual(self.db.get_attachment("captain")["status"], "running")
+            self.assertIn("captain", self.runtime.live)
+        asyncio.run(check_resumes())
 
     def test_close_can_leave_sublines_alone(self):
         parent_adapter = self.add_live("one", "sol", conv_id="line")

@@ -109,6 +109,9 @@ class MCPClientTests(unittest.TestCase):
         client = PartylineClient.__new__(PartylineClient)
         client.connection = {"api": "http://127.0.0.1:8643", "token": "secret",
                              "conversation_id": "home", "attachment_id": "att", "handle": "worker"}
+        client._active_lock = threading.Lock()
+        client._active_connections = set()
+        client._interrupted = False
         connection = Connection(response)
         client._origin = lambda: connection
         return client, connection
@@ -708,6 +711,166 @@ class RenderAndServerTests(unittest.TestCase):
         server.handle({**call, "id": 3})
         server.handle({**call, "id": 4})
         self.assertEqual(output.getvalue().count("notifications/tools/list_changed"), 1)
+
+    def test_screen_tools_follow_grants_and_push_refresh_for_idle_client(self):
+        client = FakeClient(actions=("read", "write"))
+        client.state.update(dynamic_screen_tools=True, screen_read=False,
+                            screen_control=False, screen_windows=False)
+        output = io.StringIO()
+        server = MCPServer(client, output)
+        def list_names(ident):
+            server.handle({"jsonrpc": "2.0", "id": ident, "method": "tools/list"})
+            listed = json.loads(output.getvalue().splitlines()[-1])
+            return {tool["name"] for tool in listed["result"]["tools"]}
+
+        names = list_names(1)
+        self.assertNotIn("screen_frame", names)
+        self.assertNotIn("screen_elements", names)
+        self.assertNotIn("screen_click", names)
+
+        client.state["screen_windows"] = True
+        server._refresh_signature()
+        self.assertIn("notifications/tools/list_changed", output.getvalue())
+        names = list_names(2)
+        self.assertNotIn("screen_frame", names)
+        self.assertIn("screen_elements", names)
+        self.assertIn("screen_element_action", names)
+        self.assertNotIn("screen_click", names)
+
+        client.state["screen_control"] = True
+        server._refresh_signature()
+        self.assertIn("screen_click", list_names(3))
+
+        client.state.update(screen_windows=False, screen_control=False)
+        server._refresh_signature()
+        self.assertEqual(output.getvalue().count("notifications/tools/list_changed"), 3)
+        names = list_names(4)
+        self.assertNotIn("screen_frame", names)
+        self.assertNotIn("screen_element_action", names)
+
+    def test_unlisted_screen_call_has_clear_denial(self):
+        client = FakeClient(actions=("read",))
+        client.state.update(dynamic_screen_tools=True, screen_read=False,
+                            screen_control=False, screen_windows=False)
+        output = io.StringIO()
+        server = MCPServer(client, output)
+        server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                       "params": {"name": "screen_frame", "arguments": {}}})
+        result = json.loads(output.getvalue().splitlines()[0])
+        self.assertTrue(result["result"]["isError"])
+        self.assertEqual(result["result"]["content"][0]["text"], "no screen shared with you")
+
+    def test_fallback_client_keeps_legacy_screen_catalog(self):
+        client = FakeClient(actions=("read", "write"))
+        output = io.StringIO()
+        server = MCPServer(client, output)
+        server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        names = {tool["name"] for tool in json.loads(output.getvalue().splitlines()[-1])
+                 ["result"]["tools"]}
+        self.assertIn("screen_frame", names)
+        self.assertIn("screen_elements", names)
+        self.assertIn("screen_click", names)
+
+    def test_live_screen_capabilities_resolve_attachment_grants(self):
+        from types import SimpleNamespace
+        from partyline.screen_capabilities import for_attachment
+
+        db = SimpleNamespace(
+            get_attachment=lambda _ident: {"adapter": "claude"},
+            _exec=lambda _query: SimpleNamespace(
+                fetchall=lambda: [{"attachment_id": "att-1"}]),
+        )
+        share = SimpleNamespace(status="active", share_id="share")
+        grant = SimpleNamespace(status="active", holder=None)
+        hub = SimpleNamespace(shares={"home": share},
+                              control=SimpleNamespace(grants={"share": grant}))
+        runtime = SimpleNamespace(db=db, screen_hub=hub)
+        principal = SimpleNamespace(kind="machine", conv_id="home", attachment_id="att-1",
+                                     name="worker")
+        state = for_attachment(runtime, principal, None, {})
+        self.assertTrue(state["dynamic_screen_tools"])
+        self.assertTrue(state["screen_read"])
+        self.assertTrue(state["screen_control"])
+        self.assertTrue(state["screen_windows"])
+
+    def test_capability_watcher_retries_transport_failure_and_notifies(self):
+        client = FakeClient(actions=("read", "write"))
+        client.state.update(dynamic_screen_tools=True, screen_read=False,
+                            screen_control=False, screen_windows=False)
+        calls = []
+
+        def capability_version(since, timeout):
+            calls.append((since, timeout))
+            if len(calls) == 1:
+                raise ConnectionRefusedError("temporary outage")
+            client.state["screen_read"] = True
+            return "epoch:2"
+
+        client.capability_version = capability_version
+
+        class StopAfterRetry:
+            checks = 0
+
+            def is_set(self):
+                self.checks += 1
+                return self.checks >= 3
+
+            def wait(self, _delay):
+                return False
+
+        output = io.StringIO()
+        server = MCPServer(client, output)
+        server._state_signature = server._signature(client.state)
+        server._capability_version = "epoch:1"
+        server._dynamic_screen_tools = True
+        server._watch_ready.set()
+        server._poll_stop = StopAfterRetry()
+        server._poll_capabilities()
+        self.assertEqual([call[0] for call in calls], ["epoch:1", "epoch:1"])
+        self.assertEqual(output.getvalue().count("notifications/tools/list_changed"), 1)
+        server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        names = {tool["name"] for tool in json.loads(output.getvalue().splitlines()[-1])
+                 ["result"]["tools"]}
+        self.assertIn("screen_frame", names)
+
+    def test_capability_version_event_wakes_waiter_and_tracks_sql_changes(self):
+        import sqlite3
+        from partyline.capability_versions import CapabilityVersions
+
+        async def run():
+            import asyncio
+
+            versions = CapabilityVersions()
+            since = versions.current("att-1")
+            waiting = asyncio.create_task(versions.wait_for_change("att-1", since, timeout=60))
+            await asyncio.sleep(0)
+            versions.bump_all()
+            changed = await waiting
+            self.assertNotEqual(since, changed)
+
+        import asyncio
+        asyncio.run(run())
+
+        versions = CapabilityVersions()
+        before = versions.current("att-2")
+        connection = sqlite3.connect(":memory:")
+        connection.set_trace_callback(versions.changed_by_sql)
+        connection.execute("CREATE TABLE conversations (id TEXT)")
+        connection.execute("INSERT INTO conversations VALUES ('line')")
+        after = versions.current("att-2")
+        self.assertNotEqual(before, after)
+        connection.execute("CREATE TABLE messages (id INTEGER)")
+        unrelated = versions.current("att-2")
+        connection.execute("INSERT INTO messages VALUES (1)")
+        self.assertEqual(unrelated, versions.current("att-2"))
+        connection.execute("CREATE TABLE attachments (last_seen REAL, is_lead INTEGER)")
+        connection.execute("INSERT INTO attachments VALUES (0, 0)")
+        inserted = versions.current("att-2")
+        connection.execute("UPDATE attachments SET last_seen=1")
+        self.assertEqual(inserted, versions.current("att-2"))
+        connection.execute("UPDATE attachments SET is_lead=1")
+        self.assertNotEqual(inserted, versions.current("att-2"))
+        connection.close()
 
     def test_demotion_and_promotion_change_catalog(self):
         client = FakeClient(actions=("read", "write"))

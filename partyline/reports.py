@@ -44,6 +44,10 @@ def wake_message(lead_name: str, report_id: int) -> str:
     return f"@{lead_name} needs attention: report {report_id}"
 
 
+def response_model(row: dict) -> dict:
+    return {**row, "notify": bool(row.get("notify")), "revision": int(row.get("revision") or 1)}
+
+
 class ReportError(Exception):
     def __init__(self, status_code: int, detail: str):
         super().__init__(detail)

@@ -161,6 +161,10 @@ When it must stay, the branch stays too and `worktree_kept_reason` explains why.
 A captain may retire a child of its own tree with `DELETE /api/conversations/<child-id>`
 when the child has no live processes, its goal is cleared, and the stricter clean
 and merged checks pass; a person may archive a dirty line with snapshot preservation.
+End-of-work rule: once every task is merged and released, or the captain is completely
+blocked waiting on a person, the captain detaches every process on its tree (implementers,
+reviewers, sub-captains and helper processes) and detaches itself last; no process stays
+attached "standing by".
 
 Before you clear a goal, detach the final workers, or retire a line, persist its
 deliverables, assets, and unfinished work in the intended durable repository or application

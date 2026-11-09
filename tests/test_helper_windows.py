@@ -306,15 +306,16 @@ class TrayTests(unittest.TestCase):
         shown = tray.start_tray(status, FAKE_BACKEND)
         icon = FakeIcon.instances[0]
         self.assertTrue(icon.running)
-        label, stop, choose_window, stop_window, end_tools, end_checks, quit_item = icon.menu
+        label, stop, stop_all, choose_window, end_tools, end_checks, quit_item = icon.menu
+        self.assertEqual((stop.text, stop_all.text), ("Stop screen sharing", "Stop all sharing"))
         picked, revoked = [], []
         status.choose_window, status.stop_window = lambda: picked.append(1), lambda: revoked.append(1)
         choose_window.action()
         self.assertEqual(picked, [1])
-        self.assertFalse(stop_window.enabled(None))
+        self.assertFalse(stop_all.enabled(None))
         status.window_title = "Editor"
-        self.assertTrue(stop_window.enabled(None))
-        stop_window.action()
+        self.assertTrue(stop_all.enabled(None))
+        stop_all.action()
         self.assertEqual(revoked, [1])
         status.window_title = None
         self.assertEqual(end_tools.text, "End agent session")
@@ -339,11 +340,13 @@ class TrayTests(unittest.TestCase):
         status.set("paired")
         status.set("sharing")
         self.assertTrue(stop.enabled(None))
+        self.assertTrue(stop_all.enabled(None))
         self.assertEqual(label.text(None), "Sharing part of your screen")
         self.assertIn("Sharing", icon.title)
         stop.action()
+        stop_all.action()
         quit_item.action()
-        self.assertEqual((stops, quits), ([1], [1]))
+        self.assertEqual((stops, quits, revoked), ([1, 1], [1], [1, 1]))
         self.assertEqual(icon.updates, 3)  # the post-start redraw, then paired and sharing
         status.attention("Answer me")
         self.assertEqual(icon.notified, [("Answer me", "Partyline Helper")])
@@ -374,7 +377,8 @@ class TrayTests(unittest.TestCase):
 
         def broken(*a, **k):
             raise RuntimeError("no tray on this desktop")
-        self.assertIsNone(tray.start_tray(Status(), SimpleNamespace(Icon=broken)))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertIsNone(tray.start_tray(Status(), SimpleNamespace(Icon=broken)))
 
     def test_broken_listeners_never_break_the_share(self):
         status = Status()
@@ -393,8 +397,143 @@ class TrayTests(unittest.TestCase):
         shown.start()
         shown.icon.notify = Mock(side_effect=RuntimeError)
         shown.icon.stop = Mock(side_effect=RuntimeError)
-        shown.notify("x")
-        shown.stop()
+        with contextlib.redirect_stdout(io.StringIO()):
+            shown.notify("x")
+            shown.stop()
+
+
+class Win32LikeIcon(FakeIcon):
+    """pystray's win32 Icon: a settable menu that is turned into a native menu only when update_menu
+    runs (so it is a snapshot), and a tooltip of at most 128 characters that raises when longer, after
+    pystray has already stored it."""
+
+    def __init__(self, name, image, title, menu):
+        self._menu, self._title, self.native, self.updates = None, title, [], 0
+        super().__init__(name, image, title, menu)
+
+    @property
+    def menu(self):
+        return self._menu
+
+    @menu.setter
+    def menu(self, value):
+        self._menu = value
+        self.update_menu()
+
+    @property
+    def title(self):
+        return self._title
+
+    @title.setter
+    def title(self, value):
+        if value != self._title:
+            self._title = value
+            if len(value.encode("utf-16-le")) // 2 > 128:
+                raise ValueError("string too long (maximum length 128)")
+
+    def update_menu(self):
+        super().update_menu()
+        self.native = list(self._menu or [])
+
+    def clicked(self, text):
+        entry = next(item for item in self.native if str(item.text) == text)
+        return entry.action[0].action() if isinstance(entry.action, list) else entry.action()
+
+
+class WindowStopInTheTrayTests(unittest.TestCase):
+    """A person must be able to end a window share from the tray: the shared window's long title made
+    pystray raise on the tooltip, which skipped the menu update until a later redraw happened to succeed."""
+
+    def start(self):
+        status = Status()
+        status.stop_window_grant = lambda ident: self.revoke(status, ident)
+        self.grants = {}
+        shown = tray.start_tray(status, SimpleNamespace(Icon=Win32LikeIcon, Menu=FAKE_BACKEND.Menu,
+                                                         MenuItem=FAKE_BACKEND.MenuItem))
+        return status, shown
+
+    def revoke(self, status, ident):
+        self.grants.pop(ident, None)
+        self.publish(status)
+
+    def publish(self, status):
+        status.window_grants = dict(self.grants)
+        status.window_title = "; ".join(self.grants.values()) or None
+        status.changed()
+
+    def test_a_grant_with_a_long_title_shows_its_stop_and_stop_ends_it(self):
+        status, shown = self.start()
+        printed = io.StringIO()
+        tab = "a very long browser tab title " * 4
+        self.grants["w1"] = f"Partyline — {tab} → @opus5 «partyline dev»"
+        with contextlib.redirect_stdout(printed):
+            self.publish(status)
+        icon = shown.icon
+        windows = [str(item.text) for item in icon.native if "→" in str(item.text)]
+        self.assertEqual(windows, [self.grants["w1"]])
+        self.assertLessEqual(len(icon.title), 128)
+        self.assertEqual(printed.getvalue(), "")  # nothing failed: the tooltip is cut to fit
+        self.assertTrue(next(i for i in icon.native if i.text == "Stop all sharing").enabled(None))
+        icon.clicked(self.grants["w1"])
+        self.assertEqual(self.grants, {})
+        self.assertEqual([i for i in icon.native if "→" in str(i.text)], [])
+        self.assertFalse(next(i for i in icon.native if i.text == "Stop all sharing").enabled(None))
+
+    def test_grants_revoked_elsewhere_leave_the_menu_and_stop_all_ends_everything(self):
+        status, shown = self.start()
+        stopped = []
+        status.stop_share = lambda: stopped.append("screen")
+        status.stop_window = lambda: stopped.append("windows")
+        self.grants.update(a="A → @x «L»", b="B → @y «M»")
+        self.publish(status)
+        self.assertEqual(2, len([i for i in shown.icon.native if "→" in str(i.text)]))
+        del self.grants["a"]  # the server or the web revoked it
+        self.publish(status)
+        self.assertEqual(["B → @y «M»"], [str(i.text) for i in shown.icon.native if "→" in str(i.text)])
+        shown.icon.clicked("Stop all sharing")
+        self.assertEqual(stopped, ["screen", "windows"])
+
+    def test_a_failing_tray_step_is_logged_once_and_does_not_skip_the_others(self):
+        status, shown = self.start()
+        printed = io.StringIO()
+        self.grants["w"] = "W → @x «L»"
+        shown.icon.update_menu = Mock(side_effect=RuntimeError("no menu"))
+        with contextlib.redirect_stdout(printed):
+            self.publish(status)
+            self.publish(status)
+        self.assertEqual(1, printed.getvalue().count("Tray menu update failed"))
+        self.assertEqual(shown.icon.icon.getpixel((32, 32)), tray.draw_icon("offline").getpixel((32, 32)))
+
+    def test_the_tooltip_is_cut_in_utf16_units_without_splitting_an_emoji(self):
+        self.assertEqual(tray.tooltip("short"), "short")
+        for text in ("x" * 300, "Partyline Helper: " + "😀" * 120, "é" * 127 + "😀"):
+            cut = tray.tooltip(text)
+            self.assertLessEqual(tray.units(cut), 127)
+            self.assertTrue(cut.endswith("…"))
+            cut.encode("utf-16-le")  # a split surrogate pair would not encode
+        status, shown = self.start()
+        self.grants["w"] = "😀" * 120 + " → @x «L»"
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed):
+            self.publish(status)
+        self.assertEqual("", printed.getvalue())
+        self.assertLessEqual(tray.units(shown.icon.title), 128)
+
+    def test_start_and_stop_failures_are_logged_and_never_end_the_helper(self):
+        class Broken(FakeIcon):
+            def run_detached(self, setup=None):
+                raise RuntimeError("no shell")
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed):
+            self.assertIsNone(tray.start_tray(Status(), SimpleNamespace(
+                Icon=Broken, Menu=FAKE_BACKEND.Menu, MenuItem=FAKE_BACKEND.MenuItem)))
+            status, shown = self.start()
+            shown.icon.stop = Mock(side_effect=RuntimeError("hung"))
+            shown.stop()
+            shown.stop()
+        self.assertIn("Tray start failed", printed.getvalue())
+        self.assertIn("no shell", printed.getvalue())
+        self.assertEqual(1, printed.getvalue().count("Tray stop update failed"))
 
 
 class StartupRaceTests(unittest.TestCase):

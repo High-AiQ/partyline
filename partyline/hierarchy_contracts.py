@@ -231,6 +231,11 @@ class CapabilityState(BaseModel):
     actions: list[str] = Field(default_factory=list)
     depth: int = 0
     max_depth: int = 0
+    screen_read: bool = False
+    screen_control: bool = False
+    screen_windows: bool = False
+    dynamic_screen_tools: bool = False
+    capability_version: str | None = None
 
 
 class MessageIn(BaseModel):

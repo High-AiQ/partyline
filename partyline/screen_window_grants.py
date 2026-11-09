@@ -165,7 +165,9 @@ class WindowGrants:
             computer = " ".join(entry["device_name"].split())
             text = (f"Window access granted: {entry['shared_by']} shared «{title}» "
                     f"(window={window}) on {computer}.\n"
-                    f"screen_elements(window={window}) to read; screen_element_action to act.")
+                    f"Use screen_elements(window={window}) for a summary, then find, ls, or text to locate "
+                    "content. Use element ids with screen_element_action to act; page long results with "
+                    "offset/next_offset and refresh after page changes because ids may become stale.")
         await post_private(runtime, holder["conv_id"], "system", "system",
                            f"@{holder['name']} {text}", audience=holder["id"], private=True)
         if not reason:
@@ -175,7 +177,7 @@ class WindowGrants:
     async def revoke(self, grant_id, tell_helper=True, *, reason="revoked by the person"):
         self.actions.pop(grant_id, None)
         if elements := getattr(self.hub, "elements", None):
-            elements.forget(grant_id)
+            elements.end(grant_id)
         entry = self.known.pop(grant_id, None)
         device_id = entry["device_id"] if entry else None
         self.hub.runtime.db._exec("DELETE FROM screen_window_grants WHERE id=?", (grant_id,))

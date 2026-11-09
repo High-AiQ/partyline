@@ -194,6 +194,12 @@ frames directly. It must not use the base class's bracketed-paste markers: `\e[2
 `session/update` notifications are a live wire signal, not the adapter's chat source; the
 adapter claims and tails the plain `session.v3.jsonl` persisted by the process instead.
 
+### MCP tool-list refresh
+
+MCP `notifications/tools/list_changed` support is measured in [the MCP compatibility notes](mcp/README.md).
+Claude Code and OpenCode V2 re-list tools; Codex CLI does not. Partyline retains access-bound tools in
+Codex's catalog for that session and checks each call against current screen grants.
+
 ### Immediate mentions
 
 Most harnesses read their composer only at a turn boundary. Bytes written into a pty are

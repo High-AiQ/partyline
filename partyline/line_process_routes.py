@@ -88,8 +88,8 @@ async def _stop_confirmed(adapter, stop_error) -> bool:
     )
 
 
-async def detach_attachment(runtime, att_id: str, *, survivors: bool = True,
-                            hint: bool = False, expire: bool = True) -> dict:
+async def detach_attachment(runtime, att_id: str, *, survivors: bool = True, hint: bool = False,
+                            expire: bool = True, self_detach: bool = False) -> dict:
     """Run the one-jack detach transaction used by both REST commands."""
     lock = runtime.resume_locks.setdefault(att_id, asyncio.Lock())
     try:
@@ -161,7 +161,7 @@ async def detach_attachment(runtime, att_id: str, *, survivors: bool = True,
         try:
             message = await asyncio.wait_for(
                 runtime.db.detach_attachment_with_message_async(
-                    att_id, runtime_owner, f"@{att['name']} detached{revive}"
+                    att_id, runtime_owner, f"@{att['name']} detached{revive}", self_detach=self_detach,
                 ),
                 timeout=DETACH_DB_TIMEOUT,
             )
@@ -198,13 +198,9 @@ async def detach_attachment(runtime, att_id: str, *, survivors: bool = True,
         lock.release()
 
 
-async def close_attachment(runtime, att_id: str) -> dict:
-    """The person-called close (``DELETE /api/attachments/<id>``): detach,
-    then reap the attachment's temp directory (5.12).
-
-    Other detach paths preserve the directory for resume.
-    """
-    response = await detach_attachment(runtime, att_id, hint=True)
+async def close_attachment(runtime, att_id: str, *, self_detach: bool = False) -> dict:
+    """Detach and reap the temp directory; other detach paths preserve it."""
+    response = await detach_attachment(runtime, att_id, hint=True, self_detach=self_detach)
     await asyncio.to_thread(reap_tmp_dir, att_id)
     return response
 
@@ -291,10 +287,12 @@ def register_line_process_routes(app: FastAPI, runtime) -> None:
         conversation = runtime.db.get_conversation(conv_id)
         if conversation is None:
             raise HTTPException(404)
-        deny_unless(runtime.db, request_principal(request), conv_id, "close")
+        principal = request_principal(request)
+        deny_unless(runtime.db, principal, conv_id, "close")
         if conversation["archived_at"] is not None:
             raise HTTPException(409, "restore the line before closing its processes")
         live = live_attachments(runtime.db, conv_id, include_children)
         for attachment in live:
-            await detach_attachment(runtime, attachment["id"], hint=True)
+            await detach_attachment(runtime, attachment["id"], hint=True, self_detach=(
+                principal.kind == "machine" and principal.attachment_id == attachment["id"]))
         return {"ok": True, "stopped": [attachment["name"] for attachment in live]}
