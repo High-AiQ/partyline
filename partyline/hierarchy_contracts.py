@@ -235,6 +235,7 @@ class CapabilityState(BaseModel):
     screen_control: bool = False
     screen_windows: bool = False
     dynamic_screen_tools: bool = False
+    capability_version: str | None = None
 
 
 class MessageIn(BaseModel):

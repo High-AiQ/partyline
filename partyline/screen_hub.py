@@ -14,6 +14,8 @@ from fastapi import WebSocket, WebSocketDisconnect
 from .screen_connections import device_valid, notice
 from .local_tools import TOOL_MESSAGES, LocalTools
 from .screen_control import CONTROL_MESSAGES, ControlHub
+from .capability_versions import bump_runtime
+from .screen_share_notices import share_started
 from .screen_frames import BufferedFrame, ShareBuffer
 from .screen_elements import ElementsHub
 from .screen_window_grants import MESSAGES as WINDOW_MESSAGES, WindowGrants
@@ -140,12 +142,9 @@ class ScreenHub:
                     share = self._share(result.share_id, ident)
                     if share and share.status == "waiting":
                         share.status = "active"
+                        bump_runtime(self.runtime)
                         await self._line_event(share.conv_id, self._share_view(share, current))
-                        if share.share_id not in self.walkthroughs.items:
-                            text = f"@all {share.requested_by} is sharing {current['name']}; "
-                            guide = ("screen_frame; screen_elements summary/find/ls/text; act with ids. "
-                                     "Page offset/next_offset; refresh after changes (ids may be stale).")
-                            await notice(self, share.conv_id, text + guide)
+                        await share_started(self, share, current)
                 elif kind in ("share_declined", "share_stopped"):
                     result = ShareEnded.model_validate(message)
                     share = self._share(result.share_id, ident)

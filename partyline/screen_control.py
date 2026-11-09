@@ -132,6 +132,8 @@ class ControlHub:
         mention = f"@{grant.holder} " if grant.holder else ""
         if kind == "control_granted" and grant.status == "pending":
             grant.status = "active"
+            from .capability_versions import bump_runtime
+            bump_runtime(self.hub.runtime)
             await self._changed(share)
             who = f"to {grant.holder}" if grant.holder else "to agents on this line"
             await notice(self.hub, share.conv_id,
@@ -150,6 +152,9 @@ class ControlHub:
         if not grant or grant.status == "revoked":
             return False
         status, grant.status, grant.reason = grant.status, "revoked", reason
+        if status == "active":
+            from .capability_versions import bump_runtime
+            bump_runtime(self.hub.runtime)
         await self.flush(grant, share.conv_id)
         device = self.hub.devices.get(share.device_id)
         if tell_helper and device:

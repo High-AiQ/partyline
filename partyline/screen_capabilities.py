@@ -3,8 +3,18 @@
 def for_request(runtime, db, request, conv_id, capability_resolver):
     from .auth_guard import request_principal
     principal = request_principal(request)
-    return for_attachment(runtime, principal, conv_id,
-                          capability_resolver(db, principal, conv_id))
+    versions = getattr(runtime, "capability_versions", None)
+    if principal.kind != "machine" or versions is None:
+        return capability_resolver(db, principal, conv_id)
+    version = versions.current(principal.attachment_id)
+    while True:
+        state = capability_resolver(db, principal, conv_id)
+        state = for_attachment(runtime, principal, conv_id, state)
+        current = versions.current(principal.attachment_id)
+        if current == version:
+            state["capability_version"] = current
+            return state
+        version = current
 
 
 def for_attachment(runtime, principal, conv_id, state):

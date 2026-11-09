@@ -30,6 +30,8 @@ class MCPServer:
         self._state_signature = None
         self._revoked = False
         self._dynamic_screen_tools = None
+        self._capability_version = None
+        self._watch_ready = threading.Event()
         self._poll_stop = threading.Event()
         self._poll_thread = None
 
@@ -62,21 +64,42 @@ class MCPServer:
                 tuple(sorted(state.get("actions", []))), screen_state)
 
     def _refresh_signature(self):
-        """Poll live capabilities so an idle stdio client learns about grants promptly."""
+        """Fetch capabilities after the server reports a version change."""
         try:
             state = self._state()
-        except ApiError as exc:
+        except (ApiError, OSError) as exc:
             self._revoked = self._revoked or "HTTP 401" in str(exc)
-            return
+            return False
         signature = self._signature(state)
         if self._state_signature is not None and signature != self._state_signature:
             self.send({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
         self._state_signature = signature
+        self._capability_version = state.get("capability_version", self._capability_version)
+        return True
+
+    def _watch_step(self, version):
+        try:
+            current = self.client.capability_version(version, timeout=65)
+            if current != version and not self._refresh_signature():
+                return version, False
+            return current, True
+        except Exception:
+            logger.warning("MCP capability watcher request failed; it will retry", exc_info=True)
+            return version, False
 
     def _poll_capabilities(self):
-        while not self._poll_stop.wait(0.5):
-            if self._dynamic_screen_tools:
-                self._refresh_signature()
+        delay = 0.5
+        while not self._poll_stop.is_set():
+            if not self._watch_ready.wait(0.2):
+                continue
+            version, recovered = self._watch_step(self._capability_version)
+            if recovered:
+                self._capability_version = version
+                delay = 0.5
+            elif self._poll_stop.wait(delay):
+                return
+            else:
+                delay = min(delay * 2, 10)
 
     def handle(self, message: dict):
         if not isinstance(message, dict):
@@ -107,6 +130,9 @@ class MCPServer:
                 state = self._state()
                 self._dynamic_screen_tools = bool(state.get("dynamic_screen_tools"))
                 self._state_signature = self._signature(state)
+                self._capability_version = state.get("capability_version")
+                if self._dynamic_screen_tools:
+                    self._watch_ready.set()
                 tools = (tools_core.tool_list(state) + tools_captain.tool_list(state)
                          + tools_tasks.tool_list(state) + tools_resources.tool_list(state)
                          + tools_handover.tool_list(state) + tools_control.tool_list(state)
@@ -131,6 +157,8 @@ class MCPServer:
             state = self._state()  # Each call checks the live attachment capability.
             signature = self._signature(state)
             self._dynamic_screen_tools = bool(state.get("dynamic_screen_tools"))
+            if self._dynamic_screen_tools:
+                self._watch_ready.set()
             if signature != self._state_signature:
                 changed = self._state_signature is not None
                 self._state_signature = signature
@@ -216,6 +244,12 @@ class MCPServer:
                 self.handle(message)
         finally:
             self._poll_stop.set()
+            interrupt = getattr(self.client, "interrupt", None)
+            if interrupt:
+                try:
+                    interrupt()
+                except OSError:
+                    logger.debug("MCP client connection close was already complete", exc_info=True)
             if self._poll_thread:
                 self._poll_thread.join(timeout=1)
 

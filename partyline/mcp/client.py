@@ -8,6 +8,8 @@ import mimetypes
 import os
 from pathlib import Path
 import secrets
+import socket
+import threading
 from urllib.parse import quote, urlsplit
 
 from ..agent_client import load_connection
@@ -29,6 +31,9 @@ class PartylineClient:
         if not path:
             raise ValueError("PARTYLINE_MCP_CONNECTION is required")
         self.connection = load_connection(path)
+        self._active_lock = threading.Lock()
+        self._active_connections = set()
+        self._interrupted = False
 
     @property
     def home(self) -> str:
@@ -52,6 +57,29 @@ class PartylineClient:
         result = self.request("GET", path)
         return result if isinstance(result, dict) else {}
 
+    def capability_version(self, since: str | None, timeout: float = 65) -> str:
+        path = "/api/capability-version"
+        if since is not None:
+            path += "?since=" + quote(since, safe="")
+        result = self.request("GET", path, timeout=timeout)
+        version = result.get("version") if isinstance(result, dict) else None
+        if not isinstance(version, str):
+            raise ApiError("Partyline returned an invalid capability version")
+        return version
+
+    def interrupt(self):
+        """Interrupt outstanding HTTP reads when the stdio bridge shuts down."""
+        with self._active_lock:
+            self._interrupted = True
+            connections = list(self._active_connections)
+        for connection in connections:
+            if connection.sock:
+                try:
+                    connection.sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+            connection.close()
+
     def _origin(self):
         base = urlsplit(self.connection["api"])
         port = base.port or (443 if base.scheme == "https" else 80)
@@ -64,6 +92,11 @@ class PartylineClient:
             raise ValueError("request path must be a local /api/ path")
         connection = self._origin()
         connection.timeout = timeout  # http.client reads it when it connects
+        with self._active_lock:
+            if self._interrupted:
+                connection.close()
+                raise OSError("MCP bridge is shutting down")
+            self._active_connections.add(connection)
         try:
             headers = {**headers, "Authorization": "Bearer " + self.connection["token"]}
             connection.request(method, path, body=body, headers=headers)
@@ -83,6 +116,8 @@ class PartylineClient:
                 chunks.append(chunk)
             return b"".join(chunks)
         finally:
+            with self._active_lock:
+                self._active_connections.discard(connection)
             connection.close()
 
     @staticmethod
