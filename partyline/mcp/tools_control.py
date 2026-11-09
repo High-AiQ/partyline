@@ -12,11 +12,12 @@ NOTE = (" Returns a frame reference after a short settle; fetch its media ID and
 
 
 ELEMENT_ACTION_NOTE = (
-    "Use a UIA pattern on an element from the latest consented window snapshot; the element's `actions` "
-    "list names what it supports. invoke, toggle, set_value(value); select, add_to_selection, "
-    "remove_from_selection; expand, collapse; scroll(direction, amount), set_scroll_percent("
-    "horizontal_percent and/or vertical_percent), scroll_into_view; set_range_value(number, refused outside "
-    "the element's range); window_close, window_minimize, window_maximize, window_restore, "
+    "Use a UIA pattern on any element id from the current screen_elements snapshot (found via find, ls "
+    "or text); the element's `actions` list names what it supports. invoke, toggle, set_value(value); "
+    "select, add_to_selection, remove_from_selection; expand, collapse; scroll(direction, amount), "
+    "set_scroll_percent(horizontal_percent and/or vertical_percent), scroll_into_view; "
+    "set_range_value(number, refused outside the element's range); window_close, window_minimize, "
+    "window_maximize, window_restore, "
     "window_move(x, y), window_resize(width, height) only on the shared window itself (the first element). "
     "No input is synthesized and the pointer never moves; the app may still bring itself forward and the "
     "result reports foreground_changed / target_came_forward. For dragging use screen_drag.")

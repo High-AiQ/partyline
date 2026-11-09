@@ -4,11 +4,14 @@ import json
 import subprocess
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 
 from .uia_process import read
 from .uia_gate import DispatchGate
 from .uia_window_identity import live, unmark
+
+MAX_WALKS = 4
 
 
 def select_window(platform=sys.platform, run=subprocess.run):
@@ -44,6 +47,9 @@ class WindowAccess:
         self.gate = DispatchGate()
         self.elements = {}
         self.paths = {}
+        self.epoch = None  # snapshot ID of the walk whose IDs are valid; parts of one walk share it
+        self.walks = {}  # cursor -> the unread rest of that walk
+        self.deep = True  # prefetch the whole tree in one cache request until a read times out
 
     async def check(self, grant):
         windows = await asyncio.to_thread(self.list_windows)
@@ -54,14 +60,17 @@ class WindowAccess:
             found = await asyncio.to_thread(live, grant)
         return None if found else "window closed"
 
+    def forget(self):
+        self.elements, self.paths, self.walks, self.epoch = {}, {}, {}, None
+
     def abandon_read(self):
+        """Discard the read in flight; earlier parts' ids stay valid, since a late result is dropped."""
         self.generation += 1
-        self.elements, self.paths = {}, {}
 
     def revoke(self, reason="not consented"):
         grant = self.grant
         self.gate.invalidate()
-        self.elements, self.paths = {}, {}
+        self.forget()
         self.generation += 1
         self.grant = None
         self.unavailable = reason
@@ -106,11 +115,17 @@ class WindowAccess:
         finally:
             self.picking = False
 
-    async def snapshot(self):
+    async def snapshot(self, options=None):
+        """Read one part of the window. Without a cursor that starts a new snapshot and drops the old IDs."""
         if self.platform != "win32":
             return {"elements_unavailable": "not Windows"}
         grant, generation = self.grant, self.generation
-        self.elements, self.paths = {}, {}
+        cursor = (options or {}).get("cursor")
+        state = self.walks.get(cursor) if cursor else None
+        if cursor and state is None:
+            return {"elements_unavailable": "cursor expired; start a new snapshot"}
+        if not cursor:
+            self.forget()
         if not grant:
             return {"elements_unavailable": self.unavailable}
         reason = await self.check(grant)
@@ -126,7 +141,7 @@ class WindowAccess:
         share = self.session.share
         if share and self.session.accepted:
             frame = self.session.last_uia_frame
-        result = await asyncio.to_thread(self.reader, grant["hwnd"], frame)
+        result = await asyncio.to_thread(self.reader, grant["hwnd"], frame, state, self.deep)
         if generation != self.generation or self.grant is not grant:
             return {"elements_unavailable": "consent revoked"}
         reason = await self.check(grant)
@@ -143,10 +158,28 @@ class WindowAccess:
                     or frame != self.session.last_uia_frame):
                 for element in result["elements"]:
                     element.pop("frame_bounds", None)
-            self.elements = {item["id"]: item for item in result["elements"] if "id" in item}
-            self.paths = result.pop("paths", {})
+            self.keep(result, cursor)
             result.update(window_title=grant["title"], process_name=grant["process"])
+        elif result.get("elements_unavailable") == "timeout" and state is None:
+            self.deep = False  # the one-call prefetch outran the budget: read per parent from now on
         return result
+
+    def keep(self, result, cursor):
+        """Remember every part's IDs and paths until a new snapshot starts; hand back the next cursor."""
+        if not cursor:
+            self.epoch = result.get("snapshot_id")
+        result["snapshot_id"] = self.epoch
+        for item in result["elements"]:
+            if "id" in item:
+                self.elements[item["id"]] = {"id": item["id"], "control_type": item.get("control_type"),
+                                             "name": item.get("name")}
+        self.paths.update(result.pop("paths", {}))
+        if rest := result.pop("state", None):
+            token = uuid.uuid4().hex[:12]
+            self.walks[token] = rest
+            while len(self.walks) > MAX_WALKS:
+                del self.walks[next(iter(self.walks))]
+            result["next_cursor"] = token
 
     async def watch(self, sleep=asyncio.sleep):
         while True:

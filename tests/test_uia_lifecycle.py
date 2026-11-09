@@ -66,7 +66,7 @@ class WorkerLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_abandoned_action_permits_reads_but_refuses_another_action(self):
         session = session_fixture()
         entered, finish = asyncio.Event(), asyncio.Event()
-        async def snapshot():
+        async def snapshot(options=None):
             entered.set()
             await finish.wait()
             return {"elements": []}

@@ -117,11 +117,12 @@ class ScreenTest(unittest.TestCase):
             self.assertEqual(command["type"], "read_window_elements")
             self.assertEqual("window", command["grant_id"])
             ws.send_json({"type": "window_elements", "request_id": command["request_id"],
-                          "snapshot_id": "s", "window_title": "Editor", "elements": [{"name": "Hello"}]})
+                          "snapshot_id": "s", "window_title": "Editor",
+                          "elements": [{"id": "h", "name": "Hello"}]})
             response = future.result()
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json()["window_title"], "Editor")
-            self.assertIn("Hello", response.json()["elements"])
+            self.assertIn("Hello", response.json()["outline"][0])
 
     def test_device_change_reaches_only_the_owners_sockets_across_lines(self):
         own = SimpleNamespace(screen_owner_id=1, send_json=AsyncMock())
@@ -441,7 +442,7 @@ class ScreenTest(unittest.TestCase):
         with patch.object(tools_core, "_target", return_value=("line", {})):
             tools_core.call(client, "screen_elements", {"device": "My PC"}, {})
         client.request.assert_called_once_with(
-            "POST", "/api/conversations/line/screen-elements?device=My%20PC", timeout=40)
+            "POST", "/api/conversations/line/screen-elements?device=My%20PC", timeout=60)
 
     def test_devices_report_the_helper_version_and_flag_an_outdated_helper(self):
         from partyline import __version__

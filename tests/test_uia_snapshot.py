@@ -60,7 +60,7 @@ class SnapshotTests(unittest.TestCase):
         elements = result["elements"]
         self.assertFalse(result["truncated"])
         self.assertEqual(3, len({e["id"] for e in elements}))
-        self.assertTrue(all(len(e["id"]) == 64 for e in elements))
+        self.assertTrue(all(len(e["id"]) == 16 for e in elements))
         self.assertEqual([110, 60, 150, 80], elements[1]["bounds"])
         self.assertEqual([20, 10, 100, 30], elements[1]["frame_bounds"])
         self.assertNotIn("value", elements[1])
@@ -68,14 +68,22 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual([0, 1, 3], tree.reads)
         self.assertEqual(160, len(elements[1]["automation_id"]))
 
-    def test_count_depth_and_time_limits(self):
+    def test_count_visit_and_time_caps_each_leave_a_cursor_state(self):
         tree = Provider([{"rect": (0, 0, 10, 10), "children": [1]},
                          {"rect": (0, 0, 10, 10), "children": [2]},
                          {"rect": (0, 0, 10, 10)}])
-        self.assertTrue(snapshot(tree, clock=lambda: 0, limit=1)["truncated"])
-        self.assertTrue(snapshot(tree, clock=lambda: 0, depth_limit=1)["truncated"])
-        clock = iter([0, 0, 2])
-        self.assertTrue(snapshot(tree, clock=lambda: next(clock))["truncated"])
+        for cap, reason in ((dict(limit=1), "element limit"), (dict(max_visits=2), "visit limit")):
+            with self.subTest(cap=cap):
+                result = snapshot(tree, clock=lambda: 0, **cap)
+                self.assertTrue(result["truncated"])
+                self.assertIn(reason, result["truncation"])
+                self.assertTrue(result["state"]["stack"])
+        clock = iter([0, 0, BUDGET + 1])
+        result = snapshot(tree, clock=lambda: next(clock))
+        self.assertIn("time budget", result["truncation"])
+        self.assertEqual([[[0], result["elements"][0]["id"]]], result["state"]["stack"])
+        self.assertFalse(snapshot(tree, clock=lambda: 0)["truncated"])
+        self.assertNotIn("state", snapshot(tree, clock=lambda: 0))
 
     def test_unavailable_timeout_and_failure(self):
         self.assertIn("elements_unavailable", read(1, platform="linux"))
@@ -83,7 +91,7 @@ class SnapshotTests(unittest.TestCase):
             raise OSError()
         self.assertIn("elements_unavailable", read(1, popen=failed, platform="win32"))
         def succeeded(args, **kwargs):
-            _, _, path, _ = json.loads(args[-1])
+            path = json.loads(args[-1])[2]
             Path(path).write_text('{"elements": []}', encoding="utf-8")
             return SimpleNamespace(poll=lambda: 0, returncode=0)
         self.assertEqual({"elements": []}, read(1, popen=succeeded, platform="win32"))
@@ -94,7 +102,7 @@ class SnapshotTests(unittest.TestCase):
         def sleep(delay):
             now[0] += delay
         def popen(args, **kwargs):
-            _, _, _, ready = json.loads(args[-1])
+            ready = json.loads(args[-1])[3]
             def poll():
                 if killed:
                     return -1

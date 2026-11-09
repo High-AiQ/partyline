@@ -2,7 +2,8 @@
 from .uia_identity import element_id
 from .uia_patterns import (PATTERN, WINDOW_ACTIONS, ActionRefused, check_argument, refuse_state,
                            refuse_unsupported)
-from .uia_snapshot import MAX_DEPTH, MAX_ELEMENTS
+
+FALLBACK_NODES, FALLBACK_DEPTH = 1000, 20  # search bound when a target has no recorded path
 
 
 def by_path(provider, target, path):
@@ -25,14 +26,14 @@ def find(provider, target, path=None):
         return node
     stack = [(provider.root(), 0, [])]
     visited = 0
-    while stack and visited < MAX_ELEMENTS:
+    while stack and visited < FALLBACK_NODES:
         node, depth, path = stack.pop()
         visited += 1
         if not provider.same_window(node):
             continue
         if element_id(provider, node, path) == target:
             return node
-        if depth < MAX_DEPTH:
+        if depth < FALLBACK_DEPTH:
             children = provider.children(node)
             stack.extend((child, depth + 1, [*path, index])
                          for index, child in reversed(list(enumerate(children))))

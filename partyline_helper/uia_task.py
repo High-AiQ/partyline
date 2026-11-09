@@ -7,6 +7,15 @@ from websockets.exceptions import ConnectionClosed
 from .uia_action_worker import ActionWorker, audit
 
 
+READ_TIMEOUT = 33  # seconds; START_LIMIT + BUDGET + KILL_SLACK must stay below it
+
+
+def read_options(message):
+    """The only fields of a read request the helper honours."""
+    cursor = message.get("cursor")
+    return {"cursor": cursor[:64]} if isinstance(cursor, str) and cursor else {}
+
+
 class WindowTask:
     def __init__(self, session):
         self.session = session
@@ -17,12 +26,12 @@ class WindowTask:
     def busy(self):
         return any(task and not task.done() for task in (self.task, self.read_task))
 
-    async def submit(self, request_id):
+    async def submit(self, request_id, options=None):
         if self.busy():
             await self.session.send("window_elements", request_id=request_id,
                                     elements_unavailable="window read already in progress")
             return
-        self.task = asyncio.create_task(self._read(request_id))
+        self.task = asyncio.create_task(self._read(request_id, options))
 
     async def submit_action(self, message):
         previous = self.actions.task and not self.actions.task.done()
@@ -47,11 +56,11 @@ class WindowTask:
         except ConnectionClosed:
             pass
 
-    async def _read(self, request_id):
+    async def _read(self, request_id, options=None):
         try:
             try:
-                self.read_task = asyncio.create_task(self.session.window.snapshot())
-                result = await asyncio.wait_for(asyncio.shield(self.read_task), 33)
+                self.read_task = asyncio.create_task(self.session.window.snapshot(options))
+                result = await asyncio.wait_for(asyncio.shield(self.read_task), READ_TIMEOUT)
             except TimeoutError:
                 self.session.window.abandon_read()
                 result = {"elements_unavailable": "timeout", "truncated": True}

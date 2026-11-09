@@ -66,11 +66,18 @@ class ScreenRequestTest(unittest.IsolatedAsyncioTestCase):
     async def test_screen_elements_route(self):
         with patch.object(self.hub.elements, "read",
                           return_value={"elements_unavailable": "not consented"}) as read:
-            response = await self.client.post("/api/conversations/line/screen-elements?device=PC")
+            response = await self.client.post(
+                "/api/conversations/line/screen-elements?device=PC&query=next&control_type=Hyperlink"
+                "&root=abc&text=true&offset=5&refresh=true")
+            bad = await self.client.post("/api/conversations/line/screen-elements?depth=9")
         self.assertEqual(response.json(), {"elements_unavailable": "not consented"})
+        self.assertEqual(422, bad.status_code)
         read.assert_awaited_once()
-        principal, device, window = read.await_args.args
+        principal, device, window, options = read.await_args.args
         self.assertEqual(("user", "person", "PC", None), (principal.kind, principal.name, device, window))
+        self.assertEqual(("next", "Hyperlink", "abc", True, 5, True, False),
+                         (options["query"], options["control_type"], options["root"], options["text"],
+                          options["offset"], options["refresh"], options["more"]))
 
     async def test_failed_sends_clean_both_waiter_maps(self):
         from fastapi import WebSocketDisconnect

@@ -200,7 +200,7 @@ def call(client, name: str, args: dict, home_state: dict):
         conv, _ = _target(client, home_state, None, ("read",))
         query = elements_query(args)
         path = f"/api/conversations/{quote(conv, safe='')}/screen-elements{query}"
-        return client.request("POST", path, timeout=40)
+        return client.request("POST", path, timeout=60)  # a first call captures the whole window
     if name == "screen_frame":
         conv, _ = _target(client, home_state, None, ("read",))
         query = "?mark_pointer=true" if args.get("mark_pointer") else ""

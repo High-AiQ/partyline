@@ -83,6 +83,18 @@ class WindowsUIATests(unittest.TestCase):
                            for item in result["elements"])
                 self.assertTrue(any(matches), (expected, result))
             assert_foreground()
+            # Read the same window in tiny parts: a first deep part, then per-parent resumed parts.
+            import comtypes  # noqa: F401 - initialises COM for this thread
+            from partyline_helper.uia_snapshot import snapshot as walk
+            from partyline_helper.uia_windows import WindowsProvider
+            part = walk(WindowsProvider(window["hwnd"], cached=True, deep=True), limit=2)
+            self.assertTrue(part["truncated"], part)
+            ids = [item["id"] for item in part["elements"]]
+            while part.get("state"):
+                part = walk(WindowsProvider(window["hwnd"], cached=True, deep=False), state=part["state"],
+                            limit=2)
+                ids += [item["id"] for item in part["elements"]]
+            self.assertEqual([item["id"] for item in result["elements"]], ids)
             from partyline_helper.uia_action_worker import ActionWorker
             worker = ActionWorker(session)
             session.window = access

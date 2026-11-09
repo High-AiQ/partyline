@@ -18,7 +18,7 @@ from .tools import MESSAGES as TOOL_MESSAGES, TOOLS_VERSION, Tools
 from .transport import CertificateError, certificate_failure
 from .version import helper_version
 from .uia_access import WindowAccess
-from .uia_task import WindowTask
+from .uia_task import WindowTask, read_options
 from .session_transport import SessionTransport
 from .window_shares import MESSAGES as WINDOW_MESSAGES, WindowShares
 
@@ -186,7 +186,7 @@ class Session(SessionTransport):
         elif kind in ("read_window_elements", "window_element_action") and "grant_id" in message:
             await self.windows.dispatch(message)
         elif kind == "read_window_elements":
-            await self.window_task.submit(message["request_id"])
+            await self.window_task.submit(message["request_id"], read_options(message))
         elif kind == "window_element_action":
             await self.window_task.submit_action(message)
         elif kind == "ping":
