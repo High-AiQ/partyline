@@ -709,6 +709,87 @@ class RenderAndServerTests(unittest.TestCase):
         server.handle({**call, "id": 4})
         self.assertEqual(output.getvalue().count("notifications/tools/list_changed"), 1)
 
+    def test_screen_tools_follow_grants_and_push_refresh_for_idle_client(self):
+        client = FakeClient(actions=("read", "write"))
+        client.state.update(dynamic_screen_tools=True, screen_read=False,
+                            screen_control=False, screen_windows=False)
+        output = io.StringIO()
+        server = MCPServer(client, output)
+        def list_names(ident):
+            server.handle({"jsonrpc": "2.0", "id": ident, "method": "tools/list"})
+            listed = json.loads(output.getvalue().splitlines()[-1])
+            return {tool["name"] for tool in listed["result"]["tools"]}
+
+        names = list_names(1)
+        self.assertNotIn("screen_frame", names)
+        self.assertNotIn("screen_elements", names)
+        self.assertNotIn("screen_click", names)
+
+        client.state["screen_windows"] = True
+        server._refresh_signature()
+        self.assertIn("notifications/tools/list_changed", output.getvalue())
+        names = list_names(2)
+        self.assertNotIn("screen_frame", names)
+        self.assertIn("screen_elements", names)
+        self.assertIn("screen_element_action", names)
+        self.assertNotIn("screen_click", names)
+
+        client.state["screen_control"] = True
+        server._refresh_signature()
+        self.assertIn("screen_click", list_names(3))
+
+        client.state.update(screen_windows=False, screen_control=False)
+        server._refresh_signature()
+        self.assertEqual(output.getvalue().count("notifications/tools/list_changed"), 3)
+        names = list_names(4)
+        self.assertNotIn("screen_frame", names)
+        self.assertNotIn("screen_element_action", names)
+
+    def test_unlisted_screen_call_has_clear_denial(self):
+        client = FakeClient(actions=("read",))
+        client.state.update(dynamic_screen_tools=True, screen_read=False,
+                            screen_control=False, screen_windows=False)
+        output = io.StringIO()
+        server = MCPServer(client, output)
+        server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                       "params": {"name": "screen_frame", "arguments": {}}})
+        result = json.loads(output.getvalue().splitlines()[0])
+        self.assertTrue(result["result"]["isError"])
+        self.assertEqual(result["result"]["content"][0]["text"], "no screen shared with you")
+
+    def test_fallback_client_keeps_legacy_screen_catalog(self):
+        client = FakeClient(actions=("read", "write"))
+        output = io.StringIO()
+        server = MCPServer(client, output)
+        server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        names = {tool["name"] for tool in json.loads(output.getvalue().splitlines()[-1])
+                 ["result"]["tools"]}
+        self.assertIn("screen_frame", names)
+        self.assertIn("screen_elements", names)
+        self.assertIn("screen_click", names)
+
+    def test_live_screen_capabilities_resolve_attachment_grants(self):
+        from types import SimpleNamespace
+        from partyline.screen_capabilities import for_attachment
+
+        db = SimpleNamespace(
+            get_attachment=lambda _ident: {"adapter": "claude"},
+            _exec=lambda _query: SimpleNamespace(
+                fetchall=lambda: [{"attachment_id": "att-1"}]),
+        )
+        share = SimpleNamespace(status="active", share_id="share")
+        grant = SimpleNamespace(status="active", holder=None)
+        hub = SimpleNamespace(shares={"home": share},
+                              control=SimpleNamespace(grants={"share": grant}))
+        runtime = SimpleNamespace(db=db, screen_hub=hub)
+        principal = SimpleNamespace(kind="machine", conv_id="home", attachment_id="att-1",
+                                     name="worker")
+        state = for_attachment(runtime, principal, None, {})
+        self.assertTrue(state["dynamic_screen_tools"])
+        self.assertTrue(state["screen_read"])
+        self.assertTrue(state["screen_control"])
+        self.assertTrue(state["screen_windows"])
+
     def test_demotion_and_promotion_change_catalog(self):
         client = FakeClient(actions=("read", "write"))
         client.state.update(role="implementer", is_lead=False)

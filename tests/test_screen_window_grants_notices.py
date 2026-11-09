@@ -32,8 +32,12 @@ class WindowNoticeTests(WindowGrantFixture, unittest.IsolatedAsyncioTestCase):
         notice, = self.notices("a")
         for expected in ("granted", "Chrome A tab @peer", "g1", "Computer", "owner"):
             self.assertIn(expected, notice["body"])
-        self.assertEqual('screen_elements(window="g1") to read; screen_element_action to act.',
-                         notice["body"].splitlines()[-1])
+        notice_text = notice["body"].splitlines()[-1]
+        self.assertIn('screen_elements(window="g1")', notice_text)
+        self.assertIn("summary", notice_text)
+        self.assertIn("find, ls, or text", notice_text)
+        self.assertIn("screen_element_action", notice_text)
+        self.assertIn("refresh", notice_text)
         self.runtime.live["b"].deliver.assert_not_awaited()
         self.runtime.live["peer"].deliver.assert_not_awaited()
         for ident in ("a", "b", "peer"):

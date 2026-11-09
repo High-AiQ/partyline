@@ -4,8 +4,8 @@ from ..upload_scope import UPLOAD_ONLY_CAPTION_REFUSAL
 from .client import ApiError, MAX_UPLOAD, MAX_MODEL_UPLOAD
 from .uploads import validate_uploads
 from .tools_media import GET_MEDIA_DESCRIPTION, model_upload_tool, multi_upload_tool, validate_model_path
-from .tools_screen import elements_query, screen_elements_tool, screen_frame_tool
-from . import tools_captain, tools_worker
+from .tools_screen import screen_elements_tool, screen_frame_tool
+from . import tools_captain, tools_worker, tools_screen
 def _schema(properties=None, required=None):
     return {"type": "object", "properties": properties or {},
             "required": required or [], "additionalProperties": False}
@@ -28,9 +28,13 @@ def tool_list(state):
             }),
         },
     ]
+    screen_read = (not state.get("dynamic_screen_tools") or state.get("screen_read"))
+    screen_elements = (not state.get("dynamic_screen_tools") or state.get("screen_read")
+                       or state.get("screen_windows"))
     if "read" in actions:
         tools.extend([
-            screen_frame_tool(), screen_elements_tool(),
+            *([screen_frame_tool()] if screen_read else []),
+            *([screen_elements_tool()] if screen_elements else []),
             {
                 "name": "read_messages",
                 "description": "Read a bounded page, optionally around a message id.",
@@ -196,15 +200,9 @@ def call(client, name: str, args: dict, home_state: dict):
         return client.request(method, path, None if method == "DELETE" else {"emoji": args["emoji"]})
     if name == "get_media":
         return client.download(args["file_id"], args["variant"], args["destination"])
-    if name == "screen_elements":
+    if name in ("screen_elements", "screen_frame"):
         conv, _ = _target(client, home_state, None, ("read",))
-        query = elements_query(args)
-        path = f"/api/conversations/{quote(conv, safe='')}/screen-elements{query}"
-        return client.request("POST", path, timeout=60)  # a first call captures the whole window
-    if name == "screen_frame":
-        conv, _ = _target(client, home_state, None, ("read",))
-        query = "?mark_pointer=true" if args.get("mark_pointer") else ""
-        return client.request("POST", f"/api/conversations/{quote(conv, safe='')}/screen-frame{query}")
+        return tools_screen.call(client, name, args, home_state, conv)
     if name == "upload_files":
         metadata = {key: args.get(key, "") for key in ("title", "description", "body")}
         validate_uploads(args["paths"], client_key=args["client_key"],

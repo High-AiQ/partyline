@@ -60,10 +60,27 @@ def _tool(name, description, properties, required):
 
 
 def tool_list(state):
-    if "write" not in set(state.get("actions", [])):
+    if state.get("dynamic_screen_tools"):
+        if not state.get("screen_read") and not state.get("screen_windows"):
+            return []
+        allowed = set()
+        if state.get("screen_windows"):
+            allowed.add("screen_element_action")
+        if state.get("screen_control"):
+            allowed.update({"screen_click", "screen_move", "screen_drag", "screen_scroll",
+                            "screen_type", "screen_key"})
+        elif state.get("screen_read"):
+            allowed.add("screen_control_request")
+        actions_enabled = True
+    else:
+        if "write" not in set(state.get("actions", [])):
+            return []
+        allowed = None
+        actions_enabled = True
+    if not actions_enabled:
         return []
     point = {"x": _int("X, " + FRAME + "."), "y": _int("Y, " + FRAME + ".")}
-    return [
+    tools = [
         _tool("screen_element_action", ELEMENT_ACTION_NOTE, ELEMENT_ACTION_PROPERTIES,
               ["element_id", "action"]),
         _tool("screen_control_request",
@@ -95,11 +112,14 @@ def tool_list(state):
                            "description": "Modifiers (ctrl, alt, shift, meta/cmd/win) plus one key."},
               }, ["keys"]),
     ]
+    return [tool for tool in tools if allowed is None or tool["name"] in allowed]
 
 
 def call(client, name, args, state):
     available = {tool["name"]: tool for tool in tool_list(state)}
     if name not in available:
+        if name.startswith("screen_") and state.get("dynamic_screen_tools"):
+            raise ApiError("no screen shared with you")
         raise ApiError("screen control needs write access to your line")
     validate_arguments(available[name]["inputSchema"], args)
     base = f"/api/conversations/{quote(client.home, safe='')}/screen-control"

@@ -10,6 +10,13 @@ Pair a computer once with your Partyline account; it can then be shared from any
 belongs to the line where you start it, and only that line receives its frames and control. The sidebar
 icon marks lines with active shares.
 
+Screen MCP tools appear while a live screen or window grant is available and disappear when access ends.
+The grant notice explains how to inspect a window: start with a summary, then use find, ls, or text;
+use element ids to act, page long results with offset/next_offset, and refresh after page changes.
+Screen-control tools appear only after control consent.
+Claude Code and OpenCode V2 refresh their tool list on MCP `list_changed`. Codex CLI does not, so its
+screen tools remain listed for the session and return a clear denial when no screen is shared.
+
 The Partyline Computers dialog shows these
 commands with your server's address and a pairing code filled in, each with a copy
 button. Run them in a terminal **on the computer you want to share, not on the

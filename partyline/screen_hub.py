@@ -143,7 +143,9 @@ class ScreenHub:
                         await self._line_event(share.conv_id, self._share_view(share, current))
                         if share.share_id not in self.walkthroughs.items:
                             text = f"@all {share.requested_by} is sharing {current['name']}; "
-                            await notice(self, share.conv_id, text + "screen_frame is available.")
+                            guide = ("screen_frame; screen_elements summary/find/ls/text; act with ids. "
+                                     "Page offset/next_offset; refresh after changes (ids may be stale).")
+                            await notice(self, share.conv_id, text + guide)
                 elif kind in ("share_declined", "share_stopped"):
                     result = ShareEnded.model_validate(message)
                     share = self._share(result.share_id, ident)

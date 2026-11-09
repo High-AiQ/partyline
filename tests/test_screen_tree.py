@@ -135,8 +135,8 @@ class TreeTests(unittest.TestCase):
         self.assertEqual({"device", "window", "refresh", "more", "root", "depth", "query", "value", "id",
                           "control_type", "text", "changes", "context", "offset", "bounds"},
                          set(tool["inputSchema"]["properties"]))
-        for word in ("summary", "query", "text=true", "root=<id>", "id=<id>", "screen_element_action",
-                     "refresh=true"):
+        for word in ("summary", "find", "text=true", "root=<id>", "id=<id>", "screen_element_action",
+                     "refresh=true", "Refresh"):
             self.assertIn(word, tool["description"])
         self.assertEqual("", elements_query({}))
         self.assertEqual("?device=My%20PC&depth=2&query=a%26b&text=true",
