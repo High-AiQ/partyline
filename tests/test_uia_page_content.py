@@ -127,7 +127,8 @@ class PageContentTests(unittest.TestCase):
         browser = Browser(links=1, chrome=1, latency=0)
         browser.nodes[browser.document]["name"] = "x" * 500
         result = snapshot(browser, clock=browser.clock)
-        self.assertTrue(all(len(item["name"]) <= 160 for item in result["elements"]))
+        self.assertTrue(all(len(item["name"]) <= 1000 for item in result["elements"]))
+        self.assertEqual(500, max(len(item["name"]) for item in result["elements"]))
         tall = Browser(links=0, chrome=0, latency=0)
         node = 0
         for _ in range(1200):

@@ -12,7 +12,8 @@ from .auth_guard import request_principal
 from .machine_scope import deny_unless
 from .screen_grants import require_window, resolve_window
 from .screen_element_actions import ElementAction, element_action
-from .screen_tree import MAX_NODES, MAX_TREE, Snapshot
+from .screen_tree import MAX_NODES, MAX_TREE, OUT_BYTES, Snapshot
+from .screen_tree_ids import IdSpace
 from .screen_tree_answer import answer, elements_options
 
 ELEMENT_OPTIONS = Annotated[dict, Depends(elements_options)]
@@ -20,6 +21,7 @@ SNAPSHOT_TTL = 600  # seconds a captured tree answers queries before it must be 
 MAX_SNAPSHOTS = 16
 OLD_ID = 16  # helper ids are 16 hex digits; older helpers sent 64
 MAX_STORED = 300_000  # nodes all stored trees together keep; the least recently used go first
+SETTLE_SECONDS = 0.5  # after a click, before the new snapshot, so a page can start to change
 CAPTURE_SECONDS = 20  # one call reads parts this long, then returns a partial tree to continue with `more`
 
 
@@ -27,6 +29,7 @@ class ElementsHub:
     def __init__(self, hub, clock=time.monotonic):
         self.hub = hub
         self.waiters = {}
+        self.spaces = {}  # window grant id -> its ids, kept for as long as the grant lasts
         self.snapshots = OrderedDict()  # window grant id -> its latest captured tree
         self.locks = {}
         self.clock = clock
@@ -70,10 +73,18 @@ class ElementsHub:
             if not entry[1]:
                 self.locks.pop(grant_id, None)
 
+    async def settle(self):
+        await asyncio.sleep(SETTLE_SECONDS)
+
+    def end(self, grant_id):
+        """The grant is over: its tree and its ids go."""
+        self.forget(grant_id)
+        self.spaces.pop(grant_id, None)
+
     def forget(self, grant_id):
         self.snapshots.pop(grant_id, None)
 
-    async def read(self, principal, device_name=None, window=None, options=None):
+    async def read(self, principal, device_name=None, window=None, options=None, budget=OUT_BYTES):
         options = options or {}
         grant, device = resolve_window(self.hub, principal, window, device_name)
         try:
@@ -82,7 +93,12 @@ class ElementsHub:
                 tree = self.fresh(grant["id"])
                 if options.get("refresh") or tree is None:
                     self.forget(grant["id"])  # the helper drops its ids as a new snapshot starts
-                    tree = await self.capture(principal, grant, device, Snapshot(None, self.clock()))
+                    previous = tree
+                    space = self.spaces.setdefault(grant["id"], IdSpace())
+                    space.renew()
+                    tree = await self.capture(principal, grant, device, Snapshot(None, self.clock(), space))
+                    if previous is not None and not isinstance(tree, dict):
+                        tree.before = set(previous.nodes)
                 elif options.get("more") and tree.cursor:
                     tree = await self.capture(principal, grant, device, tree)
                 if isinstance(tree, dict):
@@ -90,7 +106,7 @@ class ElementsHub:
                 require_window(self.hub, principal, grant["id"])  # a revoke during the capture stores nothing
                 self.remember(grant["id"], tree)
                 return {"window": grant["id"], "snapshot_id": tree.snapshot_id,
-                        **await asyncio.to_thread(answer, tree, grant, options)}
+                        **await asyncio.to_thread(answer, tree, grant, options, budget)}
         except (TimeoutError, OSError, RuntimeError):
             return {"elements_unavailable": "helper did not respond"}
 
@@ -100,6 +116,14 @@ class ElementsHub:
             del self.snapshots[grant_id]
             return None
         return tree
+
+    def helper_id(self, grant_id, element_id):
+        """The helper's id for a stable id of the stored tree: `(helper id, ok)`; no tree passes the id on."""
+        tree = self.fresh(grant_id)
+        if tree is None:
+            return element_id, True
+        node = tree.nodes.get(element_id) or tree.nodes.get(tree.by_helper.get(element_id))  # or helper's
+        return (node.helper, True) if node else (element_id, False)
 
     def purge(self):
         """Forget every window's tree that has outlived its time."""

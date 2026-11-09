@@ -14,6 +14,11 @@ from partyline.screen_tree_answer import answer
 from partyline.screen_tree_views import find, listing, summary, text, text_lines
 
 
+def key(stored, helper):
+    """The stable id the tree gave the element the helper called `helper`."""
+    return stored.by_helper[helper]
+
+
 def tree(*rows):
     result = Snapshot("snap", 0)
     result.add([dict(zip(("id", "parent", "control_type", "name"), row, strict=True)) for row in rows])
@@ -33,11 +38,12 @@ class TreeTests(unittest.TestCase):
         node = Snapshot("s", 0)
         node.add([item, {"id": "y", "control_type": "Edit", "automation_id": "field"}, {"id": ""}, item])
         self.assertEqual(2, len(node.nodes))
-        line = node.line(node.nodes["x"], 2)
-        self.assertEqual("  x CheckBox \"say 'hi' now\" =\"v\" [toggle] toggle:on off-screen disabled "
-                         "focused", line)
-        self.assertTrue(node.line(node.nodes["x"], bounds=True).endswith("@1,2,3,4 frame@5,6,7,8"))
-        self.assertEqual("y Edit #field", node.line(node.nodes["y"]))
+        x, y = key(node, "x"), key(node, "y")
+        line = node.line(node.nodes[x], 2)
+        self.assertEqual(f"  {x} CheckBox \"say 'hi' now\" =\"v\" [toggle] toggle:on off disabled focused",
+                         line)
+        self.assertTrue(node.line(node.nodes[x], bounds=True).endswith("@1,2,3,4 frame@5,6,7,8"))
+        self.assertEqual(f"{y} Edit #field", node.line(node.nodes[y]))
 
     def test_fit_stops_at_the_budget_but_always_keeps_one_line(self):
         lines, shown = fit(["a" * 50] * 10, str, budget=120)
@@ -46,45 +52,48 @@ class TreeTests(unittest.TestCase):
 
     def test_descendants_paths_and_orphans(self):
         stored = tree(*SAMPLE, ("o", "gone", "Button", "Orphan"))
-        self.assertEqual(6, stored.descendants()["w"])
-        self.assertEqual("Window App > Document Page > List Nav", stored.path("a"))
-        self.assertEqual("", stored.path("w"))
-        self.assertIn("o", stored.kids[None])
+        w, a, c, listing_id, orphan = (key(stored, name) for name in ("w", "a", "c", "l", "o"))
+        self.assertEqual(6, stored.descendants()[w])
+        self.assertEqual("Window App > Document Page > List Nav", stored.path(a))
+        self.assertEqual("", stored.path(w))
+        self.assertIn(orphan, stored.kids[None])
         self.assertIsNone(stored.subtree("missing"))
-        self.assertEqual(["l", "a", "c"], stored.subtree("l"))
+        self.assertEqual([listing_id, a, c], stored.subtree(listing_id))
         self.assertFalse(stored.partial)
         stored.note = "x"
         self.assertTrue(stored.partial)
 
     def test_find_matches_names_values_types_and_alternatives(self):
         stored = tree(*SAMPLE)
-        names = lambda result: [line.split(" ")[0] for line in result["lines"]]  # noqa: E731
-        self.assertEqual(["a", "c"], names(find(stored, None, "hyperlink", None, 0, False)))
-        self.assertEqual(["b", "a"], names(find(stored, "ALPHA|ok", None, None, 0, False)))
-        self.assertEqual(["c"], names(find(stored, "a", "Hyperlink", "c", 0, False)))
+        k = lambda *names: [key(stored, name) for name in names]  # noqa: E731
+        names = lambda result: [line.split("\n")[-1].split(" ")[0] for line in result["lines"]]  # noqa: E731
+        self.assertEqual(k("a", "c"), names(find(stored, None, "hyperlink", None, 0, False)))
+        self.assertEqual(k("b", "a"), names(find(stored, "ALPHA|ok", None, None, 0, False)))
+        self.assertEqual(k("c"), names(find(stored, "a", "Hyperlink", key(stored, "c"), 0, False)))
         self.assertEqual([], find(stored, "zzz", None, None, 0, False)["lines"])
         self.assertIsNone(find(stored, "a", None, "missing", 0, False))
-        self.assertEqual(["c"], names(find(stored, "a", "Hyperlink", None, 1, False)))
+        self.assertEqual(k("c"), names(find(stored, "a", "Hyperlink", None, 1, False)))
 
     def test_listing_shows_children_with_counts_and_pages(self):
         stored = tree(*SAMPLE)
-        shallow = listing(stored, "w", 1, 0)
+        w = key(stored, "w")
+        shallow = listing(stored, w, 1, 0)
         self.assertEqual(3, shallow["total"])
-        self.assertEqual('d Document "Page" (1 children, 3 in all)', shallow["lines"][2])
-        deep = listing(stored, "w", 3, 0)
+        self.assertEqual(f'{key(stored, "d")} Document "Page" (1 children, 3 in all)', shallow["lines"][2])
+        deep = listing(stored, w, 3, 0)
         self.assertEqual(6, deep["total"])
         self.assertTrue(deep["lines"][-1].startswith("  "))
         self.assertIsNone(listing(stored, "missing", 1, 0))
         with patch("partyline.screen_tree_views.fit", return_value=(["x"], 1)):
             self.assertEqual({"lines": ["x"], "total": 3, "more": 1, "next_offset": 2, "resume": [1, 2]},
-                             listing(stored, "w", 1, 1))
+                             listing(stored, w, 1, 1))
 
     def test_text_is_leaf_names_in_order_with_grep_context(self):
         stored = tree(*SAMPLE, ("e", "d", "Edit", "Search"))
         stored.add([{"id": "ev", "parent": "e", "control_type": "Edit", "name": "Zip", "value": "9021"}])
-        stored.nodes["e"].value = "cats"
+        stored.nodes[key(stored, "e")].value = "cats"
         lines = text_lines(stored, None)
-        self.assertEqual(["Alpha", "Beta", "[Search] cats", "Zip"], text_lines(stored, "d"))
+        self.assertEqual(["Alpha", "Beta", "[Search] cats", "Zip"], text_lines(stored, key(stored, "d")))
         self.assertEqual("Hello  'world'", lines[0].strip())
         whole = text(stored, None, None, 1, 0)
         self.assertEqual("0: Alpha", whole["lines"][0])
@@ -93,7 +102,7 @@ class TreeTests(unittest.TestCase):
         self.assertEqual(3, grep["total"])
         self.assertIsNone(text(stored, "missing", None, 1, 0))
         with patch("partyline.screen_tree_views.fit", return_value=(["x"], 1)):
-            paged = text(stored, "d", "a", 0, 0)
+            paged = text(stored, key(stored, "d"), "a", 0, 0)
             self.assertEqual(paged["next_offset"], 1)
 
     def test_summary_collapses_wrappers_and_notes_the_rest(self):
@@ -112,7 +121,7 @@ class TreeTests(unittest.TestCase):
         stored = tree(*SAMPLE)
         grant = {"title": "Win", "process": "p.exe"}
         self.assertIn("outline", "".join(answer(stored, grant, {})))
-        self.assertIn("lines", answer(stored, grant, {"root": "l"}))
+        self.assertIn("lines", answer(stored, grant, {"root": key(stored, "l")}))
         self.assertIn("lines", answer(stored, grant, {"query": "a"}))
         self.assertIn("lines", answer(stored, grant, {"text": True}))
         stored.cursor = "c"
@@ -123,9 +132,11 @@ class TreeTests(unittest.TestCase):
 
     def test_tool_schema_and_query_string(self):
         tool = screen_elements_tool()
-        self.assertEqual({"device", "window", "refresh", "more", "root", "depth", "query", "control_type",
-                          "text", "context", "offset", "bounds"}, set(tool["inputSchema"]["properties"]))
-        for word in ("summary", "find", "text=true", "root=<id>", "screen_element_action", "refresh=true"):
+        self.assertEqual({"device", "window", "refresh", "more", "root", "depth", "query", "value", "id",
+                          "control_type", "text", "changes", "context", "offset", "bounds"},
+                         set(tool["inputSchema"]["properties"]))
+        for word in ("summary", "query", "text=true", "root=<id>", "id=<id>", "screen_element_action",
+                     "refresh=true"):
             self.assertIn(word, tool["description"])
         self.assertEqual("", elements_query({}))
         self.assertEqual("?device=My%20PC&depth=2&query=a%26b&text=true",
@@ -288,7 +299,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("update it", summary["partial"])
         self.assertEqual(30, summary["nodes"])
         self.assertGreater(len(summary["outline"]), 1)
-        listed = await self.hub.read(None, options={"root": "x" * 64})
+        listed = await self.hub.read(None, options={"root": self.hub.snapshots["g"].order[0]})
         self.assertEqual(29, listed["total"])
         self.assertIn("update it", listed["partial"])
 
@@ -316,11 +327,12 @@ class PagingTests(unittest.TestCase):
     def test_find_and_ls_pages_resume_at_the_first_row_not_shown(self):
         rows = [("w", None, "Window", "App")] + [(f"n{n}", "w", "Button", "b" * 100) for n in range(100)]
         stored = tree(*rows)
-        first = answer(stored, {"title": "T", "process": "p"}, {"root": "w"})
+        w = key(stored, "w")
+        first = answer(stored, {"title": "T", "process": "p"}, {"root": w})
         shown = len(first["lines"].split("\n"))
         self.assertEqual(shown, first["next_offset"])
-        second = answer(stored, {"title": "T", "process": "p"}, {"root": "w", "offset": first["next_offset"]})
-        self.assertTrue(second["lines"].startswith(f"n{shown} "))
+        second = answer(stored, {"title": "T", "process": "p"}, {"root": w, "offset": first["next_offset"]})
+        self.assertTrue(second["lines"].startswith(key(stored, f"n{shown}") + " "))
 
 
 class WidthTests(unittest.TestCase):
@@ -329,10 +341,11 @@ class WidthTests(unittest.TestCase):
         rows += [(f"n{n}", "d", "Hyperlink", "链接" * 80) for n in range(300)]
         stored = tree(*rows)
         grant = {"title": "标题" * 100, "process": "chrome.exe"}
-        for options in ({}, {"root": "d"}, {"query": "链"}, {"text": True}, {"root": "d", "bounds": True}):
+        d = key(stored, "d")
+        for options in ({}, {"root": d}, {"query": "链"}, {"text": True}, {"root": d, "bounds": True}):
             result = answer(stored, grant, options)
             size = len(render(result, "http://x").encode())
             self.assertLessEqual(size, 4096, options)
-        listed = answer(stored, grant, {"root": "d"})
+        listed = answer(stored, grant, {"root": key(stored, "d")})
         self.assertIn("more", listed)
         self.assertEqual(listed["next_offset"], len(listed["lines"].split("\n")))

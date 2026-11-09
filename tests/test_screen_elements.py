@@ -47,7 +47,8 @@ class ElementsTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("partial", result)
             # Later questions use the stored tree: no message reaches the helper.
             found = await hub.read(principal, options={"query": "ok"})
-            self.assertIn('b Button "OK" [invoke] in: Window Editor', found["lines"])
+            self.assertEqual(f'in: Window Editor\n{hub.snapshots["g"].by_helper["b"]} Button "OK" [invoke]',
+                             found["lines"])
             self.assertTrue(socket.messages.empty())
 
     async def test_revocation_during_read_discards_result(self):

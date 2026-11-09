@@ -293,23 +293,49 @@ front or sending input, and the server keeps it. No page is too big, but an agen
 all at once; each answer stays near 4 KB (about 3.4 KB of lines). A call with no arguments returns a
 summary: window title, element count, counts by control type, and an outline of the main regions
 with child counts (a web page's `Document` is opened two levels deeper, skipping single-child wrapper
-chains). From there the agent explores the stored tree like a filesystem, with no new read:
+chains; runs of alike unnamed siblings fold into `+N alike`, and rows of one shape show two examples).
+The summary also calls out repeated structures so the common case is summary, then act: a `pager` (a
+small subtree whose links are named 1, 2, 3 or next/previous) with each link's id, and "N similar DataItem
+rows in Table ..." with an example. From there the agent explores the stored tree like a filesystem, with
+no new read:
 
 | Question | Arguments |
 | --- | --- |
 | `ls` | `root=<id>`, `depth` 1 to 3: the children, each with its child count |
-| `find` | `query` (case-insensitive substring of name or value, `a|b` for either) and/or `control_type`; `root` limits it to a subtree. Each match shows its ancestor path (`in: Document > List Pagination`) |
-| `text` | `text=true`: leaf and `Text` names in reading order; `query` greps it with `context` lines around each hit; `root` scopes it (default: the first `Document`) |
+| `find` | `query` matches the **name**, `value` the value (both given: both must match), and/or `control_type`; `root` limits it to a subtree. Terms: `a|b` either; `=x` or `^x$` the whole text; `^x` starts, `x$` ends; otherwise a case-insensitive substring. Matches are grouped under an `in: Document > List Pagination` line that is repeated only when the ancestors change; unnamed `Group`/`Pane`/`Custom` wrappers are left out of the path |
+| `text` | `text=true`: what a person reads, in reading order. `Text` nodes, leaf names, `Edit` values, and the accessible name of an item (`DataItem`, `ListItem`, `Button`, `Hyperlink`, ...) whose own text below does not already say it (a row named "Book in Series Title" holding only "Series"). `query` greps it (same terms) with `context` lines around each hit; `root` scopes it (default: the first `Document`) |
+| `id` | `id=<id>`: one element whole, like `cat`: its full name (up to 1,000 characters) and value (600), actions, child count and `in:` path |
+| `changes` | `changes=true`: what the last `refresh=true` added (the topmost new elements) with a `+added -gone` count; `offset` pages it |
 | paging | a long answer ends with `more` and `next_offset`; pass `offset` to continue |
-| `refresh` | `refresh=true` takes a new snapshot; ids of the old one may then be stale |
+| `refresh` | `refresh=true` takes a new snapshot; ids of elements that are unchanged stay valid |
 
-There is no regex search: a backtracking pattern over tens of thousands of names could stall the server, so `find` and `text` take plain substrings and `a|b` alternatives only.
+There is no regex search: a backtracking pattern over tens of thousands of names could stall the server, so `find` and `text` take the plain terms above only.
 
 Lines read `id Type "name" ="value" [actions] flags`; `bounds=true` adds screen and frame-pixel
-rectangles. Text is capped per field and stripped to one line; password values and other windows'
+rectangles. A lone `scroll_into_view` action is not printed, `off` marks an off-screen element. Lines clip
+a name at 240 characters and a value at 80 with `…` (the stored fields keep 1,000 and 600; read them with
+`id`). The helper now sends names up to 1,000 characters and values up to 600 (it used to cut both at 160),
+so **the helper must be updated to read past 160 characters**; an older helper still works, with its names cut
+at 160 (automation ids stay at 160). Text is stripped to one line; password values and other windows'
 elements are excluded. Element metadata may include offscreen text from the selected window. Every id
-in the stored snapshot is a `screen_element_action` target until the next snapshot, so a deep element
-found by `find` can be acted on directly.
+in the stored snapshot is a `screen_element_action` target, so a deep element found by `find` can be
+acted on directly.
+
+**Stable ids.** The server gives each element a short id (6 base-32 characters) hashed from its type, name,
+value, automation id, its place among identical siblings and its anchor: for an element with a name or
+automation id, the nearest ancestor that has one (so a new unnamed banner or a "Previous" item in front of a
+pager does not renumber the links); for an unnamed element, its parent. `Window` and `Document`
+names and the values of `Edit`, `ComboBox` and similar controls are left out, so a new page title or typed
+text does not renumber the page. After `refresh=true` an id still names the same element while that element
+is unchanged, and the server translates it to the helper's current id for actions; an id that is no longer
+in the stored tree fails with `unknown element id` and is not sent to the helper. An unnamed element's id
+names a position, so after an insertion it can point at its neighbour instead of failing. If two different
+elements hash to the same id, the later one moves on to its next candidate, and the server remembers which
+element holds each id for as long as the window grant lasts, whatever happens to its trees (expiry, eviction,
+a failed refresh), so a gone element's id is never handed to another one. A window that has been given
+more than 100,000 ids starts a new numbering (every id changes and gains an `-1`, `-2`... epoch suffix, so an id from before can never name an element after) rather than forget a claim. A summary's pager and repeated-row lines are clipped to 200 characters each and share a 900-byte budget. The helper's own ids
+(16 or 64 hex digits) from the same snapshot are still accepted. This is server-side only: the helper and
+its wire format are unchanged, and a helper older than the whole-window capture still works as before.
 
 How the capture works. The helper walks the tree depth-first in tree order, in parts of at most 2,000
 elements, 10,000 visited nodes or 3 s, whichever comes first. A part that stops early returns a
@@ -340,7 +366,8 @@ supplies the typed UI Automation COM interfaces; it is not installed on other pl
 ### Act on elements in the chosen window
 
 With a window granted to its attachment, an agent can call
-`screen_element_action` with an ID from the current `screen_elements` snapshot (any part), using the matching
+`screen_element_action` with an ID from the current `screen_elements` snapshot (any part, or one remembered
+from an earlier snapshot whose element is unchanged), using the matching
 UI Automation pattern. Each snapshot element lists its `patterns` and the `actions` it supports; the
 helper reads pattern state (range, scroll axes, window abilities) only for the action's target.
 
@@ -356,6 +383,14 @@ helper reads pattern state (range, scroll axes, window abilities) only for the a
 | `set_range_value` | RangeValue | `number`, within the element's minimum and maximum |
 | `window_close`, `window_minimize`, `window_maximize`, `window_restore` | Window | none |
 | `window_move`, `window_resize` | Transform | `x`, `y` (screen pixels) / `width`, `height` |
+
+**Click then read.** `then` takes the `screen_elements` read fields (`query`, `value`, `control_type`,
+`root`, `id`, `text`, `context`, `depth`). After a completed action the server waits half a second, takes a
+new snapshot and returns the answer as `after`, within the same 4 KB for the action result and the answer
+together. The client waits up to 100 s for a call with `then` (40 s without). An empty `then` returns what is new: the topmost elements the new snapshot has that the old one
+did not (ids are stable, so a page change lists the new rows and not the unchanged chrome) and a `diff`
+count `+added -gone`. The read needs read access to the line as well as write. If the share ends meanwhile,
+`after` says so and the action result is kept.
 
 The helper rechecks the window, element identity, containment, enabled state and supported pattern
 before dispatch, and refuses an element that lacks the pattern with an error naming the actions

@@ -12,15 +12,10 @@ NOTE = (" Returns a frame reference after a short settle; fetch its media ID and
 
 
 ELEMENT_ACTION_NOTE = (
-    "Use a UIA pattern on any element id from the current screen_elements snapshot (found via find, ls "
-    "or text); the element's `actions` list names what it supports. invoke, toggle, set_value(value); "
-    "select, add_to_selection, remove_from_selection; expand, collapse; scroll(direction, amount), "
-    "set_scroll_percent(horizontal_percent and/or vertical_percent), scroll_into_view; "
-    "set_range_value(number, refused outside the element's range); window_close, window_minimize, "
-    "window_maximize, window_restore, "
-    "window_move(x, y), window_resize(width, height) only on the shared window itself (the first element). "
-    "No input is synthesized and the pointer never moves; the app may still bring itself forward and the "
-    "result reports foreground_changed / target_came_forward. For dragging use screen_drag.")
+    "Use a UIA pattern on an element id from screen_elements; its [actions] say what it supports (none "
+    "shown: scroll_into_view). window_* act on the shared window only. No input is synthesized; the "
+    "pointer never moves. then: re-read after the action in the same call (screen_elements fields; "
+    "empty = what changed). For dragging use screen_drag.")
 ELEMENT_ACTION_PROPERTIES = {
     "window": {"type": "string",
                "description": "Window grant id or title when several windows are shared with you."},
@@ -41,6 +36,13 @@ ELEMENT_ACTION_PROPERTIES = {
     "y": {"type": "integer", "minimum": -32768, "maximum": 32767, "description": "Screen Y for window_move."},
     "width": {"type": "integer", "minimum": 1, "maximum": 16384, "description": "For window_resize."},
     "height": {"type": "integer", "minimum": 1, "maximum": 16384, "description": "For window_resize."},
+    "then": {"type": "object", "additionalProperties": False, "description": "Snapshot and read afterwards.",
+             "properties": {
+                 "query": {"type": "string", "maxLength": 200}, "value": {"type": "string", "maxLength": 200},
+                 "control_type": {"type": "string", "maxLength": 40},
+                 "root": {"type": "string", "maxLength": 128}, "id": {"type": "string", "maxLength": 128},
+                 "text": {"type": "boolean"}, "context": {"type": "integer", "minimum": 0, "maximum": 5},
+                 "depth": {"type": "integer", "minimum": 1, "maximum": 3}}},
 }
 
 
@@ -104,5 +106,6 @@ def call(client, name, args, state):
     if name == "screen_control_request":
         return client.request("POST", base + "/request")
     if name == "screen_element_action":
-        return client.request("POST", base + "/element-action", args, timeout=40)
+        wait = 100 if args.get("then") is not None else 40  # a click that reads afterwards waits for the page
+        return client.request("POST", base + "/element-action", args, timeout=wait)
     return client.request("POST", base + "/action", {"kind": name.removeprefix("screen_"), **args})

@@ -7,7 +7,9 @@ from .uia_patterns import supported
 from .uia_walk_parts import Resolver, frame_bounds, is_wrapper
 
 MAX_ELEMENTS = 2000  # elements per part; a part is a few hundred KB over the helper socket
-MAX_TEXT = 160
+MAX_TEXT = 160  # automation ids, and the state a window action reports
+MAX_NAME = 1000  # names and values in a snapshot; the server clips each line it shows
+MAX_VALUE = 600
 BUDGET = 3.0  # seconds per part; uia_process kills a child that overruns it by KILL_SLACK
 MAX_VISITS = 10000  # nodes read per part, including skipped wrappers, so empty panes cannot loop for ever
 REASONS = {"limit": "element limit", "visits": "visit limit", "time": "time budget"}
@@ -17,9 +19,9 @@ def describe(provider, node, path, props, frame, parent):
     rect = provider.bounds(node)
     if provider.password(node):
         props.pop("value", None)
-    for key in ("name", "automation_id", "value"):
+    for key, limit in (("name", MAX_NAME), ("automation_id", MAX_TEXT), ("value", MAX_VALUE)):
         if key in props:
-            props[key] = str(props[key] or "")[:MAX_TEXT]
+            props[key] = str(props[key] or "")[:limit]
     props["id"] = element_id(provider, node, path)
     if actions := supported(props, not path):
         props["actions"] = actions

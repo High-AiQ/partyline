@@ -68,6 +68,14 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual([0, 1, 3], tree.reads)
         self.assertEqual(160, len(elements[1]["automation_id"]))
 
+    def test_long_names_and_values_reach_the_server_up_to_their_caps(self):
+        tree = Provider([{"rect": (0, 0, 10, 10), "name": "N" * 2000, "value": "v" * 2000}])
+        element = snapshot(tree, clock=lambda: 0)["elements"][0]
+        self.assertEqual((1000, 600), (len(element["name"]), len(element["value"])))
+        tree = Provider([{"rect": (0, 0, 10, 10), "name": "T" * 500, "value": "v" * 300}])
+        element = snapshot(tree, clock=lambda: 0)["elements"][0]
+        self.assertEqual((500, 300), (len(element["name"]), len(element["value"])))
+
     def test_count_visit_and_time_caps_each_leave_a_cursor_state(self):
         tree = Provider([{"rect": (0, 0, 10, 10), "children": [1]},
                          {"rect": (0, 0, 10, 10), "children": [2]},
