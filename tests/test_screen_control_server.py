@@ -230,23 +230,27 @@ class ControlFlowTest(unittest.IsolatedAsyncioTestCase):
         await self.client.post("/api/conversations/line/screen-control/request")
         await until(lambda: self.grant().status == "active")
         baseline = len(self.bodies())
+        media_baseline = self.db._exec("SELECT count(*) FROM images").fetchone()[0]
         first = await self.act(kind="click", x=10, y=20)
         self.assertEqual(first.status_code, 200, first.text)
         url = first.json()["frame"]
         self.assertTrue(url.endswith("/thumb"))
         self.assertEqual(len(self.bodies()), baseline)
-        self.assertEqual(self.db._exec("SELECT count(*) FROM images").fetchone()[0], 1)
+        self.assertEqual(self.db._exec("SELECT count(*) FROM images").fetchone()[0],
+                         media_baseline + 1)
         again = await self.act(kind="move", x=11, y=20, frame="full")
         self.assertTrue(again.json()["unchanged"])
         self.assertEqual(again.json()["frame"], url.removesuffix("thumb") + "original")
-        self.assertEqual(self.db._exec("SELECT count(*) FROM images").fetchone()[0], 1)
+        self.assertEqual(self.db._exec("SELECT count(*) FROM images").fetchone()[0],
+                         media_baseline + 1)
         none = await self.act(kind="move", x=12, y=20, frame="none")
         self.assertEqual(set(none.json()), {"done"})
         self.desktop.image.putpixel((0, 0), (0, 0, 0))
         changed = await self.act(kind="move", x=13, y=20)
         self.assertNotIn("unchanged", changed.json())
         self.assertNotEqual(changed.json()["frame"], url)
-        self.assertEqual(self.db._exec("SELECT count(*) FROM images").fetchone()[0], 2)
+        self.assertEqual(self.db._exec("SELECT count(*) FROM images").fetchone()[0],
+                         media_baseline + 2)
         invalid = await self.act(kind="move", x=13, y=20, frame="large")
         self.assertEqual(invalid.status_code, 422)
 

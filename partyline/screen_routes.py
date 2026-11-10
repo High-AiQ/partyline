@@ -38,6 +38,7 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
     recover(runtime.db)
     recover_tools(runtime.db)
     hub = ScreenHub(runtime)
+    hub.media_store = store
     app.state.screen_hub = hub
     runtime.screen_hub = hub
     router = APIRouter()

@@ -725,6 +725,7 @@ class RenderAndServerTests(unittest.TestCase):
 
         names = list_names(1)
         self.assertNotIn("screen_frame", names)
+        self.assertIn("get_media", names)
         self.assertNotIn("screen_elements", names)
         self.assertNotIn("screen_click", names)
 

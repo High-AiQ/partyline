@@ -11,23 +11,23 @@ from pydantic import ValidationError
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from .screen_connections import device_valid, notice
+from .screen_connections import device_valid
 from .local_tools import TOOL_MESSAGES, LocalTools
 from .screen_control import CONTROL_MESSAGES, ControlHub
 from .capability_versions import bump_runtime
-from .screen_share_notices import share_started
 from .screen_frames import BufferedFrame, ShareBuffer
+from .screen_share_frames import add_frame
+from .screen_share_stop import stop_share as stop_screen_share
 from .screen_elements import ElementsHub
 from .screen_window_grants import MESSAGES as WINDOW_MESSAGES, WindowGrants
 from .screen_pair_limits import PairLimits
-from .screen_requests import capture, end_share, preview
+from .screen_requests import capture, preview
 from .walkthrough_takes import Takes
 from .screen_protocol import (
     DEFAULT_LONG_EDGE, DEFAULT_MAX_FPS, DEFAULT_MIN_CHANGE, HEARTBEAT_SECONDS,
     HEARTBEAT_TIMEOUT, MAX_FRAME_BYTES, PROTOCOL_VERSION, HelperFrame,
     HelperHello, HelperPreview, ShareAccepted, ShareCommand, ShareEnded,
 )
-
 
 class ScreenHub:
     def __init__(self, runtime):
@@ -129,7 +129,7 @@ class ScreenHub:
                         await ws.send_json({"type": "error", "request_id": meta.request_id,
                                             "message": "frame exceeds 4 MB"})
                         continue
-                    self._frame(current, meta, data)
+                    await self._frame(current, meta, data)
                 elif kind == "preview":
                     meta = HelperPreview.model_validate(message)
                     data = await asyncio.wait_for(ws.receive_bytes(), HEARTBEAT_TIMEOUT)
@@ -144,7 +144,6 @@ class ScreenHub:
                         share.status = "active"
                         bump_runtime(self.runtime)
                         await self._line_event(share.conv_id, self._share_view(share, current))
-                        await share_started(self, share, current)
                 elif kind in ("share_declined", "share_stopped"):
                     result = ShareEnded.model_validate(message)
                     share = self._share(result.share_id, ident)
@@ -189,20 +188,8 @@ class ScreenHub:
         return next((share for share in self.shares.values()
                      if share.share_id == share_id and share.device_id == device_id), None)
 
-    def _frame(self, device: dict, meta: HelperFrame, data: bytes) -> None:
-        share = self._share(meta.share_id, device["id"])
-        if not share or share.status != "active" or meta.region.model_dump() != share.region:
-            return
-        frame = BufferedFrame(data, meta.ts_ms, meta.region.model_dump(),
-                              meta.out_width, meta.out_height,
-                              meta.pointer.model_dump(exclude_defaults=True) if meta.pointer else None,
-                              meta.mime)
-        share.add(frame)
-        self.walkthroughs.add(share, frame)
-        if meta.request_id:
-            entry = self.snap_waiters.get(meta.request_id)
-            if entry and entry[0] is share and not entry[1].done():
-                entry[1].set_result(frame)
+    async def _frame(self, device: dict, meta: HelperFrame, data: bytes) -> None:
+        await add_frame(self, device, meta, data)
 
     async def start_share(self, conv_id: str, owner_id: int, requested_by: str,
                           device_id: str, region: dict, line_name: str,
@@ -241,26 +228,7 @@ class ScreenHub:
         share = next((item for item in self.shares.values() if item.share_id == share_id), None)
         if not share:
             return
-        status = share.status
-        self.walkthroughs.share_ended(share.share_id)
-        end_share(self, share)
-        await self.control.end(share, reason)
-        device = self.devices.get(share.device_id)
-        if device:
-            try:
-                await device["socket"].send_json({"type": "stop_share", "share_id": share.share_id})
-            except Exception:
-                pass
-        if status == "waiting" and device:
-            view = self._share_view(share, device)
-            view["share"]["status"] = "declined"
-            view["share"]["reason"] = reason
-            await self._line_event(share.conv_id, view)
-        else:
-            await self._line_event(share.conv_id, {"type": "screen_share", "share": None})
-        if status == "active" and share.share_id not in self.walkthroughs.items:
-            await notice(self, share.conv_id,
-                f"@all Screen sharing stopped ({reason}); screen_frame is no longer available.")
+        await stop_screen_share(self, share, reason)
 
     async def capture(self, conv_id: str) -> tuple[ShareBuffer, BufferedFrame]:
         return await capture(self, conv_id)
