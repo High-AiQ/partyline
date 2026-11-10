@@ -26,7 +26,7 @@ const listing: AsrSettings = {
       is_default: true,
       can_be_default: true,
       available: true,
-      fields: { base_url: "https://speech.example.test", model: "whisper-1" },
+      fields: { base_url: "https://speech.example.test", model: "whisper-large-v3" },
     },
   ],
 };

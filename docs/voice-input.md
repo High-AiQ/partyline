@@ -143,8 +143,8 @@ kind = "openai-compatible"
 base_url = "https://api.groq.com/openai"
 model = "whisper-large-v3"
 api_key_env = "GROQ_API_KEY" # the NAME of the variable; the key itself is never stored in config or the database
-response_format = "verbose_json" # optional: "verbose_json" (default; segments) or "json" (text only)
-language = "en"              # optional ISO code passed through; blank lets the service detect
+response_format = "verbose_json" # timed segments when the service supports them
+language = "en"              # optional language hint, or omit to let the service detect
 prompt = "Partyline, captain" # optional hint passed through: names and jargon to expect
 
 [[asr]]                      # anything that prints JSON; {audio} becomes the temp file path
@@ -167,17 +167,31 @@ environment and restart the server:
 The variable name must be upper case (`[A-Z_][A-Z0-9_]*`), so a pasted key can never be saved in
 its place. A `base_url` with credentials or a query string is refused for the same reason.
 
-### Recommended OpenAI presets
+### OpenAI file transcription
 
-| preset | settings | gives |
-|---|---|---|
-| `whisper-1` | `model = "whisper-1"`, `response_format = "verbose_json"` (the default) | text plus segments with timestamps (needed for WebVTT) |
-| `gpt-4o-transcribe` | `model = "gpt-4o-transcribe"`, `response_format = "json"` | better accuracy; **text only**, no segments |
+New OpenAI presets use `base_url = "https://api.openai.com"`, `api_key_env = "OPENAI_API_KEY"`,
+`model = "gpt-transcribe"`, and `response_format = "json"`. The JSON response has transcript text
+and detected languages. Walkthroughs put this untimed narration above the frames, and WebVTT
+requires a recognizer that supplies timed segments. Groq, speaches, and other compatible services
+use their own model names and formats. Use `verbose_json` for timed segments where supported.
+[OpenAI model page](https://developers.openai.com/api/docs/models/gpt-transcribe) ·
+[Transcription API reference](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create)
 
-`gpt-4o-transcribe` and `gpt-4o-mini-transcribe` reject `verbose_json` with `400` ("Use 'json' or
-'text'"), so they need `response_format = "json"`. With `json` the transcript has no segments
-and the language is the preset's `language` if set. Both use `base_url = "https://api.openai.com"`
-and `api_key_env = "OPENAI_API_KEY"`.
+OpenAI documents JSON for this model. The endpoint's shared format list also includes `text` and
+`verbose_json`, which the model-specific migration guide leaves to legacy integrations.
+OpenAI's file upload limit is 25 MB. The preset's optional language hint is sent in
+`languages[]` for `gpt-transcribe`, and `prompt` can describe the recording's context. The API
+also accepts optional `keywords[]`, multiple language hints and streamed responses. Partyline
+sends a completed recording with one optional language hint.
+[OpenAI file transcription guide](https://developers.openai.com/api/docs/guides/speech-to-text) ·
+[OpenAI migration guide](https://developers.openai.com/cookbook/examples/migrating_from_whisper_to_gpt_transcribe)
+
+OpenAI deprecated `whisper-1` and schedules its removal for February 26, 2027. To migrate an
+existing OpenAI preset, open **Settings → Voice**, edit the preset, click **update to
+gpt-transcribe** to set the model and response format, then save. For a config-file preset,
+set `model = "gpt-transcribe"` and `response_format = "json"` in its `[[asr]]` table or use
+**customize** in Settings to save an override.
+[OpenAI deprecation schedule](https://developers.openai.com/api/docs/deprecations#2026-08-26-transcription-models)
 
 ### Command presets
 

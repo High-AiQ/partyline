@@ -15,9 +15,9 @@ describe("recognizer form", () => {
       kind: "openai-compatible",
       fields: {
         base_url: "https://api.openai.com",
-        model: "whisper-1",
+        model: "gpt-transcribe",
         api_key_env: "OPENAI_API_KEY",
-        response_format: "verbose_json",
+        response_format: "json",
         language: undefined,
         prompt: undefined,
         timeout: undefined,
@@ -40,7 +40,22 @@ describe("recognizer form", () => {
     expect(validateDraft(named({ baseUrl: "ftp://x" })).baseUrl).toContain("http");
     expect(validateDraft(named({ baseUrl: "https://u:p@x.test" })).baseUrl).toContain("credentials");
     expect(validateDraft(named({ baseUrl: "https://x.test/?key=1" })).baseUrl).toContain("query");
-    expect(validateDraft(named({ model: " " })).model).toBeDefined();
+    expect(validateDraft(named({ model: " " })).model).toContain("gpt-transcribe for OpenAI");
+  });
+
+  it("requires json for OpenAI GPT-Transcribe and accepts a compatible provider's format", () => {
+    expect(validateDraft(named({ responseFormat: "verbose_json" })).responseFormat).toContain("uses json");
+    const groq = named({
+      baseUrl: "https://api.groq.com/openai",
+      apiKeyEnv: "GROQ_API_KEY",
+      model: "whisper-large-v3",
+      responseFormat: "verbose_json",
+    });
+    expect(validateDraft(groq)).toEqual({});
+    expect(draftToBody(groq).fields).toMatchObject({
+      model: "whisper-large-v3",
+      response_format: "verbose_json",
+    });
   });
 
   it("will not take a pasted key where the variable name goes", () => {
@@ -75,7 +90,7 @@ describe("recognizer form", () => {
 
   it("round trips a listed preset back into a form", () => {
     const preset: AsrPreset = {
-      name: "4o",
+      name: "legacy",
       kind: "openai-compatible",
       source: "database",
       editable: true,
@@ -85,8 +100,7 @@ describe("recognizer form", () => {
       available: true,
       fields: {
         base_url: "https://api.openai.com",
-        model: "gpt-4o-transcribe",
-        response_format: "json",
+        model: "whisper-1",
         timeout: 60,
       },
       key_env: null,
@@ -94,12 +108,15 @@ describe("recognizer form", () => {
     };
     const draft = draftFromPreset(preset);
     expect(draft).toMatchObject({
-      name: "4o",
-      model: "gpt-4o-transcribe",
-      responseFormat: "json",
+      name: "legacy",
+      model: "whisper-1",
+      responseFormat: "verbose_json",
       timeout: "60",
     });
-    expect(draftToBody(draft).fields.response_format).toBe("json");
+    expect(draftToBody(draft).fields).toMatchObject({ model: "whisper-1", response_format: "verbose_json" });
+    expect(
+      draftFromPreset({ ...preset, fields: { ...preset.fields, model: "gpt-transcribe" } }).responseFormat,
+    ).toBe("json");
     expect(draftFromPreset({ ...preset, kind: "command", fields: { argv: ["a", "b"] } }).argv).toBe("a\nb");
   });
 });

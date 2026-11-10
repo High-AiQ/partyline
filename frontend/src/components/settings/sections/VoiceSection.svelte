@@ -224,7 +224,7 @@
   <SettingRow
     id="setting-asr-add"
     label="Add a recognizer"
-    description="whisper-1 returns segments and timestamps; gpt-4o-transcribe is more accurate but needs the json format."
+    description="OpenAI presets use gpt-transcribe with json. For other services, use the model and format they support."
     stacked
   >
     {#if editing === "new"}

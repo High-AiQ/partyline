@@ -59,8 +59,8 @@ def _openai(entry: Mapping[str, Any], extra: dict[str, float]) -> OpenAICompatib
     if key_env is not None and not ENV_NAME.match(key_env):
         raise ValueError(f"{label}: api_key_env is the NAME of an environment variable (e.g. "
                          "OPENAI_API_KEY), never the key itself")
-    response_format = _text(entry, "response_format") or "verbose_json"
-    if response_format not in RESPONSE_FORMATS:
+    response_format = _text(entry, "response_format")
+    if response_format is not None and response_format not in RESPONSE_FORMATS:
         raise ValueError(f"{label}: response_format must be one of {', '.join(RESPONSE_FORMATS)}")
     return OpenAICompatible(base_url, _text(entry, "model", True) or "", key_env, **extra,
                             response_format=response_format, language=_text(entry, "language"),

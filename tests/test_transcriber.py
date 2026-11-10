@@ -24,7 +24,7 @@ from partyline.transcriber import (
     CPU_MODEL, GPU_MODEL, INSTALL_HINT, TranscribeSettings, Transcriber,
     TranscriberUnavailable,
 )
-from partyline.transcript import TakeFailed
+from partyline.transcript import TakeFailed, WhisperRetired
 from partyline.asr_presets import AsrRegistry
 
 
@@ -277,6 +277,16 @@ class TranscribeRouteTest(unittest.TestCase):
         r = self.client.post("/api/conversations/line/transcribe", content=b"x")
         self.assertEqual(r.status_code, 401)
         self.assertEqual(self.post(conv="missing").status_code, 404)
+
+    def test_retired_whisper_detail_reaches_the_composer_and_server_log(self):
+        with mock.patch.object(self.engine, "transcribe", side_effect=WhisperRetired()), \
+                self.assertLogs("partyline.transcribe_routes", "WARNING") as log:
+            response = self.post()
+        detail = "model whisper-1 is retired; switch the preset to gpt-transcribe in Settings → Voice"
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json(), {"detail": detail})
+        self.assertEqual(len(log.output), 1)
+        self.assertIn(detail, log.output[0])
 
     def test_machine_scope(self):
         self.db.add_attachment("m1", "other", "bot", "fake", ["fake"], "/tmp")

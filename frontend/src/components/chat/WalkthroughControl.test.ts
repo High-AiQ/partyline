@@ -235,12 +235,39 @@ describe("walkthrough control", () => {
     expect(finish).toHaveBeenCalledWith("l", "s", {
       notes: "notes",
       segments: [{ start: 0, end: 1, text: "click" }],
+      transcript_text: "",
       transcription_error: false,
       no_input: false,
       duration_ms: 0,
       mark_pointer: false,
     });
     expect(draft.text).toBe("");
+    await unmount(component);
+  });
+
+  it("sends untimed transcript text without a synthetic segment", async () => {
+    const finish = vi.spyOn(walkthroughApi, "finish").mockResolvedValue({ message: { id: 1 } });
+    const component = setup();
+    vi.mocked(voiceApi.transcribe).mockResolvedValue({
+      text: "click the gear",
+      duration: 0,
+      language: "en",
+      segments: [],
+    });
+    await settle();
+    await startWalkthrough();
+    await settle();
+    button("Stop and send")?.click();
+    await settle();
+    expect(finish).toHaveBeenCalledWith(
+      "l",
+      "s",
+      expect.objectContaining({
+        segments: [],
+        transcript_text: "click the gear",
+        transcription_error: false,
+      }),
+    );
     await unmount(component);
   });
 
@@ -272,6 +299,7 @@ describe("walkthrough control", () => {
     expect(finish).toHaveBeenCalledWith("l", "s", {
       notes: "",
       segments: [],
+      transcript_text: "",
       transcription_error: true,
       no_input: false,
       duration_ms: 0,

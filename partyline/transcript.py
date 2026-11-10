@@ -23,6 +23,14 @@ class TakeFailed(Exception):
         self.status = status
 
 
+class WhisperRetired(TakeFailed):
+    """An OpenAI retirement error with a fixed message safe for the server log."""
+
+    def __init__(self):
+        super().__init__(
+            "model whisper-1 is retired; switch the preset to gpt-transcribe in Settings → Voice", 502)
+
+
 @dataclass(frozen=True)
 class Transcript:
     text: str
