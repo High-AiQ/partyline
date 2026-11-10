@@ -155,7 +155,7 @@ class LineBridgeTest(unittest.TestCase):
         self.say("x", "x-amb", "@[bridge]Fable. hello")
         self.assertEqual(len(self.adapters["y-amb"].delivered), 1)
 
-    def test_an_adapter_spoken_message_is_stamped_and_hidden_too(self):
+    def test_an_adapter_spoken_message_is_stamped_and_shown_on_its_own_line(self):
         bridge = self.opened()
         socket = Socket()
         self.runtime.sockets["x"] = {socket}
@@ -163,24 +163,28 @@ class LineBridgeTest(unittest.TestCase):
         post = self.runtime.post_callback("x-amb", "x", att["runtime_owner"])
         asyncio.run(post("sonnet", "agent", "@[bridge]fable via the pty"))
         self.assertEqual(len(self.adapters["y-amb"].delivered), 1)
-        self.assertEqual(socket.sent, [])
         self.assertEqual(self.rows("x")[-1]["bridge_id"], bridge["id"])
+        shown = [p["message"] for p in socket.sent if p.get("type") == "message"]
+        self.assertEqual([m["body"] for m in shown], ["@[bridge]fable via the pty"])
+        self.assertEqual(shown[0]["bridge_peer_conv_name"], "tool")
 
-    def test_people_never_see_bridge_rows_in_reads_or_fanout(self):
+    def test_people_see_their_ambassadors_bridge_speech_but_never_the_copy(self):
         bridge = self.opened()
         sockets = {"x": Socket(), "y": Socket()}
         self.runtime.sockets["x"], self.runtime.sockets["y"] = {sockets["x"]}, {sockets["y"]}
         self.say("x", "x-amb", "@[bridge]fable secret plan")
         self.say("y", "y-amb", "@[bridge]sonnet reply")
-        for conv in ("x", "y"):
+        for conv, own, other in (("x", "secret plan", "reply"), ("y", "reply", "secret plan")):
             page = self.client.get(f"/api/conversations/{conv}/messages", headers=self.person)
-            self.assertNotIn("bridge", " ".join(m["body"] for m in page.json()["messages"]
-                                                 if m["sender_type"] == "agent"))
-            self.assertFalse(any(m.get("bridge_id") for m in page.json()["messages"]))
-            self.assertFalse(any("bridge" in str(p).lower() and "secret" in str(p)
-                                 for p in sockets[conv].sent))
-            self.assertEqual([p for p in sockets[conv].sent if p.get("type") == "message"
-                              and p["message"].get("bridge_id")], [])
+            bodies = [m["body"] for m in page.json()["messages"]]
+            self.assertTrue(any(own in body for body in bodies), conv)
+            self.assertFalse(any(other in body for body in bodies), conv)
+            self.assertFalse(any(m.get("bridge_id") and m.get("audience_attachment_id")
+                                 for m in page.json()["messages"]))
+            shown = [p["message"]["body"] for p in sockets[conv].sent
+                     if p.get("type") == "message"]
+            self.assertTrue(any(own in body for body in shown), conv)
+            self.assertFalse(any(other in body for body in shown), conv)
         log = self.client.get(f"/api/bridges/{bridge['id']}/messages", headers=self.person)
         self.assertEqual(len(log.json()), 4)  # two originals, two copies
 

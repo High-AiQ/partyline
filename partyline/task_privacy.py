@@ -13,6 +13,7 @@ import re
 
 from .mention_relay import speaker_attachment
 from .mentions import mentioned_names
+from .message_visibility import is_bridge_copy
 
 _LEADING = re.compile(r"\s*(?:@!?[A-Za-z0-9][A-Za-z0-9_.-]*[\s,]*)+")
 
@@ -37,12 +38,18 @@ def is_task_only(db, conv_id: str, message: dict) -> bool:
 
 
 def hidden_from_people(db, conv_id: str, event) -> bool:
-    """Whether this fan-out event is never shown on the line: bridge traffic or a task-only message."""
+    """Whether this fan-out event is never shown on the line: a bridge copy or a task-only message.
+
+    An ambassador's own bridge message is said on its line, so people see it;
+    it is never task-only (its mentions are bridge speech, which route nowhere).
+    """
     message = getattr(event, "message", None)
     if message is None:
         return False
-    if getattr(message, "bridge_id", None):
+    if is_bridge_copy(message.model_dump()):
         return True
+    if getattr(message, "bridge_id", None):
+        return False
     return message.sender_type == "agent" and hide_if_task_only(db, conv_id, message.model_dump())
 
 

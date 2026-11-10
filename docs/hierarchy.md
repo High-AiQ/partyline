@@ -1116,7 +1116,7 @@ full contract is `docs/contracts/line-bridge.md`; the code is
 | DO | DO NOT |
 | --- | --- |
 | Let a process ask its people in plain text to open a bridge | Open or close a bridge from a process |
-| Report anything people need in a normal message | Expect people to see bridge traffic in the chat |
+| Report anything people need in a normal message | Expect the other line's people to see your bridge message |
 
 ## Orchestrator captains and task lines
 

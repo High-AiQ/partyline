@@ -55,6 +55,13 @@
   const via = $derived(
     message.source_conv_id && message.source_conv_id !== message.conv_id ? message.source_conv_name : null,
   );
+  // An ambassador's own bridge message: said on this line, and also sent to the
+  // peer. A bridge copy (with an audience) never reaches the chat, so it has no tag here.
+  const bridgeTag = $derived(
+    message.bridge_id && !message.audience_attachment_id
+      ? `⇄ «${message.bridge_peer_conv_name ?? "another line"}»`
+      : null,
+  );
   const isPrivate = $derived(Boolean(message.audience_attachment_id));
 </script>
 
@@ -78,6 +85,9 @@
       >
       {#if via}
         <span class="via text-[10px] text-cream-faint italic">via «{via}»</span>
+      {/if}
+      {#if bridgeTag}
+        <span class="via bridge text-[10px] text-cream-faint italic">{bridgeTag}</span>
       {/if}
       {#if isPrivate}
         <span class="direct text-[10px] text-cream-faint">· direct</span>
