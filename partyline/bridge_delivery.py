@@ -1,8 +1,10 @@
 """Speaking over a bridge: ``@[bridge]<peer>`` in an ambassador's message.
 
 The ordinary mention regex does not match ``@[``, so the two forms never
-collide. Stamping happens before the sender's message is broadcast (so people
-never see it) and delivery happens when routing sees the stamp. A copy that
+collide. Stamping happens before the sender's message is broadcast: the message
+shows on its own line for people, marked as bridge speech, and delivery happens
+when routing sees the stamp. Only the copy the counterpart receives stays hidden
+from people. A copy that
 arrives over the bridge is foreign-sourced and carries its own audience, so it
 is never stamped, relayed or answered on its own: it moves only when its
 recipient writes a fresh ``@[bridge]`` message.
@@ -65,7 +67,8 @@ def stamp_outbound(db, conv_id: str, message: dict) -> dict:
     if peer["name"].lower() not in names:
         return message
     db._exec("UPDATE messages SET bridge_id=? WHERE id=?", (bridge["id"], message["id"]))
-    return {**message, "bridge_id": bridge["id"]}
+    stamped = select_message_by_id(db._exec, conv_id, message["id"])  # carries the peer's name
+    return stamped or {**message, "bridge_id": bridge["id"]}
 
 
 def speaks_over_bridge(db, att_id: str, body: str) -> bool:

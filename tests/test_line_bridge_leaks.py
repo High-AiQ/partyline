@@ -56,9 +56,12 @@ class BridgeLeakTest(unittest.TestCase):
         self.assertIn("r1", returns.requesters["x-amb"])  # @gem inside bridge speech reached no one
         self.assertFalse(speaks_over_bridge(self.db, "x-other", "@[bridge]luna hi"))
 
-    def test_by_id_reads_hide_bridge_rows_from_forward_reaction_and_pin(self):
-        row = self.crossed()
-        self.assertIsNone(self.db.message_by_id("x", row["id"]))
+    def test_by_id_reads_hide_bridge_copies_from_forward_reaction_and_pin(self):
+        original = self.crossed()
+        self.assertEqual(self.db.message_by_id("x", original["id"])["body"], original["body"])
+        self.assertIsNotNone(reaction_message(self.db, original["id"]))
+        row = [r for r in self.rows("y") if r["bridge_id"]][-1]  # the copy, which people never read
+        self.assertIsNone(self.db.message_by_id("y", row["id"]))
         self.assertIsNone(reaction_message(self.db, row["id"]))
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
@@ -69,13 +72,13 @@ class BridgeLeakTest(unittest.TestCase):
             app.include_router(router(self.runtime))
         client = TestClient(app)
         self.addCleanup(client.close)
-        forwarded = client.post(f"/api/conversations/x/messages/{row['id']}/forward",
+        forwarded = client.post(f"/api/conversations/y/messages/{row['id']}/forward",
                                 json={"to": "kid", "note": ""}, headers=self.person)
         self.assertEqual(forwarded.status_code, 404)
         reacted = client.post(f"/api/messages/{row['id']}/reactions",
                               json={"emoji": "👍"}, headers=self.person)
         self.assertEqual(reacted.status_code, 404)
-        pinned = client.post("/api/conversations/x/pins", json={"message_id": row["id"]},
+        pinned = client.post("/api/conversations/y/pins", json={"message_id": row["id"]},
                              headers=self.person)
         self.assertEqual(pinned.status_code, 404)
 

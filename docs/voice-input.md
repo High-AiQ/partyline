@@ -5,7 +5,11 @@ server, transcribed there, and the text is inserted at the caret in the message 
 sent for you in manual mode — review the text, edit it, and press send. Processes are CLIs and cannot take
 audio, so speech is turned into text before it reaches a line.
 
-While a take records or transcribes, a **cancel** button sits beside the mic, and Escape in the
+While a take records, the mic button carries the level meter, the elapsed time and the words
+**Click to transcribe** (**Transcribe** on a phone): nothing happens until you click it, and the
+text goes into the box, not to the line. After the click it reads **Transcribing…** until the text
+lands; an empty transcript or an error shows a notice ("Heard nothing" or the error). While a take
+records or transcribes, a small **✕** (*Discard recording*) sits beside the mic, and Escape in the
 composer does the same: the take is discarded, nothing is uploaded or inserted, an upload in
 flight is aborted (a late answer is ignored), and the microphone is released at once.
 

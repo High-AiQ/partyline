@@ -64,6 +64,8 @@ async def rollback_start(runtime, att):
     ident = att["id"]
     if adapter := runtime.live.get(ident):
         try:
+            from .attachment_stop_audit import direct_stop
+            direct_stop(ident, "attachment.start_rollback")
             await adapter.stop()
         except Exception:
             # Keep the card and adapter reachable for an explicit detach retry.

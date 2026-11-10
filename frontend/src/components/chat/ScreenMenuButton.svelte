@@ -15,11 +15,11 @@
         ? "Connect a computer to record a walkthrough"
         : "",
   );
-  const label = "Screen: share live or record a walkthrough";
+  const label = "Screen: share screen + record voice (Show me), or share screen only";
 </script>
 
 <svelte:window onkeydown={popup.keydown} onpointerdown={popup.pointerdown} />
-<div class="relative flex flex-none" bind:this={popup.container}>
+<div class="flex flex-none" bind:this={popup.container}>
   <button
     bind:this={popup.anchor}
     type="button"
@@ -45,17 +45,8 @@
       bind:this={popup.menu}
       role="menu"
       aria-label="Screen"
-      class="absolute bottom-full left-0 z-60 mb-1 flex min-w-max flex-col rounded-md border border-panel-line bg-panel p-1"
+      class="absolute bottom-full left-7 z-60 mb-1 flex w-72 max-w-[calc(100%-3.5rem)] flex-col rounded-md border border-panel-line bg-panel p-1"
     >
-      <button
-        type="button"
-        role="menuitem"
-        class="border-0 bg-transparent p-2 text-left hover:bg-copper hover:text-ink focus-visible:bg-copper focus-visible:text-ink"
-        onclick={() => {
-          popup.close();
-          screenStatus.openPicker++;
-        }}>Share to «{room.conversation?.name}»</button
-      >
       <button
         type="button"
         role="menuitem"
@@ -69,8 +60,23 @@
             popup.close();
             onbegin();
           }
-        }}>Record a walkthrough</button
+        }}
       >
+        <span class="block">Share screen + record voice</span>
+        <span class="block text-xs">Frames + transcript on stop</span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        class="border-0 bg-transparent p-2 text-left hover:bg-copper hover:text-ink focus-visible:bg-copper focus-visible:text-ink"
+        onclick={() => {
+          popup.close();
+          screenStatus.openPicker++;
+        }}
+      >
+        <span class="block">Share screen only</span>
+        <span class="block text-xs">Live view · no voice</span>
+      </button>
     </div>
   {/if}
   {#if error}<ComposerBubble><span role="alert" class="text-red">{error}</span></ComposerBubble>{/if}

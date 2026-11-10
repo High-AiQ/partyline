@@ -39,7 +39,8 @@ def scope_argv(command: list[str], limit: str, platform: str | None = None,
         )
     verifier = [sys.executable, "-m", "partyline.process_memory", "--verify-exec", limit,
                 "--", *command]
-    # Named attachment scopes retain failed results until the host records them.
+    # Named attachment scopes retain failed results until the host records them, so
+    # no --collect (it would drop the oom-kill result); process_exit.stop_scope ends them.
     lifetime = [f"--unit={unit}", "-p", "OOMPolicy=stop"] if unit else ["--collect"]
     return [systemd_run, "--user", "--scope", "-q", *lifetime, "-p",
             f"MemoryMax={limit}", "-p", "MemorySwapMax=0", "--expand-environment=no", "--", *verifier]

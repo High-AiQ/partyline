@@ -21,11 +21,11 @@ from .message_routing import post_human_message, route_message
 from .reattach import ReattachCoordinator
 from .runtime_delivery_credit import DeliveryCreditMixin
 from .task_privacy import hidden_from_people
+from .attachment_stop_audit import status_update
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
 RESERVED_NAMES = {"all", "system"}  # @all rings everyone; system is the notice sender
 logger = logging.getLogger(__name__)
-
 
 def handle_error(handle: str) -> str | None:
     """Return a user-facing validation error, or ``None`` for a valid handle."""
@@ -191,9 +191,7 @@ class ChatRuntime(DeliveryCreditMixin):
         async def on_status(status: str):
             if status == "detached" and att_id in getattr(self, "_shutdown_resume", set()):
                 status = "exited"
-            if not await self.db.set_attachment_status_async(
-                att_id, status, runtime_owner
-            ):
+            if not await status_update(self.db, att_id, status, runtime_owner):
                 return
             if status in ("exited", "detached"):
                 adapter = self.live.get(att_id)
@@ -207,7 +205,6 @@ class ChatRuntime(DeliveryCreditMixin):
             await self.broadcast_attachment(conv_id, att_id)
 
         return on_status
-
     def post_callback(self, att_id: str, conv_id: str, runtime_owner: str, *, route: bool = True):
         async def post(sender: str, sender_type: str, body: str):
             msg = self.db.add_owned_message(

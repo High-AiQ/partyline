@@ -65,7 +65,8 @@ class ExitEvidenceTest(unittest.TestCase):
         with patch.dict(function.__globals__, {'systemd_available': lambda *_: True}), \
              patch.object(sys, 'platform', 'linux'), \
              patch.object(subprocess, 'run', side_effect=[self.result('', -15),
-                                                        self.result('oom-kill\n'), self.result('')]) as run:
+                                                        self.result('oom-kill\n'), self.result(''),
+                                                        self.result('')]) as run:
             self.assertEqual(function(['command'], 1024, {}), 137)
         self.assertIn('reset-failed', run.call_args.args[0])
 

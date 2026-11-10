@@ -523,12 +523,12 @@ async def edit_attachment(
 async def detach(request: Request, att_id: str):
     principal = request_principal(request)
     deny_unless_attachment(runtime.db, principal, att_id, "close")
-    return await close_attachment(runtime, att_id, self_detach=(principal.kind == "machine"
-                                  and principal.attachment_id == att_id))
-
+    caller = principal.attachment_id or f"{principal.kind}:{principal.user_id}"
+    return await close_attachment(runtime, att_id, source="api.detach", caller=caller,
+                                  self_detach=(principal.kind == "machine"
+                                               and principal.attachment_id == att_id))
 def _hook_url(att_id: str, bind: BindConfig | None = None, token: str = "") -> str:
     return hook_url(att_id, bind or app.state.bind, token)
-
 @app.get("/api/attachments/{att_id}/screen", response_model=ScreenResponse)
 async def attachment_screen(
     request: Request, att_id: str, lines: int | None = Query(default=None, ge=1)

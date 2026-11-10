@@ -25,6 +25,7 @@ from fastapi.responses import JSONResponse
 
 from . import auth_store
 from .auth_tokens import TOKEN_TYPE_ACCESS, TokenError, decode_token, signing_secret
+from .attachment_stop_audit import actor_label, request_actor
 
 # The browser cannot read the HTTP response of a failed WebSocket upgrade, so
 # an unauthenticated socket is accepted and closed with this code instead.
@@ -108,7 +109,11 @@ def install_auth_guard(app, db) -> None:
                 if path == "/api/presets" or path.startswith(("/api/presets/", "/api/adapters/")):
                     return JSONResponse({"detail": "instance configuration is human-only"}, status_code=403)
             request.state.principal = principal
-        return await call_next(request)
+        actor_token = request_actor.set(actor_label(principal) if not exempt(request.url.path) else None)
+        try:
+            return await call_next(request)
+        finally:
+            request_actor.reset(actor_token)
 
 
 def request_principal(request: Request) -> Principal:

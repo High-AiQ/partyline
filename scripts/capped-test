@@ -173,6 +173,8 @@ def run_capped(command: list[str], limit: int, env: dict[str, str]) -> int:
             pass
         finally:
             try:
+                subprocess.run(["systemctl", "--user", "stop", "--no-block", unit],
+                               capture_output=True, timeout=3, env=env)
                 subprocess.run(["systemctl", "--user", "reset-failed", unit],
                                capture_output=True, timeout=3, env=env)
             except (OSError, subprocess.SubprocessError):

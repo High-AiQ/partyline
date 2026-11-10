@@ -190,6 +190,12 @@ async def engage_startup(runtime) -> None:
         await asyncio.to_thread(reap_previous_tmp_root, runtime.db)
     except Exception:
         logger.exception("previous tmp root reap failed; continuing")
+    try:
+        from . import scope_sweep
+        owned = [getattr(adapter, "memory_scope", None) for adapter in runtime.live.values()]
+        await asyncio.to_thread(scope_sweep.sweep_empty_scopes, owned)
+    except Exception:
+        logger.exception("process scope sweep failed; continuing")
 
 
 def sweep_orphaned_worktrees(db):

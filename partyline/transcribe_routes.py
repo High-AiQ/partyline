@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
@@ -11,6 +13,8 @@ from pydantic import BaseModel
 from .auth_guard import request_principal
 from .machine_scope import deny_unless
 from .transcript import TakeFailed, TranscriberUnavailable, segments_to_vtt
+
+logger = logging.getLogger(__name__)
 
 
 class PresetStatus(BaseModel):
@@ -56,6 +60,19 @@ async def bounded_body(request: Request, limit: int) -> bytes:
     return b"".join(chunks)
 
 
+def _log_take(conv_id: str, preset: str, size: int, started: float, *, result=None, error: str = "") -> None:
+    """One line per take: outcome, sizes and timing, never the words themselves."""
+    seconds = time.monotonic() - started
+    if error:
+        # Only a category: a recognizer's own message can quote the speech it choked on.
+        logger.warning("transcribe line=%s preset=%s bytes=%d took=%.2fs error=%s",
+                       conv_id, preset, size, seconds, error)
+    else:
+        logger.info("transcribe line=%s preset=%s bytes=%d audio=%.1fs took=%.2fs chars=%d%s",
+                    conv_id, preset, size, result.duration, seconds, len(result.text),
+                    "" if result.text.strip() else " empty=true")
+
+
 def transcribe_router(runtime, get_registry) -> APIRouter:
     """``get_registry`` is a thunk so tests can swap in fakes."""
     router = APIRouter()
@@ -82,12 +99,17 @@ def transcribe_router(runtime, get_registry) -> APIRouter:
             raise HTTPException(503, state["reason"])
         data = await bounded_body(request, registry.max_bytes)
         mime = request.headers.get("content-type", "")
+        name = preset or registry.default
+        started = time.monotonic()
         try:
             result = await asyncio.to_thread(backend.transcribe, data, mime)
         except TakeFailed as exc:  # this take only: the mic must stay usable
+            _log_take(conv_id, name, len(data), started, error=f"take-failed status={exc.status}")
             raise HTTPException(exc.status, str(exc)) from exc
         except TranscriberUnavailable as exc:
+            _log_take(conv_id, name, len(data), started, error="unavailable")
             raise HTTPException(503, str(exc)) from exc
+        _log_take(conv_id, name, len(data), started, result=result)
         if format == "vtt":
             return PlainTextResponse(segments_to_vtt(result.segments), media_type="text/vtt")
         return {"text": result.text, "language": result.language, "duration": result.duration,

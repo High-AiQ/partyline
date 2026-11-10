@@ -212,6 +212,21 @@ describe("cross-line message", () => {
     }
   });
 
+  it("tags an ambassador's own bridge message with the line it crossed to", async () => {
+    const crossed: ChatMessage = {
+      ...agentMessage("@[bridge]fable the schema changed"),
+      bridge_id: "bridge-1",
+      bridge_peer_conv_name: "tool",
+    };
+    const message = mount(Message, { target: document.body, props: { message: crossed } });
+    try {
+      expect(document.querySelector(".bridge")?.textContent).toBe("⇄ «tool»");
+      expect(document.querySelector(".direct")).toBeNull();
+    } finally {
+      await unmount(message);
+    }
+  });
+
   it("leaves a message said on this line untagged", async () => {
     const local: ChatMessage = { ...agentMessage("hello"), source_conv_id: "line-1" };
     const message = mount(Message, { target: document.body, props: { message: local } });

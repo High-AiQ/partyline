@@ -1,13 +1,21 @@
 """Bounded human-history reads; process delivery keeps its own cursor query."""
 
-from .message_visibility import REACTION_NOTICE_LIKE, hide_reaction_notices_clause
+from .message_visibility import (
+    REACTION_NOTICE_LIKE, bridge_copy_sql, hide_reaction_notices_clause,
+)
 
 
 # Every read joins the line a message was said on, so a cross-line copy can
-# be attributed ("via «Princess»") without a second query per message.
+# be attributed ("via «Princess»") without a second query per message. A
+# bridge row also names the line on the other side (``bridge_peer_conv_name``),
+# read from the bridge itself so the tag survives the bridge closing.
 MESSAGE_SELECT = (
-    "SELECT m.*, c.name AS source_conv_name FROM messages m"
+    "SELECT m.*, c.name AS source_conv_name, pc.name AS bridge_peer_conv_name"
+    " FROM messages m"
     " LEFT JOIN conversations c ON c.id = m.source_conv_id"
+    " LEFT JOIN line_bridges lb ON lb.id = m.bridge_id"
+    " LEFT JOIN conversations pc ON pc.id = CASE WHEN lb.a_conv_id = m.conv_id"
+    " THEN lb.b_conv_id ELSE lb.a_conv_id END"
 )
 
 
@@ -16,7 +24,7 @@ def as_message(row) -> dict:
     data = dict(row)
     data.pop("task_private", None)  # a filter column, not part of the message
     for key in ("source_attachment_id", "source_conv_id", "source_conv_name",
-                "audience_attachment_id", "bridge_id"):
+                "audience_attachment_id", "bridge_id", "bridge_peer_conv_name"):
         data.setdefault(key, None)
     return data
 
@@ -24,8 +32,8 @@ def as_message(row) -> dict:
 def select_message_by_id(
     execute, conv_id: str, message_id: int, *, visible: bool = False
 ) -> dict | None:
-    """One message; ``visible`` hides line-bridge rows from callers a person or process drives."""
-    hidden = " AND m.bridge_id IS NULL AND m.task_private=0" if visible else ""
+    """One message; ``visible`` hides bridge copies from callers a person or process drives."""
+    hidden = f" AND NOT {bridge_copy_sql()} AND m.task_private=0" if visible else ""
     row = execute(
         MESSAGE_SELECT + " WHERE m.conv_id=? AND m.id=?" + hidden, (conv_id, message_id)
     ).fetchone()

@@ -48,7 +48,7 @@ function composer(sources: RecorderSources) {
   const box = row.appendChild(document.createElement("textarea"));
   const comp = mount(VoiceInput, { target: row, props: { box, oninserted: () => undefined, sources } });
   const mic = () => row.querySelector<HTMLButtonElement>("button.voice");
-  const cancel = () => row.querySelector<HTMLButtonElement>('button[aria-label="cancel voice message"]');
+  const cancel = () => row.querySelector<HTMLButtonElement>('button[aria-label="Discard recording"]');
   return { row, box, comp, mic, cancel };
 }
 
@@ -108,11 +108,11 @@ describe("VoiceInput cancel", () => {
     await settle();
     ui.mic()?.click();
     await settle();
-    expect(ui.mic()?.textContent).toContain("transcribing");
+    expect(ui.mic()?.textContent).toContain("Transcribing");
     ui.cancel()?.click();
     await settle();
     expect(signal?.aborted).toBe(true);
-    expect(ui.mic()?.textContent).not.toContain("transcribing");
+    expect(ui.mic()?.textContent).not.toContain("Transcribing");
     finish({ text: "too late", language: "en", duration: 1, segments: [] });
     await settle();
     expect(draft.text).toBe("");

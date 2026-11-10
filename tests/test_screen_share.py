@@ -633,6 +633,8 @@ class ScreenTest(unittest.TestCase):
         from types import SimpleNamespace
         from unittest.mock import AsyncMock
 
+        self.db.add_attachment("reader", "line", "reader", "fake", ["fake"], "/tmp", "owner")
+        machine = {"Authorization": "Bearer " + auth_store.ensure_api_token(self.db, "reader")}
         for name in ("one", "two"):
             self.db.add_attachment(name, "line", name, "fake", ["fake"], "/tmp", "owner")
             self.db._exec("UPDATE attachments SET status='running' WHERE id=?", (name,))
@@ -648,17 +650,161 @@ class ScreenTest(unittest.TestCase):
             share_id = ws.receive_json()["share_id"]
             ws.send_json({"type": "share_accepted", "share_id": share_id})
             self.sync(ws)
-            self.assertEqual(self.runtime.deliver_pending.await_count, 2)
             ws.send_json({"type": "frame", "share_id": share_id, "request_id": None,
                           "ts_ms": 1, "region": region, "out_width": 32, "out_height": 24,
                           "pointer": None, "mime": "image/png"})
             ws.send_bytes(png())
+            self.sync(ws)
+            self.assertEqual(self.runtime.deliver_pending.await_count, 2)
+            files = self.db._exec("SELECT id FROM images WHERE conv_id='line'").fetchall()
+            self.assertEqual(len(files), 1)
+            first_id = files[0]["id"]
+            ws.send_json({"type": "frame", "share_id": share_id, "request_id": None,
+                          "ts_ms": 2, "region": region, "out_width": 32, "out_height": 24,
+                          "pointer": None, "mime": "image/png"})
+            ws.send_bytes(png())
+            self.sync(ws)
+            self.assertEqual(len(self.db._exec("SELECT id FROM images WHERE conv_id='line'").fetchall()), 1)
+            ws.send_json({"type": "frame", "share_id": share_id, "request_id": None,
+                          "ts_ms": 3, "region": region, "out_width": 32, "out_height": 24,
+                          "pointer": None, "mime": "image/png"})
+            ws.send_bytes(png("blue"))
+            self.sync(ws)
+            self.assertEqual(len(self.db._exec("SELECT id FROM images WHERE conv_id='line'").fetchall()), 1)
             self.client.delete("/api/screen/shares/" + share_id)
             self.assertEqual(self.runtime.deliver_pending.await_count, 4)
             messages = self.db.message_page("line")[0]
-            notices = [m for m in messages if m["sender_type"] == "system"]
+            notices = [m for m in messages if m["sender_type"] == "system"
+                       and ("started sharing desk" in m["body"]
+                            or "stopped sharing desk" in m["body"])]
             self.assertEqual(len(notices), 2)
-            self.assertTrue(all("screen_frame" in m["body"] for m in notices))
+            self.assertIn(first_id, notices[0]["body"])
+            self.assertIn("usually want the processes on this line to look now", notices[0]["body"])
+            self.assertNotIn("screen_elements", notices[0]["body"])
+            self.assertIn("share a single window", notices[0]["body"])
+            last_id = self.db._exec(
+                "SELECT id FROM images WHERE conv_id='line' ORDER BY rowid DESC LIMIT 1"
+            ).fetchone()[0]
+            self.assertEqual(len(self.db._exec("SELECT id FROM images WHERE conv_id='line'").fetchall()), 2)
+            self.assertIn(last_id, notices[1]["body"])
+            self.assertIn("stopped sharing desk", notices[1]["body"])
+            self.assertEqual(self.client.get(f"/api/media/{last_id}/original",
+                                             headers=machine).status_code, 200)
+            self.assertNotEqual(first_id, last_id)
+
+    def test_first_frame_write_serializes_stop_and_identical_last_frame(self):
+        from partyline.screen_protocol import HelperFrame
+
+        async def scenario():
+            share = ShareBuffer("race", "line", "device", 1, "alice",
+                                {"x": -100, "y": 0, "width": 100, "height": 100},
+                                status="active")
+            self.hub.shares["line"] = share
+            device = {"id": "device", "name": "desk", "socket": SimpleNamespace(
+                send_json=AsyncMock())}
+            self.hub.devices["device"] = device
+            entered, release = asyncio.Event(), asyncio.Event()
+            notices = []
+
+            async def save(_store, _conv_id, _data, _mime):
+                entered.set()
+                await release.wait()
+                return SimpleNamespace(id=f"media-{len(notices) + 1}")
+
+            async def notify(_hub, _conv_id, body):
+                notices.append(body)
+
+            frame = HelperFrame(type="frame", share_id="race", request_id=None, ts_ms=1,
+                                region=share.region, out_width=32, out_height=24,
+                                pointer=None, mime="image/png")
+            with patch("partyline.screen_share_frames.store_frame",
+                       new=AsyncMock(side_effect=save)) as store, patch(
+                           "partyline.screen_share_notices.notice",
+                           new=AsyncMock(side_effect=notify)):
+                receiving = asyncio.create_task(self.hub._frame(device, frame, b"same"))
+                await entered.wait()
+                stopping = asyncio.create_task(self.hub.stop_share("race"))
+                await asyncio.sleep(0)
+                self.assertEqual(share.status, "stopping")
+                release.set()
+                await asyncio.gather(receiving, stopping)
+            self.assertEqual(store.await_count, 1)
+            self.assertEqual(len(notices), 2)
+            self.assertIn("started sharing desk", notices[0])
+            self.assertIn("stopped sharing desk; last frame: media media-1", notices[1])
+            self.assertEqual(device["socket"].send_json.await_count, 1)
+            self.assertEqual(device["socket"].send_json.await_args.args[0]["type"], "stop_share")
+
+        asyncio.run(scenario())
+
+    def test_stop_storage_and_notice_failures_still_stop_share_and_helper(self):
+        from partyline.screen_control import Grant
+
+        async def scenario():
+            for failure in ("store", "notice"):
+                share = ShareBuffer(failure, "line", "device", 1, "alice",
+                                    {"x": -100, "y": 0, "width": 100, "height": 100},
+                                    status="active")
+                share.add(BufferedFrame(b"last", 1, share.region, 32, 24, None, "image/png"))
+                self.hub.shares["line"] = share
+                self.hub.control.grants[share.share_id] = Grant(
+                    share.share_id, "alice", "captain", status="active")
+                socket = SimpleNamespace(send_json=AsyncMock())
+                self.hub.devices["device"] = {"id": "device", "name": "desk", "socket": socket}
+                store = AsyncMock(side_effect=OSError("disk full") if failure == "store" else None)
+                stopped = AsyncMock(side_effect=OSError("notice failed") if failure == "notice" else None)
+                with patch("partyline.screen_share_stop.store_last_frame", new=store), patch(
+                        "partyline.screen_share_stop.share_stopped", new=stopped):
+                    with self.assertLogs("partyline.screen_share_stop", level="ERROR"):
+                        await self.hub.stop_share(failure)
+                self.assertNotIn("line", self.hub.shares)
+                self.assertEqual(socket.send_json.await_count, 1)
+                self.assertEqual(socket.send_json.await_args.args[0]["type"], "stop_share")
+                self.assertNotIn(share.share_id, self.hub.control.grants)
+
+        asyncio.run(scenario())
+
+    def test_share_notice_mentions_elements_only_when_a_window_is_shared(self):
+        from types import SimpleNamespace
+
+        from partyline.screen_share_notices import share_started
+
+        hub = SimpleNamespace(walkthroughs=SimpleNamespace(items={}))
+        device = {"name": "desk"}
+        for has_window in (False, True):
+            share = SimpleNamespace(share_id="share", conv_id="line", requested_by="alice",
+                                    first_media=SimpleNamespace(id="image-id"),
+                                    start_notice_sent=False)
+            with patch("partyline.screen_share_notices._window_share_on_line",
+                       return_value=has_window), patch(
+                           "partyline.screen_share_notices.notice", new=AsyncMock()) as send:
+                asyncio.run(share_started(hub, share, device))
+            text = send.await_args.args[2]
+            self.assertEqual("screen_elements" in text, has_window)
+            if not has_window:
+                self.assertIn("share a single window", text)
+
+    def test_walkthrough_frames_are_not_saved_as_share_media(self):
+        device = self.pair()
+        region = {"x": -100, "y": 0, "width": 100, "height": 100}
+        with self.client.websocket_connect("/api/screen/helper", headers={
+                "Authorization": "Bearer " + device["token"]}) as ws:
+            self.hello(ws)
+            self.client.post("/api/screen/shares?conv_id=line", json={
+                "device_id": device["device_id"], "region": region, "walkthrough": True})
+            share_id = ws.receive_json()["share_id"]
+            ws.send_json({"type": "share_accepted", "share_id": share_id})
+            self.sync(ws)
+            ws.send_json({"type": "frame", "share_id": share_id, "request_id": None,
+                          "ts_ms": 1, "region": region, "out_width": 32, "out_height": 24,
+                          "pointer": None, "mime": "image/png"})
+            ws.send_bytes(png())
+            self.sync(ws)
+            count = self.db._exec("SELECT count(*) FROM images WHERE conv_id='line'").fetchone()[0]
+            self.assertEqual(count, 0)
+            self.client.delete("/api/screen/shares/" + share_id)
+            count = self.db._exec("SELECT count(*) FROM images WHERE conv_id='line'").fetchone()[0]
+            self.assertEqual(count, 0)
 
 
     def test_invalid_requests_consume_the_ip_limit(self):

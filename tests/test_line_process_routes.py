@@ -61,6 +61,10 @@ class CloseLineProcessesTest(unittest.TestCase):
         async def detach(request: Request, att_id: str):
             return await close_attachment(self.runtime, att_id)
 
+        @app.post("/api/test-bulk")
+        async def bulk(request: Request):
+            return await self.runtime.stop_attachments("line")
+
         @app.post("/api/attachments/{att_id}/resume")
         async def resume(request: Request, att_id: str):
             deny_unless_attachment(self.db, request.state.principal, att_id, "attach")
@@ -106,6 +110,30 @@ class CloseLineProcessesTest(unittest.TestCase):
         with patch.dict(os.environ, {"PARTYLINE_TMP_BASE": self.directory.name}):
             provision_connection(self.db.path, attachment)
         return adapter
+
+    def test_close_logs_the_initiator_before_the_process_is_stopped(self):
+        self.add_live("one", "alpha")
+        with self.assertLogs("partyline.line_process_routes", level="INFO") as logs:
+            response = self.client.post("/api/conversations/line/attachments/close")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("attachment=one source=api.close_line_processes caller=user", logs.output[0])
+        self.assertIn("detach committed attachment=one", logs.output[1])
+
+    def test_bulk_stop_records_actor_and_status_commit(self):
+        self.add_live("one", "alpha")
+        with self.assertLogs("partyline.attachment_stop_audit", level="INFO") as logs:
+            response = self.client.post("/api/test-bulk")
+        self.assertEqual(response.json(), ["alpha"])
+        self.assertIn("source=tests.test_line_process_routes.bulk caller=user:", logs.output[0])
+        self.assertIn("status committed attachment=one status=detached", logs.output[1])
+
+    def test_stale_stop_callback_is_logged_as_rejected(self):
+        self.add_live("one", "alpha")
+        callback = self.runtime.status_callback("one", "line", "stale-owner")
+        with self.assertLogs("partyline.attachment_stop_audit", level="INFO") as logs:
+            asyncio.run(callback("detached"))
+        self.assertIn("status rejected attachment=one status=detached", logs.output[0])
+        self.assertEqual(self.db.get_attachment("one")["status"], "running")
 
     def machine_helper(self, ident: str) -> MCPServer:
         path = connection_directory(self.db.path) / f"{ident}.json"

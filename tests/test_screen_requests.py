@@ -3,7 +3,8 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
@@ -165,13 +166,15 @@ class ScreenRequestTest(unittest.IsolatedAsyncioTestCase):
             received.set()
             await resume.wait()
             return frame
-        with patch("partyline.screen_requests._await_frame", side_effect=hold_after_result):
+        with patch("partyline.screen_requests._await_frame", side_effect=hold_after_result), \
+                patch("partyline.screen_share_frames.store_frame",
+                      new=AsyncMock(return_value=SimpleNamespace(id="auto-frame"))) as store:
             request = asyncio.create_task(self.client.post("/api/conversations/line/screen-frame"))
             command = await socket.messages.get()
             frame = HelperFrame(type="frame", share_id="share", request_id=command["request_id"],
                                 ts_ms=2, region=self.share.region, out_width=10, out_height=10,
                                 pointer=None, mime="image/png")
-            self.hub._frame({"id": "device"}, frame, b"not persisted")
+            await self.hub._frame({"id": "device"}, frame, b"not persisted")
             await received.wait()
             await self.hub.stop_share("share")
             self.hub.shares["line"] = ShareBuffer("new", "line", "device", self.share.owner_id,
@@ -180,5 +183,6 @@ class ScreenRequestTest(unittest.IsolatedAsyncioTestCase):
             response = await request
         self.assertEqual(response.status_code, 409, response.text)
         self.assertEqual(self.db._exec("SELECT COUNT(*) FROM images").fetchone()[0], 0)
+        store.assert_awaited_once()
         self.assertEqual(self.share.frames, [])
         self.assertEqual(self.hub.snap_waiters, {})

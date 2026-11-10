@@ -10,6 +10,12 @@ Pair a computer once with your Partyline account; it can then be shared from any
 belongs to the line where you start it, and only that line receives its frames and control. The sidebar
 icon marks lines with active shares.
 
+When a person starts sharing, Partyline saves the first received frame as line media and
+asks the processes on that line to look now. When sharing stops, the notice includes the
+last distinct frame's media id. Fetch either image with `get_media`; this remains available
+after the live screen tools disappear. Walkthroughs keep their own recording and do not
+create these automatic frame files.
+
 Screen MCP tools appear while a live screen or window grant is available and disappear when access ends.
 The grant notice explains how to inspect a window: start with a summary, then use find, ls, or text;
 use element ids to act, page long results with offset/next_offset, and refresh after page changes.

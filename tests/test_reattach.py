@@ -1115,8 +1115,11 @@ class FleetPlanTest(unittest.IsolatedAsyncioTestCase):
             await self.runtime.status_callback("one", "owner", None)("detached")
         self.runtime.live["one"].stop = stop
 
-        await self.runtime.shutdown()
+        with self.assertLogs("partyline.attachment_stop_audit", level="INFO") as logs:
+            await self.runtime.shutdown()
 
+        self.assertIn("attachment=one source=restart.shutdown caller=none", logs.output[0])
+        self.assertIn("status committed attachment=one status=exited", logs.output[1])
         self.assertEqual(self.db.get_attachment("one")["status"], "exited")
         self.assertEqual(self.db.get_restart_plan()["attachment_ids"], ["one"])
         self.assertEqual(self.db.get_restart_plan()["skipped"], ["detached"])

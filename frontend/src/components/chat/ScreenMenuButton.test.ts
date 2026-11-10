@@ -54,12 +54,18 @@ it("opens sharing or starts a walkthrough, and blocks recording during a share",
   const previous = screenStatus.openPicker;
   trigger.click();
   await tick();
-  required(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')[0]).click();
+  const items = document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]');
+  expect(items[0]?.textContent).toContain("Share screen + record voice");
+  expect(trigger.getAttribute("aria-label")).toContain("Show me");
+  expect(items[0]?.textContent).toContain("Frames + transcript on stop");
+  expect(items[1]?.textContent).toContain("Share screen only");
+  expect(items[1]?.textContent).toContain("no voice");
+  required(items[1]).click();
   await tick();
   expect(screenStatus.openPicker).toBe(previous + 1);
   trigger.click();
   await tick();
-  required(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')[1]).click();
+  required(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')[0]).click();
   await tick();
   expect(begin).toHaveBeenCalledOnce();
   room.screenShare = {
@@ -71,7 +77,7 @@ it("opens sharing or starts a walkthrough, and blocks recording during a share",
   };
   trigger.click();
   await tick();
-  const record = required(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')[1]);
+  const record = required(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')[0]);
   expect(record.getAttribute("aria-disabled")).toBe("true");
   expect(document.getElementById(record.getAttribute("aria-describedby") ?? "")?.textContent).toContain(
     "Stop the live share",

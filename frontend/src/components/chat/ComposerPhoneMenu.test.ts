@@ -111,7 +111,7 @@ it("dictation from the menu shows its live state in the row, and Cancel reaches 
     await settle();
     expect(trigger()).toBeNull();
     expect(document.querySelector("button.voice")).not.toBeNull();
-    const cancel = document.querySelector<HTMLButtonElement>('button[aria-label="cancel voice message"]');
+    const cancel = document.querySelector<HTMLButtonElement>('button[aria-label="Discard recording"]');
     expect(cancel).not.toBeNull();
     cancel?.click();
     await settle();

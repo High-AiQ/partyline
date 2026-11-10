@@ -188,7 +188,7 @@ describe("VoiceInput", () => {
     expect(button?.getAttribute("aria-pressed")).toBe("true");
     button?.click();
     await settle();
-    expect(button?.textContent).toContain("transcribing");
+    expect(button?.textContent).toContain("Transcribing");
     room.conversation = { ...conversation, id: "other-line" };
     draft.openLine("other-line");
     await tick();
@@ -197,7 +197,7 @@ describe("VoiceInput", () => {
     expect(draft.text).toBe("");
     draft.openLine(conversation.id);
     expect(draft.text).toBe("");
-    expect(button?.textContent).not.toContain("transcribing");
+    expect(button?.textContent).not.toContain("Transcribing");
     void unmount(comp);
   });
 

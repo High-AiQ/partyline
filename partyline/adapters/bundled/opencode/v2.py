@@ -232,6 +232,8 @@ class PartylineAdapter(WakeSettlement, Adapter):
                                 f"transcript startup or monitoring failed: {exc}. "
                                 "Stopping this process; unread messages remain pending.")
             finally:
+                from ....attachment_stop_audit import direct_stop
+                direct_stop(self.att["id"], "opencode.transcript_watcher_failure")
                 await self.stop()
         finally:
             # A watcher that ends must never leave a readiness waiter stranded.

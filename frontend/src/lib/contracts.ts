@@ -65,6 +65,8 @@ export const ChatMessageSchema = z.object({
   source_conv_id: z.string().nullable().optional(), // said on another line, relayed here
   source_conv_name: z.string().nullable().optional(),
   audience_attachment_id: z.string().nullable().optional(), // a private copy for one process
+  bridge_id: z.string().nullable().optional(), // crossed a line bridge (the ambassador's own speech or its copy)
+  bridge_peer_conv_name: z.string().nullable().optional(), // the line on the other side of that bridge
   reactions: z.array(ReactionResponseSchema).optional(),
 });
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;

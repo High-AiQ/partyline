@@ -34,6 +34,11 @@ class ShareBuffer:
     agent_frames: dict = field(default_factory=dict)
     frame_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     next_sequence: int = 0
+    first_media: object | None = None
+    last_media: object | None = None
+    last_stored_data: bytes | None = None
+    start_notice_sent: bool = False
+    evidence_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def add(self, frame: BufferedFrame) -> None:
         self.next_sequence += 1
