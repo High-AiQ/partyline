@@ -8,6 +8,17 @@ and its initiator before stopping the process, and log the committed result.
 Adapter exit status is logged separately. A legacy open turn mark is consumed on
 resume and does not itself detach the new process.
 
+## Screen sharing does not imply microphone recording
+
+The false assumption was that “Share to «line»” and “Record a walkthrough” made
+the voice choice clear after combining the composer controls. A plain share
+produces on-demand frames and never opens the microphone. The screen menu now
+puts “Share screen + record voice” first and labels the other choice “no voice”.
+The menu regression checks both labels and their actions; the walkthrough flow
+test follows first-time monitor selection through the walkthrough flag, arm,
+transcription and finish. Keep the voice distinction visible when renaming these
+controls.
+
 ## Self-detach ends the requested work
 
 The false assumption was that every stopped process with an open turn needed to

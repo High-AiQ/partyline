@@ -148,8 +148,10 @@ before capture. Frames arrive as bounded still images at about one frame per
 second and stay in server memory until attached to a message or requested by
 `screen_frame`. The line composer can attach up to three recent distinct frames.
 
-When a paired computer is online, the composer’s **Screen** menu offers **Record a walkthrough**. It
-uses the same computer, monitor, crop, and local consent flow; a subsequent
+The composer’s **Screen** menu puts **Share screen + record voice** first, with a
+**Frames + transcript on stop** explanation and a **Show me** tooltip alias. **Share screen only**
+is explicitly a **Live view · no voice**. Recording is available when a paired
+computer is online and uses the same computer, monitor, crop, and local consent flow; a subsequent
 take reuses the last selected region on that line while its computer is online.
 After consent, the browser opens the microphone and the line shows a recording
 indicator. Stop transcribes the take and sends one message with timestamped

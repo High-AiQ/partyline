@@ -1,6 +1,7 @@
 import { mount, tick, unmount } from "svelte";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import WalkthroughControl from "./WalkthroughControl.svelte";
+import ScreenControls from "./ScreenControls.svelte";
 import { screenApi } from "../../lib/screen-api";
 import { voiceApi } from "../../lib/voice-api";
 import { walkthroughApi } from "../../lib/walkthrough-api";
@@ -27,7 +28,7 @@ function button(text: string): HTMLButtonElement | undefined {
 async function startWalkthrough(): Promise<void> {
   button("Screen:")?.click();
   await tick();
-  button("Record a walkthrough")?.click();
+  button("Share screen + record voice")?.click();
 }
 function sources(): RecorderSources {
   const stream = { getTracks: () => [{ stop: vi.fn(), label: "Headset (Jabra)" }] } as unknown as MediaStream;
@@ -120,6 +121,58 @@ describe("walkthrough control on a phone", () => {
 });
 
 describe("walkthrough control", () => {
+  it("keeps voice recording through first-time monitor selection and sends the transcript", async () => {
+    const finish = vi.spyOn(walkthroughApi, "finish").mockResolvedValue({ message: { id: 3 } });
+    const component = setup();
+    walkthrough.last = null;
+    vi.mocked(screenApi.current).mockResolvedValue({ share: null });
+    vi.mocked(screenApi.devices).mockResolvedValue({
+      devices: [
+        {
+          id: "d",
+          name: "Desk",
+          os: "test",
+          online: true,
+          monitors: [{ id: 1, ...region, scale: 1, primary: true }],
+        },
+      ],
+    });
+    vi.spyOn(screenApi, "preview").mockResolvedValue({
+      out_width: 100,
+      out_height: 100,
+      mime: "image/png",
+      data: "preview",
+    });
+    const picker = mount(ScreenControls, { target: document.body });
+    await settle();
+    await startWalkthrough();
+    await settle();
+    expect(walkthrough.selecting).toBe(true);
+    expect(screenApi.start).not.toHaveBeenCalled();
+    button("Desk (online)")?.click();
+    await settle();
+    button("1 (100 × 100)")?.click();
+    await settle();
+    vi.mocked(screenApi.current).mockResolvedValue({ share });
+    button("Share screen")?.click();
+    await settle();
+    expect(screenApi.start).toHaveBeenCalledExactlyOnceWith("l", "d", region, true);
+    expect(walkthroughApi.arm).toHaveBeenCalledExactlyOnceWith("l", "s");
+    button("Stop and send")?.click();
+    await settle();
+    expect(voiceApi.transcribe).toHaveBeenCalledOnce();
+    expect(finish).toHaveBeenCalledWith(
+      "l",
+      "s",
+      expect.objectContaining({
+        segments: [{ start: 0, end: 1, text: "click" }],
+        transcription_error: false,
+      }),
+    );
+    await unmount(component);
+    await unmount(picker);
+  });
+
   it("shows the mic level, its name and the no-input hint while recording, and frees the audio", async () => {
     vi.useFakeTimers();
     try {
@@ -156,11 +209,11 @@ describe("walkthrough control", () => {
     await tick();
     button("Screen:")?.click();
     await tick();
-    expect(button("Record a walkthrough")?.getAttribute("aria-disabled")).toBe("true");
+    expect(button("Share screen + record voice")?.getAttribute("aria-disabled")).toBe("true");
     room.screenShare = { ...share, share_id: "previous", status: "declined" };
     await tick();
-    expect(button("Record a walkthrough")?.getAttribute("aria-disabled")).toBe("false");
-    button("Record a walkthrough")?.click();
+    expect(button("Share screen + record voice")?.getAttribute("aria-disabled")).toBe("false");
+    button("Share screen + record voice")?.click();
     await settle();
     expect(screenApi.start).toHaveBeenCalledWith("l", "d", region, true);
     expect(button("Stop and send")).toBeDefined();

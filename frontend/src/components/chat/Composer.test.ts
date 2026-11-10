@@ -94,7 +94,9 @@ describe("composer controls", () => {
       expect(handsFree?.getAttribute("aria-pressed")).toBe("false");
       expect(handsFree?.textContent.trim()).toBe("");
       const showMe = box?.querySelector('button[aria-haspopup="menu"]');
-      expect(showMe?.getAttribute("aria-label")).toBe("Screen: share live or record a walkthrough");
+      expect(showMe?.getAttribute("aria-label")).toBe(
+        "Screen: share screen + record voice (Show me), or share screen only",
+      );
       expect(showMe?.textContent.trim()).toBe("");
       const frames = box?.querySelector<HTMLButtonElement>('button[aria-label="Attach screen frames"]');
       expect(frames?.getAttribute("aria-pressed")).toBe("true");
