@@ -197,6 +197,9 @@ def uvicorn_config(app, host: str, port: int, env: Mapping[str, str] | None = No
     log_config["filters"] = {"strip_query": {"()": AccessQueryFilter}}
     for name in ("uvicorn.error", "uvicorn.access"):
         log_config["loggers"][name]["filters"] = ["strip_query"]
+    # The app's loggers stay at WARNING; the one-line outcome of each voice take must still reach the journal.
+    log_config["loggers"]["partyline.transcribe_routes"] = {
+        "handlers": ["default"], "level": "INFO", "propagate": False}
     return uvicorn.Config(
         app,
         host=host,

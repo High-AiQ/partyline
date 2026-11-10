@@ -166,7 +166,7 @@
       const result = await voiceApi.transcribe(line, audio, used, controller.signal);
       if (id !== takeId || room.conversation?.id !== line) return;
       if (!result.text.trim()) {
-        room.showNotice("no speech was heard", "error");
+        room.showNotice("Heard nothing", "error");
         return;
       }
       const start = box?.selectionStart ?? draft.text.length;
@@ -217,19 +217,21 @@
 {#if !collapsed || busy}
   {#if busy}
     <button
-      class="voice-cancel flex h-11 flex-none items-center justify-center px-2.5 text-[11px]"
+      class="voice-cancel flex h-8 flex-none items-center justify-center border-transparent bg-transparent px-2 text-[11px] opacity-70 hover:opacity-100"
       type="button"
-      aria-label="cancel voice message"
+      aria-label="Discard recording"
       use:tooltip={{ label: "discard this take (Esc)" }}
       onclick={cancel}
     >
-      <span aria-hidden="true" class="min-[480px]:hidden">✕</span>
-      <span class="max-[479px]:hidden">cancel</span>
+      <span aria-hidden="true">✕</span>
     </button>
   {/if}
   <button
-    class="voice relative flex h-11 flex-none items-center justify-center gap-1.5 px-3 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-line disabled:hover:bg-ink-3 disabled:hover:text-cream-dim"
+    class="voice relative flex h-11 flex-none items-center justify-center gap-1.5 px-3 {transcribing
+      ? 'disabled:cursor-wait disabled:opacity-100'
+      : 'disabled:cursor-not-allowed disabled:opacity-45'} disabled:hover:border-line disabled:hover:bg-ink-3 disabled:hover:text-cream-dim"
     class:recording
+    class:primary={recording}
     type="button"
     aria-label={recording ? "stop recording" : "record voice message"}
     aria-pressed={recording}
@@ -240,10 +242,14 @@
     {#if loadFailed}<span class="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-red" aria-hidden="true"
       ></span>{/if}
     {#if transcribing}
-      <span class="text-[11px]">transcribing…</span>
+      <span class="text-[11px] text-copper-hot">Transcribing…</span>
     {:else if recording}
       <MicLevel level={mic.level} label={mic.label} />
       <span class="text-[11px] tabular-nums">{formatElapsed(elapsed)}</span>
+      <span class="stop-hint text-[11px] whitespace-nowrap">
+        <span class="max-[479px]:hidden">Click to transcribe</span>
+        <span class="min-[480px]:hidden">Transcribe</span>
+      </span>
       {#if mic.silent}
         <span
           class="mic-silent absolute right-0 bottom-full mb-1 rounded border border-line bg-ink-2 px-2 py-1 text-[10.5px] whitespace-nowrap text-red"
@@ -255,4 +261,6 @@
     {/if}
   </button>
 {/if}
-<span class="sr-only" role="status">{recording && mic.silent ? "no input detected" : ""}</span>
+<span class="sr-only" role="status"
+  >{recording && mic.silent ? "no input detected" : transcribing ? "transcribing" : ""}</span
+>

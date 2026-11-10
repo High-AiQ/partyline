@@ -3,6 +3,8 @@
 No model is ever loaded here; a fake stands in for faster-whisper.
 """
 
+import contextlib
+import io
 import tempfile
 import threading
 import unittest
@@ -14,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from partyline import auth_store, auth_tokens
 from partyline.auth_guard import install_auth_guard
+from partyline.bind import uvicorn_config
 from partyline.db import Db
 from partyline.runtime import ChatRuntime
 from partyline.transcribe_routes import transcribe_router
@@ -243,6 +246,32 @@ class TranscribeRouteTest(unittest.TestCase):
         self.assertEqual(r.json()["text"], "hello there")
         self.assertEqual(r.json()["segments"][0]["end"], 1.234)
         self.assertEqual(self.db._exec("SELECT COUNT(*) FROM messages").fetchone()[0], 0)
+
+    def test_logs_one_line_per_take_without_the_words(self):
+        # Through the server's real logging setup, not assertLogs, which would enable INFO itself.
+        err, out = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+            uvicorn_config(object(), "127.0.0.1", 8642, {})
+            self.post()
+            self.engine._model = SimpleNamespace(
+                transcribe=lambda *a, **k: (iter([]), SimpleNamespace(language="en", duration=2.0)))
+            self.post()
+            self.engine._model = SimpleNamespace(transcribe=lambda *a, **k: (_ for _ in ()).throw(
+                ValueError("failed on: MY PRIVATE\nSPOKEN WORDS")))
+            self.post()
+            self.engine._model = None
+            self.engine._factory = lambda *a: (_ for _ in ()).throw(OSError("no model: SPOKEN\nWORDS"))
+            self.post()
+        lines = [x for x in (err.getvalue() + out.getvalue()).splitlines() if "transcribe line=" in x]
+        self.assertEqual(len(lines), 4)
+        for part in ("line=line", "preset=local", "bytes=5", "audio=1.5s", "chars=11"):
+            self.assertIn(part, lines[0])
+        self.assertIn("chars=0 empty=true", lines[1])
+        self.assertIn("error=take-failed status=422", lines[2])
+        self.assertIn("error=unavailable", lines[3])
+        logged = err.getvalue() + out.getvalue()
+        for secret in ("hello", "PRIVATE", "SPOKEN", "WORDS", "no model"):
+            self.assertNotIn(secret, logged)
 
     def test_requires_auth_and_line(self):
         r = self.client.post("/api/conversations/line/transcribe", content=b"x")

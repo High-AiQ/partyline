@@ -112,6 +112,24 @@ describe("hands-free composer", () => {
     await unmount(s.component);
   });
 
+  it("keeps the transcribe-mode controls out of hands-free: no label, no discard button", async () => {
+    vi.spyOn(voiceApi, "transcribe").mockResolvedValue({
+      text: "x",
+      language: "en",
+      duration: 1,
+      segments: [],
+    });
+    vi.spyOn(room, "say").mockResolvedValue(true);
+    const s = await setup();
+    button()?.click();
+    await settle();
+    expect(button()?.getAttribute("aria-label")).toBe("Hands-free: listening — click to turn off");
+    expect(document.body.textContent).not.toContain("Click to transcribe");
+    expect(document.querySelector("button.voice, button.voice-cancel")).toBeNull();
+    expect(document.querySelector('[aria-label="Discard recording"]')).toBeNull();
+    await unmount(s.component);
+  });
+
   it("is an icon button whose label and badge follow the state, with errors and sends floating above", async () => {
     vi.spyOn(room, "say").mockResolvedValue(true);
     vi.spyOn(voiceApi, "transcribe").mockResolvedValue({
