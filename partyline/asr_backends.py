@@ -22,8 +22,9 @@ import unicodedata
 import uuid
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
-from .transcript import TakeFailed, Transcript, TranscriberUnavailable
+from .transcript import TakeFailed, Transcript, TranscriberUnavailable, WhisperRetired
 
 _SUFFIX = {"audio/webm": ".webm", "audio/ogg": ".ogg", "audio/mp4": ".m4a", "audio/wav": ".wav"}
 
@@ -48,6 +49,18 @@ def _finite(value: Any) -> float:
     if not math.isfinite(number):
         raise ValueError("not finite")
     return number
+
+
+def _language(payload: dict, fallback: str) -> str:
+    language = payload.get("language")
+    if isinstance(language, str):
+        return language
+    detected = payload.get("languages")
+    if isinstance(detected, list) and len(detected) == 1 and isinstance(detected[0], dict):
+        code = detected[0].get("code")
+        if isinstance(code, str) and code:
+            return code
+    return fallback
 
 
 def parse_payload(payload: Any, fallback_language: str = "") -> Transcript:
@@ -78,11 +91,10 @@ def parse_payload(payload: Any, fallback_language: str = "") -> Transcript:
     except (KeyError, TypeError, ValueError, AttributeError, OverflowError):
         raise bad from None
     duration = duration or max(ends, default=0.0)
-    language = payload.get("language")
     text = " ".join(s["text"] for s in segments).strip() if dropped else payload["text"].strip()
     if _silence_phrase(text):
         text, segments = "", []
-    return Transcript(text, language if isinstance(language, str) else fallback_language,
+    return Transcript(text, _language(payload, fallback_language),
                       round(duration, 2), tuple(segments))
 
 
@@ -90,14 +102,16 @@ class OpenAICompatible:
     kind = "openai-compatible"
 
     def __init__(self, base_url: str, model: str, api_key_env: str | None = None, timeout: float = 120.0,
-                 response_format: str = "verbose_json", language: str | None = None,
+                 response_format: str | None = None, language: str | None = None,
                  prompt: str | None = None):
         self.url = base_url.rstrip("/") + "/v1/audio/transcriptions"
+        host = urlsplit(base_url).hostname or ""
+        self._openai = host == "api.openai.com" or host.endswith(".api.openai.com")
+        self._gpt_transcribe = self._openai and model == "gpt-transcribe"
         self.model = model
         self.api_key_env = api_key_env
         self.timeout = timeout
-        # whisper-1 answers verbose_json (segments); gpt-4o-*-transcribe refuse it and need json.
-        self.response_format = response_format
+        self.response_format = response_format or ("json" if self._gpt_transcribe else "verbose_json")
         self.language = language
         self.prompt = prompt
 
@@ -113,7 +127,8 @@ class OpenAICompatible:
             raise TranscriberUnavailable(state["reason"])
         boundary = uuid.uuid4().hex
         fields = {"model": self.model, "response_format": self.response_format}
-        fields.update({k: v for k, v in (("language", self.language), ("prompt", self.prompt)) if v})
+        language_field = "languages[]" if self._gpt_transcribe else "language"
+        fields.update({k: v for k, v in ((language_field, self.language), ("prompt", self.prompt)) if v})
         parts = [f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode()
                  for k, v in fields.items()]
         suffix = _SUFFIX.get(mime.split(";")[0], ".webm")
@@ -128,26 +143,36 @@ class OpenAICompatible:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:  # noqa: S310 - operator-set URL
                 payload = json.loads(resp.read())
         except urllib.error.HTTPError as exc:
-            raise TakeFailed(_http_failure(exc, headers.get("Authorization", "")), 502) from exc
+            raise _http_failure(exc, headers.get("Authorization", ""),
+                                legacy_whisper=self._openai and self.model == "whisper-1") from exc
         except (urllib.error.URLError, OSError, ValueError) as exc:
             raise TakeFailed(f"could not reach the speech service: {exc}", 502) from exc
         return parse_payload(payload, self.language or "")
 
 
-def _http_failure(exc: urllib.error.HTTPError, secret: str) -> str:
-    """The service's own complaint (e.g. "Use 'json' or 'text'"), never anything key-shaped."""
+def _http_failure(exc: urllib.error.HTTPError, secret: str, *, legacy_whisper: bool) -> TakeFailed:
+    """Keep provider details in the response with the configured key redacted."""
     if exc.code in (401, 403):
-        return f"the speech service refused the API key ({exc.code})"
+        return TakeFailed(f"the speech service refused the API key ({exc.code})", 502)
     try:
         body = json.loads(exc.read() or b"null")
-        detail = body.get("error", {}).get("message") if isinstance(body, dict) else None
-    except (ValueError, OSError, AttributeError):
-        detail = None
+        error = body.get("error") if isinstance(body, dict) else None
+    except (ValueError, OSError):
+        error = None
+    detail = error.get("message") if isinstance(error, dict) else None
+    if legacy_whisper and 400 <= exc.code < 500:
+        code = error.get("code") if isinstance(error, dict) else None
+        message = detail.lower() if isinstance(detail, str) else ""
+        retirement_words = ("deprecated", "retired", "removed", "shut down", "discontinued")
+        retired_in_message = "whisper-1" in message and any(word in message for word in retirement_words)
+        retirement_codes = ("model_deprecated", "model_retired", "model_removed", "model_discontinued")
+        if exc.code == 410 or code in retirement_codes or retired_in_message:
+            return WhisperRetired()
     if not isinstance(detail, str) or not detail.strip():
-        return f"the speech service answered {exc.code}"
+        return TakeFailed(f"the speech service answered {exc.code}", 502)
     token = secret.removeprefix("Bearer ")
     detail = detail.replace(token, "[redacted]") if token else detail
-    return f"the speech service answered {exc.code}: {detail.strip()[:200]}"
+    return TakeFailed(f"the speech service answered {exc.code}: {detail.strip()[:200]}", 502)
 
 
 class Command:

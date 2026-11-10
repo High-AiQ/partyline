@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from .auth_guard import request_principal
 from .machine_scope import deny_unless
-from .transcript import TakeFailed, TranscriberUnavailable, segments_to_vtt
+from .transcript import TakeFailed, TranscriberUnavailable, WhisperRetired, segments_to_vtt
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ def _log_take(conv_id: str, preset: str, size: int, started: float, *, result=No
     """One line per take: outcome, sizes and timing, never the words themselves."""
     seconds = time.monotonic() - started
     if error:
-        # Only a category: a recognizer's own message can quote the speech it choked on.
+        # Callers pass a category or fixed copy. Provider messages can quote speech.
         logger.warning("transcribe line=%s preset=%s bytes=%d took=%.2fs error=%s",
                        conv_id, preset, size, seconds, error)
     else:
@@ -104,7 +104,8 @@ def transcribe_router(runtime, get_registry) -> APIRouter:
         try:
             result = await asyncio.to_thread(backend.transcribe, data, mime)
         except TakeFailed as exc:  # this take only: the mic must stay usable
-            _log_take(conv_id, name, len(data), started, error=f"take-failed status={exc.status}")
+            detail = str(exc) if isinstance(exc, WhisperRetired) else f"take-failed status={exc.status}"
+            _log_take(conv_id, name, len(data), started, error=detail)
             raise HTTPException(exc.status, str(exc)) from exc
         except TranscriberUnavailable as exc:
             _log_take(conv_id, name, len(data), started, error="unavailable")

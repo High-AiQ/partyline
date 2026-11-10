@@ -210,14 +210,11 @@
     const take = finishData;
     if (!take) return;
     stage = "finishing";
-    let segments: Transcript["segments"] = [];
+    let transcript: Transcript | undefined;
     let failed = false;
     abort = new AbortController();
     try {
-      const transcript = await voiceApi.transcribe(take.line, take.audio, voicePresets.active, abort.signal);
-      segments = transcript.segments;
-      if (!segments.length && transcript.text.trim())
-        segments = [{ start: 0, end: transcript.duration, text: transcript.text }];
+      transcript = await voiceApi.transcribe(take.line, take.audio, voicePresets.active, abort.signal);
     } catch {
       failed = true;
     }
@@ -225,7 +222,8 @@
     try {
       await walkthroughApi.finish(take.line, take.share, {
         notes: draft.text,
-        segments,
+        segments: transcript?.segments ?? [],
+        transcript_text: transcript?.segments.length ? "" : (transcript?.text ?? ""),
         transcription_error: failed,
         mark_pointer: mark,
         no_input: mic.noInput,

@@ -109,9 +109,9 @@ _SILENCE_PHRASES = {tuple(phrase.split()) for phrase in (
 _SILENCE_MAX_WORDS = max(map(len, _SILENCE_PHRASES))
 
 
-def _only_silence_phrases(segments: list[dict]) -> bool:
+def _only_silence_phrases(text: str) -> bool:
     """Match a sequence of known phrases in linear time, despite overlapping phrases."""
-    words = re.findall(r"\w+", " ".join(part["text"].casefold() for part in segments))
+    words = re.findall(r"\w+", text.casefold())
     if not words:
         return False
     reachable = [True] + [False] * len(words)
@@ -126,7 +126,7 @@ def _only_silence_phrases(segments: list[dict]) -> bool:
 def speech_segments(segments: list[dict], no_input: bool) -> list[dict]:
     """Suppress common silence artifacts and join incomplete adjacent phrases."""
     nonempty = [segment for segment in segments if segment["text"].strip()]
-    if no_input or _only_silence_phrases(nonempty):
+    if no_input or _only_silence_phrases(" ".join(part["text"] for part in nonempty)):
         return []
     joined = []
     for segment in nonempty:
@@ -141,9 +141,14 @@ def speech_segments(segments: list[dict], no_input: bool) -> list[dict]:
     return joined
 
 
+def speech_text(text: str, no_input: bool) -> str:
+    return "" if no_input or _only_silence_phrases(text) else text.strip()
+
+
 def assemble_message(notes: str, segments: list[dict], frames: list[BufferedFrame],
-                     transcription_error: bool = False, duration_ms: int = 0) -> str:
-    """Interleave transcript and numbered image references in recording order."""
+                     transcription_error: bool = False, duration_ms: int = 0, *,
+                     narration: str = "") -> str:
+    """Interleave timed speech with frames and put untimed narration above them."""
     events = []
     for segment in segments:
         events.append((max(0, int(segment["start"] * 1000)), 0, segment["text"].strip()))
@@ -165,7 +170,9 @@ def assemble_message(notes: str, segments: list[dict], frames: list[BufferedFram
              f"{'frame' if len(frames) == 1 else 'frames'}"]
     if notes.strip():
         lines.append(notes.strip())
-    if not segments and not transcription_error:
+    if narration:
+        lines.append(f'"{narration}"')
+    if not segments and not narration and not transcription_error:
         lines.append("(no speech detected — check the microphone)")
     if frames:
         lines.append("Contact sheet first: open it, then fetch only the frames you need "

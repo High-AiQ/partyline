@@ -7,6 +7,7 @@ const finished = z.object({ message: z.looseObject({ id: z.number() }) });
 export interface WalkthroughResult {
   notes: string;
   segments: Transcript["segments"];
+  transcript_text: string;
   transcription_error: boolean;
   mark_pointer: boolean;
   no_input: boolean;

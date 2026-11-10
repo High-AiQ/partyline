@@ -5,7 +5,12 @@
    * key field on purpose: a preset names the variable that holds the key.
    */
   import { tick } from "svelte";
-  import { emptyDraft, validateDraft } from "../../../lib/asr-preset-form";
+  import {
+    emptyDraft,
+    OPENAI_TRANSCRIBE_MODEL,
+    usesOpenAI,
+    validateDraft,
+  } from "../../../lib/asr-preset-form";
   import type { AsrDraft, AsrDraftErrors } from "../../../lib/asr-preset-form";
   import type { AsrKind } from "../../../lib/asr-api";
   import AsrTextField from "./AsrTextField.svelte";
@@ -112,8 +117,8 @@
       <AsrTextField
         id={id("model")}
         label="model"
-        hint="whisper-1 gives timestamps; gpt-4o-transcribe needs json"
-        placeholder="whisper-1"
+        hint="use gpt-transcribe for OpenAI, or your service's model name"
+        placeholder={OPENAI_TRANSCRIBE_MODEL}
         bind:value={draft.model}
         error={errors.model}
         disabled={busy}
@@ -134,10 +139,15 @@
           class="rounded border border-line bg-ink-3 px-2 py-1.5 text-[12.5px] text-cream"
           bind:value={draft.responseFormat}
           disabled={busy}
+          aria-invalid={Boolean(errors.responseFormat)}
+          aria-describedby={errors.responseFormat ? id("format-error") : undefined}
         >
-          <option value="verbose_json">verbose_json — segments and timestamps</option>
-          <option value="json">json — text only (gpt-4o-transcribe)</option>
+          <option value="json">json — transcript text</option>
+          <option value="verbose_json">verbose_json — timed segments</option>
         </select>
+        {#if errors.responseFormat}
+          <p id={id("format-error")} class="text-[10.5px] text-red">{errors.responseFormat}</p>
+        {/if}
       </div>
       <AsrTextField
         id={id("language")}
@@ -165,8 +175,21 @@
           class="w-full rounded border border-line bg-ink-3 px-2.5 py-1.5 text-[12.5px] text-cream"
           bind:value={draft.prompt}
           disabled={busy}
-          placeholder="optional: names and jargon the model should expect"></textarea>
+          placeholder="optional context, names and jargon"></textarea>
       </div>
+      {#if initial && draft.model.trim() === "whisper-1" && usesOpenAI(draft.baseUrl)}
+        <div class="flex flex-wrap items-center gap-2 min-[640px]:col-span-2">
+          <p class="text-[11px] text-cream-dim">OpenAI has deprecated whisper-1.</p>
+          <button
+            type="button"
+            disabled={busy}
+            onclick={() => {
+              draft.model = OPENAI_TRANSCRIBE_MODEL;
+              draft.responseFormat = "json";
+            }}>update to gpt-transcribe</button
+          >
+        </div>
+      {/if}
     {:else if draft.kind === "faster-whisper"}
       <AsrTextField
         id={id("model")}

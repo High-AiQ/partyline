@@ -115,7 +115,7 @@ describe("voice tab", () => {
   });
 
   it("validates a new recognizer inline and adds it", async () => {
-    const created: AsrSettings = { ...LISTING, presets: [...LISTING.presets, { ...second, name: "4o" }] };
+    const created: AsrSettings = { ...LISTING, presets: [...LISTING.presets, { ...second, name: "openai" }] };
     const create = vi.spyOn(asrApi, "create").mockResolvedValue(created);
     const section = mount(VoiceSection, { target: document.body });
     await settle();
@@ -126,6 +126,13 @@ describe("voice tab", () => {
     const inputs = () => [...form.querySelectorAll<HTMLInputElement>("input")];
     const byLabel = (label: string) =>
       inputs().find((input) => form.querySelector(`label[for="${input.id}"]`)?.textContent.trim() === label);
+    expect(byLabel("model")?.value).toBe("gpt-transcribe");
+    expect(byLabel("model")?.placeholder).toBe("gpt-transcribe");
+    expect(form.textContent).toContain("use gpt-transcribe for OpenAI");
+    const format = form.querySelector<HTMLSelectElement>("select:not([id$='kind'])");
+    expect(format?.value).toBe("json");
+    expect(format?.selectedOptions[0]?.textContent).toContain("transcript text");
+    expect(format?.options[1]?.textContent).toContain("timed segments");
     type(byLabel("name"), "cloud");
     type(byLabel("API key variable"), "sk-proj-123");
     form.requestSubmit();
@@ -134,23 +141,48 @@ describe("voice tab", () => {
     expect(form.textContent).toContain("already has this name");
     expect(form.textContent).toContain("never the key itself");
     expect(document.activeElement).toBe(byLabel("name"));
-    type(byLabel("name"), "4o");
+    type(byLabel("name"), "openai");
     type(byLabel("API key variable"), "OPENAI_API_KEY");
-    type(byLabel("model"), "gpt-4o-transcribe");
-    const format = form.querySelector<HTMLSelectElement>("select:not([id$='kind'])");
-    if (!format) throw new Error("no format");
-    format.value = "json";
-    format.dispatchEvent(new Event("change", { bubbles: true }));
     form.requestSubmit();
     await settle();
     expect(create).toHaveBeenCalledTimes(1);
-    expect(create.mock.calls[0]?.[0]).toBe("4o");
+    expect(create.mock.calls[0]?.[0]).toBe("openai");
     expect(create.mock.calls[0]?.[1]).toMatchObject({
       kind: "openai-compatible",
-      fields: { model: "gpt-4o-transcribe", response_format: "json", api_key_env: "OPENAI_API_KEY" },
+      fields: { model: "gpt-transcribe", response_format: "json", api_key_env: "OPENAI_API_KEY" },
     });
-    expect(maybeCard("4o")).not.toBeNull();
+    expect(maybeCard("openai")).not.toBeNull();
     expect(document.querySelector("#setting-asr-add form")).toBeNull();
+    await unmount(section);
+  });
+
+  it("stages an OpenAI Whisper upgrade in the form and applies it on save", async () => {
+    const update = vi.spyOn(asrApi, "update").mockResolvedValue(LISTING);
+    const section = mount(VoiceSection, { target: document.body });
+    await settle();
+    button(card("cloud"), "edit")?.click();
+    flushSync();
+    const form = document.querySelector<HTMLFormElement>("#setting-asr-presets form");
+    if (!form) throw new Error("no edit form");
+    const model = form.querySelector<HTMLInputElement>("input[id$='model']");
+    const format = form.querySelector<HTMLSelectElement>("select[id$='format']");
+    expect(model?.value).toBe("whisper-1");
+    expect(format?.value).toBe("verbose_json");
+    const migrate = button(form, "update to gpt-transcribe");
+    expect(migrate).toBeDefined();
+    migrate?.click();
+    await settle();
+    expect(model?.value).toBe("gpt-transcribe");
+    expect(format?.value).toBe("json");
+    expect(update).not.toHaveBeenCalled();
+    form.requestSubmit();
+    await settle();
+    expect(update).toHaveBeenCalledOnce();
+    expect(update.mock.calls[0]?.[0]).toBe("cloud");
+    expect(update.mock.calls[0]?.[1].fields).toMatchObject({
+      model: "gpt-transcribe",
+      response_format: "json",
+    });
     await unmount(section);
   });
 

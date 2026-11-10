@@ -11,12 +11,16 @@ import sys
 import tempfile
 import threading
 import unittest
+import urllib.request
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest import mock
 
 from partyline.asr_backends import Command, OpenAICompatible, parse_payload
 from partyline.asr_presets import build_registry
-from partyline.transcript import TakeFailed, TranscriberUnavailable, segments_to_vtt
+from partyline.transcript import (
+    TakeFailed, Transcript, TranscriberUnavailable, WhisperRetired, segments_to_vtt,
+)
 from partyline.transcriber import Transcriber
 
 
@@ -36,13 +40,12 @@ class VttTest(unittest.TestCase):
 
 class Handler(BaseHTTPRequestHandler):
     seen = []
+    answer = None
 
     def do_POST(self):
         body = self.rfile.read(int(self.headers["Content-Length"]))
         Handler.seen.append((self.path, self.headers.get("Authorization"), body))
-        code, payload = (500, b"nope") if b"explode" in body else (200, json.dumps(
-            {"text": " hi ", "language": "en", "duration": 2.0,
-             "segments": [{"start": 0, "end": 2, "text": "hi"}]}).encode())
+        code, payload = Handler.answer
         self.send_response(code)
         self.end_headers()
         self.wfile.write(payload)
@@ -54,35 +57,97 @@ class Handler(BaseHTTPRequestHandler):
 class OpenAITest(unittest.TestCase):
     def setUp(self):
         self.server = HTTPServer(("127.0.0.1", 0), Handler)
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.server.timeout = 0.5
+        self.addCleanup(self.server.server_close)
         self.base = f"http://127.0.0.1:{self.server.server_port}"
         Handler.seen = []
 
-    def tearDown(self):
-        self.server.shutdown()
-        self.server.server_close()
+    @contextmanager
+    def answer(self, code, payload):
+        Handler.answer = (code, payload if isinstance(payload, bytes) else json.dumps(payload).encode())
+        worker = threading.Thread(target=self.server.handle_request, daemon=True)
+        worker.start()
+        try:
+            yield
+        finally:
+            worker.join(timeout=0.6)
+            self.assertFalse(worker.is_alive())
+
+    @contextmanager
+    def redirect_openai(self):
+        urlopen = urllib.request.urlopen
+
+        def redirect(request, *, timeout):
+            self.assertEqual(request.full_url, "https://api.openai.com/v1/audio/transcriptions")
+            local = urllib.request.Request(self.base + request.selector, request.data, request.headers,
+                                           method=request.method)
+            return urlopen(local, timeout=timeout)
+
+        with mock.patch("partyline.asr_backends.urllib.request.urlopen", redirect):
+            yield
 
     def test_posts_audio_with_key_from_env(self):
-        backend = OpenAICompatible(self.base + "/", "whisper-1", "KEY_VAR")
+        backend = OpenAICompatible(self.base + "/", "whisper-1", "KEY_VAR", timeout=0.5)
         self.assertIn("KEY_VAR", backend.status()["reason"])
         with self.assertRaises(TranscriberUnavailable):
             backend.transcribe(b"audio")
-        with mock.patch.dict(os.environ, {"KEY_VAR": "sekret"}):
+        with self.answer(200, {"text": " hi ", "language": "en", "duration": 2.0,
+                               "segments": [{"start": 0, "end": 2, "text": "hi"}]}), \
+                mock.patch.dict(os.environ, {"KEY_VAR": "sekret"}):
             out = backend.transcribe(b"audio-bytes", "audio/webm;codecs=opus")
         path, auth, body = Handler.seen[0]
         self.assertEqual((path, auth), ("/v1/audio/transcriptions", "Bearer sekret"))
         self.assertIn(b"audio-bytes", body)
         self.assertIn(b"whisper-1", body)
+        self.assertIn(b'name="response_format"\r\n\r\nverbose_json\r\n', body)
         self.assertEqual((out.text, out.language, out.duration), ("hi", "en", 2.0))
         self.assertEqual(out.segments[0]["end"], 2.0)
 
     def test_errors_are_unavailable(self):
-        backend = OpenAICompatible(self.base, "m")
-        with self.assertRaisesRegex(TakeFailed, "500"):
+        backend = OpenAICompatible(self.base, "m", timeout=0.5)
+        with self.answer(500, b"nope"), self.assertRaisesRegex(TakeFailed, "500"):
             backend.transcribe(b"explode")
-        dead = OpenAICompatible("http://127.0.0.1:9", "m", timeout=2)
-        with self.assertRaisesRegex(TakeFailed, "could not reach"):
-            dead.transcribe(b"x")
+        with mock.patch("urllib.request.urlopen", side_effect=OSError("connection refused")), \
+                self.assertRaisesRegex(TakeFailed, "could not reach"):
+            backend.transcribe(b"x")
+
+    def test_gpt_transcribe_posts_json_and_language_array(self):
+        backend = OpenAICompatible("https://api.openai.com", "gpt-transcribe", timeout=0.5,
+                                   language="en", prompt="Partyline recording")
+        with self.answer(200, {"text": " Salut ", "languages": [{"code": "fr"}]}), self.redirect_openai():
+            result = backend.transcribe(b"audio-bytes", "audio/wav")
+        self.assertEqual(result, Transcript("Salut", "fr", 0.0))
+        path, _, body = Handler.seen[0]
+        self.assertEqual(path, "/v1/audio/transcriptions")
+        for field, value in (("model", "gpt-transcribe"), ("response_format", "json"),
+                             ("languages[]", "en"), ("prompt", "Partyline recording")):
+            self.assertIn(f'name="{field}"\r\n\r\n{value}\r\n'.encode(), body)
+        self.assertNotIn(b'name="language"', body)
+        self.assertIn(b'name="file"; filename="take.wav"\r\nContent-Type: audio/wav\r\n\r\naudio-bytes', body)
+
+    def test_openai_whisper_retirement_has_actionable_detail(self):
+        backend = OpenAICompatible("https://api.openai.com", "whisper-1", timeout=0.5)
+        cases = [(400, {"code": "model_deprecated"}), (410, {}),
+                 (404, {"code": "model_not_found", "message": "The whisper-1 model has been retired"})]
+        for status, error in cases:
+            with self.subTest(status=status), self.answer(status, {"error": error}), self.redirect_openai(), \
+                    self.assertRaises(WhisperRetired) as caught:
+                backend.transcribe(b"audio")
+            self.assertEqual(caught.exception.status, 502)
+            self.assertEqual(
+                str(caught.exception),
+                "model whisper-1 is retired; switch the preset to gpt-transcribe in Settings → Voice")
+
+    def test_whisper_retirement_detail_is_specific_to_openai(self):
+        retired = {"error": {"code": "model_deprecated", "message": "whisper-1 retired by this provider"}}
+        backend = OpenAICompatible(self.base, "whisper-1", timeout=0.5)
+        with self.answer(400, retired), self.assertRaisesRegex(TakeFailed, "retired by this provider"):
+            backend.transcribe(b"audio")
+        unavailable = {"error": {"code": "model_not_found", "message": "No access to model whisper-1"}}
+        backend = OpenAICompatible("https://api.openai.com", "whisper-1", timeout=0.5)
+        with self.answer(404, unavailable), self.redirect_openai(), \
+                self.assertRaisesRegex(TakeFailed, "No access to model whisper-1"):
+            backend.transcribe(b"audio")
 
 
 class CommandTest(unittest.TestCase):
@@ -157,6 +222,7 @@ class PayloadTest(unittest.TestCase):
         self.assertEqual(out.text, "thank you for helping")
         self.assertEqual(len(out.segments), 1)
         self.assertEqual(parse_payload({"text": "Thank you for helping"}).text, "Thank you for helping")
+        self.assertEqual(parse_payload({"text": "Thanks for watching!", "languages": []}).text, "")
 
     def test_tolerant_parse(self):
         out = parse_payload({"text": "a", "language": 3, "duration": None,

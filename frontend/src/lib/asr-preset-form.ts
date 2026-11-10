@@ -23,18 +23,32 @@ export type AsrDraftErrors = Partial<Record<keyof AsrDraft, string>>;
 export const NAME_PATTERN = /^[A-Za-z0-9_.-]{1,32}$/;
 /** Upper case only: a pasted key (sk-…, gsk_…) never fits, so it can never be saved. */
 export const ENV_NAME_PATTERN = /^[A-Z_][A-Z0-9_]{0,63}$/;
+export const OPENAI_TRANSCRIBE_MODEL = "gpt-transcribe";
+
+function serviceUrl(value: string): URL | null {
+  try {
+    return new URL(value.trim());
+  } catch {
+    return null;
+  }
+}
+
+export function usesOpenAI(baseUrl: string): boolean {
+  const host = serviceUrl(baseUrl)?.hostname ?? "";
+  return host === "api.openai.com" || host.endsWith(".api.openai.com");
+}
 
 export function emptyDraft(kind: AsrKind = "openai-compatible"): AsrDraft {
   return {
     name: "",
     kind,
-    model: kind === "openai-compatible" ? "whisper-1" : "",
+    model: kind === "openai-compatible" ? OPENAI_TRANSCRIBE_MODEL : "",
     device: "",
     computeType: "",
     modelDir: "",
     baseUrl: kind === "openai-compatible" ? "https://api.openai.com" : "",
     apiKeyEnv: kind === "openai-compatible" ? "OPENAI_API_KEY" : "",
-    responseFormat: "verbose_json",
+    responseFormat: "json",
     language: "",
     prompt: "",
     argv: "",
@@ -55,7 +69,11 @@ export function draftFromPreset(preset: AsrPreset): AsrDraft {
     modelDir: fields.model_dir ?? "",
     baseUrl: fields.base_url ?? "",
     apiKeyEnv: fields.api_key_env ?? "",
-    responseFormat: fields.response_format ?? "verbose_json",
+    responseFormat:
+      fields.response_format ??
+      (fields.model === OPENAI_TRANSCRIBE_MODEL && usesOpenAI(fields.base_url ?? "")
+        ? "json"
+        : "verbose_json"),
     language: fields.language ?? "",
     prompt: fields.prompt ?? "",
     argv: (fields.argv ?? []).join("\n"),
@@ -78,18 +96,16 @@ export function validateDraft(draft: AsrDraft, takenNames: readonly string[] = [
   const timeout = draft.timeout.trim();
   if (timeout && !(Number(timeout) > 0)) errors.timeout = "a positive number of seconds";
   if (draft.kind === "openai-compatible") {
-    if (!draft.model.trim()) errors.model = "the service's model name, e.g. whisper-1";
-    const url = draft.baseUrl.trim();
-    let parsed: URL | null;
-    try {
-      parsed = new URL(url);
-    } catch {
-      parsed = null;
-    }
+    const model = draft.model.trim();
+    if (!model) errors.model = "the service's model name, e.g. gpt-transcribe for OpenAI";
+    const parsed = serviceUrl(draft.baseUrl);
     if (!parsed || !["http:", "https:"].includes(parsed.protocol)) {
       errors.baseUrl = "an http(s) URL, e.g. https://api.openai.com";
     } else if (parsed.username || parsed.password || parsed.search) {
       errors.baseUrl = "no credentials or query in the URL; name a key variable instead";
+    }
+    if (model === OPENAI_TRANSCRIBE_MODEL && usesOpenAI(draft.baseUrl) && draft.responseFormat !== "json") {
+      errors.responseFormat = "gpt-transcribe on OpenAI uses json";
     }
     const env = draft.apiKeyEnv.trim();
     if (env && !ENV_NAME_PATTERN.test(env)) {
