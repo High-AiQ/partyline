@@ -1,10 +1,18 @@
 # Lessons: the false-assumptions ledger
 
+## Detach requests need an audit trail
+
+An absent HTTP access log does not prove there was no request: self-detach can
+kill the calling process before the response is logged. Log the detach request
+and its initiator before stopping the process, and log the committed result.
+Adapter exit status is logged separately. A legacy open turn mark is consumed on
+resume and does not itself detach the new process.
+
 ## Self-detach ends the requested work
 
 The false assumption was that every stopped process with an open turn needed to
 continue it. A self-detach stops the CLI before its end receipt; preserving its
-turn mark prompted Claude to repeat the self-detach on resume. The successful
+turn mark could prompt a resumed process to repeat a self-detach. The successful
 self-detach transaction now consumes that mark, while an external interruption
 keeps it. Resume regression tests cover both cases.
 

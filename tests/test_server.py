@@ -938,7 +938,9 @@ class ServerTest(unittest.TestCase):
             with patch("partyline.server.deny_unless_attachment"), \
                  patch("partyline.server.close_attachment", new_callable=AsyncMock) as close:
                 self.arun(server.detach(request, "old"))
-            close.assert_awaited_once_with(server.runtime, "old", self_detach=expected)
+            close.assert_awaited_once_with(
+                server.runtime, "old", self_detach=expected, source="api.detach",
+                caller=principal.attachment_id or f"{principal.kind}:{principal.user_id}")
 
     def test_detach_timeout_keeps_unconfirmed_running_row_tracked(self):
         self.add_attachment("old", status="running")

@@ -151,8 +151,10 @@ async def shutdown_runtime(runtime) -> None:
     """Snapshot recovery targets before stopping this generation's processes."""
     runtime.stopping = True
     runtime._shutdown_resume = snapshot_shutdown_plan(runtime.db, runtime.live)
-    for adapter in list(runtime.live.values()):
+    from .attachment_stop_audit import direct_stop
+    for ident, adapter in list(runtime.live.items()):
         try:
+            direct_stop(ident, "restart.shutdown")
             await adapter.stop()
         except Exception:
             pass

@@ -172,9 +172,12 @@ class ReplaceAttachmentTest(unittest.TestCase):
 
         live.stop = stop
         self.runtime.live["old"] = live
-        response = self.replace()
+        with self.assertLogs("partyline.line_process_routes", level="INFO") as logs:
+            response = self.replace(headers=self.captain_token)
         self.assertEqual(response.status_code, 200, response.text)
         self.assertTrue(live.stopped)
+        self.assertIn("replace_attachment caller=cap", logs.output[0])
+        self.assertIn("replace_attachment caller=cap", logs.output[1])
         self.assertNotIn("old", self.runtime.live)
         self.assertIsNone(self.db.get_attachment("old"))
 

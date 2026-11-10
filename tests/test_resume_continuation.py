@@ -130,6 +130,25 @@ class ResumeContinuationTest(unittest.IsolatedAsyncioTestCase):
         await drain()
         self.assertTrue(any("restarted in the middle" in m["body"] for m in seen["pending"]))
 
+    async def test_legacy_self_detach_marker_does_not_stop_resumed_process(self):
+        self.db._exec("UPDATE attachments SET status='detached',turn_open=1 WHERE id='one'")
+        adapter = StagingAdapter("owner-1")
+        resume, seen = self._resume(adapter, staged=True)
+        await resume_with_backlog(self.runtime, "one", resume)
+        await drain()
+        self.assertTrue(any("restarted in the middle" in m["body"] for m in seen["pending"]))
+        self.assertEqual(self.db.get_attachment("one")["turn_open"], 0)
+        self.db.set_attachment_status("one", "running", "owner-1")
+        self.runtime.live["one"] = adapter
+        Presence(self.runtime)
+        await self.runtime.presence.started("line", "one", "owner-1")
+        with patch.object(self.runtime.presence.returns, "turn_ended", new_callable=AsyncMock), \
+             patch.object(self.runtime.presence.queue, "flush", new_callable=AsyncMock), \
+             patch.object(self.runtime.presence.goal_stall, "check_tree", new_callable=AsyncMock):
+            await self.runtime.presence.ended("line", "one", "owner-1")
+        self.assertEqual(self.db.get_attachment("one")["status"], "running")
+        self.assertIs(self.runtime.live["one"], adapter)
+
     async def test_nothing_pending_means_nothing_to_settle(self):
         self.db.set_last_seen("one", 10**6, "owner-1")
         self.db.add_message("line", "luna", "agent", "I finished the request")

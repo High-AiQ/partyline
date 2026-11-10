@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import sys
 
 from fastapi import FastAPI, HTTPException, Request
 
@@ -10,13 +11,14 @@ from .contracts import MessageEvent, MessageResponse
 from .auth_guard import request_principal
 from .attachment_lifecycle import expire_unowned_attachment
 from .docker_workloads import announce_survivors
-from .hierarchy import descendants
+from .line_process_selection import live_attachments, mid_turn_blocker as mid_turn_blocker
 from .memory_requests import expire_memory_requests
 from .line_process_contracts import CloseProcessesResponse
 from .machine_scope import deny_unless
 from .mcp_attach import remove_config
 from .resource_leases import release_attachment_leases
 from .attachment_tmp import reap_tmp_dir
+from .attachment_stop_audit import actor
 
 LIVE = ("starting", "running")
 DETACH_STOP_TIMEOUT = 2.5
@@ -25,32 +27,6 @@ DETACH_DB_TIMEOUT = 0.5
 DETACH_BROADCAST_TIMEOUT = 0.5
 DETACH_CONFIRM_TIMEOUT = 3.0
 logger = logging.getLogger(__name__)
-
-
-def live_attachments(db, conv_id: str, include_children: bool) -> list[dict]:
-    """Return live attachments on a line and, optionally, its descendants."""
-    line_ids = [conv_id, *descendants(db, conv_id)] if include_children else [conv_id]
-    return [
-        att
-        for line_id in line_ids
-        for att in db.list_attachments(line_id)
-        if att["status"] in LIVE
-    ]
-
-
-def mid_turn_blocker(live: list[dict], presence) -> dict | None:
-    """Describe a live process that cannot be stopped without interrupting work."""
-    if presence is None:
-        return None
-    working = [att for att in live if presence.is_working(att["id"])]
-    if not working:
-        return None
-    names = ", ".join("@" + att["name"] for att in working)
-    return {
-        "code": "process_mid_turn",
-        "message": f"processes mid-turn: {names}; wait for them to finish before "
-        "using stop_processes=true",
-    }
 
 
 def _revive_hint(db, att_id: str) -> str:
@@ -89,8 +65,14 @@ async def _stop_confirmed(adapter, stop_error) -> bool:
 
 
 async def detach_attachment(runtime, att_id: str, *, survivors: bool = True, hint: bool = False,
-                            expire: bool = True, self_detach: bool = False) -> dict:
+                            expire: bool = True, self_detach: bool = False,
+                            source: str | None = None, caller: str | None = None) -> dict:
     """Run the one-jack detach transaction used by both REST commands."""
+    if source is None:
+        frame = sys._getframe(1)
+        source = f"{frame.f_globals.get('__name__', '?')}.{frame.f_code.co_name}"
+    logger.info("attachment detach requested attachment=%s source=%s caller=%s self_detach=%s",
+                att_id, source, actor(caller), self_detach)
     lock = runtime.resume_locks.setdefault(att_id, asyncio.Lock())
     try:
         await asyncio.wait_for(lock.acquire(), timeout=DETACH_LOCK_TIMEOUT)
@@ -182,6 +164,8 @@ async def detach_attachment(runtime, att_id: str, *, survivors: bool = True, hin
                 409,
                 "the attachment became live in another server generation; refresh and try again",
             )
+        logger.info("attachment detach committed attachment=%s source=%s caller=%s",
+                    att_id, source, actor(caller))
         await _bounded_broadcast(runtime.broadcast(
             att["conv_id"], MessageEvent(message=MessageResponse.model_validate(message))
         ))
@@ -198,9 +182,11 @@ async def detach_attachment(runtime, att_id: str, *, survivors: bool = True, hin
         lock.release()
 
 
-async def close_attachment(runtime, att_id: str, *, self_detach: bool = False) -> dict:
+async def close_attachment(runtime, att_id: str, *, self_detach: bool = False,
+                           source: str = "close_attachment", caller: str | None = None) -> dict:
     """Detach and reap the temp directory; other detach paths preserve it."""
-    response = await detach_attachment(runtime, att_id, hint=True, self_detach=self_detach)
+    response = await detach_attachment(runtime, att_id, hint=True, self_detach=self_detach,
+                                       source=source, caller=caller)
     await asyncio.to_thread(reap_tmp_dir, att_id)
     return response
 
@@ -294,5 +280,7 @@ def register_line_process_routes(app: FastAPI, runtime) -> None:
         live = live_attachments(runtime.db, conv_id, include_children)
         for attachment in live:
             await detach_attachment(runtime, attachment["id"], hint=True, self_detach=(
-                principal.kind == "machine" and principal.attachment_id == attachment["id"]))
+                principal.kind == "machine" and principal.attachment_id == attachment["id"]),
+                source="api.close_line_processes",
+                caller=principal.attachment_id or f"{principal.kind}:{principal.user_id}")
         return {"ok": True, "stopped": [attachment["name"] for attachment in live]}

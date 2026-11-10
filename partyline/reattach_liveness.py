@@ -64,6 +64,8 @@ async def abandon(runtime, attachment_id: str) -> None:
     if adapter is None:
         return
     try:
+        from .attachment_stop_audit import direct_stop
+        direct_stop(attachment_id, "restart.abandon")
         await adapter.stop()
     except Exception:
         await runtime.db.set_attachment_status_async(

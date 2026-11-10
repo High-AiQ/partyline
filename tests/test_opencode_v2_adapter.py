@@ -249,7 +249,9 @@ class OpenCodeV2Tests(unittest.IsolatedAsyncioTestCase):
         self.adapter._resolve_store = Mock(side_effect=OSError("missing store"))
         task = asyncio.create_task(self.adapter._run())
         self.adapter._tasks = [task]
-        await task
+        with self.assertLogs("partyline.attachment_stop_audit", level="INFO") as logs:
+            await task
+        self.assertIn("source=opencode.transcript_watcher_failure", logs.output[0])
         self.adapter.on_status.assert_awaited_once_with("detached")
         self.assertFalse(task.cancelled())
 
