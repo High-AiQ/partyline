@@ -19,7 +19,9 @@ from partyline import db as _db
 from partyline import docker_bridge_client as _docker_bridge_client
 from partyline import docker_relay as _docker_relay
 from partyline import resource_budget as _resource_budget
+from partyline import process_exit as _process_exit
 from partyline import resource_usage as _resource_usage
+from partyline import scope_sweep as _scope_sweep
 from partyline.resource_budget import GIB, Host
 
 def _sandbox_base() -> str:
@@ -61,6 +63,37 @@ def _pinned_host_resources():
 _resource_budget.host_resources = _pinned_host_resources
 # Usage sampling reads /proc; ordinary tests get a flat None instead.
 _resource_usage.server_usage_bytes = lambda *args, **kwargs: None
+
+
+# Real attachments a test starts get real transient scopes named by ``new_scope``. Record each
+# name, and stop whatever is left when the test process exits, so a run never leaves a scope on
+# the host. The startup sweep stops other scopes on the host, so ordinary tests never run it.
+SCOPES_CREATED: list[str] = []
+REAL_NEW_SCOPE = _process_exit.new_scope
+REAL_SCOPE_SWEEP = _scope_sweep.sweep_empty_scopes
+
+
+def _recorded_new_scope():
+    SCOPES_CREATED.append(REAL_NEW_SCOPE())
+    return SCOPES_CREATED[-1]
+
+
+def stop_created_scopes(run=None):
+    """Stop every scope this process named; returns how many names it tried."""
+    import subprocess
+    names = list(dict.fromkeys(SCOPES_CREATED))
+    if names and os.name != "nt":
+        try:
+            (run or subprocess.run)(["systemctl", "--user", "stop", "--no-block", *names],
+                                    capture_output=True, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return len(names)
+
+
+_process_exit.new_scope = _recorded_new_scope
+_scope_sweep.sweep_empty_scopes = lambda *args, **kwargs: 0
+atexit.register(stop_created_scopes)
 
 
 class _UnsyncedSqlite:

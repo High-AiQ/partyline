@@ -44,9 +44,29 @@ def inspect_exit(scope: str | None, code: int, limit: str) -> ProcessExit:
     return evidence
 
 
-def release_scope(scope: str | None) -> None:
+def stop_scope(scope: str | None) -> None:
+    """Ask systemd to drop a scope without waiting for it.
+
+    A named scope cannot use ``--collect`` (that discards the failed result the
+    OOM report reads), so nothing garbage-collects it if the manager misses the
+    cgroup going empty: it stays active and empty for good. Stopping it is a
+    no-op on a gone scope, keeps a failed scope's result, and kills only
+    stragglers an exited process left behind.
+    """
     if not scope or not SCOPE.fullmatch(scope):
         return
+    try:
+        subprocess.run(["systemctl", "--user", "stop", "--no-block", scope],
+                       capture_output=True, timeout=3)
+    except (OSError, subprocess.SubprocessError):
+        logger.warning("could not stop scope %s", scope, exc_info=True)
+
+
+def release_scope(scope: str | None) -> None:
+    """Stop the scope and clear any failed result nobody needs any more."""
+    if not scope or not SCOPE.fullmatch(scope):
+        return
+    stop_scope(scope)
     try:
         subprocess.run(["systemctl", "--user", "reset-failed", scope],
                        capture_output=True, timeout=3)
@@ -98,3 +118,6 @@ async def report_exit(adapter, code: int) -> None:
         # A failed diagnostic must not erase evidence an operator can read later.
         if adapter._stopping or (recorded and (not scope or evidence.result is not None)):
             await asyncio.to_thread(release_scope, scope)
+        else:
+            # The failed result stays readable, but an active empty scope must not.
+            await asyncio.to_thread(stop_scope, scope)

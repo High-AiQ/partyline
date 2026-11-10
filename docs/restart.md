@@ -109,6 +109,16 @@ The plan machinery — `restart_plan` table and columns, `reattach.py`, the clai
 lease lifecycle — is unchanged from the earlier operator-CLI-driven procedure; only that naming
 retired. Do not rename the table or its columns: live databases carry them.
 
+## Process scopes across a restart
+
+Every attachment runs in a transient `partyline-process-<hex>.scope` unit. The unit is named, not
+`--collect`ed, because a failed (`oom-kill`) result must stay readable for the exit report. So
+nothing garbage-collects it for us: `process_exit.release_scope` stops it when the process exits
+or is detached (a restart detaches every live process before the new generation starts), and a
+failed result is cleared only after it has been reported. At startup `scope_sweep` also stops any
+`partyline-process-*` scope that is still active but whose cgroup reports `populated 0`, skips the
+scope of every live attachment, logs the count, and never touches a scope holding a process.
+
 ## Delegated local operator approval
 
 A person may authorize a trusted operator outside the attachment fence to approve
