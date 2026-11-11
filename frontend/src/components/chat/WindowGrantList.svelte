@@ -1,11 +1,10 @@
 <script lang="ts">
   import { screenApi, type ScreenWindowGrant } from "../../lib/screen-api";
-  let { grants, refresh }: { grants: ScreenWindowGrant[]; refresh: () => Promise<void> } = $props();
+  let { grants }: { grants: ScreenWindowGrant[] } = $props();
   let error = $state("");
   async function stop(id: string): Promise<void> {
     try {
       await screenApi.revokeWindow(id);
-      await refresh();
     } catch (e) {
       error = e instanceof Error ? e.message : "Could not stop window sharing";
     }

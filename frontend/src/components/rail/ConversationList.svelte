@@ -7,8 +7,6 @@
    * actions lit, so the ⋯ does not vanish out from under the pointer on the way
    * down to the menu.
    */
-  import { onMount } from "svelte";
-  import { screenApi, type ShareIndicator } from "../../lib/screen-api";
   import { screenStatus } from "../../state/screen-status.svelte";
   import ShareIcon from "./ShareIcon.svelte";
   import { SvelteSet } from "svelte/reactivity";
@@ -36,28 +34,7 @@
 
   let { onrename, onmanagement, oncloseprocesses, ondelete, onarchivemany }: Props = $props();
 
-  let indicators = $state<ShareIndicator[]>([]);
-  let generation = 0;
-  async function refreshIndicators(): Promise<void> {
-    const current = ++generation;
-    try {
-      const result = await screenApi.indicators();
-      if (current === generation) indicators = result.indicators;
-    } catch {
-      // Keep the last known state during transient connection failures.
-    }
-  }
-  onMount(() => {
-    const timer = setInterval(() => void refreshIndicators(), 15_000);
-    return () => {
-      clearInterval(timer);
-      generation++;
-    };
-  });
-  $effect(() => {
-    void screenStatus.revision;
-    void refreshIndicators();
-  });
+  const indicators = $derived(screenStatus.indicators);
   let expanded = $state<Set<string>>(readExpandedLines());
   const rows = $derived(lineTree(room.conversations, expanded, room.conversation?.id));
 

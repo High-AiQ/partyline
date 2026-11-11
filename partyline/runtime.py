@@ -284,6 +284,8 @@ class ChatRuntime(DeliveryCreditMixin):
                     await ws.send_json(hello_payload(
                         conv_id, handle, frontend_build, server_version, instance_name
                     ))
+                    from .screen_snapshot import send_snapshot
+                    await send_snapshot(self, ws, conv_id)
                     if reattacher is not None and (offer := reattacher.offer(conv_id)):
                         await ws.send_json(offer.model_dump())
                     continue

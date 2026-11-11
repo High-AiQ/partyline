@@ -117,7 +117,6 @@ class ScreenHub:
                 message = json.loads(raw)
                 kind = message.get("type")
                 if kind == "ping":
-                    await self.window_grants.expire()
                     await ws.send_json({"type": "pong"})
                     continue
                 if kind == "pong":
@@ -237,6 +236,10 @@ class ScreenHub:
         return await preview(self, device_id, owner_id, monitor_id)
 
     async def _line_event(self, conv_id: str, payload: dict) -> None:
+        share = self.shares.get(conv_id)
+        if share:
+            await self._device_event({"id": share.device_id, "owner_id": share.owner_id},
+                                     share.device_id in self.devices)
         for ws in list(self.runtime.sockets.get(conv_id, ())):
             try:
                 await ws.send_json(payload)
@@ -246,12 +249,18 @@ class ScreenHub:
     async def _device_event(self, device: dict, online: bool) -> None:
         payload = {"type": "screen_devices_changed", "device_id": device["id"],
                    "online": online}
-        for sockets in list(self.runtime.sockets.values()):
+        from .screen_snapshot import owner_state, snapshot
+
+        state = None
+        for conv_id, sockets in list(self.runtime.sockets.items()):
             for ws in list(sockets):
                 if getattr(ws, "screen_owner_id", None) != device["owner_id"]:
                     continue
                 try:
+                    if state is None:
+                        state = owner_state(self, device["owner_id"])
                     await ws.send_json(payload)
+                    await ws.send_json(snapshot(self, device["owner_id"], conv_id, state))
                 except Exception:
                     pass
 

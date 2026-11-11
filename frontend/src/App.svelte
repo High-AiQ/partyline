@@ -15,10 +15,10 @@
   import ReattachOfferDialog from "./components/dialogs/ReattachOfferDialog.svelte";
   import SettingsRoute from "./components/settings/SettingsRoute.svelte";
   import { isSettingsRoute } from "./lib/settings-route";
-
   import { room } from "./state/room.svelte.js";
   import { session } from "./state/session.svelte.js";
   import { wire } from "./state/wire.svelte.js";
+  import { useAccountWire } from "./state/account-wire.svelte.js";
   import { dialogs } from "./state/dialogs.svelte.js";
   import { draft } from "./state/draft.svelte.js";
   import { layout } from "./state/layout.svelte.js";
@@ -26,7 +26,6 @@
 
   $effect(() => layout.watch());
   $effect(() => theme.watch());
-
   /**
    * Arriving on a narrow screen with no line open: show the lines.
    *
@@ -88,6 +87,7 @@
     wasSignedIn = signedIn;
   });
 
+  useAccountWire();
   function mention(name: string): void {
     draft.mention(name);
     // The handle has gone into the composer, which is behind this drawer.

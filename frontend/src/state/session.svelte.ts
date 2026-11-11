@@ -1,3 +1,4 @@
+import { screenStatus } from "./screen-status.svelte.js";
 /**
  * The authenticated operator, and the things that belong to the server rather
  * than to a line: the adapter registry, saved presets, and version badge.
@@ -77,6 +78,8 @@ class Session {
 
   clearSession(): void {
     clearStoredTokens();
+    screenStatus.devices = [];
+    screenStatus.indicators = [];
     this.user = null;
     this.authReady = true;
   }

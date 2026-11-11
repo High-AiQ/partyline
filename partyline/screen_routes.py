@@ -9,7 +9,6 @@ from fastapi import APIRouter, HTTPException, Request, WebSocket
 from pydantic import BaseModel, ValidationError
 from PIL import Image, ImageDraw
 
-from .helper_release import update_available
 from .auth_guard import bearer_token, request_principal
 from .machine_scope import deny_unless, is_human
 from .media import MediaError, MediaStore
@@ -21,7 +20,8 @@ from .render_check_routes import render_check_router
 from .screen_control_routes import control_router
 from .screen_frame_store import frame_reference
 from .screen_hub import ScreenHub
-from .screen_grants import device_grants, grant_router, window_share_indicators
+from .screen_grants import grant_router
+from .screen_snapshot import owner_devices, owner_indicators
 from .screen_protocol import PairClaim, Region
 from .screen_pointer import captured_pointer, annotate_stationary_pointers
 
@@ -79,7 +79,8 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
         if not result:
             hub.limits.failed(body.code)
             raise HTTPException(400, "pairing code is invalid, expired, or already used")
-        device_id, token, _, _ = result
+        device_id, token, owner_id, _ = result
+        await hub._device_event({"id": device_id, "owner_id": owner_id}, False)
         return {"device_id": device_id, "token": token}
 
     @router.get("/api/screen/devices")
@@ -87,36 +88,14 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
         principal = request_principal(request)
         if not is_human(principal):
             raise HTTPException(403, "screen devices are visible to their owner")
-        rows = runtime.db._exec(
-            "SELECT id,name,os,created_at FROM screen_devices WHERE owner_id=? "
-            "AND revoked_at IS NULL ORDER BY created_at", (principal.user_id,)
-        ).fetchall()
-        result = []
-        for row in rows:
-            item = dict(row)
-            online = hub.devices.get(item["id"])
-            item["window_grants"] = device_grants(runtime.db, item["id"])
-            item["online"] = online is not None
-            item["monitors"] = online["monitors"] if online else []
-            item["helper_version"] = online["helper_version"] if online else None
-            item["update_available"] = bool(online) and update_available(online["helper_version"])
-            result.append(item)
-        return {"devices": result}
+        return {"devices": owner_devices(hub, principal.user_id)}
 
     @router.get("/api/screen/active-indicators")
     async def active_indicators(request: Request):
         principal = request_principal(request)
         if not is_human(principal):
             raise HTTPException(403, "screen shares are visible to their owner")
-        items = []
-        for share in hub.shares.values():
-            device = hub.devices.get(share.device_id)
-            if share.owner_id == principal.user_id and share.status == "active" and device:
-                name = device["name"]
-                items.append({"conv_id": share.conv_id, "device_name": name,
-                              "kind": "screen", "label": f"{name} screen share"})
-        items.extend(window_share_indicators(runtime.db, principal.user_id))
-        return {"indicators": items}
+        return {"indicators": owner_indicators(hub, principal.user_id)}
 
     @router.delete("/api/screen/devices/{device_id}")
     async def revoke(device_id: str, request: Request):
@@ -132,6 +111,7 @@ def register_screen_routes(app, runtime, store: MediaStore) -> ScreenHub:
         runtime.db._exec("UPDATE screen_devices SET revoked_at=? WHERE id=?",
                          (time.time(), device_id))
         await revoke_device(hub, device_id)
+        await hub._device_event({"id": device_id, "owner_id": principal.user_id}, False)
         return {"ok": True}
 
     @router.post("/api/screen/shares")

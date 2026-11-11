@@ -71,6 +71,7 @@ from .contracts import (
     ShutdownResponse,
 )
 from .handshake import VersionResponse
+from .screen_account_wire import serve_wire
 from . import deployment
 from .db import Db
 from .frontend_build import current_frontend_build
@@ -583,10 +584,9 @@ async def ws_endpoint(ws: WebSocket, conv_id: str):
     finally:
         user_sockets.discard(principal.user_id, ws)
 
-
 async def _serve_socket(ws: WebSocket, conv_id: str, handle: str):
-    await runtime.websocket(
-        ws,
+    await serve_wire(
+        runtime, ws,
         conv_id,
         handle=handle,
         frontend_build=current_frontend_build(), server_version=__version__,

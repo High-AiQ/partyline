@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, untrack } from "svelte";
+  import { untrack } from "svelte";
   import WindowGrantList from "./WindowGrantList.svelte";
   import Modal from "../Modal.svelte";
   import PairingSteps from "../PairingSteps.svelte";
@@ -19,7 +19,7 @@
 
   let open = $state(false);
   let pickerRequest = untrack(() => screenStatus.openPicker);
-  let devices = $state<ScreenDevice[]>([]);
+  const devices = $derived(screenStatus.devices);
   let deviceId = $state("");
   let monitorId = $state<string | number>("");
   let preview = $state("");
@@ -38,31 +38,6 @@
   const monitor = $derived(device?.monitors.find((item) => item.id === monitorId));
 
   $effect(() => {
-    const id = room.conversation?.id;
-    const before = untrack(() => room.screenShare);
-    if (id)
-      void screenApi
-        .current(id)
-        .then((result) => {
-          if (room.conversation?.id === id && room.screenShare === before) room.screenShare = result.share;
-        })
-        .catch((e: unknown) => {
-          error = e instanceof Error ? e.message : "Could not load sharing status";
-        });
-  });
-  onMount(() => {
-    const timer = setInterval(() => {
-      if (open) void refresh();
-    }, 15_000);
-    return () => {
-      clearInterval(timer);
-    };
-  });
-  $effect(() => {
-    void screenStatus.revision;
-    if (open) void refresh();
-  });
-  $effect(() => {
     if (screenStatus.openPicker !== pickerRequest) {
       pickerRequest = screenStatus.openPicker;
       open = true;
@@ -77,14 +52,6 @@
       close();
     }
   });
-  async function refresh(): Promise<void> {
-    if (!room.conversation) return;
-    try {
-      devices = (await screenApi.devices(room.conversation.id)).devices;
-    } catch (e) {
-      error = e instanceof Error ? e.message : "Could not load computers";
-    }
-  }
   function close(): void {
     open = false;
     walkthrough.selecting = false;
@@ -197,7 +164,6 @@
     <button type="button" onclick={() => void pair()}>Pair this computer with Partyline</button>
     {#if code}<p>Code: <strong>{code}</strong> (expires in 5 minutes)</p>
       <PairingSteps origin={window.location.origin} {code} />{/if}
-    <button type="button" onclick={() => void refresh()}>Refresh</button>
     {#each devices as item (item.id)}
       <div class="flex gap-2">
         <button type="button" disabled={!item.online} onclick={() => void selectDevice(item)}
@@ -205,12 +171,9 @@
         ><button
           type="button"
           onclick={() =>
-            void screenApi
-              .revoke(item.id)
-              .then(refresh)
-              .catch((e: unknown) => {
-                error = e instanceof Error ? e.message : "Revoke failed";
-              })}>Revoke</button
+            void screenApi.revoke(item.id).catch((e: unknown) => {
+              error = e instanceof Error ? e.message : "Revoke failed";
+            })}>Revoke</button
         >
         {#if item.update_available}
           <span role="status" data-testid="helper-update"
@@ -225,7 +188,7 @@
           >
         {/if}
       </div>
-      <WindowGrantList grants={item.window_grants ?? []} {refresh} />
+      <WindowGrantList grants={item.window_grants ?? []} />
     {/each}
     {#if device}
       <h3>Choose a monitor</h3>

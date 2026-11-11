@@ -129,8 +129,9 @@ class ScreenTest(unittest.TestCase):
         other = SimpleNamespace(screen_owner_id=2, send_json=AsyncMock())
         self.runtime.sockets = {"line": [own], "other": [other]}
         asyncio.run(self.hub._device_event({"id": "pc", "owner_id": 1}, True))
-        own.send_json.assert_awaited_once_with({"type": "screen_devices_changed", "device_id": "pc",
-                                               "online": True})
+        self.assertEqual(own.send_json.await_args_list[0].args[0],
+                         {"type": "screen_devices_changed", "device_id": "pc", "online": True})
+        self.assertEqual(own.send_json.await_args_list[1].args[0]["type"], "screen_snapshot")
         other.send_json.assert_not_awaited()
 
     def test_account_pairing_shares_to_each_line_and_limits_indicators_to_owner(self):

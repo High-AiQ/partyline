@@ -16,6 +16,7 @@ import { ReactionResponseSchema } from "./reaction-contracts";
 import { PinsChangedEventSchema } from "./pin-contracts";
 import { ResourceSnapshotSchema } from "./resource-api";
 import { ScreenShareSchema } from "./screen-contracts";
+import { IndicatorSchema, ScreenDeviceSchema } from "./screen-device-contracts";
 
 export const HelloEventSchema = z.object({
   type: z.literal("hello"),
@@ -198,6 +199,12 @@ export const ScreenShareEventSchema = z.object({
   type: z.literal("screen_share"),
   share: ScreenShareSchema.nullable().default(null),
 });
+export const ScreenSnapshotEventSchema = z.object({
+  type: z.literal("screen_snapshot"),
+  indicators: z.array(IndicatorSchema),
+  devices: z.array(ScreenDeviceSchema),
+  share: ScreenShareSchema.nullable().default(null),
+});
 export const ScreenDevicesChangedEventSchema = z.object({
   type: z.literal("screen_devices_changed"),
   device_id: z.string(),
@@ -235,6 +242,7 @@ const CurrentWireEventSchema = z.discriminatedUnion("type", [
   ResourcesEventSchema,
   ScreenShareEventSchema,
   ScreenDevicesChangedEventSchema,
+  ScreenSnapshotEventSchema,
   PinsChangedEventSchema,
   AsrPresetsChangedEventSchema,
 ]);
