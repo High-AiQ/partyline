@@ -93,7 +93,9 @@ async def report_incident(runtime, row: dict, speaker: dict, handles: list[str])
             db.conn.commit()
             if made:
                 fresh.append(name)
-    if fresh:
+    # The incident is recorded either way; a root captain who is the speaker was
+    # already told by its own notice, so a second wake would only repeat it.
+    if fresh and root["id"] != speaker["id"]:
         await tell(runtime, root["id"], incident_text(db, row, speaker["name"], fresh))
 
 

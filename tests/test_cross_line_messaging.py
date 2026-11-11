@@ -101,11 +101,15 @@ class ForwardTest(unittest.TestCase):
             f"/api/conversations/{src}/messages/{message_id}/forward",
             json=payload, headers=self.token(att_id))
 
+    def forwarded(self):
+        """The forwarded post, not a server notice about who it mentioned."""
+        return [m for m in self.db.list_messages("root") if m["sender_type"] == "agent"][-1]
+
     def test_the_quote_carries_the_author_and_the_line(self):
         made = self.forward(1, {"to": "root", "note": "for the record"})
         self.assertEqual(made.status_code, 200, made.text)
 
-        stored = self.db.list_messages("root")[-1]
+        stored = self.forwarded()
         self.assertIn("for the record", stored["body"])
         self.assertIn("↪ forwarded from «Kid» — gem said:", stored["body"])
         self.assertIn("@lead the suite is green, 61 of 61", stored["body"])
@@ -113,7 +117,7 @@ class ForwardTest(unittest.TestCase):
     def test_without_a_note_the_quote_stands_alone(self):
         made = self.forward(1, {"to": "root"})
         self.assertEqual(made.status_code, 200, made.text)
-        stored = self.db.list_messages("root")[-1]
+        stored = self.forwarded()
         self.assertTrue(stored["body"].startswith("↪ forwarded from «Kid»"))
 
     def test_read_without_write_and_unknown_messages_are_refused(self):

@@ -15,13 +15,11 @@ from .idempotent_posts import (
     remember_key,
 )
 from .interrupts import interrupt_for
-from .mention_fallbacks import route_fallbacks
-from .mention_relay import hint_root_captain, relay_mentions
+from .mention_outcomes import settle_mentions
 from .mentions import (
     addressees,
     interrupt_names,
     line_addressed,
-    known_mention_names,
     mentioned_names,
 )
 from .solo_line import implied_addressee
@@ -249,42 +247,7 @@ async def route_message(
     for notice in notices:
         await runtime.post_message(conv_id, "system", "system", notice)
 
-    # A handle live on a related line is reached there, not reported missing.
-    elsewhere = await relay_mentions(runtime, conv_id, message, names - delivered - queued)
-    elsewhere |= await route_fallbacks(runtime, conv_id, message, names - delivered - queued - elsewhere)
-    if message["sender_type"] == "agent":
-        await hint_root_captain(runtime, conv_id, message, names - delivered - queued - elsewhere)
-    unavailable = [
-        name
-        for name in unreachable
-        if name.lower() not in delivered
-        and name.lower() not in queued
-        and name.lower() not in elsewhere
-    ]
-    for name in [] if message.get("bridge_id") else unavailable:
-        await runtime.post_message(
-            conv_id,
-            "system",
-            "system",
-            f"⚠ @{name} was mentioned but is not attached — nothing was delivered",
-        )
-    if (
-        message["sender_type"] == "human"
-        and not delivered
-        and not queued
-        and not elsewhere
-        and "all" not in names
-    ):
-        mentioned = mentioned_names(message["body"])
-        unrecognized = mentioned - known_mention_names(runtime.db, conv_id, mentioned)
-        if unrecognized:
-            handles = ", ".join(f"@{name}" for name in sorted(unrecognized))
-            await runtime.post_message(
-                conv_id,
-                "system",
-                "system",
-                f"⚠ nobody live on this line is named {handles} — nothing was delivered",
-            )
+    await settle_mentions(runtime, conv_id, message, names, unreachable, delivered, queued)
     for name in failed:
         await runtime.post_message(
             conv_id,

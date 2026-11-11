@@ -212,8 +212,9 @@ class CrossLineMentionTest(Tree):
         self.db.set_attachment_status("gone", "exited", "x")
         await self.say("lead", "@gone anyone there")
 
-        self.assertIn("⚠ @gone was mentioned but is not attached — nothing was delivered",
-                      self.notices("parent"))
+        [notice] = [n for n in self.notices("parent") if "did not reach" in n]
+        self.assertIn("gone: exited; resume it yourself, or ask a person to", notice)
+        self.assertEqual([n for n in self.notices("parent") if "nothing was delivered" in n], [])
 
     async def test_the_digest_tags_a_message_said_on_another_line(self):
         await self.say("sub", "@lead page one is done")

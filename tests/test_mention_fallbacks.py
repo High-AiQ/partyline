@@ -23,6 +23,12 @@ class MentionFallbackTest(TaskFixture):
         return [m['body'] for m in self.db.message_page(conv_id, limit=100)[0]
                 if all(m.get(k) == v for k, v in match.items())]
 
+    def private_notices(self, sender='system'):
+        """The waking notices the task worker was told, one per spoken message."""
+        return [m['body'] for m in self.db.message_page(self.conv_id, limit=100)[0]
+                if m.get('sender_type') == sender and 'did not reach' in m['body']
+                and m.get('audience_attachment_id') == self.worker.attachment_id]
+
     async def in_review(self):
         await self.setUp_task()
         self.runtime.live['captain'].deliver = AsyncMock(return_value=True)
@@ -50,8 +56,8 @@ class MentionFallbackTest(TaskFixture):
                          '↪ @astra is no longer attached on the root line; '
                          'delivered to the current captain @captain:\ndone @astra')
         self.assertEqual(copies[0]['source_conv_id'], self.conv_id)
-        hints = self.bodies(self.conv_id, audience_attachment_id=self.worker.attachment_id)
-        self.assertIn('⚠ @astra is not attached; the root captain is @captain', hints)
+        [hint] = self.private_notices()
+        self.assertIn('astra: not attached; the root captain is @captain', hint)
         self.assertFalse([b for b in self.bodies(self.conv_id) if 'nothing was delivered' in b])
 
     async def test_mentioning_the_current_captain_too_is_not_relayed_twice(self):
@@ -61,8 +67,8 @@ class MentionFallbackTest(TaskFixture):
         self.runtime.live['captain'].deliver = AsyncMock(return_value=True)
         await self.say('done @astra @Captain')
         self.assertFalse([m for m in self.db.messages_after('root', 0) if m['body'].startswith('↪')])
-        self.assertIn('⚠ @astra is not attached; the root captain is @captain',
-                      self.bodies(self.conv_id, audience_attachment_id=self.worker.attachment_id))
+        [hint] = self.private_notices()
+        self.assertIn('astra: not attached; the root captain is @captain', hint)
 
     async def test_former_captain_with_no_live_current_captain_is_not_relayed(self):
         await self.setUp_task()
@@ -102,9 +108,9 @@ class MentionFallbackTest(TaskFixture):
         with patch('partyline.orchestrator_revive.revive_reviewer', new=AsyncMock()) as revive:
             await self.say(f"verdict please @{reviewer['name']}")
         revive.assert_not_awaited()
-        self.assertIn(f"⚠ @{reviewer['name']} is detached; it will read this when revived — "
-                      'the root captain revives it with restart_reviewer',
-                      self.bodies(self.conv_id, sender_type='system'))
+        [hint] = self.private_notices()
+        self.assertIn(f"{reviewer['name']}: detached — a task reviewer", hint)
+        self.assertIn(f"restart_reviewer(conv_id={self.conv_id})", hint)
 
     async def test_in_review_with_a_detached_reviewer_is_revived(self):
         reviewer = await self.in_review()
@@ -124,9 +130,9 @@ class MentionFallbackTest(TaskFixture):
         with patch('partyline.orchestrator_revive.revive_reviewer',
                    new=AsyncMock(side_effect=ValueError('boom'))):
             await self.say(f"verdict? @{reviewer['name']}")
-        self.assertIn(f"⚠ @{reviewer['name']} is exited; it will read this when revived — "
-                      'the root captain revives it with restart_reviewer',
-                      self.bodies(self.conv_id, sender_type='system'))
+        [hint] = self.private_notices()
+        self.assertIn(f"{reviewer['name']}: exited — a task reviewer", hint)
+        self.assertIn(f"restart_reviewer(conv_id={self.conv_id})", hint)
 
     async def test_reviewer_at_the_restart_cap_gets_the_notice_only(self):
         reviewer = await self.in_review()
@@ -137,9 +143,9 @@ class MentionFallbackTest(TaskFixture):
             await self.say(f"verdict? @{reviewer['name']}")
         revive.assert_not_awaited()
         self.assertEqual(self.row()['reviewer_restarts'], 2)
-        self.assertIn(f"⚠ @{reviewer['name']} is detached; it will read this when revived — "
-                      'the root captain revives it with restart_reviewer',
-                      self.bodies(self.conv_id, sender_type='system'))
+        [hint] = self.private_notices()
+        self.assertIn(f"{reviewer['name']}: detached — a task reviewer", hint)
+        self.assertIn(f"restart_reviewer(conv_id={self.conv_id})", hint)
 
     async def test_in_review_reviewer_already_live_is_left_alone(self):
         reviewer = await self.in_review()
