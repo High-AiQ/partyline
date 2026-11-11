@@ -23,7 +23,7 @@ from .orchestrator_handles import pick_tag
 from .memory_live_raise import check_task_memory
 from .orchestrator_staff import ensure_reviewer, restart, spawn
 from .orchestrator_store import (
-    EXPRESS_BRIEF, EXPRESS_NO_REVIEW, preset, require_override, require_root, require_task, task,
+    EXPRESS_BRIEF, EXPRESS_NO_REVIEW, require_override, require_root, require_task, task,
     validate_policy)
 
 
@@ -39,7 +39,8 @@ async def create_task(runtime, actor, root_id, body):
 async def _create_task(runtime, actor, root_id, body):
     db = runtime.db
     root = require_root(db, actor, root_id)
-    preset(db, body.implementer)
+    from .preset_roles import require_named_role
+    require_named_role(db, body.implementer, 'implementer')
     check_task_memory(db, actor, body.memory_limit)
     if body.mode == 'express':
         if body.review not in (None, 'none'):
@@ -94,7 +95,7 @@ async def _create_task(runtime, actor, root_id, body):
                 db._exec('UPDATE attachments SET memory_limit=? WHERE id=?',
                          (body.memory_limit, ident))
                 existing = db.get_attachment(ident)
-            await restart(runtime, existing)
+            await restart(runtime, existing, 'implementer', body.implementer)
         else:
             tag = task(db, conv_id)['tag']
             await spawn(runtime, conv_id, body.implementer, ident,
@@ -138,6 +139,8 @@ async def request_review(runtime, actor, conv_id, body):
     # calls cannot spawn two reviewers or produce two terminal reports.
     async with task_lock(runtime, conv_id):
         row = require_task(db, actor, conv_id)
+        if row['status'] not in ('approved', 'done'):
+            validate_policy(db, row['policy'])
         if row['status'] in ('approved', 'done'):
             await report(runtime, row)
             return task(db, conv_id, visibility=True)

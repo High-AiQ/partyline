@@ -9,12 +9,13 @@ from .conversation_routes import unique_handle
 from .line_worktree import line_cwd
 from .process_memory import parse_size
 from .resource_budget import claim_resume, reserve_new_attachment, settings
-from .orchestrator_store import preset
+from .preset_roles import require_named_role
 
 
-async def spawn(runtime, conv_id, preset_name, ident, cwd=None, handle=None, memory_limit=None):
+async def spawn(runtime, conv_id, preset_name, ident, cwd=None, handle=None, memory_limit=None,
+                role="implementer"):
     from . import server
-    selected = preset(runtime.db, preset_name)
+    selected = require_named_role(runtime.db, preset_name, role)
     command = validated_attachment_command(
         selected['adapter'], selected['command'], server.ADAPTERS, server.ADAPTER_METADATA)
     name = unique_handle(runtime.db, conv_id, handle or selected['name'])
@@ -24,11 +25,12 @@ async def spawn(runtime, conv_id, preset_name, ident, cwd=None, handle=None, mem
         runtime_owner=str(uuid.uuid4()), start_after_history=True,
         lease=parse_size(memory_limit) if memory_limit else None)
     runtime.db._exec('UPDATE attachments SET preset=? WHERE id=?', (selected['name'], ident))
-    return await server._start_attachment(runtime.db.get_attachment(ident))
+    return await server._start_attachment(runtime.db.get_attachment(ident), staffing_role=role)
 
 
 async def ensure_reviewer(runtime, row):
     db = runtime.db
+    require_named_role(db, row['policy'], 'reviewer')
     ident = row['reviewer_id']
     if ident is None:
         ident = str(uuid.uuid4())
@@ -39,18 +41,19 @@ async def ensure_reviewer(runtime, row):
     att = db.get_attachment(ident)
     if att is None:
         await spawn(runtime, row['conv_id'], row['policy'], ident, row['review_worktree'],
-                    handle=f"review-{row['tag']}" if row.get('tag') else None)
+                    handle=f"review-{row['tag']}" if row.get('tag') else None, role="reviewer")
     else:
         if att['status'] in ('starting', 'running'):
             from .line_process_routes import detach_attachment
             await detach_attachment(runtime, ident, survivors=False)
         db._exec('UPDATE attachments SET cwd=? WHERE id=?', (row['review_worktree'], ident))
         # Resuming retains the attachment and its CLI session across every round.
-        await restart(runtime, db.get_attachment(ident))
+        await restart(runtime, db.get_attachment(ident), 'reviewer', row['policy'])
     return db.get_attachment(ident)
 
 
-async def restart(runtime, att):
+async def restart(runtime, att, role, preset_name):
+    require_named_role(runtime.db, preset_name, role)
     from . import server
     adapter = server.ADAPTERS[att['adapter']]
     if att.get('cli_session') or adapter.session_exists(att):
@@ -61,4 +64,5 @@ async def restart(runtime, att):
     lease = settings(runtime.db)['default_process_memory_bytes']
     if not await claim_resume(runtime.db, att['id'], owner, lease):
         raise HTTPException(409, 'task process is already being started')
-    return await server._start_attachment(runtime.db.get_attachment(att['id']), fresh=True)
+    return await server._start_attachment(runtime.db.get_attachment(att['id']), fresh=True,
+                                          staffing_role=role, staffing_preset=preset_name)

@@ -34,6 +34,7 @@ class ReplaceAttachmentTest(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.db = Db(f"{self.directory.name}/test.db")
+        self.db.save_preset("fixture", "Fixture", "fixture", "raw", "sh", can_manage=True)
         self.runtime = ChatRuntime(self.db)
         self.runtime.broadcast = AsyncMock()
         self.spawned = []
@@ -92,6 +93,29 @@ class ReplaceAttachmentTest(unittest.TestCase):
         # the fresh session started with the re-briefing as its checkpoint
         checkpoint = self.spawned[-1].get("checkpoint") or ""
         self.assertIn("@worker", checkpoint)
+
+    def test_person_can_replace_captain_without_a_matching_preset(self):
+        self.db.delete_preset('fixture')
+        self.db.set_attachment_status('cap', 'detached', None)
+        self.runtime.live.pop('cap')
+        response = self.replace(att_id='cap')
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(self.db.get_attachment(response.json()['id'])['is_lead'])
+
+    def test_agent_cannot_replace_captain_without_a_matching_preset(self):
+        self.db.delete_preset('fixture')
+        response = self.replace(att_id='cap', headers=self.captain_token)
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertIn('Can manage a line', response.text)
+        self.assertIn('cap', self.runtime.live)
+
+    def test_replacement_keeps_the_recorded_preset(self):
+        self.db._exec("UPDATE attachments SET preset='fixture',is_successor=1 WHERE id='old'")
+        response = self.replace()
+        self.assertEqual(response.status_code, 200, response.text)
+        replacement = self.db.get_attachment(response.json()['id'])
+        self.assertEqual(replacement['preset'], 'fixture')
+        self.assertTrue(replacement['is_successor'])
 
     def test_a_failed_start_leaves_the_captain_in_place(self):
         # the captain replaces itself and the start fails: the old row must

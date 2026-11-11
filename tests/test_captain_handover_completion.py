@@ -26,6 +26,7 @@ class CompletionTest(unittest.TestCase):
         self.db = Db(self.path)
         self.db.create_conversation('line', 'line')
         for name in ('old', 'new', 'other'):
+            self.db.save_preset(name, name, name, 'fake', '', can_manage=True)
             self.db.add_attachment(name, 'line', name, 'fake', [], '/tmp')
             self.db.set_attachment_status(name, 'running', None)
         self.now = time.time()

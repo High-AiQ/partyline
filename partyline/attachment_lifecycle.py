@@ -155,11 +155,11 @@ async def create_fresh_record(db, expected, body):
             )
             db.conn.execute(
                 "INSERT INTO attachments(id,conv_id,name,adapter,command,cwd,status,"
-                "runtime_owner,last_seen,created_at,runtime_started_at,memory_limit,counts_toward_total) "
-                "VALUES(?,?,?,?,?,?,'starting',?,?,?,?,?,?)",
+                "runtime_owner,last_seen,created_at,runtime_started_at,memory_limit,counts_toward_total,"
+                "preset,is_successor) VALUES(?,?,?,?,?,?,'starting',?,?,?,?,?,?,?,?)",
                 (ident, att["conv_id"], att["name"], att["adapter"], json.dumps(att["command"]),
                  att["cwd"], owner, cursor, started_at, started_at, memory_limit,
-                 att["counts_toward_total"]),
+                 att["counts_toward_total"], att.get("preset"), att.get("is_successor", 0)),
             )
         return db.get_attachment(ident)
 

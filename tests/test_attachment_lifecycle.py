@@ -112,6 +112,12 @@ class LifecycleTest(unittest.TestCase):
     def fresh(self, body=None):
         return self.client.post("/api/attachments/old/fresh", json=body)
 
+    def test_person_can_start_a_captain_fresh_without_a_preset(self):
+        self.db._exec("UPDATE attachments SET is_lead=1 WHERE id='old'")
+        response = self.fresh()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(self.db.get_attachment(response.json()['id'])['is_lead'])
+
     def test_fresh_replaces_identity_and_revokes_old_token_without_chat_replay(self):
         old_message = self.db.add_message("line", "greg", "human", "old context")
         response = self.fresh()

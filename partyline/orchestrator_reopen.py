@@ -23,6 +23,8 @@ async def reopen_task(runtime, actor, conv_id, body):
     require_root(db, actor, row['root_id'])
     goal = body.goal.strip()
     async with task_lock(runtime, conv_id):
+        from .preset_roles import require_named_role
+        require_named_role(db, row['implementer_preset'], 'implementer')
         changed = db._exec(
             "UPDATE task_reviews SET status='implementing',round=0,sha=NULL,review_worktree=NULL,"
             "repositories='[]',what='',location='',findings='',previous_findings='',report_id=NULL,reviewer_restarts=0,"
@@ -36,7 +38,7 @@ async def reopen_task(runtime, actor, conv_id, body):
         set_goal(db, conv_id, goal)
         att = db.get_attachment(row['implementer_id'])
         if att and att['status'] not in LIVE:
-            await restart(runtime, att)
+            await restart(runtime, att, 'implementer', row['implementer_preset'])
     ending = (EXPRESS_BRIEF if row['mode'] == 'express' else
               "Commit on this line's branch; never push. Call request_review(sha, what, where) when ready.")
     await tell(runtime, row['implementer_id'],

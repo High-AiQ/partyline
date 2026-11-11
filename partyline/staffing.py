@@ -113,7 +113,9 @@ def staffing_line(db, conv_id: str, *, runtime=None) -> str:
     presets = [row for row in (coerce_preset(p) for p in db.list_presets()) if row]
     pending = pending_approvals(db, conv_id, runtime=runtime)
     queued = queued_ids(runtime) if runtime is not None else set()
-    if not presets and not pending and not queued:
+    root = db.get_conversation(conv_id)
+    policy = (root or {}).get('default_review_policy')
+    if not presets and not pending and not queued and policy in (None, 'none', 'captain'):
         return ""
     in_use: list[str] = []
     matched_counts: dict[str, int] = {}
@@ -142,7 +144,17 @@ def staffing_line(db, conv_id: str, *, runtime=None) -> str:
         entry["display"] for entry in free if entry["traits"]["implements"]
     ) or "none"
     busy = "; ".join(in_use) or "nobody"
-    parts = [f"in use: {busy}", f"free captains: {captains}", f"free workers: {workers}"]
+    parts = [f"in use: {busy}", f"free captains/reviewers: {captains}",
+             f"free implementers: {workers}"]
+    if policy and policy not in ('none', 'captain'):
+        from .preset_roles import require_role
+        from fastapi import HTTPException
+        matches = [p for p in presets if p['name'] == policy]
+        try:
+            require_role(matches[0] if len(matches) == 1 else None, 'reviewer')
+        except HTTPException:
+            parts.append(f"invalid default reviewer preset: {policy}; check Can manage a line "
+                         "in Settings → Presets")
     waiting = queued_attachments(runtime, subtree) if runtime is not None else []
     if waiting:
         parts.insert(1, f"reattaching (queued): {queue_label(runtime, waiting, at='')}")

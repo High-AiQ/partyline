@@ -62,15 +62,14 @@ def all_tasks(db):
 
 
 def preset(db, name):
-    matches = [row for row in db.list_presets() if row['name'] == name]
-    if len(matches) != 1:
-        raise HTTPException(400, 'name must identify exactly one preset')
-    return matches[0]
+    from .preset_roles import named_preset
+    return named_preset(db, name)
 
 
 def validate_policy(db, policy):
     if policy not in ('none', 'captain'):
-        preset(db, policy)
+        from .preset_roles import require_named_role
+        require_named_role(db, policy, 'reviewer')
     return policy
 
 

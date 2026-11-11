@@ -553,6 +553,13 @@ class ServerTest(unittest.TestCase):
 
         self.assertNotIn("one", server.runtime.reattaching)
 
+    def test_person_can_resume_captain_without_preset(self):
+        self.add_attachment('old', status='exited')
+        server.runtime.db._exec("UPDATE attachments SET is_lead=1 WHERE id='old'")
+        result = self.arun(server.resume_attachment(self.principal_request(), 'old'))
+        self.assertEqual(result['status'], 'running')
+        self.assertTrue(server.runtime.db.get_attachment('old')['is_lead'])
+
     def test_a_remote_browser_can_restart_a_stopped_raw_process_through_resume(self):
         """The restart button posts here; neither route cares where the caller is."""
         server.ADAPTERS["raw"] = FakeAdapter

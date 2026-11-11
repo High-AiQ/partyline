@@ -23,7 +23,7 @@ class RoleBriefingTests(unittest.TestCase):
         self.assertIn("### Staffing", text)
         self.assertIn("/api/conversations/root/staffing", text)
         self.assertIn("DELETE /api/conversations/<child-id>?stop_processes=true", text)
-        self.assertIn("can_manage captains", text)
+        self.assertIn("Captains and reviewers need Can manage a line", text)
         self.assertIn("### You are the captain; you do not implement", text)
         self.assertIn("### The loop you run", text)
         self.assertIn("### Ask the person first", text)

@@ -49,6 +49,8 @@ class HierarchyApiTest(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.db = Db(f"{self.directory.name}/partyline.db")
         self.runtime = ChatRuntime(self.db)
+        self.db.save_preset("fixture-manager", "Fixture", "fixture", "fake", "fake", can_manage=True)
+        self.db.save_preset("fixture-raw", "Fixture raw", "fixture-raw", "raw", "sh", can_manage=True)
         self.media = MediaStore(self.db, self.directory.name + "/media")
         app = FastAPI()
         install_auth_guard(app, self.db)
@@ -98,6 +100,23 @@ class HierarchyApiTest(unittest.TestCase):
         self.client.close()
         self.db.close()
         self.directory.cleanup()
+
+    def test_appointment_obeys_captain_trait_matrix(self):
+        self.db.create_conversation('child-roles', 'Child', captain_mode='manager_tree')
+        self.db._exec("UPDATE conversations SET parent_id='parent' WHERE id='child-roles'")
+        self.db.add_attachment('candidate', 'child-roles', 'candidate', 'fake', ['fake'], '/tmp')
+        path = '/api/conversations/child-roles/lead'
+        for implements, manage in ((0, 0), (1, 0), (0, 1), (1, 1)):
+            self.db._exec("UPDATE presets SET implements=?,can_manage=? WHERE id='fixture-manager'",
+                          (implements, manage))
+            self.client.post(path, json={'attachment_id': None}, headers=self.human)
+            response = self.client.post(path, json={'attachment_id': 'candidate'}, headers=self.lead)
+            self.assertEqual(response.status_code, 200 if manage else 403, response.text)
+            if not manage:
+                self.assertIn('Can manage a line', response.text)
+                self.assertIn('Settings → Presets', response.json()['detail'])
+                human = self.client.post(path, json={'attachment_id': 'candidate'}, headers=self.human)
+                self.assertEqual(human.status_code, 200, human.text)
 
     def test_appointment_broadcasts_captain_change(self):
         from unittest.mock import AsyncMock, patch

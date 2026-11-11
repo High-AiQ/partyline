@@ -138,6 +138,11 @@ def accept(db, conv, caller, ident, live, pending=None, now=None):
             if row['to_attachment_id'] != caller:
                 raise HTTPException(403, 'Only the offered attachment may accept')
             old, target = _validate(db.conn, conv, row['from_attachment_id'], caller, live, pending, now)
+            from .preset_roles import attachment_preset, require_role
+            from .db import _att_row
+            presets = [dict(p) for p in db.conn.execute('SELECT * FROM presets').fetchall()]
+            require_role(attachment_preset(db, _att_row(target), presets), 'captain',
+                         name=target['preset'] or target['name'])
             db.conn.execute("UPDATE attachments SET is_lead=0 WHERE id=?", (old['id'],))
             db.conn.execute("UPDATE attachments SET is_lead=1,is_successor=0 WHERE id=?", (caller,))
             for side in ('a', 'b'):

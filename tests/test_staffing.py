@@ -48,11 +48,13 @@ class StaffingApiTest(unittest.TestCase):
         }
         self._original_runtime = server.runtime
         server.runtime = self.runtime
+        self.db.save_preset("initial", "Initial", "astra", "fake", "run", can_manage=True)
         self.client.post(
             "/api/conversations/parent/lead",
             json={"attachment_id": "lead-att"},
             headers=self.human,
         )
+        self.db.delete_preset("initial")
 
     def tearDown(self):
         server.runtime = self._original_runtime
@@ -119,6 +121,18 @@ class StaffingApiTest(unittest.TestCase):
 
 
 class StaffingLineTest(unittest.TestCase):
+    def test_invalid_default_reviewer_is_visible(self):
+        from partyline.staffing import staffing_line
+        with tempfile.TemporaryDirectory() as directory:
+            db = Db(f"{directory}/test.db")
+            try:
+                db.create_conversation('root', 'Root')
+                db.save_preset('bad', 'Bad', 'bad', 'fake', 'fake', can_manage=False)
+                db._exec("UPDATE conversations SET default_review_policy='bad' WHERE id='root'")
+                self.assertIn('invalid default reviewer preset: bad', staffing_line(db, 'root'))
+            finally:
+                db.close()
+
     def test_the_wake_line_names_who_is_busy_and_which_presets_are_free(self):
         from partyline.db import Db
         from partyline.staffing import staffing_line
@@ -146,13 +160,13 @@ class StaffingLineTest(unittest.TestCase):
         db._exec("UPDATE attachments SET status='running' WHERE id='a3'")
         line = staffing_line(db, "root")
         self.assertNotIn("glm-flash «Other»", line)
-        self.assertNotIn("free workers: glm-flash", line)
+        self.assertNotIn("free implementers: glm-flash", line)
         # a can_manage preset with a live instance stays listed: captains run
         # one instance per line, and the seat count says when they run out
         self.assertEqual(
             line,
             "(staffing — in use: opus «Kid» captain; luna «Kid». "
-            "free captains: astra, opus. free workers: none)",
+            "free captains/reviewers: astra, opus. free implementers: none)",
         )
 
 
@@ -186,7 +200,7 @@ class CaptainInstancesTest(unittest.TestCase):
         return staffing_line(self.db, "root", runtime=None)
 
     def captains(self, line):
-        return line.split("free captains: ", 1)[1].split(".")[0]
+        return line.split("free captains/reviewers: ", 1)[1].split(".")[0]
 
     def test_uncounted_raw_does_not_occupy_preset(self):
         self.db.add_attachment("helper", "a", "astra", "raw", ["raw", "--x"], "/tmp")
@@ -212,7 +226,7 @@ class CaptainInstancesTest(unittest.TestCase):
         self.db.save_preset("astra", "Astra", "astra", "raw", "raw --x",
                             can_manage=True, implements=False, max_instances=4)
         self.assertEqual(self.captains(self.staffing()), "astra (2 more)")
-        self.assertNotIn("free captains: none", line)
+        self.assertNotIn("free captains/reviewers: none", line)
 
     def test_the_preset_hides_only_when_max_instances_is_reached(self):
         self.seat("a", "cap-a1", "astra")
@@ -220,13 +234,13 @@ class CaptainInstancesTest(unittest.TestCase):
         self.seat("b", "cap-b1", "astra-3")
         line = self.staffing()
         self.assertNotIn("(1 more)", line)  # one seat left: shown plain
-        self.assertIn("free captains: none", line)  # 3 of 3 seats live
+        self.assertIn("free captains/reviewers: none", line)  # 3 of 3 seats live
 
     def test_worker_presets_keep_their_old_behaviour(self):
         self.seat("a", "w1", "luna")
         line = self.staffing()
         self.assertNotIn("luna", self.captains(line))
-        self.assertIn("free workers: none", line)  # in use: hidden, as before
+        self.assertIn("free implementers: none", line)  # in use: hidden, as before
         self.assertIn("in use: luna «Alpha»", line)
 
     def test_max_instances_round_trips_through_the_api(self):

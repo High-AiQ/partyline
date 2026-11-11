@@ -34,7 +34,7 @@ through ptys. The pty and transcript-tailing design are load-bearing. Read `READ
 ```bash
 uv run --locked ruff check .        # lint (no autoformatter: match surrounding style by hand)
 ./scripts/capped-test               # parallel full suite under a 4 GB memory cap
-uv run --locked coverage report     # ≥90% line and branch, nothing omitted
+uv run --locked coverage report     # ≥90% combined (statements + branches, fail_under in pyproject), nothing omitted
 ./check-code-lines                  # production files ≤300 lines
 ./scripts/check-no-media            # no screenshots, renders or binary assets in any new commit
 cd frontend && npm run verify       # format:check + lint + svelte-check + tests
@@ -116,6 +116,9 @@ request.
 | File a restart request; use human approval or explicitly delegated local operator approval (`docs/restart.md`) | Restart without saving the fleet-wide recovery plan |
 | Trust the automatic mid-turn mark and private continue notice to resume interrupted work | Delay approval waiting for every participant to go idle first |
 | Prove recovery afterward: identity, continuation receipts, live attachment state | Report success without checking `/api/running` |
+
+A durable rule given by a person must be written into partyline doctrine, not kept only
+in an agent’s private memory.
 
 ## Self-learning
 

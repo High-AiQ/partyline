@@ -27,13 +27,15 @@ from .mention_relay import post_private
 
 
 def register_attachment_lifecycle_routes(app, runtime, *, start, validate):
-    async def _start_replacement(att, body):
+    async def _start_replacement(att, body, principal):
         """Reserve the handle, restore the captain role, and start the fresh session.
 
         Shared by /fresh and /replace: on a failed start the replacement is
         cleaned up and the failure re-raised, so neither route leaves a
         half-created card behind.
         """
+        from .preset_roles import require_resume
+        role = require_resume(runtime.db, att['id'], person=is_human(principal))
         replacement = await create_fresh_record(runtime.db, att, body)
         if att.get("is_lead"):
             # The fresh record carries the old identity but not its role: a
@@ -45,7 +47,8 @@ def register_attachment_lifecycle_routes(app, runtime, *, start, validate):
                 "UPDATE attachments SET is_lead=1 WHERE id=?", (replacement["id"],))
             replacement["is_lead"] = 1
         try:
-            response = await start(replacement, checkpoint=body.checkpoint, fresh=True)
+            response = await start(replacement, checkpoint=body.checkpoint, fresh=True,
+                                   staffing_role=role)
         except (Exception, asyncio.CancelledError) as exc:
             if replacement["id"] in runtime.live:
                 if att.get("is_lead"):
@@ -76,7 +79,8 @@ def register_attachment_lifecycle_routes(app, runtime, *, start, validate):
     async def fresh_attachment(
         request: Request, att_id: str, body: FreshAttachmentRequest | None = None
     ):
-        deny_unless_attachment(runtime.db, request_principal(request), att_id, "attach")
+        principal = request_principal(request)
+        deny_unless_attachment(runtime.db, principal, att_id, "attach")
         body = body or FreshAttachmentRequest()
         att = require_stopped(runtime.db, att_id)
         if att_id in runtime.live:
@@ -87,7 +91,7 @@ def register_attachment_lifecycle_routes(app, runtime, *, start, validate):
             raise HTTPException(400, str(exc)) from exc
         if not os.path.isdir(att["cwd"]):
             raise HTTPException(400, "attachment working directory no longer exists")
-        return await _start_replacement(att, body)
+        return await _start_replacement(att, body, principal)
 
     @app.post("/api/attachments/{att_id}/replace", response_model=AttachmentResponse)
     async def replace_attachment(att_id: str, body: ReplaceRequest, request: Request):
@@ -107,6 +111,8 @@ def register_attachment_lifecycle_routes(app, runtime, *, start, validate):
             raise HTTPException(404, "attachment not found")
         if not is_human(principal):
             deny_unless(db, principal, att["conv_id"], "assign")
+        from .preset_roles import require_resume
+        require_resume(db, att_id, person=is_human(principal))
         if att_id in runtime.live:
             await detach_attachment(runtime, att_id, survivors=False, expire=False)
         stopped = require_stopped(db, att_id)
@@ -121,7 +127,7 @@ def register_attachment_lifecycle_routes(app, runtime, *, start, validate):
 
         response = await _start_replacement(
             stopped, FreshAttachmentRequest(checkpoint=render_rebrief(
-                db, stopped, reason=body.reason.strip())))
+                db, stopped, reason=body.reason.strip())), principal)
         replacement_id = response["id"]
         # Finding 5.7: the fresh instance says hello without an @, so ring the
         # line's live captain once with the assignment ask. Skipped when the

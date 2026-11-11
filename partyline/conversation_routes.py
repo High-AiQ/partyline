@@ -218,6 +218,27 @@ def register_conversation_routes(
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+        role = 'captain' if body.successor else body.staffing_role
+        auto_lead = not is_human(principal) and role == 'captain' and not body.successor
+        if auto_lead:
+            deny_unless(db, principal, conv_id, 'appoint_lead')
+        if not is_human(principal):
+            from .preset_roles import attachment_preset, require_named_role, require_role
+            selected = (require_named_role(db, body.preset_name, role) if body.preset_name else
+                        attachment_preset(db, {'name': body.name, 'adapter': body.adapter,
+                                               'command': command}))
+            if body.preset_name:
+                import shlex
+                try:
+                    matches = (selected['adapter'] == body.adapter
+                               and shlex.split(selected['command']) == command)
+                except ValueError:
+                    matches = False
+                if not matches:
+                    raise HTTPException(400, f"preset '{body.preset_name}' does not match the command")
+            require_role(selected, role, name=body.preset_name or body.name)
+        else:
+            selected = None
         # A machine works where its line works; a person may choose.
         chosen = "" if not is_human(principal) else body.cwd.strip()
         cwd = os.path.abspath(os.path.expanduser(
@@ -232,6 +253,9 @@ def register_conversation_routes(
             start_after_history=True, counts_toward_total=bool(body.counts_toward_total),
             successor=body.successor,
         )
+        if selected:
+            db._exec('UPDATE attachments SET preset=? WHERE id=?', (selected['name'], att_id))
+            att['preset'] = selected['name']
         try:
             placed = (None if body.successor else
                       await asyncio.to_thread(ensure_placed, db, conv_id, ignore_attachment_id=att_id))
@@ -256,7 +280,8 @@ def register_conversation_routes(
                 f"⚠ @{name} joins a shared branch (attached by @{principal.name}): parallel "
                 "slices mean parallel lines — one branch accepts all-or-nothing",
                 actor=principal)
-        return await s._start_attachment(att)
+        from .preset_roles import start_staffed
+        return await start_staffed(runtime, att, s._start_attachment, role, principal, auto_lead)
 
     globals().update({
         "conversations": conversations, "create_conversation": create_conversation,

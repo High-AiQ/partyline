@@ -24,6 +24,8 @@ class ManagerWorkflowTest(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.db = Db(f"{self.directory.name}/partyline.db")
         self.runtime = ChatRuntime(self.db)
+        self.db.save_preset("fixture-manager", "Fixture", "fixture", "fake", "fake", can_manage=True)
+        self.db.save_preset("fixture-raw", "Fixture raw", "fixture-raw", "raw", "sh", can_manage=True)
         self.media = MediaStore(self.db, self.directory.name + "/media")
         app = FastAPI()
         install_auth_guard(app, self.db)
