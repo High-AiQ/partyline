@@ -69,6 +69,7 @@ jobs:
           tests.test_windows_platform
           tests.test_windows_startup
           tests.test_windows_uia
+          tests.test_windows_capture_events
 
   # The frontend check is four jobs so the slow type-aware ESLint run overlaps
   # the quick ones instead of queueing behind them. Branch protection requires

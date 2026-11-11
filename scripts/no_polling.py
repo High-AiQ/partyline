@@ -15,7 +15,6 @@ CATEGORY = re.compile(r'no-poll\s+\(([bcde])\):\s*\S')
 TIMERS = re.compile(r'\b(setInterval|setTimeout)\s*\(')
 # Phase 1 exceptions awaiting Greg's decision; docs/polling-audit.md explains each.
 UNRESOLVED = {
-    ('partyline_helper/capture_loop.py', "sleep(1 / request['max_fps'])"): 1,
 }
 
 

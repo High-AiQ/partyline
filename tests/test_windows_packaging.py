@@ -72,14 +72,14 @@ class FreezeSpecTests(unittest.TestCase):
         self.assertIn("console=False", SPEC)
         self.assertIn("exclude_binaries=True", SPEC)  # onedir
         self.assertIn("COLLECT(", SPEC)
-        for package in ("partyline_helper", "pynput", "pystray", "mss"):
+        for package in ("partyline_helper", "pynput", "pystray", "windows_capture"):
             self.assertIn(f'collect_submodules("{package}")', SPEC)
         self.assertIn('copy_metadata("partyline")', SPEC)  # the version the helper reports
         self.assertIn("uac_admin=False", SPEC)
 
     def test_helper_extra_lists_every_dependency_the_spec_collects(self):
         extras = re.search(r"^helper = \[(.*?)\]", (ROOT / "pyproject.toml").read_text(), re.M).group(1)
-        for package in ("mss", "pynput", "pystray", "websockets", "pillow"):
+        for package in ("windows-capture", "pynput", "pystray", "websockets", "pillow"):
             self.assertIn(package, extras)
 
 

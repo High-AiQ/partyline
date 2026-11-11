@@ -22,6 +22,14 @@ class HelperEventsTests(unittest.IsolatedAsyncioTestCase):
         reading = asyncio.Event()
         changes = Changes()
 
+        class Capture:
+            def start(self, on_frame, on_closed):
+                self.on_frame, self.on_closed = on_frame, on_closed
+            def stop(self):
+                self.stopped = True
+
+        source = Capture()
+
         async def read(_):
             reading.set()
             return await inputs.get()
@@ -29,9 +37,9 @@ class HelperEventsTests(unittest.IsolatedAsyncioTestCase):
         session = SimpleNamespace(
             share=request, accepted=True, pending_id='share',
             control=SimpleNamespace(input_changes=changes, prompting=False, end=Mock()),
-            terminal=SimpleNamespace(read=read), frame=AsyncMock(), send=AsyncMock(),
+            terminal=SimpleNamespace(read=read), frame_from_capture=AsyncMock(), send=AsyncMock(),
             sleep=lambda _: asyncio.Event().wait())
-        task = asyncio.create_task(capture(session, request))
+        task = asyncio.create_task(capture(session, request, lambda _: source))
         try:
             await reading.wait()
             # A prompt's completed notification may coincide with an already-read line.
@@ -42,7 +50,8 @@ class HelperEventsTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(session.pending_id)
             session.control.end.assert_called_once()
             session.send.assert_awaited_once_with('share_stopped', share_id='share', reason='local')
-            session.frame.assert_awaited_once()
+            session.frame_from_capture.assert_not_awaited()
+            self.assertTrue(source.stopped)
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)

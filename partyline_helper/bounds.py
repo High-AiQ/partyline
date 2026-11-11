@@ -12,6 +12,9 @@ def bounded(value, default, low, high):
 
 
 def validate_request(desktop, request):
+    if not getattr(desktop, "supports_capture", True):
+        raise RuntimeError("Screen capture is unsupported on this platform; macOS ScreenCaptureKit and Linux "
+                           "desktop capture need follow-up")
     region = request["region"]
     for key in ("x", "y", "width", "height"):
         if type(region[key]) is not int:
