@@ -1465,3 +1465,11 @@ multiple repositories, list every current `{repository, sha}` in `repositories`.
 A stale or missing identification is rejected with the current SHA; the reviewer
 must review the new commits before retrying. Explicit SHA identifications are
 checked even when the review has not been re-pinned.
+
+
+Captains must not end a turn promising future work unless something will wake them,
+such as a live worker, a task wait or a scheduled deadline. Otherwise they must do
+the work now or tell the person plainly what blocks them.
+At a captain turn end, Partyline warns the line and privately wakes the captain if
+structured open work remains but nothing is running or scheduled. The captain should
+restart, reopen or resume the work, or tell the person what it is blocked on. An unchanged idle verdict is reported only once.

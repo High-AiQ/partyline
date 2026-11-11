@@ -21,7 +21,7 @@ from .screen_grant_schema import MIGRATIONS as SCREEN_GRANTS
 from .write_set_schema import MIGRATIONS as WRITE_SET
 from .orchestrator_schema import MIGRATIONS as ORCHESTRATOR
 from .asr_schema import MIGRATIONS as ASR
-
+from .captain_idle_schema import MIGRATIONS as CAPTAIN_IDLE
 MIGRATIONS = [
     "ALTER TABLE attachments ADD COLUMN cli_session TEXT",
     "ALTER TABLE conversations ADD COLUMN topic TEXT NOT NULL DEFAULT ''",
@@ -297,4 +297,4 @@ MIGRATIONS.extend(MEMORY + IDEMPOTENCY + NOTES + COMPACTION + ACCEPT_HISTORY + S
                   + GATES + AUTO_COMPACT + DOCKER_MODE + BRIDGE + RETIREMENT + ORCHESTRATOR + HANDOVER)
 MIGRATIONS.extend(["ALTER TABLE attachments ADD COLUMN is_successor INTEGER NOT NULL DEFAULT 0"] + SCREEN
                   + ASR + SCREEN_AUDIT + LOCAL_TOOLS_AUDIT + SCREEN_ACCOUNT)
-MIGRATIONS.extend(SCREEN_GRANTS + WRITE_SET)
+MIGRATIONS.extend(SCREEN_GRANTS + WRITE_SET + CAPTAIN_IDLE)

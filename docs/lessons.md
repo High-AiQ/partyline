@@ -2155,3 +2155,11 @@ each handle, why, and the concrete remedy (`restart_implementer` / `restart_revi
 task's `conv_id`, or the reachable captain). People keep the line notice. The notice is a system message, so it
 cannot start a loop or count as a request on the return path. A notice meant to change what its reader does next
 must reach the reader as a wake, not as text on a page it may not read. Tests: `tests/test_unreached_notice.py`.
+
+### A promise is not a wake
+
+A captain promised to integrate work after checks completed, but every worker was
+detached and no wake was registered. The false assumption was that a future action
+in a status message would arrange its own continuation. Check structured open work
+at turn end and surface a stranded tree immediately; register an actual wake for
+future work rather than relying on prose.
