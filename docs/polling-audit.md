@@ -40,7 +40,6 @@ scripts, excluding tests, generated static files and other worktrees.
 | (a) | `partyline_helper/terminal.py:45` | Terminal input; notifying queue and one consent deadline |
 | (a) | `partyline_helper/uia_process.py:36–43` | UIA readiness/exit; explicit READY pipe frame, OS process wait and separate startup/walk deadlines |
 | (a) | `partyline_helper/dialog_proc.py:90` | Parent exit; native process wait |
-| (a), decision pending | `partyline_helper/client.py:99–103,143–149` | MSS capture/change detection remains; local stop input now has an independent event consumer |
 | (a) | `partyline_helper/control.py:184` | Physical pointer movement; native mouse listener |
 | (a) | `partyline_helper/uia_access.py:186`, `window_shares.py:148` | Window destruction/desktop changes; native WinEvent hooks |
 | (a) | `frontend/src/state/resources.svelte.ts:19` | Delayed resource refetch; account/line socket snapshot and mutation push |
@@ -95,13 +94,16 @@ These remain visible rather than being relabeled as allowed timers:
    responsiveness against periodic probes. There is no passive event for every
    otherwise-idle loop-lag sample. Replacing/removing this diagnostic requires
    a decision about which measurements to retain.
-3. **MSS screen capture:** MSS exposes individual captures, not a desktop-change
-   stream. The current capture worker compares successive images. Eliminating
-   that sampler requires new platform capture backends. Its original frame
-   cadence lives in `partyline_helper/capture_loop.py`; local stop input now
-   reacts to queue and consent-ownership events without periodic reads.
+3. **Windows screen capture — resolved:** Windows shares now use a
+   `Windows.Graphics.Capture` window item selected by HWND. The frame-arrived
+   callback forwards changed frames and drops bursts above the upload cap; it
+   never samples images or schedules a capture timer. The capture item closing
+   stops and revokes the share. macOS and Linux capture are explicitly
+   unsupported pending ScreenCaptureKit and XDG desktop-portal backends.
 
-The guard pins the exact existing memory, lag and MSS sleep calls; the sibling-owned screen intervals were removed by 969006e8. It rejects additional calls; these audit
+The guard pins the exact existing memory and lag sleep calls; screen capture
+now reacts to Windows Graphics Capture events, and the sibling-owned screen
+intervals were removed by 969006e8. It rejects additional calls; these audit
 exceptions are not (b)–(e) approvals. Windows-only native hook code is isolated
 from ordinary tests; hook consumers are exercised with explicit fake events.
 

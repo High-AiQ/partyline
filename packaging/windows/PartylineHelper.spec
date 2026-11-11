@@ -11,7 +11,7 @@ ICON = os.environ.get("HELPER_ICON") or os.path.join(ROOT, "build", "PartylineHe
 
 # Capture, input, tray and border backends are chosen at runtime, so import them all explicitly.
 hidden = (collect_submodules("partyline_helper") + collect_submodules("pynput")
-          + collect_submodules("pystray") + collect_submodules("mss"))
+          + collect_submodules("pystray") + collect_submodules("windows_capture"))
 
 a = Analysis(
     [os.path.join(ROOT, "packaging", "windows", "entry.py")],

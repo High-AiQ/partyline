@@ -18,7 +18,6 @@ UNRESOLVED = {
     ('partyline/memory_sampler.py', 'asyncio.sleep(INTERVAL)'): 1,
     ('partyline/event_loop_lag.py', 'asyncio.sleep(0.1)'): 1,
     ('partyline/event_loop_lag.py', 'asyncio.sleep(interval)'): 1,
-    ('partyline_helper/capture_loop.py', "sleep(1 / request['max_fps'])"): 1,
 }
 
 

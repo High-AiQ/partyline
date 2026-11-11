@@ -64,8 +64,8 @@ helper and removes the registry entries and files; pairing credentials are left 
 `PartylineHelper.exe`, or delete `%LOCALAPPDATA%\Partyline\helper.json`), and revoke the computer in Partyline.
 
 **`partyline-helper stop`** (any platform) asks the running helper to exit: it drops a `run.stop` file in the
-config directory, which the helper polls twice a second and answers by ending any share, removing the border and
-leaving. If the helper (for example an old version that predates this command) does not exit within about five
+config directory, which the helper observes through native filesystem notifications and answers by ending any
+share, removing the border and leaving. If the helper (for example an old version that predates this command) does not exit within about five
 seconds, the pid in `run.pid` is terminated, and the command waits for the run lock to be released. It prints what
 happened and is safe to run when nothing is running. `partyline-helper start` (what the Start menu runs, and what
 a bare `partyline-helper` does) starts the helper if it is not running. `version` prints the helper version and
@@ -446,28 +446,35 @@ dispatch gate, rate limit, local audit and revocation, independently of pointer 
   border uses `WDA_EXCLUDEFROMCAPTURE` in addition to lying outside the region.
   UAC and secure-desktop windows are not captured. Keep the helper on the
   interactive desktop session.
-- **macOS:** System Settings → Privacy & Security → Screen Recording (called
-  Screen & System Audio Recording on newer versions): enable the terminal or
-  Python application running the helper, then quit and reopen it. Reading the
-  pointer does not require Accessibility permission; agent control does (below). The helper checks Screen
-  Recording permission and rejects black captures with instructions (a completely black desktop can also
-  trigger that warning). Retina capture pixels can differ from desktop points;
-  the helper multiplies desktop points and pointer positions by the uniform
-  display backing scale and converts capture rectangles back to points. Mixed
-  Retina display scales are refused rather than reporting ambiguous coordinates;
-  use displays with the same scale. The border uses PyObjC when it is already
-  installed; without PyObjC the helper prints a notice and shares without a
-  border. Test monitor selection on your actual Mac before sharing sensitive
-  material.
-- **Linux:** use an X11 session with access to its display. A Wayland session
-  (`XDG_SESSION_TYPE=wayland` or a set `WAYLAND_DISPLAY`) exits with
-  `Wayland is not supported yet (needs the xdg-desktop-portal ScreenCast/RemoteDesktop route)`.
-  Portal support is a later phase.
+- **macOS:** capture is unsupported pending a ScreenCaptureKit stream backend.
+  Pointer reading does not require Accessibility permission; agent control does
+  (below). The helper border can still be shown when PyObjC is installed.
+- **Linux X11:** capture is unsupported pending an event-driven desktop stream
+  backend. Wayland also needs the XDG desktop-portal ScreenCast route; it is
+  rejected during helper startup today.
+
+**Capture backend.** Windows uses the `windows-capture` binding to Windows
+Graphics Capture. The helper resolves the consented region to the top-level
+window under its centre, captures that HWND through a `GraphicsCaptureItem`,
+and crops each `FrameArrived` image to the requested rectangle. Windows
+Graphics Capture disables its capture border for this session. Updates arrive
+only when the window content changes; the helper drops event frames above the
+upload rate cap and never samples the window on a timer. Closing the window or
+revoking the share stops capture. The native binding is included in the
+Windows-only helper extra and explicitly collected by the frozen PyInstaller
+build.
+
+The helper's capture path is supported on Windows only. macOS and Linux capture
+are currently unsupported. macOS needs a
+ScreenCaptureKit stream backend; Linux needs an XDG desktop-portal ScreenCast
+stream backend (Wayland and X11 are both unsupported by this helper build).
+The helper reports no shareable monitors on those platforms and rejects a
+capture request instead of falling back to periodic screenshots.
 
 If pairing fails, check the origin, network, TLS certificate and code expiry.
 If revoked, create a fresh code and pair again. If capture initialization fails,
 verify desktop permissions and install the `helper` extra. The dependencies are
-mss (MIT), pynput (LGPL-3.0), websockets and Pillow; pynput reads the pointer and,
+windows-capture (MIT; Windows only), pynput (LGPL-3.0), websockets and Pillow; pynput reads the pointer and,
 only during agent control, injects input and listens for the kill switch. Automated tests use fake capture and an in-process server. The
 headless development server cannot verify real desktop capture; native interactive
 smoke testing is still required on each platform.

@@ -247,6 +247,11 @@ class ControlFlowTest(unittest.IsolatedAsyncioTestCase):
         none = await self.act(kind="move", x=12, y=20, frame="none")
         self.assertEqual(set(none.json()), {"done"})
         self.desktop.image.putpixel((0, 0), (0, 0, 0))
+        capture = self.desktop.capture_sessions[-1]
+        frames_before_change = len(self.hub.shares["line"].frames)
+        self.clock.advance(.21)  # The share's default rate cap is 5 fps.
+        capture.on_frame(self.desktop.image.copy(), (REGION["x"], REGION["y"]))
+        await until(lambda: len(self.hub.shares["line"].frames) > frames_before_change)
         changed = await self.act(kind="move", x=13, y=20)
         self.assertNotIn("unchanged", changed.json())
         self.assertNotEqual(changed.json()["frame"], url)

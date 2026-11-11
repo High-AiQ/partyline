@@ -1,13 +1,11 @@
 """Regression coverage for native helper review findings; no real desktop access."""
 import asyncio
 import contextlib
-import ctypes
 import io
 import json
 import os
 import ssl
 import unittest
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 from urllib.error import URLError
 
@@ -18,6 +16,7 @@ from partyline_helper.client import Session
 from partyline_helper.transport import CertificateError, certificate_failure
 from tests.screen_helper_fakes import (
     FakeDesktop, FakeSocket, FakeTerminal, ManualTime, REGION, checkpoint, request, serve,
+    fake_capture_factory,
 )
 
 
@@ -80,7 +79,8 @@ class CaptureReviewTests(unittest.IsolatedAsyncioTestCase):
         self.socket = FakeSocket()
         self.clock, self.term = ManualTime(), FakeTerminal()
         self.session = Session(self.socket, self.desktop, self.term, "desktop",
-                               clock=self.clock, sleep=self.clock.sleep)
+                               clock=self.clock, sleep=self.clock.sleep,
+                               capture_factory=fake_capture_factory(self.desktop))
 
     async def asyncTearDown(self):
         await self.session.stop(notify=False)
@@ -131,7 +131,7 @@ class CaptureReviewTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(frames), 2)
         self.assertEqual(frames[-1]["request_id"], "0")
         self.assertEqual(frames[-1]["ts_ms"], 1000)
-        self.assertEqual(len(self.desktop.grabs), first_grabs + 1)
+        self.assertEqual(len(self.desktop.grabs), first_grabs)
 
     async def test_snap_during_acceptance_has_initialized_timestamp_and_does_not_capture(self):
         paused, resume = asyncio.Event(), asyncio.Event()
@@ -247,23 +247,13 @@ class PlatformReviewTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Wayland is not supported yet"):
                 desktop.prepare()
 
-    def test_screen_recording_uses_bool_and_pointer_does_not_require_accessibility(self):
-        core = Mock()
-        core.CGPreflightScreenCaptureAccess.return_value = True
-        capture = Mock()
-        with patch.object(desktop.sys, "platform", "darwin"), \
-                patch.object(desktop.ctypes, "CDLL", return_value=core) as library, \
-                patch.dict("sys.modules", {"mss": SimpleNamespace(mss=lambda: capture),
-                                          "pynput.mouse": SimpleNamespace(Controller=Mock)}), \
-                patch("partyline_helper.retina.scale_factor", return_value=1), \
-                patch("partyline_helper.retina.pointer_y_offset", return_value=0):
-            obj = desktop.Desktop()
-            self.assertIs(core.CGPreflightScreenCaptureAccess.restype, ctypes.c_bool)
-            library.assert_called_once_with("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
-            obj.close()
+    def test_mac_capture_is_explicitly_unsupported(self):
+        with patch.object(desktop.sys, "platform", "darwin"):
+            obj = desktop.Desktop.__new__(desktop.Desktop)
+            self.assertFalse(obj.supports_capture)
 
     def test_missing_extra_is_actionable(self):
-        with patch.object(desktop, "Desktop", side_effect=ModuleNotFoundError("mss")), \
+        with patch.object(desktop, "Desktop", side_effect=ModuleNotFoundError("pynput")), \
                 patch("partyline_helper.links.claim_run", return_value=True), \
                 patch("partyline_helper.consent_dialog.notify"), \
                 contextlib.redirect_stdout(io.StringIO()) as output:

@@ -60,8 +60,10 @@ class FakeDesktop:
         self.image = Image.new("RGB", (200, 100), "white")
         self.position = (-20, 30)
         self.grabs = []
+        self.capture_sessions = []
         self.captured = asyncio.Queue()
         self.grabbed = asyncio.Event()
+        self.capture_factory = fake_capture_factory(self)
 
     def monitors(self):
         return [MONITOR.copy()]
@@ -74,6 +76,33 @@ class FakeDesktop:
 
     def pointer(self):
         return self.position
+
+
+class FakeCapture:
+    """A fake Graphics Capture stream whose initial frame is a deterministic event."""
+
+    def __init__(self, desktop, request):
+        self.desktop, self.request = desktop, request
+        self.stop_count = 0
+
+    def start(self, on_frame, on_closed):
+        self.on_frame, self.on_closed = on_frame, on_closed
+        self.desktop.grabs.append(self.request["region"])
+        self.desktop.captured.put_nowait(self.request["region"])
+        self.desktop.grabbed.set()
+        on_frame(self.desktop.image.copy(), (self.request["region"]["x"], self.request["region"]["y"]))
+
+    def stop(self):
+        self.stop_count += 1
+
+
+def fake_capture_factory(desktop):
+    def create(request):
+        source = FakeCapture(desktop, request)
+        desktop.capture_sessions.append(source)
+        return source
+
+    return create
 
 
 class FakeTerminal:

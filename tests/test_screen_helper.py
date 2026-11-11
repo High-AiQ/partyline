@@ -19,6 +19,7 @@ from partyline_helper import cli, config, desktop, images, terminal
 from partyline_helper.client import Session, bounded
 from tests.screen_helper_fakes import (
     FakeDesktop, FakeSocket, FakeTerminal, ManualTime, MONITOR, REGION, checkpoint, request, serve,
+    fake_capture_factory,
 )
 
 
@@ -57,11 +58,6 @@ class ConfigTests(unittest.TestCase):
 
 class ImageTests(unittest.TestCase):
     def test_gate_and_encoding(self):
-        a = images.thumbnail(Image.new("RGB", (300, 200), "white"))
-        b = images.thumbnail(Image.new("RGB", (300, 200), "black"))
-        self.assertTrue(images.changed(None, a, .02))
-        self.assertFalse(images.changed(a, a, .02))
-        self.assertTrue(images.changed(a, b, .02))
         data, width, height, mime = images.encode(Image.new("RGB", (2000, 1000)), 1280)
         self.assertEqual((width, height, mime), (1280, 640, "image/webp"))
         self.assertLessEqual(len(data), images.MAX_BYTES)
@@ -90,7 +86,8 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         self.socket = FakeSocket()
         self.clock = ManualTime()
         self.session = Session(self.socket, self.desktop, self.terminal, "desktop",
-                               clock=self.clock, sleep=self.clock.sleep)
+                               clock=self.clock, sleep=self.clock.sleep,
+                               capture_factory=fake_capture_factory(self.desktop))
 
     async def asyncTearDown(self):
         await self.session.stop(notify=False)
@@ -158,14 +155,13 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         self.session.validate(self.session.share)
         self.socket.sent.clear()
         await self.session.frame()
-        self.assertEqual(self.socket.sent, [])
+        self.assertEqual(self.socket.sent[0]["type"], "frame")
         self.desktop.position = (300, 10)
+        self.clock.advance(.04)
         await self.session.frame()
-        self.assertFalse(self.socket.sent[0]["pointer"]["visible"])
+        self.assertFalse(self.socket.sent[2]["pointer"]["visible"])
         self.socket.sent.clear()
-        self.desktop.image = Image.new("RGB", (200, 100), "black")
-        self.session.last_frame_at = None
-        await self.session.frame()
+        await self.session.frame_from_capture(self.session.share, Image.new("RGB", (200, 100), "black"))
         self.assertEqual(self.socket.sent[0]["type"], "frame")
         self.socket.sent.clear()
         self.session.last_frame_at = None
@@ -203,8 +199,14 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.socket.sent[-1]["type"], "share_declined")
         with self.assertRaises(ValueError):
             bounded(float("nan"), 1, 0, 30)
-        with patch.object(self.desktop, "grab", side_effect=RuntimeError("permission")):
+        def failed_capture(_request):
+            raise RuntimeError("permission")
+
+        self.session.capture_factory = failed_capture
+        try:
             await self.session.start(request())
+        finally:
+            self.session.capture_factory = fake_capture_factory(self.desktop)
         self.assertEqual(self.socket.sent[-1]["type"], "share_stopped")
         await self.session.frame()  # no accepted share
 
@@ -387,35 +389,21 @@ class PlatformTests(unittest.TestCase):
             desktop.prepare()
         windll.shcore.SetProcessDpiAwareness.assert_called_once_with(2)
 
-    def test_backend(self):
-        capture = Mock()
-        capture.monitors = [{}, dict(left=-100, top=0, width=200, height=100)]
-        capture.grab.return_value = SimpleNamespace(size=(2, 2), rgb=b'\xff' * 12)
+    def test_backend_reports_non_windows_capture_as_unsupported(self):
         mouse = Mock(position=(-1, 2))
-        with patch.dict("sys.modules", {"mss": SimpleNamespace(mss=Mock(return_value=capture)),
-                                       "pynput.mouse": SimpleNamespace(Controller=lambda: mouse)}), \
+        with patch.dict("sys.modules", {"pynput.mouse": SimpleNamespace(Controller=lambda: mouse)}), \
                 patch.object(desktop, "prepare"), patch.object(desktop.sys, "platform", "linux"):
             obj = desktop.Desktop()
-            self.assertEqual(obj.monitors()[0]["x"], -100)
+            self.assertEqual(obj.monitors(), [])
+            self.assertFalse(obj.supports_capture)
             self.assertEqual(obj.pointer(), (-1, 2))
-            self.assertEqual(obj.grab(REGION).size, (2, 2))
             obj.close()
-            capture.close.assert_called_once()
 
-    def test_mac_permissions(self):
-        core = Mock()
-        core.CGPreflightScreenCaptureAccess.return_value = False
-        with patch.object(desktop.sys, "platform", "darwin"), patch.object(desktop.ctypes, "CDLL",
-                                                                          side_effect=[core]):
-            with self.assertRaisesRegex(RuntimeError, "Screen Recording"):
-                desktop.Desktop()
-        obj = desktop.Desktop.__new__(desktop.Desktop)
-        obj.capture = Mock()
-        obj.scale = 1
-        obj.capture.grab.return_value = SimpleNamespace(size=(1, 1), rgb=b'\x00'*3)
+    def test_mac_capture_is_unsupported_without_requesting_screen_access(self):
         with patch.object(desktop.sys, "platform", "darwin"):
-            with self.assertRaisesRegex(RuntimeError, "Blank capture"):
-                obj.grab(REGION)
+            obj = desktop.Desktop.__new__(desktop.Desktop)
+            self.assertFalse(obj.supports_capture)
+            self.assertEqual(obj.monitors(), [])
 
 
 class CliTests(unittest.TestCase):
@@ -485,17 +473,11 @@ class RetinaTests(unittest.TestCase):
     @patch.object(desktop.sys, "platform", "darwin")
     def test_backing_pixel_coordinates(self):
         obj = desktop.Desktop.__new__(desktop.Desktop)
-        obj.capture = Mock()
-        obj.capture.monitors = [{}, dict(left=-100, top=0, width=100, height=50)]
-        obj.capture.grab.return_value = SimpleNamespace(size=(20, 20), rgb=b'\xff'*1200)
         obj.mouse = Mock(position=(-50, 10))
-        obj.pointer_y_offset = 0
         obj.scale = 2
-        self.assertEqual(obj.monitors()[0], dict(id=1, x=-200, y=0, width=200, height=100,
-                                               scale=2, primary=False))
+        obj.pointer_y_offset = 0
+        self.assertEqual(obj.monitors(), [])
         self.assertEqual(obj.pointer(), (-100, 20))
-        obj.grab(dict(x=-200, y=0, width=40, height=40))
-        obj.capture.grab.assert_called_once_with(dict(left=-100, top=0, width=20, height=20))
 
 
 class ExtraHelperTests(unittest.IsolatedAsyncioTestCase):
@@ -543,20 +525,18 @@ class ExtraHelperTests(unittest.IsolatedAsyncioTestCase):
 
     def test_desktop_errors_and_windows_monitor(self):
         obj = desktop.Desktop.__new__(desktop.Desktop)
-        obj.scale = 1
-        obj.capture = Mock()
-        obj.capture.grab.side_effect = Exception("backend failure")
-        with self.assertRaisesRegex(RuntimeError, "Desktop capture failed"):
-            obj.grab(REGION)
-        obj.capture.monitors = [{}, dict(left=0, top=0, width=100, height=100)]
+        rectangle = desktop.wintypes.RECT(0, 0, 100, 100)
         windll = Mock()
-        windll.user32.MonitorFromPoint.return_value = 123
+        windll.user32.EnumDisplayMonitors.side_effect = lambda _dc, _clip, callback, _data: callback(
+            123, None, desktop.ctypes.pointer(rectangle), 0)
         def dpi(handle, kind, dx, dy):
             dx._obj.value = 144
+            dy._obj.value = 144
         windll.shcore.GetDpiForMonitor.side_effect = dpi
         with patch.object(desktop.sys, "platform", "win32"), \
                 patch.object(desktop.ctypes, "windll", windll, create=True):
-            self.assertEqual(obj.monitors()[0]["scale"], 1.5)
+            self.assertEqual(obj.monitors()[0], dict(id=1, x=0, y=0, width=100, height=100,
+                                                      scale=1.5, primary=True))
 
 
 class CancellationTests(unittest.IsolatedAsyncioTestCase):
