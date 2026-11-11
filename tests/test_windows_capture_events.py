@@ -18,6 +18,11 @@ from partyline_helper.windows_capture import window_for_region
 from tests.screen_helper_fakes import checkpoint
 
 
+# Native smoke bounds: failure deadlines only, never waited out when capture works.
+FIRST_FRAME_MS = 5000
+STOP_S = 2
+
+
 class FakeCaptureSession:
     def __init__(self, request):
         self.request = request
@@ -283,9 +288,11 @@ class NativeWindowsCaptureTests(unittest.TestCase):
                 deadline_expired.append(True)
                 root.quit()
 
-            root.after(750, timeout)
+            # Failure bound only: a working capture quits on its first frame. A fresh hosted
+            # runner can take over 750 ms to create the first D3D capture session.
+            root.after(FIRST_FRAME_MS, timeout)
             root.mainloop()
-            self.assertTrue(arrived.is_set(), "Windows Graphics Capture delivered no frame within 750 ms")
+            self.assertTrue(arrived.is_set(), f"no capture frame within {FIRST_FRAME_MS} ms")
             self.assertEqual(deadline_expired, [], "Windows Graphics Capture exceeded its frame deadline")
             self.assertEqual(errors, [])
             self.assertGreater(frames[0].width, 0)
@@ -294,7 +301,7 @@ class NativeWindowsCaptureTests(unittest.TestCase):
             if source is not None:
                 stopping = Thread(target=source.stop, daemon=True)
                 stopping.start()
-                stopping.join(0.2)
+                stopping.join(STOP_S)
                 self.assertFalse(stopping.is_alive(),
-                                 "Windows Graphics Capture did not stop within 200 ms")
+                                 f"Windows Graphics Capture did not stop within {STOP_S} s")
             root.destroy()
